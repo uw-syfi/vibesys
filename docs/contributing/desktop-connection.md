@@ -484,8 +484,9 @@ Deleted when the corresponding phase lands:
   through `run.connect`; the relay core stays).
 - `Host.invoke` and every per-action ssh script: `instances list`, `tasks`, `--detach` start and
   resume, `instances stop` (phase 5).
-- `host.ts`, `detached-host.ts`, `ssh-host.ts`, `local-host.ts`, `bridge-protocol.ts`, and the
-  per-command parts of `shell-words.ts` and `instances.ts`, replaced by the connection manager
+- `host.ts`, `detached-host.ts`, `ssh-host.ts`, `local-host.ts`, the bridge protocol (now
+  `@vibesys/ipc`'s `bridge.ts`), and the per-command parts of `shell-words.ts` (now in
+  `@vibesys/entities`) and `instances.ts`, replaced by the connection manager
   (phase 5). The shell-safe encoding survives only for the bootstrap line.
 - The registry check in `supervisor.ts` (replaced by the real-operation check) and the page's
   desktop reconnect timer (phase 5).

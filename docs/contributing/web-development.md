@@ -421,8 +421,15 @@ own package; `clients/.dependency-cruiser.mjs` enforces it:
   core and a `shell/`; only a shell starts processes or opens sockets.
 - `renderer/` is renderer code: the welcome view (`renderer/welcome/`) and the two sandboxed
   preloads (`renderer/preload/`). It never imports `main/`.
-- `common/` is what both processes share: pure types, host naming, ids, the stop and resume
-  decisions, and the typed welcome IPC (`welcome-protocol.ts`).
+- The two processes share only workspace packages: `@vibesys/entities` (host naming, ids, a
+  host's listed runs, recent runs, the stop and resume decisions) and `@vibesys/ipc` (the run
+  page's bridge and the typed welcome IPC). The welcome view draws its dialogs, path fields,
+  status chip, and buttons with `@vibesys/ui`.
+
+The package declares one entry per process: `.` (`node`, `src/main/index.ts`, the Electron main),
+`./renderer` (`dom`, `src/renderer/index.ts`, the welcome bundle), and `./preload/run` and
+`./preload/welcome` (`node`, the two preload files), so the package-graph checker holds each side
+to its runtime and its third-party imports.
 
 ### Connections
 

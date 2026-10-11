@@ -124,7 +124,7 @@ through no path: only `node` entries may import them, and only `desktop-main` an
 | 3 | A package is used only through its `exports` map; every import of a workspace package is a declared dependency | `imports-use-exports`, `imports-are-declared`, `imports-are-workspace-packages`, `workspace-protocol`; `.dependency-cruiser.mjs` for relative paths into another package |
 | 4 | Each entry is compiled with the `lib` and `types` of its runtime, so importing a Node module from a renderer entry is a type error | `entry-projects`, `entry-capability`; `tsc -b` then enforces it |
 | 5 | Inside a package: `state/` pure, `ui/` free of I/O, `effects/` never import `ui/`, effects depend on injected interfaces | `lint-rules/*.grit` (Biome) and `.dependency-cruiser.mjs` |
-| 6 | `@vibesys/ui` has no domain dependencies; helpers live in the lowest package that needs them, with no shared junk drawer | `layer-direction` (`ui` is rank 0); review |
+| 6 | `@vibesys/ui` has no domain dependencies and names no domain concept; helpers live in the lowest package that needs them, with no shared junk drawer | `layer-direction` (`ui` is rank 0), `domain-free` (no word of `DOMAIN_WORDS` in its production source or stylesheet); review |
 
 All package-graph rules, and the tables they read, live in one module,
 [`clients/scripts/check_package_graph.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/scripts/check_package_graph.mjs),
@@ -142,7 +142,9 @@ graph:
 ```
 
 The checker, the scaffold (which writes one `tsconfig.<entry>.json` per entry from it), Knip's
-policy, and this document all read that block. Unknown keys, layers, and runtimes are rejected by
+policy, and this document all read that block. An export whose source is a stylesheet
+(`@vibesys/ui`'s `./tokens.css`) is a `dom` asset: it has no tsconfig project, and Vite resolves
+it through the same source condition. Unknown keys, layers, and runtimes are rejected by
 name (`declarations`), and the entries must be exactly the `exports` keys
 (`entries-match-exports`).
 
@@ -168,9 +170,11 @@ imports of packages not declared, so between the two a dependency is declared ex
 used, and used only where its runtime allows.
 
 **Legacy packages.** `desktop`, `web`, and `tui` predate the per-entry layout,
-so `LEGACY_EXEMPTIONS` in the checker lets them skip the per-entry project rules (and lets desktop,
-whose one `node` entry still holds the React welcome view, skip `external-dependencies`). Every
-other rule applies to them. The table only shrinks as the migration items move them.
+so `LEGACY_EXEMPTIONS` in the checker lets them skip the per-entry project rules. Every other rule
+applies to them. Desktop declares an entry per process: `.` is the `node` main process,
+`./renderer` the `dom` welcome bundle, and `./preload/run` and `./preload/welcome` the `node`
+sandboxed preloads (each a single file), so runtime reachability and the third-party allowlist hold
+on each side. The table only shrinks as the migration items move them.
 
 ## Build model
 
@@ -250,12 +254,12 @@ names a missing or extra one.
 | Package | Layer | Status | Item that creates or moves it |
 | --- | --- | --- | --- |
 | `@vibesys/contracts` | foundation | exists (pilot: generated run-protocol and host-helper types, the one schema walker, error taxonomy, `./host-helper` validation, `./testing` fixtures) | foundation item (#1869) |
-| `@vibesys/ui` | foundation | planned | web feature-folder refactor, then package extraction |
+| `@vibesys/ui` | foundation | exists: `Button`, `Combobox`, `Dialog`, `StatusChip` (`.`, `dom`) and the design tokens (`./tokens.css`); desktop's welcome view and web render them | domain packages (phase 5 of #1878) |
 | `@vibesys/core-state` | core | exists, on the per-entry layout, depends on `contracts` only | foundation item (#1869) |
 | `@vibesys/transport` | core | exists: `.` and `./testing` (the shared `FakeClock`) are `neutral`, `./websocket` is `dom` | backend-client split (#1910) |
 | `@vibesys/transport-node` | domain | exists: the Unix-socket `ServerClient`; desktop's ssh and local-host links join it with the connection manager | backend-client split (#1910) |
-| `@vibesys/entities` | domain | planned | desktop and web model extraction |
-| `@vibesys/ipc` | service | planned (from desktop's bridge and preload messages) | desktop main/renderer split |
+| `@vibesys/entities` | domain | exists: hosts and their connection status, run, task, and instance ids, a host's listed runs with the run phase text (startup stage and progress), recent runs, the stop flow, the exact-resume policy, task arguments; depends on `contracts`. Web's `entities/` stays in web for now (the gateway URL policy, the page's session status, and run-view's fold over transport's reconciliation are web-only) | domain packages (phase 5 of #1878) |
+| `@vibesys/ipc` | service | exists: the run page's bridge (port messages, their validation, the preload contract web's desktop shell reads) and the welcome view's channels, events, and payloads; depends on `entities` | domain packages (phase 5 of #1878) |
 | `@vibesys/connection` | service | planned (desktop's connection manager) | desktop main/renderer split |
 | `@vibesys/settings` | service | planned (desktop's settings store) | desktop main/renderer split |
 | `@vibesys/feature-*` | feature | planned: run-view, connect-host, start-run, stop-run, resume-run, recent-runs, path-autocomplete | feature extraction, after the web feature-folder refactor lands |
