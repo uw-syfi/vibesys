@@ -22,8 +22,9 @@ from server.host_api import (
     RunStatus,
     parse_helper_message,
 )
-from server.host_helper import HelperHost, PathHints, Scan, ScannedEntry, serve_channel
+from server.host_helper import serve_channel
 from server.host_helper_os import FileProjects
+from server.host_helper_requests import HelperHost, PathHints, Scan, ScannedEntry
 from server.instances import ControlSocketStopRequester
 from server.registry import FakeInstanceStore, LiveRegistry, StopEffects
 from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller

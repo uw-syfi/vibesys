@@ -15,13 +15,13 @@ from server.host_api import (
     HelperErrorCode,
     LiveInstanceRecord,
 )
-from server.host_helper import PathHints, ProjectLookupError, ScannedEntry
 from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
     OsDirectories,
     SubprocessRunLauncher,
 )
+from server.host_helper_requests import PathHints, ProjectLookupError, ScannedEntry
 from vs_sim.api import ProbeResult, ProcessSpec
 from vs_sim.api.testing import FakeProcessLauncher, ProcessScript, ScriptedProbe
 

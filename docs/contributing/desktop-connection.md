@@ -60,7 +60,7 @@ desktop main process (clients/desktop)                host (local or ssh)
 | AppLifecycle: single-instance lock, quit, |        | host helper (one process per        |
 |   settings store (sole writer)            |        |   channel; stateless)               |
 | ConnectionManager                         |  stdio | entrypoints.host_helper             |
-|   HostConnection per host                 |<------>|   -> server.host_helper (requests)  |
+|   HostConnection per host                 |<------>|   -> server.host_helper (channel)   |
 |     link (ssh master | none)              |  (ssh  |   -> server.host_api   (contracts)  |
 |     control channel  -> helper            |  exec  |   -> server.registry   (records)    |
 |     run channels     -> helper -> relay   |  chan- |   -> server.stdio_bridge (relay)    |
@@ -74,7 +74,8 @@ desktop main process (clients/desktop)                host (local or ssh)
 | --- | --- | --- |
 | Helper contracts | `server.host_api` (new, light) | Pydantic models for every helper message, the registry record, launch and stop results, and `RunPhase`. Imports `pydantic` and the standard library only. The single source of the helper's JSON Schema. |
 | Registry primitives | `server.registry` (new, light; split from `server.instances` and `server.transport.discovery`) | Registry root, lifetime lock, record store, `survey`. `server.instances` keeps the stop requester and composes these. |
-| Helper implementation | `server.host_helper` | The channel: a pure `step` that folds lines, replies, watch observations, and time into the channel's state and the outputs the shell performs (the handshake, request ids, deadlines, feature gates, the one hand-over to the relay), the per-method execution over role-named interfaces (`Projects`, `Directories`, `RunLauncher`, `CheckoutProbe`, the registry), and the shell. |
+| Helper channel | `server.host_helper` | The channel: a pure `step` that folds lines, replies, watch observations, and time into the channel's state and the outputs the shell performs (the handshake, request ids, deadlines, feature gates, the one hand-over to the relay), and the shell. |
+| Helper requests | `server.host_helper_requests` | The per-method execution over role-named interfaces (`Projects`, `Directories`, `RunLauncher`, `CheckoutProbe`, the registry), and the pure decisions it needs (`negotiate`, `run_summaries`, `launch_arguments`, path completion). |
 | Helper interfaces on a host | `server.host_helper_os` | The real implementations: projects through `vs_project.api`, directories as this account lists them, launches through `vs_sim.api` with the launcher's `headless_command`, the checkout through `git`. |
 | Helper entrypoint | `entrypoints.host_helper` (console script `vibesys-host-helper`) | Wires real I/O, reads stdin, writes stdout. Replaces `entrypoints.stdio_bridge` once the app uses it (phase 5). |
 | Relay core | `server.stdio_bridge` (kept) | Byte relay between stdio and a run's Unix socket, with its deadlines and typed outcomes. Used by `run.connect`. |
@@ -96,8 +97,9 @@ New modules and edges, all downward; no module gains an edge to `vibesys.*`:
 | --- | --- |
 | `server.host_api` | none (pydantic only) |
 | `server.registry` | `server.host_api`, `vs_sim.api` |
-| `server.host_helper` | `server.host_api`, `server.registry`, `server.stdio_bridge`, `server.stdio_bridge_report`, `vs_sim.api` |
-| `server.host_helper_os` | `server.host_api`, `server.host_helper`, `vs_project`, `vs_sim.api` |
+| `server.host_helper` | `server.host_api`, `server.host_helper_requests`, `server.stdio_bridge`, `server.stdio_bridge_report`, `vs_sim.api` |
+| `server.host_helper_requests` | `server.host_api`, `server.registry`, `server.stdio_bridge`, `vs_sim.api` |
+| `server.host_helper_os` | `server.host_api`, `server.host_helper_requests`, `vs_project`, `vs_sim.api` |
 | `server.instances` | `server.api`, `vs_sim.api` (loses `server.transport`; keeps only the stop requester) |
 | `server.api` | adds `server.host_api` (`PROTOCOL_VERSION` is defined there) |
 | `server.transport` | adds `server.registry` (discovery's lock primitives move there) |

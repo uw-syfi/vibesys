@@ -16,8 +16,8 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from server.host_helper import ProjectLookupError
 from server.host_helper_os import FileProjects
+from server.host_helper_requests import ProjectLookupError
 
 if TYPE_CHECKING:
     from server.host_api import TaskList

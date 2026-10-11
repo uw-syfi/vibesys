@@ -29,7 +29,13 @@ from server.host_api import (
     TaskList,
     TaskSummary,
 )
-from server.host_helper import PathHints, ProjectLookupError, ProjectRun, Scan, ScannedEntry
+from server.host_helper_requests import (
+    PathHints,
+    ProjectLookupError,
+    ProjectRun,
+    Scan,
+    ScannedEntry,
+)
 from vs_project.api import Project, ProjectError
 from vs_sim.api import ProcessSpec
 

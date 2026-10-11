@@ -22,7 +22,7 @@ from server.host_api import (
     RunStopRequest,
     StopOutcome,
 )
-from server.host_helper import answer
+from server.host_helper_requests import answer
 from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:

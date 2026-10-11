@@ -63,24 +63,26 @@ from server.host_helper import (
     Execute,
     InputEnded,
     Observed,
-    PathHints,
-    ProjectRun,
     Received,
     Relay,
     Release,
-    ScannedEntry,
     Send,
     Tick,
     Unwatch,
     Watch,
     accepts_input,
+    step,
+)
+from server.host_helper_requests import (
+    PathHints,
+    ProjectRun,
+    ScannedEntry,
     answer,
     launch_arguments,
     negotiate,
     run_summaries,
     select_completions,
     split_prefix,
-    step,
 )
 from server.registry import FakeInstanceStore
 from server.stdio_bridge import EXIT_STATUS, BridgeOutcome

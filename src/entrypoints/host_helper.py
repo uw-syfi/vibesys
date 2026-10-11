@@ -19,13 +19,14 @@ import sys
 from typing import TYPE_CHECKING
 
 from entrypoints.launcher import headless_command, source_checkout_root
-from server.host_helper import HelperHost, serve_channel
+from server.host_helper import serve_channel
 from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
     OsDirectories,
     SubprocessRunLauncher,
 )
+from server.host_helper_requests import HelperHost
 from server.instances import ControlSocketStopRequester
 from server.registry import FileInstanceStore, LiveRegistry, StopEffects, host_facts, instance_root
 from server.stdio_bridge import FdSink, FdSource
