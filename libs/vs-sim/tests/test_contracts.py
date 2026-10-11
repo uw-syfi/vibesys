@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import sys
+from io import BytesIO, StringIO
 from typing import TYPE_CHECKING
 
 import pytest
@@ -47,17 +48,25 @@ from vs_sim.api.testing import (
     ProcessUnderTest,
     RunnerUnderTest,
     ScriptedProbe,
+    ScriptedStreamingCommand,
     SignalSourceContract,
     SignalSourceUnderTest,
     SleeperContract,
     SleeperUnderTest,
+    StreamedRun,
+    StreamingCommandContract,
+    StreamingUnderTest,
     VirtualClock,
     run_virtual,
     stop_process,
 )
 
+# test-isolation: inject between Popen and private wrapper construction to verify ownership.
+from vs_sim.processes import _start_piped_process
+
 if TYPE_CHECKING:
     from pathlib import Path
+    from typing import IO
 
     from vs_sim.api import ProcessSpec
 
@@ -265,6 +274,77 @@ class TestFakeProcessLauncher(ProcessLauncherContract):
         )
 
 
+class _StartedPipedGroup:
+    """A deterministic owned group used to fault wrapper construction after start."""
+
+    def __init__(self) -> None:
+        self.stdout = BytesIO(b"stdout")
+        self.stderr = BytesIO(b"stderr")
+        self.group_kills = 0
+        self.wait_timeouts: list[float | None] = []
+
+    def kill_group(self) -> None:
+        self.group_kills += 1
+
+    def wait(self, timeout: float | None) -> int:
+        self.wait_timeouts.append(timeout)
+        return -signal.SIGKILL
+
+
+class _OwnedOutput(StringIO):
+    """A text wrapper that owns its binary input, matching the real wrapper contract."""
+
+    def __init__(self, source: IO[bytes]) -> None:
+        super().__init__()
+        self._source = source
+
+    def cancel(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self._source.close()
+        super().close()
+
+
+class _FailingOutputFactory:
+    def __init__(self, fail_at: int) -> None:
+        self._fail_at = fail_at
+        self.calls = 0
+        self.opened: list[_OwnedOutput] = []
+
+    def __call__(self, source: IO[bytes]) -> StringIO:
+        self.calls += 1
+        if self.calls == self._fail_at:
+            message = "injected output wrapper failure"
+            raise ValueError(message)
+        output = _OwnedOutput(source)
+        self.opened.append(output)
+        return output
+
+
+@pytest.mark.parametrize("fail_at", [1, 2])
+def test_piped_process_start_rolls_back_every_resource_when_output_wrapping_fails(
+    fail_at: int,
+) -> None:
+    process = _StartedPipedGroup()
+    starts: list[tuple[tuple[str, ...], Path | None]] = []
+    outputs = _FailingOutputFactory(fail_at)
+
+    def start(argv: tuple[str, ...], cwd: Path | None) -> _StartedPipedGroup:
+        starts.append((argv, cwd))
+        return process
+
+    with pytest.raises(ValueError, match="injected output wrapper failure"):
+        _start_piped_process(("sky", "status"), None, start, outputs)
+
+    assert starts == [(("sky", "status"), None)]
+    assert process.group_kills == 1
+    assert process.wait_timeouts == [5.0]
+    assert process.stdout.closed
+    assert process.stderr.closed
+    assert all(output.closed for output in outputs.opened)
+
+
 class TestInheritedStdioLauncher(ForegroundLauncherContract):
     def foreground_under_test(self) -> ForegroundUnderTest:
         return ForegroundUnderTest(
@@ -356,3 +436,31 @@ def test_fake_foreground_launcher_records_how_a_child_was_started(tmp_path: Path
         {"K": "v"},
         tmp_path,
     )
+
+
+def _streaming_script(argv: tuple[str, ...], cwd: Path) -> StreamedRun | None:
+    match argv:
+        case ("exit", status, stdout, *lines):
+            return StreamedRun(int(status), stdout, tuple(lines))
+        case ("pwd",):
+            return StreamedRun(stdout=str(cwd))
+        case ("block",):
+            return StreamedRun(blocks=True)
+        case _:
+            return None
+
+
+class TestScriptedStreamingCommand(StreamingCommandContract):
+    @pytest.fixture(autouse=True)
+    def _directory(self, tmp_path: Path) -> None:
+        self._cwd = tmp_path
+
+    def streaming_under_test(self) -> StreamingUnderTest:
+        return StreamingUnderTest(
+            ScriptedStreamingCommand(_streaming_script),
+            cwd=self._cwd,
+            exits_with=lambda status, stdout, lines: ("exit", str(status), stdout, *lines),
+            prints_cwd=("pwd",),
+            blocks_forever=("block",),
+            missing_program=("no-such-program",),
+        )

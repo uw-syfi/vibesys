@@ -22,7 +22,7 @@ dependencies = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-vs_sandbox = ["py.typed"]
+vs_sandbox = ["py.typed", "devcontainer-cli/Dockerfile", "devcontainer-cli/test_features.sh", "features/src/*/*", "features/test/*/*"]
 
 [tool.uv.sources]
 vs-evaluation = { workspace = true }

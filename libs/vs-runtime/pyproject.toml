@@ -28,7 +28,7 @@ dependencies = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-vs_runtime = ["py.typed", "prompts/*.j2"]
+vs_runtime = ["py.typed", "prompts/*.j2", "features/src/*/*", "features/test/*/*"]
 
 [tool.uv.sources]
 vs-agent = { workspace = true }

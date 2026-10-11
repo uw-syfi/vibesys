@@ -269,15 +269,17 @@ def fake_agent_image(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     def fake_agent_image(
         base_image: str,
         *,
-        toolchains: Sequence[str] = (),
-        pip_extras: Sequence[str] = (),
+        features: Sequence[Any] = (),
         **_kwargs: object,
     ) -> str:
+        pip = [f for f in features if f.feature_id == "vibesys-pip-extras"]
         calls.append(
             {
                 "base_image": base_image,
-                "toolchains": frozenset(toolchains),
-                "pip_extras": frozenset(pip_extras),
+                "toolchains": frozenset(
+                    f.feature_id.removeprefix("vibesys-") for f in features if f not in pip
+                ),
+                "pip_extras": frozenset(r for f in pip for r in f.options["requirements"].split()),
             }
         )
         return _FAKE_AGENT_IMAGE

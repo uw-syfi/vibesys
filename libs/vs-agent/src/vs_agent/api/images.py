@@ -2,9 +2,10 @@
 
 The implementation owns the agent image layout and applies VibeSys's fixed
 provider and toolchain policy. Callers supply task-specific inputs and an
-optional runner seam; they do not inspect the packaged Dockerfile.
+optional runner seam; they do not inspect the packaged Feature.
 """
 
+from vs_agent.agent_feature import AGENT_FEATURES_PROJECT, AGENT_USER, AGENT_WORKDIR, agent_feature
 from vs_agent.images import (
     DEFAULT_AGENT_IMAGE_REGISTRY,
     BuildProgressSink,
@@ -21,6 +22,9 @@ from vs_agent.images import (
 )
 
 __all__ = [
+    "AGENT_FEATURES_PROJECT",
+    "AGENT_USER",
+    "AGENT_WORKDIR",
     "DEFAULT_AGENT_IMAGE_REGISTRY",
     "BuildProgressSink",
     "DockerBuildRunner",
@@ -28,6 +32,7 @@ __all__ = [
     "ImagePushError",
     "SubprocessDockerBuildRunner",
     "TaskImageBuildError",
+    "agent_feature",
     "agent_image",
     "agent_image_is_pushed",
     "build_task_image",

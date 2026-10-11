@@ -485,7 +485,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/docker-data.tar.zst
-          key: agent-image-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-agent/src/vs_agent/images/agent.Dockerfile', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/images.py', 'tests/e2e/test_agent_image_e2e.py', 'libs/vs-sandbox/tests/test_docker_conformance_e2e.py', 'tests/e2e/test_credential_sharing_e2e.py', 'scripts/ci_docker_data_root.sh') }}
+          key: agent-image-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-sandbox/src/vs_sandbox/feature_image.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'libs/vs-sandbox/src/vs_sandbox/toolchain_features.py', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/images.py', 'tests/e2e/test_agent_image_e2e.py', 'libs/vs-sandbox/tests/test_docker_conformance_e2e.py', 'tests/e2e/test_credential_sharing_e2e.py', 'scripts/ci_docker_data_root.sh') }}
 
       - name: Point Docker at the layer cache storage
         run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
@@ -918,7 +918,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/docker-data.tar.zst
-          key: real-tiers-minimal-container-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-agent/src/vs_agent/images/agent.Dockerfile', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/images.py', 'scripts/run_minimal_container_tests.sh', 'scripts/ci_docker_data_root.sh') }}
+          key: real-tiers-minimal-container-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-sandbox/src/vs_sandbox/feature_image.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'libs/vs-sandbox/src/vs_sandbox/toolchain_features.py', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/images.py', 'scripts/run_minimal_container_tests.sh', 'scripts/ci_docker_data_root.sh') }}
 
       - name: Point Docker at the layer cache storage
         run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
@@ -928,6 +928,65 @@ jobs:
           VIBESYS_MINIMAL_CONTAINER_DIR: ${{ runner.temp }}/minimal-container
           VIBESYS_MINIMAL_CONTAINER_BASES: cpu,ubuntu-uid-1000
         run: ./support/repoctl/repoctl run-checks --group minimal_container_tests
+
+      - name: Snapshot Docker layer cache
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
+
+      - name: Save Docker layer cache
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/docker-data.tar.zst
+          key: ${{ steps.docker-cache.outputs.cache-primary-key }}
+
+  # Runs `devcontainer features test` for every VibeSys Feature on one base per
+  # family the product runs on: Debian (the CPU base), ROCm Ubuntu, and CUDA
+  # Ubuntu. The product's real GPU bases (rocm/pytorch is 23 GB compressed,
+  # nvcr.io pytorch 25 GB) cannot be pulled inside the budget, so each family is
+  # represented by a small official image of the same distribution and package
+  # manager; the real bases are built by hand (docs/contributing/devcontainer-features.md).
+  # Docker's own storage is cached between runs like `agent-image`, so an
+  # unchanged Feature costs a layer-cache check.
+  feature-tests:
+    needs: changes
+    if: needs.changes.outputs.agent_image == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - family: debian
+            base: python:3.12-bookworm
+          - family: rocm-ubuntu
+            base: rocm/dev-ubuntu-22.04:6.3
+          - family: cuda-ubuntu
+            base: nvidia/cuda:12.4.1-base-ubuntu22.04
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compute the Docker layer cache key
+        id: docker-cache-week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Docker layer cache
+        id: docker-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/docker-data.tar.zst
+          key: feature-tests-${{ matrix.family }}-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'scripts/ci_docker_data_root.sh') }}
+
+      - name: Point Docker at the layer cache storage
+        run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
+
+      - name: Test every Feature on ${{ matrix.base }}
+        run: >-
+          libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/test_features.sh "${{ matrix.base }}"
+          libs/vs-sandbox/src/vs_sandbox/features
+          libs/vs-agent/src/vs_agent/images/features
+          libs/vs-runtime/src/vs_runtime/features
 
       - name: Snapshot Docker layer cache
         if: steps.docker-cache.outputs.cache-hit != 'true'
@@ -960,6 +1019,7 @@ jobs:
       - validate-examples-cpu-check
       - native-evaluator-examples
       - agent-image
+      - feature-tests
       - real-tiers-slurm
       - real-tiers-minimal-container
       - test
@@ -1016,6 +1076,7 @@ jobs:
       - validate-examples-cpu-check
       - native-evaluator-examples
       - agent-image
+      - feature-tests
       - real-tiers-slurm
       - real-tiers-minimal-container
       - test

@@ -22,7 +22,7 @@ dependencies = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-vs_agent = ["py.typed", "images/*.Dockerfile"]
+vs_agent = ["py.typed", "images/features/src/*/*", "images/features/test/*/*"]
 
 [tool.uv.sources]
 vs-faults = { workspace = true }

@@ -39,7 +39,7 @@ from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
     from typing import TextIO
 
@@ -48,9 +48,10 @@ if TYPE_CHECKING:
     from vs_runtime.api import AgentRole, OrchestrationResumeDecision
     from vs_runtime.api.infrastructure import (
         AgentExecutionConfiguration,
+        RunEnvironmentSession,
         WorkspaceResourceProvider,
     )
-    from vs_sandbox.api import CommandRunner
+    from vs_sandbox.api import CommandRunner, ComputeBackendImpl
 
 RUN_ID = "workspace-requests"
 
@@ -120,11 +121,22 @@ class WorkspaceEnv:
 
 
 @contextmanager
-def open_workspace_env(tmp_path: Path, *, git: GitKind = GitKind.FAKE) -> Iterator[WorkspaceEnv]:
+def open_workspace_env(
+    tmp_path: Path,
+    *,
+    git: GitKind = GitKind.FAKE,
+    backend: ComputeBackendImpl | None = None,
+    open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession] | None = None,
+    owns_candidate_worktrees: bool = False,
+) -> Iterator[WorkspaceEnv]:
     """A fresh run with one started host. The caller closes ``env.hosts`` (async) before exit.
 
     ``git`` selects the repository implementation: the in-memory Fake spawns no process;
-    ``GitKind.REAL`` runs real Git.
+    ``GitKind.REAL`` runs real Git. ``backend`` is the compute backend the requests carry.
+    ``open_session`` opens every session (the root's and
+    each candidate's) instead of the default fake one. ``owns_candidate_worktrees`` names
+    the run's candidate worktrees directory in the request's ``run_owned_roots``, as a
+    product run does.
     """
     disk = FakeGitRepositories() if git is GitKind.FAKE else None
     root = tmp_path / "project"
@@ -160,15 +172,20 @@ def open_workspace_env(tmp_path: Path, *, git: GitKind = GitKind.FAKE) -> Iterat
                 log_dir=project.logger.log_dir,
                 workspace=root,
                 ref_dir=None,
-                backend=FakeComputeBackend(),
+                backend=backend if backend is not None else FakeComputeBackend(),
                 agent_backend="stub",
                 cli_provider="codex",
                 run_id=RUN_ID,
                 framework_root=tmp_path,
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
+                run_owned_roots=(
+                    (project.project.state.candidate_worktrees_directory(RUN_ID),)
+                    if owns_candidate_worktrees
+                    else ()
+                ),
             ),
-            lambda _request: _Session(),
+            open_session if open_session is not None else lambda _request: _Session(),
         )
         with closing(environment):
             factory = WorkspaceResourceFactory(

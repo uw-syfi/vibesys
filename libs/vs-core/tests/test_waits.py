@@ -7,10 +7,16 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_core.api import (
+    AttemptBudget,
+    AttemptId,
+    AttemptPhase,
+    AttemptsState,
+    AttemptView,
     ContinuationPhase,
     DispatchTurn,
     EventId,
     IntentPhase,
+    ItemId,
     Observation,
     ObservationStatus,
     ObservePacing,
@@ -18,6 +24,7 @@ from vs_core.api import (
     RecoveryBarrier,
     RecoveryCheck,
     RecoveryPhase,
+    ReleaseDependency,
     RequestObserved,
     RunStatus,
     SessionPhase,
@@ -25,6 +32,8 @@ from vs_core.api import (
     SessionView,
     WaitingPhase,
     WaitKind,
+    WorkspaceMode,
+    WorkspacePlan,
     orphan_waits,
     phase_waits,
     waits,
@@ -187,3 +196,48 @@ def test_an_observed_job_is_not_kept_alive_by_its_own_submission_intent() -> Non
         update={"evaluation": state.evaluation.model_copy(update={"jobs": (unpaced,)})}
     )
     assert [w.subject for w in orphan_waits(stalled)] == [job.resource_id.root]
+
+
+def _closing_over(*, job_ended: bool) -> tuple[CoreState, str]:
+    state, _ = submitted()
+    job = state.evaluation.jobs[0]
+    assert job.observation is not None
+    ended = job.observation.model_copy(
+        update={"status": ObservationStatus.FAILED, "terminal": True, "released": True}
+    )
+    job = job.model_copy(
+        update={
+            "observation": ended if job_ended else job.observation,
+            "status": ended.status if job_ended else job.status,
+            "terminal": job_ended,
+            "released": job_ended,
+        }
+    )
+    attempt = AttemptView(
+        attempt_id=AttemptId(root="attempt"),
+        item_id=ItemId(root="item"),
+        generation=0,
+        phase=AttemptPhase.CLOSING,
+        workspace=WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline),
+        budget=AttemptBudget(),
+        release_dependencies=(ReleaseDependency(kind="job", identity=job.resource_id),),
+    )
+    closing = state.model_copy(
+        update={
+            "attempts": AttemptsState(attempts=(attempt,)),
+            "evaluation": state.evaluation.model_copy(update={"jobs": (job,)}),
+        }
+    )
+    return closing, job.resource_id.root
+
+
+def test_a_closing_attempt_still_listing_a_job_that_has_been_released_is_an_orphan() -> None:
+    """The release already happened, so nothing is left to tell the attempt (the v8 stall)."""
+    state, resource = _closing_over(job_ended=True)
+    found = [w for w in orphan_waits(state) if w.waiter == WaitKind.RELEASE_DEPENDENCY]
+    assert [w.subject for w in found] == [resource]
+
+
+def test_a_closing_attempt_waiting_on_a_job_that_still_runs_is_named_by_the_job() -> None:
+    state, _ = _closing_over(job_ended=False)
+    assert [w for w in waits(state) if w.waiter == WaitKind.RELEASE_DEPENDENCY] == []

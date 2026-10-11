@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.slurm_cluster.harness import ALL_KINDS, CONTAINER_TMP, open_run
 
+from vs_sandbox.benchmark_output import BenchmarkOutputKind, classify_benchmark_output
+
 if TYPE_CHECKING:
     from tests.slurm_cluster.cluster import SlurmCluster
     from tests.slurm_cluster.harness import OpenRun
@@ -48,6 +50,37 @@ def test_a_benchmark_result_written_under_tmp_is_relayed_to_the_agents_tmp(run: 
     assert relayed["score"] == 42
 
 
+def _announced_result(output: str) -> str:
+    """The path the gate's output names for the benchmark result it relayed."""
+    (line,) = [line for line in output.splitlines() if line.startswith("benchmark result file: ")]
+    return line.removeprefix("benchmark result file: ")
+
+
+def test_the_agent_names_only_the_benchmark_gate_and_gets_the_result_in_its_tmp(
+    run: OpenRun,
+) -> None:
+    """Regression: a task declaring a result argument made the bare `--gate benchmark` fail."""
+    run.set_mode("benchmark", "pass")
+
+    gate = run.gate("benchmark")
+
+    assert gate.exit_code == 0, gate.output
+    result_path = _announced_result(gate.output)
+    assert classify_benchmark_output(result_path) is BenchmarkOutputKind.FRAMEWORK
+    # The file is in the agent container's /tmp, never in the host's.
+    assert not Path(result_path).exists()
+    assert json.loads(run.agent(f"cat {result_path}").output)["score"] == 42
+
+
+def test_a_failed_bare_benchmark_still_relays_the_result_it_wrote(run: OpenRun) -> None:
+    run.set_mode("benchmark", "exit:3")
+
+    gate = run.gate("benchmark")
+
+    assert gate.exit_code == 3, gate.output
+    assert json.loads(run.agent(f"cat {_announced_result(gate.output)}").output)["score"] == 42
+
+
 def test_a_failed_benchmark_still_relays_the_result_it_wrote(run: OpenRun) -> None:
     run.set_mode("benchmark", "exit:3")
     result_path = _framework_result()
@@ -76,7 +109,6 @@ def test_a_workspace_benchmark_result_lands_in_the_shared_workspace(run: OpenRun
         ("--output", f"{CONTAINER_TMP}/vibesys-framework-benchmark-../x.json"),
         ("--output", ".vibesys-benchmark-/../escape.json"),
         ("--unplanned-flag", "x"),
-        (),
     ],
 )
 def test_a_benchmark_with_arguments_the_plan_does_not_allow_is_refused_without_a_job(

@@ -26,6 +26,7 @@ from tests.support import run_test_command
 
 from vs_agent.api import CONTAINER_PYTHON
 from vs_agent.api.images import agent_image, build_task_image
+from vs_runtime.api.infrastructure import image_features
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,11 +42,12 @@ _RUN_TIMEOUT_S = 120.0
 
 #: Proves the image runs as the non-root ``agent`` user with the fixed uid
 #: the sandbox remaps to the host uid at container start (see
-#: ``agent.Dockerfile``), then that every shipped CLI, both optional
+#: the ``vibesys-agent`` Feature), then that every shipped CLI, both optional
 #: toolchains, ripgrep, and VibeSys's own Python with the ``mcp`` package are all reachable.
 _CHECK_SCRIPT = (
     "set -e; "
     "id -u; "
+    "pwd; "
     "claude --version; "
     "codex --version; "
     "gemini --version; "
@@ -68,7 +70,7 @@ def _enabled() -> bool:
 def test_cpu_agent_image_runs_every_shipped_cli_as_the_agent_user() -> None:
     image_id = agent_image(
         "python:3.12-bookworm",
-        toolchains=("rust", "go"),
+        features=image_features(("rust", "go")),
         timeout=_BUILD_TIMEOUT_S,
     )
 
@@ -84,7 +86,39 @@ def test_cpu_agent_image_runs_every_shipped_cli_as_the_agent_user() -> None:
     sys.stderr.write(result.stderr + "\n")
     assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
     output_lines = [line for line in result.stdout.splitlines() if line.strip()]
-    assert output_lines[0] == "1000", output_lines
+    assert output_lines[:2] == ["1000", "/workspace"], output_lines
+
+
+@pytest.mark.skipif(
+    not _enabled() or shutil.which("docker") is None,
+    reason=f"set {ENABLE_ENV}=1 with docker on PATH to build and run the agent image",
+)
+def test_container_runtime_and_pip_extras_features_install_everything_they_use() -> None:
+    """The opt-in Features add their tools, and the agent user can use the ``docker`` group."""
+    image_id = agent_image(
+        "python:3.12-bookworm",
+        features=image_features(("container-runtime",), ("modal>=0.66",)),
+        timeout=_BUILD_TIMEOUT_S,
+    )
+
+    result = run_test_command(
+        (
+            "docker",
+            "run",
+            "--rm",
+            image_id,
+            "bash",
+            "-lc",
+            "set -e; id -nG | tr ' ' '\\n' | grep -x docker; docker --version; "
+            "kind version; kubectl version --client; python3 -c 'import modal'",
+        ),
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=_RUN_TIMEOUT_S,
+    )
+
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
 
 
 def _task_dockerfile(tmp_path: Path) -> Path:

@@ -1,0 +1,34 @@
+{
+  "id": "vibesys-container-runtime",
+  "version": "0.1.0",
+  "name": "VibeSys container runtime",
+  "description": "A static Docker engine (dockerd and the docker CLI), the compose plugin, kind, and kubectl, plus the `docker` group, for tasks whose candidate is a container topology. Debian/Ubuntu bases only.",
+  "documentationURL": "https://github.com/uw-syfi/vibesys/blob/main/docs/contributing/devcontainer-features.md",
+  "options": {
+    "docker_engine_version": {
+      "type": "string",
+      "default": "27.5.1",
+      "description": "Static Docker engine release; default mirrors vs_agent.provider_policy.DOCKER_ENGINE_VERSION."
+    },
+    "docker_compose_version": {
+      "type": "string",
+      "default": "2.32.4",
+      "description": "Docker Compose plugin release; default mirrors vs_agent.provider_policy.DOCKER_COMPOSE_VERSION."
+    },
+    "kind_version": {
+      "type": "string",
+      "default": "0.26.0",
+      "description": "kind release; default mirrors vs_agent.provider_policy.KIND_VERSION."
+    },
+    "kubectl_version": {
+      "type": "string",
+      "default": "1.32.1",
+      "description": "kubectl release; default mirrors vs_agent.provider_policy.KUBECTL_VERSION."
+    },
+    "users": {
+      "type": "string",
+      "default": "",
+      "description": "Space-separated existing users to add to the `docker` group, which owns the daemon socket. Empty adds none. Install fails if a named user does not exist."
+    }
+  }
+}

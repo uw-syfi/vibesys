@@ -358,7 +358,9 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path: Path) -> None:
     statuses = [
         event["data"]["status"] for event in received if event["type"] == "run_status_changed"
     ]
-    assert statuses[-2:] == ["stopping", "stopped"]
+    # The stop arrives before the run is ready, so the run holds it while
+    # starting and core lands it there: the run never reports running.
+    assert statuses == ["stopped"]
     assert not socket_path.exists()
 
 

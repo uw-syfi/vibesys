@@ -172,7 +172,7 @@ def _serving(
 ) -> Iterator[HostCommandBroker]:
     broker = HostCommandBroker(
         tmp_path / "broker.sock",
-        roots=RunRoots((workspace,), (tmp_path / "worktrees",)),
+        roots=RunRoots((workspace,)),
         gpu=gpu,
         gates=gates,
         transport=net.transport,
@@ -283,21 +283,22 @@ class TestGpuOperation:
         assert command.env["KEEP_ME"] == "1"
         assert "CUDA_VISIBLE_DEVICES" not in command.env
 
-    def test_a_candidate_worktree_is_confined_to_itself(
-        self, sim: Sim, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
+    def test_a_sibling_directory_of_the_workspace_is_refused_by_name(
+        self, sim: Sim, tmp_path: Path, workspace: Path
     ) -> None:
-        candidate = tmp_path / "worktrees" / "candidate-1"
-        (candidate / "src").mkdir(parents=True)
-        monkeypatch.chdir(candidate / "src")
+        """A broker serves one session: a sibling candidate's worktree is not its to run in."""
+        sibling = tmp_path / "worktrees" / "candidate-2" / "workspace"
+        sibling.mkdir(parents=True)
 
-        def program(net: _Network) -> _RecordingLauncher:
+        def program(net: _Network) -> tuple[list[dict[str, Any]], _RecordingLauncher]:
             launcher = _RecordingLauncher(net.threads)
             with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
-                _point_at(monkeypatch, broker)
-                _run_client(net, ["--gpus", "1", "--time", "1", "--", "true"])
-            return launcher
+                return _frames(net, broker, _gpu_call(broker, str(sibling))), launcher
 
-        assert _simulate(sim, program).commands[0].argv[1] == str(candidate.resolve())
+        reply, launcher = _simulate(sim, program)
+
+        assert "inside the run's workspace" in str(reply[0]["error"])
+        assert launcher.commands == []
 
     @pytest.mark.parametrize(
         ("overrides", "message"),
@@ -531,7 +532,7 @@ class TestGateOperation:
 
         frames, gates = _simulate_with(seed, program)
 
-        expected = (kind is GateKind.ACCURACY and arguments == []) or (
+        expected = arguments == [] or (
             kind is GateKind.BENCHMARK
             and len(arguments) == 2
             and arguments[0] == _OUTPUT_ARGUMENT
@@ -565,6 +566,77 @@ class TestGateOperation:
 
         assert "invalid arguments" in str(refused[0]["error"])
         assert accepted[-1] == {"exit": 3}
+
+    @settings(max_examples=40, deadline=None)
+    @given(
+        seed=SEEDS,
+        kind=st.sampled_from(list(GateKind)),
+        output_argument=st.one_of(st.none(), st.just(_OUTPUT_ARGUMENT), st.just("--output-json")),
+    )
+    def test_a_gate_the_agent_names_runs_whatever_result_argument_the_task_declares(
+        self,
+        seed: int | None,
+        kind: GateKind,
+        output_argument: str | None,
+        tmp_path_factory: pytest.TempPathFactory,
+    ) -> None:
+        """The agent names only the gate; the broker supplies the task's result argument."""
+        workspace = tmp_path_factory.mktemp("workspace")
+
+        def program(net: _Network) -> tuple[list[dict[str, Any]], _RecordingGates]:
+            gates = _RecordingGates(net.threads, result=b'{"ok": true}')
+            with _serving(net, workspace, workspace, gates=_gates(gates, output_argument)) as b:
+                return _frames(net, b, _gate_call(b, str(workspace), kind=kind.value)), gates
+
+        frames, gates = _simulate_with(seed, program)
+
+        assert frames[-1] == {"exit": 3}
+        (run_kind, arguments, _cwd) = gates.runs[0]
+        assert run_kind is kind
+        files = [frame["file"] for frame in frames if "file" in frame]
+        if kind is GateKind.BENCHMARK and output_argument is not None:
+            # The wrapper that runs the gate accepts exactly this shape, and the broker removed it.
+            assert arguments[0] == output_argument
+            assert classify_benchmark_output(arguments[1]) is BenchmarkOutputKind.FRAMEWORK
+            assert not Path(arguments[1]).exists()
+            assert len(files) == 1
+            assert classify_benchmark_output(files[0]["path"]) is BenchmarkOutputKind.FRAMEWORK
+            assert base64.b64decode(files[0]["data"]) == b'{"ok": true}'
+            # The output names the file the agent can read.
+            output = b"".join(
+                base64.b64decode(frame["output"]) for frame in frames if "output" in frame
+            )
+            assert f"benchmark result file: {files[0]['path']}\n".encode() in output
+        else:
+            assert arguments == ()
+            assert files == []
+
+    def test_the_client_writes_the_relayed_file_and_names_it_in_the_output(
+        self,
+        sim: Sim,
+        tmp_path: Path,
+        workspace: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsysbinary: pytest.CaptureFixture[bytes],
+    ) -> None:
+        monkeypatch.chdir(workspace)
+
+        def program(net: _Network) -> int:
+            gates = _RecordingGates(net.threads, result=b"relayed")
+            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
+                _point_at(monkeypatch, broker)
+                return _run_client(net, ["--gate", "benchmark"])
+
+        status = _simulate(sim, program)
+        output = capsysbinary.readouterr().out.decode()
+        (line,) = [text for text in output.splitlines() if text.startswith("benchmark result")]
+        target = Path(line.removeprefix("benchmark result file: "))
+        try:
+            assert status == 3
+            assert target.read_bytes() == b"relayed"
+            assert list(target.parent.glob(f".{target.name}*")) == []
+        finally:
+            target.unlink(missing_ok=True)
 
     def test_closing_the_connection_cancels_the_gate(
         self, sim: Sim, tmp_path: Path, workspace: Path
@@ -612,14 +684,14 @@ class TestRoots:
         base=st.sampled_from(["workspace", "worktrees", "other", "root"]),
         parts=st.lists(st.sampled_from(["a", "b", "..", "."]), max_size=4),
     )
-    def test_a_directory_is_accepted_exactly_when_it_is_inside_the_runs_roots(
+    def test_a_directory_is_accepted_exactly_when_it_is_inside_the_sessions_workspace(
         self,
         seed: int | None,
         base: str,
         parts: list[str],
         tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
-        """Whatever path the container names, the broker agrees with a path model of the roots."""
+        """Whatever path the container names, the broker agrees with a path model of its workspace."""
         tmp_path = tmp_path_factory.mktemp("roots")
         workspace = tmp_path / "workspace"
         worktrees = tmp_path / "worktrees"
@@ -641,15 +713,12 @@ class TestRoots:
         reply, launcher = _simulate_with(seed, program)
 
         cwd = posixpath.normpath(named)
-        ws, wt = str(workspace.resolve()), str(worktrees.resolve())
+        ws = str(workspace.resolve())
         inside_workspace = cwd == ws or cwd.startswith(ws + "/")
-        inside_candidate = cwd.startswith(wt + "/")
-        accepted = bool(launcher.commands)
-        assert accepted == (inside_workspace or inside_candidate)
-        if accepted:
-            # The job is confined to the run's workspace or to one candidate under the root.
-            confined = launcher.commands[0].argv[1]
-            assert confined == ws or confined.startswith(wt + "/")
+        assert bool(launcher.commands) == inside_workspace
+        if inside_workspace:
+            # The job is confined to the session's own workspace, never a sibling's.
+            assert launcher.commands[0].argv[1] == ws
             assert reply[-1] == {"exit": 5}
 
     def test_a_symlink_inside_the_workspace_cannot_reach_outside_it(

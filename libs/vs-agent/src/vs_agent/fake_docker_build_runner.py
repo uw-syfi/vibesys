@@ -16,7 +16,7 @@ type DockerResult = subprocess.CompletedProcess[str]
 
 
 class FakeDockerBuildRunner:
-    """Answer ``docker build`` and ``docker image inspect`` from scripted results.
+    """Answer image builds and ``docker image inspect`` from scripted results.
 
     A build succeeds and inspection reports ``image_id`` unless a result (or an
     exception to raise) is scripted. Every call is recorded in ``calls``. Like
@@ -48,7 +48,7 @@ class FakeDockerBuildRunner:
         """Record the command and return the scripted outcome for its kind."""
         normalized = tuple(argv)
         self.calls.append((normalized, cwd, timeout))
-        result = self.build_result if normalized[1] == "build" else self.inspect_result
+        result = self.build_result if normalized[1] in ("build", "run") else self.inspect_result
         if isinstance(result, BaseException):
             raise result
         if on_stderr_line is not None:

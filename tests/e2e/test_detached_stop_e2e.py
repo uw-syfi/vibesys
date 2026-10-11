@@ -213,4 +213,6 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     assert subscriber.seen[0] == "subscribed"
     statuses = [entry for entry in subscriber.seen if entry not in {"subscribed", "event_batch"}]
     assert "stopped" in statuses, subscriber.seen
-    assert statuses[-2:] == ["stopping", "stopped"]
+    # The run never became ready: it held the stop while starting, and core
+    # landed it there, so it ends stopped without ever reporting running.
+    assert statuses == ["stopped"], subscriber.seen

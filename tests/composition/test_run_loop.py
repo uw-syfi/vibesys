@@ -7,6 +7,7 @@ strategy proposes nothing: the run stays open until a control or the deadline en
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import itertools
 import math
 import tempfile
@@ -26,7 +27,23 @@ from tests.support.skeleton_world import (
     open_skeleton_world,
 )
 
-from vs_core.api import ArtifactRef, Limits, Proposal, RunResultProposal, RunStatus
+from vs_core.api import (
+    ArtifactRef,
+    AttemptBudget,
+    AttemptId,
+    AttemptPhase,
+    AttemptsState,
+    AttemptView,
+    ItemId,
+    Limits,
+    Proposal,
+    ReleaseDependency,
+    ResourceId,
+    RunResultProposal,
+    RunStatus,
+    WorkspaceMode,
+    WorkspacePlan,
+)
 from vs_core.testing.builders import initial_state
 from vs_runtime.api.core import (
     CoreRunHost,
@@ -46,7 +63,7 @@ from vs_sim.api.testing import clock_from
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import RunView, StrategyEvent
+    from vs_core.api import CoreState, RunView, StrategyEvent
     from vs_sim.api.testing import VirtualClock
 
 #: Event loop turns a stuck fake turn lasts, standing for "longer than anything the run waits".
@@ -324,6 +341,41 @@ async def test_a_stalled_run_reports_what_the_host_knows_about_the_cause(tmp_pat
         start_core(host, _config())
         with pytest.raises(RunStalledError, match=r"open intents \[\]; a submission nobody told"):
             await drive_core(host, _config(), stall_notes=lambda: ["a submission nobody told"])
+
+
+@dataclasses.dataclass
+class StuckClosingWorld(World):
+    """A world whose run starts with an attempt that is closing and waits for a job's release."""
+
+    def initial(self) -> CoreState:
+        """The run's first state, with the closing attempt added."""
+        fresh = super().initial()
+        stuck = AttemptView(
+            attempt_id=AttemptId(root="attempt-1"),
+            item_id=ItemId(root="item"),
+            generation=0,
+            phase=AttemptPhase.CLOSING,
+            workspace=WorkspacePlan(
+                mode=WorkspaceMode.EXCLUSIVE_ROOT, base=fresh.run.facts.baseline
+            ),
+            budget=AttemptBudget(),
+            release_dependencies=(
+                ReleaseDependency(kind="job", identity=ResourceId(root="job-1")),
+            ),
+        )
+        return fresh.model_copy(update={"attempts": AttemptsState(attempts=(stuck,))})
+
+
+async def test_a_stalled_run_names_the_release_a_closing_attempt_waits_for(tmp_path: Path) -> None:
+    """The cause is the attempt stuck closing, not only that no intent is open."""
+    with open_skeleton_world(tmp_path, INERT) as opened:
+        world = StuckClosingWorld(
+            **{f.name: getattr(opened, f.name) for f in dataclasses.fields(opened)}
+        )
+        _, host = _host(world, ProbedRunClock(clock_from(1.0)))
+        start_core(host, _config())
+        with pytest.raises(RunStalledError, match=r"attempt-1 closing on \['job:job-1'\]"):
+            await drive_core(host, _config())
 
 
 class WaitsUntil(SkeletonStrategy):

@@ -14,7 +14,7 @@ from server.control_envelope import (
     StopCommand,
 )
 from server.diagnostics import Diagnostic, DiagnosticScope, exception_to_diagnostic
-from server.events import RunEvent
+from server.events import ChatThreadId, RunEvent
 from server.execution import ActiveAgentExecution
 from server.host_api import PROTOCOL_VERSION
 from server.run_lifecycle import RunStatus
@@ -68,7 +68,7 @@ class ChatQuery(Request):
     type: Literal["query.chat"] = "query.chat"
     text: str
     # None targets the default thread, preserving pre-thread clients.
-    thread_id: str | None = None
+    thread_id: ChatThreadId | None = None
 
 
 class ChatThreadCreateQuery(Request):
@@ -213,7 +213,7 @@ ProtocolRequest = Annotated[
 class ChatThreadInfo(ProtocolModel):
     """Resolved identity and agent settings of one experiment-chat thread."""
 
-    thread_id: str
+    thread_id: ChatThreadId
     title: str = ""
     provider: str
     model: str
@@ -242,7 +242,7 @@ class ChatResult(ProtocolModel):
     answer: str
     effect: Literal["none"] = "none"
     # Echoes the requested thread; None is the default thread.
-    thread_id: str | None = None
+    thread_id: ChatThreadId | None = None
 
 
 class PerformanceRound(ProtocolModel):

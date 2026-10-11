@@ -112,8 +112,8 @@ def cli_mcp_config_files() -> tuple[str, ...]:
 
 # --- Agent image ------------------------------------------------------------
 #
-# Versions baked into ``vs_agent/images/agent.Dockerfile`` as build args
-# (see ``vs_agent.api.images.agent_image``). Pinned rather than left
+# Versions baked into the agent image's Dev Container Features as options
+# (see ``vs_agent.api.images.devcontainer_config``). Pinned rather than left
 # to float so the container CLI matches the feature set VibeSys prompts were
 # validated against, and so a rebuild with unchanged pins resolves to the same
 # image from Docker's layer cache.
@@ -137,36 +137,6 @@ both here and (formerly) by ``cli_docker``'s now-removed per-run container
 install for Modal and SkyPilot.
 """
 
-RUST_TOOLCHAIN_VERSION = "1.92.0"
-"""Rust toolchain pin for an agent image's optional ``rust`` toolchain layer.
-
-``cli_docker`` no longer has a per-run install path or its own Rust pin
-(#676): every containerized CLI environment builds from this prebuilt image
-now, so this is the only Rust toolchain version an editor container carries.
-"""
-
-CONTAINER_RUNTIME_TOOLCHAIN = "container-runtime"
-"""Toolchain name that adds a Docker engine, the compose plugin, kind, and
-kubectl to the agent image, for tasks whose candidate is a container topology.
-Opt-in like ``rust`` and ``go``; the versions below are its build args."""
-
-DOCKER_ENGINE_VERSION = "27.5.1"
-"""Static Docker engine release (dockerd, containerd, runc, docker CLI) for the
-``container-runtime`` toolchain; the daemon inside a Sysbox sandbox container."""
-
-DOCKER_COMPOSE_VERSION = "2.32.4"
-"""Docker Compose plugin release for the ``container-runtime`` toolchain."""
-
-KIND_VERSION = "0.26.0"
-"""kind release for the ``container-runtime`` toolchain (Kubernetes-in-Docker
-tasks create their cluster on the sandbox's own daemon)."""
-
-KUBECTL_VERSION = "1.32.1"
-"""kubectl release for the ``container-runtime`` toolchain."""
-
-GO_TOOLCHAIN_VERSION = "1.23.12"
-"""Go toolchain pin for an agent image's optional ``go`` toolchain layer.
-
-Mirrors the Go pin ``run_environment``'s evaluator setup already downloads at
-run time.
-"""
+# The toolchain pins (Rust, Go, and the container-runtime tools) live in
+# ``vs_sandbox.toolchain_features``, the catalog that owns those Features;
+# ``vs_agent.api`` re-exports them so callers keep one import path.

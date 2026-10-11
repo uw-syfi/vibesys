@@ -3,14 +3,17 @@
 Usage::
 
     vibesys-gpu [--gpus N] [--time MINUTES] -- COMMAND...
-    vibesys-gpu --gate accuracy|benchmark [ARGUMENT...]
+    vibesys-gpu --gate accuracy|benchmark
 
 The agent's sandbox cannot reach the Slurm controller, so the request goes to
 the run's host-owned broker over a Unix socket (:data:`SOCKET_ENV`) with a
 per-run token (:data:`TOKEN_ENV`). The first form runs COMMAND confined in a
 new job. The second runs the framework's planned accuracy or benchmark gate;
-the broker accepts only the arguments the plan allows, and relays the result
-file a benchmark writes under ``/tmp`` back to this side of the socket.
+the agent gives a gate no arguments. The broker supplies the benchmark's result
+path itself, relays the result file back to this side of the socket under
+``/tmp``, and names that path in the gate's output. (The framework's own
+evaluation passes the result argument and path explicitly, which the broker
+validates.)
 
 Output streams as the job produces it, and the exit status is the command's.
 Interrupting the client cancels the job, whether it is queued or running.
