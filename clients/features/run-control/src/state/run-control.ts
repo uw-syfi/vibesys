@@ -3,8 +3,9 @@
  * strip renders), the banner line, and the run actions that do not belong to one sheet:
  * attach, resume, stop, retry, and switching between the run and the welcome view.
  *
- * The banner answers the latest action only: each action's request carries a token, and a reply
+ * Command-owned banners answer only the latest action: each request carries a token, and a reply
  * to an earlier action is dropped, so a slow attach cannot overwrite what a later resume says.
+ * An asynchronous problem is not owned by a command and stays visible through textless commands.
  */
 
 import type {HostKey} from '@vibesys/hosts';
@@ -12,9 +13,13 @@ import type {ChromeState, WelcomeResult} from '@vibesys/ipc';
 import type {ResumeRunId} from '@vibesys/runs';
 import {only, type Step} from '@vibesys/store';
 
+type BannerSource = 'progress' | 'problem' | 'reply';
+
 interface Banner {
   readonly text: string;
   readonly error: boolean;
+  /** Whether a command reply may replace this banner. */
+  readonly source: BannerSource;
 }
 
 export interface WelcomeState {
@@ -79,7 +84,11 @@ export function welcomeStep(
     case 'chrome':
       return only({...state, chrome: action.chrome});
     case 'problem':
-      return only({...state, banner: {text: action.text, error: true}, awaiting: null});
+      return only({
+        ...state,
+        banner: {text: action.text, error: true, source: 'problem'},
+        awaiting: null,
+      });
     case 'command': {
       const token = state.next;
       const text = progress(action.command);
@@ -88,14 +97,25 @@ export function welcomeStep(
           ...state,
           next: token + 1,
           awaiting: token,
-          banner: text === null ? state.banner : {text, error: false},
+          // Textless commands supersede only command-owned progress. An asynchronous problem
+          // has no request token and must remain visible until an action actually replaces it.
+          banner:
+            text === null
+              ? state.banner?.source === 'progress'
+                ? null
+                : state.banner
+              : {text, error: false, source: 'progress'},
         },
         requests: [{token, command: action.command}],
       };
     }
     case 'reply': {
       if (state.awaiting !== action.token) return only(state);
-      const banner = action.result.ok ? null : {text: action.result.error, error: true};
+      const banner: Banner | null = action.result.ok
+        ? state.banner?.source === 'problem'
+          ? state.banner
+          : null
+        : {text: action.result.error, error: true, source: 'reply'};
       return only({...state, awaiting: null, banner});
     }
   }
