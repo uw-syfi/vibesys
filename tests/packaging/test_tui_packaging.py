@@ -28,9 +28,12 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
         "clients/contracts/package.json",
         "clients/core-state/package.json",
         "clients/desktop/package.json",
+        "clients/entities/package.json",
+        "clients/ipc/package.json",
         "clients/transport-node/package.json",
         "clients/transport/package.json",
         "clients/tui/package.json",
+        "clients/ui/package.json",
         "clients/web/package.json",
     }
     assert set(pins.values()) == {BUN_VERSION}
