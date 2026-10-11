@@ -102,6 +102,14 @@ the runnable record. An explicit `None` schema version preserves unknown source
 metadata without fabricating a version. `load()` returns this explicit blocked alternative;
 quarantine grants no dispatch authority.
 
+`mutate_if_fenced(fence, now, mutation)` runs one synchronous external durable
+mutation while holding the same transaction that validates the lease and
+excludes takeover. It returns `False` without invoking the mutation when the
+fence is stale. Every writer to the protected external resource must use the
+same run store for this ordering guarantee; exceptions from the mutation
+propagate after the transaction is released. The mutation must not call back
+into the store whose transaction it holds.
+
 Future shell composition must serialize every whole transition before I/O,
 retain the storage CAS token separately from kernel state, map storage ownership
 to the kernel host fence, renew and verify the shared lease, and suspend dispatch

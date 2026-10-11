@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import asyncio
+from concurrent.futures import Future
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_core.api import ClockAdvanced, ContractError, OperationRegistry
-from vs_project.api import FakeStateStore, Project, StateDocumentDamagedError
+from vs_project.api import (
+    FakeStateStore,
+    Project,
+    StateDocumentDamagedError,
+    StateNamespace,
+    StoreFence,
+)
 from vs_runtime.api.core import (
     JournalPublicationDelivery,
     Publication,
@@ -20,11 +29,63 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.core_shell_fixtures import LostAcknowledgementStateStore, runtime
 from vs_runtime.api.testing import FakePublicationDelivery
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_until_started_sync
 
 pytestmark = pytest.mark.asyncio
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
+
+    from vs_sim.api import Event
+
+
+class _FenceRaceStore(FakeStateStore):
+    """Expose which public fence path the delivery used to order the regression."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.fenced_mutation_used = False
+
+    def mutate_if_fenced(self, fence: StoreFence, now: float, mutation: Callable[[], None]) -> bool:
+        self.fenced_mutation_used = True
+        return super().mutate_if_fenced(fence, now, mutation)
+
+
+@dataclass(frozen=True)
+class _RaceGates:
+    read: Event
+    takeover_attempted: Event
+    begin_takeover: Future[None]
+    takeover_done: Future[None]
+    release_guarded: Future[None]
+
+
+class _PausingReadNamespace:
+    """A faithful namespace that retains one old read until the chosen ordering."""
+
+    def __init__(
+        self,
+        real: StateNamespace,
+        store: _FenceRaceStore,
+        gates: _RaceGates,
+    ) -> None:
+        self._real = real
+        self._store = store
+        self._gates = gates
+
+    def read_bytes(self, relative_path: str) -> bytes | None:
+        source = self._real.read_bytes(relative_path)
+        self._gates.read.set()
+        if self._store.fenced_mutation_used:
+            self._gates.release_guarded.result(timeout=HANG_GUARD_S)
+        else:
+            self._gates.takeover_done.result(timeout=HANG_GUARD_S)
+        return source
+
+    def write_bytes(self, relative_path: str, contents: bytes) -> None:
+        self._real.write_bytes(relative_path, contents)
 
 
 @pytest.mark.parametrize("production", [False, True], ids=["fake", "journal"])
@@ -64,6 +125,77 @@ async def test_publish_replay_conflict_sequence_and_epoch(
     with pytest.raises(ContractError, match="fence"):
         await delivery.publish(publication, PublicationContext(fence=token, now_at=20))
     assert delivery.read() == (publication,)
+
+
+async def test_takeover_cannot_overwrite_a_current_hosts_acknowledged_publication(
+    tmp_path: Path,
+) -> None:
+    source_store = FakeStateStore()
+    shell = runtime(source_store)
+    shell.start("source", now_at=0, lease_duration=100)
+    shell.submit(ClockAdvanced(now_at=1), now_at=1)
+    shell.advance()
+    shell.submit(ClockAdvanced(now_at=2), now_at=2)
+    shell.advance()
+    first, second = shell.record.pending_publications
+
+    store = _FenceRaceStore()
+    old_fence = store.acquire("old", now=0, duration=20)
+    assert old_fence is not None
+    real_namespace = Project.open(tmp_path).state.state_store_namespace("run")
+    threads = OsThreads()
+    gates = _RaceGates(
+        read=threads.event(),
+        takeover_attempted=threads.event(),
+        begin_takeover=Future(),
+        takeover_done=Future(),
+        release_guarded=Future(),
+    )
+    paused_namespace = _PausingReadNamespace(real_namespace, store, gates)
+    registry = OperationRegistry()
+    old_delivery = JournalPublicationDelivery(
+        cast("StateNamespace", paused_namespace), registry, store
+    )
+    current_delivery = JournalPublicationDelivery(real_namespace, registry, store)
+
+    def publish_old() -> PublicationAcknowledgement:
+        return asyncio.run(
+            old_delivery.publish(first, PublicationContext(fence=old_fence, now_at=19))
+        )
+
+    def take_over_and_publish() -> tuple[PublicationAcknowledgement, PublicationAcknowledgement]:
+        gates.takeover_attempted.set()
+        gates.begin_takeover.result(timeout=HANG_GUARD_S)
+        try:
+            current_fence = store.acquire("current", now=20, duration=10)
+            assert current_fence is not None
+            context = PublicationContext(fence=current_fence, now_at=20)
+            first_ack = asyncio.run(current_delivery.publish(first, context))
+            second_ack = asyncio.run(current_delivery.publish(second, context))
+            return first_ack, second_ack
+        finally:
+            gates.takeover_done.set_result(None)
+
+    old_result = start_thread(publish_old)
+    try:
+        wait_until_started_sync(gates.read, old_result)
+        current_result = start_thread(take_over_and_publish)
+        wait_until_started_sync(gates.takeover_attempted, current_result)
+        gates.begin_takeover.set_result(None)
+        if store.fenced_mutation_used:
+            gates.release_guarded.set_result(None)
+    except BaseException:
+        if not gates.begin_takeover.done():
+            gates.begin_takeover.set_result(None)
+        if not gates.release_guarded.done():
+            gates.release_guarded.set_result(None)
+        raise
+    current_acknowledgements = current_result.result(timeout=HANG_GUARD_S)
+    old_acknowledgement = old_result.result(timeout=HANG_GUARD_S)
+
+    assert old_acknowledgement.sequence == 1
+    assert tuple(ack.sequence for ack in current_acknowledgements) == (1, 2)
+    assert tuple(row.sequence for row in current_delivery.read()) == (1, 2)
 
 
 async def test_append_before_ack_restart_deduplicates_and_only_advances_storage() -> None:

@@ -17,6 +17,8 @@ from vs_faults.api import Boundary, FaultGate
 from vs_runtime.api.core import RequestExecutors
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import BaseModel
 
     from vs_core.api import Request
@@ -113,6 +115,10 @@ class FaultingStore:
     def verify(self, fence: StoreFence, now: float) -> bool:
         """The inner store's fence check."""
         return self._inner.verify(fence, now)
+
+    def mutate_if_fenced(self, fence: StoreFence, now: float, mutation: Callable[[], None]) -> bool:
+        """The inner store's fenced external mutation."""
+        return self._inner.mutate_if_fenced(fence, now, mutation)
 
 
 class FaultingReceipts:
