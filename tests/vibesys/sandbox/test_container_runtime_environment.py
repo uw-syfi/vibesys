@@ -37,7 +37,6 @@ from vs_sandbox.api.testing import FakeDockerEngine
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from pathlib import Path
 
     from vs_sandbox.api import CommandRunner, HostResource
 

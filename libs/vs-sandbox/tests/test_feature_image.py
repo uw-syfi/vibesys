@@ -162,7 +162,7 @@ def test_rebuilding_the_same_inputs_reuses_one_tag(tmp_path: Path) -> None:
 def test_different_inputs_get_different_tags(tmp_path: Path, variant: str) -> None:
     def tag_for(root: Path, **changes: object) -> str:
         runner = _Runner(image_ids={"base:1": "sha256:" + "a" * 64, "base:2": "sha256:" + "b" * 64})
-        a = _local(root, "tool-a", {"v": changes.get("option", "1")})  # type: ignore[arg-type]
+        a = _local(root, "tool-a", {"v": str(changes.get("option", "1"))})
         b = _local(root, "tool-b", {})
         if changes.get("content"):
             (a.directory / "install.sh").write_text("#!/bin/sh\necho changed\n")
