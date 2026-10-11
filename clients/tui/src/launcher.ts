@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import {type ChildProcess, spawn} from 'node:child_process';
+import {type ChildProcess, type SpawnOptions, spawn} from 'node:child_process';
 import {accessSync, closeSync, constants, openSync, realpathSync} from 'node:fs';
 import {access, mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -51,25 +51,14 @@ export async function launch(argv: string[]): Promise<number> {
   const sessionDir = await mkdtemp(join(tmpdir(), 'vibesys-session-'));
   const socketPath = join(sessionDir, 'control.sock');
   const backendLogPath = join(sessionDir, 'backend.log');
-  const backendLogFd = openSync(backendLogPath, 'w');
+  let backendLogFd: number | undefined;
   let backendLogClosed = false;
-  const backendProcess = spawn(
-    python.command,
-    [...python.args, '-m', 'entrypoints.server', ...argv, '--control-socket', socketPath],
-    {
-      detached: true,
-      stdio: ['ignore', backendLogFd, backendLogFd],
-    },
-  );
-
+  let backendProcess: ChildProcess | undefined;
   let frontend: ChildProcess | undefined;
   const cleanup = async () => {
-    if (frontend && frontend.exitCode === null && frontend.signalCode === null) {
-      frontend.kill('SIGTERM');
-      await waitOrKill(frontend);
-    }
-    await terminateBackend(backendProcess);
-    if (!backendLogClosed) {
+    if (frontend) await terminateFrontend(frontend);
+    if (backendProcess) await terminateBackend(backendProcess);
+    if (backendLogFd !== undefined && !backendLogClosed) {
       backendLogClosed = true;
       closeSync(backendLogFd);
     }
@@ -82,26 +71,45 @@ export async function launch(argv: string[]): Promise<number> {
   };
   const disposeSignalCleanup = installSignalCleanup(runCleanup);
   try {
+    backendLogFd = openSync(backendLogPath, 'w');
+    const backendStart = beginChildStart(
+      python.command,
+      [...python.args, '-m', 'entrypoints.server', ...argv, '--control-socket', socketPath],
+      {
+        detached: true,
+        stdio: ['ignore', backendLogFd, backendLogFd],
+      },
+    );
+    backendProcess = backendStart.process;
+    const backendStartError = await backendStart.failure;
+    if (backendStartError) return reportChildStartFailure('backend', backendStartError);
+    const startedBackend = childProcessAfterSuccessfulStart(backendStart);
+
     // The frontend does its own connect retries, so it starts now and pays
     // its interpreter and renderer startup while the backend is still coming
     // up. Startup readiness is still watched here: only the launcher can see
     // a backend that dies before it ever listens, and report its log.
-    const startupFailed = watchBackendStartup(socketPath, backendProcess).then(ready => {
-      if (!ready && frontend) frontend.kill('SIGTERM');
-      return !ready;
-    });
-    frontend = spawn(runtime, [entrypoint], {
+    const frontendStart = beginChildStart(runtime, [entrypoint], {
       env: frontendEnvironment(socketPath, requestedTheme),
       stdio: 'inherit',
     });
+    frontend = frontendStart.process;
+    const frontendStartError = await frontendStart.failure;
+    if (frontendStartError) return reportChildStartFailure('frontend', frontendStartError);
+    const startedFrontend = childProcessAfterSuccessfulStart(frontendStart);
+    const startupFailed = watchBackendStartup(socketPath, startedBackend).then(ready => {
+      if (!ready) startedFrontend.kill('SIGTERM');
+      return !ready;
+    });
+
     const exitCode = await monitor(
-      frontend,
-      backendProcess,
+      startedFrontend,
+      startedBackend,
       Boolean(process.env['VIBESYS_RELEASE_SMOKE_MARKER']),
     );
     if (await startupFailed) {
-      await reportBackendFailure(backendProcess, backendLogPath);
-      return exitStatus(backendProcess) ?? 1;
+      await reportBackendFailure(startedBackend, backendLogPath);
+      return exitStatus(startedBackend) ?? 1;
     }
     return exitCode;
   } finally {
@@ -113,6 +121,50 @@ export async function launch(argv: string[]): Promise<number> {
 interface PythonCommand {
   command: string;
   args: string[];
+}
+
+interface ChildStart {
+  process: ChildProcess | undefined;
+  failure: Promise<Error | undefined>;
+}
+
+/** Start one interactive child and make its asynchronous spawn failure observable. */
+function beginChildStart(command: string, args: string[], options: SpawnOptions): ChildStart {
+  try {
+    const process = spawn(command, args, options);
+    return {process, failure: childStartError(process)};
+  } catch (error) {
+    return {process: undefined, failure: Promise.resolve(asError(error))};
+  }
+}
+
+function childStartError(process: ChildProcess): Promise<Error | undefined> {
+  return new Promise(resolve => {
+    const onSpawn = () => {
+      process.off('error', onError);
+      resolve(undefined);
+    };
+    const onError = (error: Error) => {
+      process.off('spawn', onSpawn);
+      resolve(error);
+    };
+    process.once('spawn', onSpawn);
+    process.once('error', onError);
+  });
+}
+
+function childProcessAfterSuccessfulStart(start: ChildStart): ChildProcess {
+  if (start.process) return start.process;
+  throw new Error('child start completed without a process');
+}
+
+function reportChildStartFailure(role: 'backend' | 'frontend', error: Error): number {
+  console.error(`vs: failed to start ${role}: ${error.message}`);
+  return 1;
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 /**
@@ -276,6 +328,13 @@ async function terminateBackend(backend: ChildProcess): Promise<void> {
     return;
   }
   await waitForExit(backend);
+}
+
+async function terminateFrontend(frontend: ChildProcess): Promise<void> {
+  if (exitStatus(frontend) !== undefined) return;
+  if (frontend.pid === undefined) return;
+  frontend.kill('SIGTERM');
+  await waitOrKill(frontend);
 }
 
 async function waitOrKill(process: ChildProcess): Promise<void> {
