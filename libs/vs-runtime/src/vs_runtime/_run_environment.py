@@ -286,10 +286,14 @@ class SlurmEnvironmentFacts:
     ``gate_client`` is the name the agent runs, on its ``PATH``, to request a
     trusted gate (``gate_client --gate KIND``), and ``gates`` the kinds the
     task plans. ``agent_gpu`` is set when the agent may also run its own GPU
-    commands as Slurm jobs through that same client.
+    commands as Slurm jobs through that same client. ``evaluation_tool`` is set when
+    the run's agents request trusted evaluation through the evaluation tool: they
+    are then given no gate: ``gates`` is empty, and ``gate_client`` is only the GPU
+    client, set when ``agent_gpu`` is.
     """
 
     service_command: tuple[str, ...] = ()
+    evaluation_tool: bool = False
     gate_client: str = ""
     gates: tuple[str, ...] = ()
     agent_gpu: AgentGpuFacts | None = None
@@ -373,6 +377,10 @@ class RunEnvironmentRequest:
     #: run it (a sandbox container with a Docker daemon of its own under
     #: Sysbox). Every other environment rejects the request.
     docker_in_docker: bool = False
+    #: The run's agents request trusted evaluation through the evaluation tool. An
+    #: environment that would otherwise give them a shell gate to it then gives none.
+    #: Loops not yet ported to the core path leave this unset and keep the gate.
+    evaluation_tool: bool = False
     #: Where a container environment reports its startup stages and image
     #: build progress while it opens; ``None`` reports nothing.
     startup: EnvironmentStartupSink | None = None

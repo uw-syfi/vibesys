@@ -96,6 +96,40 @@ def bridge_editor_extras(
     )
 
 
+def cluster_editor_extras() -> EditorExtras:
+    """Return the editor additions of a run whose agent has no host commands of its own.
+
+    The workspace is mounted at its host path, and the container gets no
+    accelerator: the cluster does the GPU work.
+    """
+    return EditorExtras(same_path_workspace=True, attach_accelerator=False)
+
+
+def agent_paths(
+    sandbox: object,
+    request: RunEnvironmentRequest,
+    *,
+    accuracy_command: str | None = None,
+    benchmark_command: str | None = None,
+) -> AgentPaths:
+    """Return the agent's paths, with the accuracy and benchmark commands it is given, if any.
+
+    A run whose agents request trusted evaluation through the evaluation tool gives
+    none: a command named here would only run unscored on the container's side.
+    """
+    objective = _materialize_effective_objective(request)
+    return AgentPaths(
+        objective=(
+            cast("_AgentPathSandbox", sandbox).agent_path(objective)
+            if objective is not None
+            else "OBJECTIVE.md"
+        ),
+        accuracy_command=accuracy_command,
+        benchmark_command=benchmark_command,
+        profiler_support=(request.profiler_support_name if request.profiler_support_path else None),
+    )
+
+
 def bridged_agent_paths(
     sandbox: object,
     request: RunEnvironmentRequest,
@@ -108,18 +142,13 @@ def bridged_agent_paths(
 
     A gate is offered (``launcher --gate KIND``) only when the task *planned* it.
     """
-    objective = _materialize_effective_objective(request)
-    return AgentPaths(
-        objective=(
-            cast("_AgentPathSandbox", sandbox).agent_path(objective)
-            if objective is not None
-            else "OBJECTIVE.md"
-        ),
+    return agent_paths(
+        sandbox,
+        request,
         accuracy_command=(
             shlex.join((str(launcher), "--gate", GateKind.ACCURACY.value)) if accuracy else None
         ),
         benchmark_command=(
             shlex.join((str(launcher), "--gate", GateKind.BENCHMARK.value)) if benchmark else None
         ),
-        profiler_support=(request.profiler_support_name if request.profiler_support_path else None),
     )

@@ -94,3 +94,15 @@ are not for its awaiting measurement step.
   budget (the identity and snapshot helpers survive)
 - `_evaluation_tool` legacy branch in `src/launch/composition.py`
 - Legacy loop handling of `WaitingForEvaluation`
+- The Slurm shell gate path, which only the loops not yet on the core path use (the
+  dynamic loop's agents have the evaluation tool and are given none of it): the broker's
+  `gate` operation, `Gates`, `GateRunner` and `GateKind` in
+  `libs/vs-sandbox/src/vs_sandbox/host_command_broker.py`, `gate_runners.py`,
+  `slurm_command.py` and `benchmark_output.py`, the `--gate` mode of
+  `host_command_client.py` (the `vibesys-gate` launcher), `bridged_agent_paths` and
+  `planned_gates` in `vs_runtime/_host_command_bridge.py`, the gate branch of
+  `SlurmEnvironment._open`, `src/vibesys/prompts/environments/_gate_client.j2`, and
+  `RunEnvironmentRequest.evaluation_tool` with `offers_evaluation_tool`, which exist only to
+  tell the two apart. The older loops (agent single and multi, profile-guided, plain/issue
+  queue, evolve) run their mid-turn gate and framework post-round trusted evaluation through
+  it; delete it per loop as each is ported (roadmap #1952, #1649), and finally in phase 6.

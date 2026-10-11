@@ -16,8 +16,10 @@ from vs_runtime._agent_gpu_commands import (
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession, HostBroker
 from vs_runtime._container_runtime_policy import reject_docker_in_docker
 from vs_runtime._host_command_bridge import (
+    agent_paths,
     bridge_editor_extras,
     bridged_agent_paths,
+    cluster_editor_extras,
     new_broker_socket_path,
     planned_gates,
     write_client_launcher,
@@ -71,6 +73,8 @@ if TYPE_CHECKING:
 
     from vs_agent.api.images import DockerBuildRunner
     from vs_project.api import RunResourceRequest
+    from vs_runtime._run_environment import _OrphanReaper
+    from vs_sandbox.api import DockerCli
     from vs_sandbox.api.slurm import JobConfinement
 
 _GATE_LAUNCHER = "vibesys-gate"
@@ -318,14 +322,17 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
     def from_options(cls, options: Mapping[str, object]) -> SlurmEnvironment:
         """Parse the operator file named by the options, once.
 
-        ``build_runner`` is the unrecorded injection seam for the agent image build.
+        ``build_runner``, ``docker`` and ``orphan_reaper`` are unrecorded injection
+        seams for the agent image build, the Docker CLI and recovery.
         """
         value = options.get("config_path", "~/.config/vibesys/slurm.toml")
         build_runner = options.get("build_runner")
         return cls(
             load_slurm_operator_settings(Path(str(value))),
             docker=DockerEnvironmentConfig(
-                build_runner=cast("DockerBuildRunner | None", build_runner)
+                docker=cast("DockerCli | None", options.get("docker")),
+                build_runner=cast("DockerBuildRunner | None", build_runner),
+                orphan_reaper=cast("_OrphanReaper | None", options.get("orphan_reaper")),
             ),
         )
 
@@ -374,8 +381,17 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         return _PreparedRunEnvironment(
             SlurmEnvironmentFacts(
                 service_command=_slurm_service_command(self._settings.policy),
-                gate_client=self._mode.gate_client,
-                gates=planned_gates(request.accuracy_command, request.benchmark_command),
+                evaluation_tool=request.evaluation_tool,
+                gate_client=(
+                    self._mode.gate_client
+                    if self._mode.agent_gpu_facts is not None or not request.evaluation_tool
+                    else ""
+                ),
+                gates=(
+                    ()
+                    if request.evaluation_tool
+                    else planned_gates(request.accuracy_command, request.benchmark_command)
+                ),
                 agent_gpu=self._mode.agent_gpu_facts,
             ),
             partial(self._open, request),
@@ -410,23 +426,30 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             transport_env, transport_resources = _start_transport_broker(
                 config, request, plans, brokers
             )
-            gates = self._start_gate_broker(request, plans, gpu)
-            brokers.append(gates)
-            launcher = write_client_launcher(request.log_dir / "slurm-gate", mode.gate_client)
-            sandbox = self._docker.build_editor(
-                request,
-                bridge_editor_extras(gates, launcher, env=mode.editor_env(launcher)),
-            )
+            launcher: Path | None = None
+            if request.evaluation_tool and gpu is None:
+                # Nothing for a broker to answer: the agent has no host command at all.
+                extras = cluster_editor_extras()
+            else:
+                commands = self._start_command_broker(request, plans, gpu)
+                brokers.append(commands)
+                launcher = write_client_launcher(request.log_dir / "slurm-gate", mode.gate_client)
+                extras = bridge_editor_extras(commands, launcher, env=mode.editor_env(launcher))
+            sandbox = self._docker.build_editor(request, extras)
             profiler_mcp = _remote_profiler_mcp(plans, transport_env, transport_resources)
             session = SandboxSession.start(
                 sandbox,
                 RunEnvironmentView(
-                    paths=bridged_agent_paths(
-                        sandbox,
-                        request,
-                        launcher,
-                        accuracy=plans.has_accuracy,
-                        benchmark=plans.has_benchmark,
+                    paths=(
+                        agent_paths(sandbox, request)
+                        if request.evaluation_tool or launcher is None
+                        else bridged_agent_paths(
+                            sandbox,
+                            request,
+                            launcher,
+                            accuracy=plans.has_accuracy,
+                            benchmark=plans.has_benchmark,
+                        )
                     ),
                     prompt_notes=presentation.prompt_notes,
                     isolated=True,
@@ -540,21 +563,31 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             has_benchmark=benchmark is not None,
         )
 
-    def _start_gate_broker(
+    def _start_command_broker(
         self, request: RunEnvironmentRequest, plans: _ClusterPlans, gpu: GpuCommands | None
     ) -> HostCommandBroker:
+        """Start the host broker the container reaches; it answers gates only for a gate run.
+
+        A run whose agents have the evaluation tool gets a broker with GPU commands and
+        no gate runner, so the ``gate`` operation is refused.
+        """
+        gates = (
+            None
+            if request.evaluation_tool
+            else Gates(
+                SlurmCommandGateRunner(
+                    plans.evaluator, env=dict(os.environ), wrapper=self._gate_wrapper
+                ),
+                benchmark_output_argument=request.benchmark_output_argument,
+            )
+        )
         broker = HostCommandBroker(
             new_broker_socket_path(),
             # Only this session's own workspace: with parallel candidates each session has
             # its own broker, and none may run a command in another candidate's worktree.
             roots=RunRoots((request.workspace,)),
             gpu=gpu,
-            gates=Gates(
-                SlurmCommandGateRunner(
-                    plans.evaluator, env=dict(os.environ), wrapper=self._gate_wrapper
-                ),
-                benchmark_output_argument=request.benchmark_output_argument,
-            ),
+            gates=gates,
         )
         broker.start()
         return broker

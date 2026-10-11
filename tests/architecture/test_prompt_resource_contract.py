@@ -168,6 +168,7 @@ def representative_context() -> dict[str, object]:
         "domain_single_agent",
         "environment_notes",
         "error",
+        "evaluation_tool",
         "evidence",
         "exhaustion_entry",
         "feedback",

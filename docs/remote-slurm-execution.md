@@ -13,9 +13,25 @@ directly (for example over SSH), without SkyPilot. The editor is the same local
 Docker container as in every other environment, with the workspace mounted at
 its host path.
 
-The container cannot hold the cluster's tools or credentials, so the host owns a
-broker and the container reaches it over a bind-mounted Unix socket with a
-per-run token. The agent runs a gate as `vibesys-gate --gate accuracy` or
+The container cannot hold the cluster's tools or credentials, so trusted work never
+runs there. What the agent can reach for trusted evaluation depends on the loop, and
+the environment decides it once, from whether the loop's agents have the evaluation
+tool (`offers_evaluation_tool` in `src/vibesys/run/host.py`, passed as
+`RunEnvironmentRequest.evaluation_tool`).
+
+- **The dynamic loop** has the evaluation tool (`submit_evaluation`, then
+  `validate_evaluation_wait`), which the run's evaluation service answers on the
+  host; only its results count. Its agents get no shell client for evaluation: no
+  `vibesys-gate`, no `vibesys-gpu --gate` (the broker refuses the `gate` operation),
+  no accuracy or benchmark command in their paths, and no gate text in their prompts.
+  Without agent GPU commands the container reaches no host broker at all.
+- **Every older loop** (agent single and multi, profile-guided, plain/issue queue,
+  evolve) has no evaluation tool. Its mid-turn gate and its framework's post-round
+  trusted evaluation keep the path below, unchanged. Each is deleted as its loop is
+  ported to the core path (roadmap #1952, tracked by #1649), and finally in phase 6.
+
+For an older loop the host owns a broker and the container reaches it over a
+bind-mounted Unix socket with a per-run token. The agent runs a gate as `vibesys-gate --gate accuracy` or
 `vibesys-gate --gate benchmark`. The client is mounted at
 `/usr/local/bin/vibesys-gate`, so the bare name resolves in any shell, and the
 environment notes in the agent's prompts name it and the gates the task plans. The
@@ -34,21 +50,21 @@ directory, mounted read-only at its host path, so the agent image needs only a
 `python3` (3.11 or newer) with `pydantic`, which its MCP library already
 requires. When the submit host is itself the machine that runs VibeSys, the
 configuration can use the `local` transport (`[slurm.transport] kind = "local"`,
-see the `vs-slurm` README) instead of SSH: gates run through the same
+see the `vs-slurm` README) instead of SSH: evaluations run through the same
 sbatch, poll and collect path. The local transport starts its programs in a
 login-like environment (`HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH`, `LANG`,
 `LC_*`, `TZ`, `TMPDIR`, and nothing else), as sshd would, so the host's
 credentials and any `SLURM_*` variables of an enclosing allocation never reach
-a gate. The second broker exists only for the SSH transport, so a
-local-transport run without agent GPU commands offers the gates but not the
-agent's ad hoc ROCprof capture, and no profiler is offered.
+a job. The profiler broker exists only for the SSH transport, so a
+local-transport run without agent GPU commands offers no ad hoc ROCprof capture,
+and no profiler.
 
 ### Agent GPU commands (optional)
 
 On a host that is itself a Slurm submit node (`[slurm.transport] kind = "local"`),
 the operator can also let the agent run its own GPU commands as Slurm jobs, by
 adding a `[vibesys.agent_gpu]` table to the same operator file. The same host
-broker then offers `vibesys-gpu` beside the gates, and the agent profiles
+broker then offers `vibesys-gpu` (beside the gates for an older loop), and the agent profiles
 through its own commands instead of through the remote ROCprof capture. The
 table is rejected with any other transport. See
 [GPU commands through Slurm](slurm-gpu-commands.md) for the table, the agent's

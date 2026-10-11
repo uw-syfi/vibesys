@@ -160,6 +160,7 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
     ) = None,
     state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    evaluation_tool: bool = False,
 ) -> "_PreparedRun":
     """Open one project context and register its resources with ``ownership``.
 
@@ -180,6 +181,7 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
         resume_policy=resume_policy,
         state_binding=state_binding,
         backend_factory=backend_factory,
+        evaluation_tool=evaluation_tool,
     )
 
 
@@ -195,6 +197,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     ) = None,
     state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    evaluation_tool: bool = False,
 ) -> "_PreparedRun":
     validate_run_request(request)
     bundle = request.input_bundle
@@ -609,6 +612,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 project_path_policy=project_path_policy,
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
                 docker_in_docker=bundle.docker_in_docker,
+                evaluation_tool=evaluation_tool,
                 startup=startup.report,
             )
         environment_resources = open_run_environment_resources(
@@ -729,7 +733,7 @@ def _run_facts(
         reference_location=ref_name,
         accuracy_command=view.paths.accuracy_command,
         benchmark_command=view.paths.benchmark_command,
-        accuracy_configured=bool(view.paths.accuracy_command),
+        accuracy_configured=bool(bundle.accuracy_command),
         benchmark_configured=(
             bundle.benchmark_result is not None or bundle.benchmark_result_protocol is not None
         ),

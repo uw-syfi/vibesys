@@ -123,6 +123,15 @@ without this bound a turn could run until the agent CLI timeout (3600 s).
 """
 
 
+def offers_evaluation_tool(plugin: OrchestrationPlugin) -> bool:
+    """Whether the plugin's agents request trusted evaluation through the evaluation tool.
+
+    The single place that decides it: every consumer (the evaluation service and the run
+    environment, which then gives the agent no shell gate) reads this, never a loop name.
+    """
+    return any(tool.id == "evaluation" for role in plugin.agents for tool in role.extra_tools)
+
+
 @dataclass(frozen=True, slots=True)
 class _ProductObservations:
     """Project plugin-authored observations onto VibeSys logs and events."""
@@ -198,6 +207,7 @@ class _ProductHostFactory:
                 else None
             ),
             backend_factory=self.backend_factory,
+            evaluation_tool=offers_evaluation_tool(plugin),
         )
         return self._components(resources, state_namespace, plugin.state, ownership)
 
@@ -400,9 +410,7 @@ class _ProductHostFactory:
         tool_context: AgentToolContext,
     ) -> Evaluation:
         """Compose evaluation tools and trusted-result reuse when declared."""
-        if not any(
-            tool.id == "evaluation" for role in self.plugin.agents for tool in role.extra_tools
-        ):
+        if not offers_evaluation_tool(self.plugin):
             return evaluation
         namespace = resources.project_resources.project.state.local_namespace(
             resources.project_resources.state.run_id,

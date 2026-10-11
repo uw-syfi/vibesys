@@ -400,19 +400,39 @@ def open_run(
     *,
     accuracy: bool = True,
 ) -> Iterator[OpenRun]:
-    """Open *kind* against *cluster*; close the session and remove its containers on exit."""
+    """Open *kind* as an older loop would; close the session and remove its containers on exit."""
     run_id = f"t{secrets.token_hex(5)}"
     environment = make_environment(kind, cluster, directory, image_id)
     lines: list[str] = []
     request = make_request(cluster, directory, run_id, accuracy=accuracy, log=lines.append)
+    with _opened(kind, cluster, environment, request) as run:
+        yield replace(run, log_lines=tuple(lines))
+
+
+@contextmanager
+def open_dynamic_run(
+    kind: str, cluster: SlurmCluster, directory: Path, image_id: str
+) -> Iterator[OpenRun]:
+    """Open *kind* as the dynamic loop would: its agents have the evaluation tool, so no gate."""
+    run_id = f"t{secrets.token_hex(5)}"
+    environment = make_environment(kind, cluster, directory, image_id)
+    request = replace(make_request(cluster, directory, run_id), evaluation_tool=True)
+    with _opened(kind, cluster, environment, request) as run:
+        yield run
+
+
+@contextmanager
+def _opened(
+    kind: str, cluster: SlurmCluster, environment: RunEnvironment, request: RunEnvironmentRequest
+) -> Iterator[OpenRun]:
     session = open_run_environment(environment, request)
     try:
-        yield OpenRun(session, request, run_id, kind, tuple(lines))
+        yield OpenRun(session, request, request.run_id, kind)
     finally:
         try:
             session.close()
         finally:
-            remove_run_containers(run_id)
+            remove_run_containers(request.run_id)
             cluster.cancel_all()
 
 

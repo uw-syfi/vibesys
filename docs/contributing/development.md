@@ -184,6 +184,10 @@ exactly the caller's environment, so the host installs nothing.
 | `slurm-local-gpu` | local transport plus `[vibesys.agent_gpu]` | the same, plus GPU scheduling, confinement and `vibesys-gpu` |
 | `slurm-gpu-alias` | the deprecated `--run-environment slurm-gpu` file | smoke: its deprecation notice, gates and one GPU command |
 
+Each kind is opened as an older loop would (the agent has the gates, and the framework's
+own evaluation runs through them) and, in `test_agent_surface.py`, as the dynamic loop
+would (the agent has the evaluation tool, so no gate).
+
 The tier is marked `slurm_cluster` and skipped unless `VIBESYS_SLURM_CLUSTER=1`
 and Docker are available. CI runs it as the `real-tiers-slurm` job when the `real_tiers` change filter selects it, on every merge-queue entry, and nightly. The script sets the variable,
 removes everything it created on exit, and passes extra arguments to pytest.

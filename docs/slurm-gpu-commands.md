@@ -66,17 +66,25 @@ worktree is refused with `commands must run from inside the run's workspace`, so
 one candidate cannot read or write another's files through a GPU job. Candidate
 sessions run concurrently; Slurm queues their jobs against the operator limits.
 
-The trusted accuracy and benchmark gates are host commands that the framework
-planned. The agent runs them as `vibesys-gpu --gate accuracy` or
-`vibesys-gpu --gate benchmark`. The container gets exactly one client: with the
-capability on, `vibesys-gpu` carries both the GPU commands and the gates; without
-it, `vibesys-gate` carries the gates only. The gates stay on the `sbatch` path
-(`vs_sandbox.slurm_command`) whether or not the agent may run GPU commands, and
-are sized by `sbatch_arguments` and the task's resources. The agent gives a gate
-no arguments. A benchmark's result file is written on the host, so the broker
-relays it back into the container's `/tmp` and names the path in the gate's
-output. The framework's own evaluation names the result path itself, which the
-broker validates.
+`vibesys-gpu -- COMMAND` runs the agent's own GPU commands. It is not an evaluation and
+produces no evidence. What else the client carries depends on the loop:
+
+- The dynamic loop's agents have the evaluation tool (`submit_evaluation`, then
+  `validate_evaluation_wait`): only it scores a candidate, and only its results count.
+  Numbers the agent measures through `vibesys-gpu` are for its own iteration. The
+  broker has no gate runner, so `vibesys-gpu --gate` is refused, and the prompts name no
+  gate. The container gets the client only when the capability is on.
+- An older loop's agents (everything but the dynamic loop, until each is ported to the
+  core path, roadmap #1952) are also given the trusted accuracy and benchmark gates, which
+  are host commands that the framework planned. The agent runs them as
+  `vibesys-gpu --gate accuracy` or `vibesys-gpu --gate benchmark`. The container gets
+  exactly one client: with the capability on, `vibesys-gpu` carries both the GPU commands
+  and the gates; without it, `vibesys-gate` carries the gates only. The gates stay on the
+  `sbatch` path (`vs_sandbox.slurm_command`) whether or not the agent may run GPU
+  commands, and are sized by `sbatch_arguments` and the task's resources. The agent gives
+  a gate no arguments. A benchmark's result file is written on the host, so the broker
+  relays it back into the container's `/tmp` and names the path in the gate's output. The
+  framework's own evaluation names the result path itself, which the broker validates.
 
 ## Operator configuration
 

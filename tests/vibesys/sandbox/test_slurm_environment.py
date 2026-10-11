@@ -7,12 +7,13 @@ program stands in for the cluster, so nothing patches the code under test.
 
 from __future__ import annotations
 
+import asyncio
 import shlex
 import shutil
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
@@ -31,8 +32,11 @@ from vs_runtime.api import CoreRunContext
 from vs_runtime.api.infrastructure import (
     RunEnvironment,
     RunEnvironmentRequest,
+    ScalarBenchmarkContract,
     SlurmEnvironment,
+    TrustedEvaluationPlan,
     TrustedEvaluatorRequirements,
+    create_trusted_evaluation_executor,
     run_environment_deprecation,
 )
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
@@ -43,6 +47,7 @@ from vs_sim.api import SubprocessProbe
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vs_project.api import GitTracker
     from vs_runtime.api.infrastructure import RunEnvironmentSession
 
 _SLURM_CONFIG = """[slurm]
@@ -93,10 +98,15 @@ partitions = ["main"]
 max_gpus = 8
 max_time_minutes = 120
 """
-# Stands in for ``vs_sandbox.slurm_command``: reports how it was called and fails the benchmark.
+# Stands in for ``vs_sandbox.slurm_command``: reports how it was called. A benchmark that is
+# not asked for a result file fails; one that is writes it, as the real wrapper does.
 _FAKE_GATE = """\
-import os, sys
+import json, os, sys
 print("gate", *sys.argv[1:], "cwd=" + os.getcwd())
+if "--output-json" in sys.argv:
+    with open(sys.argv[sys.argv.index("--output-json") + 1], "w") as result:
+        json.dump({"ms": 3.5}, result)
+    sys.exit(0)
 sys.exit(7 if "benchmark" in sys.argv else 0)
 """
 
@@ -203,9 +213,13 @@ def _open(
     *,
     accuracy: str | None = "python accuracy.py",
     benchmark: str | None = "python benchmark.py",
+    evaluation_tool: bool = False,
 ) -> tuple[DaemonBackend, RunEnvironmentRequest, RunEnvironmentSession]:
     backend = DaemonBackend(daemon_engine(tmp_path))
-    request = _request(tmp_path, backend, accuracy=accuracy, benchmark=benchmark)
+    request = replace(
+        _request(tmp_path, backend, accuracy=accuracy, benchmark=benchmark),
+        evaluation_tool=evaluation_tool,
+    )
     return backend, request, open_run_environment(_environment(tmp_path, name, backend), request)
 
 
@@ -676,3 +690,107 @@ def test_the_dynamic_loop_accepts_every_slurm_configuration_including_agent_gpu_
         )
     finally:
         session.close()
+
+
+class _UntouchedInputs:
+    """The git tracker of a candidate that changed no evaluator-owned file."""
+
+    def trusted_input_changes(self) -> list[str]:
+        return []
+
+
+@pytest.mark.parametrize("name", _ENVIRONMENTS)
+def test_an_older_loops_framework_evaluation_runs_through_the_gate_on_slurm(
+    tmp_path: Path, name: str
+) -> None:
+    """The loops not yet ported evaluate each round through the framework and the gate (#1952)."""
+    backend = DaemonBackend(daemon_engine(tmp_path))
+    request = replace(_request(tmp_path, backend), benchmark_output_argument="--output-json")
+    session = open_run_environment(_environment(tmp_path, name, backend), request)
+    try:
+        executor = create_trusted_evaluation_executor(
+            TrustedEvaluationPlan(
+                accuracy_command=session.view.paths.accuracy_command,
+                benchmark_command=session.view.paths.benchmark_command,
+                benchmark_contract=ScalarBenchmarkContract(
+                    output_argument="--output-json", metric="ms"
+                ),
+            ),
+            workspace=request.workspace,
+            sandbox=session.sandbox,
+            git=cast("GitTracker", _UntouchedInputs()),
+        )
+
+        accuracy = asyncio.run(executor.accuracy())
+        benchmark = asyncio.run(executor.benchmark())
+
+        assert accuracy.passed, accuracy.output
+        assert benchmark.passed, benchmark.output
+        assert benchmark.row == {"ms": 3.5}
+    finally:
+        session.close()
+
+
+# The agents have the evaluation tool (the dynamic loop): the shell offers them no gate.
+
+
+@pytest.mark.parametrize("name", _ENVIRONMENTS)
+@pytest.mark.parametrize("accuracy", [None, "python accuracy.py"])
+def test_agents_with_the_evaluation_tool_are_given_no_gate_command_or_gate_text(
+    tmp_path: Path, name: str, accuracy: str | None
+) -> None:
+    backend, _, session = _open(tmp_path, name, accuracy=accuracy, evaluation_tool=True)
+    try:
+        run = _run_tokens(backend)
+        mounts = [run[i + 1] for i, flag in enumerate(run) if flag == "-v"]
+        has_gpu = name not in ("slurm", "slurm-local")
+        assert session.view.paths.accuracy_command is None
+        assert session.view.paths.benchmark_command is None
+        assert "--gate" not in session.view.prompt_notes
+        assert "vibesys-gate" not in session.view.prompt_notes
+        assert not any(mount.endswith(":/usr/local/bin/vibesys-gate:ro") for mount in mounts)
+        assert any(mount.endswith(":/usr/local/bin/vibesys-gpu:ro") for mount in mounts) is has_gpu
+        # Without agent GPU commands the container reaches no broker at all.
+        has_broker = any(token.startswith("VIBESYS_COMMAND_BROKER_SOCKET=") for token in run)
+        assert has_broker is has_gpu
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize("name", ["slurm+gpu", "slurm-gpu"])
+def test_a_gpu_broker_of_agents_with_the_evaluation_tool_refuses_a_gate_request(
+    tmp_path: Path, name: str
+) -> None:
+    _backend, _, session = _open(tmp_path, name, evaluation_tool=True)
+    try:
+        launcher = tmp_path / "logs" / "slurm-gate" / "vibesys-gpu"
+        refused = session.sandbox.execute(f"{launcher} --gate accuracy")
+
+        assert refused.exit_code != 0
+        assert "gate" in refused.output
+        assert "gate --plan" not in refused.output
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize("name", _ENVIRONMENTS)
+def test_closing_the_session_of_agents_with_the_evaluation_tool_removes_every_host_socket(
+    tmp_path: Path, name: str
+) -> None:
+    backend, _, session = _open(tmp_path, name, evaluation_tool=True)
+    run = _run_tokens(backend)
+    sockets = [
+        Path(token.split("=", 1)[1])
+        for token in run
+        if token.startswith("VIBESYS_COMMAND_BROKER_SOCKET=")
+    ]
+    sockets += [
+        Path(value)
+        for key, value in session.view.profiler_mcp_env
+        if key == "VIBESYS_SLURM_BROKER_SOCKET"
+    ]
+    assert all(socket.exists() for socket in sockets)
+
+    session.close()
+
+    assert not any(socket.exists() for socket in sockets)
