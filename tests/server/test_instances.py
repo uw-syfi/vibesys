@@ -233,6 +233,16 @@ _RECORD_DOCUMENTS = {
         **_record(instance_id).model_dump(mode="json", exclude={"phase", "log_path"}),
         "version": 2,
     },
+    "v3": lambda instance_id: {**_record(instance_id).model_dump(mode="json"), "version": 3},
+    "v3 with progress": lambda instance_id: {
+        **_record(instance_id).model_dump(mode="json"),
+        "version": 3,
+        "phase": {
+            "status": "starting",
+            "stage": "building_image",
+            "progress": {"done": 1, "total": 3, "label": "RUN npm install"},
+        },
+    },
     "future": lambda instance_id: {"version": 9, "id": instance_id, "phase": "anything"},
     "no version": lambda instance_id: {"id": instance_id},
     "not an object": lambda _instance_id: [1, 2],
@@ -263,13 +273,14 @@ def test_a_listing_over_mixed_record_versions_reports_every_live_id_exactly_once
     unreadable = [record.id for record in listing.unreadable]
     assert sorted(live + unreadable) == IDS[: len(kinds)]
     for instance_id, kind in zip(IDS, kinds, strict=False):
-        assert (instance_id in live) == (kind == "current")
+        assert (instance_id in live) == (kind in {"current", "v3"})
 
 
 @pytest.mark.parametrize(
     ("kind", "version"),
     [
         ("v2", 2),
+        ("v3 with progress", 3),
         ("future", 9),
         ("no version", None),
         ("not an object", None),
@@ -279,6 +290,10 @@ def test_a_listing_over_mixed_record_versions_reports_every_live_id_exactly_once
 )
 def test_an_unreadable_record_names_the_version_it_claims(kind: str, version: int | None) -> None:
     assert parse_record(IDS[0], _raw(kind, IDS[0])) == UnreadableRecord(id=IDS[0], version=version)
+
+
+def test_a_version_3_record_reads_as_the_same_record_at_the_current_version() -> None:
+    assert parse_record(IDS[0], _raw("v3", IDS[0])) == _record(IDS[0])
 
 
 def test_a_newer_checkouts_tombstone_is_left_to_its_own_lister() -> None:

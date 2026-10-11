@@ -4,7 +4,7 @@
  * `pnpm-workspace.yaml` admits directories rather than names (`packages: ["*"]`), so which
  * packages exist is a fact about the filesystem, not a list to maintain. Every gate that used to
  * repeat the names reads them from here: `.dependency-cruiser.mjs` (the scanned-path patterns),
- * `scripts/check_ts_architecture.mjs` (the scan roots), `scripts/check_ts_package_manifests.mjs`
+ * `scripts/check_ts_architecture.mjs` (the scan roots), `scripts/check_package_graph.mjs`
  * (the dependency policy), and `knip.config.ts` (the audited workspaces). The workspace scripts in
  * `package.json` need no list at all: `pnpm -r` runs every member by construction.
  *
@@ -44,13 +44,11 @@ import {join} from 'node:path';
 const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 const MANIFEST_FILE = 'package.json';
 const ARCHITECTURE_TSCONFIG = 'tsconfig.architecture.json';
-const WEB_PACKAGE = '@vibesys/web';
-const WEB_TSCONFIG = 'web/tsconfig.json';
-const WEB_ALIAS_DEFINITION = 'web/workspace-source-aliases.json';
 const SOURCE_DIRECTORY = 'src';
-const BUILD_OUTPUT_PREFIX = './dist/';
-const JAVASCRIPT_SUFFIX = '.js';
 const TYPESCRIPT_SUFFIX = '.ts';
+// The export condition every workspace export names its TypeScript source with; see
+// docs/contributing/clients-architecture.md (Build model).
+const SOURCE_CONDITION = '@vibesys/source';
 
 // Which directories hold no source is already declared, in `.gitignore`, so this asks git rather
 // than keeping a second list: build output (`dist`), installed dependencies (`node_modules`), tool
@@ -83,10 +81,12 @@ const NOT_A_WORKSPACE_MEMBER = new Set(['node_modules', 'bower_components']);
 // already excluded above.
 const OUTPUT_DIRECTORY_NAMES = new Set(['dist', 'node_modules']);
 
-// A workspace pattern this module understands: `*` (every directory, what pnpm is configured with)
-// or a literal directory name. Anything else would need glob semantics to expand correctly, and
-// guessing would narrow the package set silently.
-const SUPPORTED_PATTERN = /^(?:\*|[\w.-]+)$/;
+// A workspace pattern this module understands: `*` (every directory), `<group>/*` (every directory
+// inside one grouping directory, such as `features/*`), or a literal directory name. Anything else
+// would need glob semantics to expand correctly, and guessing would narrow the package set
+// silently.
+const SUPPORTED_PATTERN = /^(?:\*|[\w.-]+\/\*|[\w.-]+)$/;
+const GROUP_PATTERN = /^([\w.-]+)\/\*$/;
 
 const SEQUENCE_ENTRY = /^\s+-\s*(?:"([^"]+)"|'([^']+)'|([^\s#]+))\s*$/;
 
@@ -109,11 +109,15 @@ export function workspaceLayout(root) {
   const rootChildren = candidateChildren(root, '', false);
   const packages = readPackages(root, rootChildren);
   const packageDirectories = new Set(packages.map(({directory}) => directory));
+  // A grouping directory (`features` for `features/*`) holds packages, not source or tooling.
+  const groups = new Set(
+    packagePatterns(root).flatMap(pattern => GROUP_PATTERN.exec(pattern)?.[1] ?? []),
+  );
   // The ignore filter starts here, one layer below the package question: a root directory that is
   // not a package, and every directory inside a package. The packages themselves are already
   // settled, by pnpm's rule, and are not re-asked about.
   const candidates = [
-    ...rootChildren.filter(({path}) => !packageDirectories.has(path)),
+    ...rootChildren.filter(({path}) => !packageDirectories.has(path) && !groups.has(path)),
     ...packages.flatMap(({directory}) =>
       candidateChildren(root, directory, crossesSymlink(root, directory)),
     ),
@@ -123,12 +127,12 @@ export function workspaceLayout(root) {
   const tooling = [];
   for (const {path} of candidates) {
     if (ignored.has(path)) continue;
-    const separator = path.lastIndexOf('/');
-    if (separator < 0) {
+    if (!path.includes('/')) {
       // A root directory that is not a package is the workspace's own tooling (`scripts`).
       tooling.push(path);
     } else {
-      (path.slice(separator + 1) === SOURCE_DIRECTORY ? source : tooling).push(path);
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      (name === SOURCE_DIRECTORY ? source : tooling).push(path);
     }
   }
   return {
@@ -164,98 +168,36 @@ export function pathAlternation(directories) {
  * @returns {string[]} one message per disagreement, naming the file and the offending key
  */
 export function declarationErrors(root, layout) {
-  return [
-    ...architecturePathErrors(root, layout),
-    ...workspaceAliasErrors(root, layout),
-    ...packageScriptErrors(layout),
-  ];
-}
-
-/**
- * Check the Web source aliases that both Vite configurations derive from.
- *
- * The package exports are authoritative. `web/tsconfig.json` must map every
- * public entry point of each workspace package Web declares as a dependency,
- * and no other workspace specifier, to its source file. The TypeScript map is
- * checked separately because TypeScript owns its JSONC configuration format.
- *
- * @param {string} root
- * @param {ReturnType<typeof workspaceLayout>} layout
- * @returns {string[]} one message per alias that can resolve to build output
- */
-export function workspaceAliasErrors(root, layout) {
-  const web = layout.packages.find(({name}) => name === WEB_PACKAGE);
-  if (web === undefined) return [];
-
-  const declared = readJson(root, WEB_TSCONFIG).compilerOptions?.paths ?? {};
-  const aliases = readJson(root, WEB_ALIAS_DEFINITION);
-  const expected = expectedWebPaths(layout, web.manifest);
-  return [
-    ...pathMapErrors(
-      root,
-      WEB_TSCONFIG,
-      'web',
-      declared,
-      expected,
-      'a declared workspace package export',
-    ),
-    ...aliasMapErrors(root, aliases, expected),
-  ];
+  return [...architecturePathErrors(root, layout), ...packageScriptErrors(layout)];
 }
 
 function architecturePathErrors(root, layout) {
   const declared = readJson(root, ARCHITECTURE_TSCONFIG).compilerOptions?.paths ?? {};
   const expected = expectedArchitecturePaths(layout);
-  return pathMapErrors(
-    root,
-    ARCHITECTURE_TSCONFIG,
-    '.',
-    declared,
-    expected,
-    'a workspace package export',
-  );
+  return pathMapErrors(root, declared, expected);
 }
 
-function pathMapErrors(root, config, pathBase, declared, expected, unexpectedDescription) {
+function pathMapErrors(root, declared, expected) {
   const errors = [];
   for (const [specifier, target] of expected) {
     const value = declared[specifier];
     if (!Array.isArray(value) || value.length !== 1 || value[0] !== target) {
-      errors.push(`${config}: ${specifier} must map to ["${target}"]`);
-    } else if (!existsSync(join(root, pathBase, target))) {
-      errors.push(`${config}: ${specifier} maps to missing ${target}`);
+      errors.push(`${ARCHITECTURE_TSCONFIG}: ${specifier} must map to ["${target}"]`);
+    } else if (!existsSync(join(root, target))) {
+      errors.push(`${ARCHITECTURE_TSCONFIG}: ${specifier} maps to missing ${target}`);
     }
   }
   for (const specifier of Object.keys(declared)) {
     if (!expected.has(specifier)) {
-      errors.push(`${config}: ${specifier} is not ${unexpectedDescription}`);
-    }
-  }
-  return errors;
-}
-
-function aliasMapErrors(root, declared, expected) {
-  const errors = [];
-  for (const [specifier, target] of expected) {
-    if (declared[specifier] !== target) {
-      errors.push(`${WEB_ALIAS_DEFINITION}: ${specifier} must map to "${target}"`);
-    } else if (!existsSync(join(root, 'web', target))) {
-      errors.push(`${WEB_ALIAS_DEFINITION}: ${specifier} maps to missing ${target}`);
-    }
-  }
-  for (const specifier of Object.keys(declared)) {
-    if (!expected.has(specifier)) {
-      errors.push(
-        `${WEB_ALIAS_DEFINITION}: ${specifier} is not a declared workspace package export`,
-      );
+      errors.push(`${ARCHITECTURE_TSCONFIG}: ${specifier} is not a workspace package export`);
     }
   }
   return errors;
 }
 
 /**
- * The path map the packages imply: every package's public entry points, mapped to the source they
- * are built from, so a public import resolves to source instead of build output.
+ * The path map the packages imply: every package's public entry points, mapped to the source their
+ * `@vibesys/source` condition names, so a public import resolves to source instead of build output.
  */
 function expectedArchitecturePaths(layout) {
   const expected = new Map();
@@ -273,40 +215,20 @@ function expectedArchitecturePaths(layout) {
   return expected;
 }
 
-function expectedWebPaths(layout, webManifest) {
-  const workspaceDependencies = new Set(
-    Object.keys(webManifest.dependencies ?? {}).filter(dependency =>
-      dependency.startsWith('@vibesys/'),
-    ),
-  );
-  const allPaths = expectedArchitecturePaths(layout);
-  const expected = new Map();
-  for (const [specifier, target] of allPaths) {
-    if (
-      [...workspaceDependencies].some(
-        dependency => specifier === dependency || specifier.startsWith(`${dependency}/`),
-      )
-    ) {
-      expected.set(specifier, `../${target}`);
-    }
-  }
-  return expected;
-}
-
 function exportSourcePath(directory, subpath, target) {
-  const built = typeof target === 'string' ? target : (target?.import ?? target?.default);
+  const source =
+    typeof target === 'object' && target !== null ? target[SOURCE_CONDITION] : undefined;
   if (
-    typeof built !== 'string' ||
-    !built.startsWith(BUILD_OUTPUT_PREFIX) ||
-    !built.endsWith(JAVASCRIPT_SUFFIX)
+    typeof source !== 'string' ||
+    !source.startsWith('./') ||
+    !source.endsWith(TYPESCRIPT_SUFFIX)
   ) {
     throw new Error(
-      `${directory}/${MANIFEST_FILE}: cannot map the "${subpath}" export target ` +
-        `${JSON.stringify(built)} to a source file`,
+      `${directory}/${MANIFEST_FILE}: the "${subpath}" export must name its TypeScript source ` +
+        `with the "${SOURCE_CONDITION}" condition`,
     );
   }
-  const relativePath = built.slice(BUILD_OUTPUT_PREFIX.length, -JAVASCRIPT_SUFFIX.length);
-  return `${directory}/${SOURCE_DIRECTORY}/${relativePath}${TYPESCRIPT_SUFFIX}`;
+  return `${directory}/${source.slice('./'.length)}`;
 }
 
 function packageScriptErrors(layout) {
@@ -336,26 +258,33 @@ function packageScriptErrors(layout) {
  * meta-check. A nested `dist/package.json` cannot become a member by this rule, because `*` matches
  * direct children only, so keeping the filter out of it costs nothing.
  */
-function starMembers(root, rootChildren) {
-  return rootChildren
+function starMembers(root, children) {
+  return children
     .map(({path}) => path)
-    .filter(path => !NOT_A_WORKSPACE_MEMBER.has(path))
+    .filter(path => !NOT_A_WORKSPACE_MEMBER.has(path.slice(path.lastIndexOf('/') + 1)))
     .filter(path => existsSync(join(root, path, MANIFEST_FILE)));
 }
 
 function readPackages(root, rootChildren) {
-  const directories = new Set();
-  for (const pattern of packagePatterns(root)) {
-    if (pattern === '*') {
-      for (const directory of starMembers(root, rootChildren)) directories.add(directory);
-      continue;
-    }
-    if (!existsSync(join(root, pattern, MANIFEST_FILE))) {
-      throw new Error(`${WORKSPACE_FILE}: packages entry "${pattern}" has no ${MANIFEST_FILE}`);
-    }
-    directories.add(pattern);
-  }
+  const directories = new Set(
+    packagePatterns(root).flatMap(pattern => patternMembers(root, rootChildren, pattern)),
+  );
   return [...directories].sort().map(directory => readPackage(root, directory));
+}
+
+/** The package directories one `packages` pattern admits. */
+function patternMembers(root, rootChildren, pattern) {
+  if (pattern === '*') return starMembers(root, rootChildren);
+  const group = GROUP_PATTERN.exec(pattern)?.[1];
+  if (group !== undefined) {
+    // A grouping directory that does not exist yet (no feature package so far) admits nothing.
+    if (!existsSync(join(root, group))) return [];
+    return starMembers(root, candidateChildren(root, group, false));
+  }
+  if (!existsSync(join(root, pattern, MANIFEST_FILE))) {
+    throw new Error(`${WORKSPACE_FILE}: packages entry "${pattern}" has no ${MANIFEST_FILE}`);
+  }
+  return [pattern];
 }
 
 function readPackage(root, directory) {

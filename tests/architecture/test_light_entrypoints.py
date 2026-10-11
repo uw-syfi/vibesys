@@ -1,8 +1,8 @@
 """The light host commands import only light modules.
 
-``vibesys example``, ``vibesys instances``, ``vibesys tasks`` and the stdio bridge are what the
-desktop app runs on a host, once per action, so their start-up time is the
-app's latency. The run engine (``vibesys.api`` and what it loads) takes about
+``vibesys example``, ``vibesys instances``, ``vibesys tasks``, the stdio bridge and the host
+helper are what the desktop app runs on a host, once per action or channel, so
+their start-up time is the app's latency. The run engine (``vibesys.api`` and what it loads) takes about
 1.7 s to import; these commands must never pay for it. Tach cannot keep them
 light on its own: its edges are module granular, and ``server.api`` (run
 protocol and engine together) is one module.
@@ -37,6 +37,7 @@ LIGHT_ENTRYPOINTS = (
     "entrypoints.tasks",
     "entrypoints.stdio_bridge",
     "entrypoints.detached_run",
+    "entrypoints.host_helper",
 )
 """Modules a light host command loads first. The launcher routes on argv before
 it loads anything heavy, so its own module level is held to the same bound."""
@@ -53,13 +54,17 @@ ALLOWED_FIRST_PARTY = (
     "entrypoints.tasks",
     "entrypoints.stdio_bridge",
     "entrypoints.detached_run",
+    "entrypoints.host_helper",
     "server",
     "server.control_envelope",
     "server.diagnostics",
     "server.host_api",
+    "server.host_helper",
+    "server.host_helper_os",
     "server.instances",
     "server.registry",
     "server.stdio_bridge",
+    "server.stdio_bridge_report",
     "vs_sim",
     "vs_project",
 )

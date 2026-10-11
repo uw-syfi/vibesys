@@ -1,10 +1,9 @@
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import react from '@vitejs/plugin-react';
-import {defineConfig, type Plugin} from 'vite';
+import {defaultClientConditions, defineConfig, type Plugin} from 'vite';
 import {webBuildInputs} from './build-inputs.js';
 import {webBuildManifest} from './build-manifest.js';
-import {workspaceSourceAliases} from './workspace-source-aliases.js';
 
 const workspaceRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -36,6 +35,6 @@ export default defineConfig({
     }),
   ],
   resolve: {
-    alias: workspaceSourceAliases(),
+    conditions: ['@vibesys/source', ...defaultClientConditions],
   },
 });

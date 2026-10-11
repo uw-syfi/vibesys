@@ -21,7 +21,11 @@ from vibesys.constants import (
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import (
     CoreEventType,
+    CoreEventWriter,
+    EventStatus,
     ExperimentsChangedData,
+    RunStartupProgressData,
+    StartupProgressData,
 )
 from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
@@ -85,6 +89,7 @@ from vs_runtime.api import (
     boot_trace,
 )
 from vs_runtime.api.infrastructure import (
+    EnvironmentStartup,
     ModelArtifactRequest,
     ProjectRunBaselineMissingError,
     ProjectRunDirtyResumeError,
@@ -540,6 +545,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             )
             workspace_files.materialize(plan, existing=True)
 
+        startup = _StartupReporter(integration.events)
         with boot_trace.span("environment_plan"):
             # Allocate the run-owned local root before deriving confinement.
             # Candidate creation must not change the durable session policy
@@ -603,11 +609,15 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 project_path_policy=project_path_policy,
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
                 docker_in_docker=bundle.docker_in_docker,
+                startup=startup.report,
             )
         environment_resources = open_run_environment_resources(
             run_environment_request,
             lambda request: open_run_environment(environment, request),
         )
+        # Later containers (candidates, auxiliary agents) reuse this request;
+        # their builds are not the run's startup.
+        startup.finish()
         ownership.callback(environment_resources.close)
         session = environment_resources.session
 
@@ -663,6 +673,36 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     for line in boot_trace.drain_log_lines():
         logger.lprint(line)
     return result
+
+
+class _StartupReporter:
+    """Publish the run environment's startup observations as core events, until it is open."""
+
+    def __init__(self, events: CoreEventWriter) -> None:
+        self._events = events
+        self._finished = False
+
+    def report(self, startup: EnvironmentStartup) -> None:
+        """Emit ``startup`` as a ``run_startup_progress`` event while the run is starting."""
+        if self._finished:
+            return
+        progress = startup.progress
+        self._events.emit(
+            CoreEventType.RUN_STARTUP_PROGRESS,
+            status=EventStatus.ACTIVE,
+            data=RunStartupProgressData(
+                stage=startup.stage,
+                progress=None
+                if progress is None
+                else StartupProgressData(
+                    done=progress.done, total=progress.total, label=progress.label
+                ),
+            ),
+        )
+
+    def finish(self) -> None:
+        """The run environment is open: later observations are not the run's startup."""
+        self._finished = True
 
 
 def _run_facts(

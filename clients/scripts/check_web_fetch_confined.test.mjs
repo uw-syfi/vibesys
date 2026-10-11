@@ -26,10 +26,10 @@ function pluginDiagnostics(path) {
 
 // Fixtures live inside a real directory so the biome.json override globs match them exactly as
 // they match product code.
-async function lintFixture(t, parent, source) {
+async function lintFixture(t, parent, source, name = 'sample.ts') {
   const fixture = await mkdtemp(join(WORKSPACE_ROOT, parent, 'fetch-fixture-'));
   t.after(() => rm(fixture, {recursive: true, force: true}));
-  const path = join(fixture, 'sample.ts');
+  const path = join(fixture, name);
   await writeFile(path, source);
   return pluginDiagnostics(path);
 }
@@ -38,6 +38,10 @@ const FETCHES = {
   call: "export const load = () => fetch('/api');\n",
   'globalThis.fetch': 'export const load = globalThis.fetch;\n',
   'window.fetch': "export const load = () => window.fetch('/api');\n",
+  'self.fetch': "export const load = () => self.fetch('/api');\n",
+  'a two-argument call': "export const load = () => fetch('/api', {method: 'POST'});\n",
+  // Referencing the global, not only calling it: an alias reaches the network all the same.
+  'an alias': "const request = fetch;\nexport const load = () => request('/api');\n",
 };
 
 for (const [name, source] of Object.entries(FETCHES)) {
@@ -45,6 +49,15 @@ for (const [name, source] of Object.entries(FETCHES)) {
     assert.equal((await lintFixture(t, 'web/src', source)).length, 1);
   });
 }
+
+test('a property named fetch is not the global', async t => {
+  const source = 'export const load = (client: {fetch(): void}) => client.fetch();\n';
+  assert.deepEqual(await lintFixture(t, 'web/src', source), []);
+});
+
+test('web/src test files may fetch', async t => {
+  assert.deepEqual(await lintFixture(t, 'web/src', FETCHES.call, 'sample.test.ts'), []);
+});
 
 test('the backend adapter itself may fetch', () => {
   assert.deepEqual(pluginDiagnostics(join(WORKSPACE_ROOT, 'web/src/platform/backend.ts')), []);

@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
-import {checkModel} from '../../testing/model.js';
-import type {Seeded} from '../../testing/seeded.js';
+import type {Seeded} from '@vibesys/core-state/testing';
+import {checkModel} from '@vibesys/core-state/testing';
 import type {StartOutcome, WelcomeHost, WelcomeResult} from '../../welcome-protocol.js';
 import {
   awaited,
@@ -163,15 +163,22 @@ describe('start sheet', () => {
       step: startStep,
       action: randomStartAction,
       issues: request => (request.kind === 'cancel-start' ? null : request.token),
-      reply: (state, action) => {
-        if (action.type === 'tasks-reply')
-          return {token: action.token, awaited: awaited(state).tasks};
-        if (action.type === 'start-reply')
-          return {token: action.token, awaited: awaited(state).start};
+      awaited,
+      reply: action => {
+        if (action.type === 'tasks-reply') return {slot: 'tasks', token: action.token};
+        if (action.type === 'start-reply') return {slot: 'start', token: action.token};
         return null;
       },
       invariants: startInvariants,
-      also: (_before, _action, after) => {
+      also: (before, action, after, requests) => {
+        // A start action asks to start a run exactly when the sheet could start one.
+        if (action.type === 'start') {
+          const started = requests.flatMap(request =>
+            request.kind === 'start' ? [request.task] : [],
+          );
+          const task = startable(before);
+          expect(started).toEqual(task === null ? [] : [task]);
+        }
         // Start is enabled only for a picked task listed for the project shown.
         const task = startable(after);
         if (task === null) return;

@@ -232,14 +232,13 @@ const responsePayloadSchema: Record<string, unknown> = {
         "thread_id": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/ChatThreadId"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Thread Id"
+          "default": null
         }
       },
       "required": [
@@ -249,13 +248,18 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "ChatResult",
       "type": "object"
     },
+    "ChatThreadId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^(?!(?:aux|con|nul|prn|com[1-9]|lpt[1-9])(?:\\.|$))(?!.*\\.$)[a-z0-9][a-z0-9._-]*$(?![\\s\\S])",
+      "type": "string"
+    },
     "ChatThreadInfo": {
       "additionalProperties": false,
       "description": "Resolved identity and agent settings of one experiment-chat thread.",
       "properties": {
         "thread_id": {
-          "title": "Thread Id",
-          "type": "string"
+          "$ref": "#/$defs/ChatThreadId"
         },
         "title": {
           "default": "",

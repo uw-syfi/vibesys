@@ -1,0 +1,27 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "stream",
+  "envMode": "loose",
+  "globalDependencies": [
+    "tsconfig.base.json",
+    "scripts/run_bun_tests.mjs",
+    "scripts/run_node_tests.mjs"
+  ],
+  "tasks": {
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".tsbuild/**"]
+    },
+    "check": {
+      "dependsOn": ["^check"],
+      "outputs": ["dist/**", ".tsbuild/**"]
+    },
+    "test": {
+      "dependsOn": ["transit"],
+      "outputs": []
+    }
+  }
+}

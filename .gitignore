@@ -35,11 +35,18 @@ dist/
 # `run_node_tests.mjs` cleans these package-local compiler outputs in a
 # `finally`, but a killed runner cannot execute cleanup.
 clients/*/.vibesys-node-tests-*/
+# `scripts/new_package.test.mjs` scaffolds into these and removes them when it finishes.
+clients/.vibesys-scaffold-test-*/
 clients/web/artifacts/
 clients/web/test-results/
 clients/web/.browser-dist/
 clients/web/.desktop-dist/
 clients/desktop/.welcome-dist/
+# `tsc -b` build info for the check-only projects, and Turborepo's local cache and task logs.
+clients/**/.tsbuild/
+.turbo/
+clients/.turbo/
+clients/**/.turbo/
 downloads/
 eggs/
 .eggs/

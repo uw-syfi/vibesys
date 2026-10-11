@@ -21,6 +21,31 @@ const SCHEMA = {
   },
 };
 
+const NO_HELPER_REQUESTS = {
+  properties: {request: {discriminator: {mapping: {}}}, message: {discriminator: {mapping: {}}}},
+};
+
+const HELPER_SCHEMA = {
+  properties: {
+    request: {discriminator: {mapping: {hello: '#/$defs/H', ping: '#/$defs/P'}}},
+    message: {
+      discriminator: {mapping: {hello: '#/$defs/HR', ping: '#/$defs/PR', error: '#/$defs/E'}},
+    },
+  },
+};
+
+function helperScenario(id, steps) {
+  return {
+    id,
+    protocol: 'host-helper',
+    title: id,
+    description: id,
+    role: 'control',
+    transports: ['stdio'],
+    steps,
+  };
+}
+
 const CONTRACT = '### WP-ALPHA: first decision\n\ntext\n\n### WP-BETA: second decision\n\ntext\n';
 
 function validEvent(type) {
@@ -56,6 +81,10 @@ async function writeTree(spec) {
   await writeFile(
     join(root, 'clients', 'backend-client', 'src', 'generated', 'protocol.schema.json'),
     JSON.stringify(spec.schema ?? SCHEMA),
+  );
+  await writeFile(
+    join(root, 'clients', 'backend-client', 'src', 'generated', 'host-helper.schema.json'),
+    JSON.stringify(spec.helperSchema ?? NO_HELPER_REQUESTS),
   );
   await writeFile(
     join(root, 'docs', 'contributing', 'wire-protocol.md'),
@@ -270,4 +299,37 @@ test('runner inventories reject empty metadata, groups, and duplicate registrati
   assert.ok(
     errors.some(error => error.includes('group "bad group" must be a non-empty scenario array')),
   );
+});
+
+test('host helper scenarios are checked against the helper schema and must send every request', async () => {
+  const handshake = helperScenario('helper-handshake', [
+    {dir: 'c2s', frame: {type: 'hello', request_id: 'h'}},
+    {dir: 's2c', expect: {type: 'hello', request_id: 'h'}},
+  ]);
+  const scenarios = {
+    'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA']),
+    'helper-handshake.json': handshake,
+  };
+  const ok = await writeTree({events: fullEvents(), scenarios, helperSchema: HELPER_SCHEMA});
+  const errors = await corpusErrors(ok);
+  assert.deepEqual(errors, [
+    'host-helper.schema.json: request "ping" is sent by no host helper scenario',
+  ]);
+
+  const broken = helperScenario('helper-broken', [
+    {dir: 'c2s', frame: {type: 'pong', request_id: 'p'}},
+    {dir: 's2c', expect: {type: 'subscribe'}},
+  ]);
+  broken.decisions = ['WP-ALPHA'];
+  broken.role = 'subscribe';
+  const root = await writeTree({
+    events: fullEvents(),
+    scenarios: {...scenarios, 'helper-broken.json': broken},
+    helperSchema: HELPER_SCHEMA,
+  });
+  const found = await corpusErrors(root);
+  assert.ok(found.some(error => error.includes('unknown host helper request type "pong"')));
+  assert.ok(found.some(error => error.includes('unknown host helper message type "subscribe"')));
+  assert.ok(found.some(error => error.includes('a host helper scenario has no "decisions"')));
+  assert.ok(found.some(error => error.includes('"role" must be one of control, run')));
 });

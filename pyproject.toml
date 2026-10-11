@@ -42,6 +42,9 @@ Issues = "https://github.com/uw-syfi/vibesys/issues"
 # `--headless`/`validate`/no TTY. The engine itself is
 # `python -m entrypoints.headless`.
 vibesys = "entrypoints.launcher:main"
+# The one program the desktop app runs on a host, once per channel
+# (docs/contributing/desktop-connection.md, "The host helper").
+vibesys-host-helper = "entrypoints.host_helper:main"
 
 [tool.setuptools.package-data]
 # ``entrypoints/_tui`` is produced at build time by setup.py's build_py step;

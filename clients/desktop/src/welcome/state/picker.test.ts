@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {Seeded} from '../../testing/seeded.js';
+import {Seeded} from '@vibesys/core-state/testing';
 import {filterHosts, moveSelection} from './picker.js';
 
 describe('filterHosts', () => {

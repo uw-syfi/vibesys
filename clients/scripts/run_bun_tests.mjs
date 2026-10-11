@@ -5,9 +5,9 @@
  *
  * `bun test` reports a test file it cannot import as a single error and keeps running the rest, so
  * a build artifact that disappears mid-run costs that whole file's tests and still reads as one
- * ordinary failure. Every package's `build` clears its own `dist` before `tsc` writes it, and that
- * `dist` is what the other packages resolve their imports through, so any concurrent build in the
- * same checkout can take it away. Run 7 of #1039 reported `Ran 1023 tests across 38 files` with
+ * ordinary failure. Tests resolve workspace packages to their source through the `@vibesys/source`
+ * export condition, so no `dist` is on that path any more, but a module that fails to import for
+ * any other reason is still invisible. Run 7 of #1039 reported `Ran 1023 tests across 38 files` with
  * `1 fail` against a normal 1141 tests: the 118 tests that never registered were invisible in the
  * output, and so was the file they belonged to.
  *
@@ -19,8 +19,8 @@
  * is the record of what it collected, so the gate reads the runner's answer instead of scraping
  * its console summary.
  *
- * `--max-concurrency 1` lives here rather than in each package's `test` script, so the four
- * packages cannot drift apart on it. The runner deliberately takes test roots and nothing else:
+ * `--max-concurrency 1` and the source condition live here rather than in each package's `test`
+ * script, so the packages cannot drift apart on them. The runner deliberately takes test roots and nothing else:
  * a bun flag that changed which files run (`-t`, `--bail`, `--only`) would make the gate report
  * the rest of the suite as missing, so ad-hoc runs call `bun test` directly.
  */
@@ -32,7 +32,13 @@ import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const RUNNER = 'bun';
-const RUNNER_ARGUMENTS = ['test', '--max-concurrency', '1', '--reporter=junit'];
+const RUNNER_ARGUMENTS = [
+  'test',
+  '--conditions=@vibesys/source',
+  '--max-concurrency',
+  '1',
+  '--reporter=junit',
+];
 const REPORT_FILE = 'collected.xml';
 
 /**
@@ -103,10 +109,8 @@ export function collectionErrors(expected, collected) {
         'tests. `bun test` reports a test file it cannot import as a single error and runs the ' +
         'rest, so the tests in these files did not run:\n' +
         missing.map(name => `  - ${name}`).join('\n') +
-        '\nA cleared or half-written dependency `dist` is the usual cause: every package `build` ' +
-        'removes its own `dist` before `tsc` rewrites it, so a concurrent build in this checkout ' +
-        'can take it away mid-run. Rebuild and re-run; if the file has no tests at all, give it ' +
-        'one or delete it.',
+        '\nRun the file alone with `bun test --conditions=@vibesys/source <file>` to see why it ' +
+        'did not load; if the file has no tests at all, give it one or delete it.',
     );
   }
   if (surplus.length > 0) {

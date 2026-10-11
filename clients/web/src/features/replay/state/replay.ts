@@ -4,7 +4,7 @@
  * token; a reply for any other load is dropped, so a superseded load never folds its events.
  */
 import type {RunEvent} from '@vibesys/backend-client';
-import {only, type Step} from '../../../shared/step.js';
+import {only, type Step} from '@vibesys/core-state';
 
 export const DEFAULT_REPLAY_FIXTURE_URL = '/__vibesys/fixtures/framework-events.jsonl';
 
@@ -58,9 +58,4 @@ export function replayStep(
       };
     }
   }
-}
-
-export function replayInvariants(state: ReplayState): string[] {
-  if (state.kind === 'loading' && state.token >= state.next) return ['token not issued'];
-  return [];
 }

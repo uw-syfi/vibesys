@@ -59,7 +59,7 @@ from vs_sim.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from vs_sim.api import (
         Clock,
@@ -200,7 +200,13 @@ def _headless_requested(args: list[str]) -> bool:
     return not (sys.stdin.isatty() and sys.stdout.isatty())
 
 
-def _run_headless(args: list[str], host: LauncherHost) -> int:
+def headless_command(args: Sequence[str]) -> list[str]:
+    """The command line that runs ``vibesys ARGS`` without the TUI, under this interpreter.
+
+    The host helper starts detached runs (``--detach``) through it, so a run the
+    desktop app starts runs exactly what ``vibesys --detach`` at a terminal runs.
+    """
+    args = list(args)
     subcommands = {"web": "entrypoints.web"}
     module = (
         subcommands[args[0]]
@@ -218,9 +224,11 @@ def _run_headless(args: list[str], host: LauncherHost) -> int:
         command_args = args
     else:
         command_args = _without_option(args, "--theme")
-    return call_child(
-        [sys.executable, "-m", module, *command_args], children=host.children, signals=host.signals
-    )
+    return [sys.executable, "-m", module, *command_args]
+
+
+def _run_headless(args: list[str], host: LauncherHost) -> int:
+    return call_child(headless_command(args), children=host.children, signals=host.signals)
 
 
 # Signals a supervisor or a closed terminal sends to this process alone; the

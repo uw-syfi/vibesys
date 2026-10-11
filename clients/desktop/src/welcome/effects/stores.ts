@@ -4,6 +4,8 @@
  * fanned out to the stores that fold them. This is the only module of the view that talks to the
  * bridge.
  */
+
+import {createStore, type Store} from '@vibesys/core-state';
 import type {HostKey} from '../../host-settings.js';
 import type {WelcomeBridge, WelcomeResult} from '../../welcome-protocol.js';
 import {type HostAction, type HostState, hostInitial, hostStep} from '../state/host.js';
@@ -17,7 +19,6 @@ import {
   type WelcomeState,
   welcomeStep,
 } from '../state/welcome.js';
-import {createStore, type Store} from './store.js';
 
 /** How often the lists look again while a stop is ending. */
 const STOP_REFRESH_MS = 3_000;

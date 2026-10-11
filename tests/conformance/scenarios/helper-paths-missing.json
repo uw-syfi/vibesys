@@ -1,0 +1,58 @@
+{
+  "id": "helper-paths-missing",
+  "protocol": "host-helper",
+  "title": "Complete a path under a missing directory",
+  "description": "paths.complete whose directory does not exist is answered path_missing.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "paths.complete",
+        "request_id": "c",
+        "deadline_ms": 10000,
+        "prefix": "/nonexistent-vibesys-conformance/pro"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "c",
+        "code": "path_missing"
+      }
+    }
+  ]
+}

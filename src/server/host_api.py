@@ -1,8 +1,9 @@
 """Light contracts a host reports about its live detached servers.
 
-These are the documents ``vibesys instances`` and ``vibesys --detach`` print,
-and the record a detached server publishes in the live registry
-(``server.registry``). They import only Pydantic and the standard library, so
+These are the documents ``vibesys instances``, ``vibesys tasks`` and
+``vibesys --detach`` print, the record a detached server publishes in the live
+registry (``server.registry``), and every message of the host helper
+(``server.host_helper``), the one program the desktop app runs on a host. They import only Pydantic and the standard library, so
 a host command that reads or writes them starts in a fraction of the time the
 run engine takes to import. ``tests/architecture/test_light_entrypoints.py``
 keeps it that way.
@@ -15,23 +16,35 @@ registry.
 
 Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``INSTANCE_ID_PATTERN``, ``InstanceId``, ``RunId``, ``RunStatus``,
-``StartupStage``, ``FailureReason``, ``RunPhase``, ``InstanceStatus``,
+``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
+``RunPhase``, ``InstanceStatus``,
 ``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
-``DetachedLaunchErrorCode``, and ``DetachedLaunchFailure``.
+``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
+``TaskList``, and the host helper's messages: ``HELPER_PROTOCOL_VERSIONS``,
+``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
+members, ``HelperMessage`` and its members, and ``HelperErrorCode``.
+
+The helper's messages follow ``docs/contributing/desktop-connection.md``
+("Handshake and versioning"): strict within a negotiated version, additive
+changes only behind a ``HelperFeature`` that ``hello`` returned.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
+    NonNegativeInt,
     PositiveInt,
     StringConstraints,
+    TypeAdapter,
     ValidationError,
     model_validator,
 )
@@ -50,8 +63,8 @@ InstanceId = Annotated[str, StringConstraints(pattern=INSTANCE_ID_PATTERN)]
 RunId = Annotated[str, StringConstraints(min_length=1)]
 """The durable run a server drives; ``vs_project`` owns its full syntax."""
 
-RECORD_VERSION = 3
-"""The registry record version this checkout writes and reads."""
+RECORD_VERSION = 4
+"""The registry record version this checkout writes; it also reads version 3."""
 
 
 class RunStatus(StrEnum):
@@ -94,10 +107,36 @@ class RunStatus(StrEnum):
 
 
 class StartupStage(StrEnum):
-    """Where a starting run is, in the order it gets there."""
+    """Where a starting run is, in the order it gets there.
+
+    Declaration order is the order: a starting run only moves to a later stage.
+    """
 
     RESOLVING = "resolving"
-    """The server validates the request and its configuration."""
+    """The server validates the request, its configuration, and the project."""
+    BUILDING_IMAGE = "building_image"
+    """The agent image is being built (the first build on a host takes minutes)."""
+    STARTING_CONTAINER = "starting_container"
+    """The image is built; the agent's container is being started."""
+
+    @property
+    def rank(self) -> int:
+        """Position in the startup order."""
+        return list(StartupStage).index(self)
+
+
+class StartupProgress(BaseModel):
+    """How far a startup stage has come: ``done`` of ``total`` steps, now on ``label``.
+
+    ``total`` is ``None`` when the stage does not know it. ``label`` names the
+    step now running (an image build's Dockerfile instruction), as data.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    done: NonNegativeInt
+    total: int | None = Field(default=None, ge=1)
+    label: str = ""
 
 
 class FailureReason(BaseModel):
@@ -110,17 +149,28 @@ class FailureReason(BaseModel):
     message: str
 
 
+class StartupFact(BaseModel):
+    """A starting run reached ``stage``, or progressed within it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    stage: StartupStage
+    progress: StartupProgress | None = None
+
+
 class RunPhase(BaseModel):
     """A run's lifecycle status with the detail its status needs.
 
-    ``stage`` says where a ``starting`` run is; ``reason`` says why a
-    ``failed`` one ended. Neither is present for any other status.
+    ``stage`` (and, when the stage reports it, ``progress``) says where a
+    ``starting`` run is; ``reason`` says why a ``failed`` one ended. None of
+    them is present for any other status.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     status: RunStatus
     stage: StartupStage | None = None
+    progress: StartupProgress | None = None
     reason: FailureReason | None = None
 
     @model_validator(mode="after")
@@ -128,29 +178,51 @@ class RunPhase(BaseModel):
         if (self.stage is not None) != (self.status is RunStatus.STARTING):
             message = "stage is present exactly when status is starting"
             raise ValueError(message)
+        if self.progress is not None and self.stage is None:
+            message = "progress is present only with a startup stage"
+            raise ValueError(message)
         if (self.reason is not None) != (self.status is RunStatus.FAILED):
             message = "reason is present exactly when status is failed"
             raise ValueError(message)
         return self
 
     def advance(
-        self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+        self,
+        *,
+        status: RunStatus | None = None,
+        failure: FailureReason | None = None,
+        startup: StartupFact | None = None,
     ) -> RunPhase:
-        """Return the phase after one observed fact: a status change or a failure.
+        """Return the phase after one observed fact: a status change, a failure, or a startup step.
 
         The fold is monotone: an ended phase absorbs every fact, and ``failed``
         is entered only with its reason, from the failure's diagnostic, so a
-        status change to ``failed`` waits for the event that says why.
-        ``starting`` keeps its stage until the run leaves it. The statuses
-        themselves move by ``server.run_lifecycle``'s rules; this projects them.
+        status change to ``failed`` waits for the event that says why. A
+        failure while the run is past ``resolving`` names the startup stage it
+        failed in. ``starting`` only moves to a later stage (a startup fact of
+        an earlier stage, or after ``starting``, changes nothing), and keeps
+        its stage until the run leaves it. The statuses themselves move by
+        ``server.run_lifecycle``'s rules; this projects them.
         """
         if self.status.has_ended:
             return self
         if failure is not None:
-            return RunPhase(status=RunStatus.FAILED, reason=failure)
+            return RunPhase(status=RunStatus.FAILED, reason=self._failed_in(failure))
+        if startup is not None:
+            return self._started(startup)
         if status is None or status in {RunStatus.STARTING, RunStatus.FAILED, self.status}:
             return self
         return RunPhase(status=status)
+
+    def _started(self, startup: StartupFact) -> RunPhase:
+        if self.stage is None or startup.stage.rank < self.stage.rank:
+            return self
+        return RunPhase(status=RunStatus.STARTING, stage=startup.stage, progress=startup.progress)
+
+    def _failed_in(self, failure: FailureReason) -> FailureReason:
+        if self.stage is None or self.stage is StartupStage.RESOLVING:
+            return failure
+        return failure.model_copy(update={"stage": self.stage.value})
 
 
 class InstanceStatus(StrEnum):
@@ -163,7 +235,7 @@ class InstanceStatus(StrEnum):
 
 
 class LiveInstanceRecord(BaseModel):
-    """What a detached server publishes about itself (version 3).
+    """What a detached server publishes about itself (version 4).
 
     ``run_id`` is allocated by the launcher before the server starts, so the
     record names its run from the first time it is published. ``phase`` is the
@@ -174,7 +246,7 @@ class LiveInstanceRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[3] = RECORD_VERSION
+    version: Literal[4] = RECORD_VERSION
     id: InstanceId
     status: InstanceStatus
     phase: RunPhase
@@ -213,11 +285,28 @@ class UnreadableRecord(BaseModel):
     version: int | None
 
 
-def parse_record(instance_id: str, raw: str) -> LiveInstanceRecord | UnreadableRecord:
-    """Parse one stored record, strictly, if it is of the version this reader knows.
+_UPGRADED_RECORD_VERSION = 3
+"""The earlier record version this reader still reads, through ``_upgrade_v3``."""
 
-    Records of earlier versions predate phases and tombstones and are not
-    upgraded: their servers report no phase this reader could stand behind.
+
+def _upgrade_v3(record: LiveInstanceRecord) -> LiveInstanceRecord | None:
+    """A version 3 record read as version 4, or ``None`` if it uses what version 3 lacked.
+
+    Version 4 only added startup stages past ``resolving`` and their progress
+    to the phase, so every version 3 phase is a version 4 phase.
+    """
+    stage = record.phase.stage
+    if record.phase.progress is not None or stage not in {None, StartupStage.RESOLVING}:
+        return None
+    return record
+
+
+def parse_record(instance_id: str, raw: str) -> LiveInstanceRecord | UnreadableRecord:
+    """Parse one stored record, strictly, if it is of a version this reader knows.
+
+    A version 3 record is upgraded (``_upgrade_v3``). Records of earlier
+    versions predate phases and tombstones and are not upgraded: their servers
+    report no phase this reader could stand behind.
     """
     try:
         document = json.loads(raw)
@@ -226,21 +315,25 @@ def parse_record(instance_id: str, raw: str) -> LiveInstanceRecord | UnreadableR
     version = document.get("version") if isinstance(document, dict) else None
     if not isinstance(version, int) or isinstance(version, bool):
         return UnreadableRecord(id=instance_id, version=None)
-    try:
-        record = LiveInstanceRecord.model_validate(document) if version == RECORD_VERSION else None
-    except ValidationError:
-        record = None
+    record: LiveInstanceRecord | None = None
+    if version in {_UPGRADED_RECORD_VERSION, RECORD_VERSION}:
+        try:
+            record = LiveInstanceRecord.model_validate({**document, "version": RECORD_VERSION})
+        except ValidationError:
+            record = None
+    if record is not None and version == _UPGRADED_RECORD_VERSION:
+        record = _upgrade_v3(record)
     if record is None or record.id != instance_id:
         return UnreadableRecord(id=instance_id, version=version)
     return record
 
 
 class InstanceList(BaseModel):
-    """``vibesys instances list --json``: the detached servers on this node (version 3)."""
+    """``vibesys instances list --json``: the detached servers on this node (version 4)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[3] = 3
+    version: Literal[4] = 4
     instances: tuple[LiveInstanceRecord, ...]
     """Servers alive now."""
     ended: tuple[LiveInstanceRecord, ...] = ()
@@ -326,3 +419,441 @@ class DetachedLaunchFailure(BaseModel):
     """The detached server's log, when one was started."""
     live_instance: LiveInstanceRecord | None = None
     """The server already driving the run, for ``run_already_live``: attach to it."""
+
+
+class TaskSummary(BaseModel):
+    """One task of a project."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    """The task's directory name, the value ``--task`` accepts."""
+
+
+class TaskList(BaseModel):
+    """``vibesys tasks --json``: the tasks of one project."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: Literal[1] = 1
+    project_root: str
+    """The resolved absolute project directory the tasks were read from."""
+    tasks: tuple[TaskSummary, ...]
+
+
+# --- the host helper ---------------------------------------------------------
+
+HELPER_PROTOCOL_VERSIONS = (1, 1)
+"""The lowest and highest helper protocol versions this helper speaks.
+
+Independent of the run protocol's ``PROTOCOL_VERSION``, which ``run.connect``
+reports per run.
+"""
+
+
+class HelperFeature(StrEnum):
+    """Optional capabilities negotiated by ``hello``; a closed set per protocol version.
+
+    A client calls a gated method only after ``hello`` returned its feature, so
+    a strict peer never sees a method it does not know.
+    """
+
+    INSTANCES_WATCH = "instances_watch"
+    """``instances.watch`` and ``instances.unwatch``: registry changes pushed as they happen."""
+    PATHS_COMPLETE = "paths_complete"
+    """``paths.complete``: directory completion for a typed path on the host."""
+
+
+RequestId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+"""Chosen by the client, unique among its requests in flight on one channel."""
+
+MAX_DEADLINE_MS = 3_600_000
+
+
+class _HelperRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: RequestId
+    deadline_ms: Annotated[int, Field(gt=0, le=MAX_DEADLINE_MS)]
+    """How long the client waits for the reply; the helper answers ``deadline_exceeded`` after it."""
+
+
+class HelloRequest(_HelperRequest):
+    """The first message on every channel: which versions and features the client speaks.
+
+    Its shape never changes across protocol versions, so any helper can parse
+    any client's ``hello`` and answer ``incompatible`` with a reason.
+    """
+
+    type: Literal["hello"] = "hello"
+    client_versions: tuple[PositiveInt, PositiveInt]
+    """The lowest and highest helper protocol versions the client speaks."""
+    features: tuple[str, ...] = ()
+    """Features the client would use; ones this helper does not know are dropped."""
+    app_version: str
+
+
+class InstancesListRequest(_HelperRequest):
+    """The live and recently ended detached servers on this host."""
+
+    type: Literal["instances.list"] = "instances.list"
+
+
+class InstancesWatchRequest(_HelperRequest):
+    """Push the listing now and again whenever it changes, until ``instances.unwatch``."""
+
+    type: Literal["instances.watch"] = "instances.watch"
+
+
+class InstancesUnwatchRequest(_HelperRequest):
+    """Stop the watch that ``watch_id`` (its request's id) started."""
+
+    type: Literal["instances.unwatch"] = "instances.unwatch"
+    watch_id: RequestId
+
+
+class TasksListRequest(_HelperRequest):
+    """The tasks a project defines under ``.vibesys/tasks/``."""
+
+    type: Literal["tasks.list"] = "tasks.list"
+    project: str
+    """The project directory on the host; ``~`` expands to the helper's home."""
+
+
+class RunsListRequest(_HelperRequest):
+    """A project's runs, with the phase of any server on this host that drives one."""
+
+    type: Literal["runs.list"] = "runs.list"
+    project: str
+
+
+class ResumeRun(BaseModel):
+    """Resume this run."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: RunId
+
+
+class ResumeLatest(BaseModel):
+    """Resume the project's current or latest run; the launch resolves it before detaching."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    latest: Literal[True]
+
+
+class RunStartRequest(_HelperRequest):
+    """Start a detached run (``vibesys --detach``) in ``project``."""
+
+    type: Literal["run.start"] = "run.start"
+    project: str
+    task: str | None = None
+    args: tuple[str, ...] = ()
+    """Further run options, one argument per item; never parsed by a shell."""
+    resume: ResumeRun | ResumeLatest | None = None
+
+
+class RunStopRequest(_HelperRequest):
+    """Stop a live detached server (``vibesys instances stop``)."""
+
+    type: Literal["run.stop"] = "run.stop"
+    instance_id: InstanceId
+    force: bool = False
+
+
+class RunRole(StrEnum):
+    """Which run-protocol connection a run channel carries (``WP-ROLES``)."""
+
+    CONTROL = "control"
+    SUBSCRIBE = "subscribe"
+    CHAT = "chat"
+
+
+class RunConnectRequest(_HelperRequest):
+    """Make this channel a byte relay to a live run's control socket."""
+
+    type: Literal["run.connect"] = "run.connect"
+    instance_id: InstanceId
+    role: RunRole
+
+
+class PingRequest(_HelperRequest):
+    """Liveness of the channel."""
+
+    type: Literal["ping"] = "ping"
+
+
+class PathsCompleteRequest(_HelperRequest):
+    """The directories that complete a typed path on the host."""
+
+    type: Literal["paths.complete"] = "paths.complete"
+    prefix: Annotated[str, StringConstraints(max_length=4096)]
+    """A path as typed: ``~`` expands on the host, a relative path is under the home
+    directory, and a trailing ``/`` lists the directory itself."""
+
+
+HelperRequest = Annotated[
+    HelloRequest
+    | InstancesListRequest
+    | InstancesWatchRequest
+    | InstancesUnwatchRequest
+    | TasksListRequest
+    | RunsListRequest
+    | RunStartRequest
+    | RunStopRequest
+    | RunConnectRequest
+    | PingRequest
+    | PathsCompleteRequest,
+    Field(discriminator="type"),
+]
+"""Every message a client sends on a helper channel."""
+
+_REQUEST: TypeAdapter[HelperRequest] = TypeAdapter(HelperRequest)
+
+
+def parse_helper_request(line: bytes) -> HelperRequest:
+    """Parse one request line strictly; ``ValidationError`` names what is wrong."""
+    return _REQUEST.validate_json(line)
+
+
+class Checkout(BaseModel):
+    """The VibeSys source checkout the helper runs from."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    root: str
+    commit: str | None
+    """``HEAD``'s commit, or ``None`` when git could not say."""
+    dirty: bool | None
+    """Whether tracked files differ from ``HEAD``; ``None`` when git could not say."""
+
+
+class _HelperReply(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: RequestId
+
+
+class HelloReply(_HelperReply):
+    """The negotiated version and features, and what will start runs on this host."""
+
+    type: Literal["hello"] = "hello"
+    protocol_version: PositiveInt
+    features: tuple[HelperFeature, ...]
+    vibesys_version: str
+    checkout: Checkout | None
+    """``None`` when the helper runs from an installed distribution."""
+
+
+class InstancesListReply(_HelperReply):
+    """The registry's listing."""
+
+    type: Literal["instances.list"] = "instances.list"
+    listing: InstanceList
+
+
+class InstancesWatchReply(_HelperReply):
+    """The watch started; ``instances.changed`` for ``watch_id`` follows at once and on change."""
+
+    type: Literal["instances.watch"] = "instances.watch"
+    watch_id: RequestId
+
+
+class InstancesUnwatchReply(_HelperReply):
+    """The watch ended; no ``instances.changed`` for ``watch_id`` follows."""
+
+    type: Literal["instances.unwatch"] = "instances.unwatch"
+    watch_id: RequestId
+
+
+class InstancesChanged(BaseModel):
+    """A push on a watch: the listing as it is now, sent first and then on each change."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["instances.changed"] = "instances.changed"
+    watch_id: RequestId
+    listing: InstanceList
+
+
+class TasksListReply(_HelperReply):
+    """The project's tasks."""
+
+    type: Literal["tasks.list"] = "tasks.list"
+    tasks: TaskList
+
+
+class RunSummary(BaseModel):
+    """One run of a project, from its durable manifest and this host's registry."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: RunId
+    task: str | None
+    display_name: str
+    created_at: datetime
+    phase: RunPhase | None
+    """The phase of the server on this host that drives or last drove the run, if one is listed."""
+    instance_id: InstanceId | None
+    """That server, while it is live: attach to it rather than resume."""
+
+
+class RunList(BaseModel):
+    """A project's runs, oldest first."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    project_root: str
+    runs: tuple[RunSummary, ...]
+
+
+class RunsListReply(_HelperReply):
+    """The project's runs."""
+
+    type: Literal["runs.list"] = "runs.list"
+    runs: RunList
+
+
+class RunStartReply(_HelperReply):
+    """The started server's record, or why nothing started."""
+
+    type: Literal["run.start"] = "run.start"
+    launch: LiveInstanceRecord | DetachedLaunchFailure
+
+
+class RunStopReply(_HelperReply):
+    """What the stop observed."""
+
+    type: Literal["run.stop"] = "run.stop"
+    result: InstanceStopResult
+
+
+class RunConnectReply(_HelperReply):
+    """The channel is now a byte relay carrying the run protocol to this run."""
+
+    type: Literal["run.connect"] = "run.connect"
+    run_id: RunId
+    protocol_version: PositiveInt
+    """The run protocol version the server speaks."""
+
+
+class PingReply(_HelperReply):
+    """The channel is alive."""
+
+    type: Literal["ping"] = "ping"
+
+
+class PathEntry(BaseModel):
+    """One directory that completes the typed path, with what it looks like."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    path: str
+    """The absolute path on the host."""
+    vibesys_checkout: bool
+    """Its ``pyproject.toml`` declares the ``vibesys`` project."""
+    vibesys_project: bool
+    """It has ``.vibesys/tasks``."""
+    git_repository: bool
+    """It has a ``.git`` directory or file."""
+
+
+PATHS_COMPLETE_CAP = 200
+"""The most entries one ``paths.complete`` reply carries."""
+
+
+class PathsCompleteReply(_HelperReply):
+    """Matching directories of ``directory``, sorted by name, at most ``PATHS_COMPLETE_CAP``."""
+
+    type: Literal["paths.complete"] = "paths.complete"
+    directory: str
+    """The absolute directory that was listed."""
+    entries: tuple[PathEntry, ...]
+    truncated: bool
+    """More directories match than were returned, or the directory was too large to read whole."""
+
+
+class HelperErrorCode(StrEnum):
+    """Why a request failed; a closed set."""
+
+    HANDSHAKE_REQUIRED = "handshake_required"
+    """A request other than ``hello`` came before a successful ``hello``."""
+    INCOMPATIBLE = "incompatible"
+    """No protocol version both sides speak, or ``hello`` was sent twice."""
+    INVALID_REQUEST = "invalid_request"
+    """The line is not a request of the negotiated version."""
+    DUPLICATE_REQUEST_ID = "duplicate_request_id"
+    """Another request or watch with this id is open on the channel."""
+    FEATURE_NOT_NEGOTIATED = "feature_not_negotiated"
+    """The method needs a feature ``hello`` did not return."""
+    DEADLINE_EXCEEDED = "deadline_exceeded"
+    """The reply was not ready within the request's ``deadline_ms``."""
+    CHANNEL_BUSY = "channel_busy"
+    """``run.connect`` needs a channel with no other request or watch open."""
+    UNKNOWN_WATCH = "unknown_watch"
+    """``instances.unwatch`` named no open watch."""
+    PROJECT_MISSING = "project_missing"
+    """The project directory does not exist or is not a directory."""
+    PROJECT_UNINITIALIZED = "project_uninitialized"
+    """The directory has no ``.vibesys/tasks``."""
+    TASK_INVALID = "task_invalid"
+    """The project's tasks or runs could not be read."""
+    PATH_MISSING = "path_missing"
+    """The directory to complete in does not exist."""
+    PATH_NOT_DIRECTORY = "path_not_directory"
+    """The path to complete in is not a directory."""
+    PERMISSION_DENIED = "permission_denied"
+    """This user may not list the directory."""
+    RUN_GONE = "run_gone"
+    """No live server has the id, or nothing listens at its socket."""
+    CONNECT_DENIED = "connect_denied"
+    """The run's socket exists but this user may not connect to it."""
+    CONNECT_FAILED = "connect_failed"
+    """Connecting to the run's socket failed another way."""
+    INTERNAL = "internal"
+    """The helper failed; ``message`` says how."""
+
+
+class HelperError(BaseModel):
+    """A failed request, or a line that was not one (``request_id`` is ``None`` then)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["error"] = "error"
+    request_id: RequestId | None
+    code: HelperErrorCode
+    message: str
+    path: str | None = None
+    """The path the error is about, for project and path errors."""
+    supported_versions: tuple[PositiveInt, PositiveInt] | None = None
+    """For ``incompatible``: the range this helper speaks."""
+    vibesys_version: str | None = None
+    """For ``incompatible``: the VibeSys this helper belongs to."""
+
+
+HelperReply = (
+    HelloReply
+    | InstancesListReply
+    | InstancesWatchReply
+    | InstancesUnwatchReply
+    | TasksListReply
+    | RunsListReply
+    | RunStartReply
+    | RunStopReply
+    | RunConnectReply
+    | PingReply
+    | PathsCompleteReply
+)
+"""A request's result; its ``type`` is the request's."""
+
+HelperMessage = Annotated[HelperReply | InstancesChanged | HelperError, Field(discriminator="type")]
+"""Every message the helper sends on a channel before the channel becomes a relay."""
+
+_MESSAGE: TypeAdapter[HelperMessage] = TypeAdapter(HelperMessage)
+
+
+def parse_helper_message(line: bytes) -> HelperMessage:
+    """Parse one helper message line strictly, as a client does."""
+    return _MESSAGE.validate_json(line)

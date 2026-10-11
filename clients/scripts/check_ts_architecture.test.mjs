@@ -9,7 +9,6 @@ import {cruise} from 'dependency-cruiser';
 import extractDepcruiseOptions from 'dependency-cruiser/config-utl/extract-depcruise-options';
 import extractTSConfig from 'dependency-cruiser/config-utl/extract-ts-config';
 import {cruiseWorkspace} from './check_ts_architecture.mjs';
-import {manifestErrors} from './check_ts_package_manifests.mjs';
 import {declarationErrors, pathAlternation, workspaceLayout} from './workspace_layout.mjs';
 
 const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -21,14 +20,6 @@ const CONFIG = join(WORKSPACE_ROOT, '.dependency-cruiser.mjs');
 // the workspace is covered without anyone editing a list here.
 const REPOSITORY_LAYOUT = workspaceLayout(WORKSPACE_ROOT);
 const PACKAGE_DIRECTORIES = REPOSITORY_LAYOUT.packages.map(({directory}) => directory);
-const DEPENDENCY_BUILD_COMMANDS = ['build', 'check', 'test'];
-
-function dependencyBuildHooks(name) {
-  return Object.fromEntries(
-    DEPENDENCY_BUILD_COMMANDS.map(command => [`pre${command}`, `pnpm --filter ${name}^... build`]),
-  );
-}
-
 test('dependency-cruiser rule names are unique', async () => {
   const options = await extractDepcruiseOptions(CONFIG);
   const names = options.ruleSet.forbidden.map(rule => rule.name);
@@ -46,6 +37,7 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async t =
           '@vibesys/backend-client': ['backend-client/src/index.ts'],
           '@vibesys/backend-client/testing': ['backend-client/src/testing/index.ts'],
           '@vibesys/core-state': ['core-state/src/index.ts'],
+          '@vibesys/core-state/testing': ['core-state/src/testing/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
           '@vibesys/web': ['web/src/index.ts'],
         },
@@ -115,6 +107,22 @@ const VALID_FILES = {
     "import '../test-support/expect.js';\nimport './fake-clock.js';\n",
   'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
   'core-state/src/shared-fixtures.test.ts': "import '@vibesys/backend-client/testing';\n",
+  'core-state/src/testing/index.ts': "import './model.js';\n",
+  'core-state/src/testing/model.ts': "import '../index.js';\n",
+  // The desktop: a main process whose one process module owns sockets and child processes, and the
+  // welcome view's layers (composition root -> effects -> pure state; ui renders state by type).
+  // Its own test support may build on core-state's.
+  'desktop/src/main.ts': "import './process.js';\nimport 'electron';\n",
+  'desktop/src/process.ts': "import 'node:child_process';\nimport 'node:net';\n",
+  'desktop/src/welcome/main.tsx': "import './effects/stores.js';\nimport './ui/view.js';\n",
+  'desktop/src/welcome/effects/stores.ts':
+    "import '../state/start.js';\nimport '@vibesys/core-state';\nimport '@vibesys/backend-client';\n",
+  'desktop/src/welcome/state/start.ts':
+    "import '@vibesys/core-state';\nimport type {} from '@vibesys/backend-client';\n",
+  'desktop/src/welcome/ui/view.ts': "import type {} from '../state/start.js';\n",
+  'desktop/src/testing/fake-chrome.ts': "import type {} from '@vibesys/core-state/testing';\n",
+  'desktop/src/welcome/state/start.test.ts':
+    "import '@vibesys/core-state/testing';\nimport '../../testing/fake-chrome.js';\nimport 'node:fs';\n",
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
   // The web run page's layers, each reaching only down: the composition enters a feature through
@@ -129,6 +137,8 @@ const VALID_FILES = {
   'web/src/features/replay/state/replay.ts':
     "import '@vibesys/core-state';\nimport type {} from '@vibesys/backend-client';\nimport '../../../entities/run.js';\n",
   'web/src/features/replay/ui/view.ts': "import '../state/replay.js';\n",
+  'web/src/features/replay/state/replay.test.ts':
+    "import '@vibesys/core-state/testing';\nimport '../../../app/compose.js';\n",
   'web/src/entities/run.ts': "import '@vibesys/core-state';\nimport '../shared/store.js';\n",
   'web/src/platform/backend.ts': "import '@vibesys/backend-client';\n",
   'web/src/shared/store.ts': '',
@@ -151,6 +161,74 @@ const VALID_FILES = {
 };
 
 const RULE_CASES = [
+  {
+    rule: 'desktop-welcome-state-is-pure',
+    files: {'desktop/src/welcome/state/start.ts': "import '../effects/stores.js';\n"},
+  },
+  {
+    rule: 'desktop-welcome-state-is-pure',
+    files: {'desktop/src/welcome/state/start.ts': "import '@vibesys/backend-client';\n"},
+  },
+  {
+    rule: 'desktop-welcome-core-and-ui-have-no-node-runtime',
+    files: {'desktop/src/welcome/ui/view.ts': "import 'node:path';\n"},
+  },
+  {
+    rule: 'desktop-welcome-ui-does-not-depend-on-shell',
+    files: {'desktop/src/welcome/ui/view.ts': "import '../effects/stores.js';\n"},
+  },
+  {
+    rule: 'desktop-welcome-effects-do-not-import-ui',
+    files: {'desktop/src/welcome/effects/stores.ts': "import '../ui/view.js';\n"},
+  },
+  {
+    rule: 'renderers-do-not-import-electron',
+    files: {'desktop/src/welcome/effects/stores.ts': "import 'electron';\n"},
+  },
+  {
+    rule: 'renderers-do-not-import-electron',
+    files: {'web/src/platform/backend.ts': "import 'electron';\n"},
+  },
+  {
+    rule: 'desktop-and-web-confine-sockets-and-processes',
+    files: {'desktop/src/main.ts': "import 'node:child_process';\n"},
+  },
+  {
+    rule: 'desktop-and-web-confine-sockets-and-processes',
+    files: {'web/src/platform/backend.ts': "import 'net';\n"},
+  },
+  {
+    rule: 'desktop-does-not-depend-on-peer-frontends',
+    files: {'desktop/src/main.ts': "import '../../web/src/index.js';\n"},
+  },
+  {
+    rule: 'web-features-does-not-import-layers-above',
+    files: {'web/src/features/replay/state/replay.ts': "import '../../../app/compose.js';\n"},
+  },
+  {
+    rule: 'web-entities-does-not-import-layers-above',
+    files: {'web/src/entities/run.ts': "import '../features/replay/index.js';\n"},
+  },
+  {
+    rule: 'web-layers-do-not-import-the-package-surface',
+    files: {'web/src/platform/backend.ts': "import '../index.js';\n"},
+  },
+  {
+    rule: 'production-code-does-not-import-core-state-test-support',
+    files: {'web/src/features/replay/state/replay.ts': "import '@vibesys/core-state/testing';\n"},
+  },
+  {
+    rule: 'production-code-does-not-import-core-state-test-support',
+    files: {'desktop/src/welcome/state/start.ts': "import '@vibesys/core-state/testing';\n"},
+  },
+  {
+    rule: 'core-state-has-no-node-runtime',
+    files: {'core-state/src/index.ts': "import 'node:fs';\n"},
+  },
+  {
+    rule: 'core-state-has-no-ui-runtime',
+    files: {'core-state/src/index.ts': "import '@opentui/core';\n"},
+  },
   {
     rule: 'web-shared-does-not-import-layers-above',
     files: {'web/src/shared/store.ts': "import '../entities/run.js';\n"},
@@ -386,6 +464,7 @@ async function violatedRules(t, files) {
           '@vibesys/backend-client': ['backend-client/src/index.ts'],
           '@vibesys/backend-client/testing': ['backend-client/src/testing/index.ts'],
           '@vibesys/core-state': ['core-state/src/index.ts'],
+          '@vibesys/core-state/testing': ['core-state/src/testing/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
           '@vibesys/web': ['web/src/index.ts'],
         },
@@ -395,7 +474,10 @@ async function violatedRules(t, files) {
   await writeExternalPackage(root, '@opentui/core');
   await writeExternalPackage(root, 'declared-package');
   await writeExternalPackage(root, 'undeclared-package');
-  const declared = {devDependencies: {'declared-package': '1.0.0', '@opentui/core': '1.0.0'}};
+  await writeExternalPackage(root, 'electron');
+  const declared = {
+    devDependencies: {'declared-package': '1.0.0', '@opentui/core': '1.0.0', electron: '1.0.0'},
+  };
   await writeFile(join(root, 'package.json'), JSON.stringify(declared));
   // Each package declares the same externals, because `production-dependencies-are-declared`
   // resolves a declaration against the manifest nearest the importing module.
@@ -428,80 +510,20 @@ test('valid layering produces no violations', async t => {
   assert.deepEqual(await violatedRules(t, VALID_FILES), []);
 });
 
+test('every dependency-cruiser rule has a failing fixture', async () => {
+  const options = await extractDepcruiseOptions(CONFIG);
+  const covered = new Set(RULE_CASES.map(({rule}) => rule));
+  const uncovered = options.ruleSet.forbidden
+    .map(({name}) => name)
+    .filter(name => !covered.has(name));
+  assert.deepEqual(uncovered, []);
+});
+
 for (const {rule, files} of RULE_CASES) {
   test(`${rule} rejects ${Object.keys(files)[0]}: ${Object.values(files)[0].trim()}`, async t => {
     assert.ok((await violatedRules(t, {...VALID_FILES, ...files})).includes(rule));
   });
 }
-
-test('manifest policy rejects declared reverse dependencies', async t => {
-  const root = await workspaceFixture(t, 'vibesys-manifest-rules-');
-  await writeManifest(root, 'backend-client', '@vibesys/backend-client', {
-    '@vibesys/core-state': 'workspace:*',
-  });
-  await writeManifest(
-    root,
-    'core-state',
-    '@vibesys/core-state',
-    {'@vibesys/backend-client': 'workspace:*', '@opentui/core': '1.0.0'},
-    dependencyBuildHooks('@vibesys/core-state'),
-  );
-  await writeManifest(
-    root,
-    'tui',
-    '@vibesys/tui',
-    {'@vibesys/backend-client': 'workspace:*'},
-    dependencyBuildHooks('@vibesys/tui'),
-  );
-  await writeManifest(
-    root,
-    'web',
-    '@vibesys/web',
-    {'@vibesys/backend-client': 'workspace:*', '@vibesys/core-state': 'workspace:*'},
-    dependencyBuildHooks('@vibesys/web'),
-  );
-
-  assert.deepEqual(manifestErrors(root), [
-    'backend-client/package.json: @vibesys/backend-client must not depend on @vibesys/core-state',
-    'core-state/package.json: @vibesys/core-state must not depend on @opentui/core',
-    'tui/package.json: @vibesys/tui must declare @vibesys/core-state in dependencies',
-  ]);
-});
-
-for (const command of DEPENDENCY_BUILD_COMMANDS) {
-  test(`manifest policy requires dependency build order for direct ${command}`, async t => {
-    const root = await workspaceFixture(t, `vibesys-manifest-pre${command}-`);
-    // A leaf has nothing to prepare and needs no hook. The dependent has the other two correct
-    // hooks, so each case proves this command independently rather than passing because all three
-    // lifecycle scripts were absent.
-    await writeManifest(root, 'backend-client', '@vibesys/backend-client', {});
-    const scripts = dependencyBuildHooks('@vibesys/core-state');
-    delete scripts[`pre${command}`];
-    await writeManifest(
-      root,
-      'core-state',
-      '@vibesys/core-state',
-      {'@vibesys/backend-client': 'workspace:*'},
-      scripts,
-    );
-
-    assert.deepEqual(manifestErrors(root), [
-      `core-state/package.json: @vibesys/core-state must declare "pre${command}": ` +
-        '"pnpm --filter @vibesys/core-state^... build", because direct ' +
-        `"${command}" must build its runtime workspace dependencies first`,
-    ]);
-  });
-}
-
-test('manifest policy names a package that joins the workspace without one', async t => {
-  const root = await workspaceFixture(t, 'vibesys-manifest-policy-');
-  await writeManifest(root, 'stub', '@vibesys/stub', {});
-
-  assert.deepEqual(manifestErrors(root), [
-    'stub/package.json: @vibesys/stub has no dependency policy in ' +
-      'scripts/check_ts_package_manifests.mjs',
-  ]);
-});
 
 // The workspace admits directories, so the layout is what every gate enumerates from: a package
 // or a directory that joins it must appear here without anyone editing a list. These fixtures are
@@ -657,9 +679,9 @@ test('workspace layout drops a symlink it cannot resolve', async t => {
 
 test('workspace layout rejects a packages pattern it cannot expand', async t => {
   const root = await scratchDirectory(t, 'vibesys-layout-pattern-');
-  await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "libs/*"\n');
+  await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "libs/**"\n');
 
-  assert.throws(() => workspaceLayout(root), /unsupported packages pattern "libs\/\*"/);
+  assert.throws(() => workspaceLayout(root), /unsupported packages pattern "libs\/\*\*"/);
 });
 
 test('declarations accept a package whose entry points and scripts agree with the layout', async t => {
@@ -696,7 +718,10 @@ test('declarations reject a path map entry no package exports', async t => {
   const root = await workspaceFixture(t, 'vibesys-declarations-extra-');
   await writePackage(root, 'stub', '@vibesys/stub', ['src'], {
     scripts: {build: 'true', check: 'true', test: 'true'},
-    exports: {'.': {import: './dist/index.js'}, './node': {import: './dist/node/index.js'}},
+    exports: {
+      '.': {'@vibesys/source': './src/index.ts', default: './dist/index.js'},
+      './node': {'@vibesys/source': './src/node/index.ts', default: './dist/node/index.js'},
+    },
   });
   await writeFile(join(root, 'stub/src/index.ts'), '');
   await mkdir(join(root, 'stub/src/node'), {recursive: true});
@@ -716,74 +741,6 @@ test('declarations reject a path map entry no package exports', async t => {
 
   assert.deepEqual(declarationErrors(root, workspaceLayout(root)), [
     'tsconfig.architecture.json: @vibesys/gone is not a workspace package export',
-  ]);
-});
-
-test('web aliases cover every export of its workspace dependencies', async t => {
-  const root = await workspaceFixture(t, 'vibesys-web-aliases-');
-  await writePackage(root, 'backend-client', '@vibesys/backend-client', ['src'], {
-    exports: {
-      '.': {import: './dist/index.js'},
-      './testing': {import: './dist/testing/index.js'},
-    },
-    scripts: {build: '', check: '', test: ''},
-  });
-  await writePackage(root, 'core-state', '@vibesys/core-state', ['src'], {
-    scripts: {build: '', check: '', test: ''},
-  });
-  await writePackage(root, 'web', '@vibesys/web', ['src'], {
-    dependencies: {
-      '@vibesys/backend-client': 'workspace:*',
-      '@vibesys/core-state': 'workspace:*',
-    },
-    scripts: {build: '', check: '', test: ''},
-  });
-  await writeFile(join(root, 'backend-client/src/index.ts'), '');
-  await mkdir(join(root, 'backend-client/src/testing'), {recursive: true});
-  await writeFile(join(root, 'backend-client/src/testing/index.ts'), '');
-  await writeFile(join(root, 'core-state/src/index.ts'), '');
-  await writeFile(join(root, 'web/src/index.ts'), '');
-  await writeFile(
-    join(root, 'tsconfig.architecture.json'),
-    JSON.stringify({
-      compilerOptions: {
-        paths: {
-          '@vibesys/backend-client': ['backend-client/src/index.ts'],
-          '@vibesys/backend-client/testing': ['backend-client/src/testing/index.ts'],
-          '@vibesys/core-state': ['core-state/src/index.ts'],
-          '@vibesys/web': ['web/src/index.ts'],
-        },
-      },
-    }),
-  );
-  await writeFile(
-    join(root, 'web/tsconfig.json'),
-    JSON.stringify({
-      compilerOptions: {
-        paths: {
-          '@vibesys/backend-client': ['../backend-client/src/index.ts'],
-          '@vibesys/backend-client/private': ['../backend-client/src/private.ts'],
-          '@vibesys/core-state': ['../core-state/src/index.ts'],
-        },
-      },
-    }),
-  );
-  await writeFile(
-    join(root, 'web/workspace-source-aliases.json'),
-    JSON.stringify({
-      '@vibesys/backend-client': '../backend-client/src/index.ts',
-      '@vibesys/backend-client/private': '../backend-client/src/private.ts',
-      '@vibesys/core-state': '../core-state/src/index.ts',
-    }),
-  );
-
-  assert.deepEqual(declarationErrors(root, workspaceLayout(root)), [
-    'web/tsconfig.json: @vibesys/backend-client/testing must map to ' +
-      '["../backend-client/src/testing/index.ts"]',
-    'web/tsconfig.json: @vibesys/backend-client/private is not a declared workspace package export',
-    'web/workspace-source-aliases.json: @vibesys/backend-client/testing must map to ' +
-      '"../backend-client/src/testing/index.ts"',
-    'web/workspace-source-aliases.json: @vibesys/backend-client/private is not a declared workspace package export',
   ]);
 });
 
@@ -905,10 +862,6 @@ async function scratchDirectory(t, prefix) {
   const root = await mkdtemp(join(tmpdir(), prefix));
   t.after(() => rm(root, {recursive: true, force: true}));
   return root;
-}
-
-async function writeManifest(root, directory, name, dependencies, scripts = {}) {
-  await writePackage(root, directory, name, [], {dependencies, scripts});
 }
 
 async function writePackage(root, directory, name, directories, manifest = {}) {

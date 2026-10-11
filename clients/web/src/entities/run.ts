@@ -10,11 +10,12 @@ import type {
 } from '@vibesys/backend-client';
 import {
   type CoreState,
+  only,
   reduceEventBatch,
   reduceEventRebootstrap,
   reduceSnapshot,
+  type Step,
 } from '@vibesys/core-state';
-import {only, type Step} from '../shared/step.js';
 
 export type RunAction =
   /** A replayed run's events, in order. */

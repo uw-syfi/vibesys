@@ -1,0 +1,19 @@
+{
+  // The shipping page: DOM and Vite's client types only, so a Node import is a type error.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/app.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/shared/testing/**"],
+  "references": [
+    {"path": "../backend-client/tsconfig.lib.json"},
+    {"path": "../core-state/tsconfig.lib.json"}
+  ]
+}

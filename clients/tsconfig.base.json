@@ -1,0 +1,37 @@
+{
+  // The compiler settings every package project shares. Each `tsconfig.<entry>.json` extends this
+  // and adds only what its entry's runtime decides (`lib`, `types`, module resolution for a
+  // bundled entry) plus its own `include` and `references`. See
+  // docs/contributing/clients-architecture.md (Build model).
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": [],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    // Workspace packages resolve to their TypeScript source through this export condition, so a
+    // type check never needs a dependency's `dist`. Project references then redirect each such
+    // import to the referenced project's declarations, which `tsc -b` keeps up to date.
+    "customConditions": ["@vibesys/source"],
+    "composite": true,
+    "incremental": true,
+    "declaration": true,
+    "strict": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmitOnError": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true
+  }
+}

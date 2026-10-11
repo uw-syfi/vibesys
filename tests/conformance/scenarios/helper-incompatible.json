@@ -1,0 +1,41 @@
+{
+  "id": "helper-incompatible",
+  "protocol": "host-helper",
+  "title": "No shared version",
+  "description": "A hello whose version range the helper does not speak is answered incompatible, naming the range the helper supports.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          90,
+          99
+        ],
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "h",
+        "code": "incompatible",
+        "supported_versions": [
+          1,
+          1
+        ]
+      }
+    }
+  ]
+}

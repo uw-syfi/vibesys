@@ -1,5 +1,5 @@
 /**
- * The browser page's entry: DOM glue around the pure boot decision (`state/boot.ts`). It scrubs
+ * The browser page's entry: DOM glue around the pure boot decision (`boot.ts`). It scrubs
  * the launch capability from the address bar, performs the plan (remember the gateway, exchange a
  * capability), and renders the composed page.
  */

@@ -11,11 +11,12 @@ import type {
 import * as coreState from './index.js';
 
 describe('published core-state surface', () => {
-  it('exports only projection entry points and read helpers at runtime', () => {
+  it('exports only projection entry points, read helpers, and the store kernel at runtime', () => {
     expect(Object.keys(coreState).sort()).toEqual([
       'DEFAULT_CHAT_THREAD_ID',
       'activeRunFocus',
       'agentKindText',
+      'createStore',
       'describePhase',
       'executionStatusFor',
       'experimentForRound',
@@ -26,6 +27,7 @@ describe('published core-state surface', () => {
       'initialCoreState',
       'joinRoundsWithExperiments',
       'latestDiagnosticChange',
+      'only',
       'phaseText',
       'phasesForRound',
       'planningStageForPhase',

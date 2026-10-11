@@ -5,9 +5,10 @@ timing: the clock, sleeping, seeds, signals, child processes and blocking calls.
 
 - `vs_sim.api` holds the role-named interfaces product code takes
   (`Clock`, `Sleeper`, `SleepingClock`, `BlockingRunner`, `SignalSource`,
-  `ProcessLauncher`, `RandomSource`, `Threads`, `Network`) and their real implementations
-  (`SystemClock`, `MonotonicClock`, `ThreadBlockingRunner`, `LoopSignalSource`,
-  `SubprocessLauncher`, `SeededRandom`, `SystemRandomSource`, `OsThreads`, `UnixNetwork`).
+  `ProcessLauncher`, `StreamingCommand`, `RandomSource`, `Threads`, `Network`) and their real
+  implementations (`SystemClock`, `MonotonicClock`, `ThreadBlockingRunner`, `LoopSignalSource`,
+  `SubprocessLauncher`, `SubprocessStreamingCommand`, `SeededRandom`, `SystemRandomSource`,
+  `OsThreads`, `UnixNetwork`).
   `Threads` is the one interface for everything that blocks an operating-system thread:
   `spawn`, locks, reentrant locks, conditions, events, synchronous `sleep` and a monotonic
   `now`. `Network` carries bytes over local stream connections (`listen`, `accept`,
@@ -21,7 +22,8 @@ timing: the clock, sleeping, seeds, signals, child processes and blocking calls.
   `file_size_limit`, Fakes of each interface (including
   `GatedBlockingRunner`, which keeps a blocking call in flight until released), and a contract suite
   every implementation of `Clock`, `BlockingRunner`, `SignalSource`, `ProcessLauncher`,
-  `Threads` and `Network` passes.
+  `StreamingCommand` (`ScriptedStreamingCommand` is its Fake; the real one runs it in
+  `tests/e2e`), `Threads` and `Network` passes.
 - `SimThreads` simulates `Threads` cooperatively: every simulated thread is a real thread
   but only one runs at a time, and under a schedule seed the next one is drawn from the
   seed at every synchronization point (one seed, one interleaving). It shares the

@@ -1,0 +1,15 @@
+{
+  // Tests and their fakes, with the main-process and welcome-state sources they import.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "types": ["node", "bun"],
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts", "src/**/*.cts"],
+  "references": [
+    {"path": "../backend-client/tsconfig.lib.json"},
+    {"path": "../core-state/tsconfig.lib.json"}
+  ]
+}

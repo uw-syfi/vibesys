@@ -20,6 +20,7 @@ only the standard library and ``vs_sim.api``.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Protocol
@@ -286,6 +287,32 @@ def _reason(error: OSError) -> EndReason:
     return EndReason.FAILED
 
 
+class FdSource:
+    """Unbuffered reads from a file descriptor, so a frame is handled as soon as it arrives."""
+
+    def __init__(self, fd: int) -> None:
+        """Read from ``fd``."""
+        self._fd = fd
+
+    def read(self, max_bytes: int) -> bytes:
+        """Up to ``max_bytes`` bytes; ``b""`` at end of stream."""
+        return os.read(self._fd, max_bytes)
+
+
+class FdSink:
+    """Unbuffered writes to a file descriptor, so a stalled reader blocks here, not in a buffer."""
+
+    def __init__(self, fd: int) -> None:
+        """Write to ``fd``."""
+        self._fd = fd
+
+    def write(self, data: bytes) -> None:
+        """Write all of ``data``."""
+        view = memoryview(data)
+        while view:
+            view = view[os.write(self._fd, view) :]
+
+
 @dataclass(frozen=True)
 class ClientStreams:
     """The client side of the relay: the ssh channel's stdin and stdout in production."""
@@ -372,6 +399,51 @@ def connect_outcome(error: OSError) -> BridgeOutcome:
     return BridgeOutcome.CONNECT_FAILED
 
 
+def dial(
+    network: Dialer, address: str, limits: BridgeLimits | None = None
+) -> Connection | BridgeResult:
+    """Connect to ``address``, or the result that says why the relay cannot start."""
+    limits = limits or BridgeLimits()
+    try:
+        return network.connect(address, timeout=limits.connect_timeout_seconds)
+    except OSError as error:
+        return BridgeResult(
+            connect_outcome(error), f"connecting to {address}: {error.strerror or error}"
+        )
+
+
+def relay(
+    connection: Connection,
+    *,
+    client: ClientStreams,
+    threads: Threads,
+    limits: BridgeLimits | None = None,
+) -> BridgeResult:
+    """Relay between ``client`` and an open ``connection`` until one side ends or a write stalls.
+
+    Returns once the outcome is decided and the connection is closed. A copy loop may
+    still be blocked on the client's input or on a stalled output write; the caller
+    ends the process.
+    """
+    limits = limits or BridgeLimits()
+    state = _Relay(threads, limits)
+    threads.spawn(
+        lambda: state.copy(client.incoming, Peer.CLIENT, _ConnectionSink(connection), Peer.SERVER),
+        name="stdio-bridge-upstream",
+    )
+    threads.spawn(
+        lambda: state.copy(
+            _ConnectionSource(connection), Peer.SERVER, client.outgoing, Peer.CLIENT
+        ),
+        name="stdio-bridge-downstream",
+    )
+    try:
+        outcome = state.supervise()
+    finally:
+        connection.close()
+    return BridgeResult(outcome, _DETAIL[outcome].format(deadline=limits.write_deadline_seconds))
+
+
 def run_bridge(
     *,
     network: Dialer,
@@ -380,31 +452,8 @@ def run_bridge(
     threads: Threads,
     limits: BridgeLimits | None = None,
 ) -> BridgeResult:
-    """Connect to ``address`` and relay until one side ends or a write stalls.
-
-    Returns once the outcome is decided and the socket is closed. A copy loop may still
-    be blocked on stdin or on a stalled stdout write; the caller ends the process.
-    """
-    limits = limits or BridgeLimits()
-    try:
-        connection = network.connect(address, timeout=limits.connect_timeout_seconds)
-    except OSError as error:
-        return BridgeResult(
-            connect_outcome(error), f"connecting to {address}: {error.strerror or error}"
-        )
-    relay = _Relay(threads, limits)
-    threads.spawn(
-        lambda: relay.copy(client.incoming, Peer.CLIENT, _ConnectionSink(connection), Peer.SERVER),
-        name="stdio-bridge-upstream",
-    )
-    threads.spawn(
-        lambda: relay.copy(
-            _ConnectionSource(connection), Peer.SERVER, client.outgoing, Peer.CLIENT
-        ),
-        name="stdio-bridge-downstream",
-    )
-    try:
-        outcome = relay.supervise()
-    finally:
-        connection.close()
-    return BridgeResult(outcome, _DETAIL[outcome].format(deadline=limits.write_deadline_seconds))
+    """Connect to ``address`` and relay until one side ends or a write stalls (``relay``)."""
+    connection = dial(network, address, limits)
+    if isinstance(connection, BridgeResult):
+        return connection
+    return relay(connection, client=client, threads=threads, limits=limits)

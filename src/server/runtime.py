@@ -22,11 +22,12 @@ from server.events import (
     EventStatus,
     EventType,
     RunInterruptedData,
+    RunStartupProgressData,
     RunStatusChangedData,
     ServerReadyData,
 )
 from server.execution import ExecutionTracker
-from server.host_api import FailureReason
+from server.host_api import FailureReason, StartupFact
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
@@ -99,9 +100,13 @@ class ServerLifecycleObserver(Protocol):
         ...
 
     def observe(
-        self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+        self,
+        *,
+        status: RunStatus | None = None,
+        failure: FailureReason | None = None,
+        startup: StartupFact | None = None,
     ) -> None:
-        """The run's status changed, or it failed for ``failure``."""
+        """The run's status changed, it failed for ``failure``, or its startup progressed."""
         ...
 
 
@@ -473,6 +478,8 @@ def _report_phase_facts(observer: ServerLifecycleObserver, event: RunEvent) -> N
     """Tell ``observer`` the lifecycle facts in one journaled event."""
     if isinstance(event.data, RunStatusChangedData):
         observer.observe(status=event.data.status)
+    elif isinstance(event.data, RunStartupProgressData):
+        observer.observe(startup=StartupFact(stage=event.data.stage, progress=event.data.progress))
     failure = failure_reason(event)
     if failure is not None:
         observer.observe(failure=failure)

@@ -1,0 +1,93 @@
+{
+  "id": "helper-project-missing",
+  "protocol": "host-helper",
+  "title": "Project requests on a missing directory",
+  "description": "tasks.list, runs.list and run.start naming a directory that does not exist are each answered project_missing with the path, and nothing is launched.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "tasks.list",
+        "request_id": "t",
+        "deadline_ms": 10000,
+        "project": "/nonexistent-vibesys-conformance/project"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "t",
+        "code": "project_missing"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "runs.list",
+        "request_id": "r",
+        "deadline_ms": 10000,
+        "project": "/nonexistent-vibesys-conformance/project"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "r",
+        "code": "project_missing"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "run.start",
+        "request_id": "s",
+        "deadline_ms": 10000,
+        "project": "/nonexistent-vibesys-conformance/project",
+        "task": "spsc"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "s",
+        "code": "project_missing"
+      }
+    }
+  ]
+}

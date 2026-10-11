@@ -1,19 +1,18 @@
 import {describe, expect, test} from 'bun:test';
 import {event} from '@vibesys/backend-client/testing';
-import {checkModel} from '../../../shared/testing/model.js';
+import {checkModel} from '@vibesys/core-state/testing';
 import {
   DEFAULT_REPLAY_FIXTURE_URL,
   REPLAY_IDLE,
   type ReplayAction,
   replayFailure,
-  replayInvariants,
   replayStep,
 } from './replay.js';
 
 const EVENTS = [event(1, 'agent_output_chunk', 'hello')];
 
 describe('replayStep', () => {
-  test('holds its invariants and never folds a superseded load', () => {
+  test('awaits only issued loads and never folds a superseded one', () => {
     checkModel({
       initial: REPLAY_IDLE,
       step: replayStep,
@@ -26,11 +25,8 @@ describe('replayStep', () => {
               result: random.bool() ? {ok: true, events: EVENTS} : {ok: false, error: 'HTTP 503'},
             },
       issues: request => (request.kind === 'fetch' ? request.token : null),
-      reply: (state, action) =>
-        action.type === 'reply'
-          ? {token: action.token, awaited: state.kind === 'loading' ? state.token : null}
-          : null,
-      invariants: replayInvariants,
+      awaited: state => ({load: state.kind === 'loading' ? state.token : null}),
+      reply: action => (action.type === 'reply' ? {slot: 'load', token: action.token} : null),
       also: (before, action, after, requests) => {
         // Events fold at most once: only the awaited load's success appends them.
         const appends = requests.filter(request => request.kind === 'append');

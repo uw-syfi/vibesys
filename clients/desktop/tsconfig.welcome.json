@@ -1,12 +1,16 @@
 {
-  "extends": "./tsconfig.json",
+  // The welcome view's renderer: DOM only, so a Node import is a type error. Vite bundles it. It
+  // imports the shared protocol modules beside `main.ts`, which a composite project would have to
+  // list, so it is checked on its own (`tsc -p`) rather than through the solution.
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": [],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
-    "noEmit": true
+    "composite": false,
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/welcome.tsbuildinfo"
   },
   "include": ["src/welcome/**/*.ts", "src/welcome/**/*.tsx"],
   "exclude": ["src/welcome/**/*.test.ts"]

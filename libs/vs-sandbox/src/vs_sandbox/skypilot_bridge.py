@@ -36,6 +36,7 @@ from vs_sandbox.skypilot_recovery import (
     InvocationResultRecord,
 )
 from vs_sandbox.skypilot_runner import (
+    CancellableOutputSink,
     ClusterStatus,
     RemoteJobInfo,
     RemoteJobStatus,
@@ -112,6 +113,35 @@ class _Wire:
         self._connection.send(data)
 
 
+class _BridgeOutputSink:
+    """Serialize one stream and let runner cleanup interrupt a blocked socket write."""
+
+    def __init__(
+        self,
+        writer: _Wire,
+        connection: Connection,
+        stream: Literal["stdout", "stderr"],
+        lock: Lock,
+    ) -> None:
+        self._writer = writer
+        self._connection = connection
+        self._stream = stream
+        self._lock = lock
+
+    def __call__(self, data: str) -> None:
+        for start in range(0, len(data), _OUTPUT_CHUNK_CHARACTERS):
+            frame = OutputFrame(
+                type=self._stream,
+                data=data[start : start + _OUTPUT_CHUNK_CHARACTERS],
+            )
+            with self._lock:
+                self._writer.write(encode_message(frame))
+
+    def cancel(self) -> None:
+        """Close the request connection to wake an active Unix ``sendall``."""
+        self._connection.close()
+
+
 class _ArtifactStream:
     def __init__(
         self,
@@ -148,6 +178,15 @@ class _ArtifactStream:
                     self._oversized = True
             else:
                 self._sink(line)
+
+    def __call__(self, data: str) -> None:
+        """Accept a segment from the command runner."""
+        self.feed(data)
+
+    def cancel(self) -> None:
+        """Propagate delivery cancellation to the underlying transport sink."""
+        if isinstance(self._sink, CancellableOutputSink):
+            self._sink.cancel()
 
     def result(self) -> bytes | None:
         if not self._expected:
@@ -231,6 +270,15 @@ class _DecodedLogSpool:
             remote_read=len(self._persisted),
             client_delivered=len(self._persisted),
         )
+
+    def __call__(self, data: str) -> None:
+        """Accept a decoded segment from the artifact stream."""
+        self.feed(data)
+
+    def cancel(self) -> None:
+        """Propagate delivery cancellation to the client transport."""
+        if isinstance(self._sink, CancellableOutputSink):
+            self._sink.cancel()
 
     def finish(self) -> None:
         """Require a terminal from-origin stream to cover the durable prefix."""
@@ -394,8 +442,9 @@ class SkyPilotBridge:
                 if self._report_closing(writer):
                     return
                 self._handle_request(reader, writer, connection)
-        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-008195 [BLE001]; the request boundary converts every failure to a protocol ErrorFrame with its exception type.
-            self._write(writer, ErrorFrame(error=type(exc).__name__))
+        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-008195 [BLE001]; the request boundary attempts to convert every failure to a protocol ErrorFrame, but a disconnected client cannot receive it.
+            with contextlib.suppress(OSError):
+                self._write(writer, ErrorFrame(error=type(exc).__name__))
         finally:
             with self._handler_condition:
                 self._active_handlers -= 1
@@ -501,6 +550,18 @@ class SkyPilotBridge:
                     ).hexdigest()[:32]
                     begin_marker = f"__VIBESYS_SKYPILOT_ARTIFACT_BEGIN_{nonce}__"
                     end_marker = f"__VIBESYS_SKYPILOT_ARTIFACT_END_{nonce}__"
+                    stdout_output = _BridgeOutputSink(
+                        writer,
+                        connection,
+                        "stdout",
+                        write_lock,
+                    )
+                    stderr_output = _BridgeOutputSink(
+                        writer,
+                        connection,
+                        "stderr",
+                        write_lock,
+                    )
                     log_spool = _DecodedLogSpool(
                         path=self._state_namespace.external_directory(
                             f"logs/{request.invocation_id}/{active_record.job_name}"
@@ -508,10 +569,10 @@ class SkyPilotBridge:
                         / "stdout",
                         journal=self._journal,
                         invocation_id=request.invocation_id,
-                        sink=lambda data: self._write_output(writer, "stdout", data, write_lock),
+                        sink=stdout_output,
                     )
                     artifact_stream = _ArtifactStream(
-                        log_spool.feed,
+                        log_spool,
                         expected=bool(request.artifacts),
                         begin_marker=begin_marker,
                         end_marker=end_marker,
@@ -567,10 +628,8 @@ class SkyPilotBridge:
                             self._resources,
                             workdir=staging,
                             command=effective_command,
-                            stdout_sink=artifact_stream.feed,
-                            stderr_sink=lambda data: self._write_output(
-                                writer, "stderr", data, write_lock
-                            ),
+                            stdout_sink=artifact_stream,
+                            stderr_sink=stderr_output,
                             job_started=lambda job_id, invocation=active_record: self._job_started(
                                 invocation,
                                 job_id,
@@ -935,23 +994,6 @@ class SkyPilotBridge:
             or local_state_or_logs
             or any(relative == path or relative.is_relative_to(path) for path in hidden)
         )
-
-    def _write_output(
-        self,
-        writer: _Wire,
-        stream: Literal["stdout", "stderr"],
-        data: str,
-        lock: Lock,
-    ) -> None:
-        for start in range(0, len(data), _OUTPUT_CHUNK_CHARACTERS):
-            self._write(
-                writer,
-                OutputFrame(
-                    type=stream,
-                    data=data[start : start + _OUTPUT_CHUNK_CHARACTERS],
-                ),
-                lock,
-            )
 
     def _write(
         self,

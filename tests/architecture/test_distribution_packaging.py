@@ -467,7 +467,7 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
     assert "clients/.dependency-cruiser.mjs" in members
     assert "clients/scripts/check_ts_architecture.mjs" in members
     assert "clients/scripts/check_ts_architecture.test.mjs" in members
-    assert "clients/scripts/check_ts_package_manifests.mjs" in members
+    assert "clients/scripts/check_package_graph.mjs" in members
     assert "clients/scripts/workspace_layout.mjs" in members
     module = _load_packaging_support()
     expected_client_sources = set(module.discover_client_workspace_sources(PROJECT_ROOT))

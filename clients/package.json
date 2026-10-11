@@ -8,22 +8,25 @@
     "lint:ts": "biome lint .",
     "check:ts": "biome check . && pnpm warn:ts-file-size",
     "warn:ts-file-size": "biome lint --config-path biome.warnings.json --only=style/noExcessiveLinesPerFile .",
-    "check:ts-architecture": "node scripts/check_ts_architecture.mjs && node scripts/check_ts_package_manifests.mjs",
-    "test:ts-architecture": "node --test scripts/check_ts_architecture.test.mjs scripts/check_biome_line_caps.test.mjs scripts/check_ui_no_effects.test.mjs scripts/check_web_fetch_confined.test.mjs",
+    "check:ts-architecture": "node scripts/check_ts_architecture.mjs && node scripts/check_package_graph.mjs",
+    "test:ts-architecture": "node --test scripts/check_ts_architecture.test.mjs scripts/check_package_graph.test.mjs scripts/new_package.test.mjs scripts/check_biome_line_caps.test.mjs scripts/check_ui_no_effects.test.mjs scripts/check_web_fetch_confined.test.mjs",
     "test:bun-runner": "node --test scripts/run_bun_tests.test.mjs",
     "test:node-runner": "node --test scripts/run_node_tests.test.mjs",
     "check:conformance": "node scripts/check_conformance_corpus.mjs",
     "check:web-browser-bundle": "pnpm --filter @vibesys/web build:browser && node scripts/check_web_browser_bundle.mjs",
     "test:conformance": "node --test scripts/check_conformance_corpus.test.mjs",
     "check:knip": "knip",
-    "build:clients": "pnpm -r --workspace-concurrency=1 run build",
-    "check:clients": "pnpm -r --workspace-concurrency=1 run check",
-    "test:clients": "pnpm test:ts-architecture && pnpm test:conformance && pnpm test:bun-runner && pnpm test:node-runner && pnpm -r --workspace-concurrency=1 run test"
+    "new:package": "node scripts/new_package.mjs",
+    "build:clients": "turbo run build",
+    "check:clients": "turbo run check",
+    "test:clients": "pnpm test:ts-architecture && pnpm test:conformance && pnpm test:bun-runner && pnpm test:node-runner && turbo run test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",
     "dependency-cruiser": "16.10.4",
     "knip": "6.37.0",
+    "turbo": "2.11.4",
+    "typescript": "5.9.3",
     "vite": "7.1.5"
   }
 }

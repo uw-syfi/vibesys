@@ -190,6 +190,38 @@ function validateString(value: unknown, schema: Schema, path: string): void {
     validatePrimitive(false, 'string', path);
     return;
   }
+  const length = [...value].length;
+  const minimumLength = schema['minLength'];
+  if (typeof minimumLength === 'number' && length < minimumLength) {
+    throw new BackendClientError(
+      'parse',
+      `Invalid server ${path}: must contain at least ${minimumLength} characters`,
+    );
+  }
+  const maximumLength = schema['maxLength'];
+  if (typeof maximumLength === 'number' && length > maximumLength) {
+    throw new BackendClientError(
+      'parse',
+      `Invalid server ${path}: must contain at most ${maximumLength} characters`,
+    );
+  }
+  const pattern = schema['pattern'];
+  if (typeof pattern === 'string') {
+    let matches: boolean;
+    try {
+      matches = new RegExp(pattern, 'u').test(value);
+    } catch (error) {
+      throw new BackendClientError('parse', `Invalid protocol schema pattern at ${path}`, {
+        cause: error,
+      });
+    }
+    if (!matches) {
+      throw new BackendClientError(
+        'parse',
+        `Invalid server ${path}: must match its declared pattern`,
+      );
+    }
+  }
   if (schema['format'] !== 'date-time') return;
   if (!isRfc3339DateTime(value)) {
     throw new BackendClientError('parse', `Invalid server ${path}: must be a date-time`);

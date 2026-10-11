@@ -25,9 +25,10 @@ from typing import TYPE_CHECKING, Protocol
 
 from vs_agent import provider_policy
 from vs_agent.container_python import CONTAINER_PYTHON_HOME, CONTAINER_PYTHON_VERSION
+from vs_sim.api import StreamingCommand, SubprocessStreamingCommand
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
+    from collections.abc import Callable, Collection, Sequence
 
 _DEFAULT_BUILD_TIMEOUT_SECONDS = 1200.0
 _DEFAULT_PUSH_TIMEOUT_SECONDS = 1200.0
@@ -40,6 +41,11 @@ _TASK_IMAGE_REPOSITORY = "vibesys-task-build"
 #: no-op and the agent layer's cache key stays stable.
 _BASE_IMAGE_REPOSITORY = "vibesys-base"
 _AGENT_IMAGE_REPOSITORY = "vibesys-agent-build"
+#: A BuildKit progress line that starts a Dockerfile step: ``#7 [ 2/14] RUN ...``,
+#: or ``#7 [stage 2/14] RUN ...`` in a named stage of a multi-stage build.
+_BUILD_STEP = re.compile(r"^#\d+ \[(?:\S+ )?\s*(\d+)/(\d+)\] (.+)$")
+#: Longest step label reported; a ``RUN`` line can be a whole shell script.
+_STEP_LABEL_LIMIT = 200
 
 #: Where a pushed agent image lives. GHCR because the repository is on GitHub
 #: and it is cloud-neutral for SkyPilot's arbitrary infra targets. Runs
@@ -196,6 +202,48 @@ class ImagePushError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ImageBuildProgress:
+    """How far one image build has come: ``done`` of ``total`` Dockerfile steps.
+
+    ``label`` is the step now running, as Docker names it (``RUN npm install
+    ...``), cut to a bounded length. Observations of one build only move
+    forward; a build of two images (task, then agent) reports each in turn.
+    """
+
+    done: int
+    total: int
+    label: str
+
+
+type BuildProgressSink = Callable[[ImageBuildProgress], None]
+"""Where an image build reports its progress."""
+
+
+class _StepTracker:
+    """Turn a build's BuildKit progress lines into forward-moving step observations."""
+
+    def __init__(self, sink: BuildProgressSink) -> None:
+        self._sink = sink
+        self._done = -1
+
+    def line(self, text: str) -> None:
+        match = _BUILD_STEP.match(text)
+        if match is None:
+            return
+        step, total = int(match.group(1)), int(match.group(2))
+        if not 1 <= step <= total:
+            return
+        done = step - 1
+        if done <= self._done:
+            # A step re-announced (``CACHED``, a parallel stage) is not progress.
+            return
+        self._done = done
+        self._sink(
+            ImageBuildProgress(done=done, total=total, label=match.group(3)[:_STEP_LABEL_LIMIT])
+        )
+
+
+@dataclass(frozen=True)
 class _BuildTarget:
     """Where a Dockerfile and its build context are, and how to tag and name it.
 
@@ -231,13 +279,23 @@ class DockerBuildRunner(Protocol):
         *,
         cwd: Path,
         timeout: float,
+        on_stderr_line: Callable[[str], None] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        """Run one Docker command without a shell."""
+        """Run one Docker command without a shell.
+
+        When ``on_stderr_line`` is given, it receives each line of the
+        command's standard error, in order, while the command runs; the
+        result still carries all of it.
+        """
         ...
 
 
 class SubprocessDockerBuildRunner:
     """Run Docker directly and capture its diagnostics."""
+
+    def __init__(self, streaming: StreamingCommand | None = None) -> None:
+        """Stream a command's stderr through ``streaming`` (a real process by default)."""
+        self._streaming = streaming or SubprocessStreamingCommand()
 
     def run(
         self,
@@ -245,8 +303,13 @@ class SubprocessDockerBuildRunner:
         *,
         cwd: Path,
         timeout: float,
+        on_stderr_line: Callable[[str], None] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run one Docker command without invoking a shell."""
+        if on_stderr_line is not None:
+            return self._streaming.run(
+                argv, cwd=cwd, timeout_seconds=timeout, on_stderr_line=on_stderr_line
+            )
         return subprocess.run(  # noqa: S603  # lint-waiver: LW-010239 [S603]; Docker commands are constructed by the sandbox adapter and never use a shell.
             tuple(argv),
             cwd=cwd,
@@ -265,6 +328,7 @@ def build_task_image(
     base_image: str | None = None,
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
+    on_progress: BuildProgressSink | None = None,
 ) -> str:
     """Build a task Dockerfile and return its immutable Docker image ID.
 
@@ -284,11 +348,15 @@ def build_task_image(
     of naming its own. A task Dockerfile with its own ``FROM`` line ignores an
     unused build arg, so this is safe to pass unconditionally from a caller
     that does not know whether the task Dockerfile uses it.
+
+    ``on_progress``, when given, receives the build's step observations.
     """
     dockerfile = _validated_task_dockerfile(dockerfile_path, timeout)
     runner = command_runner or SubprocessDockerBuildRunner()
     return _build_task_image(
-        dockerfile, base_image=base_image, runner=runner, timeout=timeout
+        dockerfile,
+        base_image=base_image,
+        build=_BuildRun(runner=runner, timeout=timeout, on_progress=on_progress),
     ).image_id
 
 
@@ -305,13 +373,7 @@ def _validated_task_dockerfile(dockerfile_path: Path, timeout: float) -> Path:
     return dockerfile
 
 
-def _build_task_image(
-    dockerfile: Path,
-    *,
-    base_image: str | None,
-    runner: DockerBuildRunner,
-    timeout: float,
-) -> _BuiltImage:
+def _build_task_image(dockerfile: Path, *, base_image: str | None, build: _BuildRun) -> _BuiltImage:
     """Build a validated task Dockerfile and return its tag and immutable ID."""
     extra_build_args = ("--build-arg", f"BASE_IMAGE={base_image}") if base_image is not None else ()
     target = _BuildTarget(
@@ -320,10 +382,10 @@ def _build_task_image(
         image_repository=_TASK_IMAGE_REPOSITORY,
         image_label="task image",
     )
-    return _build_and_inspect(target, extra_build_args, runner=runner, timeout=timeout)
+    return _build_and_inspect(target, extra_build_args, build)
 
 
-def _resolvable_base(base_image: str, *, runner: DockerBuildRunner, timeout: float) -> str:
+def _resolvable_base(base_image: str, build: _BuildRun) -> str:
     """Return a reference to *base_image* that BuildKit resolves locally.
 
     A bare ``sha256:`` image ID (what the headless entrypoint records for a
@@ -339,16 +401,14 @@ def _resolvable_base(base_image: str, *, runner: DockerBuildRunner, timeout: flo
         image_repository=_BASE_IMAGE_REPOSITORY,
         image_label="base image",
     )
-    result = _run_docker(
-        runner, ("docker", "tag", base_image, tag), timeout=timeout, action="tagging", target=target
-    )
+    result = _run_docker(build, ("docker", "tag", base_image, tag), action="tagging", target=target)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "docker tag failed").strip()
         raise TaskImageBuildError.base_tag_failed(base_image, tag, result.returncode, detail)
     return tag
 
 
-def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task image, toolchains, pip extras, injected runner, and timeout independently affect build layers or execution; callers use this public builder directly.
+def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task image, toolchains, pip extras, injected runner, timeout, and progress sink independently affect build layers, execution, or observation; callers use this public builder directly.
     base_image: str,
     *,
     task_dockerfile: Path | None = None,
@@ -356,6 +416,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     pip_extras: Collection[str] = (),
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
+    on_progress: BuildProgressSink | None = None,
 ) -> str:
     """Build the agent layer on top of a task image, and return its image ID.
 
@@ -377,22 +438,26 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     ``toolchains`` is sorted and deduplicated before being rendered, so the
     build args (and therefore the cache key) do not depend on collection
     order.
+
+    ``on_progress``, when given, receives each build's step observations
+    (the task image's, then the agent layer's), parsed from Docker's
+    progress output.
     """
     if timeout <= 0:
         message = "agent image build timeout must be positive"
         raise ValueError(message)
 
     runner = command_runner or SubprocessDockerBuildRunner()
+    build = _BuildRun(runner=runner, timeout=timeout, on_progress=on_progress)
     if task_dockerfile is not None:
         dockerfile = _validated_task_dockerfile(task_dockerfile, timeout)
         base = _build_task_image(
             dockerfile,
-            base_image=_resolvable_base(base_image, runner=runner, timeout=timeout),
-            runner=runner,
-            timeout=timeout,
+            base_image=_resolvable_base(base_image, build),
+            build=build,
         ).tag
     else:
-        base = _resolvable_base(base_image, runner=runner, timeout=timeout)
+        base = _resolvable_base(base_image, build)
 
     build_args: list[str] = ["--build-arg", f"BASE_IMAGE={base}"]
     build_args += ["--build-arg", f"NODE_VERSION={provider_policy.NODE_VERSION}"]
@@ -418,15 +483,20 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
         image_repository=_AGENT_IMAGE_REPOSITORY,
         image_label="agent image",
     )
-    return _build_and_inspect(target, tuple(build_args), runner=runner, timeout=timeout).image_id
+    return _build_and_inspect(target, tuple(build_args), build).image_id
+
+
+@dataclass(frozen=True)
+class _BuildRun:
+    """How every build of one launch runs: its runner, bound, and progress sink."""
+
+    runner: DockerBuildRunner
+    timeout: float
+    on_progress: BuildProgressSink | None = None
 
 
 def _build_and_inspect(
-    target: _BuildTarget,
-    extra_build_args: Sequence[str],
-    *,
-    runner: DockerBuildRunner,
-    timeout: float,
+    target: _BuildTarget, extra_build_args: Sequence[str], build: _BuildRun
 ) -> _BuiltImage:
     """Build one Dockerfile to a unique tag and resolve its immutable ID."""
     image_tag = f"{target.image_repository}:{uuid.uuid4().hex}"
@@ -442,7 +512,11 @@ def _build_and_inspect(
         str(target.context),
     )
     build_result = _run_docker(
-        runner, build_argv, timeout=timeout, action="building", target=target
+        build,
+        build_argv,
+        action="building",
+        target=target,
+        on_stderr_line=None if build.on_progress is None else _StepTracker(build.on_progress).line,
     )
     if build_result.returncode != 0:
         detail = (build_result.stderr or build_result.stdout or "docker build failed").strip()
@@ -456,9 +530,7 @@ def _build_and_inspect(
         "{{.Id}}",
         image_tag,
     )
-    inspect_result = _run_docker(
-        runner, inspect_argv, timeout=timeout, action="inspecting", target=target
-    )
+    inspect_result = _run_docker(build, inspect_argv, action="inspecting", target=target)
     if inspect_result.returncode != 0:
         detail = (inspect_result.stderr or inspect_result.stdout or "docker inspect failed").strip()
         raise TaskImageBuildError.inspect_failed(
@@ -479,19 +551,24 @@ def _build_and_inspect(
 
 
 def _run_docker(
-    runner: DockerBuildRunner,
+    build: _BuildRun,
     argv: Sequence[str],
     *,
-    timeout: float,
     action: str,
     target: _BuildTarget,
+    on_stderr_line: Callable[[str], None] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     try:
-        return runner.run(argv, cwd=target.dockerfile.parent, timeout=timeout)
+        return build.runner.run(
+            argv,
+            cwd=target.dockerfile.parent,
+            timeout=build.timeout,
+            on_stderr_line=on_stderr_line,
+        )
     except FileNotFoundError as exc:
         raise TaskImageBuildError.docker_not_found(action, target) from exc
     except subprocess.TimeoutExpired as exc:
-        raise TaskImageBuildError.docker_timed_out(timeout, action, target) from exc
+        raise TaskImageBuildError.docker_timed_out(build.timeout, action, target) from exc
 
 
 # ---------------------------------------------------------------------------

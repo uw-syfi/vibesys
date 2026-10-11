@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {FakeClock} from '@vibesys/backend-client/testing';
+import {SEEDS, Seeded} from '@vibesys/core-state/testing';
 import {AppLifecycle, type QuitEffect, type QuitEvent, quitStep, RUNNING} from './app-lifecycle.js';
-import {SEEDS, Seeded} from './testing/seeded.js';
 
 /** An app whose host release the test settles by hand. */
 function world(boundMs = 5_000) {

@@ -1036,6 +1036,7 @@ const EVENT_DATA_HANDLERS = {
   output: ignoredEventData,
   server_ready: ignoredEventData,
   run_started: ignoredEventData,
+  run_startup_progress: ignoredEventData,
   run_failed: runEventData(applyTerminalExecutionStatus),
   run_interrupted: runEventData(applyTerminalExecutionStatus),
   run_status_changed: runEventData(

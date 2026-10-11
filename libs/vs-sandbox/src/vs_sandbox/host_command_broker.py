@@ -206,11 +206,11 @@ class RunRoots:
     """The directories a request may run in.
 
     *workspaces* are directories a command may run in, each confined to
-    itself; *worktree_roots* hold one candidate workspace per child.
+    itself. A broker serves one session, so it lists that session's own
+    workspace and never a sibling candidate's.
     """
 
     workspaces: Sequence[Path]
-    worktree_roots: Sequence[Path] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,7 +375,6 @@ class HostCommandBroker:
         self._network = transport.network
         self._threads = transport.threads
         self._workspaces = tuple(path.resolve() for path in roots.workspaces)
-        self._worktree_roots = tuple(path.resolve() for path in roots.worktree_roots)
         self._gpu = gpu
         self._gates = gates
         self._launcher: GpuLauncher | None = None if gpu is None else gpu.launcher
@@ -565,9 +564,6 @@ class HostCommandBroker:
         for workspace in self._workspaces:
             if cwd == workspace or workspace in cwd.parents:
                 return workspace
-        for root in self._worktree_roots:
-            if root in cwd.parents:
-                return root / cwd.relative_to(root).parts[0]
         raise HostCommandBrokerError.outside_workspace()
 
 

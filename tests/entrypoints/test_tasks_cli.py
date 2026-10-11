@@ -9,7 +9,8 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from entrypoints import launcher
-from entrypoints.tasks import TaskList, TaskSummary, run
+from entrypoints.tasks import run
+from server.host_api import TaskList, TaskSummary
 from vs_sim.api.testing import FakeForegroundLauncher, ForegroundScript
 
 if TYPE_CHECKING:

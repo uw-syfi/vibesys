@@ -35,7 +35,7 @@ from vs_agent.api.images import agent_image
 from vs_agent.api.testing import DockerResult, docker_result
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
+    from collections.abc import Callable, Collection, Sequence
 
 _AGENT_IMAGE_DIR = Path(str(importlib.resources.files("vs_agent").joinpath("images")))
 _AGENT_DOCKERFILE = _AGENT_IMAGE_DIR / "agent.Dockerfile"
@@ -65,7 +65,9 @@ class _FakeRunner:
         *,
         cwd: Path,
         timeout: float,
+        on_stderr_line: Callable[[str], None] | None = None,
     ) -> DockerResult:
+        del on_stderr_line
         normalized = tuple(argv)
         self.calls.append((normalized, cwd, timeout))
         if normalized[1] == "build":

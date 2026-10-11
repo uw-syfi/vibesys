@@ -2,6 +2,8 @@
 import type {JSX} from 'react';
 import type {GatewayConnectAction, GatewayConnectState} from '../state/gateway-connect.js';
 
+const MESSAGE_ID = 'gateway-url-message';
+
 export function GatewayForm({
   state,
   send,
@@ -12,8 +14,9 @@ export function GatewayForm({
   const connecting = state.kind === 'connecting';
   const connected = state.kind === 'connected';
   const canRetry = state.kind === 'editing' && state.retryTarget !== null;
-  const error = state.kind === 'editing' ? state.error : null;
-  const announcement = connecting ? 'Connecting…' : (error ?? '');
+  const feedback = state.kind === 'editing' ? state.feedback : null;
+  const announcement = connecting ? 'Connecting…' : (feedback?.message ?? '');
+  const invalid = feedback?.kind === 'failure';
   return (
     <form
       className="gateway-connect"
@@ -30,11 +33,21 @@ export function GatewayForm({
           value={state.url}
           onChange={event => send({type: 'edit', value: event.target.value})}
           disabled={connecting || connected}
+          aria-describedby={announcement === '' ? undefined : MESSAGE_ID}
+          aria-invalid={invalid ? true : undefined}
           placeholder="http://127.0.0.1:8765/?token=..."
           spellCheck={false}
         />
         {connecting ? (
-          <button type="button" onClick={() => send({type: 'cancel'})}>
+          <button
+            type="button"
+            onClick={event => {
+              // This button becomes the form's submit button during the same click. Prevent the
+              // browser's post-handler default action from submitting the newly rendered Retry.
+              event.preventDefault();
+              send({type: 'cancel'});
+            }}
+          >
             Cancel
           </button>
         ) : (
@@ -44,7 +57,8 @@ export function GatewayForm({
         )}
       </div>
       <p
-        className={error === null ? 'gateway-connect-status' : 'gateway-connect-error'}
+        id={MESSAGE_ID}
+        className={invalid ? 'gateway-connect-error' : 'gateway-connect-status'}
         role="status"
         aria-live="polite"
         aria-atomic={true}

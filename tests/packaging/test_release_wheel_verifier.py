@@ -188,6 +188,7 @@ Tag: py3-none-manylinux_2_28_x86_64
 """
     files[f"{DIST_INFO}/entry_points.txt"] = (
         b"[console_scripts]\nvibesys = entrypoints.launcher:main\n"
+        b"vibesys-host-helper = entrypoints.host_helper:main\n"
     )
     files[f"{DIST_INFO}/top_level.txt"] = ("\n".join(FRAMEWORK_PACKAGES) + "\n").encode()
     files[f"{DIST_INFO}/licenses/LICENSE"] = (source_root / "LICENSE").read_bytes()

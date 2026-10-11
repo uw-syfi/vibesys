@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
+import {Seeded} from '@vibesys/core-state/testing';
 import {parseTaskList, taskListProblem} from './task-list.js';
-import {Seeded} from './testing/seeded.js';
 
 describe('parseTaskList', () => {
   test('reads the tasks in order', () => {

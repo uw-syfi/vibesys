@@ -1,0 +1,72 @@
+{
+  "id": "helper-invalid-request",
+  "protocol": "host-helper",
+  "title": "Strict parsing within a version",
+  "description": "A request with a field the negotiated version does not define is answered invalid_request with its request id; a line that is not JSON is answered invalid_request with no request id.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "ping",
+        "request_id": "x",
+        "deadline_ms": 10000,
+        "surprise": true
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "x",
+        "code": "invalid_request"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "ping"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": null,
+        "code": "invalid_request"
+      }
+    }
+  ]
+}
