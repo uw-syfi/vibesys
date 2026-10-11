@@ -3,8 +3,8 @@
  * capability through the `bootstrap` the composition injects, and hands a connection to the page owner, which remembers it
  * and goes live.
  */
+import {createStore, type Store} from '@vibesys/core-state';
 import type {GatewayBootstrapTarget, GatewayConnection} from '../../../entities/gateway.js';
-import {createStore, type Store} from '../../../shared/store.js';
 import {
   type GatewayConnectAction,
   type GatewayConnectState,

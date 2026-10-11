@@ -2,10 +2,11 @@
  * Random window states (`ChromeState`) for model-based tests of the title strip and the welcome
  * stores, drawn from a `Seeded` generator.
  */
+
+import type {Seeded} from '@vibesys/core-state/testing';
 import {type StopView, stopKey} from '../stop-run.js';
 import type {ConnectionStatus} from '../supervisor.js';
 import type {ChromeState} from '../welcome-protocol.js';
-import type {Seeded} from './seeded.js';
 
 const CONNECTIONS: readonly ConnectionStatus[] = [
   {kind: 'connecting'},

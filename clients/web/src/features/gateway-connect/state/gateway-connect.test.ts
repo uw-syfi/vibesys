@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {checkModel} from '../../../shared/testing/model.js';
+import {checkModel} from '@vibesys/core-state/testing';
 import {
   type GatewayConnectAction,
   type GatewayConnectRequest,
@@ -43,10 +43,9 @@ describe('gatewayConnectStep', () => {
         }
       },
       issues: request => (request.kind === 'bootstrap' ? request.token : null),
-      reply: (state, action) =>
-        action.type === 'bootstrap-reply'
-          ? {token: action.token, awaited: state.kind === 'connecting' ? state.token : null}
-          : null,
+      awaited: state => ({bootstrap: state.kind === 'connecting' ? state.token : null}),
+      reply: action =>
+        action.type === 'bootstrap-reply' ? {slot: 'bootstrap', token: action.token} : null,
       invariants: gatewayConnectInvariants,
       also: (before, action, after, requests: readonly GatewayConnectRequest[]) => {
         // A submit while an exchange is pending, or after the hand-off, asks for nothing.

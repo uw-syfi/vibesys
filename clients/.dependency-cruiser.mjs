@@ -16,6 +16,9 @@ const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
 const BACKEND_CLIENT_TEST_ONLY = '^backend-client/src/(?:test-support/|testing/)';
+const CORE_STATE_TEST_ONLY = '^core-state/src/testing/';
+// A package's own test-support directory (`desktop/src/testing/`): Fakes that only tests import.
+const PACKAGE_TEST_SUPPORT = '^[^/]+/src/testing/';
 const BACKEND_CLIENT_NODE_TEST_SUPPORT =
   '^backend-client/src/(?:test-support/|testing/.*\\.test-helper\\.[cm]?[jt]sx?$)';
 
@@ -254,6 +257,14 @@ export default {
       // Test support may build on itself, e.g. the testing entry re-exporting its Fakes.
       from: {path: SCANNED, pathNot: [TEST_FILE, BACKEND_CLIENT_TEST_ONLY]},
       to: {path: BACKEND_CLIENT_TEST_ONLY},
+    },
+    {
+      // The store model checker and its seeded generator are test support for every frontend's
+      // screen stores; only tests and other test support reach them.
+      name: 'production-code-does-not-import-core-state-test-support',
+      severity: 'error',
+      from: {path: SCANNED, pathNot: [TEST_FILE, PACKAGE_TEST_SUPPORT]},
+      to: {path: CORE_STATE_TEST_ONLY},
     },
     {
       // Core state is below every frontend, not only the two that happened to exist when the rule

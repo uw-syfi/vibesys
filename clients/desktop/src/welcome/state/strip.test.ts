@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
+import {Seeded} from '@vibesys/core-state/testing';
 import {RUN_ID_UNAVAILABLE, resumeDecision} from '../../resume-run.js';
 import {randomChrome} from '../../testing/fake-chrome.js';
-import {Seeded} from '../../testing/seeded.js';
 import type {ChromeState} from '../../welcome-protocol.js';
 import {runLink, stripControls} from './strip.js';
 

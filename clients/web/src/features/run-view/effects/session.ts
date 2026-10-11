@@ -4,18 +4,24 @@
  * injects, and turns the browser's lifecycle (visibility, network) into actions. Decisions live in
  * the core; this module only does what the core asks and reports what happened.
  */
-import {type CoreState, hasRunEnded, initialCoreState} from '@vibesys/core-state';
+import {
+  type CoreState,
+  createStore,
+  hasRunEnded,
+  initialCoreState,
+  type Store,
+} from '@vibesys/core-state';
 import type {WebSessionState} from '../../../entities/connection.js';
 import {type RunAction, runStep} from '../../../entities/run.js';
 import type {RunConnection, TransportHooks} from '../../../platform/backend.js';
 import type {BrowserLifecycle} from '../../../platform/lifecycle.js';
-import {createStore, type Store} from '../../../shared/store.js';
 import {
   type Reachability,
   SESSION_INITIAL,
   type SessionAction,
   type SessionRequest,
   type SessionState,
+  type SnapshotResult,
   sessionStep,
 } from '../state/session.js';
 
@@ -108,7 +114,11 @@ export class WebSession {
     switch (request.kind) {
       case 'load-snapshot': {
         const {token} = request;
-        void this.#loadSnapshot().then(error => dispatch({type: 'snapshot-reply', token, error}));
+        void this.#loadSnapshot().then(result => dispatch({type: 'snapshot-reply', token, result}));
+        return;
+      }
+      case 'apply-snapshot': {
+        this.store.dispatch({type: 'snapshot', snapshot: request.snapshot});
         return;
       }
       case 'subscribe': {
@@ -147,8 +157,8 @@ export class WebSession {
           });
           return;
         }
-        void this.#loadSnapshot().then(error =>
-          dispatch({type: 'refresh-reply', token, outcome: {kind: 'snapshot', error}}),
+        void this.#loadSnapshot().then(result =>
+          dispatch({type: 'refresh-reply', token, outcome: {kind: 'snapshot', result}}),
         );
         return;
       }
@@ -173,14 +183,12 @@ export class WebSession {
     }
   }
 
-  /** Load the snapshot into the run fold; the error, or null on success. */
-  async #loadSnapshot(): Promise<Error | null> {
+  /** Load the snapshot; the core decides whether the run fold applies it. */
+  async #loadSnapshot(): Promise<SnapshotResult> {
     try {
-      const snapshot = await this.#connection.loadSnapshot();
-      this.store.dispatch({type: 'snapshot', snapshot});
-      return null;
+      return {ok: true, snapshot: await this.#connection.loadSnapshot()};
     } catch (error) {
-      return toError(error);
+      return {ok: false, error: toError(error)};
     }
   }
 }

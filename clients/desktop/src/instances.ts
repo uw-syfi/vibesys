@@ -10,7 +10,7 @@
  * `incompatible` with the two versions, never as a schema error the user cannot act on.
  */
 import {PROTOCOL_VERSION} from '@vibesys/backend-client';
-import {INSTANCE_ID} from './ids.js';
+import {isInstanceId} from './ids.js';
 
 /** A live detached server this client can talk to. */
 interface LiveInstance {
@@ -121,7 +121,7 @@ export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRe
     const vibesysVersion = record['vibesys_version'];
     return {
       kind: 'incompatible',
-      id: typeof id === 'string' && INSTANCE_ID.test(id) ? id : null,
+      id: isInstanceId(id) ? id : null,
       protocolVersion,
       vibesysVersion: typeof vibesysVersion === 'string' ? vibesysVersion : null,
     };
@@ -394,7 +394,7 @@ function string(record: Record<string, unknown>, key: string, path: string): str
 }
 
 function instanceId(value: unknown, path: string): string {
-  if (typeof value !== 'string' || !INSTANCE_ID.test(value)) {
+  if (!isInstanceId(value)) {
     throw new RecordError(`${path} must be 12 lowercase hex digits`);
   }
   return value;

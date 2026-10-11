@@ -8,9 +8,10 @@
  * process stops the run as soon as its record appears instead of attaching, and the window stays on
  * the welcome view.
  */
+
+import {only, type Step} from '@vibesys/core-state';
 import type {HostKey} from '../../host-settings.js';
 import type {StartOutcome, WelcomeHost, WelcomeResult} from '../../welcome-protocol.js';
-import {only, type Step} from './step.js';
 
 interface SheetHost {
   readonly key: HostKey;
@@ -120,14 +121,7 @@ export function awaited(state: StartState): {tasks: number | null; start: number
 
 /** What must hold after every step; returns the violations (empty when none). */
 export function startInvariants(state: StartState): string[] {
-  const problems: string[] = [];
-  if (state.kind === 'editing') problems.push(...taskProblems(state));
-  const tokens = Object.values(awaited(state)).filter(token => token !== null);
-  if (tokens.some(token => token >= state.next)) problems.push('token not issued');
-  if (startable(state) !== null && (state.kind !== 'editing' || state.tasks.kind !== 'listed')) {
-    problems.push('Start enabled without a listed task');
-  }
-  return problems;
+  return state.kind === 'editing' ? taskProblems(state) : [];
 }
 
 type Editing = Extract<StartState, {kind: 'editing'}>;

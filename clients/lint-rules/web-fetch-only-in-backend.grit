@@ -1,16 +1,19 @@
 // The web run page has one path to the backend: `web/src/platform/backend.ts`. It is the only
-// module that calls `fetch`; dependency-cruiser holds backend-client's runtime imports to it too.
+// module that uses `fetch`; dependency-cruiser holds backend-client's runtime imports to it too.
+// Any reference to the global `fetch` counts, not only a call: `const f = fetch; f(url)` reaches
+// the network as surely as `fetch(url)` does. A property named `fetch` (`client.fetch()`) is not
+// the global and is not matched.
 language js;
 
 or {
-  `fetch($args)`,
+  JsIdentifierExpression(name = `fetch`),
   `globalThis.fetch`,
   `window.fetch`,
   `self.fetch`
-} as $call where {
+} as $reference where {
   register_diagnostic(
-    span = $call,
-    message = "Only web/src/platform/backend.ts calls fetch. Add the request there and inject it where it is needed.",
+    span = $reference,
+    message = "Only web/src/platform/backend.ts uses fetch. Add the request there and inject it where it is needed.",
     severity = "error"
   )
 }

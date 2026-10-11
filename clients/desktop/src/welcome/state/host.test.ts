@@ -1,8 +1,7 @@
 import {describe, expect, test} from 'bun:test';
+import {checkModel, Seeded} from '@vibesys/core-state/testing';
 import type {HostKey} from '../../host-settings.js';
 import {randomChrome} from '../../testing/fake-chrome.js';
-import {checkModel} from '../../testing/model.js';
-import {Seeded} from '../../testing/seeded.js';
 import type {ChromeState, WelcomeHost, WelcomeResult} from '../../welcome-protocol.js';
 import {
   type HostAction,
@@ -138,14 +137,11 @@ describe('host panel', () => {
       step: hostStep,
       action: randomHostAction,
       issues: request => request.token,
-      reply: (state, action) => {
-        const awaitedNow = hostAwaited(state);
-        if (action.type === 'host-reply') return {token: action.token, awaited: awaitedNow.host};
-        if (action.type === 'checkout-reply') {
-          return {token: action.token, awaited: awaitedNow.checkout};
-        }
-        if (action.type === 'sign-in-reply')
-          return {token: action.token, awaited: awaitedNow.signIn};
+      awaited: hostAwaited,
+      reply: action => {
+        if (action.type === 'host-reply') return {slot: 'host', token: action.token};
+        if (action.type === 'checkout-reply') return {slot: 'checkout', token: action.token};
+        if (action.type === 'sign-in-reply') return {slot: 'signIn', token: action.token};
         return null;
       },
       invariants: hostInvariants,

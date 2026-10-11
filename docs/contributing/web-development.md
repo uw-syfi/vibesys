@@ -166,15 +166,17 @@ uv run python -m entrypoints.web live --project /path/to/project --task TASK --o
 - `entities/` holds domain values and pure functions shared by features (the
   run fold, connection state, gateway URL policy). No I/O.
 - `platform/` holds system services: `backend.ts` is the only module that
-  imports backend-client runtime values or calls `fetch`
+  imports backend-client runtime values or uses `fetch`
   (`lint-rules/web-fetch-only-in-backend.grit`), plus the browser lifecycle,
   tab storage, and the desktop bridge transport.
-- `shared/` is domain-free: the store container and the seeded model-test
-  helpers.
+- `shared/` is for domain-free utilities; it is empty today.
 
-The reducers are tested model-based, like the desktop welcome view's: seeded
-random action and reply sequences, checking each reducer's invariants and that
-no stale reply is applied after every step.
+The store kernel (`Step`, `Reducer`, `createStore`) comes from
+`@vibesys/core-state`, shared with the desktop welcome view. The reducers are
+tested model-based with `checkModel` from `@vibesys/core-state/testing`: seeded
+random action and reply sequences, checking after every step that each awaited
+token was issued and no two slots await one, that no stale reply is applied,
+and each reducer's own invariants and properties.
 
 ## Gateway HTTP hygiene
 
@@ -516,7 +518,8 @@ The welcome view (`clients/desktop/src/welcome/`) is layered like the TUI, and
 The stores are tested model-based: seeded random sequences of user actions and
 replies (stale, duplicated, reordered) folded through each reducer, checking
 its invariants and that no stale reply is applied after every step
-(`clients/desktop/src/testing/model.ts`).
+(`checkModel` from `@vibesys/core-state/testing`, which also checks that every
+awaited token was issued). The stores run on core-state's store kernel.
 
 The main process has one owner of process-wide state, `AppLifecycle`
 (`clients/desktop/src/app-lifecycle.ts`): a single-instance lock (a second

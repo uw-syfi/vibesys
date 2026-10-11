@@ -4,6 +4,8 @@
  * wired here (replayed events fold into the run view; a connected gateway goes to the page owner).
  * Wiring only; the entries (`main.tsx`, `desktop-main.tsx`) decide which page to compose.
  */
+
+import type {Store} from '@vibesys/core-state';
 import type {JSX} from 'react';
 import {useSyncExternalStore} from 'react';
 import type {GatewayBootstrapTarget, GatewayConnection} from '../entities/gateway.js';
@@ -26,7 +28,6 @@ import {
   type WebSession,
 } from '../features/run-view/index.js';
 import {bootstrapGateway, fetchReplayFixture} from '../platform/backend.js';
-import type {Store} from '../shared/store.js';
 
 function useStore<S>(store: Pick<Store<S, unknown>, 'getState' | 'subscribe'>): S {
   return useSyncExternalStore(store.subscribe, store.getState, store.getState);

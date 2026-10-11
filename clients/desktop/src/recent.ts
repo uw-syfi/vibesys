@@ -4,7 +4,7 @@
  * its host's live registry, never stored: a run is live only while a registry record proves it.
  */
 import {type HostKey, hostFromKey, validHostPath} from './host-settings.js';
-import {INSTANCE_ID, RUN_ID, TASK_NAME} from './ids.js';
+import {isInstanceId, isRunId, isTaskName} from './ids.js';
 import {
   type InstanceListing,
   type InstanceRecord,
@@ -43,11 +43,14 @@ class RecentError extends Error {
 
 const KEYS = ['host', 'project', 'task', 'instanceId', 'runId', 'attachedAt'] as const;
 
-function nullable(value: unknown, pattern: RegExp, path: string): string | null {
+function nullable(
+  value: unknown,
+  valid: (value: unknown) => value is string,
+  what: string,
+  path: string,
+): string | null {
   if (value === null) return null;
-  if (typeof value !== 'string' || !pattern.test(value)) {
-    throw new RecentError(`${path} must be null or match ${pattern.source}`);
-  }
+  if (!valid(value)) throw new RecentError(`${path} must be null or ${what}`);
   return value;
 }
 
@@ -69,7 +72,7 @@ function parseRun(value: unknown, path: string): RecentRun {
     throw new RecentError(`${path}.host: ${(error as Error).message}`);
   }
   const instanceId = record['instanceId'];
-  if (typeof instanceId !== 'string' || !INSTANCE_ID.test(instanceId)) {
+  if (!isInstanceId(instanceId)) {
     throw new RecentError(`${path}.instanceId must be 12 hex digits`);
   }
   const attachedAt = record['attachedAt'];
@@ -85,9 +88,9 @@ function parseRun(value: unknown, path: string): RecentRun {
   return {
     host: host as HostKey,
     project,
-    task: nullable(record['task'], TASK_NAME, `${path}.task`),
+    task: nullable(record['task'], isTaskName, 'a task name', `${path}.task`),
     instanceId,
-    runId: nullable(record['runId'], RUN_ID, `${path}.runId`),
+    runId: nullable(record['runId'], isRunId, 'a run id', `${path}.runId`),
     attachedAt,
   };
 }

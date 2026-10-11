@@ -5,12 +5,13 @@
  * (`connected`), which remembers it and goes live. Pending attempts can be cancelled; failed and
  * cancelled attempts retain their validated target privately in state for an explicit retry.
  */
+
+import {only, type Step} from '@vibesys/core-state';
 import {
   type GatewayBootstrapTarget,
   type GatewayConnection,
   targetFromCapability,
 } from '../../../entities/gateway.js';
-import {only, type Step} from '../../../shared/step.js';
 
 const CANCELLED_ERROR = 'Gateway connection cancelled. Retry when ready.';
 
@@ -85,9 +86,8 @@ export function gatewayConnectStep(
 
 export function gatewayConnectInvariants(state: GatewayConnectState): string[] {
   const problems: string[] = [];
-  if (state.kind === 'connecting') {
-    if (state.token >= state.next) problems.push('token not issued');
-    if (state.target.bootstrapUrl === null) problems.push('connecting without a capability');
+  if (state.kind === 'connecting' && state.target.bootstrapUrl === null) {
+    problems.push('connecting without a capability');
   }
   if (state.kind === 'editing' && state.retryTarget?.bootstrapUrl === '') {
     problems.push('retry without a capability');

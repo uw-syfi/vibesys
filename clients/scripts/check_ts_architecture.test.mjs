@@ -46,6 +46,7 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async t =
           '@vibesys/backend-client': ['backend-client/src/index.ts'],
           '@vibesys/backend-client/testing': ['backend-client/src/testing/index.ts'],
           '@vibesys/core-state': ['core-state/src/index.ts'],
+          '@vibesys/core-state/testing': ['core-state/src/testing/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
           '@vibesys/web': ['web/src/index.ts'],
         },
@@ -115,6 +116,22 @@ const VALID_FILES = {
     "import '../test-support/expect.js';\nimport './fake-clock.js';\n",
   'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
   'core-state/src/shared-fixtures.test.ts': "import '@vibesys/backend-client/testing';\n",
+  'core-state/src/testing/index.ts': "import './model.js';\n",
+  'core-state/src/testing/model.ts': "import '../index.js';\n",
+  // The desktop: a main process whose one process module owns sockets and child processes, and the
+  // welcome view's layers (composition root -> effects -> pure state; ui renders state by type).
+  // Its own test support may build on core-state's.
+  'desktop/src/main.ts': "import './process.js';\nimport 'electron';\n",
+  'desktop/src/process.ts': "import 'node:child_process';\nimport 'node:net';\n",
+  'desktop/src/welcome/main.tsx': "import './effects/stores.js';\nimport './ui/view.js';\n",
+  'desktop/src/welcome/effects/stores.ts':
+    "import '../state/start.js';\nimport '@vibesys/core-state';\nimport '@vibesys/backend-client';\n",
+  'desktop/src/welcome/state/start.ts':
+    "import '@vibesys/core-state';\nimport type {} from '@vibesys/backend-client';\n",
+  'desktop/src/welcome/ui/view.ts': "import type {} from '../state/start.js';\n",
+  'desktop/src/testing/fake-chrome.ts': "import type {} from '@vibesys/core-state/testing';\n",
+  'desktop/src/welcome/state/start.test.ts':
+    "import '@vibesys/core-state/testing';\nimport '../../testing/fake-chrome.js';\nimport 'node:fs';\n",
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
   // The web run page's layers, each reaching only down: the composition enters a feature through
@@ -129,6 +146,8 @@ const VALID_FILES = {
   'web/src/features/replay/state/replay.ts':
     "import '@vibesys/core-state';\nimport type {} from '@vibesys/backend-client';\nimport '../../../entities/run.js';\n",
   'web/src/features/replay/ui/view.ts': "import '../state/replay.js';\n",
+  'web/src/features/replay/state/replay.test.ts':
+    "import '@vibesys/core-state/testing';\nimport '../../../app/compose.js';\n",
   'web/src/entities/run.ts': "import '@vibesys/core-state';\nimport '../shared/store.js';\n",
   'web/src/platform/backend.ts': "import '@vibesys/backend-client';\n",
   'web/src/shared/store.ts': '',
@@ -151,6 +170,74 @@ const VALID_FILES = {
 };
 
 const RULE_CASES = [
+  {
+    rule: 'desktop-welcome-state-is-pure',
+    files: {'desktop/src/welcome/state/start.ts': "import '../effects/stores.js';\n"},
+  },
+  {
+    rule: 'desktop-welcome-state-is-pure',
+    files: {'desktop/src/welcome/state/start.ts': "import '@vibesys/backend-client';\n"},
+  },
+  {
+    rule: 'desktop-welcome-core-and-ui-have-no-node-runtime',
+    files: {'desktop/src/welcome/ui/view.ts': "import 'node:path';\n"},
+  },
+  {
+    rule: 'desktop-welcome-ui-does-not-depend-on-shell',
+    files: {'desktop/src/welcome/ui/view.ts': "import '../effects/stores.js';\n"},
+  },
+  {
+    rule: 'desktop-welcome-effects-do-not-import-ui',
+    files: {'desktop/src/welcome/effects/stores.ts': "import '../ui/view.js';\n"},
+  },
+  {
+    rule: 'renderers-do-not-import-electron',
+    files: {'desktop/src/welcome/effects/stores.ts': "import 'electron';\n"},
+  },
+  {
+    rule: 'renderers-do-not-import-electron',
+    files: {'web/src/platform/backend.ts': "import 'electron';\n"},
+  },
+  {
+    rule: 'desktop-and-web-confine-sockets-and-processes',
+    files: {'desktop/src/main.ts': "import 'node:child_process';\n"},
+  },
+  {
+    rule: 'desktop-and-web-confine-sockets-and-processes',
+    files: {'web/src/platform/backend.ts': "import 'net';\n"},
+  },
+  {
+    rule: 'desktop-does-not-depend-on-peer-frontends',
+    files: {'desktop/src/main.ts': "import '../../web/src/index.js';\n"},
+  },
+  {
+    rule: 'web-features-does-not-import-layers-above',
+    files: {'web/src/features/replay/state/replay.ts': "import '../../../app/compose.js';\n"},
+  },
+  {
+    rule: 'web-entities-does-not-import-layers-above',
+    files: {'web/src/entities/run.ts': "import '../features/replay/index.js';\n"},
+  },
+  {
+    rule: 'web-layers-do-not-import-the-package-surface',
+    files: {'web/src/platform/backend.ts': "import '../index.js';\n"},
+  },
+  {
+    rule: 'production-code-does-not-import-core-state-test-support',
+    files: {'web/src/features/replay/state/replay.ts': "import '@vibesys/core-state/testing';\n"},
+  },
+  {
+    rule: 'production-code-does-not-import-core-state-test-support',
+    files: {'desktop/src/welcome/state/start.ts': "import '@vibesys/core-state/testing';\n"},
+  },
+  {
+    rule: 'core-state-has-no-node-runtime',
+    files: {'core-state/src/index.ts': "import 'node:fs';\n"},
+  },
+  {
+    rule: 'core-state-has-no-ui-runtime',
+    files: {'core-state/src/index.ts': "import '@opentui/core';\n"},
+  },
   {
     rule: 'web-shared-does-not-import-layers-above',
     files: {'web/src/shared/store.ts': "import '../entities/run.js';\n"},
@@ -386,6 +473,7 @@ async function violatedRules(t, files) {
           '@vibesys/backend-client': ['backend-client/src/index.ts'],
           '@vibesys/backend-client/testing': ['backend-client/src/testing/index.ts'],
           '@vibesys/core-state': ['core-state/src/index.ts'],
+          '@vibesys/core-state/testing': ['core-state/src/testing/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
           '@vibesys/web': ['web/src/index.ts'],
         },
@@ -395,7 +483,10 @@ async function violatedRules(t, files) {
   await writeExternalPackage(root, '@opentui/core');
   await writeExternalPackage(root, 'declared-package');
   await writeExternalPackage(root, 'undeclared-package');
-  const declared = {devDependencies: {'declared-package': '1.0.0', '@opentui/core': '1.0.0'}};
+  await writeExternalPackage(root, 'electron');
+  const declared = {
+    devDependencies: {'declared-package': '1.0.0', '@opentui/core': '1.0.0', electron: '1.0.0'},
+  };
   await writeFile(join(root, 'package.json'), JSON.stringify(declared));
   // Each package declares the same externals, because `production-dependencies-are-declared`
   // resolves a declaration against the manifest nearest the importing module.
@@ -426,6 +517,15 @@ async function violatedRules(t, files) {
 
 test('valid layering produces no violations', async t => {
   assert.deepEqual(await violatedRules(t, VALID_FILES), []);
+});
+
+test('every dependency-cruiser rule has a failing fixture', async () => {
+  const options = await extractDepcruiseOptions(CONFIG);
+  const covered = new Set(RULE_CASES.map(({rule}) => rule));
+  const uncovered = options.ruleSet.forbidden
+    .map(({name}) => name)
+    .filter(name => !covered.has(name));
+  assert.deepEqual(uncovered, []);
 });
 
 for (const {rule, files} of RULE_CASES) {

@@ -7,9 +7,10 @@
  * row, or the main process), never through a URL. The panel reloads, keeping what it shows, when
  * the window comes back from a run (the run's host is shown) and while a stop is ending (`tick`).
  */
+
+import {only, type Step} from '@vibesys/core-state';
 import type {HostKey} from '../../host-settings.js';
 import type {ChromeState, WelcomeHost, WelcomeResult} from '../../welcome-protocol.js';
-import {only, type Step} from './step.js';
 
 /** The checkout form: "Where is your VibeSys checkout on HOST?". */
 export interface CheckoutForm {
@@ -114,9 +115,6 @@ export function hostInvariants(state: HostState): string[] {
     if (panel.data.checkout === null && panel.checkout?.cancellable === true) {
       problems.push('the first checkout form can be cancelled');
     }
-  }
-  for (const token of Object.values(hostAwaited(state))) {
-    if (token !== null && token >= state.next) problems.push(`token ${token} not issued`);
   }
   return problems;
 }

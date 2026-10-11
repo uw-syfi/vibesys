@@ -322,6 +322,48 @@ describe('WebSession', () => {
     await session.close();
   });
 
+  test('regression: a late start-up snapshot never overwrites a newer refresh snapshot', async () => {
+    // The shell used to fold each loaded snapshot before the core checked its reply, so the
+    // start-up snapshot, answered after an overlapping refresh's, rolled the run's status back.
+    // Both are at one sequence, where the run fold itself cannot tell which is newer.
+    const older = snapshotResponse({sequence: 0, status: 'running'});
+    const newer = snapshotResponse({sequence: 0, status: 'paused'});
+    for (const startupFirst of [false, true]) {
+      const lifecycle = new FakeLifecycle();
+      const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+      const startup = deferred<ProtocolResponse>();
+      const refresh = deferred<ProtocolResponse>();
+      transport.snapshots.push(startup.promise, refresh.promise);
+      // The stream subscribes without a bootstrap batch, so only the snapshots move the fold.
+      transport.silentDials = 1;
+      const started = session.start();
+      lifecycle.emit('online');
+      expect(transport.requests).toHaveLength(2);
+
+      const status = () => session.store.getState().status;
+      const answerStartup = async () => {
+        startup.resolve(older);
+        await started;
+      };
+      const answerRefresh = async () => {
+        refresh.resolve(newer);
+        await waitForSession(session, () => status() === 'paused');
+      };
+      if (startupFirst) {
+        await answerStartup();
+        await answerRefresh();
+      } else {
+        await answerRefresh();
+        await answerStartup();
+      }
+      expect({startupFirst, status: status()}).toEqual({
+        startupFirst,
+        status: 'paused',
+      });
+      await session.close();
+    }
+  });
+
   test('promotes an overlapping lifecycle retry to an explicit reattach', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
