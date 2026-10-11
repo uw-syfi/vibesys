@@ -27,7 +27,7 @@
       header .brand { font-weight: 600; color: var(--muted); }
       header .grow { flex: 1; }
       header > * { flex-shrink: 0; white-space: nowrap; }
-      header #conn, header #strip-stop-state { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      header #conn, header #strip-stop-state, header #strip-resume-state { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       button, input { font: inherit; color: inherit; -webkit-app-region: no-drag; }
       button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
       button:hover { background: var(--hover); }
@@ -83,6 +83,7 @@
       <button id="host-chip" class="chip" type="button" hidden></button>
       <span id="conn" class="muted"></span>
       <span id="strip-stop-state" class="muted"></span>
+      <span id="strip-resume-state" class="muted"></span>
       <span class="grow"></span>
       <button id="strip-stop" type="button" hidden>Stop run</button>
       <button id="strip-force" type="button" hidden>Force stop</button>

@@ -1,5 +1,12 @@
 import {describe, expect, test} from 'bun:test';
 import {parseInstanceRecord} from './instances.js';
+import {
+  exactResumeRunId,
+  ResumeRequestError,
+  RUN_ID_UNAVAILABLE,
+  resumeArguments,
+  resumeDecision,
+} from './resume-run.js';
 import {type StopView, stopKey} from './stop-run.js';
 import {parseTaskList} from './task-list.js';
 import {fakeRecord} from './testing/fake-record.js';
@@ -236,23 +243,106 @@ function chromeState(random: () => number): ChromeState {
 }
 
 describe('stripControls', () => {
-  test('regression: an ended run offers Resume and never Retry', () => {
+  test('regression: an ended run offers Resume only for its exact id and never Retry', () => {
     const random = generator(3);
     for (let round = 0; round < 500; round += 1) {
       const state = chromeState(random);
       const controls = stripControls(state);
-      if (controls.resume) {
+      if (controls.resume !== null) {
         expect(controls.retry).toBe(false);
         expect(controls.stop).toBe(false);
         expect(controls.force).toBe(false);
       }
-      if (state.attached?.ended === true) expect(controls.resume).toBe(true);
+      if (state.attached?.ended === true) {
+        expect(controls.resume).toEqual(resumeDecision(state.attached.runId));
+      }
       if (state.attached === null) expect(Object.values(controls).some(Boolean)).toBe(false);
       expect(controls.back).toBe(state.attached !== null && state.mode === 'welcome');
       if (controls.stop) expect(state.attached?.instanceId).not.toBeNull();
     }
   });
+
+  test('an ended run with no id explains why Resume is unavailable', () => {
+    const state: ChromeState = {
+      mode: 'welcome',
+      attached: {
+        host: 'local',
+        hostLabel: 'This Mac',
+        instanceId: '0123456789ab',
+        runId: null,
+        project: '/p',
+        status: 'run ended',
+        detail: '',
+        stuck: true,
+        ended: true,
+      },
+      stops: {},
+    };
+    expect(stripControls(state).resume).toEqual({
+      kind: 'unavailable',
+      reason: RUN_ID_UNAVAILABLE,
+    });
+  });
 });
+
+describe('exact resume identity', () => {
+  test('the IPC boundary rejects missing and non-canonical ids with a precise error', () => {
+    for (const value of [
+      undefined,
+      null,
+      '',
+      ' ',
+      ' run-1',
+      'run-1 ',
+      '-latest',
+      '.run-1',
+      '_run-1',
+      'Run-1',
+      'run id',
+      '../run',
+      'a'.repeat(129),
+    ]) {
+      expect(() => exactResumeRunId(value)).toThrow(
+        'a run id is 1-128 lowercase letters, digits, ".", "_", or "-", starting with a letter or digit',
+      );
+      expect(() => exactResumeRunId(value)).toThrow(ResumeRequestError);
+    }
+  });
+
+  test('the IPC boundary accepts canonical ids at both length bounds', () => {
+    const longest = `a${'-'.repeat(127)}`;
+    expect(String(exactResumeRunId('a'))).toBe('a');
+    expect(String(exactResumeRunId(longest))).toBe(longest);
+  });
+
+  test('every available run-specific decision emits --resume with one exact id', () => {
+    const random = generator(29);
+    for (let round = 0; round < 500; round += 1) {
+      const candidate = generatedRunId(random);
+      const decision = resumeDecision(random() < 0.2 ? null : candidate);
+      if (decision.kind === 'unavailable') {
+        expect(decision.reason).toBe(RUN_ID_UNAVAILABLE);
+        continue;
+      }
+      const args = resumeArguments(decision.runId);
+      expect(args).toHaveLength(2);
+      expect(args[0]).toBe('--resume');
+      expect(String(args[1])).toBe(candidate);
+      expect(String(args[1])).not.toBe('');
+    }
+  });
+});
+
+function generatedRunId(random: () => number): string {
+  const first = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const rest = `${first}._-`;
+  let value = first[Math.floor(random() * first.length)] ?? 'a';
+  const length = Math.floor(random() * 128);
+  for (let index = 0; index < length; index += 1) {
+    value += rest[Math.floor(random() * rest.length)] ?? '';
+  }
+  return value;
+}
 
 describe('recentChanged', () => {
   test('regression: attaching to a different run, or learning its id, changes the recent runs', () => {

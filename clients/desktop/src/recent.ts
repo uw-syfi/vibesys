@@ -5,6 +5,7 @@
  */
 import {type HostKey, hostFromKey, validHostPath} from './host-settings.js';
 import type {InstanceRecord} from './instances.js';
+import type {ResumeRunId} from './resume-run.js';
 
 /** One run the user attached to. */
 export interface RecentRun {
@@ -128,8 +129,10 @@ export function remember(file: RecentFile, run: RecentRun, limit = RECENT_LIMIT)
   return {version: 1, runs: [merged, ...rest].slice(0, Math.max(0, limit))};
 }
 
-/** What the app asked a host to launch: a new run, or a resume of `run` (empty: the latest). */
-export type RunLaunch = {readonly kind: 'start'} | {readonly kind: 'resume'; readonly run: string};
+/** What the app asked a host to launch: a new run, or a resume of the exact `run`. */
+export type RunLaunch =
+  | {readonly kind: 'start'}
+  | {readonly kind: 'resume'; readonly run: ResumeRunId};
 
 /**
  * The run id to record for a run the app just launched. A server reports its run's id only once
@@ -137,7 +140,7 @@ export type RunLaunch = {readonly kind: 'start'} | {readonly kind: 'resume'; rea
  * recording it keeps the resumed run on its earlier entry (with that entry's task).
  */
 export function launchedRunId(launch: RunLaunch, reported: string | null): string | null {
-  if (reported !== null || launch.kind === 'start' || launch.run === '') return reported;
+  if (reported !== null || launch.kind === 'start') return reported;
   return launch.run;
 }
 

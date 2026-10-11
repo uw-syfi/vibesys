@@ -10,6 +10,7 @@ import {
   recentStatus,
   remember,
 } from './recent.js';
+import {exactResumeRunId} from './resume-run.js';
 import {fakeRecord} from './testing/fake-record.js';
 
 /** A small seeded generator (fast-check is not a dependency; see the testing skill). */
@@ -87,7 +88,7 @@ describe('remember', () => {
     const resumed = run({
       instanceId: 'ba9876543210',
       task: null,
-      runId: launchedRunId({kind: 'resume', run: 'run-1'}, null),
+      runId: launchedRunId({kind: 'resume', run: exactResumeRunId('run-1')}, null),
       attachedAt: 2,
     });
     const file = remember(remember(EMPTY_RECENT, run()), resumed);
@@ -97,8 +98,9 @@ describe('remember', () => {
   test('a launch names a run only when its server reported one or it resumes a named run', () => {
     for (const reported of RUNS) {
       expect(launchedRunId({kind: 'start'}, reported)).toBe(reported);
-      expect(launchedRunId({kind: 'resume', run: ''}, reported)).toBe(reported);
-      expect(launchedRunId({kind: 'resume', run: 'run-9'}, reported)).toBe(reported ?? 'run-9');
+      expect(launchedRunId({kind: 'resume', run: exactResumeRunId('run-9')}, reported)).toBe(
+        reported ?? 'run-9',
+      );
     }
   });
 

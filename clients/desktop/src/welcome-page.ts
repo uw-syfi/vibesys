@@ -8,6 +8,7 @@
  */
 
 import type {HostKey} from './host-settings.js';
+import {type ResumeDecision, type ResumeRunId, resumeDecision} from './resume-run.js';
 import {type StopView, stopKey} from './stop-run.js';
 import {WORDMARK} from './welcome-banner.js';
 import {
@@ -45,7 +46,7 @@ interface WelcomeBridge {
   tasks(host: HostKey, project: string): Promise<WelcomeResult<string[]>>;
   attach(host: HostKey, instance: string): Promise<WelcomeResult<null>>;
   start(host: HostKey, project: string, task: string, args: string): Promise<WelcomeResult<null>>;
-  resume(host: HostKey, project: string, run: string): Promise<WelcomeResult<null>>;
+  resume(host: HostKey, project: string, run: ResumeRunId): Promise<WelcomeResult<null>>;
   showRun(): Promise<WelcomeResult<null>>;
   showWelcome(): Promise<WelcomeResult<null>>;
   retry(): Promise<WelcomeResult<null>>;
@@ -99,6 +100,7 @@ const retry = byId<HTMLButtonElement>('retry');
 const stripStop = byId<HTMLButtonElement>('strip-stop');
 const stripForce = byId<HTMLButtonElement>('strip-force');
 const stripResume = byId<HTMLButtonElement>('strip-resume');
+const stripResumeState = byId('strip-resume-state');
 const stripStopState = byId('strip-stop-state');
 /** How often the lists look again while an accepted stop is ending. */
 const REFRESH_MS = 3_000;
@@ -166,7 +168,7 @@ function renderChrome(state: ChromeState): void {
   retry.hidden = !controls.retry;
   stripStop.hidden = !controls.stop;
   stripForce.hidden = !controls.force;
-  stripResume.hidden = !controls.resume;
+  renderResumeControl(controls.resume);
   stripStopState.textContent = controls.stopText;
   stripStopState.title = controls.stopText;
   stripStopState.className = controls.stopError ? 'error' : 'muted';
@@ -189,6 +191,12 @@ function renderChrome(state: ChromeState): void {
     void showHost(returnedTo, returnedTo === current);
   }
   if (stopsChanged) refreshLists();
+}
+
+function renderResumeControl(decision: ResumeDecision | null): void {
+  stripResume.hidden = decision?.kind !== 'available';
+  stripResumeState.textContent = decision?.kind === 'unavailable' ? decision.reason : '';
+  stripResumeState.title = stripResumeState.textContent;
 }
 
 /** Read the recent runs again (the main process just recorded one) and redraw them. */
@@ -227,8 +235,10 @@ stripForce.addEventListener('click', () => {
 stripResume.addEventListener('click', () => {
   const attached = chrome.attached;
   if (attached === null) return;
+  const decision = resumeDecision(attached.runId);
+  if (decision.kind === 'unavailable') return;
   void bridge?.showWelcome();
-  void resume(attached.host, attached.project, attached.runId ?? '');
+  void resume(attached.host, attached.project, decision.runId);
 });
 
 /** The stop controls of a live run in a list: Stop, "Stopping…", or the failure with Force stop. */
@@ -283,9 +293,14 @@ function fillRecentCell(
       ...stopControls(run.host, status.instanceId),
     );
   } else if (status?.kind === 'ended') {
-    cell.action.append(
-      button('Resume…', () => void resume(run.host, run.project, run.runId ?? '')),
-    );
+    const decision = resumeDecision(run.runId);
+    if (decision.kind === 'available') {
+      cell.action.append(
+        button('Resume…', () => void resume(run.host, run.project, decision.runId)),
+      );
+    } else {
+      cell.action.append(element('span', decision.reason, 'muted'));
+    }
   } else if (status?.kind === 'unknown') {
     cell.action.append(button('Open host', () => void showHost(run.host)));
   }
@@ -517,13 +532,10 @@ async function attach(host: HostKey, instance: string): Promise<void> {
   if (!failed(result)) say('');
 }
 
-async function resume(host: HostKey, project: string, run: string): Promise<void> {
+async function resume(host: HostKey, project: string, run: ResumeRunId): Promise<void> {
   if (bridge === undefined) return;
-  if (
-    !window.confirm(`Resume run ${run || '(latest)'} in ${project}? It continues the run's agents.`)
-  )
-    return;
-  say(`Resuming ${run || 'the latest run'}…`);
+  if (!window.confirm(`Resume run ${run} in ${project}? It continues the run's agents.`)) return;
+  say(`Resuming ${run}…`);
   const result = await bridge.resume(host, project, run);
   if (!failed(result)) say('');
 }

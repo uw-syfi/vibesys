@@ -6,6 +6,7 @@
 import {type HostKey, validAlias} from './host-settings.js';
 import type {InstanceRecord} from './instances.js';
 import type {RecentRun} from './recent.js';
+import {type ResumeDecision, resumeDecision} from './resume-run.js';
 import {stopKey} from './stop-run.js';
 import type {ChromeState} from './welcome-protocol.js';
 
@@ -82,7 +83,8 @@ export function suggestProjects(
 export interface StripControls {
   readonly stop: boolean;
   readonly force: boolean;
-  readonly resume: boolean;
+  /** Exact resume action, why it is unavailable, or null while the run has not ended. */
+  readonly resume: ResumeDecision | null;
   /** Retry the connection: only while it is stuck on something a retry can fix. */
   readonly retry: boolean;
   /** "Back to run": the welcome view fills the window while a run is attached. */
@@ -94,7 +96,7 @@ export interface StripControls {
 const NO_STRIP: StripControls = {
   stop: false,
   force: false,
-  resume: false,
+  resume: null,
   retry: false,
   back: false,
   stopText: '',
@@ -112,7 +114,7 @@ export function stripControls(state: ChromeState): StripControls {
   return {
     stop: attached.instanceId !== null && !ended && stop?.phase !== 'stopping',
     force: !ended && (stop?.canForce ?? false),
-    resume: ended,
+    resume: ended ? resumeDecision(attached.runId) : null,
     retry: attached.stuck && !ended,
     back: state.mode === 'welcome',
     stopText: ended ? '' : (stop?.text ?? ''),

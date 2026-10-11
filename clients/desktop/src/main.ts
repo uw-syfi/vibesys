@@ -65,6 +65,7 @@ import {isAllowedRequest, isAppUrl, type LaunchTarget, originOf} from './launch-
 import {QuitGate} from './quit-gate.js';
 import {launchedRunId, learnedRunId, type RunLaunch, recentStatus} from './recent.js';
 import {type RelayPort, relay} from './relay.js';
+import {exactResumeRunId, type ResumeRunId, resumeArguments} from './resume-run.js';
 import {shellWords} from './shell-words.js';
 import {StopController} from './stop-controller.js';
 import {
@@ -496,12 +497,9 @@ class DesktopApp {
     ]);
   }
 
-  /** Resume stopped run `run` (the latest when empty) of `project` on `id`, detached, and attach. */
-  async resumeRun(id: HostId, project: string, run: string): Promise<void> {
-    await this.#launch(id, project, null, {kind: 'resume', run}, [
-      '--resume',
-      ...(run === '' ? [] : [run]),
-    ]);
+  /** Resume stopped run `run` of `project` on `id`, detached, and attach. */
+  async resumeRun(id: HostId, project: string, run: ResumeRunId): Promise<void> {
+    await this.#launch(id, project, null, {kind: 'resume', run}, [...resumeArguments(run)]);
   }
 
   async #launch(
@@ -701,10 +699,7 @@ class DesktopApp {
       return null;
     });
     handle(WELCOME_CHANNELS.resume, async (key, project, run) => {
-      const runId = typeof run === 'string' ? run.trim() : '';
-      if (!/^[A-Za-z0-9._-]*$/.test(runId) || runId.startsWith('-')) {
-        throw new Error('a run id is letters, digits, ".", "_", and "-", not starting with "-"');
-      }
+      const runId = exactResumeRunId(run);
       await this.resumeRun(
         hostFromKey(key),
         validHostPath(project, 'the project directory'),

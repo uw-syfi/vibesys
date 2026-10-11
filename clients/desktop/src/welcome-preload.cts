@@ -15,6 +15,7 @@ import type {
   WelcomeResult,
 } from './welcome-protocol.js';
 import type {HostKey} from './host-settings.js';
+import type {ResumeRunId} from './resume-run.js';
 
 type Channels = typeof import('./welcome-protocol.js').WELCOME_CHANNELS;
 
@@ -53,7 +54,7 @@ electron.contextBridge.exposeInMainWorld('vibesysWelcome', {
   attach: (host: HostKey, instance: string) => call<null>(CHANNELS.attach, host, instance),
   start: (host: HostKey, project: string, task: string, args: string) =>
     call<null>(CHANNELS.start, host, project, task, args),
-  resume: (host: HostKey, project: string, run: string) =>
+  resume: (host: HostKey, project: string, run: ResumeRunId) =>
     call<null>(CHANNELS.resume, host, project, run),
   showRun: () => call<null>(CHANNELS.showRun),
   showWelcome: () => call<null>(CHANNELS.showWelcome),
