@@ -9,7 +9,9 @@
     "layer": "app",
     "entries": {
       ".": "node",
-      "./renderer": "dom"
+      "./renderer": "dom",
+      "./preload/run": "node",
+      "./preload/welcome": "node"
     }
   },
   "main": "dist/main/index.js",
@@ -20,6 +22,14 @@
     },
     "./renderer": {
       "@vibesys/source": "./src/renderer/index.ts"
+    },
+    "./preload/run": {
+      "@vibesys/source": "./src/renderer/preload/run.cts",
+      "default": "./dist/renderer/preload/run.cjs"
+    },
+    "./preload/welcome": {
+      "@vibesys/source": "./src/renderer/preload/welcome.cts",
+      "default": "./dist/renderer/preload/welcome.cjs"
     }
   },
   "scripts": {

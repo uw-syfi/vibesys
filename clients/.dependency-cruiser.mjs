@@ -152,7 +152,8 @@ function webRunPageRules() {
 //   slice is a pure `state/` core and a `shell/` that owns its processes, sockets, and timers.
 // - `src/renderer/` is the renderer code (the welcome view and the sandboxed preloads); it reaches
 //   the main process only through its preload's bridge.
-// - `src/common/` is what both processes share: pure types, entities, and the typed IPC.
+// - The two processes share only workspace packages: the models in `@vibesys/entities` and the
+//   typed messages in `@vibesys/ipc`, whose `neutral` runtime the package-graph checker holds.
 const DESKTOP = '^desktop/src/';
 const DESKTOP_MAIN = `${DESKTOP}main/`;
 const DESKTOP_MAIN_LAYERS = ['app', 'features', 'entities', 'platform', 'shared'];
@@ -181,22 +182,6 @@ function desktopRules() {
       severity: 'error',
       from: {path: DESKTOP_MAIN},
       to: {path: `${DESKTOP}renderer/`},
-    },
-    {
-      // Shared by both processes, so it is pure: no runtime, no process's code, no I/O.
-      name: 'desktop-common-is-pure',
-      severity: 'error',
-      from: {path: `${DESKTOP}common/`, pathNot: TEST_FILE},
-      to: {
-        path: [`${DESKTOP}(?:main|renderer)/`, UI_RUNTIME, ...TRANSPORT, ...CONTRACTS],
-        dependencyTypesNot: ['type-only'],
-      },
-    },
-    {
-      name: 'desktop-common-has-no-node-runtime',
-      severity: 'error',
-      from: {path: `${DESKTOP}common/`, pathNot: TEST_FILE},
-      to: {dependencyTypes: ['core']},
     },
     {
       // A functional core (a platform slice's `state/`, a welcome store) folds events into state
