@@ -6,14 +6,18 @@ import {Seeded} from '@vibesys/core-state/testing';
 import {withHostSettings} from './host-settings.js';
 import {EMPTY_RECENT, type RecentFile, remember} from './recent.js';
 import {SettingsStore} from './settings-store.js';
+import {FakeSettingsFilesystem, fileError} from './testing/fake-settings-filesystem.js';
 
-function store() {
-  const directory = mkdtempSync(join(tmpdir(), 'vsd-settings-'));
+function store(
+  filesystem?: FakeSettingsFilesystem,
+  directory = mkdtempSync(join(tmpdir(), 'vsd-settings-')),
+) {
   const logged: string[] = [];
   const settings = new SettingsStore({
     settingsPath: join(directory, 'hosts.json'),
     recentPath: join(directory, 'recent.json'),
     log: message => logged.push(message),
+    ...(filesystem === undefined ? {} : {filesystem}),
   });
   return {settings, logged, directory};
 }
@@ -29,6 +33,83 @@ function run(index: number) {
 }
 
 describe('SettingsStore', () => {
+  test('regression: a host-settings read failure cannot replace the existing file', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'hosts.json');
+    const filesystem = new FakeSettingsFilesystem({
+      [path]: `${JSON.stringify({
+        version: 2,
+        hosts: {'ssh:existing': {checkout: '/existing'}},
+      })}\n`,
+    });
+    const {settings, logged} = store(filesystem, directory);
+    filesystem.failNextRead(path, fileError('EACCES', path));
+    let failure: unknown;
+    try {
+      await settings.updateHosts(current =>
+        withHostSettings(current, {kind: 'ssh', alias: 'new'}, {checkout: '/new'}),
+      );
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain(`could not read ${path}`);
+    expect(settings.hostsProblem).toContain(`could not read ${path}`);
+    expect(logged).toContainEqual(expect.stringContaining(`could not read ${path}`));
+    expect(filesystem.operations).toEqual([{kind: 'read', path}]);
+    expect(JSON.parse(filesystem.text(path))).toEqual({
+      version: 2,
+      hosts: {'ssh:existing': {checkout: '/existing'}},
+    });
+
+    await settings.updateHosts(current =>
+      withHostSettings(current, {kind: 'ssh', alias: 'new'}, {checkout: '/new'}),
+    );
+    expect(JSON.parse(filesystem.text(path))).toEqual({
+      version: 2,
+      hosts: {
+        'ssh:existing': {checkout: '/existing'},
+        'ssh:new': {checkout: '/new'},
+      },
+    });
+    expect(settings.hostsProblem).toBeNull();
+    expect(filesystem.operations.map(operation => operation.kind)).toEqual([
+      'read',
+      'read',
+      'write',
+      'replace',
+    ]);
+  });
+
+  test('regression: a recent-runs read failure cannot replace the existing file', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'recent.json');
+    const existing = {version: 2, runs: [run(1)]};
+    const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
+    const {settings, logged} = store(filesystem, directory);
+    filesystem.failNextRead(path, fileError('EIO', path));
+    let failure: unknown;
+    try {
+      await settings.updateRecent(current => remember(current, run(2)));
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain(`could not read ${path}`);
+    expect(logged).toContainEqual(expect.stringContaining(`could not read ${path}`));
+    expect(filesystem.operations).toEqual([{kind: 'read', path}]);
+    expect(JSON.parse(filesystem.text(path))).toEqual(existing);
+
+    await settings.updateRecent(current => remember(current, run(2)));
+    expect(JSON.parse(filesystem.text(path))).toEqual({version: 2, runs: [run(2), run(1)]});
+    expect(filesystem.operations.map(operation => operation.kind)).toEqual([
+      'read',
+      'read',
+      'write',
+      'replace',
+    ]);
+  });
+
   test('regression: every recent update is pushed, so Recent never needs a manual refresh', async () => {
     const {settings} = store();
     const heard: RecentFile[] = [];

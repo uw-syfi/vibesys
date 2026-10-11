@@ -23,10 +23,26 @@ export interface SettingsStoreOptions {
   readonly settingsPath: string;
   readonly recentPath: string;
   readonly log: (message: string) => void;
+  readonly filesystem?: SettingsFilesystem;
+}
+
+/** The filesystem operations needed to read and atomically replace settings files. */
+export interface SettingsFilesystem {
+  readText(path: string): Promise<string>;
+  writePrivateText(path: string, text: string): Promise<void>;
+  remove(path: string): Promise<void>;
+  replace(staging: string, target: string): Promise<void>;
+}
+
+interface ReadResult<T> {
+  readonly value: T;
+  /** A filesystem failure that makes writing from `value` unsafe; null for absent/invalid JSON. */
+  readonly failure: Error | null;
 }
 
 export class SettingsStore {
   readonly #options: SettingsStoreOptions;
+  readonly #filesystem: SettingsFilesystem;
   /** The last update; each update starts after it settles. */
   #queue: Promise<void> = Promise.resolve();
   #hostsProblem: string | null = null;
@@ -34,6 +50,7 @@ export class SettingsStore {
 
   constructor(options: SettingsStoreOptions) {
     this.#options = options;
+    this.#filesystem = options.filesystem ?? NODE_SETTINGS_FILESYSTEM;
   }
 
   /** Why `hosts.json` was ignored on its last read; null when it is fine or absent. */
@@ -43,44 +60,59 @@ export class SettingsStore {
 
   /** The host settings, read afresh. */
   async hosts(): Promise<SettingsFile> {
-    let text: string;
-    try {
-      text = await readFile(this.#options.settingsPath, 'utf8');
-    } catch {
+    return (await this.#readHosts()).value;
+  }
+
+  async #readHosts(): Promise<ReadResult<SettingsFile>> {
+    const read = await readText(this.#filesystem, this.#options.settingsPath);
+    if (read.kind === 'missing') {
       this.#hostsProblem = null;
-      return EMPTY_SETTINGS;
+      return {value: EMPTY_SETTINGS, failure: null};
+    }
+    if (read.kind === 'failed') {
+      const failure = readFailure(this.#options.settingsPath, read.error);
+      this.#hostsProblem = failure.message;
+      this.#options.log(failure.message);
+      return {value: EMPTY_SETTINGS, failure};
     }
     try {
-      const parsed = parseSettings(JSON.parse(text) as unknown);
+      const parsed = parseSettings(JSON.parse(read.text) as unknown);
       this.#hostsProblem = null;
-      return parsed;
+      return {value: parsed, failure: null};
     } catch (error) {
       this.#hostsProblem = `${this.#options.settingsPath}: ${(error as Error).message}`;
       this.#options.log(`ignoring ${this.#hostsProblem}`);
-      return EMPTY_SETTINGS;
+      return {value: EMPTY_SETTINGS, failure: null};
     }
   }
 
   /** The recent runs, read afresh. */
   async recent(): Promise<RecentFile> {
-    let text: string;
-    try {
-      text = await readFile(this.#options.recentPath, 'utf8');
-    } catch {
-      return EMPTY_RECENT;
+    return (await this.#readRecent()).value;
+  }
+
+  async #readRecent(): Promise<ReadResult<RecentFile>> {
+    const read = await readText(this.#filesystem, this.#options.recentPath);
+    if (read.kind === 'missing') return {value: EMPTY_RECENT, failure: null};
+    if (read.kind === 'failed') {
+      const failure = readFailure(this.#options.recentPath, read.error);
+      this.#options.log(failure.message);
+      return {value: EMPTY_RECENT, failure};
     }
     try {
-      return parseRecent(JSON.parse(text) as unknown);
+      return {value: parseRecent(JSON.parse(read.text) as unknown), failure: null};
     } catch (error) {
       this.#options.log(`ignoring ${this.#options.recentPath}: ${(error as Error).message}`);
-      return EMPTY_RECENT;
+      return {value: EMPTY_RECENT, failure: null};
     }
   }
 
   /** Replace the host settings with `update` of the current ones. */
   updateHosts(update: (current: SettingsFile) => SettingsFile): Promise<void> {
     return this.#serialize(async () => {
-      await writeJson(this.#options.settingsPath, update(await this.hosts()));
+      const current = await this.#readHosts();
+      if (current.failure !== null) throw current.failure;
+      await writeJson(this.#filesystem, this.#options.settingsPath, update(current.value));
     });
   }
 
@@ -94,8 +126,10 @@ export class SettingsStore {
     current: () => boolean = () => true,
   ): Promise<void> {
     return this.#serialize(async () => {
-      const next = update(await this.recent());
-      if (!(await writeJson(this.#options.recentPath, next, current))) return;
+      const recent = await this.#readRecent();
+      if (recent.failure !== null) throw recent.failure;
+      const next = update(recent.value);
+      if (!(await writeJson(this.#filesystem, this.#options.recentPath, next, current))) return;
       for (const listener of this.#recentListeners) listener(next);
     });
   }
@@ -113,18 +147,47 @@ export class SettingsStore {
   }
 }
 
+type TextRead =
+  | {readonly kind: 'text'; readonly text: string}
+  | {readonly kind: 'missing'}
+  | {readonly kind: 'failed'; readonly error: unknown};
+
+const NODE_SETTINGS_FILESYSTEM: SettingsFilesystem = {
+  readText: path => readFile(path, 'utf8'),
+  writePrivateText: (path, text) => writeFile(path, text, {mode: 0o600}),
+  remove: unlink,
+  replace: rename,
+};
+
+async function readText(filesystem: SettingsFilesystem, path: string): Promise<TextRead> {
+  try {
+    return {kind: 'text', text: await filesystem.readText(path)};
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+      return {kind: 'missing'};
+    }
+    return {kind: 'failed', error};
+  }
+}
+
+function readFailure(path: string, cause: unknown): Error {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  return new Error(`could not read ${path}: ${detail}`, {cause});
+}
+
 /** Replace `path` with `value` as JSON, private to the user, atomically (write aside, rename). */
 async function writeJson(
+  filesystem: SettingsFilesystem,
   path: string,
   value: unknown,
   current: () => boolean = () => true,
 ): Promise<boolean> {
   const staging = `${path}.${process.pid}.tmp`;
-  await writeFile(staging, `${JSON.stringify(value, null, 2)}\n`, {mode: 0o600});
+  await filesystem.writePrivateText(staging, `${JSON.stringify(value, null, 2)}\n`);
   if (!current()) {
-    await unlink(staging);
+    await filesystem.remove(staging);
     return false;
   }
-  await rename(staging, path);
+  await filesystem.replace(staging, path);
   return true;
 }
