@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
@@ -19,6 +21,30 @@ import {declarationErrors, workspaceLayout} from './workspace_layout.mjs';
 const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const TSC = join(WORKSPACE_ROOT, 'node_modules/typescript/bin/tsc');
 
+// The packages a scaffolded feature's machine skeleton builds on, copied into the fixture and
+// linked where Node resolves them. `xstate` resolves from the workspace's hoisted install.
+const MACHINE_PACKAGES = ['store', 'machine'];
+const MACHINE_PATHS = {
+  '@vibesys/machine': ['machine/src/index.ts'],
+  '@vibesys/machine/testing': ['machine/src/testing/index.ts'],
+  '@vibesys/store': ['store/src/index.ts'],
+  '@vibesys/store/testing': ['store/src/testing/index.ts'],
+};
+
+function copyMachinePackages(root) {
+  const skipped = new Set(['node_modules', 'dist', '.tsbuild']);
+  for (const directory of MACHINE_PACKAGES) {
+    cpSync(join(WORKSPACE_ROOT, directory), join(root, directory), {
+      recursive: true,
+      filter: source => !skipped.has(source.split('/').at(-1)),
+    });
+  }
+  mkdirSync(join(root, 'node_modules/@vibesys'), {recursive: true});
+  for (const directory of MACHINE_PACKAGES) {
+    symlinkSync(join(root, directory), join(root, 'node_modules/@vibesys', directory), 'dir');
+  }
+}
+
 // The fixture lives inside the workspace (a dot-directory, which no gate scans and git ignores) so
 // the scaffolded projects resolve `typescript`, `@types/bun`, and `@types/node` from the
 // workspace's own install, exactly as a real new package does.
@@ -30,7 +56,11 @@ function fixtureWorkspace(t) {
     'packages:\n  - "*"\n  - "features/*"\n  - "apps/*"\n',
   );
   copyFileSync(join(WORKSPACE_ROOT, 'tsconfig.base.json'), join(root, 'tsconfig.base.json'));
-  writeFileSync(join(root, 'tsconfig.architecture.json'), '{"compilerOptions": {"paths": {}}}\n');
+  writeFileSync(
+    join(root, 'tsconfig.architecture.json'),
+    `${JSON.stringify({compilerOptions: {paths: MACHINE_PATHS}})}\n`,
+  );
+  copyMachinePackages(root);
   return root;
 }
 

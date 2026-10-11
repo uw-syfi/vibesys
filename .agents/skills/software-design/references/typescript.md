@@ -46,6 +46,21 @@ anything else in another package is an error.
   diff.
 - **State.** Frontend state changes only from backend events; keep folds pure
   and pass time as event data. See [functional-core.md](functional-core.md).
+  Ask whether the state is a mode with effects or a fold:
+  - Control state (a mode that starts work, waits, retries, cancels) is an
+    XState v5 machine: `setup({types, actors, actions, guards, delays})`, each
+    operation an injected `invoke` with an explicit `id` (placeholder:
+    `unprovided` from `@vibesys/machine`), delays as `after`, cancellation by
+    leaving the state. The shell provides the operations with
+    `machine.provide` and exposes the actor with `actorStore`.
+  - A data fold (events in, a value out, no mode) is a plain reducer on
+    `@vibesys/store`.
+  - Test a machine with pure `getNextSnapshot`/`transition` steps and
+    `checkMachine` from `@vibesys/machine/testing`; test stale replies on a
+    live actor. `pnpm new:package feature <name>` scaffolds all three.
+  The rule, examples, and rejected alternatives are in
+  [clients-architecture.md](../../../../docs/contributing/clients-architecture.md),
+  "State".
 - **I/O.** Keep transport behind an interface called by the shell, and use an
   in-memory implementation in composed tests (see the `testing` skill).
 

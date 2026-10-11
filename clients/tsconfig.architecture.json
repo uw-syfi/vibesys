@@ -28,6 +28,8 @@
       "@vibesys/hosts": ["hosts/src/index.ts"],
       "@vibesys/ipc": ["ipc/src/index.ts"],
       "@vibesys/ipc/testing": ["ipc/src/testing/index.ts"],
+      "@vibesys/machine": ["machine/src/index.ts"],
+      "@vibesys/machine/testing": ["machine/src/testing/index.ts"],
       "@vibesys/run-session": ["run-session/src/index.ts"],
       "@vibesys/run-session/testing": ["run-session/src/testing/index.ts"],
       "@vibesys/run-state": ["run-state/src/index.ts"],

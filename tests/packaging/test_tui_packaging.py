@@ -30,6 +30,7 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
         "clients/contracts/package.json",
         "clients/hosts/package.json",
         "clients/ipc/package.json",
+        "clients/machine/package.json",
         "clients/run-session/package.json",
         "clients/run-state/package.json",
         "clients/runs/package.json",

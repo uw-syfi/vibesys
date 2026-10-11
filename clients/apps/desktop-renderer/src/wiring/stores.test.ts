@@ -265,7 +265,7 @@ describe('loadWelcomeStores', () => {
     await settle();
     expect(questions).toHaveLength(1);
     expect(bridge.asked).not.toContain('resume');
-    expect(stores.welcome.getState().awaiting).toBeNull();
+    expect(stores.welcome.getState().busy).toBe(false);
   });
 
   test('keeps every push that crosses the overview and continues live', async () => {

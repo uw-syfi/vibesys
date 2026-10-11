@@ -33,6 +33,9 @@
       "path": "../../ipc/tsconfig.testing.json"
     },
     {
+      "path": "../../machine/tsconfig.testing.json"
+    },
+    {
       "path": "../../runs/tsconfig.lib.json"
     },
     {

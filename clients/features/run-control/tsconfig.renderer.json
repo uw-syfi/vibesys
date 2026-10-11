@@ -28,6 +28,9 @@
       "path": "../../ipc/tsconfig.lib.json"
     },
     {
+      "path": "../../machine/tsconfig.lib.json"
+    },
+    {
       "path": "../../runs/tsconfig.lib.json"
     },
     {
