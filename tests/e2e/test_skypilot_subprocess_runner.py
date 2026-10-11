@@ -8,36 +8,34 @@ drained while a sink fails, and timeout cleanup kills descendants that inherited
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 import threading
 from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_sandbox.api.skypilot import PosixSkyPilotProcessLauncher, SubprocessCommandRunner
+from vs_sandbox.api.skypilot import SubprocessCommandRunner
+from vs_sim.api import PipedProcess, ProcessTimeoutError, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
+    from io import TextIOBase
     from pathlib import Path
-    from typing import IO
-
-    from vs_sandbox.api.skypilot import SkyPilotCommandProcess
 
 
 class _ReadyProcess:
     """Synchronize the command timeout after a real child reports readiness."""
 
-    def __init__(self, process: SkyPilotCommandProcess, ready: threading.Event) -> None:
+    def __init__(self, process: PipedProcess, ready: threading.Event) -> None:
         self._process = process
         self._ready = ready
         self._synchronized = False
 
     @property
-    def stdout(self) -> IO[str]:
+    def stdout(self) -> TextIOBase:
         return self._process.stdout
 
     @property
-    def stderr(self) -> IO[str]:
+    def stderr(self) -> TextIOBase:
         return self._process.stderr
 
     def wait(self, timeout: float | None) -> int:
@@ -49,10 +47,13 @@ class _ReadyProcess:
     def kill_group(self) -> None:
         self._process.kill_group()
 
+    def cancel_output(self) -> None:
+        self._process.cancel_output()
+
 
 class _ReadyProcessLauncher:
     def __init__(self, ready: threading.Event) -> None:
-        self._launcher = PosixSkyPilotProcessLauncher()
+        self._launcher = SubprocessPipedProcessLauncher()
         self._ready = ready
 
     def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> _ReadyProcess:
@@ -131,7 +132,7 @@ signal.pause()
     ready = threading.Event()
     stdout = _ReadySink(ready)
 
-    with pytest.raises(subprocess.TimeoutExpired):
+    with pytest.raises(ProcessTimeoutError):
         SubprocessCommandRunner(processes=_ReadyProcessLauncher(ready)).run(
             (sys.executable, "-c", program), timeout=0, stdout_sink=stdout
         )

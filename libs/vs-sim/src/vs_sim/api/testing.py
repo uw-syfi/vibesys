@@ -36,6 +36,7 @@ from vs_sim.crash import (
 from vs_sim.fakes import (
     FakeForegroundChild,
     FakeForegroundLauncher,
+    FakePipedProcessLauncher,
     FakeProcessLauncher,
     FakeProcessSignaller,
     FakeSignalSource,
@@ -101,6 +102,7 @@ __all__ = [
     "EventTrace",
     "FakeForegroundChild",
     "FakeForegroundLauncher",
+    "FakePipedProcessLauncher",
     "FakeProcessLauncher",
     "FakeProcessSignaller",
     "FakeSignalSource",

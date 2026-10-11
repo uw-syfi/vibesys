@@ -4,7 +4,6 @@ import io
 import os
 import re
 import socket
-import subprocess
 import tempfile
 import threading
 from io import StringIO
@@ -35,20 +34,19 @@ from vs_sandbox.api.skypilot import (
     ResolvedSkyPilotResources,
     ResponseFrame,
     SkyPilotBridge,
-    SkyPilotCommandProcess,
     SkyPilotJobRunner,
     SubprocessCommandRunner,
     decode_response,
     encode_message,
 )
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import HANG_GUARD_S
+from vs_sim.api import ProcessTimeoutError, Threads
+from vs_sim.api.testing import HANG_GUARD_S, FakePipedProcessLauncher, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_sandbox.api.skypilot import RemoteJobInfo
-    from vs_sim.api import Connection, Listener, Worker
+    from vs_sim.api import Condition, Connection, Event, Listener, Lock, Worker
 
 
 def _resources() -> ResolvedSkyPilotResources:
@@ -189,20 +187,42 @@ class FakeRunner(SkyPilotJobRunner):
         self.release_names.append(cluster_name)
 
 
-class _RecordingThreads(OsThreads):
+class _RecordingThreads:
     def __init__(self) -> None:
+        self._threads = SimThreads()
         self.workers: list[Worker] = []
 
     def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
-        worker = super().spawn(target, name=name, daemon=daemon)
+        worker = self._threads.spawn(target, name=name, daemon=daemon)
         self.workers.append(worker)
         return worker
+
+    def lock(self) -> Lock:
+        return self._threads.lock()
+
+    def rlock(self) -> Lock:
+        return self._threads.rlock()
+
+    def condition(self, lock: Lock | None = None) -> Condition:
+        return self._threads.condition(lock)
+
+    def event(self) -> Event:
+        return self._threads.event()
+
+    def sleep(self, seconds: float) -> None:
+        self._threads.sleep(seconds)
+
+    def now(self) -> float:
+        return self._threads.now()
+
+    def run[T](self, main: Callable[[], T]) -> T:
+        return self._threads.run(main)
 
 
 class _BlockedBridgeConnection:
     """A request whose output transport remains blocked until the server closes it."""
 
-    def __init__(self, request: bytes, threads: OsThreads) -> None:
+    def __init__(self, request: bytes, threads: Threads) -> None:
         self._request = bytearray(request)
         self.send_started = threads.event()
         self.closed = threads.event()
@@ -210,7 +230,8 @@ class _BlockedBridgeConnection:
     def send(self, data: bytes) -> None:
         del data
         self.send_started.set()
-        self.closed.wait()
+        if not self.closed.wait(timeout=1):
+            raise AssertionError
         raise BrokenPipeError
 
     def recv(self, max_bytes: int, timeout: float | None = None) -> bytes:
@@ -229,7 +250,7 @@ class _BlockedBridgeConnection:
 
 
 class _SingleConnectionListener:
-    def __init__(self, connection: _BlockedBridgeConnection, threads: OsThreads) -> None:
+    def __init__(self, connection: _BlockedBridgeConnection, threads: Threads) -> None:
         self._connection = connection
         self._closed = threads.event()
         self._accepted = False
@@ -239,7 +260,8 @@ class _SingleConnectionListener:
         if not self._accepted:
             self._accepted = True
             return self._connection
-        self._closed.wait()
+        if not self._closed.wait(timeout=1):
+            raise AssertionError
         raise OSError
 
     def close(self) -> None:
@@ -247,7 +269,7 @@ class _SingleConnectionListener:
 
 
 class _SingleConnectionNetwork:
-    def __init__(self, connection: _BlockedBridgeConnection, threads: OsThreads) -> None:
+    def __init__(self, connection: _BlockedBridgeConnection, threads: Threads) -> None:
         self._listener = _SingleConnectionListener(connection, threads)
 
     def listen(self, address: str) -> Listener:
@@ -270,22 +292,17 @@ class _TimeoutAfterBridgeWriteProcess:
     def wait(self, timeout: float | None) -> int:
         self.waits += 1
         if self.waits == 1:
-            self._connection.send_started.wait()
+            if not self._connection.send_started.wait(timeout=1):
+                raise AssertionError
             assert timeout is not None
-            raise subprocess.TimeoutExpired(("sky",), timeout)
+            raise ProcessTimeoutError(("sky",), timeout)
         return -9
 
     def kill_group(self) -> None:
         self.group_kills += 1
 
-
-class _OneProcessLauncher:
-    def __init__(self, process: SkyPilotCommandProcess) -> None:
-        self._process = process
-
-    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> SkyPilotCommandProcess:
-        del argv, cwd
-        return self._process
+    def cancel_output(self) -> None:
+        pass
 
 
 class _BlockingBridgeRunner(FakeRunner):
@@ -300,7 +317,7 @@ class _BlockingBridgeRunner(FakeRunner):
         self.finished = threads.event()
         self._command = SubprocessCommandRunner(
             threads,
-            processes=_OneProcessLauncher(process),
+            processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
             cleanup_timeout=1,
         )
 
@@ -340,7 +357,6 @@ def _namespace(tmp_path: Path) -> StateNamespace:
     return StateNamespace(project_root=tmp_path, root=root, portable=False)
 
 
-@pytest.mark.timeout(20)
 def test_timeout_cancels_blocked_bridge_transport_and_releases_subprocess_workers(
     tmp_path: Path,
 ) -> None:
@@ -368,12 +384,16 @@ def test_timeout_cancels_blocked_bridge_transport_and_releases_subprocess_worker
         threads=threads,
     )
 
-    try:
-        bridge.start()
-        runner.finished.wait()
-    finally:
-        connection.close()
-        bridge.close()
+    def exercise() -> None:
+        try:
+            bridge.start()
+            if not runner.finished.wait(timeout=1):
+                raise AssertionError
+        finally:
+            connection.close()
+            bridge.close()
+
+    threads.run(exercise)
 
     assert connection.send_started.is_set()
     assert connection.closed.is_set()

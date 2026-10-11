@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from vs_sim.gate import arrival
 from vs_sim.processes import (
     ForegroundChild,
+    PipedProcess,
     ProcessOutcome,
     ProcessSpec,
     RunningProcess,
@@ -233,6 +234,20 @@ class FakeProcessLauncher:
         """Record ``spec`` and start the process the script describes for it."""
         self.started.append(spec)
         return _ScriptedProcess(spec, self.script(spec), self.clock)
+
+
+@dataclass
+class FakePipedProcessLauncher:
+    """Record synchronous piped process starts and create each process through a Fake factory."""
+
+    factory: Callable[[tuple[str, ...], Path | None], PipedProcess]
+    started: list[tuple[tuple[str, ...], Path | None]] = field(default_factory=list)
+
+    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> PipedProcess:
+        """Record the normalized start request and return its scripted process."""
+        request = (tuple(argv), cwd)
+        self.started.append(request)
+        return self.factory(*request)
 
 
 @dataclass(frozen=True)

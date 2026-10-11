@@ -5,11 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import re
 import shlex
-import signal
-import subprocess
 import tempfile
 import uuid
 from collections import deque
@@ -17,14 +14,22 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import yaml
 
-from vs_sim.api import OsThreads, Threads
+from vs_sim.api import (
+    OsThreads,
+    PipedProcess,
+    PipedProcessLauncher,
+    ProcessTimeoutError,
+    SubprocessPipedProcessLauncher,
+    Threads,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
+    from io import TextIOBase
 
     from vs_sandbox.skypilot_config import ResolvedSkyPilotResources
     from vs_sim.api import Condition, Lock, Worker
@@ -228,95 +233,6 @@ class CancellableOutputSink(Protocol):
         ...
 
 
-class SkyPilotCommandProcess(Protocol):
-    """One started SkyPilot CLI process and the POSIX group it owns."""
-
-    @property
-    def stdout(self) -> IO[str]:
-        """The process's text stdout pipe."""
-        ...
-
-    @property
-    def stderr(self) -> IO[str]:
-        """The process's text stderr pipe."""
-        ...
-
-    def wait(self, timeout: float | None) -> int:
-        """Wait for the group leader and return its status, or raise ``TimeoutExpired``."""
-        ...
-
-    def kill_group(self) -> None:
-        """Kill the group leader and every descendant that remains in its process group."""
-        ...
-
-
-class SkyPilotProcessLauncher(Protocol):
-    """Start a SkyPilot CLI command as an owned process group."""
-
-    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> SkyPilotCommandProcess:
-        """Start *argv* with piped text output."""
-        ...
-
-
-class _PosixSkyPilotCommandProcess:
-    """A ``Popen`` group leader on a supported POSIX host."""
-
-    def __init__(self, process: subprocess.Popen[str]) -> None:
-        self._process = process
-
-    @property
-    def stdout(self) -> IO[str]:
-        stream = self._process.stdout
-        if stream is None:
-            raise AssertionError
-        return stream
-
-    @property
-    def stderr(self) -> IO[str]:
-        stream = self._process.stderr
-        if stream is None:
-            raise AssertionError
-        return stream
-
-    def wait(self, timeout: float | None) -> int:
-        return self._process.wait(timeout=timeout)
-
-    def kill_group(self) -> None:
-        try:
-            os.killpg(self._process.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            # A group with no remaining process needs no cleanup. Permission
-            # errors are also terminal: the caller still observes its bounded
-            # cleanup deadline instead of blocking forever on the pipes.
-            return
-
-
-class PosixSkyPilotProcessLauncher:
-    """Start owned process groups on VibeSys's supported Linux and macOS hosts.
-
-    VibeSys does not publish Windows builds. Failing explicitly off POSIX avoids
-    silently falling back to direct-child termination, which cannot satisfy the
-    process-tree ownership contract.
-    """
-
-    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> SkyPilotCommandProcess:
-        """Start *argv* in a new POSIX process group with piped text output."""
-        if os.name != "posix":
-            message = "SkyPilot command execution requires POSIX process groups"
-            raise SkyPilotCLIError(message)
-        process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-009052 [S603]; execute the caller's argv directly with no shell at the external CLI adapter boundary.
-            argv,
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            process_group=0,
-        )
-        return _PosixSkyPilotCommandProcess(process)
-
-
 class SubprocessCommandRunner:
     """Run one owned POSIX process group while forwarding both output streams.
 
@@ -335,7 +251,7 @@ class SubprocessCommandRunner:
         self,
         threads: Threads | None = None,
         *,
-        processes: SkyPilotProcessLauncher | None = None,
+        processes: PipedProcessLauncher | None = None,
         cleanup_timeout: float = _PROCESS_CLEANUP_TIMEOUT_SECONDS,
     ) -> None:
         """Bind output threads, process ownership, and *cleanup_timeout* seconds of cleanup."""
@@ -343,7 +259,7 @@ class SubprocessCommandRunner:
             message = "cleanup_timeout must be finite and nonnegative"
             raise ValueError(message)
         self._threads: Threads = threads or OsThreads()
-        self._processes: SkyPilotProcessLauncher = processes or PosixSkyPilotProcessLauncher()
+        self._processes: PipedProcessLauncher = processes or SubprocessPipedProcessLauncher()
         self._cleanup_timeout = cleanup_timeout
 
     def run(
@@ -394,19 +310,23 @@ class SubprocessCommandRunner:
                         )
                     )
             returncode = process.wait(timeout=timeout)
-        except BaseException:
-            self._cancel_deliveries(outputs)
-            deadline = self._threads.now() + self._cleanup_timeout
-            self._stop_and_drain(process, drain_workers, deadline=deadline)
-            self._join_workers(delivery_workers, deadline=deadline)
-            self._close_if_drained((stdout, stderr), drain_workers)
+        except BaseException as failure:
+            self._cleanup_failed_run(
+                process,
+                outputs,
+                (drain_workers, delivery_workers),
+                (stdout, stderr),
+                failure,
+            )
             raise
         if not self._join_workers(drain_workers):
             self._cancel_deliveries(outputs)
             deadline = self._threads.now() + self._cleanup_timeout
-            self._stop_and_drain(process, drain_workers, deadline=deadline)
-            self._join_workers(delivery_workers, deadline=deadline)
-            self._close_if_drained((stdout, stderr), drain_workers)
+            try:
+                self._stop_and_drain(process, drain_workers, deadline=deadline)
+            finally:
+                self._join_workers(delivery_workers, deadline=deadline)
+                self._close_if_drained((stdout, stderr), drain_workers)
             message = (
                 "SkyPilot command output did not close within "
                 f"{self._cleanup_timeout} seconds after its process exited; "
@@ -434,21 +354,58 @@ class SubprocessCommandRunner:
             raise sink_errors[0]
         return ProcessResult(normalized, returncode, outputs[0].text(), outputs[1].text())
 
+    def _cleanup_failed_run(
+        self,
+        process: PipedProcess,
+        outputs: Sequence[_StreamOutput],
+        workers: tuple[Sequence[Worker], Sequence[Worker]],
+        streams: tuple[TextIOBase, TextIOBase],
+        failure: BaseException,
+    ) -> None:
+        """Settle owned resources and surface a failed group signal over *failure*."""
+        drain_workers, delivery_workers = workers
+        self._cancel_deliveries(outputs)
+        deadline = self._threads.now() + self._cleanup_timeout
+        cleanup_error: OSError | None = None
+        try:
+            self._stop_and_drain(process, drain_workers, deadline=deadline)
+        except OSError as exc:
+            cleanup_error = exc
+        finally:
+            self._join_workers(delivery_workers, deadline=deadline)
+            self._close_if_drained(streams, drain_workers)
+        if cleanup_error is not None:
+            raise cleanup_error from failure
+
     def _stop_and_drain(
         self,
-        process: SkyPilotCommandProcess,
+        process: PipedProcess,
         workers: Sequence[Worker],
         *,
         deadline: float,
     ) -> None:
-        """Kill the group, then reap and join drains within one cleanup bound."""
-        process.kill_group()
-        with suppress(OSError, subprocess.SubprocessError):
-            process.wait(timeout=self._remaining(deadline))
-        self._join_workers(workers, deadline=deadline)
+        """Kill the group, cancel pipe reads, then settle within one cleanup bound."""
+        cleanup_error: OSError | None = None
+        try:
+            process.kill_group()
+        except OSError as exc:
+            cleanup_error = exc
+        try:
+            process.cancel_output()
+        except OSError as exc:
+            cleanup_error = cleanup_error or exc
+        try:
+            with suppress(OSError, ProcessTimeoutError):
+                process.wait(timeout=self._remaining(deadline))
+        finally:
+            self._join_workers(workers, deadline=deadline)
+        if cleanup_error is not None:
+            raise cleanup_error
 
     @staticmethod
-    def _close_if_drained(streams: tuple[IO[str], IO[str]], workers: Sequence[Worker]) -> None:
+    def _close_if_drained(
+        streams: tuple[TextIOBase, TextIOBase], workers: Sequence[Worker]
+    ) -> None:
         """Close owned pipes only after no worker can still be reading them."""
         if not any(worker.is_alive() for worker in workers):
             for stream in streams:
@@ -483,7 +440,7 @@ class _StreamOutput:
     def __init__(
         self,
         threads: Threads,
-        stream: IO[str],
+        stream: TextIOBase,
         sink: Callable[[str], None] | None,
         *,
         sink_errors: list[Exception],
@@ -932,7 +889,7 @@ class SkyPilotJobRunner:
             )
         except FileNotFoundError as exc:
             raise SkyPilotCLIError.executable_not_found(self._executable) from exc
-        except subprocess.TimeoutExpired as exc:
+        except ProcessTimeoutError as exc:
             raise SkyPilotTimeoutError.command_timed_out(timeout) from exc
 
     @staticmethod
