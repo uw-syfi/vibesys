@@ -7,14 +7,13 @@ Fencing commits does not fence external executors: they must honor the epoch
 or reconcile stable request identities before replay.
 """
 
+from collections.abc import Callable
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from vs_project.project import Project
 
 
@@ -182,6 +181,16 @@ class StateStore(Protocol):
         """Verify current owner and epoch against authoritative expiry.
 
         Time before the last successful mutation cannot authorize dispatch.
+        """
+        ...
+
+    def mutate_if_fenced(self, fence: StoreFence, now: float, mutation: Callable[[], None]) -> bool:
+        """Run one synchronous mutation while takeover is excluded.
+
+        Return ``False`` without calling ``mutation`` when the fence is not
+        current. The mutation must complete its durable write before returning;
+        it must not call back into this store. Its exception propagates after
+        the store releases its transaction.
         """
         ...
 

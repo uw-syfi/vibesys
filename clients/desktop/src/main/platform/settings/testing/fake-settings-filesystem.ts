@@ -7,10 +7,52 @@ export type SettingsFilesystemOperation =
   | {readonly kind: 'remove'; readonly path: string}
   | {readonly kind: 'replace'; readonly staging: string; readonly target: string};
 
+/** One explicitly held Fake write, released by the test rather than a clock. */
+export interface DeferredSettingsWrite {
+  readonly received: Promise<void>;
+  release(): void;
+}
+
+/** An atomic replacement already applied, with its async completion explicitly held. */
+export interface DeferredSettingsReplace {
+  readonly committed: Promise<void>;
+  release(): void;
+}
+
+class WriteGate implements DeferredSettingsWrite {
+  readonly received: Promise<void>;
+  readonly released: Promise<void>;
+  readonly #arrive: () => void;
+  readonly #release: () => void;
+
+  constructor() {
+    let arrive = (): void => {};
+    let release = (): void => {};
+    this.received = new Promise(resolve => {
+      arrive = resolve;
+    });
+    this.released = new Promise(resolve => {
+      release = resolve;
+    });
+    this.#arrive = arrive;
+    this.#release = release;
+  }
+
+  arrive(): void {
+    this.#arrive();
+  }
+
+  release(): void {
+    this.#release();
+  }
+}
+
 export class FakeSettingsFilesystem implements SettingsFilesystem {
   readonly operations: SettingsFilesystemOperation[] = [];
   readonly #files = new Map<string, string>();
   readonly #readFailures = new Map<string, unknown[]>();
+  #nextWrite: WriteGate | null = null;
+  #nextReplace: WriteGate | null = null;
 
   constructor(files: Readonly<Record<string, string>> = {}) {
     for (const [path, text] of Object.entries(files)) this.#files.set(path, text);
@@ -20,6 +62,22 @@ export class FakeSettingsFilesystem implements SettingsFilesystem {
     const failures = this.#readFailures.get(path) ?? [];
     failures.push(error);
     this.#readFailures.set(path, failures);
+  }
+
+  /** Hold the next staged write until the test releases it. */
+  deferNextWrite(): DeferredSettingsWrite {
+    if (this.#nextWrite !== null) throw new Error('a settings write is already deferred');
+    const gate = new WriteGate();
+    this.#nextWrite = gate;
+    return gate;
+  }
+
+  /** Hold the next replace's promise after its target bytes have atomically changed. */
+  deferNextReplaceAfterCommit(): DeferredSettingsReplace {
+    if (this.#nextReplace !== null) throw new Error('a settings replace is already deferred');
+    const gate = new WriteGate();
+    this.#nextReplace = gate;
+    return {committed: gate.received, release: () => gate.release()};
   }
 
   text(path: string): string {
@@ -38,6 +96,12 @@ export class FakeSettingsFilesystem implements SettingsFilesystem {
 
   async writePrivateText(path: string, text: string): Promise<void> {
     this.operations.push({kind: 'write', path});
+    const gate = this.#nextWrite;
+    this.#nextWrite = null;
+    if (gate !== null) {
+      gate.arrive();
+      await gate.released;
+    }
     this.#files.set(path, text);
   }
 
@@ -51,6 +115,12 @@ export class FakeSettingsFilesystem implements SettingsFilesystem {
     const text = this.text(staging);
     this.#files.set(target, text);
     this.#files.delete(staging);
+    const gate = this.#nextReplace;
+    this.#nextReplace = null;
+    if (gate !== null) {
+      gate.arrive();
+      await gate.released;
+    }
   }
 }
 

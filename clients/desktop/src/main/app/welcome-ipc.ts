@@ -6,7 +6,6 @@
  * paths, ids, task names, run arguments) before anything reaches a host, or throws naming what is
  * wrong. `bindWelcomeIpc` answers the channels only for the welcome view's own web contents.
  */
-import type {IpcMain, IpcMainInvokeEvent} from 'electron';
 import {type HostId, hostFromKey, validHostPath} from '../../common/hosts.js';
 import {isInstanceId, isTaskName} from '../../common/ids.js';
 import {exactResumeRunId, type ResumeRunId} from '../../common/resume-run.js';
@@ -14,11 +13,39 @@ import {shellWords} from '../../common/shell-words.js';
 import {WELCOME_CHANNELS, type WelcomeResult} from '../../common/welcome-protocol.js';
 import {ConnectionError} from '../platform/connection/index.js';
 
+/** The narrow IPC boundary needed by the welcome request binder. */
+export interface WelcomeIpc {
+  handle(
+    channel: string,
+    listener: (event: WelcomeInvokeEvent, ...args: unknown[]) => Promise<WelcomeResult<unknown>>,
+  ): void;
+}
+
+export interface WelcomeInvokeEvent {
+  readonly senderId: number;
+  readonly senderUrl: string | null;
+  /** The main-process identity of the exact renderer document that invoked this request. */
+  readonly rendererGeneration: string | null;
+}
+
+/** One renderer web contents, with document replacement reported by the Electron wiring. */
+export interface WelcomeDocument {
+  readonly id: number;
+  onNewDocument(listener: (retiringGeneration: string | null) => void): void;
+  onDestroyed(listener: () => void): void;
+}
+
 export type WelcomeRequest =
   | {readonly kind: 'overview'}
   | {readonly kind: 'hosts'}
   | {readonly kind: 'host'; readonly host: HostId}
-  | {readonly kind: 'set-checkout'; readonly host: HostId; readonly path: unknown}
+  | {
+      readonly kind: 'set-checkout';
+      readonly host: HostId;
+      readonly path: unknown;
+      readonly change: number;
+    }
+  | {readonly kind: 'cancel-checkout'; readonly change: number}
   | {readonly kind: 'sign-in'; readonly host: HostId}
   | {readonly kind: 'tasks'; readonly host: HostId; readonly project: string}
   /** List `directory` (a path ending in `/`) for completion. */
@@ -67,9 +94,9 @@ function directory(value: unknown): string {
   return path.endsWith('/') ? path : `${path}/`;
 }
 
-function startToken(value: unknown): number {
+function operationToken(value: unknown, operation: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
-    throw new Error('a start is named by a positive integer');
+    throw new Error(`a ${operation} is named by a positive integer`);
   }
   return value;
 }
@@ -83,7 +110,7 @@ function start(args: readonly unknown[]): WelcomeRequest {
     project: project(path),
     task,
     args: typeof words === 'string' ? shellWords(words) : [],
-    start: startToken(token),
+    start: operationToken(token, 'start'),
   };
 }
 
@@ -98,7 +125,14 @@ export function parseWelcomeRequest(channel: Channel, args: readonly unknown[]):
     case WELCOME_CHANNELS.host:
       return {kind: 'host', host: hostFromKey(first)};
     case WELCOME_CHANNELS.setCheckout:
-      return {kind: 'set-checkout', host: hostFromKey(first), path: second};
+      return {
+        kind: 'set-checkout',
+        host: hostFromKey(first),
+        path: second,
+        change: operationToken(third, 'checkout change'),
+      };
+    case WELCOME_CHANNELS.cancelCheckout:
+      return {kind: 'cancel-checkout', change: operationToken(first, 'checkout change')};
     case WELCOME_CHANNELS.signIn:
       return {kind: 'sign-in', host: hostFromKey(first)};
     case WELCOME_CHANNELS.tasks:
@@ -110,7 +144,7 @@ export function parseWelcomeRequest(channel: Channel, args: readonly unknown[]):
     case WELCOME_CHANNELS.start:
       return start(args);
     case WELCOME_CHANNELS.cancelStart:
-      return {kind: 'cancel-start', start: startToken(first)};
+      return {kind: 'cancel-start', start: operationToken(first, 'start')};
     case WELCOME_CHANNELS.resume:
       return {
         kind: 'resume',
@@ -144,21 +178,55 @@ function failure(error: unknown): WelcomeResult<never> {
 
 /**
  * Answer every welcome channel with `answer`, for `welcome` (the welcome view's web contents on
- * `url`) only; any other sender is refused.
+ * `url`) only; any other sender is refused. Each request carries the invoking Electron frame's
+ * process/routing identity. A replacement document cannot issue work until `retire` has settled
+ * every operation belonging to the prior identities.
  */
 export function bindWelcomeIpc(
-  ipc: IpcMain,
-  welcome: {readonly id: number},
+  ipc: WelcomeIpc,
+  welcome: WelcomeDocument,
   url: string,
-  answer: (request: WelcomeRequest) => Promise<unknown>,
+  answer: (request: WelcomeRequest, rendererGeneration: string) => Promise<unknown>,
+  retire: (rendererGeneration: string) => Promise<void>,
 ): void {
+  let alive = true;
+  /** Every replacement advances this even when Electron cannot identify the retiring frame. */
+  let documentEpoch = 0;
+  let activeGenerations = new Set<string>();
+  const retiredGenerations = new Set<string>();
+  let retirement = Promise.resolve();
+  const retireCurrent = (retiringGeneration: string | null = null): void => {
+    documentEpoch += 1;
+    if (retiringGeneration !== null) activeGenerations.add(retiringGeneration);
+    const retiring = [...activeGenerations];
+    activeGenerations = new Set();
+    for (const generation of retiring) retiredGenerations.add(generation);
+    retirement = retirement.then(async () => {
+      await Promise.all(retiring.map(generation => retire(generation)));
+    });
+  };
+  welcome.onNewDocument(retireCurrent);
+  welcome.onDestroyed(() => {
+    alive = false;
+    retireCurrent();
+  });
   for (const channel of Object.values(WELCOME_CHANNELS)) {
-    ipc.handle(channel, async (event: IpcMainInvokeEvent, ...args: unknown[]) => {
-      if (event.sender.id !== welcome.id || event.senderFrame?.url.startsWith(url) !== true) {
+    ipc.handle(channel, async (event, ...args) => {
+      if (event.senderId !== welcome.id || event.senderUrl?.startsWith(url) !== true) {
         return failure(new Error('not the welcome view'));
       }
+      const requestGeneration = event.rendererGeneration;
+      const requestEpoch = documentEpoch;
       try {
-        return {ok: true, value: await answer(parseWelcomeRequest(channel, args))};
+        if (requestGeneration === null) throw new Error('welcome view document is unavailable');
+        await retirement;
+        if (!alive || requestEpoch !== documentEpoch || retiredGenerations.has(requestGeneration))
+          throw new Error('welcome view was replaced');
+        activeGenerations.add(requestGeneration);
+        return {
+          ok: true,
+          value: await answer(parseWelcomeRequest(channel, args), requestGeneration),
+        };
       } catch (error) {
         return failure(error);
       }

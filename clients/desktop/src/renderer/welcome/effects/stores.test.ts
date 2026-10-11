@@ -1,4 +1,5 @@
 import {describe, expect, test} from 'bun:test';
+import type {Store} from '@vibesys/core-state';
 import type {HostKey} from '../../../common/hosts.js';
 import type {ResumeRunId} from '../../../common/resume-run.js';
 import type {
@@ -13,6 +14,7 @@ import type {
   WelcomeRecent,
   WelcomeResult,
 } from '../../../common/welcome-protocol.js';
+import type {HostAction, HostState} from '../state/host.js';
 import {loadWelcomeStores} from './stores.js';
 
 class Deferred<T> {
@@ -34,6 +36,14 @@ class FakeWelcomeBridge implements WelcomeBridge {
   readonly platform = 'linux';
   readonly overviewReply = new Deferred<WelcomeResult<WelcomeOverview>>();
   readonly hostCalls: HostKey[] = [];
+  readonly checkoutCalls: Array<{
+    readonly host: HostKey;
+    readonly path: string;
+    readonly change: number;
+    readonly reply: Deferred<WelcomeResult<string>>;
+  }> = [];
+  readonly cancelledCheckouts: number[] = [];
+  checkout = '/vibesys';
   readonly #chrome: Array<(event: WelcomeEvent<ChromeState>) => void> = [];
   readonly #recent: Array<(event: WelcomeEvent<readonly WelcomeRecent[]>) => void> = [];
   readonly #showHost: Array<(event: WelcomeEvent<HostKey>) => void> = [];
@@ -50,11 +60,18 @@ class FakeWelcomeBridge implements WelcomeBridge {
 
   async host(host: HostKey): Promise<WelcomeResult<WelcomeHost>> {
     this.hostCalls.push(host);
-    return {ok: true, value: {key: host, label: host, checkout: '/vibesys'}};
+    return {ok: true, value: {key: host, label: host, checkout: this.checkout}};
   }
 
-  async setCheckout(_host: HostKey, path: string): Promise<WelcomeResult<string>> {
-    return {ok: true, value: path};
+  setCheckout(host: HostKey, path: string, change: number): Promise<WelcomeResult<string>> {
+    const reply = new Deferred<WelcomeResult<string>>();
+    this.checkoutCalls.push({host, path, change, reply});
+    return reply.promise;
+  }
+
+  async cancelCheckout(change: number): Promise<WelcomeResult<null>> {
+    this.cancelledCheckouts.push(change);
+    return {ok: true, value: null};
   }
 
   async signIn(_host: HostKey): Promise<WelcomeResult<null>> {
@@ -157,6 +174,59 @@ class FakeWelcomeBridge implements WelcomeBridge {
 }
 
 describe('loadWelcomeStores', () => {
+  test('cancelling an in-flight checkout revokes the same main-process operation', async () => {
+    const bridge = new FakeWelcomeBridge();
+    const loading = loadWelcomeStores(bridge, () => true);
+    bridge.overviewReply.resolve({
+      ok: true,
+      value: {
+        eventCursor: 0,
+        settingsProblem: null,
+        chrome: {mode: 'welcome', attached: null, stops: {}},
+        recent: [],
+        listings: [],
+        host: 'local',
+      },
+    });
+    const loaded = await loading;
+    if (!loaded.ok) throw new Error(loaded.error);
+    await hostReady(loaded.value.host);
+
+    loaded.value.host.dispatch({type: 'edit-checkout'});
+    loaded.value.host.dispatch({type: 'checkout-input', value: '/new'});
+    loaded.value.host.dispatch({type: 'submit-checkout'});
+    const call = bridge.checkoutCalls[0];
+    if (call === undefined) throw new Error('checkout call expected');
+    expect(call).toMatchObject({host: 'local', path: '/new'});
+
+    loaded.value.host.dispatch({type: 'cancel-checkout'});
+    expect(bridge.cancelledCheckouts).toEqual([call.change]);
+    expect(loaded.value.host.getState().panel).toMatchObject({
+      kind: 'ready',
+      data: {checkout: '/vibesys'},
+      checkout: null,
+    });
+
+    // Cancellation can lose the main process's atomic commit race. Its successful original reply
+    // must update the closed panel to the durable checkout rather than leave renderer and disk split.
+    const committed = new Promise<void>(resolve => {
+      const unsubscribe = loaded.value.host.subscribe(() => {
+        const panel = loaded.value.host.getState().panel;
+        if (panel.kind !== 'ready' || panel.data.checkout !== '/new') return;
+        unsubscribe();
+        resolve();
+      });
+    });
+    bridge.checkout = '/new';
+    call.reply.resolve({ok: true, value: '/new'});
+    await committed;
+    expect(loaded.value.host.getState().panel).toMatchObject({
+      kind: 'ready',
+      data: {checkout: '/new'},
+      checkout: null,
+    });
+  });
+
   test('keeps every push that crosses the overview and continues live', async () => {
     const bridge = new FakeWelcomeBridge();
     const loading = loadWelcomeStores(bridge, () => true);
@@ -285,6 +355,17 @@ describe('loadWelcomeStores', () => {
     expect(bridge.hostCalls).toEqual([]);
   });
 });
+
+async function hostReady(store: Store<HostState, HostAction>): Promise<void> {
+  if (store.getState().panel.kind === 'ready') return;
+  await new Promise<void>(resolve => {
+    const unsubscribe = store.subscribe(() => {
+      if (store.getState().panel.kind !== 'ready') return;
+      unsubscribe();
+      resolve();
+    });
+  });
+}
 
 function chrome(runId: string): ChromeState {
   return {

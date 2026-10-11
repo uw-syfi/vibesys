@@ -17,6 +17,7 @@ from vs_issue_tracker.core import (
     IssueType,
 )
 from vs_issue_tracker.errors import IssueTrackerLoadError
+from vs_issue_tracker.fake import FakeIssueTracker, FaultHook, FaultPhase
 from vs_issue_tracker.format import format_issue_full, format_issue_short
 from vs_issue_tracker.github import GitHubIssueTracker, open_issue_tracker
 from vs_issue_tracker.policy import (
@@ -45,6 +46,9 @@ __all__ = [
     "CapReached",
     "CreateIssuePolicy",
     "CreateRejection",
+    "FakeIssueTracker",
+    "FaultHook",
+    "FaultPhase",
     "FileProgressLog",
     "GitHubIssueTracker",
     "GitHubProgressLog",

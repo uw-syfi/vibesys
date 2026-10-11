@@ -13,6 +13,7 @@ from vs_github.cli import (
     GitHubCLIError,
     GitHubCLIUnavailableError,
 )
+from vs_github.fake import FakeGitHubClient
 
 
 class GitHubClient(Protocol):
@@ -63,6 +64,7 @@ class GitHubClient(Protocol):
 
 
 __all__ = [
+    "FakeGitHubClient",
     "GitHubAuthenticationError",
     "GitHubCLI",
     "GitHubCLIError",

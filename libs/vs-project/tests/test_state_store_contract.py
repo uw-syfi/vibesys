@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Barrier
@@ -28,6 +28,8 @@ from vs_project.api import (
     StoreFence,
     Unknown,
 )
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_until_started_sync
 
 if TYPE_CHECKING:
     from typing import Protocol
@@ -192,6 +194,58 @@ def test_fence_renewal_expiry_and_takeover(make_store: StoreFactory, tmp_path: P
     )
     assert store.load() is None
     assert store.commit(None, _envelope(0), second, now=19) == Committed(record=_envelope(0))
+
+
+def test_fenced_mutation_finishes_before_takeover_and_rejects_the_old_owner(
+    make_store: StoreFactory, tmp_path: Path
+) -> None:
+    store = make_store(tmp_path, ())
+    first = store.acquire("host-a", now=0, duration=10)
+    assert first is not None
+    threads = OsThreads()
+    mutation_entered = threads.event()
+    takeover_started = threads.event()
+    release_mutation: Future[None] = Future()
+    order: list[str] = []
+
+    def mutate() -> None:
+        mutation_entered.set()
+        release_mutation.result(timeout=HANG_GUARD_S)
+        order.append("mutation")
+
+    def guarded_mutation() -> bool:
+        return store.mutate_if_fenced(first, now=9, mutation=mutate)
+
+    def take_over() -> StoreFence | None:
+        takeover_started.set()
+        fence = store.acquire("host-b", now=10, duration=10)
+        order.append("takeover")
+        return fence
+
+    mutation_result = start_thread(guarded_mutation)
+    try:
+        wait_until_started_sync(mutation_entered, mutation_result)
+        takeover_result = start_thread(take_over)
+        wait_until_started_sync(takeover_started, takeover_result)
+    finally:
+        release_mutation.set_result(None)
+    assert mutation_result.result(timeout=HANG_GUARD_S)
+    second = takeover_result.result(timeout=HANG_GUARD_S)
+
+    assert second is not None
+    assert order == ["mutation", "takeover"]
+    rejected: list[str] = []
+    assert not store.mutate_if_fenced(first, now=10, mutation=lambda: rejected.append("stale"))
+    assert rejected == []
+
+    def fail() -> None:
+        message = "external publication failed"
+        raise OSError(message)
+
+    with pytest.raises(OSError, match="external publication failed"):
+        store.mutate_if_fenced(second, now=11, mutation=fail)
+    third = store.acquire("host-c", now=20, duration=10)
+    assert third is not None
 
 
 def test_quarantine_is_an_explicit_record_not_a_ready_envelope(

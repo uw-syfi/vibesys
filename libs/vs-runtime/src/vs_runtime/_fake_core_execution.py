@@ -104,9 +104,12 @@ class FakePublicationDelivery:
         self, publication: Publication, context: PublicationContext
     ) -> PublicationAcknowledgement:
         """Honor the host fence, then apply the shared strict journal contract."""
-        if not self._store.verify(context.fence, now=context.now_at):
+
+        def append() -> None:
+            self._publications = append_publication(self._publications, publication)
+
+        if not self._store.mutate_if_fenced(context.fence, context.now_at, append):
             raise ContractError(("fence",), "publication host no longer owns the run")
-        self._publications = append_publication(self._publications, publication)
         return PublicationAcknowledgement(
             publication_id=publication.publication_id, sequence=publication.sequence
         )

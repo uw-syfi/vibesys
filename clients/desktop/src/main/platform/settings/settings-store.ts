@@ -41,6 +41,9 @@ interface ReadResult<T> {
   readonly failure: Error | null;
 }
 
+/** Whether a conditional settings update crossed its atomic replace boundary. */
+type SettingsUpdateOutcome = 'committed' | 'cancelled';
+
 export class SettingsStore {
   readonly #options: SettingsStoreOptions;
   readonly #filesystem: SettingsFilesystem;
@@ -110,12 +113,20 @@ export class SettingsStore {
     }
   }
 
-  /** Replace the host settings with `update` of the current ones. */
-  updateHosts(update: (current: SettingsFile) => SettingsFile): Promise<void> {
+  /**
+   * Replace the host settings with `update` of the current ones. `current` is checked at the
+   * atomic-replace boundary so a cancelled checkout validation cannot commit staged settings.
+   * The outcome makes that boundary explicit: after `committed`, later cancellation cannot revoke
+   * the durable write.
+   */
+  updateHosts(
+    update: (current: SettingsFile) => SettingsFile,
+    current: () => boolean = () => true,
+  ): Promise<SettingsUpdateOutcome> {
     return this.#serialize(async () => {
-      const current = await this.#readHosts();
-      if (current.failure !== null) throw current.failure;
-      await writeJson(this.#filesystem, this.#options.settingsPath, update(current.value));
+      const hosts = await this.#readHosts();
+      if (hosts.failure !== null) throw hosts.failure;
+      return writeJson(this.#filesystem, this.#options.settingsPath, update(hosts.value), current);
     });
   }
 
@@ -132,7 +143,10 @@ export class SettingsStore {
       const recent = await this.#readRecent();
       if (recent.failure !== null) throw recent.failure;
       const next = update(recent.value);
-      if (!(await writeJson(this.#filesystem, this.#options.recentPath, next, current))) return;
+      if (
+        (await writeJson(this.#filesystem, this.#options.recentPath, next, current)) === 'cancelled'
+      )
+        return;
       for (const listener of this.#recentListeners) listener(next);
     });
   }
@@ -143,9 +157,12 @@ export class SettingsStore {
     return () => this.#recentListeners.delete(listener);
   }
 
-  #serialize(write: () => Promise<void>): Promise<void> {
+  #serialize<T>(write: () => Promise<T>): Promise<T> {
     const next = this.#queue.then(write);
-    this.#queue = next.catch(() => undefined);
+    this.#queue = next.then(
+      () => undefined,
+      () => undefined,
+    );
     return next;
   }
 }
@@ -189,13 +206,13 @@ async function writeJson(
   path: string,
   value: unknown,
   current: () => boolean = () => true,
-): Promise<boolean> {
+): Promise<SettingsUpdateOutcome> {
   const staging = `${path}.${process.pid}.tmp`;
   await filesystem.writePrivateText(staging, `${JSON.stringify(value, null, 2)}\n`);
   if (!current()) {
     await filesystem.remove(staging);
-    return false;
+    return 'cancelled';
   }
   await filesystem.replace(staging, path);
-  return true;
+  return 'committed';
 }

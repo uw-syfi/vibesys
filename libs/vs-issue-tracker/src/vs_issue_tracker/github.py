@@ -35,6 +35,8 @@ _STATUS_PREFIX = "vibesys:status/"
 _PROGRESS_LABEL = "vibesys:progress-log"
 _EVENT_START = "<!-- vibesys:issue-event:v1\n"
 _EVENT_END = "\n-->"
+_KEY_START = "<!-- vibesys:issue-key:v1 "
+_KEY_END = " -->"
 _TYPE_RANK = {IssueType.BUG: 0, IssueType.FEATURE: 1, IssueType.PERF: 2}
 
 
@@ -84,21 +86,27 @@ class GitHubIssueTracker(IssueTracker):
             return None
         return _to_issue(raw)
 
-    def create(
+    def create(  # noqa: PLR0913  # lint-waiver: LW-771008 [PLR0913]; the create contract names independent fields plus the idempotency key.
         self,
         *,
-        type: IssueType | str,  # noqa: A002  # lint-waiver: LW-920414 [A002]; preserve the storage-neutral tracker create keyword.
+        type: IssueType | str,  # noqa: A002  # lint-waiver: LW-771009 [A002]; preserve the storage-neutral tracker create keyword.
         title: str,
         description: str,
         created_by: str,
         iteration: int,
+        key: str | None = None,
     ) -> Issue:
-        """Create an issue with its type label and initial structured event."""
+        """Create an issue with its type label and initial structured event.
+
+        A key is also written into the issue body as a hidden marker, in the same call that
+        creates the issue, so a crash before the create event is written still leaves the key
+        findable.
+        """
         issue_type = type if isinstance(type, IssueType) else IssueType(type)
         issue_id = self._cli.create_issue(
             self.repository,
             title=title,
-            body=description,
+            body=description if key is None else f"{description}\n\n{_KEY_START}{key}{_KEY_END}",
             labels=[f"{_TYPE_PREFIX}{issue_type.value}"],
         )
         event = _event(
@@ -107,18 +115,19 @@ class GitHubIssueTracker(IssueTracker):
             iteration=iteration,
             note="",
             payload={"type": issue_type.value, "created_by": created_by},
+            key=key,
         )
         self._write_event(issue_id, event)
         issue = self._issue(issue_id)
         if issue is None:
-            raise RuntimeError(f"Created GitHub issue #{issue_id} could not be read back")  # noqa: TRY003  # lint-waiver: LW-920415 [TRY003]; identify an impossible post-create read failure.
+            raise RuntimeError(f"Created GitHub issue #{issue_id} could not be read back")  # noqa: TRY003  # lint-waiver: LW-771010 [TRY003]; identify an impossible post-create read failure.
         return issue
 
     def get(self, issue_id: int) -> Issue | None:
         """Return a VibeSys issue by GitHub issue number."""
         return self._issue(issue_id)
 
-    def update_status(  # noqa: PLR0913  # lint-waiver: LW-920416 [PLR0913]; implement the shared tracker transition contract without packing fields.
+    def update_status(  # noqa: PLR0913  # lint-waiver: LW-771011 [PLR0913]; implement the shared tracker transition contract without packing fields.
         self,
         issue_id: int,
         status: IssueStatus | str,
@@ -127,6 +136,7 @@ class GitHubIssueTracker(IssueTracker):
         iteration: int,
         note: str = "",
         payload: dict[str, Any] | None = None,
+        key: str | None = None,
     ) -> Issue:
         """Apply native and label state, then append one transition event."""
         target = status if isinstance(status, IssueStatus) else IssueStatus(status)
@@ -155,6 +165,7 @@ class GitHubIssueTracker(IssueTracker):
                 iteration=iteration,
                 note=note,
                 payload=payload,
+                key=key,
             ),
         )
         return self._required(issue_id)
@@ -180,7 +191,7 @@ class GitHubIssueTracker(IssueTracker):
             )
         return [issue.id for issue in blocked]
 
-    def increment_attempts(
+    def increment_attempts(  # noqa: PLR0913  # lint-waiver: LW-771012 [PLR0913]; the increment_attempts contract names independent fields plus the idempotency key.
         self,
         issue_id: int,
         *,
@@ -188,6 +199,7 @@ class GitHubIssueTracker(IssueTracker):
         iteration: int,
         note: str = "",
         payload: dict[str, Any] | None = None,
+        key: str | None = None,
     ) -> Issue:
         """Append an attempt event and return the incremented issue projection."""
         self._required(issue_id)
@@ -199,6 +211,7 @@ class GitHubIssueTracker(IssueTracker):
                 iteration=iteration,
                 note=note,
                 payload=payload,
+                key=key,
             ),
         )
         return self._required(issue_id)
@@ -207,7 +220,7 @@ class GitHubIssueTracker(IssueTracker):
         self,
         *,
         status: IssueStatus | str | None = None,
-        type: IssueType | str | None = None,  # noqa: A002  # lint-waiver: LW-920417 [A002]; preserve the storage-neutral tracker filter keyword.
+        type: IssueType | str | None = None,  # noqa: A002  # lint-waiver: LW-771013 [A002]; preserve the storage-neutral tracker filter keyword.
     ) -> builtins.list[Issue]:
         """List VibeSys issues, optionally filtered by status and type."""
         status_filter = (
@@ -256,7 +269,7 @@ class GitHubIssueTracker(IssueTracker):
     def _required(self, issue_id: int) -> Issue:
         issue = self._issue(issue_id)
         if issue is None:
-            raise KeyError(f"issue #{issue_id} not found")  # noqa: TRY003  # lint-waiver: LW-920418 [TRY003]; include the missing remote issue number.
+            raise KeyError(f"issue #{issue_id} not found")  # noqa: TRY003  # lint-waiver: LW-771014 [TRY003]; include the missing remote issue number.
         return issue
 
     def _write_event(self, issue_id: int, event: IssueEvent) -> None:
@@ -266,8 +279,14 @@ class GitHubIssueTracker(IssueTracker):
         )
 
 
-def _event(
-    *, actor: str, action: str, iteration: int, note: str, payload: dict[str, Any] | None
+def _event(  # noqa: PLR0913  # lint-waiver: LW-771015 [PLR0913]; the fields are the independent facts of one event record.
+    *,
+    actor: str,
+    action: str,
+    iteration: int,
+    note: str,
+    payload: dict[str, Any] | None,
+    key: str | None = None,
 ) -> IssueEvent:
     return IssueEvent(
         timestamp=datetime.now(UTC).isoformat(),
@@ -276,7 +295,17 @@ def _event(
         iteration=iteration,
         note=note,
         payload=payload,
+        key=key,
     )
+
+
+def _split_key(body: str) -> tuple[str, str | None]:
+    """The issue body without its hidden key marker, and the key the marker carries."""
+    start = body.rfind(_KEY_START)
+    if start < 0 or not body.endswith(_KEY_END):
+        return body, None
+    key = body[start + len(_KEY_START) : -len(_KEY_END)]
+    return body[:start].rstrip("\n"), key
 
 
 def _to_issue(raw: dict[str, object]) -> Issue:
@@ -286,7 +315,7 @@ def _to_issue(raw: dict[str, object]) -> Issue:
         None,
     )
     if type_value is None:
-        raise ValueError(f"GitHub issue #{raw.get('number')} lacks a VibeSys type label")  # noqa: TRY003  # lint-waiver: LW-920419 [TRY003]; identify malformed tracker metadata by issue number.
+        raise ValueError(f"GitHub issue #{raw.get('number')} lacks a VibeSys type label")  # noqa: TRY003  # lint-waiver: LW-771016 [TRY003]; identify malformed tracker metadata by issue number.
     events = _events(raw.get("comments"))
     create = next((event for event in events if event.action == "create"), None)
     state = str(raw.get("state", "OPEN")).lower()
@@ -299,12 +328,13 @@ def _to_issue(raw: dict[str, object]) -> Issue:
     else:
         status = IssueStatus.OPEN
     number = _number(raw["number"])
+    description, create_key = _split_key(str(raw.get("body") or ""))
     created_at = str(raw.get("createdAt") or datetime.now(UTC).isoformat())
     return Issue(
         id=number,
         type=IssueType(type_value),
         title=str(raw.get("title", "")),
-        description=str(raw.get("body") or ""),
+        description=description,
         status=status,
         created_by=str((create.payload or {}).get("created_by") if create else _author(raw)),
         created_iter=create.iteration if create and create.iteration is not None else 0,
@@ -313,6 +343,7 @@ def _to_issue(raw: dict[str, object]) -> Issue:
         attempts=_attempt_count(events),
         history=events,
         closed_iter=_closed_iteration(events),
+        create_key=create_key,
     )
 
 
@@ -398,7 +429,7 @@ def open_issue_tracker(
     if backend == "local":
         return IssueBoard(local_path, on_change=on_change)
     if repository is None:
-        raise ValueError("repository is required for the GitHub issue backend")  # noqa: TRY003  # lint-waiver: LW-920420 [TRY003]; name the missing backend configuration field.
+        raise ValueError("repository is required for the GitHub issue backend")  # noqa: TRY003  # lint-waiver: LW-771017 [TRY003]; name the missing backend configuration field.
     return GitHubIssueTracker(repository)
 
 

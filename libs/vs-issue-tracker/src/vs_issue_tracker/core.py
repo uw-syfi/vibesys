@@ -60,6 +60,8 @@ class IssueEvent(BaseModel):
     iteration: int | None = None
     note: str = ""
     payload: dict[str, Any] | None = None
+    key: str | None = None
+    """Idempotency key of the keyed write that produced this event, if any."""
 
 
 class Issue(BaseModel):
@@ -79,6 +81,12 @@ class Issue(BaseModel):
     attempts: int = 0
     history: list[IssueEvent] = Field(default_factory=list)
     closed_iter: int | None = None
+    create_key: str | None = None
+    """Idempotency key of the keyed write that created the issue, if any."""
+
+    def has_key(self, key: str) -> bool:
+        """Whether the keyed write ``key`` created this issue or is recorded in its history."""
+        return self.create_key == key or any(event.key == key for event in self.history)
 
 
 class IssueTracker(Protocol):
@@ -90,23 +98,28 @@ class IssueTracker(Protocol):
     interface.
     """
 
-    def create(
+    def create(  # noqa: PLR0913  # lint-waiver: LW-771001 [PLR0913]; the create contract names independent fields plus the idempotency key.
         self,
         *,
-        type: IssueType | str,  # noqa: A002  # lint-waiver: LW-920407 [A002]; preserve the established public keyword across tracker backends.
+        type: IssueType | str,  # noqa: A002  # lint-waiver: LW-771002 [A002]; preserve the established public keyword across tracker backends.
         title: str,
         description: str,
         created_by: str,
         iteration: int,
+        key: str | None = None,
     ) -> Issue:
-        """Create an open issue and its initial create event."""
+        """Create an open issue and its initial create event.
+
+        ``key`` is recorded with the issue so a caller can later ask whether a keyed write
+        landed; the tracker does not deduplicate on it.
+        """
         ...
 
     def get(self, issue_id: int) -> Issue | None:
         """Return a detached issue, or ``None`` if the identifier is absent."""
         ...
 
-    def update_status(  # noqa: PLR0913  # lint-waiver: LW-920409 [PLR0913]; retain the tracker transition contract's named state, actor, iteration, and event fields.
+    def update_status(  # noqa: PLR0913  # lint-waiver: LW-771003 [PLR0913]; retain the tracker transition contract's named state, actor, iteration, and event fields.
         self,
         issue_id: int,
         status: IssueStatus | str,
@@ -115,6 +128,7 @@ class IssueTracker(Protocol):
         iteration: int,
         note: str = "",
         payload: dict[str, Any] | None = None,
+        key: str | None = None,
     ) -> Issue:
         """Change status and append a history event; missing IDs raise ``KeyError``."""
         ...
@@ -129,7 +143,7 @@ class IssueTracker(Protocol):
         """Reopen blocked issues and reset their attempt counts."""
         ...
 
-    def increment_attempts(
+    def increment_attempts(  # noqa: PLR0913  # lint-waiver: LW-771004 [PLR0913]; the increment_attempts contract names independent fields plus the idempotency key.
         self,
         issue_id: int,
         *,
@@ -137,6 +151,7 @@ class IssueTracker(Protocol):
         iteration: int,
         note: str = "",
         payload: dict[str, Any] | None = None,
+        key: str | None = None,
     ) -> Issue:
         """Increment the attempt count and append an attempt event."""
         ...
@@ -145,7 +160,7 @@ class IssueTracker(Protocol):
         self,
         *,
         status: IssueStatus | str | None = None,
-        type: IssueType | str | None = None,  # noqa: A002  # lint-waiver: LW-920408 [A002]; preserve the established public filter keyword across tracker backends.
+        type: IssueType | str | None = None,  # noqa: A002  # lint-waiver: LW-771005 [A002]; preserve the established public filter keyword across tracker backends.
     ) -> builtins.list[Issue]:
         """List detached issues, optionally filtered by status and type."""
         ...
@@ -193,78 +208,28 @@ class _IssueBoardData(BaseModel):
         return self
 
 
-class IssueBoard:
-    """Atomic JSON-backed issue tracker."""
+class _MemoryBoard:
+    """The issue-board logic over an in-memory snapshot; persistence is a subclass hook."""
 
-    def __init__(
-        self,
-        path: Path,
-        *,
-        on_change: Callable[[], None] | None = None,
-    ) -> None:
-        """Open the JSON issue board with an optional change callback."""
-        self.path = Path(path)
+    def __init__(self, *, on_change: Callable[[], None] | None = None) -> None:
         self._lock = RLock()
-        self._on_change: Callable[[], None] | None = None
-        self._data = _IssueBoardData(
-            version=_STORE_VERSION,
-            next_id=1,
-            issues=[],
-        )
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if self.path.is_file():
-            self._data = self._load_from_disk()
-        else:
-            self._save_locked()
         self._on_change = on_change
-
-    def _load_from_disk(self) -> _IssueBoardData:
-        try:
-            loaded = json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise IssueBoardLoadError.at_path(self.path, f"invalid JSON: {exc}") from exc
-        except OSError as exc:
-            raise IssueBoardLoadError.at_path(self.path, f"cannot read store: {exc}") from exc
-        if not isinstance(loaded, dict):
-            raise IssueBoardLoadError.at_path(self.path, "expected a JSON object")
-        if "version" not in loaded:
-            raise IssueBoardLoadError.at_path(
-                self.path,
-                f"unsupported version None; expected {_STORE_VERSION}",
-            )
-        if loaded["version"] != _STORE_VERSION:
-            raise IssueBoardLoadError.at_path(
-                self.path,
-                f"unsupported version {loaded['version']!r}; expected {_STORE_VERSION}",
-            )
-        try:
-            data = _IssueBoardData.model_validate(loaded)
-        except ValidationError as exc:
-            raise IssueBoardLoadError.at_path(
-                self.path,
-                f"invalid store structure: {exc}",
-            ) from exc
-        return data
+        self._data = _IssueBoardData(version=_STORE_VERSION, next_id=1, issues=[])
 
     def _refresh_locked(self) -> None:
-        """Read the latest persisted snapshot while holding ``_lock``."""
-        self._data = self._load_from_disk()
+        """Re-read the snapshot from the store while holding ``_lock``; memory has none."""
 
     def _save_locked(self) -> None:
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(self._data.model_dump_json(indent=2), encoding="utf-8")
-        tmp.replace(self.path)
+        """Persist the snapshot, then tell the change callback."""
+        self._notify()
+
+    def _notify(self) -> None:
         if self._on_change is not None:
             try:
                 self._on_change()
             except Exception:  # noqa: BLE001  # lint-waiver: LW-010100 [BLE001]; callbacks are caller code, and persistence must survive any callback failure.
                 sys.stderr.write("[IssueBoard] on_change callback raised; ignoring:\n")
                 traceback.print_exc(file=sys.stderr)
-
-    def reload(self) -> None:
-        """Re-read the JSON file from disk, discarding the in-memory copy."""
-        with self._lock:
-            self._refresh_locked()
 
     def _replace_issue(self, issue: Issue) -> None:
         for idx, stored in enumerate(self._data.issues):
@@ -273,7 +238,7 @@ class IssueBoard:
                 return
         raise _issue_not_found(issue.id)
 
-    def create(
+    def create(  # noqa: PLR0913  # lint-waiver: LW-771006 [PLR0913]; the create contract names independent fields plus the idempotency key.
         self,
         *,
         type: IssueType | str,  # noqa: A002  # lint-waiver: LW-010101 [A002]; `type` is the established public create keyword and serialized issue field name.
@@ -281,6 +246,7 @@ class IssueBoard:
         description: str,
         created_by: str,
         iteration: int,
+        key: str | None = None,
     ) -> Issue:
         """Create and persist a new open issue with its initial history event."""
         issue_type = IssueType(type) if not isinstance(type, IssueType) else type
@@ -298,12 +264,14 @@ class IssueBoard:
                 created_at=now,
                 updated_at=now,
                 attempts=0,
+                create_key=key,
                 history=[
                     IssueEvent(
                         timestamp=now,
                         actor=created_by,
                         action="create",
                         iteration=iteration,
+                        key=key,
                     )
                 ],
             )
@@ -330,6 +298,7 @@ class IssueBoard:
         iteration: int,
         note: str = "",
         payload: dict[str, Any] | None = None,
+        key: str | None = None,
     ) -> Issue:
         """Change issue status and append the corresponding history event."""
         if not isinstance(status, IssueStatus):
@@ -353,6 +322,7 @@ class IssueBoard:
                     iteration=iteration,
                     note=note,
                     payload=payload,
+                    key=key,
                 )
             )
             self._replace_issue(issue)
@@ -392,7 +362,7 @@ class IssueBoard:
                 self._save_locked()
         return reopened
 
-    def increment_attempts(
+    def increment_attempts(  # noqa: PLR0913  # lint-waiver: LW-771007 [PLR0913]; the increment_attempts contract names independent fields plus the idempotency key.
         self,
         issue_id: int,
         *,
@@ -400,6 +370,7 @@ class IssueBoard:
         iteration: int,
         note: str = "",
         payload: dict[str, Any] | None = None,
+        key: str | None = None,
     ) -> Issue:
         """Increment an issue's attempt count and append an attempt event."""
         with self._lock:
@@ -418,6 +389,7 @@ class IssueBoard:
                     iteration=iteration,
                     note=note,
                     payload=payload,
+                    key=key,
                 )
             )
             self._replace_issue(issue)
@@ -486,3 +458,66 @@ class IssueBoard:
             return None
         candidates.sort(key=lambda i: (_TYPE_RANK[i.type], i.created_at))
         return candidates[0]
+
+
+class IssueBoard(_MemoryBoard):
+    """Atomic JSON-backed issue tracker."""
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        on_change: Callable[[], None] | None = None,
+    ) -> None:
+        """Open the JSON issue board with an optional change callback."""
+        super().__init__()
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.is_file():
+            self._data = self._load_from_disk()
+        else:
+            self._save_locked()
+        self._on_change = on_change
+
+    def _load_from_disk(self) -> _IssueBoardData:
+        try:
+            loaded = json.loads(self.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise IssueBoardLoadError.at_path(self.path, f"invalid JSON: {exc}") from exc
+        except OSError as exc:
+            raise IssueBoardLoadError.at_path(self.path, f"cannot read store: {exc}") from exc
+        if not isinstance(loaded, dict):
+            raise IssueBoardLoadError.at_path(self.path, "expected a JSON object")
+        if "version" not in loaded:
+            raise IssueBoardLoadError.at_path(
+                self.path,
+                f"unsupported version None; expected {_STORE_VERSION}",
+            )
+        if loaded["version"] != _STORE_VERSION:
+            raise IssueBoardLoadError.at_path(
+                self.path,
+                f"unsupported version {loaded['version']!r}; expected {_STORE_VERSION}",
+            )
+        try:
+            data = _IssueBoardData.model_validate(loaded)
+        except ValidationError as exc:
+            raise IssueBoardLoadError.at_path(
+                self.path,
+                f"invalid store structure: {exc}",
+            ) from exc
+        return data
+
+    def _refresh_locked(self) -> None:
+        """Read the latest persisted snapshot while holding ``_lock``."""
+        self._data = self._load_from_disk()
+
+    def _save_locked(self) -> None:
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(self._data.model_dump_json(indent=2), encoding="utf-8")
+        tmp.replace(self.path)
+        self._notify()
+
+    def reload(self) -> None:
+        """Re-read the JSON file from disk, discarding the in-memory copy."""
+        with self._lock:
+            self._refresh_locked()

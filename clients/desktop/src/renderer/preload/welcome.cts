@@ -32,6 +32,7 @@ const CHANNELS: Channels = {
   hosts: 'vibesys:welcome:hosts',
   host: 'vibesys:welcome:host',
   setCheckout: 'vibesys:welcome:set-checkout',
+  cancelCheckout: 'vibesys:welcome:cancel-checkout',
   signIn: 'vibesys:welcome:sign-in',
   tasks: 'vibesys:welcome:tasks',
   complete: 'vibesys:welcome:complete',
@@ -64,7 +65,9 @@ const bridge: WelcomeBridge = {
   overview: () => call<WelcomeOverview>(CHANNELS.overview),
   hosts: () => call<string[]>(CHANNELS.hosts),
   host: (host: HostKey) => call<WelcomeHost>(CHANNELS.host, host),
-  setCheckout: (host: HostKey, path: string) => call<string>(CHANNELS.setCheckout, host, path),
+  setCheckout: (host: HostKey, path: string, change: number) =>
+    call<string>(CHANNELS.setCheckout, host, path, change),
+  cancelCheckout: (change: number) => call<null>(CHANNELS.cancelCheckout, change),
   signIn: (host: HostKey) => call<null>(CHANNELS.signIn, host),
   tasks: (host: HostKey, project: string) => call<string[]>(CHANNELS.tasks, host, project),
   complete: (host: HostKey, directory: string) =>
