@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.core_roles import (
-    CONTINUING_READER,
+    CONTINUATION,
     MEASURING_READER,
     MEASURING_WRITER,
     RoleKind,
@@ -52,6 +52,7 @@ from vs_runtime.api import (
     CorePlan,
     CorePolicy,
     OrchestrationPlugin,
+    WorkspaceAccess,
 )
 from vs_runtime.api.core import (
     OperationCatalog,
@@ -69,8 +70,6 @@ if TYPE_CHECKING:
 _PLUGIN_ID = STATE_SCHEMA.name.removesuffix(".strategy-state")
 # The label of the snapshot that retains a candidate.
 RETENTION_LABEL = "verified"
-# The workspace directory an evaluation turn may write its benchmark output to.
-PERF_DIRECTORY = "perf"
 _RENDERER = TemplateRenderer(Path(prompts.__file__).parent)
 
 
@@ -82,7 +81,13 @@ def _role(role: Role, template: str, kind: RoleKind) -> AgentRole:
 
 IMPLEMENTER = _role(Role.IMPLEMENTER, "implementer_system_prompt.j2", MEASURING_WRITER)
 JUDGE = _role(Role.JUDGE, "judge_system_prompt.j2", MEASURING_READER)
-PERF_EVALUATOR = _role(Role.PERF, "performance_system_prompt.j2", CONTINUING_READER)
+# The evaluator starts servers and writes its measurements in its own checkout, which is discarded
+# when its attempt settles; it needs no evaluation tool.
+PERF_EVALUATOR = _role(
+    Role.PERF,
+    "performance_system_prompt.j2",
+    RoleKind(WorkspaceAccess.READ_WRITE, CONTINUATION),
+)
 CORE_ROLES = (IMPLEMENTER, JUDGE, PERF_EVALUATOR)
 
 
@@ -188,7 +193,6 @@ def issue_queue_core_policy() -> CorePolicy:
         ),
         retention_label=RETENTION_LABEL,
         prompt_templates=Path(prompts.__file__).parent,
-        artifact_directories=(PERF_DIRECTORY,),
         owned_operations=board_entries,
     )
 

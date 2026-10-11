@@ -486,20 +486,27 @@ def _evaluated(
 
 
 def _accept(
-    state: IssueQueueStrategyState, reply: Result, payload: str, event: TurnResult
+    state: IssueQueueStrategyState, reply: IssueJudgeResult, payload: str, event: TurnResult
 ) -> IssueQueueStrategyState:
-    if isinstance(reply, IssueJudgeResult):
-        return _reviewed(state, reply, payload, event)
-    if isinstance(reply, IssuePerfEvalResult):
-        return _evaluated(state, reply, payload)
-    msg = "an implementer result is accepted with its checkpoint"
-    raise AssertionError(msg)
+    return _reviewed(state, reply, payload, event)
+
+
+def _written_turn(
+    state: IssueQueueStrategyState,
+    reply: IssueImplementerResult | IssuePerfEvalResult,
+    payload: str,
+    candidate: RevisionRef | None,
+) -> IssueQueueStrategyState:
+    """Accept the result of a turn that wrote to its workspace, once its checkpoint is known."""
+    if isinstance(reply, IssueImplementerResult):
+        return _implemented(state, reply, payload, candidate)
+    return _evaluated(state, reply, payload)
 
 
 def settle_retained(
     state: IssueQueueStrategyState, view: RunView, config: IssueQueueConfig
 ) -> IssueQueueStrategyState:
-    """Fold the held implementer reply once core has retained or declined its checkpoint.
+    """Fold the held reply of a write turn once core has retained or declined its checkpoint.
 
     Core delivers a turn's reply before the executor snapshots the workspace, so the
     candidate is readable from the view only later. Until then the reply stays held.
@@ -515,10 +522,11 @@ def settle_retained(
     )
     if candidate is None and not declined:
         return state
-    reply = _decode(Role.IMPLEMENTER, job.held_reply, config)
+    role = Role.IMPLEMENTER if job.kind is JobKind.ISSUE else Role.PERF
+    reply = _decode(role, job.held_reply, config)
     held = _with(state, job.released())
-    if isinstance(reply, IssueImplementerResult):
-        return _implemented(held, reply, job.held_reply, candidate)
+    if isinstance(reply, IssueImplementerResult | IssuePerfEvalResult):
+        return _written_turn(held, reply, job.held_reply, candidate)
     return held
 
 
@@ -558,13 +566,13 @@ def _wait_or_correct(
 def _answered(
     state: IssueQueueStrategyState, view: RunView, reply: Result, job: Job, event: TurnResult
 ) -> IssueQueueStrategyState:
-    """Accept a role's result. The implementer's waits for its checkpoint to be readable."""
+    """Accept a role's result. A write turn's waits for its checkpoint to be readable."""
     payload = event.output_json or ""
-    if isinstance(reply, IssueImplementerResult):
+    if isinstance(reply, IssueImplementerResult | IssuePerfEvalResult):
         candidate = turn_candidate(view, job.attempt, event.invocation)
         if candidate is None:
             return _with(state, job.holding(payload, event.invocation))
-        return _implemented(state, reply, payload, candidate)
+        return _written_turn(state, reply, payload, candidate)
     return _accept(state, reply, payload, event)
 
 

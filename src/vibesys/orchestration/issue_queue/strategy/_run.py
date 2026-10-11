@@ -85,11 +85,8 @@ def _stop(draft: Draft) -> None:
             reason = f"{reason}: {state.adoption_error}"
         result = RunResultProposal(outcome="failure", reason=reason)
     else:
-        selection = (
-            candidates.selection_of(state.winner)
-            if ending.outcome == "success" and state.winner is not None
-            else None
-        )
+        # What was adopted is named whatever the ending, so the result says what the root holds.
+        selection = None if state.winner is None else candidates.selection_of(state.winner)
         result = RunResultProposal(
             outcome=ending.outcome, reason=ending.reason, selection=selection
         )

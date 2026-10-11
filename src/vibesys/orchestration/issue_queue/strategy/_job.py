@@ -226,7 +226,7 @@ def _turn_shape(
     if role is Role.PERF:
         return (
             WorkspaceMode.ISOLATED_CHILD,
-            Access.WRITE_ARTIFACTS,
+            Access.WRITE_CANDIDATE,
             PERF_REPLY,
             config.perf_turn_seconds,
             job.base,

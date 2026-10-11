@@ -14,7 +14,8 @@ Use the configured loads as a starting ladder. If they do not expose saturation,
 increase request rate until throughput plateaus, latency rises sharply, or
 requests fail. Add one or two prompt-length or output-length workloads when the
 shape could change the ceiling. Save and read structured benchmark output for
-every run (write files only under `perf/` in the workspace). Diagnose the limiting
+every run. You work in your own checkout of the accumulated candidate, which is discarded when
+this evaluation ends, so scratch files and logs can go anywhere in it. Diagnose the limiting
 resource separately at low, medium, and saturation load. Compare with both the
 immediately prior result and the best recorded result. Always stop any server process
 that this turn started, including after benchmark failure.

@@ -23,13 +23,15 @@ _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
 _ORCHESTRATION = _SRC / "orchestration"
 
 # dynamic_core.py is the dynamic strategy's own host composition (see its docstring), and
-# dynamic_roles.py declares the roles that composition runs.
+# dynamic_roles.py declares the roles that composition runs; issue_queue_core.py and
+# issue_queue_board.py are the issue queue's, for its roles and its tracker.
 _ALLOWED_EXTERNAL_POLICY_IMPORTS = {
     "api/evolve.py",
     "api/catalog.py",
-    "api/issue_queue.py",
     "dynamic_core.py",
     "dynamic_roles.py",
+    "issue_queue_board.py",
+    "issue_queue_core.py",
 }
 _INFRASTRUCTURE_LIBRARIES = (
     "vs_agent",
