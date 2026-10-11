@@ -1,11 +1,26 @@
 /** Recent: the runs this user opened, each with its status on its host and what it allows. */
 
-import {type RecentRun, type RecentStatus, resumeDecision, stopKey} from '@vibesys/entities';
-import type {ChromeState} from '@vibesys/ipc';
+import {
+  type HostKey,
+  type RecentRun,
+  type RecentStatus,
+  type ResumeRunId,
+  resumeDecision,
+} from '@vibesys/entities';
 import {Button} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
-import {type ListsState, statusOf} from '../state/lists.js';
-import {commands, StopControls, type WelcomeSenders} from './common.js';
+import {type ListsState, statusOf} from '../../state/lists.js';
+
+/**
+ * What a recent run offers, which other features own: reattaching, resuming, its stop controls,
+ * and opening its host's panel. The app composes them in.
+ */
+export interface RecentRunActions {
+  readonly attach: (host: HostKey, instance: string) => void;
+  readonly resume: (host: HostKey, project: string, run: ResumeRunId) => void;
+  readonly stopControls: (host: HostKey, instance: string) => ReactNode;
+  readonly openHost: (host: HostKey) => void;
+}
 
 function statusText(status: RecentStatus): {text: string; className: string} {
   switch (status.kind) {
@@ -23,46 +38,37 @@ function statusText(status: RecentStatus): {text: string; className: string} {
 function RowActions(props: {
   readonly run: RecentRun;
   readonly status: RecentStatus;
-  readonly chrome: ChromeState;
-  readonly send: WelcomeSenders;
+  readonly actions: RecentRunActions;
 }): ReactNode {
-  const {run, status, chrome, send} = props;
-  const dispatch = commands(send);
+  const {run, status, actions} = props;
   switch (status.kind) {
     case 'live': {
       const instance = status.instanceId;
       return (
         <>
-          <Button
-            variant="primary"
-            onClick={() => dispatch({kind: 'attach', host: run.host, instance})}
-          >
+          <Button variant="primary" onClick={() => actions.attach(run.host, instance)}>
             Reattach
           </Button>
-          <StopControls
-            view={chrome.stops[stopKey(run.host, instance)]}
-            stop={force => dispatch({kind: 'stop', host: run.host, instance, force})}
-          />
+          {actions.stopControls(run.host, instance)}
         </>
       );
     }
     case 'ended': {
       const decision = resumeDecision(run.runId);
       if (decision.kind === 'unavailable') return <span className="muted">{decision.reason}</span>;
-      const resume = {host: run.host, project: run.project, run: decision.runId};
-      return <Button onClick={() => dispatch({kind: 'resume', ...resume})}>Resume…</Button>;
+      const resume = (): void => actions.resume(run.host, run.project, decision.runId);
+      return <Button onClick={resume}>Resume…</Button>;
     }
     case 'unknown':
-      return <Button onClick={() => send.host({type: 'show', host: run.host})}>Open host</Button>;
+      return <Button onClick={() => actions.openHost(run.host)}>Open host</Button>;
   }
 }
 
 export function RecentPanel(props: {
   readonly lists: ListsState;
-  readonly chrome: ChromeState;
-  readonly send: WelcomeSenders;
+  readonly actions: RecentRunActions;
 }): JSX.Element {
-  const {lists, chrome, send} = props;
+  const {lists, actions} = props;
   if (lists.runs.length === 0) {
     return (
       <section id="recent-section">
@@ -97,7 +103,7 @@ export function RecentPanel(props: {
                 <td>{run.runId}</td>
                 <td className={className}>{text}</td>
                 <td className="actions-cell">
-                  <RowActions run={run} status={status} chrome={chrome} send={send} />
+                  <RowActions run={run} status={status} actions={actions} />
                 </td>
               </tr>
             );
