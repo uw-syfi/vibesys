@@ -40,7 +40,7 @@ from vs_sim.api.testing import HANG_GUARD_S
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from vibesys.api import RunSession
+    from vibesys.api import RunControl
     from vs_runtime.api.infrastructure import RunControlChannel
 
 
@@ -60,6 +60,16 @@ class _Session:
 
     def stop(self) -> None:
         self._control.request_stop()
+
+
+def _wait_for_stop(control: RunControlChannel, threads: OsThreads) -> None:
+    """Reach control boundaries until a stop lands or the e2e guard expires."""
+    deadline = threads.now() + HANG_GUARD_S
+    while threads.now() < deadline:
+        control.raise_if_stopped()
+        threads.sleep(0.05)
+    message = "the stop never reached the run"
+    raise AssertionError(message)
 
 
 @pytest.fixture
@@ -134,17 +144,12 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     outcome: list[object] = []
 
     def run() -> None:
-        with runtime.condition:
-            # The runtime reads only the `RunControl` slice of its session
-            # (through `RunApi`'s session provider), which `_Session` implements.
-            runtime.session = cast("RunSession", _Session(integration.control))
-        deadline = threads.now() + HANG_GUARD_S
-        while threads.now() < deadline:
-            # The run's next controlled boundary: a requested stop lands here.
-            integration.control.raise_if_stopped()
-            threads.sleep(0.05)
-        message = "the stop never reached the run"
-        raise AssertionError(message)
+        control = _Session(integration.control)
+        runtime.controls.install(cast("RunControl", control))
+        try:
+            _wait_for_stop(integration.control, threads)
+        finally:
+            runtime.controls.release(cast("RunControl", control))
 
     def serve() -> None:
         hostname, version = host_facts()

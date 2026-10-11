@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from launch import open_run_store
-from server.api.service import RunApi
+from server.api.service import RunApi, RunControlSlot
 from server.chat.manager import ChatManager
 from server.controller import RunController
 from server.execution import AgentExecutionRequest, ExecutionHandle, ExecutionTracker
@@ -45,9 +45,8 @@ class _ControlBridge:
 
     Mirrors what `vibesys.api._session._LocalRunSession`'s `steer`/`pause`/
     `resume`/`stop` methods do in production: translate the `RunControl`
-    protocol's names onto the channel's writer-side methods. `RunApi`'s
-    `session_provider` returns this so `_execute_command` can route through
-    it exactly as it would a live session.
+    protocol's names onto the channel's writer-side methods. The control slot
+    installs this so `RunApi` can route exactly as it would to a live session.
     """
 
     def __init__(self, channel: RunControlChannel) -> None:
@@ -229,6 +228,8 @@ def build_server_parts(
         lambda transition: _record_control_transition(core_events, transition)
     )
     control_bridge = _ControlBridge(control)
+    controls = RunControlSlot(condition)
+    controls.install(control_bridge)
     api = RunApi(
         condition,
         controller,
@@ -236,7 +237,7 @@ def build_server_parts(
         journal,
         chat,
         integration,
-        session_provider=lambda: control_bridge,
+        controls=controls,
         tui_defaults=tui_defaults,
         threads=threads,
     )

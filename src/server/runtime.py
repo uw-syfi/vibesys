@@ -6,7 +6,7 @@ import asyncio
 from contextlib import ExitStack, suppress
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
-from server.api.service import RunApi
+from server.api.service import RunApi, RunControlSlot
 from server.chat.manager import ChatManager
 from server.controller import RunController
 from server.diagnostics import (
@@ -174,6 +174,7 @@ class ServerRuntime:
             self.chat,
         )
         self.chat.set_fallback_answer(RunInspector(self.integration).answer)
+        self.controls = RunControlSlot(self.condition)
         self.api = RunApi(
             self.condition,
             self.controller,
@@ -181,7 +182,7 @@ class ServerRuntime:
             self.journal,
             self.chat,
             self.integration,
-            session_provider=lambda: self.session,
+            controls=self.controls,
             tui_defaults=tui_defaults,
             threads=self.threads,
         )
@@ -210,17 +211,23 @@ class ServerRuntime:
             with self.condition:
                 self.handle = handle
                 self.session = session
+            control_installed = False
             try:
-                async for event in handle.events():
-                    self.integration.project_event(event)
-                return await handle.result()
-            except asyncio.CancelledError as cancellation:
-                handle.stop()
+                self.controls.install(session)
+                control_installed = True
                 try:
-                    await handle.result()
-                finally:
-                    raise cancellation
+                    async for event in handle.events():
+                        self.integration.project_event(event)
+                    return await handle.result()
+                except asyncio.CancelledError as cancellation:
+                    handle.stop()
+                    try:
+                        await handle.result()
+                    finally:
+                        raise cancellation
             finally:
+                if control_installed:
+                    self.controls.release(session)
                 with self.condition:
                     self.handle = None
                     self.session = None
