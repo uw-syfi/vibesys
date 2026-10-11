@@ -216,8 +216,8 @@
 {"path": "src/entrypoints/server.py", "rule": "threading", "count": 1}
 {"path": "src/entrypoints/web.py", "rule": "process", "count": 1}
 {"path": "src/entrypoints/web.py", "rule": "socket_io", "count": 1}
-{"path": "src/server/api/protocol.py", "rule": "wall_clock", "count": 2}
 {"path": "src/server/chat/manager.py", "rule": "threading", "count": 1}
+{"path": "src/server/control_envelope.py", "rule": "wall_clock", "count": 2}
 {"path": "src/server/event_index.py", "rule": "fs_sync", "count": 2}
 {"path": "src/server/events.py", "rule": "wall_clock", "count": 1}
 {"path": "src/server/execution.py", "rule": "threading", "count": 2}
