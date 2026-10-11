@@ -372,6 +372,20 @@ def representative_context() -> dict[str, object]:
     return context
 
 
+def template_roots(path: Path, installed: Path) -> tuple[Path, tuple[Path, ...]]:
+    """The root a packaged template renders from, and every root its includes may resolve in."""
+    shared = installed / "vibesys" / "prompts" / "shared"
+    common = shared.parent
+    core_protocol = common / "core_protocol"
+    parts = path.relative_to(installed).parts
+    root = installed.joinpath(*parts[: parts.index("prompts") + 1])
+    if path.is_relative_to(shared):
+        root = shared
+    elif path.is_relative_to(core_protocol):
+        root = core_protocol
+    return root, (root, shared, common, core_protocol)
+
+
 def render_packaged_prompts(installed: Path) -> int:
     """Exercise the public renderer against every template in the unpacked wheel."""
     context = representative_context()
@@ -422,16 +436,13 @@ def render_packaged_prompts(installed: Path) -> int:
         # prompt trees form this renderer's contract.
         if "prompts" not in path.relative_to(installed).parts or path.name == "README.md":
             continue
+        parts = path.relative_to(installed).parts
+        root, search_roots = template_roots(path, installed)
         shared = installed / "vibesys" / "prompts" / "shared"
         common = shared.parent
-        parts = path.relative_to(installed).parts
-        root = installed.joinpath(*parts[: parts.index("prompts") + 1])
-        if path.is_relative_to(shared):
-            root = shared
-        search_roots = (root, shared, common)
         free, _ = resolve_free_variables(path, search_roots=search_roots)
         template_inputs = context
-        if "core_policy" in parts:
+        if "core_policy" in parts or "core_protocol" in parts:
             template_inputs = context | core_policy_context()
         assert free <= template_inputs.keys() | {"response"}, (
             path,

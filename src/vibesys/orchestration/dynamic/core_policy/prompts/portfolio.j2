@@ -1,4 +1,5 @@
-{% from '_macros.j2' import rev, metric, partial %}
+{% from '_revision.j2' import rev %}
+{% from '_macros.j2' import metric, partial %}
 Schedule at most {{ capacity }} new workstreams for free slots. {{ in_flight }} other
 workstreams are still running (their history rows show non-terminal phases), and the
 run may schedule {{ remaining }} more workstreams in total, including these. Each

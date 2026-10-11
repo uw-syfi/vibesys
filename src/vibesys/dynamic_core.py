@@ -37,6 +37,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     measurement_recipe,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
+from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_runtime.api import (
     CoreOperation,
     CorePlan,
@@ -157,6 +158,7 @@ def dynamic_core_policy() -> CorePolicy:
         ),
         retention_label=RETENTION_LABEL,
         prompt_templates=Path(prompts.__file__).parent,
+        prompt_fallback_roots=(CORE_PROTOCOL_DIR,),
     )
 
 

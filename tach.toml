@@ -452,7 +452,7 @@ depends_on = ["vibesys.metrics", "vibesys.orchestration.profilers"]
 [[modules]]
 path = "vibesys.prompts"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vs_prompts"]
+depends_on = ["vibesys", "vs_prompts", "vs_core"]
 
 [[modules]]
 path = "vs_sandbox"
@@ -1042,7 +1042,7 @@ expose = ["FocusLedger", "FocusLedgerRow", "FocusView", "ProfileAttributionError
 from = ["vibesys.profile_focus"]
 
 [[interfaces]]
-expose = ["BackendPromptRenderer", "ComputeBackendFragment", "CpuComputeBackendFragment", "CudaComputeBackendFragment", "MetalComputeBackendFragment", "PROMPTS_DIR", "RocmComputeBackendFragment", "TrainiumComputeBackendFragment", "get_backend_fragment", "render_plan_correction", "render_string", "render_template"]
+expose = ["BackendPromptRenderer", "CORE_PROTOCOL_DIR", "ComputeBackendFragment", "CoreProtocolTemplate", "ReplyCorrectionPrompt", "ResumePrompt", "WaitUnrecordedPrompt", "CpuComputeBackendFragment", "CudaComputeBackendFragment", "MetalComputeBackendFragment", "PROMPTS_DIR", "RocmComputeBackendFragment", "TrainiumComputeBackendFragment", "get_backend_fragment", "render_plan_correction", "render_string", "render_template"]
 from = ["vibesys.prompts"]
 
 [[interfaces]]
@@ -1256,7 +1256,7 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.dynamic.strategy"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.dynamic.models", "vibesys.hypothesis", "vibesys.metrics"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.dynamic.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.prompts"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.strategy"]
@@ -1280,7 +1280,7 @@ expose = ["ResolvedRun", "dynamic_core_registration", "dynamic_operation_catalog
 # place that stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.dynamic_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.dynamic_roles", "vibesys.errors", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.run.evaluation_backend"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.dynamic_roles", "vibesys.errors", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.evaluation_backend"]
 
 [[interfaces]]
 from = ["vibesys.dynamic_roles"]

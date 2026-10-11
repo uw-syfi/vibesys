@@ -13,6 +13,7 @@ from vibesys.api.request import load_task
 from vibesys.dynamic_core import ResolvedRun
 from vibesys.orchestration.dynamic import PLUGIN, REGISTRATION
 from vibesys.orchestration.dynamic.core_policy.api import RunBounds
+from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import ArtifactStore, RunFacts
@@ -117,7 +118,7 @@ def ports(root: Path, run: ResolvedRun) -> OperationPorts:
     """The runtime ports of the production owners, over the in-memory workspace fake."""
     workspaces = FakeWorkspaces(FakeWorkspace())
     return OperationPorts(
-        renderer=TemplateRenderer(root),
+        renderer=TemplateRenderer(root, fallback_roots=(CORE_PROTOCOL_DIR,)),
         artifacts=run.artifacts,
         workspaces=workspaces,
         ledger=workspaces,

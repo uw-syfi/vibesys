@@ -1,4 +1,4 @@
-{% from '_macros.j2' import rev %}
+{% from '_revision.j2' import rev %}
 Continue your suspended {{ role }} turn in this same provider session.
 {% if retained_revision %}
 The retained workspace revision is `{{ rev(retained_revision) }}`. Check the tree before
