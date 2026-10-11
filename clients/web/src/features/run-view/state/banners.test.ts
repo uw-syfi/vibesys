@@ -1,6 +1,8 @@
 import {describe, expect, test} from 'bun:test';
 import {BackendClientError, type RunEvent} from '@vibesys/backend-client';
 import {type CoreRunStatus, hasRunEnded, initialCoreState} from '@vibesys/core-state';
+import type {WebSessionState, WebSessionStatus} from '../../../entities/connection.js';
+import {runStep} from '../../../entities/run.js';
 import {
   CONTROLS_BANNER_COPY,
   connectionBanners,
@@ -11,8 +13,6 @@ import {
   pageHeader,
   STREAM_BANNER_COPY,
 } from './banners.js';
-import type {WebSessionState, WebSessionStatus} from './session.js';
-import {createCoreStateStore} from './store.js';
 
 /** Every status core state can hold, so a new one is a compile error here. */
 const RUN_STATUSES: readonly CoreRunStatus[] = [
@@ -153,28 +153,28 @@ describe('connectionBanners', () => {
     // terminal event goes through `core-state`'s reducer, which is the path the
     // browser takes, and is the same event `e2e/controls-banner.spec.ts`
     // withholds and then releases.
-    const store = createCoreStateStore();
+    let run = initialCoreState();
     const lostChannel = sessionState('connected', 'lost');
 
-    store.append([RUN_STARTED]);
-    expect(hasRunEnded(store.getState())).toBe(false);
-    expect(connectionBanners(store.getState(), lostChannel).controls).toEqual({
+    run = runStep(run, {type: 'events', events: [RUN_STARTED]}).state;
+    expect(hasRunEnded(run)).toBe(false);
+    expect(connectionBanners(run, lostChannel).controls).toEqual({
       message: LOST,
       retrying: false,
     });
 
-    store.append([RUN_FINISHED]);
+    run = runStep(run, {type: 'events', events: [RUN_FINISHED]}).state;
     // Both facts come off the same folded state, which is why a render cannot
     // show one without the other: the status the header reads and the predicate
     // the banner reads are the same field of the same value.
-    expect(store.getState().status).toBe('completed');
-    expect(hasRunEnded(store.getState())).toBe(true);
-    expect(connectionBanners(store.getState(), lostChannel).controls).toBeNull();
+    expect(run.status).toBe('completed');
+    expect(hasRunEnded(run)).toBe(true);
+    expect(connectionBanners(run, lostChannel).controls).toBeNull();
 
     // The stream banner crosses the same transition the other way: the gap it
     // names outlives the run, and the explicit reload remains available.
     const staleStream = sessionState('stale', 'up');
-    expect(connectionBanners(store.getState(), staleStream).stream).toEqual({
+    expect(connectionBanners(run, staleStream).stream).toEqual({
       message: GAP_FINAL,
       reattach: true,
     });

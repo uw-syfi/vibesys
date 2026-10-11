@@ -13,14 +13,10 @@ import {
   sameControlChannelState,
 } from '@vibesys/backend-client';
 import {event, eventBatch, snapshotResponse} from '@vibesys/backend-client/testing';
-import {connectionBanners, STREAM_BANNER_COPY} from './banners.js';
-import {
-  type BrowserLifecycle,
-  WebSession,
-  type WebSessionOptions,
-  type WebSessionTransportHooks,
-  webSocketUrlFromLocation,
-} from './session.js';
+import {connectRun, type TransportHooks, type TransportTiming} from '../../../platform/backend.js';
+import type {BrowserLifecycle} from '../../../platform/lifecycle.js';
+import {connectionBanners, STREAM_BANNER_COPY} from '../state/banners.js';
+import {WebSession} from './session.js';
 
 type LifecycleEvent = 'visibilitychange' | 'online' | 'offline';
 
@@ -122,10 +118,10 @@ class FakeTransport implements ControlTransport {
   closeCalls = 0;
   reconnectCalls = 0;
   readonly reconnectFailures: Error[] = [];
-  readonly #hooks: WebSessionTransportHooks;
+  readonly #hooks: TransportHooks;
   #controls: ControlChannelState = {status: 'connected'};
 
-  constructor(hooks: WebSessionTransportHooks) {
+  constructor(hooks: TransportHooks) {
     this.#hooks = hooks;
   }
 
@@ -237,78 +233,6 @@ class FakeTransport implements ControlTransport {
 }
 
 describe('WebSession', () => {
-  test('maps the page URL to the browser WebSocket endpoint', () => {
-    expect(
-      webSocketUrlFromLocation(
-        new URL(
-          'http://localhost:4173/runs/demo?token=secret&unused=ignored',
-        ) as unknown as Location,
-      ),
-    ).toBe('ws://localhost:4173/ws');
-    expect(
-      webSocketUrlFromLocation(
-        new URL('https://example.test/app?token=encoded%20token') as unknown as Location,
-      ),
-    ).toBe('wss://example.test/ws');
-  });
-
-  test('maps a browser harness capability URL to the gateway WebSocket endpoint', () => {
-    expect(
-      webSocketUrlFromLocation({
-        href: 'http://127.0.0.1:5173/?gateway=http%3A%2F%2F127.0.0.1%3A8765%2F%3Ftoken%3Dsecret',
-      } as Location),
-    ).toBe('ws://127.0.0.1:8765/ws');
-  });
-
-  test('never forwards the page capability token to a foreign gateway authority', () => {
-    expect(
-      webSocketUrlFromLocation({
-        href: 'http://127.0.0.1:8765/?token=secret&gateway=http%3A%2F%2F127.0.0.1%3A5173%2F',
-      } as Location),
-    ).toBe('ws://127.0.0.1:5173/ws');
-  });
-
-  test('never puts a capability token in a WebSocket URL', () => {
-    const pageOrigins = ['http://127.0.0.1:8765', 'https://gateway.test'];
-    const gatewayValues = [
-      null,
-      '/',
-      'http://127.0.0.1:5173/',
-      'http://127.0.0.1:5173/?token=gateway-token',
-      'https://elsewhere.test/',
-      '//elsewhere.test/',
-      'http://127.0.0.1:8765@elsewhere.test/',
-    ];
-    const cases = pageOrigins.flatMap(origin =>
-      gatewayValues.flatMap(gateway =>
-        [null, 'page-token'].map(pageToken => ({origin, gateway, pageToken})),
-      ),
-    );
-
-    const results = cases.map(({origin, gateway, pageToken}) => {
-      const page = new URL(origin);
-      if (pageToken !== null) page.searchParams.set('token', pageToken);
-      if (gateway !== null) page.searchParams.set('gateway', gateway);
-      const socket = new URL(webSocketUrlFromLocation({href: page.href} as Location));
-      return {
-        page: page.href,
-        socket: socket.href,
-        sent: socket.searchParams.get('token'),
-        pageAuthority: socket.origin === origin.replace(/^http/, 'ws'),
-      };
-    });
-
-    expect(results.filter(result => result.sent !== null)).toEqual([]);
-  });
-
-  test('maps a direct gateway capability URL to a secure WebSocket endpoint', () => {
-    expect(
-      webSocketUrlFromLocation({
-        href: 'https://127.0.0.1:8765/?token=secret',
-      } as Location),
-    ).toBe('wss://127.0.0.1:8765/ws');
-  });
-
   test('wakes after an OS sleep with an exhausted schedule and catches up exactly', async () => {
     const lifecycle = new FakeLifecycle();
     const scheduler = new ManualScheduler();
@@ -995,7 +919,7 @@ function healthy(): ReturnType<WebSession['getState']> {
  */
 function sessionWith(
   lifecycle: FakeLifecycle,
-  options: Pick<WebSessionOptions, 'reconnectDelaysMs' | 'scheduleTimeout'> = {},
+  options: TransportTiming = {},
 ): {
   readonly session: WebSession;
   readonly transport: FakeTransport;
@@ -1003,13 +927,19 @@ function sessionWith(
   const built: FakeTransport[] = [];
   const session = new WebSession({
     lifecycle,
-    transport: hooks => {
-      const transport = new FakeTransport(hooks);
-      built.push(transport);
-      return transport;
-    },
-    reconnectDelaysMs: options.reconnectDelaysMs ?? [0],
-    ...(options.scheduleTimeout === undefined ? {} : {scheduleTimeout: options.scheduleTimeout}),
+    connect: connectRun(
+      hooks => {
+        const transport = new FakeTransport(hooks);
+        built.push(transport);
+        return transport;
+      },
+      {
+        reconnectDelaysMs: options.reconnectDelaysMs ?? [0],
+        ...(options.scheduleTimeout === undefined
+          ? {}
+          : {scheduleTimeout: options.scheduleTimeout}),
+      },
+    ),
   });
   const transport = built[0];
   if (transport === undefined) throw new Error('WebSession did not build its transport');

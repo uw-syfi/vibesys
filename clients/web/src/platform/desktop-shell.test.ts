@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent, ScheduleTimeout} from '@vibesys/backend-client';
 import {event, eventBatch, snapshotResponse} from '@vibesys/backend-client/testing';
+import {WebSession} from '../features/run-view/index.js';
 import {
   type DesktopSocketHandlers,
   desktopBridge,
@@ -8,7 +9,7 @@ import {
   desktopShellAttributes,
   markDesktopShell,
 } from './desktop-shell.js';
-import {type BrowserLifecycle, WebSession} from './session.js';
+import type {BrowserLifecycle} from './lifecycle.js';
 
 describe('desktopShellAttributes', () => {
   test('describes every supported platform', () => {

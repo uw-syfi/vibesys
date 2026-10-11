@@ -1,14 +1,12 @@
 import {describe, expect, test} from 'bun:test';
 import {
-  bootstrapGateway,
   browserSessionForGateway,
-  GatewaySessionStore,
   resolveGatewayTarget,
   scrubLaunchCapability,
   serializeBrowserSession,
   targetFromCapability,
   webSocketUrlWithSession,
-} from './gateway-session.js';
+} from './gateway.js';
 
 describe('gateway session lifecycle', () => {
   test('turns a direct capability page into clean durable browser state', () => {
@@ -54,21 +52,6 @@ describe('gateway session lifecycle', () => {
     ).toBe('https://viewer.test/');
   });
 
-  test('treats denied session storage as optional browser state', () => {
-    const denied = new GatewaySessionStore(() => {
-      throw new DOMException('storage denied', 'SecurityError');
-    });
-
-    expect(denied.rememberedGateway()).toBeNull();
-    expect(denied.browserSession('http://127.0.0.1:8765/')).toBeNull();
-    expect(() => denied.rememberGateway('http://127.0.0.1:8765/')).not.toThrow();
-    expect(() =>
-      denied.rememberBrowserSession('http://127.0.0.1:8765/', 'browser-session'),
-    ).not.toThrow();
-    const target = resolveGatewayTarget('http://127.0.0.1:8765/?token=launch-secret', null);
-    expect(target?.webSocketUrl).toBe('ws://127.0.0.1:8765/ws');
-  });
-
   test('restores only a direct same-origin target from nonsecret session state', () => {
     expect(resolveGatewayTarget('http://127.0.0.1:8765/', 'http://127.0.0.1:8765/')).not.toBeNull();
     expect(resolveGatewayTarget('http://127.0.0.1:5173/', 'http://127.0.0.1:8765/')).toBeNull();
@@ -84,35 +67,6 @@ describe('gateway session lifecycle', () => {
     );
     expect(() => targetFromCapability('http://127.0.0.1:5173/', 'http://127.0.0.1:8765/')).toThrow(
       'must include its capability token',
-    );
-  });
-
-  test('uses a credentialed no-store bootstrap and rejects a failed exchange', async () => {
-    const calls: Array<{url: string; init: RequestInit | undefined}> = [];
-    const successful = async (
-      url: string | URL | Request,
-      init?: RequestInit,
-    ): Promise<Response> => {
-      calls.push({url: String(url), init});
-      return new Response('', {
-        status: 200,
-        headers: {'X-VibeSys-Browser-Session': 'browser-session'},
-      });
-    };
-
-    expect(await bootstrapGateway('http://127.0.0.1:8765/?token=secret', successful)).toBe(
-      'browser-session',
-    );
-    expect(calls).toEqual([
-      {
-        url: 'http://127.0.0.1:8765/?token=secret',
-        init: {cache: 'no-store', credentials: 'include', mode: 'cors'},
-      },
-    ]);
-
-    const rejected = async (): Promise<Response> => new Response('', {status: 403});
-    await expect(bootstrapGateway('http://127.0.0.1:8765/?token=old', rejected)).rejects.toThrow(
-      'HTTP 403',
     );
   });
 

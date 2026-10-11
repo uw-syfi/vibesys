@@ -1,6 +1,6 @@
 import type {ControlChannelState} from '@vibesys/backend-client';
 import {activeRunFocus, type CoreState, hasRunEnded, phaseText} from '@vibesys/core-state';
-import type {WebSessionState} from './session.js';
+import type {WebSessionState} from '../../../entities/connection.js';
 
 /** The control-channel outage a banner describes, once there is one to show. */
 type ControlOutage = Extract<ControlChannelState, {status: 'disconnected'}>;
@@ -165,6 +165,17 @@ export const LIVE_SESSION_HEADER_COPY = {
   unreachable: {heading: 'Server unreachable', status: 'server unreachable'},
 } as const;
 
+/**
+ * The session a replay page presents: there is no connection to fail, so no banner can show and
+ * the header keeps its replay copy.
+ */
+export const REPLAY_SESSION: WebSessionState = {
+  hasSnapshot: true,
+  status: 'connected',
+  error: null,
+  controls: {status: 'connected'},
+};
+
 function describeOutage(outage: ControlOutage): string {
   return CONTROLS_BANNER_COPY[outage.everConnected ? 'lost' : 'cold'];
 }
@@ -173,7 +184,7 @@ function describeOutage(outage: ControlOutage): string {
  * Decide the banners from the run's state and the session's.
  *
  * This is a presentation judgment, not a fact about the transport, so it lives
- * here and not in `WebSession`: the session reports that the control channel is
+ * here and not in the session core: the session reports that the control channel is
  * undeliverable, which stays true after the run ends, and this decides whether
  * that is worth showing. Deciding it at report time instead latches, because a
  * control drop and the run's terminal event arrive over two independent sockets

@@ -1,6 +1,8 @@
-const REMEMBERED_GATEWAY_KEY = 'vibesys.gateway-session.v1';
-const REMEMBERED_BROWSER_SESSION_KEY = 'vibesys.browser-session.v1';
-const BROWSER_SESSION_HEADER = 'X-VibeSys-Browser-Session';
+/**
+ * Where a page's live gateway is and what may appear in browser-visible URLs. Pure URL policy:
+ * the launch capability is scrubbed from the address bar, kept only in the transient bootstrap
+ * URL, and never put in a WebSocket URL.
+ */
 
 export interface GatewayTarget {
   /** Capability-free HTTP authority retained in browser state and URLs. */
@@ -13,58 +15,12 @@ export interface GatewayTarget {
   readonly bootstrapUrl: string | null;
 }
 
-export type GatewayFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
-export type GatewaySessionStorage = Pick<Storage, 'getItem' | 'setItem'>;
-
-/**
- * Optional tab-scoped persistence for gateway reconnect state.
- *
- * Browsers may deny access to `sessionStorage` even for an otherwise valid
- * page. Direct gateway pages authenticate with their HttpOnly cookie, so a
- * storage policy must not prevent them from starting or leave a launch
- * capability in the address bar.
- */
-export class GatewaySessionStore {
-  readonly #storage: () => GatewaySessionStorage;
-
-  constructor(storage: () => GatewaySessionStorage) {
-    this.#storage = storage;
-  }
-
-  rememberedGateway(): string | null {
-    return this.#read(REMEMBERED_GATEWAY_KEY);
-  }
-
-  browserSession(gatewayUrl: string): string | null {
-    return browserSessionForGateway(this.#read(REMEMBERED_BROWSER_SESSION_KEY), gatewayUrl);
-  }
-
-  rememberGateway(gatewayUrl: string): void {
-    this.#write(REMEMBERED_GATEWAY_KEY, gatewayUrl);
-  }
-
-  rememberBrowserSession(gatewayUrl: string, token: string): void {
-    this.#write(REMEMBERED_BROWSER_SESSION_KEY, serializeBrowserSession(gatewayUrl, token));
-  }
-
-  #read(key: string): string | null {
-    try {
-      return this.#storage().getItem(key);
-    } catch {
-      return null;
-    }
-  }
-
-  #write(key: string, value: string): void {
-    try {
-      this.#storage().setItem(key, value);
-    } catch {
-      // Storage is an optional reconnect aid. The HttpOnly cookie remains the
-      // direct gateway's credential, and a harness can use its minted session
-      // for the current page lifetime even when persistence is denied.
-    }
-  }
+/** A capability-free gateway target paired with its freshly exchanged credential. */
+export interface GatewayConnection {
+  readonly gatewayUrl: string;
+  readonly cleanPageUrl: string;
+  readonly webSocketUrl: string;
+  readonly browserSession: string;
 }
 
 /** Remove every launch capability from a browser-visible URL without validating it. */
@@ -107,23 +63,6 @@ export function resolveGatewayTarget(
 export function targetFromCapability(pageHref: string, capabilityUrl: string): GatewayTarget {
   const page = new URL(pageHref);
   return targetForGateway(page, new URL(capabilityUrl.trim(), page.origin), true, true);
-}
-
-export async function bootstrapGateway(
-  capabilityUrl: string,
-  fetcher: GatewayFetch = fetch,
-): Promise<string> {
-  const response = await fetcher(capabilityUrl, {
-    cache: 'no-store',
-    credentials: 'include',
-    mode: 'cors',
-  });
-  if (!response.ok) throw new Error(`Gateway rejected the capability (HTTP ${response.status})`);
-  const browserSession = response.headers.get(BROWSER_SESSION_HEADER);
-  if (browserSession === null || browserSession === '') {
-    throw new Error('Gateway did not establish a browser session');
-  }
-  return browserSession;
 }
 
 export function serializeBrowserSession(gatewayUrl: string, token: string): string {

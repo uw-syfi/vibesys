@@ -9,10 +9,15 @@
  * machine waking from sleep. `desktopWebSocket` turns a connection into the `WebSocketLike` the
  * browser transport already drives, so redial, resume, and reconciliation run unchanged.
  */
-import type {ScheduleTimeout} from '@vibesys/backend-client';
-import type {WebSocketLike} from '@vibesys/backend-client/websocket';
-import {WebSocketTransport} from './browser-entry.js';
-import type {BrowserLifecycle, WebSessionOptions} from './session.js';
+import {
+  connectRun,
+  openTransport,
+  type RunConnection,
+  type TransportHooks,
+  type TransportTiming,
+  type WebSocketLike,
+} from './backend.js';
+import type {BrowserLifecycle} from './lifecycle.js';
 
 /** The platforms the desktop shell reports (`process.platform` values it supports). */
 const PLATFORMS = ['darwin', 'win32', 'linux'] as const;
@@ -177,6 +182,12 @@ function desktopLifecycle(base: BrowserLifecycle, bridge: DesktopBridge): Browse
   };
 }
 
+/** What a live session needs from the desktop shell: its lifecycle, transport, and timing. */
+export interface DesktopSessionWiring {
+  readonly lifecycle: BrowserLifecycle;
+  readonly connect: (hooks: TransportHooks) => RunConnection;
+}
+
 /**
  * The `WebSession` wiring for a page inside the desktop shell: the browser's `WebSocketTransport`
  * over bridge connections, and `lifecycle` plus the shell's wake reports. Everything above the
@@ -185,27 +196,15 @@ function desktopLifecycle(base: BrowserLifecycle, bridge: DesktopBridge): Browse
 export function desktopSessionOptions(
   bridge: DesktopBridge,
   lifecycle: BrowserLifecycle,
-  timing: DesktopSessionTiming = {},
-): WebSessionOptions {
-  const {scheduleTimeout, reconnectDelaysMs} = timing;
+  timing: TransportTiming = {},
+): DesktopSessionWiring {
   return {
     lifecycle: desktopLifecycle(lifecycle, bridge),
-    ...(scheduleTimeout === undefined ? {} : {scheduleTimeout}),
-    ...(reconnectDelaysMs === undefined ? {} : {reconnectDelaysMs}),
     // The shell binds the window to its server, so the transport's URL names nothing; it is kept
     // only because the transport's constructor takes one.
-    transport: hooks =>
-      new WebSocketTransport('vibesys-desktop:', {
-        onConnectionState: hooks.onConnectionState,
-        webSocket: () => desktopWebSocket(bridge),
-        ...(scheduleTimeout === undefined ? {} : {scheduleTimeout}),
-        ...(reconnectDelaysMs === undefined ? {} : {reconnectDelaysMs}),
-      }),
+    connect: connectRun(
+      hooks => openTransport('vibesys-desktop:', hooks, timing, () => desktopWebSocket(bridge)),
+      timing,
+    ),
   };
-}
-
-/** Timing seams; the defaults are the browser's. Tests supply a deterministic scheduler. */
-export interface DesktopSessionTiming {
-  readonly scheduleTimeout?: ScheduleTimeout;
-  readonly reconnectDelaysMs?: readonly number[];
 }

@@ -1,9 +1,10 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {createLiveApp} from './App.js';
-import {desktopBridge, desktopSessionOptions, markDesktopShell} from './desktop-shell.js';
-import {browserLifecycle, WebSession} from './session.js';
-import './styles.css';
+import {WebSession} from '../features/run-view/index.js';
+import {desktopBridge, desktopSessionOptions, markDesktopShell} from '../platform/desktop-shell.js';
+import {browserLifecycle} from '../platform/lifecycle.js';
+import '../styles.css';
+import {createLiveApp} from './compose.js';
 
 // The desktop shell's entry: the page is bundled inside the app, and the shell's bridge is its
 // only way to the server. There is no URL, token, or gateway to read.
