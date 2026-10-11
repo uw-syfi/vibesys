@@ -146,6 +146,35 @@ arguments follow `--`:
 uv run python -m entrypoints.web live --project /path/to/project --task TASK --open -- --outer-loop agent --local
 ```
 
+## Run page layout
+
+`clients/web/src` is feature-sliced, with layers that point down only
+(`app/` -> `features/` -> `entities/` -> `platform/` -> `shared/`), enforced by
+`clients/.dependency-cruiser.mjs`:
+
+- `app/` composes: the browser and desktop entries (`main.tsx`,
+  `desktop-main.tsx`), the pure boot decision (`boot.ts`), and `compose.tsx`,
+  which builds the feature stores, injects platform services into them, and
+  wires cross-feature flows (replayed events fold into the run view).
+- `features/<name>/` is one slice (`run-view`, `gateway-connect`, `replay`)
+  with `state/` (a pure `step(state, action) -> {state, requests}` reducer,
+  request tokens that drop stale replies, `invariants`), `ui/` (presentational
+  React, props in and events out), and `effects/` (performs the requests through
+  injected services; never imports `ui/`). Its `index.ts` is its only public
+  surface, and a feature never imports another feature.
+- `entities/` holds domain values and pure functions shared by features (the
+  run fold, connection state, gateway URL policy). No I/O.
+- `platform/` holds system services: `backend.ts` is the only module that
+  imports backend-client runtime values or calls `fetch`
+  (`lint-rules/web-fetch-only-in-backend.grit`), plus the browser lifecycle,
+  tab storage, and the desktop bridge transport.
+- `shared/` is domain-free: the store container and the seeded model-test
+  helpers.
+
+The reducers are tested model-based, like the desktop welcome view's: seeded
+random action and reply sequences, checking each reducer's invariants and that
+no stale reply is applied after every step.
+
 ## Gateway HTTP hygiene
 
 Every gateway HTTP response, including the 403 and 404 bodies, is built by
