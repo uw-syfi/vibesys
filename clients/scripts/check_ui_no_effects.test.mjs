@@ -39,6 +39,10 @@ const FORBIDDEN = {
   timeout: 'export const later = () => setTimeout(() => {}, 1);\n',
   interval: 'export const every = () => setInterval(() => {}, 1);\n',
   'transport import': "import {createClient} from '@vibesys/transport';\nexport {createClient};\n",
+  // Regression: a statement pattern matched a named import of one specifier only.
+  'multi-specifier import':
+    "import {createClient, request} from '@vibesys/transport';\nexport {createClient, request};\n",
+  're-export': "export {ipcRenderer} from 'electron';\n",
   'transport-node import':
     "import type {Foo} from '@vibesys/transport-node';\nexport type {Foo};\n",
   'namespace import': "import * as fs from 'node:fs';\nexport {fs};\n",
