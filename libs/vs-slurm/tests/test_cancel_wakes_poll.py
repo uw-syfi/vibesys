@@ -19,16 +19,19 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_slurm.api import (
+    ClusterCancelRequested,
     ClusterSubmitted,
     SlurmConfig,
     SlurmConnectorTransport,
     SlurmError,
+    SlurmJobHandle,
     SlurmJobRequest,
     SlurmJobRunner,
+    SlurmJobStatus,
 )
 
 # test-isolation: the Fake connector is an executable test double outside the library API.
-from vs_slurm.fake_connector import JOB_ID, handle, recorded_commands
+from vs_slurm.fake_connector import JOB_ID, FakeConnector, handle, recorded_commands
 
 # test-isolation: SlurmCluster is the cluster the gate command is wired to; the api exports its interface only.
 from vs_slurm.wiring import SlurmCluster
@@ -151,14 +154,64 @@ def test_a_cancel_asks_the_scheduler_before_it_records_the_tombstone(
         cluster.inspect(submitted.handle)
     before = len(recorded_commands(state))
 
-    cluster.cancel(submitted.handle)
+    cancelled = cluster.cancel(submitted.handle)
 
     commands = recorded_commands(state)[before:]
+    assert isinstance(cancelled, ClusterCancelRequested)
     scancel = commands.index(f"scancel {JOB_ID}")
     tombstone = next(
         i for i, command in enumerate(commands) if ".cluster-cancelled.pending" in command
     )
     assert scancel < tombstone
     assert commands.count(f"scancel {JOB_ID}") == 1
-    # Nothing but reads precedes the scancel, so it is not delayed by uploads.
-    assert not any(command.startswith("mkdir") for command in commands[:scancel])
+    # Completed observations do not cross request boundaries. Cancellation owns
+    # one fresh scheduler read even when a prior inspection used the same locator.
+    assert sum(command.startswith("squeue ") for command in commands[:scancel]) == 1
+
+
+def test_cancel_reuses_operation_evidence_recovered_by_the_same_request(tmp_path: Path) -> None:
+    """A fresh local cache reads remote identity once before cancelling the scheduler job."""
+    runner = _runner(_Cluster(tmp_path), _POLL_INTERVAL_SECONDS)
+    cluster = SlurmCluster(runner, state_root=tmp_path / "first-cache")
+    submitted = cluster.submit(_request(tmp_path), operation_id="recover-cancel")
+    assert isinstance(submitted, ClusterSubmitted)
+    recovered = SlurmCluster(runner, state_root=tmp_path / "fresh-cache")
+    before = len(recorded_commands(tmp_path))
+
+    cancelled = recovered.cancel("recover-cancel")
+
+    commands = recorded_commands(tmp_path)[before:]
+    assert isinstance(cancelled, ClusterCancelRequested)
+    scancel = commands.index(f"scancel {JOB_ID}")
+    reads = commands[:scancel]
+    assert len(reads) == 2
+    assert sum(".cluster-operation/intent.json" in command for command in reads) == 1
+    assert sum(command.startswith("squeue ") for command in reads) == 1
+
+
+def test_cancel_does_not_reuse_a_completed_inspection_read(tmp_path: Path) -> None:
+    """A later cancellation owns a fresh scheduler read for its own decision."""
+    connector = FakeConnector(tmp_path / "connector")
+    connector.script("crossing-cancel", states=(SlurmJobStatus.RUNNING,))
+    runner = SlurmJobRunner(
+        SlurmConfig(
+            name="fake",
+            remote_workspace_root=str(tmp_path / "remote"),
+            transport=SlurmConnectorTransport(kind="connector", command=("fake",)),
+        ),
+        process=connector,
+        clock=lambda: 0.0,
+    )
+    cluster = SlurmCluster(runner, state_root=tmp_path / "state")
+    submitted = cluster.submit(_request(tmp_path), operation_id="crossing-cancel")
+    assert isinstance(submitted, ClusterSubmitted)
+    assert isinstance(submitted.handle, SlurmJobHandle)
+    cluster.inspect(submitted.handle)
+    before = len(recorded_commands(connector.state))
+
+    cancelled = cluster.cancel(submitted.handle)
+
+    commands = recorded_commands(connector.state)[before:]
+    scancel = commands.index(f"scancel {submitted.handle.job_id}")
+    assert isinstance(cancelled, ClusterCancelRequested)
+    assert sum(command.startswith("squeue ") for command in commands[:scancel]) == 1

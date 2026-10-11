@@ -398,7 +398,7 @@ class SlurmCluster:
 
     def _cancel(self, target: ClusterTarget, *, by_job_id: bool) -> ClusterCancelOutcome:
         with self._store.lock():
-            record, _ = self._record(target, by_job_id=by_job_id)
+            record, evidence = self._record(target, by_job_id=by_job_id)
             if record is None:
                 if isinstance(target, str) and not by_job_id:
                     validate_operation_id(target)
@@ -417,7 +417,7 @@ class SlurmCluster:
             # four round trips and only guards a replay, which also finds the
             # job cancelled, so it follows the scancel instead of delaying it.
             try:
-                observation = self._reconcile_record(record)
+                observation = self._reconcile_record(record, evidence)
             finally:
                 self._runner.cancel_operation(record.operation_id)
             if isinstance(observation, ClusterUnknown):
@@ -616,7 +616,9 @@ class SlurmCluster:
         return record, evidence
 
     def _reconcile(
-        self, record: Operation, evidence: RemoteOperationEvidence | None = None
+        self,
+        record: Operation,
+        evidence: RemoteOperationEvidence | None = None,
     ) -> ClusterInspectOutcome:
         observed = self._reconcile_record(record, evidence)
         if isinstance(observed, _SubmissionAbsent):
@@ -627,9 +629,11 @@ class SlurmCluster:
         return observed
 
     def _reconcile_record(
-        self, record: Operation, evidence: RemoteOperationEvidence | None = None
+        self,
+        record: Operation,
+        evidence: RemoteOperationEvidence | None = None,
     ) -> ClusterInspectOutcome | _SubmissionAbsent:
-        """Reconcile once while retaining a successful no-job lookup for cancellation."""
+        """Reconcile the operation with one fresh scheduler observation."""
         handle = record.handle
         if handle is None or not record.dispatched:
             return ClusterUnknown(
@@ -700,12 +704,14 @@ class SlurmCluster:
         """The scheduler-wide evidence of an operation; ``None`` if a known job's cannot be read.
 
         The evidence resolves an unresolved job identity and carries a cancel marker
-        written by another process. A record whose job is already accepted does not
-        need it to be inspected, and the next inspection reads it again, so one lost
-        read must not hide the scheduler's own reading of the job.
+        written by another process. Caller-supplied evidence is reused. Without it,
+        a known job already cancelled in this cache cannot learn another fact from
+        the marker, and the scheduler reading remains authoritative.
         """
         if evidence is not None:
             return evidence
+        if record.cancelled and job_id != "0":
+            return None
         try:
             return self._runner.inspect_operation(record.operation_id)
         except (
