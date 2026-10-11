@@ -22,7 +22,7 @@ from tests.vibesys.orchestration.single.strategy._waiting_turns import (
 )
 
 from vs_core.api import AttemptPhase, RunStatus, Settle, Withdraw
-from vs_runtime.api.testing import HostOptions
+from vs_runtime.api.testing import HostOptions, Run
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     import pytest
 
 
-def _run(root: Path, *, waits: tuple[bool, ...], polls: tuple[int, ...], rounds: int) -> object:
+def _run(root: Path, *, waits: tuple[bool, ...], polls: tuple[int, ...], rounds: int) -> Run:
     bridge = new_bridge(root)
     script = WaitingTurns(
         planner=deque(plan_reply(f"h{n}") for n in range(rounds + 4)),
@@ -51,13 +51,13 @@ def _run(root: Path, *, waits: tuple[bool, ...], polls: tuple[int, ...], rounds:
 def test_a_round_whose_turn_waited_adopts_the_candidate_it_checkpointed(tmp_path: Path) -> None:
     finished = _run(tmp_path, waits=(True,), polls=(2,), rounds=1)
 
-    assert finished.core.run.status == RunStatus.TERMINAL  # type: ignore[attr-defined]
-    assert finished.core.run.result is not None  # type: ignore[attr-defined]
-    assert finished.core.run.result.outcome == "success"  # type: ignore[attr-defined]
-    assert finished.core.evaluation.continuations != ()  # type: ignore[attr-defined]
+    assert finished.core.run.status == RunStatus.TERMINAL
+    assert finished.core.run.result is not None
+    assert finished.core.run.result.outcome == "success"
+    assert finished.core.evaluation.continuations != ()
     (settle,) = [
         item.disposition
-        for item in finished.decisions  # type: ignore[attr-defined]
+        for item in finished.decisions
         if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
     ]
     assert settle.candidate is not None
@@ -77,6 +77,6 @@ def test_a_run_ends_whatever_its_turns_wait_for(
 ) -> None:
     finished = _run(tmp_path_factory.mktemp("waits"), waits=waits, polls=polls, rounds=rounds)
 
-    assert finished.core.run.status == RunStatus.TERMINAL  # type: ignore[attr-defined]
-    for attempt in finished.core.attempts.attempts:  # type: ignore[attr-defined]
+    assert finished.core.run.status == RunStatus.TERMINAL
+    for attempt in finished.core.attempts.attempts:
         assert attempt.phase == AttemptPhase.TERMINAL
