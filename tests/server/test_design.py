@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 import pytest
 from tests.server.support import agent_descriptor, build_server_parts, run_record
 from tests.support import run_test_command
-from tests.support.legacy_single_state import SingleState
 
 from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
 from server.api.protocol import DesignPatchQuery, DesignQuery
@@ -18,6 +17,7 @@ from vibesys.api.testing import FakeRunRecord
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.readmodel import project_run_view
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
+from vibesys.orchestration.multi.models import MultiState
 from vs_project.api import Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 
@@ -100,7 +100,7 @@ def _view(state: HypothesisState, *, run_id: str = "run-1") -> RunView:
         run_id=run_id,
         status=RunStatus.ACTIVE,
         experiment_revision=state.experiment_revision,
-        loop="single-agent",
+        loop="multi-agent",
     )
 
 
@@ -590,8 +590,8 @@ def _project_run(project: Path, *, trusted_input_baseline: str) -> tuple[Project
 
 def _save_single_state(project: Project, run_id: str, search: HypothesisState) -> None:
     """Persist the exact aggregate declared by the registered single plugin."""
-    project.state.portable_namespace(run_id, "single-agent").slot("state.json", SingleState).save(
-        SingleState(search=search)
+    project.state.portable_namespace(run_id, "multi-agent").slot("state.json", MultiState).save(
+        MultiState(search=search)
     )
 
 

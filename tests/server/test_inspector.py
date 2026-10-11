@@ -3,7 +3,6 @@
 from pathlib import Path
 
 from tests.server.support import agent_descriptor, build_server_parts, run_record
-from tests.support.legacy_single_state import SingleState
 
 from server.diagnostics import DiagnosticScope
 from server.events import ConfigurationFailedData, EventStatus, EventType
@@ -11,6 +10,7 @@ from server.read_model import RunInspector
 from vibesys.api.hypothesis import RoundRecord
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
+from vibesys.orchestration.multi.models import MultiState
 from vs_project.api import Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 
@@ -36,8 +36,8 @@ def _project_run(root: Path) -> tuple[Project, str]:
 
 def test_inspector_answers_round_and_failure_queries(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    project.state.portable_namespace(run_id, "single-agent").slot("state.json", SingleState).save(
-        SingleState(
+    project.state.portable_namespace(run_id, "multi-agent").slot("state.json", MultiState).save(
+        MultiState(
             search=HypothesisState(
                 hypotheses=[
                     Hypothesis(

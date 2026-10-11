@@ -329,7 +329,6 @@
 {"path": "tests/vibesys/loops/torch_inject_fixtures.py", "rule": "subprocess", "count": 2}
 {"path": "tests/vibesys/loops/torch_inject_fixtures.py", "rule": "threading", "count": 2}
 {"path": "tests/vibesys/orchestration/multi/test_persistence.py", "rule": "subprocess", "count": 1}
-{"path": "tests/vibesys/orchestration/single/test_persistence.py", "rule": "subprocess", "count": 1}
 {"path": "tests/vibesys/run/test_core_agent_candidate_sandbox.py", "rule": "executor", "count": 1}
 {"path": "tests/vibesys/run/test_run_exit_cancels_slurm_jobs.py", "rule": "executor", "count": 1}
 {"path": "tests/vibesys/run/test_run_exit_cancels_slurm_jobs.py", "rule": "process", "count": 1}

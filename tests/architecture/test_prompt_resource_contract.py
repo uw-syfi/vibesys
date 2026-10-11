@@ -534,6 +534,29 @@ def core_policy_context() -> dict[str, object]:
         "blocker": "tests/test_engine.py::test_decode fails to import",
         "narrowed_step": "Make the import resolve first.",
         "turns_without_candidate": 2,
+        # The single strategy's plan prompt (`PlanPrompt`) fields.
+        "benchmark_enabled": True,
+        "exhaustion_feedback": "fixture feedback",
+        "exhaustion_round": 1,
+        "frontier": (),
+        "last_profile": None,
+        "max_rounds": 3,
+        "official_cadence_due": False,
+        "older_rounds": 0,
+        "pending_claims": (),
+        "regression_kind": None,
+        "regression_round": None,
+        # `RoundPrompt` fields.
+        "activation_evidence": "fixture",
+        "dominated_by_rounds": (),
+        "falsification_criteria": "fixture",
+        "invariants": "fixture",
+        "minimum_acceptance_criteria": "fixture",
+        "no_valid_reply": None,
+        "official_due": True,
+        "official_reason": "cadence",
+        "profiler_id": "none",
+        "title": "fixture title",
     }
 
 

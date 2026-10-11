@@ -1,9 +1,9 @@
 """What the agent is told about trusted evaluation depends on its loop (#1649).
 
-The dynamic loop gives its agents the evaluation tool, so its prompts describe evaluation
-only through that tool: no ``vibesys-gate``, no ``--gate``, and ``vibesys-gpu`` only as
-``-- COMMAND`` where the agent's own GPU commands are on. Every older loop (agent single and
-multi, profile-guided, plain/issue queue, evolve) has no evaluation tool and keeps the shell
+The loops on the core path (dynamic and single) give their agents the evaluation tool, so their prompts describe
+evaluation only through that tool: no ``vibesys-gate``, no ``--gate``, and ``vibesys-gpu`` only as
+``-- COMMAND`` where the agent's own GPU commands are on. Every older loop (agent multi,
+profile-guided multi, plain/issue queue, evolve) has no evaluation tool and keeps the shell
 gate until it is ported to the core path (roadmap #1952), so its notes are unchanged.
 """
 
@@ -81,10 +81,12 @@ def _assert_evaluation_tool_only(text: str, *, gpu: bool) -> None:
 
 
 @pytest.mark.parametrize("loop", _LOOPS)
-def test_only_the_dynamic_loop_has_the_evaluation_tool(loop: str) -> None:
+def test_only_the_core_loops_have_the_evaluation_tool(loop: str) -> None:
     registration: OrchestrationRegistration = _LOOPS[loop]
 
-    assert offers_evaluation_tool(registration.plugin) is (loop == "dynamic")
+    assert offers_evaluation_tool(registration.plugin) is (
+        loop in {"dynamic", "agent-single", "profile-guided-single"}
+    )
 
 
 @pytest.mark.parametrize("environment", ["slurm", "slurm+gpu"])

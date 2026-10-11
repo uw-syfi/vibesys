@@ -95,7 +95,7 @@ def agent_descriptor(
         metric_space=metric_space or MetricSpace(),
     )
     return OrchestrationDescriptor(
-        id="single-agent",
+        id="multi-agent",
         config_version=1,
         options=options.model_dump(mode="json"),
     )
