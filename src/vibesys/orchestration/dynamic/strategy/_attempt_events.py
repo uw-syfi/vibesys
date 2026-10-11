@@ -78,7 +78,6 @@ from vs_core.api import (
     ledger_refs,
     may_resubmit,
     trusted_keys,
-    turn_candidate,
 )
 
 _IMPLEMENTER_REPLY = TypeAdapter(ImplementerReply)
@@ -514,6 +513,15 @@ def _awaits_checkpoint(result: ImplementerResult) -> bool:
     return result.outcome is not HypothesisOutcome.BLOCKED
 
 
+def _candidate_of(
+    view: RunView, record: AttemptRecord, invocation: InvocationRef
+) -> RevisionRef | None:
+    """The revision the reply's turn chain retained, by core's one rule (`TurnChain.candidate`)."""
+    if record.turn is None:
+        return None
+    return record.turn.candidate(view, record.attempt, invocation)
+
+
 def settle_retained(
     state: DynamicStrategyState, view: RunView, config: DynamicConfig
 ) -> DynamicStrategyState:
@@ -527,7 +535,7 @@ def settle_retained(
         if not record.holds_reply or invocation is None or record.held_reply is None:
             continue
         live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
-        candidate = turn_candidate(view, record.attempt, invocation)
+        candidate = _candidate_of(view, record, invocation)
         declined = live is not None and any(
             row.invocation == invocation for row in live.checkpoint_declines
         )
@@ -673,7 +681,7 @@ def _answered(
             )
         return _yielded(state, index, view)
     if isinstance(reply, ImplementerResult):
-        candidate = turn_candidate(view, state.attempts[index].attempt, event.invocation)
+        candidate = _candidate_of(view, state.attempts[index], event.invocation)
         if candidate is None and _awaits_checkpoint(reply):
             return _put(
                 state,

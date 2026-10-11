@@ -30,7 +30,7 @@ from tests.vibesys.orchestration.dynamic.strategy._waiting_turns import (
     translator_for,
 )
 
-from vs_core.api import AttemptPhase, RunStatus
+from vs_core.api import AttemptPhase, RunStatus, Settle, Withdraw
 from vs_runtime.api.testing import HostOptions
 
 if TYPE_CHECKING:
@@ -59,6 +59,8 @@ class Scenario:
     parents: bool = False
     roles: tuple[str, ...] = ("implementer", "judge")
     """The roles whose turns may wait."""
+    unchanged_after_first_retain: bool = False
+    """Whether a resumed turn leaves the worktree as it was (retains nothing of its own)."""
 
 
 def run_waiting(root: Path, scenario: Scenario) -> Run:
@@ -86,6 +88,7 @@ def run_waiting(root: Path, scenario: Scenario) -> Run:
         delay=lambda n: scenario.delays[n % len(scenario.delays)],
         polls=list(scenario.polls),
         roles=scenario.roles,
+        unchanged_after_first_retain=scenario.unchanged_after_first_retain,
         benchmark=lambda commit: scenario.throughput[
             int(commit[:4], 16) % len(scenario.throughput)
         ],
@@ -176,3 +179,24 @@ def test_one_of_four_judges_waiting_does_not_hold_the_run_back(tmp_path: Path) -
 
     assert finished.core.run.status == RunStatus.TERMINAL
     assert all(a.phase == AttemptPhase.TERMINAL for a in finished.core.attempts.attempts)
+
+
+def test_an_implementer_resumed_after_waiting_keeps_the_candidate_it_checkpointed(
+    tmp_path: Path,
+) -> None:
+    """The resumed turn only reads the verdict, so the candidate is its suspended turn's."""
+    finished = run_waiting(
+        tmp_path,
+        replace(JUDGE_WAITS, roles=("implementer",), unchanged_after_first_retain=True),
+    )
+
+    assert finished.core.run.status == RunStatus.TERMINAL
+    assert finished.core.run.result is not None
+    assert finished.core.run.result.outcome == "success"
+    assert finished.core.evaluation.continuations != ()
+    (settle,) = [
+        item.disposition
+        for item in finished.decisions
+        if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
+    ]
+    assert settle.candidate is not None

@@ -57,7 +57,6 @@ from vs_core.api import (
     ledger_refs,
     may_resubmit,
     trusted_keys,
-    turn_candidate,
 )
 
 _REPLY = TypeAdapter(Waitable[SingleAgentRoundResponse])
@@ -253,19 +252,10 @@ def _next_turn(record: RoundState, update: dict[str, object]) -> RoundState:
 def _candidate_of(
     view: RunView, record: RoundState, invocation: InvocationRef
 ) -> RevisionRef | None:
-    """The revision the reply's turn retained; a resumed turn's is the chain's latest checkpoint.
-
-    A turn that suspended to wait for its evaluations is checkpointed under its own
-    invocation. The turn core resumes edits nothing more when it only reads the verdicts, so it
-    retains nothing of its own: the candidate is what the chain checkpointed before it waited.
-    """
-    own = turn_candidate(view, record.attempt, invocation)
-    if own is not None or record.turn is None or record.turn.charge != "resume":
-        return own
-    live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
-    if live is None or not live.checkpoints:
+    """The revision the reply's turn chain retained, by core's one rule (`TurnChain.candidate`)."""
+    if record.turn is None:
         return None
-    return live.checkpoints[-1].revision
+    return record.turn.candidate(view, record.attempt, invocation)
 
 
 def settle_retained(

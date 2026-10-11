@@ -18,10 +18,11 @@ transition returns a new chain and never proposes a decision.
 
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 from pydantic import Field
 
+from vs_core._evidence_views import turn_candidate
 from vs_core.types.common import (
     ArtifactRef,
     ContinuationId,
@@ -29,6 +30,10 @@ from vs_core.types.common import (
     InvocationRef,
     Value,
 )
+
+if TYPE_CHECKING:
+    from vs_core.types.common import AttemptId, RevisionRef
+    from vs_core.types.kernel import RunView
 
 type Charge = Literal["free", "paid", "correction", "resume"]
 
@@ -53,6 +58,9 @@ class TurnChain[C: Value](Value):
     continuation: ContinuationId | None = None
     # The reply asked to wait for evaluations; core's `TurnSuspended` completes the yield.
     yielded: bool = False
+    # Earlier turns of this logical answer, oldest first: the suspended turn a resume continues,
+    # and the invalid or lost turns a correction replaces. A paid or free ask starts empty.
+    lineage: tuple[InvocationRef, ...] = ()
 
     def with_prompts(
         self, prompts: tuple[ArtifactRef, ...], tool_policy: ArtifactRef | None
@@ -76,6 +84,7 @@ class TurnChain[C: Value](Value):
                 "resume_as": None,
                 "continuation": None,
                 "yielded": False,
+                "lineage": (),
             }
         )
 
@@ -87,7 +96,11 @@ class TurnChain[C: Value](Value):
         if self.corrections >= limit:
             return None
         return self.followed_by(charge="correction", context=context).model_copy(
-            update={"corrections": self.corrections + 1, "invocation": invalid}
+            update={
+                "corrections": self.corrections + 1,
+                "invocation": invalid,
+                "lineage": (*self.lineage, invalid),
+            }
         )
 
     def asked_again(
@@ -107,10 +120,23 @@ class TurnChain[C: Value](Value):
                 "drops": self.drops + 1,
                 "charge": "correction",
                 "invocation": lost,
+                "lineage": (*self.lineage, lost),
                 "prompts": (),
                 "ask_not_before": now + backoff,
             }
         )
+
+    def candidate(
+        self, view: RunView, attempt: AttemptId, invocation: InvocationRef
+    ) -> RevisionRef | None:
+        """The latest revision retained by ``invocation`` or by an earlier turn of this chain.
+
+        This is the one rule every strategy uses to read a reply's candidate. A resumed turn
+        usually only reads its verdict and edits nothing, so its candidate is the checkpoint of
+        the suspended turn it continues. A turn outside the chain, such as a paid retry, is not
+        credited with an older turn's checkpoint.
+        """
+        return turn_candidate(view, attempt, invocation, predecessors=self.lineage)
 
     def yielding(self) -> Self:
         """The reply asked to wait: only core's `TurnSuspended` completes the yield."""
@@ -133,6 +159,9 @@ class TurnChain[C: Value](Value):
         return self.followed_by(charge="resume", context=context).model_copy(
             update={
                 "invocation": self.invocation,
+                "lineage": self.lineage
+                if self.invocation is None
+                else (*self.lineage, self.invocation),
                 "resume_as": authorized,
                 "continuation": continuation,
             }
