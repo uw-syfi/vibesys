@@ -8,9 +8,8 @@ Each process scenario launches the installed ``vibesys`` CLI as an operator does
 (launcher, then engine) with ``--outer-loop dynamic --headless``. The invariants
 scenario uses the default Docker run environment (CPU backend); the Ctrl-C
 scenario asserts on cluster jobs, so it uses the Slurm run environment. The cluster is ``vs_slurm.fake_connector`` in executing
-mode: every production job script runs on this host. The GPU node's profiler
-capture is answered by the Fake remote interpreter (one trace and a summary),
-so the profile path runs end to end without a GPU. Agents are the real CLIs
+mode: every production job script runs on this host. The connector transport has no
+profiler broker, so the Slurm scenario runs with ``--profiler none``. Agents are the real CLIs
 (Claude Haiku by default; ``VIBESYS_SMOKE_PROVIDER=codex`` selects Codex). The
 process input is ``dynamic_smoke/bundle``: a slow prime counter whose accuracy check
 and benchmark finish in seconds.
@@ -26,6 +25,7 @@ import asyncio
 import json
 import os
 import pwd
+import re
 import shutil
 import signal
 import subprocess
@@ -256,7 +256,7 @@ class SmokeRun:
             return [
                 "--run-environment", "slurm",
                 "--slurm-config", str(self.base / "slurm.toml"),
-                "--profiler", "rocprof", "--backend", "rocm",
+                "--profiler", "none", "--backend", "rocm",
             ]  # fmt: skip
         return ["--run-environment", "docker", "--backend", "cpu", "--profiler", "none"]
 
@@ -390,8 +390,23 @@ def _require_successful_search(envelope: Mapping[str, object]) -> None:
 
 @pytest.mark.usefixtures("container_cli_credentials")
 def test_serving_smoke_fixture_builds_a_profiled_cli_request(tmp_path: Path) -> None:
-    """Default CI catches serving capture configuration failures before provider launch."""
+    """Default CI catches serving capture configuration failures before provider launch.
+
+    Remote ROCprof capture exists only where the profiler has a transport broker, which is
+    the SSH transport, so this request is built over an SSH operator file. Building a
+    request never connects, so the host name is a placeholder.
+    """
     smoke = SmokeRun(tmp_path)
+    operator_file = smoke.base / "slurm.toml"
+    operator_file.write_text(
+        re.sub(
+            r"^transport = .*$",
+            'transport = { kind = "ssh", host = "cluster" }',
+            operator_file.read_text(encoding="utf-8"),
+            flags=re.MULTILINE,
+        ),
+        encoding="utf-8",
+    )
     request = build_run_request(
         parse_cli_invocation(
             [
