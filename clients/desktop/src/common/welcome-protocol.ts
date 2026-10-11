@@ -20,6 +20,7 @@ export const WELCOME_CHANNELS = {
   hosts: 'vibesys:welcome:hosts',
   host: 'vibesys:welcome:host',
   setCheckout: 'vibesys:welcome:set-checkout',
+  cancelCheckout: 'vibesys:welcome:cancel-checkout',
   signIn: 'vibesys:welcome:sign-in',
   tasks: 'vibesys:welcome:tasks',
   complete: 'vibesys:welcome:complete',
@@ -161,7 +162,9 @@ export interface WelcomeBridge {
   overview(): Promise<WelcomeResult<WelcomeOverview>>;
   hosts(): Promise<WelcomeResult<string[]>>;
   host(host: HostKey): Promise<WelcomeResult<WelcomeHost>>;
-  setCheckout(host: HostKey, path: string): Promise<WelcomeResult<string>>;
+  /** Change a checkout under `change`, so losing renderer intent can cancel the main-process work. */
+  setCheckout(host: HostKey, path: string, change: number): Promise<WelcomeResult<string>>;
+  cancelCheckout(change: number): Promise<WelcomeResult<null>>;
   signIn(host: HostKey): Promise<WelcomeResult<null>>;
   tasks(host: HostKey, project: string): Promise<WelcomeResult<string[]>>;
   /** The directories that complete `directory` (a path ending in `/`) on `host`. */

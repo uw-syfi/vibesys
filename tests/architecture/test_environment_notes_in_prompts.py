@@ -15,7 +15,8 @@ from pathlib import Path
 import pytest
 
 _ORCHESTRATION = Path(__file__).resolve().parents[2] / "src" / "vibesys" / "orchestration"
-_NOTES = re.compile(r"\b(runtime_notes|environment_notes)\b")
+# `run_context.j2` is the shared core-protocol template that prints the notes.
+_NOTES = re.compile(r"\b(runtime_notes|environment_notes)\b|run_context\.j2")
 _PROMPT_DIRS = sorted(
     path
     for path in (*_ORCHESTRATION.glob("*/prompts"), *_ORCHESTRATION.glob("*/*/prompts"))

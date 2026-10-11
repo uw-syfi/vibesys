@@ -66,11 +66,15 @@ interface Env {
 
 function harness(env: Env): {
   callbacks: PersistentEventStreamCallbacks;
-  messages: Array<{message: ServerMessage; resumed: boolean}>;
+  messages: Array<{message: ServerMessage; resumed: boolean; connectionGeneration: number}>;
   states: StreamConnectionState[];
   nextState(): Promise<StreamConnectionState>;
 } {
-  const messages: Array<{message: ServerMessage; resumed: boolean}> = [];
+  const messages: Array<{
+    message: ServerMessage;
+    resumed: boolean;
+    connectionGeneration: number;
+  }> = [];
   const states: StreamConnectionState[] = [];
   const stateWaiters: Array<(state: StreamConnectionState) => void> = [];
   return {
@@ -81,7 +85,7 @@ function harness(env: Env): {
       cursor: () => env.cursor,
       storeId: () => env.storeId ?? '',
       shouldReconnect: () => env.reconnect,
-      onMessage: (message, {resumed}) => messages.push({message, resumed}),
+      onMessage: (message, context) => messages.push({message, ...context}),
       onConnectionState: state => {
         states.push(state);
         stateWaiters.shift()?.(state);
@@ -109,8 +113,13 @@ class StubTransport implements StreamTransport {
    * shape an old server produces for an unknown field) before one goes through.
    */
   refuseSubscribes = 0;
+  /** Whether a refused capability probe first emits its terminal protocol frame. */
+  protocolErrorBeforeRefusal = false;
+  /** Whether the next accepted dial emits a protocol fault and then one invalid later frame. */
+  faultThenBatchOnNextSubscribe = false;
   /** Errors upcoming dials fail with, consumed in order before `refuseSubscribes`. */
   readonly scriptedDialFailures: Error[] = [];
+  readonly scriptedCloseFailures: Error[] = [];
   readonly #subscribeWaiters: Array<
     (call: {afterSequence: number; tail: number | undefined; storeId: string | undefined}) => void
   > = [];
@@ -120,6 +129,8 @@ class StubTransport implements StreamTransport {
   #deferNext = false;
   #deferredFailure: Error | null = null;
   #release: (() => void) | null = null;
+  #deferNextClose = false;
+  #releaseClose: (() => void) | null = null;
 
   /** Arm the next subscribe to deliver this batch before its promise resolves. */
   deliverOnNextSubscribe(events: readonly RunEvent[], historyAfterSequence: number): void {
@@ -139,6 +150,17 @@ class StubTransport implements StreamTransport {
   releasePendingSubscribe(): void {
     const release = this.#release;
     this.#release = null;
+    release?.();
+  }
+
+  /** Hold the next accepted subscription's close until `releasePendingClose`. */
+  deferNextSubscriptionClose(): void {
+    this.#deferNextClose = true;
+  }
+
+  releasePendingClose(): void {
+    const release = this.#releaseClose;
+    this.#releaseClose = null;
     release?.();
   }
 
@@ -162,19 +184,36 @@ class StubTransport implements StreamTransport {
     if (scripted !== undefined) return Promise.reject(scripted);
     if (this.refuseSubscribes > 0) {
       this.refuseSubscribes -= 1;
+      if (this.protocolErrorBeforeRefusal) {
+        onMessage({type: 'protocol_error', code: 'unsupported', message: 'Field unsupported'});
+      }
       return Promise.reject(new ServerError('Extra inputs are not permitted'));
     }
     this.#message = onMessage;
     this.#disconnect = onDisconnect;
     const record = {closed: false};
     this.subscriptions.push(record);
+    const closeSettled: Promise<void> | null = this.#deferNextClose
+      ? new Promise<void>(resolve => {
+          this.#releaseClose = resolve;
+        })
+      : null;
+    const closeFailure = this.scriptedCloseFailures.shift();
+    this.#deferNextClose = false;
     const subscription: EventSubscription = {
       close: async () => {
         record.closed = true;
+        if (closeSettled !== null) await closeSettled;
+        if (closeFailure !== undefined) throw closeFailure;
       },
     };
     const armed = this.#armed;
     this.#armed = null;
+    if (this.faultThenBatchOnNextSubscribe) {
+      this.faultThenBatchOnNextSubscribe = false;
+      onMessage({type: 'protocol_error', code: 'stream_failed', message: 'Replay failed'});
+      onMessage({type: 'event_batch', events: [], history_after_sequence: 0});
+    }
     if (armed !== null) {
       onMessage({
         type: 'event_batch',
@@ -207,6 +246,10 @@ class StubTransport implements StreamTransport {
       history_after_sequence: historyAfterSequence,
       ...(rebootstrap === undefined ? {} : {rebootstrap}),
     });
+  }
+
+  emitProtocolError(): void {
+    this.#message?.({type: 'protocol_error', code: 'stream_failed', message: 'Replay failed'});
   }
 
   sever(error: Error | string = 'Server event stream disconnected'): void {
@@ -283,6 +326,25 @@ describe('PersistentEventStream', () => {
     expect(states).toEqual([]);
   });
 
+  it('adopts a successful tail fallback after the rejected probe emits its protocol frame', async () => {
+    const transport = new StubTransport();
+    transport.refuseSubscribes = 1;
+    transport.protocolErrorBeforeRefusal = true;
+    transport.deliverOnNextSubscribe([], 0);
+    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: []});
+
+    await stream.subscribe(callbacks);
+
+    expect(transport.subscribeCalls).toEqual([
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+      {afterSequence: 0, tail: undefined, storeId: undefined},
+    ]);
+    expect(messages.map(({message}) => message.type)).toEqual(['protocol_error', 'event_batch']);
+    expect(transport.subscriptions).toEqual([{closed: false}]);
+    await stream.close();
+  });
+
   it('reports a boot failure and does not arm the reconnect loop', async () => {
     const transport = new StubTransport();
     transport.refuseSubscribes = Number.POSITIVE_INFINITY;
@@ -310,6 +372,8 @@ describe('PersistentEventStream', () => {
       event(1, 'agent_output_chunk', 'one\n'),
       event(2, 'agent_output_chunk', 'two\n'),
     ]);
+    const bootstrapGeneration = messages.at(-1)?.connectionGeneration;
+    if (bootstrapGeneration === undefined) throw new Error('Bootstrap batch was not delivered');
     env.cursor = 2;
 
     transport.sever();
@@ -327,6 +391,9 @@ describe('PersistentEventStream', () => {
     // The resumed stream's batches are tagged resumed.
     transport.emitBatch([event(3, 'agent_output_chunk', 'three\n')], 0, false);
     expect(messages[messages.length - 1]?.resumed).toBe(true);
+    expect(messages[messages.length - 1]?.connectionGeneration).toBeGreaterThan(
+      bootstrapGeneration,
+    );
 
     // A success gives the next outage the full schedule again.
     env.cursor = 3;
@@ -352,12 +419,18 @@ describe('PersistentEventStream', () => {
 
     transport.sever();
     await stream.settle();
+    transport.emitBatch([event(7, 'agent_output_chunk', 'seven\n')]);
+    const resumedGeneration = messages.at(-1)?.connectionGeneration;
+    if (resumedGeneration === undefined) throw new Error('Resumed batch was not delivered');
     // The new socket resumed from cursor 6, but its already-open subscription
     // later overflowed its tail and sent a second bootstrap. This marker is
     // therefore the one batch that must not inherit the dial's resumed flag.
     transport.emitBatch([event(20, 'agent_output_chunk', 'twenty\n')], 19, true);
 
-    expect(messages[messages.length - 1]).toMatchObject({resumed: false});
+    expect(messages[messages.length - 1]).toMatchObject({
+      resumed: false,
+      connectionGeneration: resumedGeneration,
+    });
     expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
 
     // A fresh batch also establishes a bootstrap for the current stream, so a
@@ -402,8 +475,10 @@ describe('PersistentEventStream', () => {
     env.storeId = 'run-store';
 
     // An old server forbids `store_id` on subscribe, so the store-named dial is
-    // rejected; the resume retries without it rather than failing the reconnect.
+    // rejected after its terminal protocol frame; the resume retries without
+    // it rather than letting that retired probe poison the fallback handle.
     transport.refuseSubscribes = 1;
+    transport.protocolErrorBeforeRefusal = true;
     transport.sever();
     await stream.settle();
 
@@ -412,6 +487,7 @@ describe('PersistentEventStream', () => {
       {afterSequence: 1, tail: undefined, storeId: undefined},
     ]);
     expect(states.at(-1)?.status).toBe('connected');
+    expect(transport.subscriptions[1]?.closed).toBe(false);
   });
 
   it('keeps the store name when a transport failure interrupts the store probe', async () => {
@@ -685,13 +761,291 @@ describe('PersistentEventStream', () => {
     ]);
 
     const recovered = nextState();
-    stream.rebootstrap();
-    stream.rebootstrap();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    expect(stream.rebootstrap()).toBe('transitioning');
     transport.releasePendingSubscribe();
     await expect(recovered).resolves.toMatchObject({status: 'connected'});
 
     expect(transport.subscribeCalls).toHaveLength(2);
     expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+    await stream.close();
+  });
+
+  it('retains a fresh retry requested after the active fresh dial reports failure', async () => {
+    const transport = new StubTransport();
+    const {callbacks, nextState} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+
+    transport.deferNextSubscribe();
+    const failedDial = transport.nextSubscribe();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    await expect(failedDial).resolves.toEqual({
+      afterSequence: 0,
+      tail: 1_000,
+      storeId: undefined,
+    });
+
+    const failure = new BackendClientError('disconnected', 'fresh bootstrap failed');
+    const reported = nextState();
+    transport.sever(failure);
+    await expect(reported).resolves.toEqual({status: 'disconnected', error: failure});
+
+    // The handle is still settling, but its failure has already been exposed.
+    // A later explicit request is a new attempt, not a duplicate of the failed one.
+    const retriedDial = transport.nextSubscribe();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    expect(stream.rebootstrap()).toBe('transitioning');
+    expect(transport.subscribeCalls).toHaveLength(2);
+
+    transport.releasePendingSubscribe();
+    await expect(retriedDial).resolves.toEqual({
+      afterSequence: 0,
+      tail: 1_000,
+      storeId: undefined,
+    });
+    await stream.settle();
+
+    expect(transport.subscribeCalls).toHaveLength(3);
+    expect(transport.subscriptions[1]?.closed).toBe(true);
+    await stream.close();
+  });
+
+  it('retains a fresh retry after an in-band fault ends a pending fresh dial', async () => {
+    const transport = new StubTransport();
+    const {callbacks} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+
+    transport.deferNextSubscribe();
+    const failedDial = transport.nextSubscribe();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    await failedDial;
+    transport.emitProtocolError();
+
+    const retriedDial = transport.nextSubscribe();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    transport.releasePendingSubscribe();
+    await expect(retriedDial).resolves.toEqual({
+      afterSequence: 0,
+      tail: 1_000,
+      storeId: undefined,
+    });
+    await stream.close();
+  });
+
+  it('fences frames after a protocol fault from a pending fresh generation', async () => {
+    const transport = new StubTransport();
+    const {callbacks, messages} = harness({cursor: 0, reconnect: false});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+
+    transport.faultThenBatchOnNextSubscribe = true;
+    expect(stream.rebootstrap()).toBe('transitioning');
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+
+    expect(messages.map(({message}) => message.type)).toEqual(['event_batch', 'protocol_error']);
+    expect(transport.subscriptions[1]?.closed).toBe(true);
+    await stream.close();
+  });
+
+  it('awaits a synchronously faulted pending handle during stream teardown', async () => {
+    const transport = new StubTransport();
+    const {callbacks} = harness({cursor: 0, reconnect: false});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+
+    transport.deferNextSubscriptionClose();
+    transport.faultThenBatchOnNextSubscribe = true;
+    const faultedDial = transport.nextSubscribe();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    await faultedDial;
+
+    let settled = false;
+    const closing = stream.close().then(() => {
+      settled = true;
+    });
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    expect(settled).toBe(false);
+
+    transport.releasePendingClose();
+    await closing;
+    expect(transport.subscriptions[1]?.closed).toBe(true);
+  });
+
+  it('contains a pending faulted handle close failure during teardown', async () => {
+    const transport = new StubTransport();
+    const {callbacks, states} = harness({cursor: 0, reconnect: false});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+
+    transport.scriptedCloseFailures.push(new Error('socket close failed'));
+    transport.faultThenBatchOnNextSubscribe = true;
+    const faultedDial = transport.nextSubscribe();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    await faultedDial;
+
+    await stream.close();
+    expect(states).toEqual([]);
+    expect(transport.subscriptions[1]?.closed).toBe(true);
+  });
+
+  it('retires a synchronously faulted pending handle before its queued replacement', async () => {
+    const transport = new StubTransport();
+    const {callbacks} = harness({cursor: 0, reconnect: false});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+
+    transport.deferNextSubscriptionClose();
+    transport.faultThenBatchOnNextSubscribe = true;
+    const faultedDial = transport.nextSubscribe();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    await faultedDial;
+
+    const replacement = transport.nextSubscribe();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    expect(transport.subscribeCalls).toHaveLength(2);
+
+    transport.releasePendingClose();
+    await expect(replacement).resolves.toEqual({
+      afterSequence: 0,
+      tail: undefined,
+      storeId: undefined,
+    });
+    expect(transport.subscriptions[1]?.closed).toBe(true);
+    expect(transport.subscribeCalls).toHaveLength(3);
+    await stream.close();
+  });
+
+  it('awaits a protocol-failed live handle during stream teardown', async () => {
+    const transport = new StubTransport();
+    transport.deferNextSubscriptionClose();
+    const {callbacks} = harness({cursor: 0, reconnect: false});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    transport.emitProtocolError();
+
+    let settled = false;
+    const closing = stream.close().then(() => {
+      settled = true;
+    });
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    expect(settled).toBe(false);
+
+    transport.releasePendingClose();
+    await closing;
+    expect(transport.subscriptions[0]?.closed).toBe(true);
+  });
+
+  it('retires a protocol-failed live handle before dialing its replacement', async () => {
+    const transport = new StubTransport();
+    transport.deferNextSubscriptionClose();
+    const {callbacks} = harness({cursor: 0, reconnect: false});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    transport.emitProtocolError();
+
+    const replacement = transport.nextSubscribe();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    expect(transport.subscribeCalls).toHaveLength(1);
+
+    transport.releasePendingClose();
+    await expect(replacement).resolves.toEqual({
+      afterSequence: 0,
+      tail: undefined,
+      storeId: undefined,
+    });
+    expect(transport.subscribeCalls).toHaveLength(2);
+    await stream.close();
+  });
+
+  it('continues replacement after a protocol-failed handle rejects close', async () => {
+    const transport = new StubTransport();
+    transport.scriptedCloseFailures.push(new Error('socket close failed'));
+    const {callbacks} = harness({cursor: 0, reconnect: false});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    transport.emitProtocolError();
+
+    const replacement = transport.nextSubscribe();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    await expect(replacement).resolves.toEqual({
+      afterSequence: 0,
+      tail: undefined,
+      storeId: undefined,
+    });
+    expect(transport.subscriptions[0]?.closed).toBe(true);
+    await stream.close();
+  });
+
+  it('identifies a coalesced fresh recovery whose first batch already landed', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 0, reconnect: true};
+    const {callbacks, messages, nextState} = harness(env);
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(5, 'agent_output_chunk', 'old\n')]);
+    env.cursor = 5;
+
+    // The replacement delivers its first batch synchronously, but its
+    // subscription handle remains pending. The batch, not handle settlement,
+    // is the boundary visible to consumers.
+    transport.deferNextSubscribe();
+    transport.deliverOnNextSubscribe([event(1, 'run_finished')], 0);
+    expect(stream.rebootstrap()).toBe('transitioning');
+    expect(stream.rebootstrap()).toBe('transitioning');
+    await stream.settle();
+    expect(messages.at(-1)).toMatchObject({resumed: false});
+    expect(stream.rebootstrap()).toBe('current');
+    expect(stream.rebootstrap()).toBe('current');
+    expect(transport.subscribeCalls).toHaveLength(2);
+
+    const recovered = nextState();
+    transport.releasePendingSubscribe();
+    await expect(recovered).resolves.toMatchObject({status: 'connected'});
+    await stream.close();
+    expect(stream.rebootstrap()).toBe('inactive');
+  });
+
+  it('retains one cursor retry requested while a fresh handshake is still settling', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 5, reconnect: false, storeId: 'replacement'};
+    const {callbacks, messages, nextState} = harness(env);
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(5, 'agent_output_chunk', 'old\n')]);
+
+    // The fresh generation has already delivered its first batch, but its
+    // subscription handle is still pending. A snapshot may now prove that the
+    // terminal batch stopped short of durable history and request a cursor
+    // retry before the fresh recovery releases the single dial slot.
+    transport.deferNextSubscribe();
+    transport.deliverOnNextSubscribe([event(1, 'agent_output_chunk', 'replacement\n')], 0);
+    expect(stream.rebootstrap()).toBe('transitioning');
+    await stream.settle();
+    expect(messages.at(-1)).toMatchObject({resumed: false});
+    const terminalClose = new Error('replacement closed before the snapshot settled');
+    transport.sever(terminalClose);
+    env.reconnect = true;
+    const reported = nextState();
+    stream.retryIfDisconnected();
+    stream.retryIfDisconnected();
+    expect(transport.subscribeCalls).toHaveLength(2);
+
+    const retainedRetry = transport.nextSubscribe();
+    transport.releasePendingSubscribe();
+    await expect(reported).resolves.toEqual({status: 'disconnected', error: terminalClose});
+    expect(await retainedRetry).toEqual({
+      afterSequence: 5,
+      tail: undefined,
+      storeId: 'replacement',
+    });
+    expect(transport.subscribeCalls).toHaveLength(3);
     await stream.close();
   });
 
@@ -706,7 +1060,7 @@ describe('PersistentEventStream', () => {
 
     // The pending attempt is already a fresh bootstrap. Neither the stronger
     // public recovery verb nor a lifecycle retry may open a competing socket.
-    stream.rebootstrap();
+    expect(stream.rebootstrap()).toBe('transitioning');
     stream.retry();
     expect(transport.subscribeCalls).toHaveLength(1);
 
@@ -754,7 +1108,7 @@ describe('PersistentEventStream', () => {
     expect(resumed?.resumed).toBe(true);
   });
 
-  it('closes a reconnect subscription that resolves after close', async () => {
+  it('awaits and closes a reconnect subscription that resolves during close', async () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true};
     const {callbacks} = harness(env);
@@ -769,13 +1123,19 @@ describe('PersistentEventStream', () => {
     // The boot subscribe plus the resume dial, which is now pending.
     expect(transport.subscribeCalls).toHaveLength(2);
 
-    await stream.close();
-    // close() cannot cancel a dial that has not resolved; let it land now.
-    transport.releasePendingSubscribe();
-    await stream.settle();
+    let settled = false;
+    const closing = stream.close().then(() => {
+      settled = true;
+    });
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    expect(settled).toBe(false);
 
-    // The late subscription is closed, not adopted, so its socket cannot
-    // outlive shutdown and deliver state after close.
+    // The transport has no handshake cancellation primitive, so shutdown owns
+    // the pending dial until its late handle can be closed.
+    transport.releasePendingSubscribe();
+    await closing;
+
+    // The handle is closed before shutdown settles, not adopted or abandoned.
     expect(transport.subscriptions[1]?.closed).toBe(true);
   });
 
@@ -857,6 +1217,27 @@ describe('PersistentEventStream', () => {
     transport.releasePendingSubscribe();
     await expect(recovered).resolves.toMatchObject({status: 'connected'});
     expect(transport.subscribeCalls).toHaveLength(2);
+    await stream.close();
+  });
+
+  it('reports a failed replacement dial when retry retires a healthy stream', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 0, reconnect: true};
+    const {callbacks, states} = harness(env);
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    env.cursor = 1;
+
+    const failure = new BackendClientError('disconnected', 'replacement dial failed');
+    transport.scriptedDialFailures.push(failure);
+    stream.retry();
+    await stream.settle();
+
+    // A lifecycle wake can proactively replace a live stream. If that dial fails, the old socket
+    // is already retired, so silence would leave the caller claiming it is still connected.
+    expect(transport.subscribeCalls).toHaveLength(2);
+    expect(states).toEqual([{status: 'disconnected', error: failure}]);
     await stream.close();
   });
 

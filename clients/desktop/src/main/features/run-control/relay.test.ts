@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {Duplex} from 'node:stream';
-import type {MainToPage} from '../../../common/bridge-protocol.js';
+import {BRIDGE_CREDIT_WINDOW_BYTES, type MainToPage} from '../../../common/bridge-protocol.js';
 import {type RelayPort, relay} from './relay.js';
 
 /** The server's end of one connection. */
@@ -31,6 +31,43 @@ class LinkedEnd extends Duplex {
     this.peer = null;
     if (peer !== null && !peer.readableEnded) peer.push(null);
     callback(error);
+  }
+}
+
+/** A server stream that owns written bytes until the test explicitly accepts them. */
+class HeldWriteStream extends Duplex {
+  readonly writes: Buffer[] = [];
+  readonly #completions: Array<() => void> = [];
+
+  override _read(): void {}
+
+  override _write(chunk: Buffer, _encoding: BufferEncoding, callback: () => void): void {
+    this.writes.push(Buffer.from(chunk));
+    this.#completions.push(callback);
+  }
+
+  acceptNext(): void {
+    const complete = this.#completions.shift();
+    if (complete === undefined) throw new Error('no server write is pending');
+    complete();
+  }
+}
+
+/** A host stream whose terminal event the test owns. */
+class ControlledReadStream extends Duplex {
+  override _read(): void {}
+
+  override _write(_chunk: Buffer, _encoding: BufferEncoding, callback: () => void): void {
+    callback();
+  }
+
+  line(data: string): void {
+    this.emit('data', `${data}\n`);
+  }
+
+  terminate(kind: 'close' | 'error'): void {
+    if (kind === 'error') this.emit('error', new Error('host stream failed'));
+    else this.emit('close');
   }
 }
 
@@ -96,13 +133,19 @@ function random(seed: number): () => number {
 
 async function connected(
   server: ConnectionHandler,
+  grantOutput = true,
 ): Promise<{port: FakePort; done: Promise<void>; stream: Duplex}> {
   const [stream, end] = duplexPair();
   server(end);
   const port = new FakePort();
   const done = relay(port, async () => stream);
   await port.until(posted => posted.length > 0);
+  if (grantOutput) port.send({type: 'credit', bytes: BRIDGE_CREDIT_WINDOW_BYTES});
   return {port, done, stream};
+}
+
+function frameBytes(data: string): number {
+  return Buffer.byteLength(data, 'utf8') + 1;
 }
 
 describe('relay', () => {
@@ -127,8 +170,8 @@ describe('relay', () => {
       expect({seed, posted: port.posted}).toEqual({
         seed,
         posted: [
-          {type: 'open'},
-          ...lines.map(data => ({type: 'message' as const, data})),
+          {type: 'open', creditBytes: BRIDGE_CREDIT_WINDOW_BYTES},
+          ...lines.map(data => ({type: 'message' as const, data, bytes: frameBytes(data)})),
           {type: 'close'},
         ],
       });
@@ -144,6 +187,96 @@ describe('relay', () => {
     await port.until(posted => frames(posted).length === 2);
     expect(frames(port.posted)).toEqual(['{"type":"query.snapshot"}', '{"type":"subscribe"}']);
     stream.destroy();
+  });
+
+  test('server output spends exact UTF-8 credit and resumes contiguously', async () => {
+    const {port, done} = await connected(connection => {
+      connection.write('é\nok\n');
+    }, false);
+    port.send({type: 'credit', bytes: frameBytes('é')});
+    await port.until(posted => frames(posted).length === 1);
+    expect(frames(port.posted)).toEqual(['é']);
+
+    port.send({type: 'credit', bytes: frameBytes('ok')});
+    await port.until(posted => frames(posted).length === 2);
+    expect(frames(port.posted)).toEqual(['é', 'ok']);
+    port.disconnect();
+    await done;
+  });
+
+  test('server EOF waits for credited complete frames before closing the page', async () => {
+    const {port, done} = await connected(connection => connection.end('first\nsecond\n'), false);
+    port.send({type: 'credit', bytes: frameBytes('first')});
+    await port.until(posted => frames(posted).length === 1);
+    expect(port.posted).toEqual([
+      {type: 'open', creditBytes: BRIDGE_CREDIT_WINDOW_BYTES},
+      {type: 'message', data: 'first', bytes: frameBytes('first')},
+    ]);
+
+    port.send({type: 'credit', bytes: frameBytes('second')});
+    await done;
+    expect(port.posted).toEqual([
+      {type: 'open', creditBytes: BRIDGE_CREDIT_WINDOW_BYTES},
+      {type: 'message', data: 'first', bytes: frameBytes('first')},
+      {type: 'message', data: 'second', bytes: frameBytes('second')},
+      {type: 'close'},
+    ]);
+  });
+
+  for (const terminal of ['error', 'close'] as const) {
+    test(`server ${terminal} closes instead of waiting for page credit`, async () => {
+      const port = new FakePort();
+      const stream = new ControlledReadStream();
+      let settled = false;
+      const done = relay(port, async () => stream).then(() => {
+        settled = true;
+      });
+      await port.until(posted => posted.some(message => message.type === 'open'));
+
+      port.send({type: 'credit', bytes: 1});
+      stream.line('larger-than-credit');
+      stream.terminate(terminal);
+      await Promise.resolve();
+
+      expect(port.posted.at(-1)).toEqual({type: 'close'});
+      expect(port.closedByMain).toBe(true);
+      expect(settled).toBe(true);
+      await done;
+    });
+  }
+
+  test('page input is bounded and returns credit only after the server accepts bytes', async () => {
+    const port = new FakePort();
+    const stream = new HeldWriteStream();
+    const done = relay(port, async () => stream);
+    await port.until(posted => posted.some(message => message.type === 'open'));
+
+    const fillsWindow = 'x'.repeat(BRIDGE_CREDIT_WINDOW_BYTES - 1);
+    port.send({type: 'send', data: fillsWindow});
+    expect(stream.writableLength).toBe(BRIDGE_CREDIT_WINDOW_BYTES);
+    expect(port.posted.some(message => message.type === 'credit')).toBe(false);
+
+    stream.acceptNext();
+    await port.until(posted => posted.some(message => message.type === 'credit'));
+    expect(port.posted.find(message => message.type === 'credit')).toEqual({
+      type: 'credit',
+      bytes: BRIDGE_CREDIT_WINDOW_BYTES,
+    });
+    port.disconnect();
+    await done;
+  });
+
+  test('page input beyond its outstanding byte credit closes before another write', async () => {
+    const port = new FakePort();
+    const stream = new HeldWriteStream();
+    const done = relay(port, async () => stream);
+    await port.until(posted => posted.some(message => message.type === 'open'));
+
+    port.send({type: 'send', data: 'x'.repeat(BRIDGE_CREDIT_WINDOW_BYTES - 1)});
+    port.send({type: 'send', data: 'overflow'});
+    await done;
+    expect(stream.writes).toHaveLength(1);
+    expect(port.posted.at(-1)).toEqual({type: 'close'});
   });
 
   test('a failed dial reports close without open', async () => {
@@ -168,7 +301,10 @@ describe('relay', () => {
       port.send(message);
       await done;
       await serverClosed;
-      expect(port.posted).toEqual([{type: 'open'}, {type: 'close'}]);
+      expect(port.posted).toEqual([
+        {type: 'open', creditBytes: BRIDGE_CREDIT_WINDOW_BYTES},
+        {type: 'close'},
+      ]);
     });
   }
 
@@ -198,6 +334,9 @@ describe('relay', () => {
       connection.write('x'.repeat(5 * 1024 * 1024));
     });
     await done;
-    expect(port.posted).toEqual([{type: 'open'}, {type: 'close'}]);
+    expect(port.posted).toEqual([
+      {type: 'open', creditBytes: BRIDGE_CREDIT_WINDOW_BYTES},
+      {type: 'close'},
+    ]);
   });
 });

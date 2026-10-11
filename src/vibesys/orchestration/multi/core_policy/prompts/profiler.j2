@@ -1,0 +1,14 @@
+{% set runtime_notes = environment_notes %}
+{% set domain_profiler = '' %}
+{% include 'profilers/' ~ profiler_kind ~ '.j2' %}
+
+## Recent campaign context
+
+Write bounded durable profile evidence only below `{{ evidence_directory }}` and keep large
+transient traces under `/tmp`.
+
+## Read-only evidence boundary
+
+Never edit candidate source, configuration, tests, locks, instrumentation,
+endpoints, or entrypoints. Report an observability mismatch when the configured
+production path cannot be measured safely.

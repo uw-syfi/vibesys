@@ -33,6 +33,7 @@ from vs_core.api import (
     AttemptId,
     AttemptPhase,
     AttemptView,
+    ContinuationId,
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
@@ -47,6 +48,8 @@ from vs_core.api import (
     RunView,
     Scope,
     SessionId,
+    TurnChain,
+    Value,
     WorkspaceMode,
     WorkspacePlan,
 )
@@ -202,8 +205,13 @@ def _view(*checkpoints: AttemptCheckpoint) -> RunView:
 
 def test_a_retry_turn_that_retained_nothing_is_not_credited_with_an_older_checkpoint() -> None:
     view = _view(_checkpoint("first", "r1"))
-    assert turn_candidate(view, AttemptId(root="attempt"), _invocation("retry")) is None
-    assert turn_candidate(view, AttemptId(root="attempt"), _invocation("first")) == revision("r1")
+    assert (
+        turn_candidate(view, AttemptId(root="attempt"), _invocation("retry"), predecessors=())
+        is None
+    )
+    assert turn_candidate(
+        view, AttemptId(root="attempt"), _invocation("first"), predecessors=()
+    ) == revision("r1")
 
 
 @given(
@@ -216,11 +224,17 @@ def test_a_turn_owns_only_its_own_last_checkpoint(
     view = _view(*(_checkpoint(inv, f"r{n}-{i}") for i, (inv, n) in enumerate(retained)))
     mine = [f"r{n}-{i}" for i, (inv, n) in enumerate(retained) if inv == asked]
     expected = revision(mine[-1]) if mine else None
-    assert turn_candidate(view, AttemptId(root="attempt"), _invocation(asked)) == expected
+    assert (
+        turn_candidate(view, AttemptId(root="attempt"), _invocation(asked), predecessors=())
+        == expected
+    )
 
 
 def test_a_turn_of_an_unknown_attempt_has_no_candidate() -> None:
-    assert turn_candidate(empty_view(), AttemptId(root="none"), _invocation("x")) is None
+    assert (
+        turn_candidate(empty_view(), AttemptId(root="none"), _invocation("x"), predecessors=())
+        is None
+    )
 
 
 # -- the contract shapes the strategy relies on -----------------------------------------
@@ -263,3 +277,55 @@ def test_evidence_ids_are_unique_only_within_a_source_request() -> None:
     two = _ref("same", source_request=RequestId(root="two"))
     assert one.evidence_id == EvidenceId(root="same") == two.evidence_id
     assert one.key != two.key
+
+
+@given(
+    steps=st.lists(
+        st.tuples(st.sampled_from(("suspend", "correct", "lose", "retry")), st.booleans()),
+        max_size=10,
+    ),
+    first_retains=st.booleans(),
+)
+def test_a_turn_chains_candidate_is_the_latest_checkpoint_of_the_chain(
+    steps: list[tuple[str, bool]], *, first_retains: bool
+) -> None:
+    """Whatever mix of suspends, resumes, corrections, lost turns and retries came before.
+
+    Each turn retains a checkpoint or not. A retry starts a different logical answer, so the
+    earlier turns stop counting; every other step keeps them in the chain.
+    """
+    chain: TurnChain[Value] = TurnChain()
+    current = 0
+    retained = {0: first_retains}
+    members = [0]
+    for kind, retains in steps:
+        ref = _invocation(f"t{current}")
+        nxt = current + 1
+        if kind == "suspend":
+            chain = chain.suspended(ref, ContinuationId(root=f"c{current}")).resumed(
+                authorized=InvocationId(root=f"t{nxt}"),
+                continuation=ContinuationId(root=f"c{current}"),
+                context=None,
+            )
+        elif kind == "correct":
+            corrected = chain.corrected(ref, None, limit=100)
+            assert corrected is not None
+            chain = corrected
+        elif kind == "lose":
+            again = chain.asked_again(ref, now=0.0, limit=100, backoff=0.0)
+            if again is None:
+                continue
+            chain = again
+        else:
+            chain = chain.followed_by(charge="paid")
+            members = []
+        current = nxt
+        retained[current] = retains
+        members.append(current)
+    view = _view(
+        *(_checkpoint(f"t{turn}", f"r{turn}") for turn in sorted(retained) if retained[turn])
+    )
+    held = [turn for turn in members if retained[turn]]
+    expected = revision(f"r{held[-1]}") if held else None
+
+    assert chain.candidate(view, AttemptId(root="attempt"), _invocation(f"t{current}")) == expected

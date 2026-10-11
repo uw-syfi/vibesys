@@ -1,0 +1,108 @@
+{% from '_revision.j2' import rev %}
+You own one complete inner-loop round: implement the typed plan, independently
+self-review it, and collect only the profile/evidence needed to classify it.
+
+{% include 'run_context.j2' %}
+
+## Authoritative inputs
+
+Hypothesis `{{ hypothesis_id }}`{% if title %} ({{ title }}){% endif %}, round {{ round_number }}, attempt {{ retry }}.
+Your workspace is an isolated candidate at `{{ rev(base_revision) }}`; edit it freely.
+
+- Claim: {{ hypothesis }}
+- Task: {{ task }}
+- Pass criteria: {{ pass_criteria }}
+{% if invariants %}- Invariants: {{ invariants }}
+{% endif %}{% if activation_evidence %}- Activation evidence: {{ activation_evidence }}
+{% endif %}{% if falsification_criteria %}- Falsifier: {{ falsification_criteria }}
+{% endif %}{% if minimum_acceptance_criteria %}- Minimum acceptance: {{ minimum_acceptance_criteria }}
+{% endif %}
+Read the code and the objective with tools. Do not rely on stale history.
+Reuse a matching framework validation PASS when its declared inputs are unchanged.
+
+{% if feedback %}
+New retry feedback:
+
+{{ feedback }}
+
+Address affected source/evidence and invariants without repeating unrelated
+expensive work.
+{% endif %}
+{% if no_valid_reply %}
+Your previous attempt returned no valid response ({{ no_valid_reply }}). Answer with the
+schema-valid JSON object this time.
+{% endif %}
+{% if dominated_by_rounds %}
+Your claimed `pareto_frontier` row was dominated by the live noise-aware archive (rounds
+{{ dominated_by_rounds | join(', ') }}). Report the row as `discard` unless its metrics or the
+configured objective comparability were recorded incorrectly; do not rerun an unchanged
+candidate merely to repair the disposition.
+{% endif %}
+
+## Implement and verify
+
+Execute one causally complete slice. The external contract is fixed; language,
+runtime, topology, build system, and component boundaries may change unless an
+authoritative input restricts them. Preserve objective/workload/resource/API
+invariants and never edit framework, reference, evaluator, benchmark, profiler,
+or skill sources.
+
+Prove production-path activation, then stage costly work behind a cheap
+directional gate. Compare exact target-read build/provenance/gate paths/bytes
+with the resolved target package/mount plan; archive presence is insufficient.
+A pre-target rejection is unspent only with raw proof no target allocation or
+runtime phase began. Archive bytes immediately before target work; framework
+checkpoint and validation-input hashes suffice for local/report-only edits.
+Relate only custom-gate counters with the same
+scope/owner; cheaply test positive, zero, and mixed cases. Preserve exact
+source/build/runtime identity and
+every raw row before later diagnostics. Compare like-for-like workload and
+offered load. Do not manufacture a gain through accounting, admission, failure,
+timeout, load selection, or mixed operating points. Clean up processes, tasks,
+sockets, and accelerators on every exit.
+
+Evaluate the causal result against the plan's independent minimum, not its
+forecast. Classify Pareto retention separately: a feasible nondominated tradeoff
+may be retained without meeting all terminal gates. Canonical fields come only
+from one fresh canonical selected row; targeted values remain provisional.
+
+{% if official_due %}
+Official evaluation is scheduled after this round because
+`{{ official_reason or 'framework policy' }}`. Do not duplicate
+framework-owned commands.
+{% else %}
+Official evaluation is deferred; do not run a ceremonial full sweep or immutable
+accuracy check merely for bookkeeping.
+{% endif %}
+
+## Profile
+
+Profile only a decision-relevant gap from the typed plan, with commands available in your
+workspace. Record an uninstrumented control, activation, observer effect, and non-overlapping
+evidence. Perturbed captures are qualitative; overlapping CPU/CUDA totals are not additive.
+{% if profiler_id == 'none' %}
+Standalone profiling is disabled for this run. Use existing evidence and do not
+invoke profiler tools.
+{% else %}
+The run's profiler is `{{ profiler_id }}`. Capture with it when its commands exist in your
+environment; a profile you cannot capture is uncertainty to report in `profile_analysis`, not a
+reason to FAIL.
+Record `observer_effect_fraction` against a comparable uninstrumented control.
+If headline metrics differ by more than 10%, the capture is qualitative and
+must not be converted into exclusive phase shares.
+{% endif %}
+
+## Trusted performance numbers are the framework's
+
+The evaluation tool returns evidence identities, not metric values, and the framework runs the
+official gates itself after you PASS. Do not submit benchmark or profile evaluations to read
+numbers; a trusted accuracy check of your workspace is the useful use of the tool. Never FAIL a
+round because trusted metric values are not shown to you: self-review correctness, invariants,
+evidence identity, reward-hack risk and resource lifecycle only.
+
+{% include 'agent_evaluation.j2' %}
+
+Self-review the exact scoped outcome, invariants, evidence identity, reward-hack
+risk, and resource lifecycle. PASS only when that outcome is supported; it does
+not assert global completion. Return only the schema-valid JSON object. The
+framework records it and feeds profile fields to the next designer.

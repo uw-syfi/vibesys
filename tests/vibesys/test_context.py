@@ -667,7 +667,8 @@ def test_copied_run_provisions_self_contained_project_in_collection(tmp_path: Pa
     assert _git(project, "status", "--porcelain") == ""
 
 
-def test_agent_v5_run_resumes_with_larger_round_budget(tmp_path: Path) -> None:
+def test_agent_v5_run_resumes_only_with_the_options_it_started_with(tmp_path: Path) -> None:
+    """A core run's limits are fixed in its committed state, so a larger budget is refused (#2013)."""
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
@@ -680,20 +681,20 @@ def test_agent_v5_run_resumes_with_larger_round_budget(tmp_path: Path) -> None:
     view = open_run_store(Project.open(project)).get_run(run_id)
     assert view.loop == "multi-agent"
     registration = built_in_orchestrations().resolve(stored.orchestration.id)
-    assert registration.project is not None
+    assert registration.projector is not None
 
-    with _create_context(
-        project,
-        evaluator=evaluator,
-        exp_name=run_id,
-        existing=True,
-        configuration=_options(max_rounds=2),
-    ):
+    with pytest.raises(ConfigurationError, match="cannot change its descriptor"):
+        _create_context(
+            project,
+            evaluator=evaluator,
+            exp_name=run_id,
+            existing=True,
+            configuration=_options(max_rounds=2),
+        )
+
+    with _create_context(project, evaluator=evaluator, exp_name=run_id, existing=True):
         pass
 
-    resumed = Project.open(project).state.load_run(run_id)
-    assert isinstance(resumed, OrchestrationRunManifest)
-    assert resumed.orchestration.options["max_rounds"] == 2
     assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
 
 
@@ -701,7 +702,7 @@ def test_agent_v5_run_resumes_with_larger_round_budget(tmp_path: Path) -> None:
     ("change", "expected_detail"),
     [
         ("add", "missing recorded roles: auditor"),
-        ("remove", "unknown recorded roles: profiler"),
+        ("remove", "unknown recorded roles: multi-profiler"),
     ],
 )
 def test_agent_v5_resume_rejects_changed_plugin_role_catalog(
@@ -717,7 +718,7 @@ def test_agent_v5_resume_rejects_changed_plugin_role_catalog(
     selected_roles = (
         (*plugin_roles, AgentRole(id="auditor", system_prompt="audit"))
         if change == "add"
-        else tuple(role for role in plugin_roles if role.id != "profiler")
+        else tuple(role for role in plugin_roles if role.id != "multi-profiler")
     )
     backend_factory = _RecordingBackendFactory()
 
@@ -822,7 +823,6 @@ def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: 
                 evaluator=evaluator,
                 exp_name=run_id,
                 existing=True,
-                configuration=_options(max_rounds=2),
                 integration=integration,
             )
     finally:

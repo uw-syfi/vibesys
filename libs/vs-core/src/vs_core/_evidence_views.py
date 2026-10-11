@@ -55,15 +55,24 @@ def ledger_refs(view: RunView, keys: tuple[EvidenceKey, ...]) -> tuple[EvidenceR
 
 
 def turn_candidate(
-    view: RunView, attempt: AttemptId, invocation: InvocationRef
+    view: RunView,
+    attempt: AttemptId,
+    invocation: InvocationRef,
+    *,
+    predecessors: tuple[InvocationRef, ...],
 ) -> RevisionRef | None:
-    """The revision this very turn retained, never an earlier turn's checkpoint.
+    """The latest revision retained by this turn or by a turn it continues.
 
-    A retry turn that retained nothing new yields None even when the attempt holds
-    older checkpoints, so it reports "retained no changed candidate".
+    ``predecessors`` are the earlier turns of the same logical answer (the suspended turn a
+    resume continues, an invalid or lost turn a correction replaces); `TurnChain.candidate`
+    supplies them. A turn that only reads a verdict edits nothing, so its candidate is what the
+    turn it resumed checkpointed. A different logical turn, such as a paid retry, is not a
+    predecessor: that retained nothing new yields None even when the attempt holds older
+    checkpoints, so it reports "retained no changed candidate".
     """
     live = next((item for item in view.attempts if item.attempt_id == attempt), None)
     if live is None:
         return None
-    mine = tuple(item for item in live.checkpoints if item.invocation == invocation)
+    chain = {invocation, *predecessors}
+    mine = tuple(item for item in live.checkpoints if item.invocation in chain)
     return mine[-1].revision if mine else None

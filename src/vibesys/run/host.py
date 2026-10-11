@@ -108,6 +108,16 @@ if TYPE_CHECKING:
 type _AgentToolResolver = Callable[
     [object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]
 ]
+type StatelessToolServer = Callable[[object], ToolServerDescriptor | None]
+"""The server of a tool that holds no run state, for a run's tool context; None if it has none."""
+
+
+def _tool_context(resources: _PreparedRun) -> AgentToolContext:
+    return AgentToolContext(
+        resources.facts.profiler_id, resources.environment_resources.view.profiler_mcp_env
+    )
+
+
 _EVALUATION_CLEANUP_FAILURE = "evaluation agent cleanup failed"
 _SERVICES_CLEANUP_FAILURE = "evaluation and profiler services did not close"
 
@@ -172,7 +182,7 @@ class _ProductHostFactory:
         | None
     )
     options: BaseModel | None = None
-    stateless_tool_servers: Mapping[str, ToolServerDescriptor] | None = None
+    stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None
     core_services: CoreServices | None = field(default=None, init=False)
     evaluation_backend: SemanticEvaluationBackend | None = field(default=None, init=False)
     evaluation_service: EvaluationAgentService | None = field(default=None, init=False)
@@ -242,10 +252,7 @@ class _ProductHostFactory:
             ),
             root_agent_environment_opener=self._root_agent_environment_opener(),
         )
-        tool_context = AgentToolContext(
-            resources.facts.profiler_id,
-            resources.environment_resources.view.profiler_mcp_env,
-        )
+        tool_context = _tool_context(resources)
         agent_runtime = self._agent_runtime(
             resources,
             session_store,
@@ -502,6 +509,40 @@ class _ProductHostFactory:
             profiler=profiler_service,
         )
 
+    def _offered_roles(self, resources: _PreparedRun) -> tuple[AgentRole, ...]:
+        """The plugin's roles, without a stateless tool whose provider declines for this run.
+
+        A provider that declines (the selected profiler is ``none``) says the run has no such
+        tool, and a strategy only runs the turns that use it when the run offers it. A stateless
+        tool with no provider at all is a wiring mistake and stays for composition to refuse.
+        """
+        context = _tool_context(resources)
+        declined = frozenset(
+            tool
+            for tool, server in (self.stateless_tool_servers or {}).items()
+            if server(context) is None
+        )
+        return tuple(
+            role.model_copy(
+                update={
+                    "extra_tools": tuple(
+                        tool
+                        for tool in role.extra_tools
+                        if not (tool.stateless and tool.id in declined)
+                    )
+                }
+            )
+            for role in self.plugin.agents
+        )
+
+    def _stateless_tool_servers(self, resources: _PreparedRun) -> dict[str, ToolServerDescriptor]:
+        """The server of each stateless tool this run's environment can serve, by tool id."""
+        context = _tool_context(resources)
+        served = {
+            tool: server(context) for tool, server in (self.stateless_tool_servers or {}).items()
+        }
+        return {tool: server for tool, server in served.items() if server is not None}
+
     def _core_services(  # noqa: PLR0913  # lint-waiver: LW-948090 [PLR0913]; each argument is an independently owned resource the host already opened, and the composition reads them once.
         self,
         resources: _PreparedRun,
@@ -597,14 +638,15 @@ class _ProductHostFactory:
                     else PollingEvaluationExecutor(evaluation, workspaces)
                 ),
                 environment=self._core_environment(resources),
-                roles=self.plugin.agents,
+                roles=self._offered_roles(resources),
                 agent_client=client,
                 invocation_slot=invocations,
                 configuration=configuration,
                 clock=self.timing.clock,
                 agent_lifecycle=self.integration.agent_execution_event,
                 evaluation_diagnostics=self._evaluation_diagnostic,
-                stateless_tool_servers=dict(self.stateless_tool_servers or {}),
+                stateless_tool_servers=self._stateless_tool_servers(resources),
+                commands=agent_runtime.commands,
                 measurement_observer=CoreMeasurementEvents(self.integration.events),
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id
@@ -862,7 +904,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     timing: RunTiming,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
     | None = None,
-    stateless_tool_servers: Mapping[str, ToolServerDescriptor] | None = None,
+    stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None,
 ) -> AsyncIterator[CoreHost]:
     """Open the host of a plugin whose ``core`` policy the runtime drives.
 

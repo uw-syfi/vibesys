@@ -11,8 +11,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
-from vibesys.orchestration.single import PLUGIN
-from vibesys.orchestration.single.agents import IMPLEMENTER
+from vibesys.orchestration.issue_queue import PLUGIN
+from vibesys.orchestration.issue_queue.agents import IMPLEMENTER
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_agent.api import (
     AgentClient,

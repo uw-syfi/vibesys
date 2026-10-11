@@ -45,6 +45,9 @@ export function fakeProcess(onKill: (signal: KillSignal) => void = () => {}): Fa
       stdin: input,
       stdout,
       stderr,
+      get running() {
+        return !ended;
+      },
       exit,
       kill: signal => {
         if (ended) return;

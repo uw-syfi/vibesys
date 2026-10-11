@@ -77,6 +77,7 @@ import {
   clearEntrySelection,
   clearInputError,
   closeNotepad,
+  closeNotepadAfterPromotion,
   closeOverlays,
   closePane,
   cyclePaneFocus,
@@ -98,6 +99,7 @@ import {
   selectNextTodo,
   setChatDockFits,
   setDesignPane,
+  setNotepadPersistenceError,
   setNotepadText,
   setPerformancePane,
   switchChatThread,
@@ -7895,7 +7897,7 @@ describe('modal geometry with an error banner', () => {
       },
       {
         id: 'notepad',
-        marker: 'Saved locally',
+        marker: 'Waiting for run identity',
         state: {...initial, errorBanner: banner, notepad: {...initial.notepad, open: true}},
       },
       {
@@ -8365,8 +8367,95 @@ describe('notepad', () => {
 
     expect(controller.state.notepad.open).toBe(true);
     expect(frame).toContain('Never sent to an agent unless you promote it below.');
+    expect(frame).toContain('Waiting for run identity');
     expect(frame).toContain('F6: steer (unsent)');
     expect(frame).toContain('F7: chat (unsent)');
+  });
+
+  it('surfaces a startup-draft conflict without claiming the draft was saved', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const initial = initialSessionState();
+    const controller = new FakeController({
+      ...initial,
+      notepad: {
+        open: true,
+        text: 'startup draft',
+        createdAt: 't0',
+        updatedAt: 't0',
+        persistence: 'conflict',
+        persistenceError: null,
+      },
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    const frame = await testRenderer.waitForFrame(value => value.includes('startup draft'));
+
+    expect(frame).toContain('Not saved: a saved note exists');
+    expect(frame).toContain('F6/F7: copy text; discard if blank');
+  });
+
+  it('lets F6 retire a blank startup conflict without creating a command draft', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const initial = initialSessionState();
+    const controller = new FakeController({
+      ...initial,
+      notepad: {
+        open: true,
+        text: '   ',
+        createdAt: 't0',
+        updatedAt: 't1',
+        persistence: 'conflict',
+        persistenceError: null,
+      },
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('Not saved:'));
+
+    testRenderer.mockInput.pressKey('F6');
+    await testRenderer.waitForFrame(() => !controller.state.notepad.open);
+
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    expect(input.value).toBe('');
+  });
+
+  it('shows a local persistence failure as an unsaved in-memory draft', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const initial = initialSessionState();
+    const failed = setNotepadPersistenceError(
+      {
+        ...initial,
+        notepad: {
+          ...initial.notepad,
+          open: true,
+          text: 'draft stays in memory',
+          createdAt: 't0',
+          updatedAt: 't0',
+          persistence: 'ready',
+        },
+      },
+      'EACCES: permission denied',
+    );
+    const controller = new FakeController(failed);
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    const frame = await testRenderer.waitForFrame(value =>
+      value.includes('Not saved locally · EACCES: permission denied'),
+    );
+
+    expect(frame).toContain('draft stays in memory');
+    expect(controller.submissions).toEqual([]);
+    expect(controller.chatSubmissions).toEqual([]);
+
+    controller.publish(setNotepadPersistenceError(controller.state, null));
+    const recovered = await testRenderer.waitForFrame(value =>
+      value.includes('Saved locally · kept out of run-events.jsonl'),
+    );
+    expect(recovered).not.toContain('Not saved locally');
   });
 
   it('treats a leading / inside the notepad as plain text, never a command', async () => {
@@ -8871,14 +8960,24 @@ class FakeController implements SessionController {
   }
   promoteNoteToSteerDraft(): {text: string} | null {
     const text = notepadPromotionText(this.state);
-    if (text === null) return null;
-    this.publish(closeNotepad(this.state));
+    if (text === null) {
+      if (this.state.notepad.persistence === 'conflict') {
+        this.publish(closeNotepadAfterPromotion(this.state));
+      }
+      return null;
+    }
+    this.publish(closeNotepadAfterPromotion(this.state));
     return {text};
   }
   promoteNoteToChatDraft(): {text: string} | null {
     const text = notepadPromotionText(this.state);
-    if (text === null) return null;
-    this.publish(openChat(closeNotepad(this.state)));
+    if (text === null) {
+      if (this.state.notepad.persistence === 'conflict') {
+        this.publish(closeNotepadAfterPromotion(this.state));
+      }
+      return null;
+    }
+    this.publish(openChat(closeNotepadAfterPromotion(this.state)));
     return {text};
   }
 

@@ -23,6 +23,18 @@ def implement(identifier: str, **extra: object) -> dict[str, object]:
     }
 
 
+def profile(identifier: str, **extra: object) -> dict[str, object]:
+    """One trusted profile entry of a plan."""
+    return {
+        "kind": "profile",
+        "profile_id": identifier,
+        "target_hypothesis_id": None,
+        "question": "Where does the current revision spend its time?",
+        "decision_impact": "Optimize the dominant component next.",
+        **extra,
+    }
+
+
 def implemented(outcome: str = "supported", summary: str = "done", **extra: object) -> str:
     """An implementer result reply."""
     return json.dumps({"summary": summary, "outcome": outcome, **extra})

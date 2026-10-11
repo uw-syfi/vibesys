@@ -96,7 +96,7 @@ def _loop_config(run_id: str, lease_seconds: float) -> RunLoopConfig:
 
 
 def ensure_not_legacy_resume(project_root: Path, run_id: str) -> None:
-    """Reject resuming a run that the legacy dynamic loop created, before any resource opens.
+    """Reject resuming a run that a legacy loop created, before any resource opens.
 
     The core cannot continue a legacy run's state, and starting a fresh run under its
     identity would discard that run's history. The error names the run and the file
@@ -111,7 +111,7 @@ def ensure_not_legacy_resume(project_root: Path, run_id: str) -> None:
                 code=diagnostic.code,
                 stage=diagnostic.stage,
                 message=(
-                    f"cannot resume run {run_id!r}: it was created by the legacy dynamic loop "
+                    f"cannot resume run {run_id!r}: it was created by a legacy loop "
                     f"({diagnostic.path}, schema {diagnostic.source_schema}); "
                     "start a new run instead"
                 ),

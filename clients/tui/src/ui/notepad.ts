@@ -13,6 +13,11 @@ const MIN_ROWS = 6;
 // `{date}-{time}-{8-hex-suffix}-{slug}`: sortable and collision-safe, not
 // meant for a person to read at a glance.
 const RUN_ID_PATTERN = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})\d{2}-[0-9a-f]{8}-(.+)$/;
+const PERSISTENCE_STATUS: Record<SessionState['notepad']['persistence'], string> = {
+  pending_identity: 'Waiting for run identity · edits stay in memory',
+  ready: 'Saved locally · kept out of run-events.jsonl',
+  conflict: 'Not saved: a saved note exists · F6/F7: copy text; discard if blank',
+};
 
 /**
  * Where a run id matches the generator's shape, show the slug (the one part
@@ -54,8 +59,12 @@ export class NotepadView {
   readonly #hint: TextRenderable;
   #renderedText: string | null = null;
   #renderedRunId: string | null = null;
+  #renderedPersistence: SessionState['notepad']['persistence'] | null = null;
+  #renderedPersistenceError: string | null = null;
+  #theme: Theme;
 
   constructor(renderer: CliRenderer, theme: Theme) {
+    this.#theme = theme;
     this.output = new BoxRenderable(renderer, {
       id: 'notepad',
       width: '70%',
@@ -130,10 +139,14 @@ export class NotepadView {
   onTextChange: (text: string) => void = () => {};
 
   applyTheme(theme: Theme): void {
+    this.#theme = theme;
     this.output.borderColor = theme.info;
     this.output.backgroundColor = theme.canvas;
     this.#metaRun.fg = theme.textPrimary;
-    this.#metaNote.fg = theme.textMuted;
+    this.#metaNote.fg =
+      this.#renderedPersistence === 'conflict' || this.#renderedPersistenceError !== null
+        ? theme.warning
+        : theme.textMuted;
     this.#hint.fg = theme.textSubtle;
     this.#editor.textColor = theme.textPrimary;
     this.#editor.focusedTextColor = theme.textStrong;
@@ -146,6 +159,7 @@ export class NotepadView {
       return;
     }
     this.output.visible = true;
+    const persistenceError = notepad.persistenceError?.replace(/\s+/g, ' ').trim() ?? null;
     const rows = fitModalRows(
       viewport,
       Math.round(viewport.height * TOP_SHARE),
@@ -167,6 +181,21 @@ export class NotepadView {
       this.#renderedRunId = state.core.runId;
       const run = state.core.runId === null ? 'unknown run' : formatRunLabel(state.core.runId);
       this.#metaRun.content = `Run ${run}`;
+    }
+    if (
+      this.#renderedPersistence !== notepad.persistence ||
+      this.#renderedPersistenceError !== persistenceError
+    ) {
+      this.#renderedPersistence = notepad.persistence;
+      this.#renderedPersistenceError = persistenceError;
+      this.#metaNote.content =
+        persistenceError === null
+          ? PERSISTENCE_STATUS[notepad.persistence]
+          : `Not saved locally · ${persistenceError} · draft stays in memory`;
+      this.#metaNote.fg =
+        notepad.persistence === 'conflict' || persistenceError !== null
+          ? this.#theme.warning
+          : this.#theme.textMuted;
     }
   }
 

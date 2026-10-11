@@ -116,10 +116,9 @@ _ANNOTATIONS = _field_annotations()
 
 
 def test_every_progress_entry_pointer_is_guarded_by_a_written_entry() -> None:
-    pointers = _repo_pointers()
-
-    assert pointers, "the scan found no progress-entry pointer; the pattern no longer matches"
-    assert _unproven(pointers, _ANNOTATIONS) == []
+    # No shipped template names a progress entry since the loops that wrote progress files moved
+    # to the core path; the scanner stays (and is tested on snippets below) for the next pointer.
+    assert _unproven(_repo_pointers(), _ANNOTATIONS) == []
 
 
 _REPORTED = {

@@ -53,8 +53,9 @@ def test_build_uses_task_context_and_returns_runnable_image_id(tmp_path: Path) -
         str(task_root),
     )
     assert cwd == task_root
-    assert timeout == 42
-    assert runner.calls[1] == (
+    assert 0 < timeout <= 42
+    inspect_argv, inspect_cwd, inspect_timeout = runner.calls[1]
+    assert (inspect_argv, inspect_cwd) == (
         (
             "docker",
             "image",
@@ -64,8 +65,8 @@ def test_build_uses_task_context_and_returns_runnable_image_id(tmp_path: Path) -
             tag,
         ),
         task_root,
-        42,
     )
+    assert 0 < inspect_timeout <= 42
 
 
 def test_build_passes_base_image_as_build_arg(tmp_path: Path) -> None:
@@ -98,7 +99,7 @@ def test_build_passes_base_image_as_build_arg(tmp_path: Path) -> None:
         (FileNotFoundError(), "Docker was not found while building"),
         (
             docker_timed_out(("docker", "build"), 7),
-            "timed out after 7 seconds while building",
+            "budget of 7 seconds ran out while building",
         ),
     ],
 )
@@ -188,7 +189,7 @@ def test_build_rejects_malformed_runnable_image_id(
         (FileNotFoundError(), "Docker was not found while inspecting"),
         (
             docker_timed_out(("docker", "image", "inspect"), 7),
-            "timed out after 7 seconds while inspecting",
+            "budget of 7 seconds ran out while inspecting",
         ),
         (
             docker_build_result(("docker",), 17, "ignored", "inspect failure"),

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vs_sandbox.api import (
     FeatureImageBuildError,
@@ -66,7 +69,9 @@ class _Runner:
         fail_on: str | None = None,
         error: BaseException | None = None,
         image_ids: dict[str, str] | None = None,
+        failure_stderr: str = "boom",
     ) -> None:
+        self.failure_stderr = failure_stderr
         self.image_ids = image_ids or {}
         self.calls: list[tuple[str, ...]] = []
         self.seen: list[_Seen] = []
@@ -94,7 +99,7 @@ class _Runner:
                 )
             )
         if self.fail_on == call[1]:
-            return _Outcome(3, "", "boom")
+            return _Outcome(3, "", self.failure_stderr)
         stdout = self.image_ids.get(call[-1], _ID) if call[1:3] == ("image", "inspect") else ""
         return _Outcome(0, stdout, "")
 
@@ -271,6 +276,26 @@ def test_missing_docker_and_timeouts_are_build_errors(tmp_path: Path) -> None:
         _build(_Runner(error=FileNotFoundError("docker")), [feature])
     with pytest.raises(FeatureImageBuildError, match="timed out after 7 seconds"):
         _build(_Runner(error=TimeoutError()), [feature])
+
+
+def test_a_timeout_keeps_what_the_stopped_command_printed(tmp_path: Path) -> None:
+    feature = _local(tmp_path, "tool-a", {})
+
+    with pytest.raises(FeatureImageBuildError, match="ETIMEDOUT fetching the tarball"):
+        _build(_Runner(error=TimeoutError("ETIMEDOUT fetching the tarball")), [feature])
+
+
+@given(printed=st.text(min_size=1, max_size=5000).filter(lambda text: text.strip() != ""))
+def test_a_failed_build_reports_the_end_of_its_output(printed: str) -> None:
+    """A build prints the failing step last, so the tail is what the error keeps."""
+    with tempfile.TemporaryDirectory() as directory:
+        feature = _local(Path(directory), "tool-a", {})
+        runner = _Runner(fail_on="build", failure_stderr="x" * 3000 + printed)
+
+        with pytest.raises(FeatureImageBuildError) as caught:
+            _build(runner, [feature])
+
+    assert str(caught.value).endswith(("x" * 3000 + printed).strip()[-100:])
 
 
 def test_a_nonpositive_timeout_is_rejected() -> None:

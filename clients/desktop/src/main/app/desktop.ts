@@ -29,6 +29,12 @@ export interface DesktopDeps {
   readonly log: (message: string) => void;
 }
 
+function rendererGeneration(
+  frame: {readonly processId: number; readonly routingId: number} | null | undefined,
+): string | null {
+  return frame === null || frame === undefined ? null : `${frame.processId}:${frame.routingId}`;
+}
+
 /** The recent runs as the welcome view lists them. */
 function welcomeRecent(recent: RecentFile): WelcomeRecent[] {
   return recent.runs.map(run => ({...run, hostLabel: hostLabel(hostFromKey(run.host))}));
@@ -46,8 +52,43 @@ export class Desktop {
       deps.window.sendWelcome(WELCOME_EVENTS.recent, deps.welcome.recent(value));
       void this.#watchRecent(recent);
     });
-    bindWelcomeIpc(ipcMain, deps.window.welcome.webContents, WELCOME_URL, request =>
-      this.#answer(request),
+    const welcome = deps.window.welcome.webContents;
+    bindWelcomeIpc(
+      {
+        handle: (channel, listener) =>
+          ipcMain.handle(channel, (event, ...args) =>
+            listener(
+              {
+                senderId: event.sender.id,
+                senderUrl: event.senderFrame?.url ?? null,
+                rendererGeneration: rendererGeneration(event.senderFrame),
+              },
+              ...args,
+            ),
+          ),
+      },
+      {
+        id: welcome.id,
+        onNewDocument: listener => {
+          welcome.on('did-start-navigation', event => {
+            if (event.isMainFrame && !event.isSameDocument) {
+              listener(rendererGeneration(event.frame));
+            }
+          });
+        },
+        onDestroyed: listener => {
+          welcome.on('destroyed', listener);
+        },
+      },
+      WELCOME_URL,
+      (request, rendererGeneration) => this.#answer(request, rendererGeneration),
+      async rendererGeneration => {
+        try {
+          await deps.hosts.cancelCheckoutOwner(rendererGeneration);
+        } catch (error) {
+          deps.log(`could not retire checkout changes: ${(error as Error).message}`);
+        }
+      },
     );
   }
 
@@ -123,7 +164,7 @@ export class Desktop {
   }
 
   /** Answer one validated welcome request. */
-  async #answer(request: WelcomeRequest): Promise<unknown> {
+  async #answer(request: WelcomeRequest, rendererGeneration: string): Promise<unknown> {
     const {hosts, runs} = this.#deps;
     switch (request.kind) {
       case 'overview':
@@ -133,7 +174,13 @@ export class Desktop {
       case 'host':
         return hosts.host(request.host);
       case 'set-checkout':
-        return hosts.setCheckout(request.host, request.path);
+        return hosts.setCheckout(request.host, request.path, {
+          owner: rendererGeneration,
+          sequence: request.change,
+        });
+      case 'cancel-checkout':
+        await hosts.cancelCheckout({owner: rendererGeneration, sequence: request.change});
+        return null;
       case 'sign-in':
         await hosts.signIn(request.host);
         return null;

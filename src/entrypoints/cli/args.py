@@ -591,7 +591,7 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         default=5.0,
         metavar="SECONDS",
         help=(
-            "Dynamic loop: wait this long before asking an agent again after the provider "
+            "Core-path loops (dynamic, single, multi): wait this long before asking an agent again after the provider "
             "dropped its turn; doubles with each further drop of the same turn (default: 5)."
         ),
     )

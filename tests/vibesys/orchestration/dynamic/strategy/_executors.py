@@ -88,12 +88,20 @@ class Executors:
     planner: deque[str | Answer] = field(default_factory=deque)
     implementer: deque[str | Answer] = field(default_factory=deque)
     judge: deque[str | Answer] = field(default_factory=deque)
+    profiler: deque[str | Answer] = field(default_factory=deque)
     # False retains one commit per attempt, whatever its turns did. True retains a new commit
     # after every turn, as a worktree that changed between turns would.
     retain_per_turn: bool = False
+    # True: only the attempt's first snapshot yields a revision, as when a resumed turn only
+    # reads a verdict and leaves the worktree as it was.
+    unchanged_after_first_retain: bool = False
     # Throughput per candidate commit; None makes the benchmark fail.
     benchmark: Callable[[str], float | None] = lambda _commit: 100.0
     accuracy: Callable[[str], bool] = lambda _commit: True
+    profile_reading: Callable[[str], tuple[bool, str]] = lambda _commit: (
+        True,
+        "profile captured",
+    )
     # None makes the input's benchmark fail, as a workload the input cannot run does.
     baseline_value: float | None = 50.0
     # True for a measurement whose job ends without any evidence (its infrastructure failed).
@@ -147,6 +155,9 @@ class Executors:
 
     def _retain(self, request: SnapshotAndRetain) -> Answer:
         attempt = request.attempt.attempt_id.root
+        if self.retained[attempt] and self.unchanged_after_first_retain:
+            # The turn changed nothing since the attempt's first checkpoint: no new commit.
+            return Succeeded()
         revision = self._retained(attempt)
         self.retained[attempt] += 1
         return Succeeded(revision=revision)
@@ -228,6 +239,7 @@ class Executors:
             "orchestrator": self.planner,
             "implementer": self.implementer,
             "judge": self.judge,
+            "profiler": self.profiler,
         }[role]
         if not queue:
             return Unknown()
@@ -309,7 +321,14 @@ class Executors:
             passed = plan.purpose == "baseline" or self.accuracy(commit)
             return EvidenceReading(evidence_id=identifier, kind=kind, passed=passed, stage=stage)
         if kind is EvidenceKind.PROFILING:
-            return EvidenceReading(evidence_id=identifier, kind=kind, passed=True, stage=stage)
+            passed, feedback = self.profile_reading(commit)
+            return EvidenceReading(
+                evidence_id=identifier,
+                kind=kind,
+                passed=passed,
+                stage=stage,
+                feedback=feedback,
+            )
         value = self.baseline_value if plan.purpose == "baseline" else self.benchmark(commit)
         if value is None:
             return EvidenceReading(

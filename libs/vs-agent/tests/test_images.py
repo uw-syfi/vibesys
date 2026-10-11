@@ -28,6 +28,7 @@ from vs_agent.api.images import (
 )
 from vs_agent.api.testing import DockerBuildResult, docker_build_result
 from vs_sandbox.api import LocalFeature
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -129,7 +130,9 @@ class _FakeRunner:
 def test_agent_image_is_one_docker_build_of_the_generated_dockerfile() -> None:
     runner = _FakeRunner()
 
-    image_id = agent_image("python:3.12-bookworm", command_runner=runner, timeout=42)
+    image_id = agent_image(
+        "python:3.12-bookworm", command_runner=runner, timeout=42, clock=ManualClock()
+    )
 
     assert image_id == _AGENT_IMAGE_ID
     assert runner.verbs() == [("image", "inspect"), ("build",), ("image", "inspect")]

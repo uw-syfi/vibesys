@@ -53,13 +53,14 @@ serving; the kernel-writing domain's profiler guidance and the
 
 ## Add the profiler prompt
 
-Add `<kind>.j2` under each strategy that uses the profiler, currently
-`src/vibesys/orchestration/{multi,evolve}/prompts/profilers/` (`profile-guided-multi-agent`
-reuses `multi`'s prompts; it is a preset of `multi`, not a separate strategy
-folder). Explain how
-that strategy's agent should collect and interpret evidence, which limitations
-it must report, and how it should produce `ProfilerSummary`. Review each
-strategy's prompt separately; there is no cross-strategy fallback.
+Add `<kind>.j2` under `src/vibesys/prompts/shared/profilers/`. `multi` (and
+`profile-guided-multi-agent`, a preset of it) renders it through its `profiler.j2`, which includes
+`profilers/<kind>.j2` for the run's profiler and adds where to write bounded evidence; `evolve` has
+its own wrapper under `src/vibesys/orchestration/evolve/prompts/profilers/` that includes the same
+file. Explain how the agent should collect and interpret evidence, which limitations it must
+report, and how it should produce `ProfilerSummary`. The template receives `profile_focus`,
+`benchmark_command`, `modality`, `profile_execution`, `profiler_support_name`,
+`profiler_mcp_name`, `objective` and `runtime_notes`.
 
 ## Validate the implementation
 

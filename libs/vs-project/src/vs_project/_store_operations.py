@@ -1,7 +1,7 @@
 """Shared state-store transition semantics; implementations own I/O only."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -153,6 +153,15 @@ class StoreOperations(ABC):
         timing = _Time(now=now)
         with self._transaction():
             return _valid_fence(self._read(), fence, timing.now)
+
+    def mutate_if_fenced(self, fence: StoreFence, now: float, mutation: Callable[[], None]) -> bool:
+        """Run a synchronous external mutation under the lease transaction."""
+        timing = _Time(now=now)
+        with self._transaction():
+            if not _valid_fence(self._read(), fence, timing.now):
+                return False
+            mutation()
+            return True
 
     def commit(
         self, expected_revision: int | None, envelope: StoredEnvelope, fence: StoreFence, now: float

@@ -240,11 +240,28 @@ describe('SettingsStore', () => {
     expect(readdirSync(directory).filter(name => name.endsWith('.tmp'))).toEqual([]);
   });
 
+  test('a cancelled host update is discarded at the atomic commit boundary', async () => {
+    const {settings, directory} = store();
+    let current = true;
+
+    const outcome = await settings.updateHosts(
+      hosts => {
+        current = false;
+        return withHostSettings(hosts, {kind: 'local'}, {checkout: '/cancelled'});
+      },
+      () => current,
+    );
+
+    expect(outcome).toBe('cancelled');
+    expect(await settings.hosts()).toEqual(EMPTY_SETTINGS);
+    expect(readdirSync(directory).filter(name => name.endsWith('.tmp'))).toEqual([]);
+  });
+
   test('interleaved updates of both files keep every change and leave no partial file', async () => {
     const random = new Seeded(9);
     for (let round = 0; round < 10; round += 1) {
       const {settings, logged, directory} = store();
-      const updates: Promise<void>[] = [];
+      const updates: Promise<unknown>[] = [];
       const runs: number[] = [];
       const hosts: string[] = [];
       for (let index = 1; index <= 8; index += 1) {

@@ -4151,7 +4151,7 @@
     },
     "SnapshotQuery": {
       "additionalProperties": false,
-      "description": "Request the current run snapshot.",
+      "description": "Request the current run snapshot.\n\n``expected_store_id`` fences the read to the event store whose batch established a\nclient's sequence space. None preserves the unfenced request used by\nclients that do not combine a snapshot with a live subscription. An empty\nstring is a real fence for the pre-attachment store, not an alias for None.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -4178,6 +4178,18 @@
           "default": "query.snapshot",
           "title": "Type",
           "type": "string"
+        },
+        "expected_store_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Store Id"
         }
       },
       "title": "SnapshotQuery",

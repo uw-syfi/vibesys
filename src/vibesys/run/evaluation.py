@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shlex
 from itertools import count
 from typing import TYPE_CHECKING
 
@@ -91,6 +92,9 @@ def trusted_evaluation_plan(
         benchmark_command=session.view.paths.benchmark_command,
         benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
         framework_setup_timeout_seconds=session.view.framework_setup_timeout_seconds,
+        profile_command=(
+            shlex.join(bundle.profile_command) if bundle.profile_command is not None else None
+        ),
         profile_timeout_seconds=(
             bundle.manifest.profile.timeout_seconds if bundle.manifest.profile else None
         ),

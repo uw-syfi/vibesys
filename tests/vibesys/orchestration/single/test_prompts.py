@@ -1,131 +1,158 @@
-"""The single plugin's typed prompt contexts and colocated template resources."""
+"""Every prompt the single strategy can request renders from the core policy's templates.
+
+The strategy sends a typed `PromptContext`; the render owner passes its fields (plus the
+run-level `objective`) to the template under strict undefined variables. A template that reads a
+name no context supplies fails the render, which ends the round, so each template is exercised
+over its context space.
+"""
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 
-import vibesys.orchestration.single.prompts as single_prompts
-from vibesys.hypothesis import ExhaustionNotice
-from vibesys.orchestration.progress import ProgressLog
-from vibesys.orchestration.single.models import PlanContext, SingleAgentRoundContext
-from vibesys.profile_focus import (
-    FocusLedger,
-    FocusLedgerRow,
-    ProfileGuidanceStatus,
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+
+import vibesys.orchestration.single.core_policy.prompts as templates
+from vibesys.orchestration.single.core_policy.api import run_prompt_variables
+from vibesys.orchestration.single.strategy.api import PlanPrompt, PromptTemplate, RoundPrompt
+from vibesys.prompts import CORE_PROTOCOL_DIR
+from vibesys.serial_search.api import (
+    PROMPTS_DIR,
+    Bottleneck,
+    FrontierRow,
+    LastProfile,
+    PendingClaim,
+    RoundRow,
 )
-from vibesys.prompts import PROMPTS_DIR
-from vs_prompts.api import resolve_free_variables
+from vs_core.api import RevisionId, RevisionRef
+from vs_prompts.api import TemplateRenderer
 
-
-def _plan_context(workspace: Path) -> PlanContext:
-    log = ProgressLog(workspace, workspace / "progress")
-    notice = single_prompts.render_progress(
-        "exhaustion",
-        round_number=4,
-        exhaustion_info=ExhaustionNotice(round_number=3, attempts=2, feedback="Add a test."),
-    )
-    entry = log.append(4, notice)
-    return PlanContext(
-        objective_location="OBJECTIVE.md",
-        profiler_entry=None,
-        regression_entry=entry,
-        exhaustion_entry=entry,
-        progress_location="progress/ledger.md",
-        roadmap_location="progress/roadmap.md",
-        pareto_archive_location="progress/pareto.md",
-        plateau_warning="The throughput curve has flattened.",
-        domain_orchestrator="Domain planning rules.",
-        runtime_notes="Use the supplied accelerator.",
-        framework_benchmark_enabled=True,
-        official_eval_every=3,
-        provisional_candidates=2,
-        official_eval_cadence_due=True,
-        active_component="decode scheduler",
-        ledger=FocusLedger(
-            rows=(
-                FocusLedgerRow(
-                    name="decode scheduler",
-                    status=ProfileGuidanceStatus.ACTIVE,
-                    rounds_spent=1,
-                    latest_share=0.43,
-                    stalled_rounds=0,
-                ),
-            )
+_ROOT = Path(templates.__file__).parent
+_OBJECTIVE = "Raise queue throughput."
+_RENDERER = TemplateRenderer(_ROOT, fallback_roots=(PROMPTS_DIR, CORE_PROTOCOL_DIR))
+_TEXT = st.text(alphabet="abcdefg hij", min_size=1, max_size=12)
+_REVISIONS = st.sampled_from(("a1", "b2")).map(
+    lambda name: RevisionRef(revision_id=RevisionId(root=name), digest=f"git-commit:{name}")
+)
+_METRICS = st.lists(st.tuples(_TEXT, st.floats(0, 1e6)), max_size=2).map(tuple)
+_PLAN = st.builds(
+    PlanPrompt,
+    round_number=st.integers(1, 5),
+    max_rounds=st.integers(5, 9),
+    plateau_warning=st.none() | _TEXT,
+    provisional_candidates=st.integers(0, 3),
+    official_eval_every=st.integers(1, 3),
+    official_cadence_due=st.booleans(),
+    benchmark_enabled=st.booleans(),
+    history=st.lists(
+        st.builds(
+            RoundRow,
+            round_number=st.integers(1, 5),
+            hypothesis_id=_TEXT,
+            claim=_TEXT,
+            passed=st.booleans(),
+            official=st.booleans(),
+            judge_verdict=st.sampled_from(("pass", "fail", "deferred")),
+            metric=st.none() | st.floats(0, 1e6),
+            unit=st.none() | _TEXT,
+            delta_pct=st.none() | st.floats(-50, 50),
+            retained=st.none() | st.booleans(),
+            commit=st.none() | _TEXT,
         ),
-        ranked_bottlenecks=[
-            {"component": "decode scheduler", "cost_share": 43, "evidence": ["trace.json"]}
-        ],
+        max_size=3,
+    ).map(tuple),
+    frontier=st.lists(
+        st.builds(
+            FrontierRow,
+            round_number=st.integers(1, 5),
+            commit=_TEXT,
+            official=st.booleans(),
+            metrics=_METRICS,
+        ),
+        max_size=2,
+    ).map(tuple),
+    pending_claims=st.lists(
+        st.builds(PendingClaim, round_number=st.integers(1, 5), commit=_TEXT, metrics=_METRICS),
+        max_size=2,
+    ).map(tuple),
+    last_profile=st.none() | st.builds(LastProfile, analysis=_TEXT, bottlenecks=_TEXT),
+    regression_round=st.none() | st.integers(1, 5),
+    regression_kind=st.none() | _TEXT,
+    exhaustion_feedback=st.none() | _TEXT,
+    exhaustion_round=st.none() | st.integers(1, 5),
+    active_component=st.none() | _TEXT,
+    ranked_bottlenecks=st.lists(
+        st.builds(Bottleneck, component=_TEXT, cost_share_pct=st.floats(0, 100)), max_size=2
+    ).map(tuple),
+    base_revision=_REVISIONS,
+)
+_ROUND = st.builds(
+    RoundPrompt,
+    round_number=st.integers(1, 5),
+    retry=st.integers(1, 3),
+    hypothesis_id=_TEXT,
+    title=_TEXT,
+    hypothesis=_TEXT,
+    task=_TEXT,
+    pass_criteria=_TEXT,
+    base_revision=_REVISIONS,
+    feedback=st.none() | _TEXT,
+    no_valid_reply=st.none() | _TEXT,
+    dominated_by_rounds=st.lists(st.integers(1, 5), max_size=2).map(tuple),
+    official_due=st.booleans(),
+    official_reason=st.none() | _TEXT,
+    profiler_id=st.sampled_from(("none", "torch_profiler")),
+)
+
+
+def _variables(
+    context: PlanPrompt | RoundPrompt, *, agent_evaluation: bool = False
+) -> dict[str, object]:
+    variables = {name: getattr(context, name) for name in type(context).model_fields}
+    variables.pop("template")
+    return {
+        **run_prompt_variables(
+            objective=_OBJECTIVE, environment_notes="", agent_evaluation=agent_evaluation
+        ),
+        **variables,
+    }
+
+
+@given(context=_PLAN)
+def test_the_plan_prompt_renders_for_every_context(context: PlanPrompt) -> None:
+    text = _RENDERER.render_template(f"{PromptTemplate.PLAN.value}.j2", **_variables(context))
+    assert _OBJECTIVE in text
+    assert f"Round {context.round_number} of {context.max_rounds}" in text
+    for row in context.history:
+        assert row.hypothesis_id in text
+
+
+@given(context=_ROUND)
+def test_the_round_prompt_renders_for_every_context(context: RoundPrompt) -> None:
+    text = _RENDERER.render_template(f"{PromptTemplate.ROUND.value}.j2", **_variables(context))
+    assert _OBJECTIVE in text
+    assert context.task in text
+    assert context.hypothesis_id in text
+    assert (context.feedback is None) or context.feedback in text
+
+
+@pytest.mark.parametrize("template", [PromptTemplate.ROUND])
+@given(data=st.data(), offered=st.booleans())
+def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
+    template: PromptTemplate, data: st.DataObject, *, offered: bool
+) -> None:
+    context = data.draw(_ROUND)
+    text = _RENDERER.render_template(
+        f"{template.value}.j2", **_variables(context, agent_evaluation=offered)
     )
+    assert ("submit_evaluation" in text) is offered
 
 
-def _single_agent_context(*, interface: str = "service") -> SingleAgentRoundContext:
-    return SingleAgentRoundContext(
-        accuracy_command="check-accuracy",
-        benchmark_command="measure-throughput",
-        domain_profiler="Domain profiling rules.",
-        domain_single_agent="Domain implementation rules.",
-        feedback="Fix the failing health check.",
-        interface=interface,
-        objective_location="OBJECTIVE.md",
-        official_evaluation_due=True,
-        official_evaluation_reason="requested by the designer",
-        pareto_archive_location="progress/pareto.md",
-        plan_artifact_location="progress/plans/round-0001.json",
-        profiler_kind="none",
-        profiler_support_name=None,
-        progress_location="progress/ledger.md",
-        runtime_notes="Use the supplied accelerator.",
-        validation_location="progress/validation/",
-    )
-
-
-def test_colocated_templates_use_every_field_of_their_typed_contexts() -> None:
-    root = Path(inspect.getfile(single_prompts)).parent
-    shared = PROMPTS_DIR / "shared"
-    for template, model in (
-        ("orchestrator_plan_prompt.j2", PlanContext),
-        ("single_agent_round_prompt.j2", SingleAgentRoundContext),
-    ):
-        variables, unresolved = resolve_free_variables(root / template, search_roots=(root, shared))
-        assert unresolved == ()
-        assert variables == set(model.model_fields)
-
-
-def test_plan_prompt_renders_policy_context_and_profile_guidance(tmp_path: Path) -> None:
-    rendered = single_prompts.render_plan_prompt(_plan_context(tmp_path))
-
-    assert "progress/roadmap.md" in rendered
-    assert "The throughput curve has flattened." in rendered
-    assert "decode scheduler" in rendered
-    assert "decode scheduler | active | 1 | 43.00% | 0" in rendered
-    assert "43% of measured cost" in rendered
-    assert "latest progress entry contains a regression" in rendered
-    assert "latest progress entry contains exhausted-review feedback" in rendered
-    assert "The framework has a machine-readable trusted benchmark" in rendered
-    assert "Provisional count:\n2; cadence is\ndue." in rendered
-    assert "Domain planning rules." in rendered
-
-
-def test_single_agent_prompt_renders_shared_execution_boundary_and_retry() -> None:
-    rendered = single_prompts.render_single_agent_prompt(_single_agent_context())
-
-    assert "Fix the failing health check." in rendered
-    assert "requested by the designer" in rendered
-    assert "Accuracy: `check-accuracy`" in rendered
-    assert "Benchmark: `measure-throughput`" in rendered
-    assert "Standalone profiling is disabled" in rendered
-    assert "Domain implementation rules." in rendered
-    assert "Domain profiling rules." in rendered
-    assert "running candidate service" in rendered
-
-
-def test_single_agent_prompt_renders_inprocess_execution_boundary() -> None:
-    context = _single_agent_context(interface="inprocess").model_copy(
-        update={"profiler_kind": "torch", "profiler_support_name": "torch_profiler"}
-    )
-
-    rendered = single_prompts.render_single_agent_prompt(context)
-
-    assert "invokes the candidate directly inside an evaluator process" in rendered
-    assert "Use `torch.profiler` through `torch_profiler`" in rendered
+def test_the_prompts_name_no_progress_files() -> None:
+    """The workspace is an isolated child of a revision: no template points at progress files."""
+    for path in _ROOT.glob("*.j2"):
+        text = path.read_text()
+        assert "progress/" not in text, path
+        assert "pareto-frontier.md" not in text, path

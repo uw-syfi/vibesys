@@ -1,0 +1,9 @@
+## Validation recipe contract
+
+`validation_recipe_artifact` names a JSON file in your workspace of this shape (version 1). Each
+recipe is a bounded, non-interactive command run from the workspace root, and `input_paths` must
+fully determine whether a prior pass could be reused:
+
+```json
+{{ validation_recipe_schema }}
+```

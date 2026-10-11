@@ -209,6 +209,13 @@ def test_no_profiler_means_no_profiling(tmp_path: Path) -> None:
     assert not config.profile_measurement
 
 
+def test_a_profiler_without_trusted_capture_does_not_offer_profile_work(tmp_path: Path) -> None:
+    config = _policy(tmp_path, profiler_id="nsys")[0].strategy.config
+
+    assert not config.profiling
+    assert not config.profile_measurement
+
+
 def test_an_unset_run_budget_is_an_unbounded_deadline(tmp_path: Path) -> None:
     assert _policy(tmp_path)[0].deadline_at == UNBOUNDED_DEADLINE_AT
 

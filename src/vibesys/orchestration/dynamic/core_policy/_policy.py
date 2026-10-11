@@ -134,7 +134,10 @@ def build_core_policy(
         recipe=inputs.recipe,
         benchmark_configured=inputs.benchmark_configured,
         accuracy_configured=inputs.accuracy_configured,
-        profiling=inputs.profiling,
+        # A profiler agent alone cannot make a profile workstream useful. Offer
+        # one only when trusted evaluation also has a capture command, matching
+        # the evidence capability the workstream promises to the planner.
+        profiling=inputs.profile_measurement,
         profile_measurement=inputs.profile_measurement,
         queue_allowance_seconds=float(bounds.queue_allowance_seconds),
         **stage_budgets,

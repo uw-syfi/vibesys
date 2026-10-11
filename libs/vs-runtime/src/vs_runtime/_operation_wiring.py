@@ -15,7 +15,16 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from vs_core.api import ContractError, OperationRegistry
+from vs_core.api import (
+    CAPTURE_SUFFIX,
+    INTERPRET_SUFFIX,
+    RENDER_SUFFIX,
+    RETAIN_SUFFIX,
+    VALIDATE_LOCAL_SUFFIX,
+    VERIFY_SUFFIX,
+    ContractError,
+    OperationRegistry,
+)
 from vs_runtime._capture_command_operation import CaptureCommandOwner
 from vs_runtime._core_loop import CoreRuntimeBindings
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
@@ -25,6 +34,7 @@ from vs_runtime._operation_receipts import NamespaceOperationReceipts
 from vs_runtime._operation_requests import RegisteredOperationRequests
 from vs_runtime._receipt_store import ReceiptStore
 from vs_runtime._render_operation import RenderArtifactsOwner
+from vs_runtime._validate_local_operation import ValidateLocalOwner
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 
 if TYPE_CHECKING:
@@ -53,6 +63,7 @@ class OperationRole(StrEnum):
     INTERPRET_EVIDENCE = "interpret_evidence"
     RETAIN_REVISION = "retain_revision"
     CAPTURE_COMMAND = "capture_command"
+    VALIDATE_LOCAL = "validate_local"
 
 
 # A role whose owner is absent is declared but refused with the contract it lacks.
@@ -70,6 +81,10 @@ _REFUSALS: Mapping[OperationRole, tuple[RefusalReason, str]] = {
         RefusalReason.NO_COMMAND_RUNNER,
         "no command runner was wired to execute a captured command in a workspace",
     ),
+    OperationRole.VALIDATE_LOCAL: (
+        RefusalReason.NO_COMMAND_RUNNER,
+        "no command runner and isolated candidate workspaces were wired to run validation recipes",
+    ),
 }
 
 
@@ -79,17 +94,22 @@ def operation_roles(operations: StrategyOperations) -> dict[OperationRole, Opera
     The runtime performs an operation by role, independent of the strategy's kind names, so
     a strategy that declares its operations through `StrategyOperations` gets its owners.
     """
-    return dict(zip(_ROLE_ORDER, operations.registrations(), strict=False))
+    return {
+        role: registration
+        for role, suffix in _SUFFIX_OF_ROLE.items()
+        if (registration := operations.registration_of(suffix)) is not None
+    }
 
 
-# The order `StrategyOperations.registrations` lists its operations in; the optional capture is last.
-_ROLE_ORDER = (
-    OperationRole.RENDER_ARTIFACTS,
-    OperationRole.VERIFY_REVISION,
-    OperationRole.INTERPRET_EVIDENCE,
-    OperationRole.RETAIN_REVISION,
-    OperationRole.CAPTURE_COMMAND,
-)
+# The suffix of the operation kind each role is declared under (`StrategyOperations`).
+_SUFFIX_OF_ROLE = {
+    OperationRole.RENDER_ARTIFACTS: RENDER_SUFFIX,
+    OperationRole.VERIFY_REVISION: VERIFY_SUFFIX,
+    OperationRole.INTERPRET_EVIDENCE: INTERPRET_SUFFIX,
+    OperationRole.RETAIN_REVISION: RETAIN_SUFFIX,
+    OperationRole.CAPTURE_COMMAND: CAPTURE_SUFFIX,
+    OperationRole.VALIDATE_LOCAL: VALIDATE_LOCAL_SUFFIX,
+}
 
 
 @dataclass(frozen=True)
@@ -130,6 +150,15 @@ def production_owners(
                 if ports.commands is not None:
                     owners[role] = CaptureCommandOwner(
                         ports.workspaces, ports.commands, ports.ledger, ports.commit_of
+                    )
+            case OperationRole.VALIDATE_LOCAL:
+                if ports.commands is not None and ports.workspaces.supports_parallel_candidates:
+                    owners[role] = ValidateLocalOwner(
+                        ports.workspaces,
+                        ports.commands,
+                        ports.ledger,
+                        ports.commit_of,
+                        ports.artifacts,
                     )
     return owners
 

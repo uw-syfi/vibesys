@@ -43,6 +43,8 @@ from vibesys.constants import ComputeBackend
 from vs_prompts.api import FragmentFamily, RenderedPrompt, TemplateRenderer
 
 PROMPTS_DIR = Path(__file__).resolve().parent
+CORE_PROTOCOL_DIR = PROMPTS_DIR / "core_protocol"
+"""Directory of the shared core-protocol templates, a fallback root of a core policy."""
 _BACKEND_FRAGMENTS_ROOT = PROMPTS_DIR / "backend"
 _SHARED_LOOP_FRAGMENTS_ROOT = PROMPTS_DIR / "shared"
 
@@ -71,7 +73,11 @@ def _build_env(template_dir: Path | str | None = None) -> TemplateRenderer:
             if key == str(PROMPTS_DIR)
             else TemplateRenderer(
                 Path(template_dir),
-                fallback_roots=(_SHARED_LOOP_FRAGMENTS_ROOT, PROMPTS_DIR),
+                fallback_roots=(
+                    _SHARED_LOOP_FRAGMENTS_ROOT,
+                    PROMPTS_DIR,
+                    CORE_PROTOCOL_DIR,
+                ),
             )
         )
     return _env_cache[key]

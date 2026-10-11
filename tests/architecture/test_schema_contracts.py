@@ -14,7 +14,7 @@ from vibesys.hypothesis import (
     derive_hypothesis_title,
     normalize_hypothesis_title,
 )
-from vibesys.orchestration.multi.contracts import ImplementerResponse, JudgeResponse
+from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.models import SingleAgentRoundResponse

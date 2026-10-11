@@ -45,6 +45,8 @@ export interface HostState {
   readonly mode: ChromeState['mode'];
   readonly panel: Panel;
   readonly signIn: {readonly token: number} | {readonly error: string} | null;
+  /** Cancelled forms whose main-process commit result is still authoritative if it succeeded. */
+  readonly abandonedCheckouts: Readonly<Record<number, HostKey>>;
 }
 
 export type HostAction =
@@ -76,6 +78,7 @@ export type HostRequest =
       readonly host: HostKey;
       readonly path: string;
     }
+  | {readonly kind: 'cancel-checkout'; readonly token: number; readonly host: HostKey}
   | {readonly kind: 'sign-in'; readonly token: number; readonly host: HostKey};
 
 export function hostLabelOf(key: HostKey): string {
@@ -84,7 +87,14 @@ export function hostLabelOf(key: HostKey): string {
 
 /** The initial state; the shell dispatches `show` for the first host. */
 export function hostInitial(host: HostKey): HostState {
-  return {next: 1, host, mode: 'welcome', panel: {kind: 'loading', token: 0}, signIn: null};
+  return {
+    next: 1,
+    host,
+    mode: 'welcome',
+    panel: {kind: 'loading', token: 0},
+    signIn: null,
+    abandonedCheckouts: {},
+  };
 }
 
 /** The tokens the state awaits, by request slot. */
@@ -125,6 +135,8 @@ function load(state: HostState, host: HostKey, quiet: boolean): Step<HostState, 
     keep && state.panel.kind === 'ready'
       ? {...state.panel, reloading: token}
       : {kind: 'loading', token};
+  const checking = keep ? null : hostAwaited(state).checkout;
+  const form = state.panel.kind === 'ready' ? state.panel.checkout : null;
   return {
     state: {
       ...state,
@@ -132,8 +144,20 @@ function load(state: HostState, host: HostKey, quiet: boolean): Step<HostState, 
       host,
       panel,
       signIn: host === state.host ? state.signIn : null,
+      abandonedCheckouts:
+        checking === null || form === null
+          ? state.abandonedCheckouts
+          : {
+              ...state.abandonedCheckouts,
+              [checking]: state.host,
+            },
     },
-    requests: [{kind: 'host', token, host}],
+    requests: [
+      ...(checking === null
+        ? []
+        : [{kind: 'cancel-checkout' as const, token: checking, host: state.host}]),
+      {kind: 'host', token, host},
+    ],
   };
 }
 
@@ -203,6 +227,28 @@ function submitCheckout(state: HostState): Step<HostState, HostRequest> {
   };
 }
 
+function cancelCheckout(state: HostState): Step<HostState, HostRequest> {
+  const panel = state.panel;
+  const form = panel.kind === 'ready' ? panel.checkout : null;
+  if (form?.cancellable !== true) return only(state);
+  return {
+    state:
+      form.checking === null
+        ? withForm(state, () => null)
+        : {
+            ...withForm(state, () => null),
+            abandonedCheckouts: {
+              ...state.abandonedCheckouts,
+              [form.checking]: state.host,
+            },
+          },
+    requests:
+      form.checking === null
+        ? []
+        : [{kind: 'cancel-checkout', token: form.checking, host: state.host}],
+  };
+}
+
 function signIn(state: HostState): Step<HostState, HostRequest> {
   if (state.signIn !== null && 'token' in state.signIn) return only(state);
   const token = state.next;
@@ -217,6 +263,16 @@ function checkoutReply(
   token: number,
   result: WelcomeResult<string>,
 ): Step<HostState, HostRequest> {
+  const abandonedHost = state.abandonedCheckouts[token];
+  if (abandonedHost !== undefined) {
+    const abandonedCheckouts = {...state.abandonedCheckouts};
+    delete abandonedCheckouts[token];
+    const cleared = {...state, abandonedCheckouts};
+    if (!result.ok || abandonedHost !== cleared.host) return only(cleared);
+    // The main process may normalize the submitted path. Reload its saved value while preserving
+    // any newer form the user has already opened over this panel.
+    return load(cleared, cleared.host, true);
+  }
   if (hostAwaited(state).checkout !== token) return only(state);
   if (!result.ok) {
     const failed = {checking: null, error: result.error, authNeeded: result.authNeeded};
@@ -253,7 +309,7 @@ export function hostStep(state: HostState, action: HostAction): Step<HostState, 
     case 'checkout-input':
       return only(withForm(state, form => ({...form, value: action.value})));
     case 'cancel-checkout':
-      return only(withForm(state, form => (form.cancellable ? null : form)));
+      return cancelCheckout(state);
     case 'submit-checkout':
       return submitCheckout(state);
     case 'sign-in':

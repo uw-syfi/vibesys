@@ -48,11 +48,19 @@ const NODE_SSH_CONFIG_FILESYSTEM: SshConfigFilesystem = {
   readText: path => readFile(path, 'utf8'),
 };
 
+/** One checkout change, unique across renderer-document lifetimes. */
+interface CheckoutChangeId {
+  readonly owner: string;
+  readonly sequence: number;
+}
+
 export class Hosts {
   readonly #deps: HostsDeps;
   readonly #sshConfigFilesystem: SshConfigFilesystem;
   /** Hosts whose registry the view hears, by key, with what stops hearing it. */
   readonly #watched = new Map<HostKey, () => void>();
+  /** Checkout validations that still own permission to persist, by renderer-document operation. */
+  readonly #checkoutChanges = new Map<string, CheckoutChange>();
 
   constructor(deps: HostsDeps) {
     this.#deps = deps;
@@ -113,17 +121,62 @@ export class Hosts {
    * Check `path` as `id`'s checkout by starting its helper there, then save it; resolve with the
    * checkout's physical path. The next use of the host runs from it.
    */
-  async setCheckout(id: HostId, path: unknown): Promise<string> {
+  async setCheckout(id: HostId, path: unknown, change: CheckoutChangeId): Promise<string> {
     const checkout = validHostPath(path, `the VibeSys checkout on ${hostLabel(id)}`);
-    let root: string | null;
-    {
-      await using candidate = this.#deps.manager.candidate(id, checkout);
-      await candidate.ready();
-      root = candidate.checkoutRoot;
+    const key = checkoutChangeKey(change);
+    if (this.#checkoutChanges.has(key)) throw new Error('the checkout change is already active');
+    const operation = new CheckoutChange(this.#deps.manager.candidate(id, checkout));
+    this.#checkoutChanges.set(key, operation);
+    try {
+      await operation.candidate.ready();
+      const root = operation.candidate.checkoutRoot;
+      await operation.closeCandidate();
+      operation.assertCurrent();
+      const outcome = await this.#deps.settings.updateHosts(
+        current => withHostSettings(current, id, {checkout}),
+        operation.isCurrent,
+      );
+      if (outcome === 'cancelled') operation.assertCurrent();
+      operation.committed();
+      if (this.#watched.has(hostKey(id))) this.#deps.manager.connection(id, checkout);
+      return root ?? checkout;
+    } catch (error) {
+      if (operation.cancelled())
+        throw new Error('the checkout change was cancelled', {cause: error});
+      throw error;
+    } finally {
+      try {
+        await operation.closeCandidate();
+      } finally {
+        operation.settle();
+        if (this.#checkoutChanges.get(key) === operation) this.#checkoutChanges.delete(key);
+      }
     }
-    await this.#deps.settings.updateHosts(current => withHostSettings(current, id, {checkout}));
-    if (this.#watched.has(hostKey(id))) this.#deps.manager.connection(id, checkout);
-    return root ?? checkout;
+  }
+
+  /** Revoke one renderer checkout change and stop its candidate connection. */
+  async cancelCheckout(change: CheckoutChangeId): Promise<void> {
+    const operation = this.#checkoutChanges.get(checkoutChangeKey(change));
+    if (operation === undefined) return;
+    operation.cancel();
+    await operation.closeCandidate();
+  }
+
+  /** Revoke and settle every checkout change owned by a renderer document that went away. */
+  async cancelCheckoutOwner(owner: string): Promise<void> {
+    const operations = [...this.#checkoutChanges.entries()]
+      .filter(([key]) => key.startsWith(`${owner}\0`))
+      .map(([, operation]) => operation);
+    for (const operation of operations) operation.cancel();
+    const cleanup = await Promise.allSettled(
+      operations.map(operation => operation.closeCandidate()),
+    );
+    await Promise.all(operations.map(operation => operation.settled));
+    const failures = cleanup.flatMap(result =>
+      result.status === 'rejected' ? [result.reason] : [],
+    );
+    if (failures.length > 0)
+      throw new AggregateError(failures, 'could not cancel checkout changes');
   }
 
   /** Sign in to `id` now, prompting when the host asks (the user's own action). */
@@ -182,6 +235,53 @@ export class Hosts {
 
 function isMissingFile(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+}
+
+/** One checkout validation and the permission it must still own at the settings commit boundary. */
+class CheckoutChange {
+  readonly candidate: HostConnection;
+  readonly settled: Promise<void>;
+  #resolveSettled: () => void = () => undefined;
+  #state: 'current' | 'cancelled' | 'committed' = 'current';
+  #closing: Promise<void> | null = null;
+
+  constructor(candidate: HostConnection) {
+    this.candidate = candidate;
+    this.settled = new Promise(resolve => {
+      this.#resolveSettled = resolve;
+    });
+  }
+
+  readonly isCurrent = (): boolean => this.#state === 'current';
+
+  cancel(): void {
+    if (this.#state === 'current') this.#state = 'cancelled';
+  }
+
+  assertCurrent(): void {
+    if (this.#state === 'cancelled') throw new Error('the checkout change was cancelled');
+  }
+
+  cancelled(): boolean {
+    return this.#state === 'cancelled';
+  }
+
+  committed(): void {
+    this.#state = 'committed';
+  }
+
+  settle(): void {
+    this.#resolveSettled();
+  }
+
+  closeCandidate(): Promise<void> {
+    this.#closing ??= this.candidate[Symbol.asyncDispose]();
+    return this.#closing;
+  }
+}
+
+function checkoutChangeKey(change: CheckoutChangeId): string {
+  return `${change.owner}\0${change.sequence}`;
 }
 
 /** A helper's refusal in plain words: what failed, and the helper's own reason. */

@@ -28,8 +28,6 @@ from vibesys.hypothesis import (
     RoundRecord,
 )
 from vibesys.metrics import MetricComparison, MetricSpace, Objective
-from vibesys.orchestration.multi import prompts as multi_prompts
-from vibesys.orchestration.single import prompts as single_prompts
 from vibesys.prompts import PROMPTS_DIR, render_template
 
 if TYPE_CHECKING:
@@ -474,22 +472,17 @@ def test_notice_matches_golden_text(name: str) -> None:
     assert rendered == golden.read_text(encoding="utf-8")
 
 
-_PLUGIN_PROMPTS = {"multi": multi_prompts, "single": single_prompts}
-
-
-@pytest.mark.parametrize("plugin", sorted(_PLUGIN_PROMPTS))
 @pytest.mark.parametrize("name", sorted(_summaries()))
-def test_pareto_document_wraps_the_golden_archive(plugin: str, name: str) -> None:
-    """Each plugin's progress document is the archive under a fixed heading."""
+def test_pareto_document_wraps_the_golden_archive(name: str) -> None:
+    """The progress document is the archive under a fixed heading."""
     records, space = _SUMMARY_INPUTS[name]
     archive = _SEARCH.archive_view(records, space=space)
-    document = _PLUGIN_PROMPTS[plugin].render_pareto_frontier(archive)
+    document = render_template("pareto_frontier.j2", template_dir=_SHARED_PROMPTS, archive=archive)
     golden = (_GOLDEN_DIR / f"{name}.txt").read_text(encoding="utf-8")
     assert document == f"# Pareto frontier\n\n{golden.rstrip()}\n"
 
 
-@pytest.mark.parametrize("plugin", sorted(_PLUGIN_PROMPTS))
-def test_pareto_guard_appends_the_golden_conflict_to_the_review(plugin: str) -> None:
+def test_pareto_guard_appends_the_golden_conflict_to_the_review() -> None:
     """A guarded pass keeps the agent's review verbatim and cites the conflict."""
     conflict = _SEARCH.pareto_conflict(
         disposition=CandidateDisposition.PARETO_FRONTIER,
@@ -499,10 +492,17 @@ def test_pareto_guard_appends_the_golden_conflict_to_the_review(plugin: str) -> 
     )
     assert conflict is not None
     golden = (_GOLDEN_DIR / "conflict_one_dominator.txt").read_text(encoding="utf-8")
-    prompts = _PLUGIN_PROMPTS[plugin]
     review = "  Looks right.\n"
-    assert prompts.render_archive_conflict(conflict) == golden
-    assert (
-        prompts.render_pareto_guard(review, conflict)
-        == f"{review}\n\nFramework Pareto guard: {golden}"
+    notice = render_template(
+        "_notices/archive_conflict.j2",
+        template_dir=_SHARED_PROMPTS,
+        pareto_archive_conflict=conflict,
     )
+    guarded = render_template(
+        "_notices/pareto_guard.j2",
+        template_dir=_SHARED_PROMPTS,
+        review=review,
+        pareto_archive_conflict=conflict,
+    )
+    assert notice == golden
+    assert guarded == f"{review}\n\nFramework Pareto guard: {golden}"

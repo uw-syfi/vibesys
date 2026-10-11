@@ -99,9 +99,13 @@ function hostStore(bridge: WelcomeBridge, firstHost: HostKey): Store<HostState, 
         );
         return;
       case 'set-checkout':
-        void settled(bridge.setCheckout(request.host, request.path)).then(result =>
+        void settled(bridge.setCheckout(request.host, request.path, request.token)).then(result =>
           dispatch({type: 'checkout-reply', token: request.token, result}),
         );
+        return;
+      case 'cancel-checkout':
+        // The cancelled change's own reply is stale; cancellation only revokes its main-process work.
+        void settled(bridge.cancelCheckout(request.token));
         return;
       case 'sign-in':
         void settled(bridge.signIn(request.host)).then(result =>

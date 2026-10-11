@@ -1,5 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it} from 'bun:test';
-import {mkdtempSync, rmSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {
@@ -1450,6 +1450,62 @@ describe('session controller', () => {
     expect(transport.experimentRequests).toBe(3);
   });
 
+  for (const staleOutcome of ['success', 'failure'] as const) {
+    it(`follows a ${staleOutcome} stale design request with one current refresh`, async () => {
+      const transport = new InvalidatedDesignTransport();
+      const controller = new SocketSessionController(transport);
+      await controller.start();
+      expect(transport.designRequests).toBe(1);
+
+      transport.design = [
+        {
+          round: 1,
+          base: 'aaa1111',
+          commit: 'bbb2222',
+          files: [{path: 'src/queue.rs', change: 'modified'}],
+        },
+      ];
+      transport.emitExperimentChange(1);
+      transport.emitExperimentChange(2);
+      transport.emitExperimentChange(3);
+      expect(transport.experimentRequests).toBe(2);
+
+      // The first invalidation's experiment request finishes while the old
+      // design query is still held. The burst asks for only one more
+      // experiment request, and every resulting design refresh coalesces.
+      await transport.resolveExperiments();
+      await settlePromiseEffects();
+      expect(transport.experimentRequests).toBe(3);
+      await transport.resolveExperiments();
+      await settlePromiseEffects();
+
+      await transport.settleDesign(staleOutcome);
+      await settlePromiseEffects();
+      expect(transport.designRequests).toBe(2);
+
+      await transport.settleDesign('success');
+      await settlePromiseEffects();
+      expect(controller.state.designLog?.map(round => round.round)).toEqual([1]);
+      expect(transport.designRequests).toBe(2);
+      await controller.stop();
+    });
+  }
+
+  it('retires a queued design refresh when the controller stops', async () => {
+    const transport = new InvalidatedDesignTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emitExperimentChange(1);
+    await transport.resolveExperiments();
+    await settlePromiseEffects();
+
+    await controller.stop();
+    await transport.settleDesign('success');
+    await settlePromiseEffects();
+
+    expect(transport.designRequests).toBe(1);
+  });
+
   it('opens the selected hypothesis with /open-round', async () => {
     const transport = new FakeTransport();
     transport.experiments = [
@@ -1944,6 +2000,101 @@ describe('session controller', () => {
     expect(transport.requests.at(-1)).toEqual({type: 'query.chat_thread_create'});
   });
 
+  it('keeps the newest thread-create selection when an older reply arrives last', async () => {
+    const transport = new DeferredThreadCreateTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const older = controller.clearChatThread();
+    const newer = controller.clearChatThread();
+    transport.resolveCreate(1, 'thread-newer', 2);
+    await newer;
+    expect(controller.state.activeChatThreadId).toBe('thread-newer');
+
+    transport.resolveCreate(0, 'thread-older', 1);
+    await older;
+
+    expect(controller.state.activeChatThreadId).toBe('thread-newer');
+    expect(controller.state.core.chatThreads.map(thread => thread.id)).toEqual([
+      'default',
+      'thread-older',
+      'thread-newer',
+    ]);
+  });
+
+  it('does not publish a pending thread-create failure while stopping', async () => {
+    const transport = new DeferredThreadCreateTransport();
+    transport.rejectCreatesOnClose = new Error('Client closed');
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const creating = controller.clearChatThread();
+    await controller.stop();
+    await creating;
+
+    expect(controller.state.errorBanner).toBeNull();
+    expect(controller.state.activeChatThreadId).toBe('default');
+  });
+
+  it('does not give a thread-create reply navigation ownership after stopping', async () => {
+    const transport = new DeferredThreadCreateTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const creating = controller.clearChatThread();
+    await controller.stop();
+    transport.resolveCreate(0, 'thread-created', 1);
+    await creating;
+
+    expect(controller.state.activeChatThreadId).toBe('default');
+    expect(controller.state.core.chatThreads.map(thread => thread.id)).toContain('thread-created');
+  });
+
+  it('does not let a pending thread-create reply override manual thread navigation', async () => {
+    const transport = new DeferredThreadCreateTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const creating = controller.clearChatThread();
+    controller.switchChatThread('default');
+    transport.resolveCreate(0, 'thread-created', 1);
+    await creating;
+
+    expect(controller.state.activeChatThreadId).toBe('default');
+    expect(controller.state.core.chatThreads.map(thread => thread.id)).toContain('thread-created');
+  });
+
+  it('keeps a newer thread menu open when a pending thread-create reply settles', async () => {
+    const transport = new DeferredThreadCreateTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const creating = controller.clearChatThread();
+    controller.openChatResumeMenu();
+    transport.resolveCreate(0, 'thread-created', 1);
+    await creating;
+
+    expect(controller.state.activeChatThreadId).toBe('default');
+    expect(controller.state.chatMenu?.kind).toBe('resume');
+    expect(controller.state.chatMenu?.rows.map(row => row.kind)).toContain('thread');
+  });
+
+  it('does not report an older thread-create failure over a newer success', async () => {
+    const transport = new DeferredThreadCreateTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const older = controller.clearChatThread();
+    const newer = controller.clearChatThread();
+    transport.resolveCreate(1, 'thread-newer', 1);
+    await newer;
+    transport.rejectCreate(0, new Error('older create failed'));
+    await older;
+
+    expect(controller.state.activeChatThreadId).toBe('thread-newer');
+    expect(controller.state.errorBanner).toBeNull();
+  });
+
   it('answers unknown slash input in the composer with the chat help', async () => {
     const transport = new ThreadTransport();
     const controller = new SocketSessionController(transport);
@@ -2330,6 +2481,171 @@ describe('notepad', () => {
     expect(controller.state.notepad.text).toBe('from a previous session');
   });
 
+  it('hydrates an untouched notepad opened before startup learns its identity', async () => {
+    writeNote({
+      projectScope: NOTE_PROJECT_SCOPE,
+      runId: 'run',
+      text: 'saved before restart',
+      createdAt: 't0',
+      updatedAt: 't0',
+    });
+    const transport = new FakeTransport();
+    transport.deferSnapshot = true;
+    const controller = new SocketSessionController(transport);
+
+    const starting = controller.start();
+    controller.openNotepad();
+    expect(controller.state.notepad).toMatchObject({
+      open: true,
+      text: '',
+      persistence: 'pending_identity',
+    });
+
+    transport.releaseSnapshot();
+    await starting;
+
+    expect(controller.state.notepad).toMatchObject({
+      open: true,
+      text: 'saved before restart',
+      createdAt: 't0',
+      updatedAt: 't0',
+      persistence: 'ready',
+    });
+  });
+
+  it('preserves a touched startup draft without overwriting an existing saved note', async () => {
+    writeNote({
+      projectScope: NOTE_PROJECT_SCOPE,
+      runId: 'run',
+      text: 'saved before restart',
+      createdAt: 'saved-t0',
+      updatedAt: 'saved-t1',
+    });
+    const transport = new FakeTransport();
+    transport.deferSnapshot = true;
+    const controller = new SocketSessionController(transport);
+
+    const starting = controller.start();
+    controller.openNotepad();
+    controller.setNoteText('draft written during startup');
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+      'saved before restart',
+    );
+
+    transport.releaseSnapshot();
+    await starting;
+
+    expect(controller.state.notepad).toMatchObject({
+      open: true,
+      text: 'draft written during startup',
+      persistence: 'conflict',
+    });
+    controller.setNoteText('edited conflict draft');
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+      'saved before restart',
+    );
+
+    controller.closeNotepad();
+    controller.openNotepad();
+    expect(controller.state.notepad).toMatchObject({
+      text: 'edited conflict draft',
+      persistence: 'conflict',
+    });
+
+    expect(controller.promoteNoteToSteerDraft()).toEqual({text: 'edited conflict draft'});
+    controller.openNotepad();
+    expect(controller.state.notepad).toMatchObject({
+      text: 'saved before restart',
+      persistence: 'ready',
+    });
+  });
+
+  it('lets either promotion action retire a conflicted draft that was edited to blank', async () => {
+    for (const promotion of ['steer', 'chat'] as const) {
+      writeNote({
+        projectScope: NOTE_PROJECT_SCOPE,
+        runId: 'run',
+        text: 'saved before restart',
+        createdAt: 'saved-t0',
+        updatedAt: 'saved-t1',
+      });
+      const transport = new FakeTransport();
+      transport.deferSnapshot = true;
+      const controller = new SocketSessionController(transport);
+
+      const starting = controller.start();
+      controller.openNotepad();
+      controller.setNoteText('startup draft');
+      transport.releaseSnapshot();
+      await starting;
+      controller.setNoteText('   ');
+      expect(controller.state.notepad.persistence).toBe('conflict');
+
+      const prefill =
+        promotion === 'steer'
+          ? controller.promoteNoteToSteerDraft()
+          : controller.promoteNoteToChatDraft();
+
+      expect(prefill).toBeNull();
+      expect(controller.state.notepad.open).toBe(false);
+      expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+        'saved before restart',
+      );
+      controller.openNotepad();
+      expect(controller.state.notepad).toMatchObject({
+        text: 'saved before restart',
+        persistence: 'ready',
+      });
+    }
+  });
+
+  it('persists a touched startup draft when its resolved identity has no saved note', async () => {
+    const transport = new FakeTransport();
+    transport.deferSnapshot = true;
+    const controller = new SocketSessionController(transport);
+
+    const starting = controller.start();
+    controller.openNotepad();
+    controller.setNoteText('first note for this run');
+    transport.releaseSnapshot();
+    await starting;
+
+    expect(controller.state.notepad.persistence).toBe('ready');
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+      'first note for this run',
+    );
+  });
+
+  it('keeps a startup draft when its first identity-bound write fails and retries later', async () => {
+    const blockedStateHome = join(stateHome, 'startup-state-home');
+    writeFileSync(blockedStateHome, 'occupied');
+    process.env['VIBESYS_STATE_HOME'] = blockedStateHome;
+    const transport = new FakeTransport();
+    transport.deferSnapshot = true;
+    const controller = new SocketSessionController(transport);
+
+    const starting = controller.start();
+    controller.openNotepad();
+    controller.setNoteText('draft written during startup');
+    transport.releaseSnapshot();
+
+    await expect(starting).resolves.toBeUndefined();
+    expect(controller.state.notepad).toMatchObject({
+      text: 'draft written during startup',
+      persistence: 'ready',
+    });
+    expect(controller.state.notepad.persistenceError).toContain('ENOTDIR');
+
+    rmSync(blockedStateHome);
+    mkdirSync(blockedStateHome);
+    controller.setNoteText('recovered startup draft');
+
+    expect(controller.state.notepad.persistenceError).toBeNull();
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+      'recovered startup draft',
+    );
+  });
+
   it('persists every keystroke, surviving a restart against the same run', async () => {
     const controller = new SocketSessionController(new FakeTransport());
     await controller.start();
@@ -2347,6 +2663,43 @@ describe('notepad', () => {
     await restarted.start();
     restarted.openNotepad();
     expect(restarted.state.notepad.text).toBe('watch the retry budget');
+  });
+
+  it('keeps a draft in memory and off the wire when local persistence fails', async () => {
+    const blockedStateHome = join(stateHome, 'not-a-directory');
+    writeFileSync(blockedStateHome, 'occupied');
+    process.env['VIBESYS_STATE_HOME'] = blockedStateHome;
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    const bootRequests = transport.requests.length;
+    controller.openNotepad();
+
+    expect(() => controller.setNoteText('draft stays in memory')).not.toThrow();
+
+    expect(controller.state.notepad.text).toBe('draft stays in memory');
+    expect(controller.state.notepad.persistenceError).toContain('ENOTDIR');
+    expect(transport.requests.slice(bootRequests)).toEqual([]);
+  });
+
+  it('clears the persistence diagnostic after a later edit writes successfully', async () => {
+    const blockedStateHome = join(stateHome, 'recoverable-state-home');
+    writeFileSync(blockedStateHome, 'occupied');
+    process.env['VIBESYS_STATE_HOME'] = blockedStateHome;
+    const controller = new SocketSessionController(new FakeTransport());
+    await controller.start();
+    controller.openNotepad();
+    controller.setNoteText('first draft');
+    expect(controller.state.notepad.persistenceError).not.toBeNull();
+
+    rmSync(blockedStateHome);
+    mkdirSync(blockedStateHome);
+    controller.setNoteText('recovered draft');
+
+    expect(controller.state.notepad.persistenceError).toBeNull();
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+      'recovered draft',
+    );
   });
 
   it('does not write to disk before a run id is known', () => {
@@ -3170,6 +3523,7 @@ describe('stream reconnect', () => {
 
 class FakeTransport implements ServerTransport {
   closed = false;
+  deferSnapshot = false;
   /** Mutable so a test can change what a refetch returns mid-run. */
   experiments: NonNullable<ProtocolResponse['experiments']> = [];
   experimentsReady = true;
@@ -3184,6 +3538,7 @@ class FakeTransport implements ServerTransport {
   readonly requests: RequestInput[] = [];
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
+  #releaseSnapshot: (() => void) | null = null;
 
   constructor(
     private readonly responseEvents: RunEvent[] = [],
@@ -3198,7 +3553,7 @@ class FakeTransport implements ServerTransport {
     if (input.type === 'query.design_patch' && this.designPatchError) {
       return Promise.reject(this.designPatchError);
     }
-    return Promise.resolve({
+    const response: ProtocolResponse = {
       protocol_version: 1,
       request_id: 'request',
       timestamp: '2026-01-01T00:00:00Z',
@@ -3237,6 +3592,14 @@ class FakeTransport implements ServerTransport {
         sequence: 12,
         ...(this.projectScope === undefined ? {} : {project_scope: this.projectScope}),
       },
+    };
+    if (input.type !== 'query.snapshot' || !this.deferSnapshot) return Promise.resolve(response);
+    if (this.#releaseSnapshot !== null) throw new Error('Snapshot request is already pending');
+    return new Promise(resolve => {
+      this.#releaseSnapshot = () => {
+        this.#releaseSnapshot = null;
+        resolve(response);
+      };
     });
   }
 
@@ -3268,6 +3631,12 @@ class FakeTransport implements ServerTransport {
 
   disconnect(error: Error): void {
     this.#disconnect?.(error);
+  }
+
+  releaseSnapshot(): void {
+    const release = this.#releaseSnapshot;
+    if (release === null) throw new Error('No snapshot request is pending');
+    release();
   }
 }
 
@@ -3542,6 +3911,114 @@ class RevisionedExperimentsTransport implements ServerTransport {
   }
 }
 
+/** Holds experiment and design answers so invalidations can cross both requests exactly. */
+class InvalidatedDesignTransport implements ServerTransport {
+  design: NonNullable<ProtocolResponse['design']> = [];
+  experimentRequests = 0;
+  designRequests = 0;
+  readonly #pendingExperiments: Array<{
+    readonly response: Promise<ProtocolResponse>;
+    readonly resolve: (response: ProtocolResponse) => void;
+  }> = [];
+  readonly #pendingDesign: Array<{
+    readonly response: Promise<ProtocolResponse>;
+    readonly resolve: (response: ProtocolResponse) => void;
+    readonly reject: (error: Error) => void;
+    readonly value: ProtocolResponse;
+  }> = [];
+  #message: ((message: ServerMessage) => void) | null = null;
+
+  request(input: RequestInput): Promise<ProtocolResponse> {
+    const base = {
+      protocol_version: 1 as const,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true as const,
+    };
+    if (input.type === 'query.snapshot') {
+      return Promise.resolve({...base, snapshot: {run_id: 'run', status: 'running', sequence: 0}});
+    }
+    if (input.type === 'query.experiments') {
+      this.experimentRequests += 1;
+      if (this.experimentRequests === 1) {
+        return Promise.resolve({...base, experiments: [], experiments_ready: true});
+      }
+      let resolve!: (response: ProtocolResponse) => void;
+      const response = new Promise<ProtocolResponse>(done => {
+        resolve = done;
+      });
+      this.#pendingExperiments.push({response, resolve});
+      return response;
+    }
+    if (input.type === 'query.design') {
+      this.designRequests += 1;
+      const value = {...base, design: [...this.design], design_ready: true};
+      let resolve!: (response: ProtocolResponse) => void;
+      let reject!: (error: Error) => void;
+      const response = new Promise<ProtocolResponse>((done, fail) => {
+        resolve = done;
+        reject = fail;
+      });
+      this.#pendingDesign.push({response, resolve, reject, value});
+      return response;
+    }
+    return Promise.resolve(base);
+  }
+
+  async resolveExperiments(): Promise<void> {
+    const pending = this.#pendingExperiments.shift();
+    if (pending === undefined) throw new Error('No pending experiment request');
+    pending.resolve({
+      protocol_version: 1,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true,
+      experiments: [],
+      experiments_ready: true,
+    });
+    await pending.response;
+  }
+
+  async settleDesign(outcome: 'success' | 'failure'): Promise<void> {
+    const pending = this.#pendingDesign.shift();
+    if (pending === undefined) throw new Error('No pending design request');
+    if (outcome === 'success') {
+      pending.resolve(pending.value);
+      await pending.response;
+      return;
+    }
+    const rejected = pending.response.catch(() => undefined);
+    pending.reject(new Error('design query failed'));
+    await rejected;
+  }
+
+  subscribe(
+    _afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    this.#message = onMessage;
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  emitExperimentChange(sequence: number): void {
+    this.#message?.({
+      type: 'event',
+      event: {
+        sequence,
+        run_id: 'run',
+        timestamp: '2026-01-01T00:00:00Z',
+        type: 'experiments_changed',
+        data: {kind: 'experiments_changed', reason: 'round_persisted', revision: sequence},
+      },
+    });
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 /**
  * A backend whose design query the test holds open, so a slow /design can
  * overlap the next pane command the way the live git-backed query does.
@@ -3759,6 +4236,69 @@ class ThreadTransport implements ServerTransport {
   }
 }
 
+/** Thread-create replies settle only when the test chooses, in any order. */
+class DeferredThreadCreateTransport extends ThreadTransport {
+  rejectCreatesOnClose: Error | null = null;
+  readonly #pending: Array<{
+    input: Extract<RequestInput, {type: 'query.chat_thread_create'}>;
+    resolve: (response: ProtocolResponse) => void;
+    reject: (error: Error) => void;
+  }> = [];
+
+  override request(input: RequestInput): Promise<ProtocolResponse> {
+    if (input.type !== 'query.chat_thread_create') return super.request(input);
+    this.requests.push(input);
+    return new Promise((resolve, reject) => this.#pending.push({input, resolve, reject}));
+  }
+
+  resolveCreate(index: number, threadId: string, sequence: number): void {
+    const pending = this.#pending[index];
+    if (pending === undefined) throw new Error(`No pending thread-create request ${index}`);
+    const settings = {
+      provider: pending.input.provider ?? 'codex',
+      model: pending.input.model ?? 'gpt-run',
+    };
+    pending.resolve({
+      protocol_version: 1,
+      request_id: `request-${index}`,
+      timestamp: '2026-01-01T00:00:01Z',
+      ok: true,
+      chat_thread: {thread_id: threadId, title: '', ...settings},
+      events: [
+        {
+          sequence,
+          timestamp: '2026-01-01T00:00:01Z',
+          type: 'chat_thread_created',
+          agent_kind: 'chat',
+          round_label: 'experiment-chat',
+          chat_thread_id: threadId,
+          data: {
+            kind: 'chat_thread_created',
+            thread_id: threadId,
+            title: '',
+            ...settings,
+            created_at: '2026-01-01T00:00:01Z',
+          },
+        },
+      ],
+    });
+  }
+
+  rejectCreate(index: number, error: Error): void {
+    const pending = this.#pending[index];
+    if (pending === undefined) throw new Error(`No pending thread-create request ${index}`);
+    pending.reject(error);
+  }
+
+  override close(): Promise<void> {
+    const error = this.rejectCreatesOnClose;
+    if (error !== null) {
+      for (const pending of this.#pending) pending.reject(error);
+    }
+    return Promise.resolve();
+  }
+}
+
 /** Chat options stay under test control while the rest of the transport behaves normally. */
 class DeferredChatOptionsTransport extends ThreadTransport {
   readonly #pending: Array<{
@@ -3915,6 +4455,14 @@ function patchRequests(transport: FakeTransport): RequestInput[] {
 
 function designQueries(transport: DeferredDesignTransport): number {
   return transport.requests.filter(request => request.type === 'query.design').length;
+}
+
+/** Drain promise continuations only, without wall-clock time or scheduler ordering. */
+async function settlePromiseEffects(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 function entry(

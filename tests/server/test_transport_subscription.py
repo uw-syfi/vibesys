@@ -387,6 +387,28 @@ def test_snapshot_reconstructs_chat_threads_from_full_history(tmp_path: Path) ->
     assert response.snapshot.chat_threads[0].provider == "claude"
 
 
+def test_snapshot_store_fence_rejects_a_replaced_sequence_space(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path / "server")
+    bootstrap_store = parts.journal.store_id_locked()
+
+    # None is the backward-compatible unfenced query. The empty pre-attach
+    # store remains independently fenceable rather than being treated as None.
+    assert parts.api.execute(SnapshotQuery()).snapshot is not None
+    assert parts.api.execute(SnapshotQuery(expected_store_id=bootstrap_store)).snapshot is not None
+
+    parts.attach(_write_log(tmp_path / "logs", _round_log(200)))
+    replacement_store = parts.journal.store_id_locked()
+    assert replacement_store != bootstrap_store
+
+    with pytest.raises(RuntimeError) as failure:
+        parts.api.execute(SnapshotQuery(expected_store_id=bootstrap_store))
+    assert getattr(failure.value, "diagnostic_code", None) == "snapshot_store_replaced"
+    assert parts.api.execute(SnapshotQuery()).snapshot is not None
+    assert (
+        parts.api.execute(SnapshotQuery(expected_store_id=replacement_store)).snapshot is not None
+    )
+
+
 def test_late_attach_rebootstraps_at_fresh_tail_with_spine(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "server")
 

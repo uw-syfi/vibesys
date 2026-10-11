@@ -1,15 +1,20 @@
-"""Policy-owned values for the plain multi-agent orchestration."""
+"""Policy-owned values for the multi-agent orchestration presets: options and agent replies."""
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, FiniteFloat, model_validator
 
-from vibesys.hypothesis.state import HypothesisState
+from vibesys.hypothesis import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    SkillResourceSelection,
+)
 from vibesys.inputs import ProfileGuidedInput
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vs_runtime.api import AccuracyReceipt
+from vibesys.orchestration.review import Verdict
+from vs_runtime.api import VALIDATION_RECIPE_ARTIFACT_DESCRIPTION, ValidationRecipeArtifactPath
 
 _ProfileGuidedInput = ProfileGuidedInput
 
@@ -40,25 +45,119 @@ class ProfileGuidedMultiOptions(AgentOrchestrationOptions):
         return self
 
 
-class PaidAttempt(BaseModel):
-    """Durable proof that one implementer attempt was started."""
+class ImplementerResponse(BaseModel):
+    """Structured response from a multi-policy implementer."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    summary: str = Field(description="What was implemented or changed this iteration.")
+    expected_behavior: str = Field(
+        description="Observable behavior expected from the implementation."
+    )
+    hypothesis_outcome: HypothesisOutcome = Field(
+        default=HypothesisOutcome.NOMINATED,
+        description=(
+            "Hypothesis lifecycle status. Use continue only for bounded unfinished "
+            "same-mechanism work; supported/nominated require review readiness."
+        ),
+    )
+    evidence: str = Field(
+        default="",
+        description="Observed evidence supporting the reported hypothesis outcome.",
+    )
+    next_step: str = Field(
+        default="",
+        description="Concrete remaining action for a nonterminal or failed outcome.",
+    )
+    perf_metric: FiniteFloat | None = Field(
+        default=None,
+        description="Fresh canonical headline metric, otherwise None.",
+    )
+    perf_unit: str | None = Field(
+        default=None,
+        description="Unit of perf_metric, otherwise None.",
+    )
+    metrics: dict[str, FiniteFloat] = Field(
+        default_factory=dict,
+        description="Objective metrics from the same canonical row.",
+    )
+    evaluation_artifact: str | None = Field(
+        default=None,
+        description="Workspace-relative canonical evaluation artifact.",
+    )
+    candidate_disposition: CandidateDisposition = Field(
+        default=CandidateDisposition.UNASSESSED,
+        description=(
+            "Independent checkpoint retention: pareto_frontier, prerequisite, discard, or unassessed."
+        ),
+    )
+    candidate_metrics: dict[str, FiniteFloat] = Field(
+        default_factory=dict,
+        description="Objective values from one fresh comparable provisional row.",
+    )
+    candidate_evaluation_artifact: str | None = Field(
+        default=None,
+        description="Workspace-relative raw artifact for candidate_metrics.",
+    )
+    candidate_operating_point: str = Field(
+        default="",
+        description="Workload/load/configuration identity for candidate_metrics.",
+    )
+    candidate_retention_reason: str = Field(
+        default="",
+        description="Reason for the checkpoint retention recommendation.",
+    )
+    skill_context_updates: list[SkillResourceSelection] = Field(
+        default_factory=list,
+        description="New advisory skill resources consulted or selected this turn.",
+    )
+    validation_recipe_artifact: ValidationRecipeArtifactPath | None = Field(
+        default=None,
+        description=VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
+    )
 
-    round_number: Annotated[int, Field(gt=0)]
-    member_id: str = Field(min_length=1)
-    turn_number: Annotated[int, Field(gt=0)]
+
+class JudgeResponse(BaseModel):
+    """Structured response from a multi-policy judge."""
+
+    analysis: str = Field(
+        description=(
+            "Detailed analysis covering correctness, completeness, dependencies, "
+            "tests, and code quality."
+        )
+    )
+    feedback: str = Field(description="Specific actionable feedback. Empty string if passing.")
+    verdict: Verdict = Field(
+        description=(
+            "PASS when verified evidence supports the declared outcome and checkpoint "
+            "disposition under the objective invariants; final success criteria need not "
+            "hold for a justified continue, disproven, or blocked outcome. FAIL otherwise."
+        )
+    )
+    skills_used: list[SkillResourceSelection] = Field(
+        default_factory=list,
+        description=(
+            "Skill resources independently selected for this review; observational "
+            "only and never inherited by the implementer."
+        ),
+    )
 
 
-class MultiState(BaseModel):
-    """The multi plugin's complete opaque durability aggregate."""
+class PreRoundDecision(BaseModel):
+    """Whether a specialist profile should precede planning."""
 
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    need_profile: bool = Field(
+        description="True when a profiler run should happen before planning."
+    )
+    profile_focus: str = Field(
+        default="",
+        description="Profiler guidance. Empty when need_profile is False.",
+    )
+    reasoning: str = Field(description="Short explanation of the decision.")
 
-    schema_version: Literal[1] = 1
-    search: HypothesisState = Field(default_factory=HypothesisState)
-    last_paid_attempt: PaidAttempt | None = None
-    accuracy_receipt: AccuracyReceipt | None = None
 
-
-__all__ = ["MultiOptions", "MultiState", "PaidAttempt", "ProfileGuidedMultiOptions"]
+__all__ = [
+    "ImplementerResponse",
+    "JudgeResponse",
+    "MultiOptions",
+    "PreRoundDecision",
+    "ProfileGuidedMultiOptions",
+]

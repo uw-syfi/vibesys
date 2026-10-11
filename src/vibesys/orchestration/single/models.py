@@ -2,70 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
+from pydantic import BaseModel, Field, FiniteFloat, model_validator
 
 from vibesys.hypothesis import (
     CandidateDisposition,
     SkillResourceSelection,
 )
-from vibesys.hypothesis.state import HypothesisState
 from vibesys.inputs import ProfileGuidedInput
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.review import Verdict
-from vibesys.profile_focus import FocusLedger
-from vs_runtime.api import AccuracyReceipt
 
 _ProfileGuidedInput = ProfileGuidedInput
-
-
-class PlanContext(BaseModel):
-    """Changing evidence rendered for one single-policy planning turn."""
-
-    model_config = ConfigDict(frozen=True)
-
-    objective_location: str
-    profiler_entry: ProgressEntry | None
-    regression_entry: ProgressEntry | None
-    exhaustion_entry: ProgressEntry | None
-    progress_location: str
-    roadmap_location: str
-    pareto_archive_location: str
-    plateau_warning: str | None
-    domain_orchestrator: str
-    runtime_notes: str
-    framework_benchmark_enabled: bool
-    official_eval_every: int
-    provisional_candidates: int
-    official_eval_cadence_due: bool
-    active_component: str | None = None
-    ledger: FocusLedger | None = None
-    ranked_bottlenecks: list[dict[str, object]] = Field(default_factory=list)
-
-
-class SingleAgentRoundContext(BaseModel):
-    """Changing evidence for one combined implementation and review turn."""
-
-    model_config = ConfigDict(frozen=True)
-
-    accuracy_command: str | None
-    benchmark_command: str | None
-    domain_profiler: str
-    domain_single_agent: str
-    feedback: str | None
-    interface: str
-    objective_location: str
-    official_evaluation_due: bool
-    official_evaluation_reason: str | None
-    pareto_archive_location: str
-    plan_artifact_location: str
-    profiler_kind: str
-    profiler_support_name: str | None
-    progress_location: str
-    runtime_notes: str
-    validation_location: str
 
 
 class SingleAgentRoundResponse(BaseModel):
@@ -160,35 +109,4 @@ class ProfileGuidedSingleOptions(AgentOrchestrationOptions):
         return self
 
 
-class PaidAttempt(BaseModel):
-    """Durable proof that one implementer attempt was started."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    round_number: Annotated[int, Field(gt=0)]
-    role_id: str = Field(min_length=1)
-    member_id: str = Field(min_length=1)
-    turn_number: Annotated[int, Field(gt=0)]
-
-
-class SingleState(BaseModel):
-    """The single plugin's complete opaque durability aggregate."""
-
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
-
-    schema_version: Literal[1] = 1
-    search: HypothesisState = Field(default_factory=HypothesisState)
-    last_paid_attempt: PaidAttempt | None = None
-    accuracy_receipt: AccuracyReceipt | None = None
-    last_response: SingleAgentRoundResponse | None = None
-
-
-__all__ = [
-    "PaidAttempt",
-    "PlanContext",
-    "ProfileGuidedSingleOptions",
-    "SingleAgentRoundContext",
-    "SingleAgentRoundResponse",
-    "SingleOptions",
-    "SingleState",
-]
+__all__ = ["ProfileGuidedSingleOptions", "SingleAgentRoundResponse", "SingleOptions"]

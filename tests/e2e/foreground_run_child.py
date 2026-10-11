@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import faulthandler
 import sys
 import threading
 from pathlib import Path
@@ -50,6 +51,8 @@ class BlockedRuntime:
 
 
 if __name__ == "__main__":
+    # SIGABRT from the parent dumps all thread stacks to stderr when the run fails to stop.
+    faulthandler.enable()
     # test-isolation: the child swaps the runtime and request parsing for a blocked fake
     BlockedRuntime.transports = int(sys.argv[1])
     runtime_module.ServerRuntime = BlockedRuntime  # ty: ignore[invalid-assignment]  # LW-155503 [invalid-assignment]; the child swaps the dynamically imported runtime class for its fake

@@ -1,7 +1,5 @@
 {#- Shared renderings of typed context values. -#}
-{% macro rev(ref) -%}
-{{ ref.revision_id.root }}
-{%- endmacro %}
+{% from '_revision.j2' import rev %}
 {% macro metric(row) -%}
 {{ row.name }} = {{ row.value }}{% if row.unit %} {{ row.unit }}{% endif %} (better: {{ row.direction }})
 {%- endmacro %}

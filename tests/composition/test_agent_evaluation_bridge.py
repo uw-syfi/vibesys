@@ -62,6 +62,7 @@ from vs_runtime.api.core import (
     EVALUATION_TOOL_ID,
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
+    OwedSubmissions,
     ReceiptStore,
     ScopeWorkspaces,
     StoreWorkspaceReceipts,
@@ -239,6 +240,7 @@ async def scenario(tmp_path: Path, *, submissions: int = 1) -> AsyncIterator[Sce
             tmp_path / "evaluation.sock",
             POLICY,
             ScopeWorkspaces(workspaces, StoreWorkspaceReceipts(ReceiptStore(receipts))),
+            OwedSubmissions(ReceiptStore(receipts)),
         )
         resolvers[0].bridge = bridge
         bridges.append(bridge)
@@ -339,7 +341,9 @@ async def _synthesized(tmp_path: Path, calls: list[tuple[Any, ...]]) -> None:
                 case (_, raw):
                     frame = raw
             before = process.shell.storage_revision
-            reply = SOCKET_REPLY.validate_json(await bridge.handle(frame))
+            raw_reply, confirm = await bridge.answer(frame)
+            reply = SOCKET_REPLY.validate_json(raw_reply)
+            confirm()
             if isinstance(reply, SocketSuccess):
                 assert call[0] in ("submit", "wait")
                 assert len(call) < 2 or call[1] == "own", "only the issued token is honoured"

@@ -12,6 +12,7 @@ import socket
 import struct
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from http import HTTPStatus
 from http.client import HTTPConnection, HTTPMessage, HTTPResponse
@@ -34,7 +35,9 @@ from websockets.protocol import State
 
 from entrypoints import web as web_entrypoint
 from server.api.protocol import (
+    ChatQuery,
     EventBatchMessage,
+    Response,
     SnapshotQuery,
     SteerCommand,
     SubscribeRequest,
@@ -56,10 +59,10 @@ from server.transport.websocket import (
     _connection_closed,
     _content_type,
 )
-from vs_sim.api.testing import HANG_GUARD_S, join_or_fail, wait_or_fail
+from vs_sim.api.testing import HANG_GUARD_S, Gate, join_or_fail, start_thread, wait_or_fail
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import AsyncIterator, Callable, Sequence
     from typing import Literal, Never
 
     from websockets.asyncio.client import ClientConnection
@@ -67,9 +70,9 @@ if TYPE_CHECKING:
     from websockets.http11 import Request
     from websockets.typing import Origin
 
-    from server.api.protocol import RunSnapshot
+    from server.api.protocol import ProtocolRequest, RunSnapshot
     from server.api.service import RunApi, SubscriptionBootstrap, SubscriptionCheckpoint
-    from vs_sim.api import Event
+    from vs_sim.api import BlockingRunner, Event
 
 # The burst has to be larger than the send path can absorb, or the producing
 # coroutine never stalls and the write deadline under test never fires. The
@@ -897,10 +900,169 @@ async def _request(
     *,
     origin: str | None = None,
 ) -> dict[str, Any]:
-    origin = origin or f"http://127.0.0.1:{gateway.bound_port}"
-    async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
+    async with _gateway_connection(gateway, origin=origin) as websocket:
         await websocket.send(request.model_dump_json())
         return json.loads(await websocket.recv())
+
+
+@asynccontextmanager
+async def _gateway_connection(
+    gateway: WebSocketGateway, *, origin: str | None = None
+) -> AsyncIterator[ClientConnection]:
+    """Open the real public endpoint through the file's one socket-test seam."""
+    origin = origin or f"http://127.0.0.1:{gateway.bound_port}"
+    async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
+        yield websocket
+
+
+class _HeldChatRequestRunner:
+    """Hold chat before execution while letting other request workers run."""
+
+    def __init__(self) -> None:
+        self.release_chat = Gate()
+        self.requests: list[ProtocolRequest] = []
+        self._entered: dict[str, Gate] = {}
+        self._completed: dict[str, Gate] = {}
+
+    def entered(self, request: ProtocolRequest) -> Gate:
+        """Return the signal for this exact request reaching the runner."""
+        return self._entered.setdefault(request.request_id, Gate())
+
+    def completed(self, request: ProtocolRequest) -> Gate:
+        """Return the signal for this exact request finishing execution."""
+        return self._completed.setdefault(request.request_id, Gate())
+
+    async def run[**P, T](self, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+        request = cast("ProtocolRequest", args[0])
+        self.requests.append(request)
+        self.entered(request).open()
+        if isinstance(request, ChatQuery):
+            await self.release_chat.wait()
+        result = function(*args, **kwargs)
+        self.completed(request).open()
+        return result
+
+
+class _RecordingRequestApi:
+    """Minimal API Fake whose public responses expose request execution order."""
+
+    def __init__(self) -> None:
+        self.executed: list[ProtocolRequest] = []
+
+    def execute(self, request: ProtocolRequest) -> Response:
+        self.executed.append(request)
+        return Response(request_id=request.request_id)
+
+
+async def _assert_chat_connection_is_isolated(
+    gateway: WebSocketGateway,
+    runner: _HeldChatRequestRunner,
+    api: _RecordingRequestApi,
+) -> None:
+    held_chat = ChatQuery(text="hold this chat")
+    same_connection_snapshot = SnapshotQuery()
+    other_connection_snapshot = SnapshotQuery()
+    async with (
+        asyncio.timeout(DEADLOCK_GUARD_S),
+        _gateway_connection(gateway) as chat,
+        _gateway_connection(gateway) as control,
+    ):
+        try:
+            await chat.send(held_chat.model_dump_json())
+            chat_response = asyncio.create_task(chat.recv())
+            await runner.entered(held_chat).wait(chat_response)
+
+            # Queue one request behind chat on the same connection, then issue an
+            # independent request on the control connection. Reaching the latter
+            # proves the loop had a scheduling opportunity, so the former remaining
+            # absent is an ordering fact rather than a timing assertion.
+            await chat.send(same_connection_snapshot.model_dump_json())
+            await control.send(other_connection_snapshot.model_dump_json())
+            control_response = asyncio.create_task(control.recv())
+            await runner.completed(other_connection_snapshot).wait(control_response)
+
+            assert [request.request_id for request in runner.requests] == [
+                held_chat.request_id,
+                other_connection_snapshot.request_id,
+            ]
+            assert [request.request_id for request in api.executed] == [
+                other_connection_snapshot.request_id
+            ]
+            assert (
+                json.loads(await control_response)["request_id"]
+                == other_connection_snapshot.request_id
+            )
+
+            runner.release_chat.open()
+            assert json.loads(await chat_response)["request_id"] == held_chat.request_id
+            assert (
+                json.loads(await chat.recv())["request_id"] == same_connection_snapshot.request_id
+            )
+        finally:
+            # The gateway deliberately drains an executing request during close.
+            # Release the Fake before socket cleanup even when an assertion fails.
+            runner.release_chat.open()
+
+    assert [request.request_id for request in runner.requests] == [
+        held_chat.request_id,
+        other_connection_snapshot.request_id,
+        same_connection_snapshot.request_id,
+    ]
+    assert [request.request_id for request in api.executed] == [
+        other_connection_snapshot.request_id,
+        held_chat.request_id,
+        same_connection_snapshot.request_id,
+    ]
+
+
+def test_chat_request_does_not_block_another_websocket_or_reorder_its_own() -> None:
+    runner = _HeldChatRequestRunner()
+    api = _RecordingRequestApi()
+    with WebSocketGateway(
+        cast("RunApi", api), request_runner=cast("BlockingRunner", runner)
+    ) as gateway:
+        asyncio.run(_assert_chat_connection_is_isolated(gateway, runner, api))
+
+
+async def _assert_shutdown_drains_started_request(
+    gateway: WebSocketGateway,
+    runner: _HeldChatRequestRunner,
+    api: _RecordingRequestApi,
+) -> None:
+    closing = None
+    async with _gateway_connection(gateway) as websocket:
+        try:
+            request = ChatQuery(text="finish during shutdown")
+            await websocket.send(request.model_dump_json())
+            response = asyncio.create_task(websocket.recv())
+            await runner.entered(request).wait(response)
+
+            closing = start_thread(gateway.close)
+            async with asyncio.timeout(DEADLOCK_GUARD_S):
+                with pytest.raises(ConnectionClosedOK):
+                    await response
+            assert not closing.done(), "gateway abandoned its started request worker"
+
+            runner.release_chat.open()
+            async with asyncio.timeout(DEADLOCK_GUARD_S):
+                await asyncio.wrap_future(closing)
+            assert [executed.request_id for executed in api.executed] == [request.request_id]
+        finally:
+            runner.release_chat.open()
+            if closing is not None and not closing.done():
+                await asyncio.wrap_future(closing)
+
+
+def test_gateway_shutdown_drains_a_started_request_before_closing_its_loop() -> None:
+    runner = _HeldChatRequestRunner()
+    api = _RecordingRequestApi()
+    gateway = WebSocketGateway(cast("RunApi", api), request_runner=cast("BlockingRunner", runner))
+    gateway.start()
+    try:
+        asyncio.run(_assert_shutdown_drains_started_request(gateway, runner, api))
+    finally:
+        runner.release_chat.open()
+        gateway.close()
 
 
 async def _raw_request(gateway: WebSocketGateway, raw: str) -> dict[str, Any]:

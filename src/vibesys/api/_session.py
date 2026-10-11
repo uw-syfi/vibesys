@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from vibesys.api.contracts import EventSink, RunView
     from vibesys.plugin_catalog import OrchestrationProjector, OrchestrationRegistry
     from vibesys.run.contracts import RunRequest
+    from vibesys.run.host import StatelessToolServer
     from vs_agent.api import (
         AgentClientProtocol,
         AgentEventSink,
@@ -88,6 +89,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]
     ]
     | None = None,
+    stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None,
     stop_timer: StopTimer,
     timing: RunTiming,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore],
@@ -110,6 +112,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
             agent_client_factory=agent_client_factory,
             backend_factory=backend_factory,
             agent_tool_bindings=agent_tool_bindings,
+            stateless_tool_servers=stateless_tool_servers,
             plugin=plugin,
             options=options,
             stop_timer=stop_timer,
@@ -316,6 +319,7 @@ class _LocalRunSession:
                 agent_client_factory=self._implementations.agent_client_factory,
                 backend_factory=self._implementations.backend_factory,
                 agent_tool_bindings=self._implementations.agent_tool_bindings,
+                stateless_tool_servers=self._implementations.stateless_tool_servers,
                 stop_timer=self._implementations.stop_timer,
                 timing=self._implementations.timing,
                 invocation_store_factory=self._implementations.invocation_store_factory,

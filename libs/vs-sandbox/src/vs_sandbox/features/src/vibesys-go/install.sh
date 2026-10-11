@@ -4,23 +4,53 @@
 # Feature.
 set -euo pipefail
 
+# >>> vibesys network helpers (identical in every Feature; Features cannot share files)
+# Every fetch in a Feature is bounded and retried a bounded number of times, so
+# a stalled connection ends in a failure that names the step instead of hanging
+# the image build until the caller's budget runs out. Only operations that are
+# safe to repeat are retried: downloads to a path and package installs.
+NET_ATTEMPTS=5
+retry() {
+    local attempt=1
+    until "$@"; do
+        if [ "${attempt}" -ge "${NET_ATTEMPTS}" ]; then
+            echo "giving up after ${attempt} attempts: $*" >&2
+            return 1
+        fi
+        echo "retry ${attempt}/${NET_ATTEMPTS} after failure: $*" >&2
+        sleep $((attempt * 5))
+        attempt=$((attempt + 1))
+    done
+}
+# Fail a transfer that stalls (under 10 KB/s for 30 s) or runs over 10 minutes.
+fetch() {
+    retry curl -fsSL --connect-timeout 20 --speed-limit 10240 --speed-time 30 --max-time 600 "$@"
+}
+APT_BOUNDS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2)
+apt_update_and_install() {
+    apt-get update -qq "${APT_BOUNDS[@]}" &&
+        apt-get install -y -qq --no-install-recommends "${APT_BOUNDS[@]}" "$@"
+}
+apt_install() {
+    retry apt_update_and_install "$@"
+}
+# npm's own defaults (a 300 s request timeout, 2 retries) outlast a CI job's budget.
+npm_install_global() {
+    retry npm install -g --include=optional --fetch-retries=3 --fetch-timeout=60000 \
+        --fetch-retry-mintimeout=5000 --fetch-retry-maxtimeout=30000 "$@"
+}
+pip_install() {
+    retry pip install --no-cache-dir --retries 5 --timeout 30 "$@"
+}
+# <<< vibesys network helpers
+
 if [ -z "${GO_VERSION:-}" ]; then
     echo "vibesys-go: option 'go_version' is required" >&2
     exit 1
 fi
 
 export DEBIAN_FRONTEND=noninteractive
-installed=""
-for attempt in 1 2 3 4 5; do
-    if apt-get update -qq && apt-get install -y -qq --no-install-recommends \
-        curl ca-certificates tar; then
-        installed=1
-        break
-    fi
-    echo "apt retry ${attempt}..." >&2
-    sleep $((attempt * 5))
-done
-[ -n "${installed}" ]
+apt_install curl ca-certificates tar
 rm -rf /var/lib/apt/lists/*
 
 arch="$(dpkg --print-architecture)"
@@ -29,7 +59,7 @@ case "${arch}" in
     arm64) go_arch=arm64 ;;
     *) echo "unsupported architecture for Go: ${arch}" >&2; exit 1 ;;
 esac
-curl -fsSL --retry 5 --retry-delay 5 -o /tmp/go.tar.gz \
+fetch -o /tmp/go.tar.gz \
     "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz"
 rm -rf /usr/local/go
 tar -xzf /tmp/go.tar.gz -C /usr/local

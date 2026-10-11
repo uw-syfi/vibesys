@@ -22,10 +22,12 @@ if TYPE_CHECKING:
 class JournalPublicationDelivery:
     """Atomic durable journal, with conflict detection on ID and sequence.
 
-    The host's StateStore fence serializes writers. A returned publication is
-    durable before acknowledgement; replay after append-before-ack verifies
-    exact payload equality and does not append a duplicate. There is no legacy
-    journal fallback. Namespace is supplied through Project.portable_namespace.
+    The host's StateStore fence and the journal mutation share one transaction,
+    so takeover cannot interleave between ownership validation and replacement.
+    A returned publication is durable before acknowledgement; replay after
+    append-before-ack verifies exact payload equality and does not append a
+    duplicate. There is no legacy journal fallback. Namespace is supplied
+    through Project.portable_namespace.
     """
 
     def __init__(
@@ -52,18 +54,19 @@ class JournalPublicationDelivery:
         self, publication: Publication, context: PublicationContext
     ) -> PublicationAcknowledgement:
         """Honor the host fence and durably deduplicate before acknowledgement."""
-        if not self._store.verify(context.fence, now=context.now_at):
-            raise ContractError(("fence",), "publication host no longer owns the run")
-        rows = self.read()
-        appended = append_publication(rows, publication)
-        if appended == rows:
-            return PublicationAcknowledgement(
-                publication_id=publication.publication_id, sequence=publication.sequence
+
+        def append() -> None:
+            rows = self.read()
+            appended = append_publication(rows, publication)
+            if appended == rows:
+                return
+            journal = PublicationHistory(
+                schema_version=PUBLICATION_SCHEMA_VERSION, publications=appended
             )
-        journal = PublicationHistory(
-            schema_version=PUBLICATION_SCHEMA_VERSION, publications=appended
-        )
-        self._namespace.write_bytes("publications.json", journal.model_dump_json().encode())
+            self._namespace.write_bytes("publications.json", journal.model_dump_json().encode())
+
+        if not self._store.mutate_if_fenced(context.fence, context.now_at, append):
+            raise ContractError(("fence",), "publication host no longer owns the run")
         return PublicationAcknowledgement(
             publication_id=publication.publication_id, sequence=publication.sequence
         )

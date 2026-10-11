@@ -44,6 +44,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     ReviewPrompt,
     dynamic_operation_registry,
 )
+from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import (
     AttemptId,
     EvidenceId,
@@ -88,7 +89,7 @@ def _text(prompt: ReviewPrompt, *, agent_evaluation: bool = True) -> str:
     variables = {name: getattr(prompt, name) for name in type(prompt).model_fields}
     variables.pop("template")
     root = Path(templates.__file__).parent
-    return TemplateRenderer(root).render_template(
+    return TemplateRenderer(root, fallback_roots=(CORE_PROTOCOL_DIR,)).render_template(
         "review.j2",
         **variables,
         **run_prompt_variables(

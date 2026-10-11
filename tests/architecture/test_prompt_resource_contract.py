@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import re
-import shutil
 import sys
 import sysconfig
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,6 +17,11 @@ from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionId,
 
 if __name__ != "packaged_prompt_contract":
     from tests.support import run_test_command
+    from tests.support.distribution_build import (
+        PrivatePackagingSource,
+        build_distribution,
+        copy_private_packaging_source,
+    )
 
 from vibesys.constants import ComputeBackend
 from vibesys.hypothesis import (
@@ -31,20 +36,22 @@ from vibesys.metrics import Objective
 from vibesys.orchestration.dynamic.strategy.api import PlannerPrompt, ReviewEvaluation
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.orchestration.issue_queue.strategy.api import IssueBrief, PriorPerformance
-from vibesys.orchestration.multi.contracts import (
+from vibesys.orchestration.multi.models import (
     ImplementerResponse,
     JudgeResponse,
     PreRoundDecision,
-    ProfilerCampaign,
 )
-from vibesys.orchestration.multi.files import MultiFiles
+from vibesys.orchestration.multi.strategy.api import (
+    GateFacts,
+    ImplementerClaims,
+    ValidationFailure,
+)
 from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
     ProfilerSummary,
     profiler_definition,
     profiler_support_extra,
 )
-from vibesys.orchestration.progress import ProgressLog
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.skill_selection import (
     PLATFORM_SKELETON,
@@ -53,7 +60,7 @@ from vibesys.orchestration.skill_selection import (
     resolve_agent_resource_paths,
 )
 from vibesys.profile_focus import FocusLedger
-from vibesys.prompts import PROMPTS_DIR, render_template
+from vibesys.prompts import render_template
 from vibesys.run.contracts import ProfilerKind
 from vibesys.run.project_policy import build_project_path_policy
 from vibesys.run.workspace_policy import (
@@ -65,7 +72,7 @@ from vs_evaluation.api import EvaluationOperationSnapshot, EvaluationState, Prof
 from vs_issue_tracker.api import Issue, IssueStatus, IssueType
 from vs_project.api import Project
 from vs_prompts.api import resolve_free_variables
-from vs_runtime.api import LocalValidationEvaluation, ResolvedSkillResources, RunFacts, SkillFact
+from vs_runtime.api import LocalValidationEvaluation, RunFacts, SkillFact
 from vs_runtime.api.infrastructure import (
     ModalEnvironmentFacts,
     ProjectMaterializer,
@@ -81,34 +88,30 @@ if TYPE_CHECKING:
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@dataclass(frozen=True)
+class _PackagedTree:
+    """The installed wheel paired with the exact source snapshot that produced it."""
+
+    source: PrivatePackagingSource
+    installed: Path
+
+
 @pytest.fixture(scope="module")
-def packaged_tree(tmp_path_factory: pytest.TempPathFactory) -> Path:
+def packaged_tree(tmp_path_factory: pytest.TempPathFactory) -> _PackagedTree:
     """Build in private scratch so concurrent packaging checks share no build output."""
     scratch = tmp_path_factory.mktemp("prompt-wheel")
-    checkout = scratch / "checkout"
-    shutil.copytree(
-        ROOT,
-        checkout,
-        ignore=shutil.ignore_patterns(
-            ".git", ".venv", "build", "dist", "*.egg-info", "__pycache__", ".pytest_cache"
-        ),
-    )
-    run_test_command(
-        ["uv", "build", "--wheel", "--out-dir", str(scratch / "dist")],
-        cwd=checkout,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    source = copy_private_packaging_source(ROOT, scratch / "checkout")
+    build_distribution(source, scratch / "dist", artifact="wheel")
     installed = scratch / "installed"
     with zipfile.ZipFile(next((scratch / "dist").glob("vibesys-*.whl"))) as archive:
         archive.extractall(installed)
-    return installed
+    return _PackagedTree(source=source, installed=installed)
 
 
-def assert_every_source_prompt_is_in_the_wheel(packaged_tree: Path) -> None:
+def assert_every_source_prompt_is_in_the_wheel(packaged_tree: _PackagedTree) -> None:
     """A forgotten package-data glob must fail even when editable installs render it."""
-    sources = [ROOT / "src", *(ROOT / "libs").glob("*/src")]
+    source_root = packaged_tree.source.root
+    sources = [source_root / "src", *(source_root / "libs").glob("*/src")]
     expected = {
         path.relative_to(source)
         for source in sources
@@ -116,11 +119,15 @@ def assert_every_source_prompt_is_in_the_wheel(packaged_tree: Path) -> None:
         if path.is_file() and path.suffix in {".j2", ".md"} and "prompts" in path.parts
     }
     assert expected
-    missing = sorted(str(path) for path in expected if not (packaged_tree / path).is_file())
+    missing = sorted(
+        str(path) for path in expected if not (packaged_tree.installed / path).is_file()
+    )
     assert not missing, f"Prompts missing from wheel: {missing}"
 
 
-def test_every_packaged_prompt_renders_without_checkout_fallback(packaged_tree: Path) -> None:
+def test_every_packaged_prompt_renders_without_checkout_fallback(
+    packaged_tree: _PackagedTree,
+) -> None:
     """Run real rendering in a child whose package imports come from the wheel."""
     assert_every_source_prompt_is_in_the_wheel(packaged_tree)
     script = (
@@ -136,11 +143,11 @@ def test_every_packaged_prompt_renders_without_checkout_fallback(packaged_tree: 
             "-S",
             "-c",
             script,
-            str(packaged_tree),
+            str(packaged_tree.installed),
             sysconfig.get_path("purelib"),
             str(Path(__file__)),
         ],
-        cwd=packaged_tree,
+        cwd=packaged_tree.installed,
         check=False,
         capture_output=True,
         text=True,
@@ -373,6 +380,20 @@ def representative_context() -> dict[str, object]:
     return context
 
 
+def template_roots(path: Path, installed: Path) -> tuple[Path, tuple[Path, ...]]:
+    """The root a packaged template renders from, and every root its includes may resolve in."""
+    shared = installed / "vibesys" / "prompts" / "shared"
+    common = shared.parent
+    core_protocol = common / "core_protocol"
+    parts = path.relative_to(installed).parts
+    root = installed.joinpath(*parts[: parts.index("prompts") + 1])
+    if path.is_relative_to(shared):
+        root = shared
+    elif path.is_relative_to(core_protocol):
+        root = core_protocol
+    return root, (root, shared, common, core_protocol)
+
+
 def render_packaged_prompts(installed: Path) -> int:
     """Exercise the public renderer against every template in the unpacked wheel."""
     context = representative_context()
@@ -423,16 +444,13 @@ def render_packaged_prompts(installed: Path) -> int:
         # prompt trees form this renderer's contract.
         if "prompts" not in path.relative_to(installed).parts or path.name == "README.md":
             continue
+        parts = path.relative_to(installed).parts
+        root, search_roots = template_roots(path, installed)
         shared = installed / "vibesys" / "prompts" / "shared"
         common = shared.parent
-        parts = path.relative_to(installed).parts
-        root = installed.joinpath(*parts[: parts.index("prompts") + 1])
-        if path.is_relative_to(shared):
-            root = shared
-        search_roots = (root, shared, common)
         free, _ = resolve_free_variables(path, search_roots=search_roots)
         template_inputs = context
-        if "core_policy" in parts:
+        if {"core_policy", "core_protocol", "serial_search"} & set(parts):
             template_inputs = context | core_policy_context()
         assert free <= template_inputs.keys() | {"response"}, (
             path,
@@ -541,6 +559,41 @@ def core_policy_context() -> dict[str, object]:
         ),
         "files_touched": ("a.py",),
         "self_check": "Ran the tests.",
+        # The multi strategy's prompt fields (`ImplementPrompt`, `JudgePrompt`, `ProfilerPrompt`).
+        "framework": GateFacts(),
+        "claims": ImplementerClaims(
+            summary="fixture",
+            expected_behavior="fixture",
+            hypothesis_outcome="nominated",
+            candidate_disposition="unassessed",
+        ),
+        "validation_failure": ValidationFailure(recipe="unit", error="boom", output="tail"),
+        "validation_recipe_schema": '{"version": 1}',
+        "evidence_directory": "profile/round-0001/",
+        "profiler_kind": "linux_cpu",
+        # The single strategy's plan prompt (`PlanPrompt`) fields.
+        "benchmark_enabled": True,
+        "exhaustion_feedback": "fixture feedback",
+        "exhaustion_round": 1,
+        "frontier": (),
+        "last_profile": None,
+        "max_rounds": 3,
+        "official_cadence_due": False,
+        "older_rounds": 0,
+        "pending_claims": (),
+        "regression_kind": None,
+        "regression_round": None,
+        # `RoundPrompt` fields.
+        "activation_evidence": "fixture",
+        "dominated_by_rounds": (),
+        "falsification_criteria": "fixture",
+        "invariants": "fixture",
+        "minimum_acceptance_criteria": "fixture",
+        "no_valid_reply": None,
+        "official_due": True,
+        "official_reason": "cadence",
+        "profiler_id": "none",
+        "title": "fixture title",
     }
 
 
@@ -689,38 +742,6 @@ def stage_prompt_workspace(
 
 def rich_path_context(workspace: Path) -> dict[str, object]:
     """Use real artifact writers and typed collections for cited role inputs."""
-    files = MultiFiles.open(workspace)
-    archive = ParetoArchiveView(axes=(), relative_noise=0.05, latest=None)
-    files.write_pareto(archive)
-    plan = OrchestratorPlan.model_validate(
-        {
-            "task": "Batch requests.",
-            "pass_criteria": "Correct.",
-            "reasoning": "Reduce overhead.",
-        }
-    )
-    plan_location = files.write_plan(1, plan)
-    implementation_location = files.write_implementer(
-        1,
-        1,
-        ImplementerResponse.model_validate(
-            {
-                "summary": "Implemented.",
-                "expected_behavior": "Correct.",
-            }
-        ),
-    )
-    entry = ProgressLog(workspace, files.progress).append(
-        1,
-        render_template(
-            "_progress/profile.j2",
-            template_dir=PROMPTS_DIR / "shared",
-            round_number=1,
-            summary=ProfilerSummary(
-                analysis="Measured queue.", bottlenecks="Queue.", suggestions="Batch."
-            ),
-        ),
-    )
     reference = workspace / "reference"
     reference.mkdir()
     (workspace / "progress.md").write_text("Issue progress ledger.")
@@ -733,42 +754,13 @@ def rich_path_context(workspace: Path) -> dict[str, object]:
     sessions.mkdir()
     (sessions / "conversation.jsonl").write_text("{}\n")
     return {
-        "plan": plan,
-        "plan_artifact_location": plan_location,
-        "implementer_artifact_location": implementation_location,
-        "prior_attempt_artifact_locations": (implementation_location,),
-        "roadmap_location": files.roadmap_location,
-        "progress_location": files.progress_location,
-        "pareto_archive_location": files.pareto_location,
-        "validation_location": files.validation_location,
-        "validation_recipe_contract_location": files.validation_schema_location,
-        "current_round_location": entry.location,
-        "regression_entry": entry,
-        "exhaustion_entry": entry,
-        "profiler_entry": entry,
-        "campaign": ProfilerCampaign(
-            progress_location=files.progress_location, evidence_location=files.profiler_location(1)
-        ),
         "read_only_paths": ("reference",),
         "gates": ("accuracy", "benchmark"),
         "seeded_workspace_paths": ("reference/model.py",),
-        "history_root": files.progress_location,
-        "recommended_skills": (
-            ResolvedSkillResources(
-                name="serving-systems",
-                router_path="serving-systems/SKILL.md",
-                resource_paths=("serving-systems/references/tooling/openai-api.md",),
-                purpose="Follow the API contract.",
-            ),
-        ),
         "objective_location": "OBJECTIVE.md",
         "reference_path": "reference",
-        "gate_approved_evaluation_artifact": "artifacts/evaluation.json",
         "session_state_dir": "sessions",
         "profiling": True,
-        "framework_revert_applied": True,
-        "gate_revalidation_pending": True,
-        "official_evaluation_due": True,
     }
 
 
@@ -810,29 +802,12 @@ def assert_resource_citations(
 
 def runtime_path_context(context: dict[str, object]) -> frozenset[str]:
     """Collect known existing paths from actual artifact writers and typed receipts."""
-    names = (
-        "objective_location",
-        "reference_path",
-        "progress_location",
-        "roadmap_location",
-        "pareto_archive_location",
-        "plan_artifact_location",
-        "plan_example",
-        "implementer_artifact_location",
-        "current_round_location",
-        "validation_location",
-        "validation_recipe_contract_location",
-        "gate_approved_evaluation_artifact",
-        "session_state_dir",
-    )
-    campaign = context["campaign"]
-    assert isinstance(campaign, ProfilerCampaign)
+    names = ("objective_location", "reference_path", "session_state_dir")
     return frozenset(str(context[name]) for name in names) | {
         "reference/meta.json",
         "reference/config.json",
         "reference/reference.py",
         "progress.md",
-        campaign.evidence_location,
     }
 
 

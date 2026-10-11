@@ -13,7 +13,7 @@ from vibesys.api import agent_spec_from_config
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import Config
 from vibesys.errors import ConfigurationError
-from vibesys.orchestration.multi.contracts import JudgeResponse
+from vibesys.orchestration.multi.models import JudgeResponse
 from vibesys.orchestration.review import Verdict
 from vs_agent.api import AgentClient, build_agent_client
 from vs_agent.callbacks import AgentLogger

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 import pytest
 from tests.server.support import agent_descriptor, build_server_parts, run_record
 from tests.support import run_test_command
+from tests.support.multi_search import SearchRecord
 
 from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
 from server.api.protocol import DesignPatchQuery, DesignQuery
@@ -17,7 +18,6 @@ from vibesys.api.testing import FakeRunRecord
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.readmodel import project_run_view
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
-from vibesys.orchestration.single.models import SingleState
 from vs_project.api import Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 
@@ -100,7 +100,7 @@ def _view(state: HypothesisState, *, run_id: str = "run-1") -> RunView:
         run_id=run_id,
         status=RunStatus.ACTIVE,
         experiment_revision=state.experiment_revision,
-        loop="single-agent",
+        loop="multi-agent",
     )
 
 
@@ -171,8 +171,8 @@ def test_design_log_derives_per_round_file_changes(tmp_path: Path) -> None:
     (workspace / ".vibesys" / "state" / "note").write_text("bookkeeping\n", encoding="utf-8")
     (workspace / "progress.md").write_text("round 1\n", encoding="utf-8")
     (workspace / "pareto-frontier.md").write_text("# Pareto frontier\n", encoding="utf-8")
-    (workspace / "progress").mkdir()
-    (workspace / "progress" / "round-0001.md").write_text("framework\n", encoding="utf-8")
+    (workspace / "profile").mkdir()
+    (workspace / "profile" / "round-0001.md").write_text("framework\n", encoding="utf-8")
     (workspace / "roadmap").mkdir()
     (workspace / "roadmap" / "index.md").write_text("framework\n", encoding="utf-8")
     first = _commit_all(workspace, "round 1")
@@ -589,10 +589,8 @@ def _project_run(project: Path, *, trusted_input_baseline: str) -> tuple[Project
 
 
 def _save_single_state(project: Project, run_id: str, search: HypothesisState) -> None:
-    """Persist the exact aggregate declared by the registered single plugin."""
-    project.state.portable_namespace(run_id, "single-agent").slot("state.json", SingleState).save(
-        SingleState(search=search)
-    )
+    """Commit the ledger as the runtime record of the registered multi run."""
+    SearchRecord(project, run_id).save(search)
 
 
 def test_service_builds_design_from_workspace_history(tmp_path: Path) -> None:

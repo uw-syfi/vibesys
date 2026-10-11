@@ -12,6 +12,8 @@ export interface SpawnedProcess {
   readonly stdin: Writable;
   readonly stdout: Readable;
   readonly stderr: Readable;
+  /** True until this adapter observes that process termination has begun. */
+  readonly running: boolean;
   /**
    * Settles with the exit code once the process has ended and its output has been read; null when
    * it ended by signal or never started.
@@ -22,9 +24,19 @@ export interface SpawnedProcess {
 
 /** A real child process spawned with three pipes. */
 export function fromChild(child: ChildProcess): SpawnedProcess {
+  let running = true;
   const exit = new Promise<number | null>(resolve => {
-    child.once('error', () => resolve(null));
-    child.once('close', code => resolve(code));
+    child.once('error', () => {
+      running = false;
+      resolve(null);
+    });
+    child.once('exit', () => {
+      running = false;
+    });
+    child.once('close', code => {
+      running = false;
+      resolve(code);
+    });
   });
   // A process that exits before reading its input makes a later write fail with EPIPE; the exit
   // code reports that outcome, so the write error carries nothing more.
@@ -34,6 +46,9 @@ export function fromChild(child: ChildProcess): SpawnedProcess {
     stdin: child.stdin as Writable,
     stdout: child.stdout as Readable,
     stderr: child.stderr as Readable,
+    get running() {
+      return running;
+    },
     exit,
     kill: signal => {
       if (child.exitCode === null && child.signalCode === null) child.kill(signal);

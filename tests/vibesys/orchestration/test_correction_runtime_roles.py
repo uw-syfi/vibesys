@@ -9,7 +9,6 @@ import pytest
 from pydantic import BaseModel, RootModel
 
 from vibesys import dynamic_roles as dynamic
-from vibesys.hypothesis import OrchestratorPlan
 from vibesys.orchestration.dynamic.models import (
     ImplementerReply,
     JudgeReply,
@@ -23,15 +22,8 @@ from vibesys.orchestration.evolve.models import (
 from vibesys.orchestration.evolve.models import (
     MutatorResponse,
 )
-from vibesys.orchestration.multi import agents as multi
-from vibesys.orchestration.multi.contracts import (
-    ImplementerResponse,
-    JudgeResponse,
-    PreRoundDecision,
 )
 from vibesys.orchestration.profilers import ProfilerSummary
-from vibesys.orchestration.single import agents as single
-from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_agent.api import AgentClient, AgentOutputSchemaError, DurableSessionStore
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider, FakeTurnScript
@@ -118,50 +110,6 @@ CASES = (
             ),
         ),
         id="dynamic-planner",
-    ),
-    pytest.param(
-        multi.DESIGNER,
-        OrchestratorPlan(task="Implement", pass_criteria=VERIFIED_CRITERIA, reasoning="Plan"),
-        id="multi-planner",
-    ),
-    pytest.param(
-        multi.DESIGNER,
-        PreRoundDecision(need_profile=True, reasoning="Measure"),
-        id="multi-profile-decision",
-    ),
-    pytest.param(
-        multi.IMPLEMENTER,
-        ImplementerResponse(summary="Implemented", expected_behavior="Faster"),
-        id="multi-implementer",
-    ),
-    pytest.param(
-        multi.JUDGE,
-        JudgeResponse(analysis="Reviewed", feedback="", verdict="pass"),
-        id="multi-judge",
-    ),
-    pytest.param(
-        multi.PROFILER,
-        ProfilerSummary(analysis="Measured", bottlenecks="CPU", suggestions="Batch"),
-        id="multi-profiler",
-    ),
-    pytest.param(
-        single.DESIGNER,
-        OrchestratorPlan(task="Implement", pass_criteria=VERIFIED_CRITERIA, reasoning="Plan"),
-        id="single-planner",
-    ),
-    pytest.param(
-        single.IMPLEMENTER,
-        SingleAgentRoundResponse(
-            summary="Implemented",
-            expected_behavior="Faster",
-            self_review="Reviewed",
-            feedback="",
-            verdict="pass",
-            bottlenecks="CPU",
-            suggestions="Batch",
-            profile_analysis="Measured",
-        ),
-        id="single-combined",
     ),
     pytest.param(
         evolve.MUTATOR,

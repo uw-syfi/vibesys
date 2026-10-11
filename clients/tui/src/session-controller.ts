@@ -2,8 +2,6 @@ import {
   DEFAULT_RECONNECT_DELAYS_MS,
   type ExperimentCursor,
   PersistentEventStream,
-  type ProtocolResponse,
-  type RequestInput,
   type RunEvent,
   type RunSnapshot,
   type ScheduleTimeout,
@@ -13,12 +11,7 @@ import {
   type StreamConnectionState,
   StreamReconciler,
 } from '@vibesys/backend-client';
-import {
-  DEFAULT_CHAT_THREAD_ID,
-  hasRunEnded,
-  projectPerformance,
-  recordsBenchmark,
-} from '@vibesys/core-state';
+import {DEFAULT_CHAT_THREAD_ID, hasRunEnded, recordsBenchmark} from '@vibesys/core-state';
 import type {StartupTrace} from './boot-trace.js';
 import {
   chatMenuCustomModel,
@@ -76,7 +69,7 @@ import {
   openPalette,
   setPaletteQuery,
 } from './palette-model.js';
-import {renderPerformanceCurve} from './performance-chart.js';
+import {renderCommandResponse} from './response-renderer.js';
 import {
   clearAgentSelection,
   selectAgent,
@@ -100,6 +93,7 @@ import {
   clearEntrySelection,
   clearInputError,
   closeNotepad,
+  closeNotepadAfterPromotion,
   closeOverlays,
   closePane,
   cyclePaneFocus,
@@ -111,6 +105,7 @@ import {
   initialSessionState,
   markEventStreamAvailable,
   markEventStreamUnavailable,
+  markNotepadConflict,
   normalizeFocus,
   notepadPromotionText,
   openChat,
@@ -126,6 +121,7 @@ import {
   setChatDockFits,
   setChatThreadPending,
   setDesignPane,
+  setNotepadPersistenceError,
   setNotepadText,
   setPerformancePane,
   showDetail,
@@ -235,11 +231,12 @@ export interface SessionController {
   setNoteText(text: string): void;
   /**
    * Closes the notepad and returns its text for the caller to drop, unsent,
-   * into the command bar's `/steer` draft. Returns null for an empty note, so
-   * the caller has nothing to pre-fill and the notepad is left open.
+   * into the command bar's `/steer` draft. Returns null for an empty note. An
+   * ordinary empty note stays open; this action closes an empty conflicted
+   * draft so the preserved saved note becomes accessible again.
    */
   promoteNoteToSteerDraft(): {text: string} | null;
-  /** As `promoteNoteToSteerDraft`, but for the chat composer's draft; also opens chat. */
+  /** As `promoteNoteToSteerDraft`, but a nonblank result opens and fills the chat draft. */
   promoteNoteToChatDraft(): {text: string} | null;
   /** Loads the chunk of history just older than what is folded. Resolves false when history is already complete. */
   loadOlderHistory(): Promise<boolean>;
@@ -287,10 +284,15 @@ export class SocketSessionController implements SessionController {
   #paneRefreshWanted: PaneView | null = null;
   /** Single-flight guard for the supplemental design-log refresh. */
   #designFetch: Promise<void> | null = null;
+  /** One refresh requested after the current design query started. */
+  #designRefreshPending = false;
+  /** Stop is terminal for this controller, so no supplemental query starts afterward. */
+  #designRefreshAllowed = true;
   readonly #reconciler = new StreamReconciler({backfillChunk: BACKFILL_CHUNK});
   /** Serializes the consumer effect of applying one shared backfill outcome. */
   #historyFetch: Promise<boolean> | null = null;
   #streamProtocolError = false;
+  #chatThreadCreateGeneration = 0;
   /** Opaque server-owned namespace for project-local client state. */
   #noteProjectScope: string | null = null;
   /**
@@ -412,6 +414,7 @@ export class SocketSessionController implements SessionController {
         }
         this.#rememberSnapshotWatermark(response.snapshot, next, streamGeneration);
         this.#setState(next);
+        this.#reconcileNotepadIdentity();
         // The stream may have closed quietly before this concurrent answer
         // established that its fold was incomplete. The conditional retry is
         // inert while healthy and promotes that prior close when it is not.
@@ -491,6 +494,9 @@ export class SocketSessionController implements SessionController {
   }
 
   async stop(): Promise<void> {
+    this.#designRefreshAllowed = false;
+    this.#designRefreshPending = false;
+    this.#chatThreadCreateGeneration += 1;
     await this.#stream.close();
     await this.client.close();
   }
@@ -637,15 +643,19 @@ export class SocketSessionController implements SessionController {
   }
 
   /**
-   * Opens the notepad, hydrated from `notes-store.ts` on the first open of a
-   * run that already has a saved note (a restart, or a reconnect that landed
-   * on the same run). Later opens in the same process reuse in-memory state,
-   * so a read here never clobbers text the operator is mid-edit on.
+   * Opens the notepad, hydrated from `notes-store.ts` once its run/project
+   * identity is known. A conflicted startup draft stays in memory across
+   * closes instead of being replaced by the older durable note.
    */
   openNotepad(): void {
+    if (this.#state.notepad.persistence === 'conflict') {
+      this.#setState(openNotepad(this.#state));
+      return;
+    }
     const identity = this.#noteIdentity();
-    const record = identity === null ? null : readNote(identity);
-    this.#setState(openNotepad(hydrateNotepad(this.#state, record)));
+    const hydrated =
+      identity === null ? this.#state : hydrateNotepad(this.#state, readNote(identity));
+    this.#setState(openNotepad(hydrated));
   }
 
   closeNotepad(): void {
@@ -662,15 +672,29 @@ export class SocketSessionController implements SessionController {
   setNoteText(text: string): void {
     const timestamp = new Date().toISOString();
     const next = setNotepadText(this.#state, text, timestamp);
-    this.#setState(next);
     const identity = this.#noteIdentity();
-    if (identity !== null && next.notepad.createdAt !== null) {
+    if (
+      identity === null ||
+      next.notepad.persistence !== 'ready' ||
+      next.notepad.createdAt === null
+    ) {
+      this.#setState(next);
+      return;
+    }
+    try {
       writeNote({
         ...identity,
         text: next.notepad.text,
         createdAt: next.notepad.createdAt,
         updatedAt: next.notepad.updatedAt ?? timestamp,
       });
+      this.#setState(setNotepadPersistenceError(next, null));
+    } catch (error) {
+      // The private note is convenience state, not part of the run. Keep the
+      // operator's newest draft in memory and show that it is unsaved; a later
+      // successful edit clears this diagnostic. Filesystem failure must never
+      // escape the editor callback or put note text on the backend transport.
+      this.#setState(setNotepadPersistenceError(next, errorMessage(error)));
     }
   }
 
@@ -678,6 +702,40 @@ export class SocketSessionController implements SessionController {
     const runId = this.#state.core.runId;
     const projectScope = this.#noteProjectScope;
     return runId === null || projectScope === null ? null : {projectScope, runId};
+  }
+
+  /**
+   * Bind a startup notepad to the identity learned from the first accepted
+   * snapshot. An untouched pad adopts the durable record. A touched pad may
+   * claim an empty slot, but it never overwrites a record that predates its
+   * identity: that crossing becomes an explicit in-memory conflict instead.
+   */
+  #reconcileNotepadIdentity(): void {
+    if (this.#state.notepad.persistence !== 'pending_identity') return;
+    const identity = this.#noteIdentity();
+    if (identity === null) return;
+    const record = readNote(identity);
+    if (this.#state.notepad.createdAt === null) {
+      this.#setState(hydrateNotepad(this.#state, record));
+      return;
+    }
+    if (record !== null) {
+      this.#setState(markNotepadConflict(this.#state));
+      return;
+    }
+    const {text, createdAt, updatedAt} = this.#state.notepad;
+    const bound = hydrateNotepad(this.#state, null);
+    try {
+      writeNote({
+        ...identity,
+        text,
+        createdAt,
+        updatedAt: updatedAt ?? createdAt,
+      });
+      this.#setState(setNotepadPersistenceError(bound, null));
+    } catch (error) {
+      this.#setState(setNotepadPersistenceError(bound, errorMessage(error)));
+    }
   }
 
   /**
@@ -689,16 +747,26 @@ export class SocketSessionController implements SessionController {
    */
   promoteNoteToSteerDraft(): {text: string} | null {
     const text = notepadPromotionText(this.#state);
-    if (text === null) return null;
-    this.#setState(closeNotepad(this.#state));
+    if (text === null) {
+      if (this.#state.notepad.persistence === 'conflict') {
+        this.#setState(closeNotepadAfterPromotion(this.#state));
+      }
+      return null;
+    }
+    this.#setState(closeNotepadAfterPromotion(this.#state));
     return {text};
   }
 
-  /** As `promoteNoteToSteerDraft`, but for the chat composer; also opens chat. */
+  /** As `promoteNoteToSteerDraft`, but a nonblank result opens and fills the chat draft. */
   promoteNoteToChatDraft(): {text: string} | null {
     const text = notepadPromotionText(this.#state);
-    if (text === null) return null;
-    this.#setState(openChat(closeNotepad(this.#state)));
+    if (text === null) {
+      if (this.#state.notepad.persistence === 'conflict') {
+        this.#setState(closeNotepadAfterPromotion(this.#state));
+      }
+      return null;
+    }
+    this.#setState(openChat(closeNotepadAfterPromotion(this.#state)));
     return {text};
   }
 
@@ -707,14 +775,17 @@ export class SocketSessionController implements SessionController {
   }
 
   switchChatThread(threadId: string): void {
+    this.#chatThreadCreateGeneration += 1;
     this.#setState(switchChatThread(this.#state, threadId));
   }
 
   openChatResumeMenu(): void {
+    this.#chatThreadCreateGeneration += 1;
     this.#setState(openChatResumeMenu(this.#state));
   }
 
   async openChatModelMenu(): Promise<void> {
+    this.#chatThreadCreateGeneration += 1;
     this.#setState(openChatModelMenu(this.#state));
     const ownedMenu = this.#state.chatMenu;
     try {
@@ -765,6 +836,7 @@ export class SocketSessionController implements SessionController {
   }
 
   closeChatMenu(): void {
+    this.#chatThreadCreateGeneration += 1;
     this.#setState(closeChatMenu(this.#state));
   }
 
@@ -784,16 +856,24 @@ export class SocketSessionController implements SessionController {
    * replayed events carry the authoritative thread record.
    */
   async #createChatThread(settings: ChatThreadSettings | null): Promise<void> {
+    const generation = ++this.#chatThreadCreateGeneration;
     try {
       const response = await this.client.request({
         type: 'query.chat_thread_create',
         ...(settings === null ? {} : {provider: settings.provider, model: settings.model}),
       });
-      const state = applyResponseEvents(closeChatMenu(this.#state), response.events ?? []);
+      const state = applyResponseEvents(this.#state, response.events ?? []);
+      if (this.#chatThreadCreateGeneration !== generation) {
+        if (state !== this.#state) this.#setState(state);
+        return;
+      }
+      const navigated = closeChatMenu(state);
       const threadId = response.chat_thread?.thread_id;
-      this.#setState(threadId === undefined ? state : switchChatThread(state, threadId));
+      this.#setState(threadId === undefined ? navigated : switchChatThread(navigated, threadId));
     } catch (error) {
-      this.#setState(reportCaughtError(this.#state, error, 'request'));
+      if (this.#chatThreadCreateGeneration === generation) {
+        this.#setState(reportCaughtError(this.#state, error, 'request'));
+      }
     }
   }
 
@@ -1132,14 +1212,23 @@ export class SocketSessionController implements SessionController {
    * The design log annotates the hypothesis drill-down, so it rides the same
    * triggers as the experiment fetch but never its promise: the query runs git
    * over the run's history, and the landing view must not wait on that to
-   * report boot. Single-flighted on its own so overlapping refreshes collapse.
-   * Best effort: on failure the drill-down keeps whatever it last showed and
-   * stays quiet, because `/design` reports errors through the pane.
+   * report boot. Single-flighted on its own so overlapping refreshes collapse,
+   * with one follow-up retained when an invalidation arrives mid-flight. Best
+   * effort: on failure the drill-down keeps whatever it last showed and stays
+   * quiet, because `/design` reports errors through the pane.
    */
   #refreshDesignLog(): Promise<void> {
-    if (this.#designFetch !== null) return this.#designFetch;
+    if (!this.#designRefreshAllowed) return Promise.resolve();
+    if (this.#designFetch !== null) {
+      this.#designRefreshPending = true;
+      return this.#designFetch;
+    }
     const fetch = this.#requestDesignLog().finally(() => {
       this.#designFetch = null;
+      if (this.#designRefreshAllowed && this.#designRefreshPending) {
+        this.#designRefreshPending = false;
+        void this.#refreshDesignLog();
+      }
     });
     this.#designFetch = fetch;
     return fetch;
@@ -1382,7 +1471,7 @@ export class SocketSessionController implements SessionController {
         if (action.paneView !== undefined) return this.openPane(action.paneView);
         try {
           const response = await this.client.request(action.request);
-          const rendered = renderResponse(action.request, response, action.responseView);
+          const rendered = renderCommandResponse(action.request, response, action.responseView);
           if (rendered !== null) this.#setState(showDetail(this.#state, rendered));
         } catch (error) {
           this.#setState(reportCaughtError(this.#state, error, 'request'));
@@ -1536,23 +1625,4 @@ function errorMessage(error: unknown): string {
 /** Proves a switch over a discriminated union handles every case at compile time. */
 function assertNever(value: never): never {
   throw new Error(`Unhandled command action: ${JSON.stringify(value)}`);
-}
-
-function renderResponse(
-  request: RequestInput,
-  response: ProtocolResponse,
-  responseView?: 'perf',
-): string | null {
-  if (response.ack) return `${response.ack.action}: ${response.ack.status}`;
-  if (request.type === 'query.performance' || responseView === 'perf') {
-    return renderPerformanceCurve(
-      projectPerformance({
-        performance: response.performance,
-        events: response.events,
-        objectiveDirection: response.performance_context?.objective_direction,
-      }),
-      response.performance_context,
-    );
-  }
-  return null;
 }

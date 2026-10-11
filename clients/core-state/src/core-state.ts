@@ -1435,12 +1435,16 @@ function applyChatEvent(
   const data = event.data;
   const threadId = event.chat_thread_id ?? DEFAULT_CHAT_THREAD_ID;
   if (data?.kind === 'chat_thread_created') {
-    return upsertChatThread(state, {
-      id: data.thread_id,
-      title: data.title ?? '',
-      provider: data.provider,
-      model: data.model,
-    });
+    return upsertChatThread(
+      state,
+      {
+        id: data.thread_id,
+        title: data.title ?? '',
+        provider: data.provider,
+        model: data.model,
+      },
+      event.sequence,
+    );
   }
   let next = state;
   const typed = data?.kind === 'tool_call' || data?.kind === 'tool_result';
@@ -1463,9 +1467,13 @@ function applyChatEvent(
 }
 
 /** Registers a replayed thread, or refreshes the record it already has. */
-function upsertChatThread(state: CoreState, thread: ChatThread): CoreState {
+function upsertChatThread(
+  state: CoreState,
+  thread: ChatThread,
+  creationSequence?: number,
+): CoreState {
   const existing = state.chatThreads.find(candidate => candidate.id === thread.id);
-  const chatThreads =
+  let chatThreads =
     existing === undefined
       ? [...state.chatThreads, thread]
       : state.chatThreads.map(candidate =>
@@ -1473,11 +1481,60 @@ function upsertChatThread(state: CoreState, thread: ChatThread): CoreState {
             ? {...thread, title: thread.title || candidate.title}
             : candidate,
         );
+  if (creationSequence !== undefined && creationSequence > 0) {
+    chatThreads = orderChatThreadsByCreation(state, chatThreads, thread.id, creationSequence);
+  }
   const chatTranscripts =
     state.chatTranscripts[thread.id] === undefined
       ? {...state.chatTranscripts, [thread.id]: []}
       : state.chatTranscripts;
   return cloneCoreStateWith(state, {chatThreads, chatTranscripts});
+}
+
+/**
+ * Restores the server's creation order when independent RPC replies arrive in
+ * reverse order. Response-route deliveries are retained until their stream
+ * copies arrive, so reducer provenance, rather than a caller-local sort, owns
+ * the authoritative journal sequence for every observed creation event.
+ */
+function orderChatThreadsByCreation(
+  state: CoreState,
+  threads: readonly ChatThread[],
+  currentThreadId: string,
+  currentSequence: number,
+): ChatThread[] {
+  const creationSequences = new Map<string, number>();
+  for (const {event} of retainedReplayEvents(state)) {
+    const data = event.data;
+    const sequence = event.sequence ?? 0;
+    if (
+      data?.kind !== 'chat_thread_created' ||
+      sequence <= 0 ||
+      !acceptsRunMetadata(state.runId, [event])
+    ) {
+      continue;
+    }
+    const previous = creationSequences.get(data.thread_id);
+    creationSequences.set(data.thread_id, Math.min(previous ?? sequence, sequence));
+  }
+  const previous = creationSequences.get(currentThreadId);
+  creationSequences.set(currentThreadId, Math.min(previous ?? currentSequence, currentSequence));
+
+  const defaultThread = threads.find(thread => thread.id === DEFAULT_CHAT_THREAD_ID);
+  const registered: Array<{thread: ChatThread; index: number}> = [];
+  const replayed: Array<{thread: ChatThread; index: number; sequence: number}> = [];
+  for (const [index, candidate] of threads.entries()) {
+    if (candidate.id === DEFAULT_CHAT_THREAD_ID) continue;
+    const sequence = creationSequences.get(candidate.id);
+    if (sequence === undefined) registered.push({thread: candidate, index});
+    else replayed.push({thread: candidate, index, sequence});
+  }
+  replayed.sort((left, right) => left.sequence - right.sequence || left.index - right.index);
+  return [
+    ...(defaultThread === undefined ? [] : [defaultThread]),
+    ...registered.map(item => item.thread),
+    ...replayed.map(item => item.thread),
+  ];
 }
 
 function setChatThreadTitle(state: CoreState, threadId: string, title: string): CoreState {

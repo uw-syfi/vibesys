@@ -26,3 +26,6 @@ class AgentOrchestrationOptions(BaseModel):
     operator_constraints: tuple[str, ...] = ()
     metric_space: MetricSpace = Field(default_factory=MetricSpace)
     profile_guided: ProfileGuidedInput | None = None
+    # Seconds to wait before asking an agent again after the provider connection dropped its
+    # turn; doubles with each further drop of the same turn.
+    turn_drop_backoff_seconds: Annotated[float, Field(gt=0, le=600)] = 5.0

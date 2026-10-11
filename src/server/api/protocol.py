@@ -57,9 +57,16 @@ class SteerCommand(Request):
 
 
 class SnapshotQuery(Request):
-    """Request the current run snapshot."""
+    """Request the current run snapshot.
+
+    ``expected_store_id`` fences the read to the event store whose batch established a
+    client's sequence space. None preserves the unfenced request used by
+    clients that do not combine a snapshot with a live subscription. An empty
+    string is a real fence for the pre-attachment store, not an alias for None.
+    """
 
     type: Literal["query.snapshot"] = "query.snapshot"
+    expected_store_id: str | None = None
 
 
 class ChatQuery(Request):

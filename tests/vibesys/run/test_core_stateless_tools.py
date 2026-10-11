@@ -38,7 +38,14 @@ if TYPE_CHECKING:
 SERVER = StdioServerDescriptor(name="profiler", command="true")
 
 
-def _compose(tmp_path: Path, tool: str, *, stateless: bool = False, served: bool = False) -> None:
+def _compose(
+    tmp_path: Path,
+    tool: str,
+    *,
+    stateless: bool = False,
+    served: bool = False,
+    declined: bool = False,
+) -> None:
     project_root = tmp_path / "project"
     templates = tmp_path / "templates"
     templates.mkdir()
@@ -69,7 +76,13 @@ def _compose(tmp_path: Path, tool: str, *, stateless: bool = False, served: bool
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
-                stateless_tool_servers={tool: SERVER} if served else None,
+                stateless_tool_servers=(
+                    {tool: lambda _context: SERVER}
+                    if served
+                    else {tool: lambda _context: None}
+                    if declined
+                    else None
+                ),
             ):
                 return
         finally:
@@ -86,6 +99,11 @@ def test_a_stateless_tool_nobody_serves_is_refused_not_silently_dropped(tmp_path
     with pytest.raises(CoreCompositionError, match="no server") as raised:
         _compose(tmp_path, "profiler", stateless=True, served=False)
     assert raised.value.resource == "agent role 'implementer' tool 'profiler'"
+
+
+def test_a_stateless_tool_its_provider_declines_for_the_run_is_left_out(tmp_path: Path) -> None:
+    """A run with no profiler has no profiler tool; the roles that declare it still compose."""
+    _compose(tmp_path, "profiler", stateless=True, declined=True)
 
 
 def test_a_tool_not_declared_stateless_is_refused_even_when_a_server_exists(

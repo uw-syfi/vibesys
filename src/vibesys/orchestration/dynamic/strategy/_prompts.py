@@ -11,6 +11,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from vibesys.metrics import MetricRow, PartialRow
+from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
 from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionRef, Value
 
 
@@ -22,9 +23,6 @@ class PromptTemplate(StrEnum):
     IMPLEMENT = "implement"
     REVIEW = "review"
     PROFILE_REQUEST = "profile_request"
-    RESUME = "resume"
-    REPLY_CORRECTION = "reply_correction"
-    WAIT_UNRECORDED = "wait_unrecorded"
 
 
 class EvidenceCitation(Value):
@@ -73,6 +71,34 @@ class HistoryRow(Value):
     failure_fence: str = "```"
 
 
+class ProfileHistoryStatus(StrEnum):
+    """What the trusted profile attempt established for its target."""
+
+    RUNNING = "running"
+    OBSERVED = "observed"
+    FAILED = "failed"
+
+
+class ProfileHistoryRow(Value):
+    """One planned profile and the trusted evidence it produced."""
+
+    kind: Literal["profile"] = "profile"
+    profile_id: str
+    sequence: int = Field(gt=0)
+    target_hypothesis_id: str | None = None
+    revision: RevisionRef
+    question: str
+    decision_impact: str
+    status: ProfileHistoryStatus
+    evidence_ids: tuple[EvidenceId, ...] = ()
+    diagnosis: str = ""
+    failure: str = ""
+    detail_fence: str = "```"
+
+
+type WorkstreamHistoryRow = HistoryRow | ProfileHistoryRow
+
+
 class PlannerPrompt(Value):
     """Free-slot planning request."""
 
@@ -84,7 +110,7 @@ class PlannerPrompt(Value):
     base_accuracy_passed: bool | None
     offer_snapshot: str
     buildable: tuple[BuildableRow, ...] = ()
-    history: tuple[HistoryRow, ...] = ()
+    history: tuple[WorkstreamHistoryRow, ...] = ()
     older_ids: tuple[str, ...] = ()
     baseline: tuple[MetricRow, ...] = ()
     input_failure: str | None = None
@@ -162,31 +188,6 @@ class ProfilePrompt(Value):
     question: str
     required_fields: tuple[str, ...] = ()
     target: RevisionRef
-
-
-class ResumePrompt(Value):
-    """Continuation of a suspended turn after its awaited evaluations settled."""
-
-    template: Literal[PromptTemplate.RESUME] = PromptTemplate.RESUME
-    role: Literal["implementer", "judge", "profiler"]
-    retained_revision: RevisionRef | None
-    timed_out: bool
-    evidence: tuple[EvidenceId, ...] = ()
-    repeated_failure: str | None = None
-
-
-class ReplyCorrectionPrompt(Value):
-    """Why the previous reply violated its output schema."""
-
-    template: Literal[PromptTemplate.REPLY_CORRECTION] = PromptTemplate.REPLY_CORRECTION
-    role: Literal["planner", "implementer", "judge", "profiler"]
-    error: str
-
-
-class WaitUnrecordedPrompt(Value):
-    """The previous reply said it was waiting for an evaluation, but the run recorded no wait."""
-
-    template: Literal[PromptTemplate.WAIT_UNRECORDED] = PromptTemplate.WAIT_UNRECORDED
 
 
 type PromptContext = Annotated[

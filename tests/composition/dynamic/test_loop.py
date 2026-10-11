@@ -55,8 +55,6 @@ _SCHEMA_ERRORS = (
 _DROP_BUDGET = 2
 """``DynamicConfig.max_turn_drops``: how often one logical turn is asked again."""
 _LOST = "agent CLI exited"
-_REFILL_CALLS = 8
-"""Planner replies queued after the first plan: more than any interleaving asks for."""
 
 
 def _assert_long_text_kept_whole_yet_history_bounded(
@@ -339,6 +337,11 @@ def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
 
     Two candidates fail the benchmark with 14 and 38 of 72 rounds. The record keeps the
     structured measurement of each, and the next plan lists the closer candidate first.
+
+    One workstream runs at a time, so the order of events is the script's and not the
+    scheduler's: with parallel workstreams the number of planner asks and whether any ask
+    follows both candidates depends on which thread finishes first, and a scripted planner
+    cannot answer an ask count the script does not fix.
     """
     loop_input = LoopInput.create(tmp_path)
     # The input itself misses the bar too, by more than either candidate.
@@ -351,34 +354,18 @@ def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
 
         return turn
 
-    later = ["C", "D"]
-
-    def refill(agent: Turn) -> dict[str, object]:
-        """Fill exactly the free slots the prompt offers from the workstreams not yet planned.
-
-        A and B run in parallel threads, so they may finish one after the other (two
-        refills of one slot each) or together (one refill of two slots). Each order is
-        a legitimate run, so the script answers the slots it is asked for. A blocked
-        candidate refunds its start, so a slot can also come free while the other
-        candidate is still benchmarking, after every workstream is planned: the planner
-        is then asked once more and has nothing left to offer, which is an empty plan.
-        """
-        taken = [later.pop(0) for _ in range(min(agent.slots, len(later)))]
-        return portfolio(*(workstream(name) for name in taken))
-
     agents = (
         ScriptedAgents()
-        .plan(portfolio(workstream("A"), workstream("B")), *[refill] * _REFILL_CALLS)
+        .plan(portfolio(workstream("A")), portfolio(workstream("B")), portfolio(workstream("C")))
         .implement("A", reach(14, "A"))
         .judge("A", PASS)
         .implement("B", reach(38, "B"))
         .judge("B", PASS)
         .implement("C", implemented("C", outcome="blocked"))
-        .implement("D", implemented("D", outcome="blocked"))
     )
 
     run = run_request(
-        loop_input.request(max_rounds=2, max_in_flight=2),
+        loop_input.request(max_rounds=3, max_in_flight=1),
         agents,
         slurm_process=loop_input.connector,
         state_stores=loop_input.state_stores,
@@ -406,17 +393,12 @@ def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
         assert rounds[identifier]["metrics"] == []
         assert rounds[identifier]["partial"] == measured(value)
     planner = agents.prompts(ORCHESTRATOR.id)
-    assert later == []
-    assert sorted(rounds) == ["A", "B", "C", "D"]
-    # The first plan that sees both finished candidates, whichever order they finished in.
-    seeing_both = [
-        prompt
-        for prompt in planner
-        if "partial warmup_rounds_per_s = 38.0 rounds/s" in prompt
-        and "partial warmup_rounds_per_s = 14.0 rounds/s" in prompt
-    ]
-    assert seeing_both
-    buildable = seeing_both[0].split("Buildable candidates")[1]
+    assert len(planner) == 3
+    assert sorted(rounds) == ["A", "B", "C"]
+    # Only the third plan follows both candidates.
+    assert "partial warmup_rounds_per_s = 14.0 rounds/s" in planner[1]
+    assert "partial warmup_rounds_per_s = 38.0 rounds/s" not in planner[1]
+    buildable = planner[2].split("Buildable candidates")[1]
     order = re.findall(r"hypothesis `([A-Z])`", buildable)
     assert order[:2] == ["B", "A"]
     assert "partial warmup_rounds_per_s = 38.0 rounds/s" in buildable
