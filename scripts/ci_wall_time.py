@@ -77,13 +77,18 @@ def job_from_record(record: dict[str, object]) -> Job | None:
     """Build a Job from an API record, or None when it cost the run nothing.
 
     Skipped jobs report timestamps that do not describe real work, and a job
-    that is still running (the caller itself) has no completed_at.
+    that is still running (the caller itself) has no completed_at. On a partial
+    rerun, untouched jobs keep their earlier start and completion while GitHub
+    gives them the new attempt's creation time; that impossible chronology also
+    describes no work in the current attempt.
     """
     created = parse_moment(_text(record.get("created_at")))
     started = parse_moment(_text(record.get("started_at")))
     completed = parse_moment(_text(record.get("completed_at")))
     conclusion = _text(record.get("conclusion")) or ""
     if conclusion == "skipped" or created is None or started is None or completed is None:
+        return None
+    if started < created or completed < created:
         return None
     return Job(_text(record.get("name")) or "", conclusion, created, started, completed)
 
@@ -105,7 +110,7 @@ def analyze(jobs: list[Job], epsilon: float = READY_EPSILON_SECONDS) -> Report |
             for job in jobs
             # Strictly earlier completion also guarantees the walk terminates.
             if job.completed_at < current.completed_at
-            and (job.completed_at - ready).total_seconds() <= epsilon
+            and abs((job.completed_at - ready).total_seconds()) <= epsilon
         ]
         if not predecessors:
             break

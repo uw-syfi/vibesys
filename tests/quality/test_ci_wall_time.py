@@ -9,11 +9,18 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from scripts.ci_wall_time import analyze, job_from_record, main, render
+from scripts.ci_wall_time import (
+    READY_EPSILON_SECONDS,
+    analyze,
+    job_from_record,
+    main,
+    render,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -111,6 +118,57 @@ def test_skipped_jobs_and_jobs_without_completed_at_are_ignored() -> None:
     assert [job.name for job in jobs] == ["changes"]
 
 
+def test_a_job_that_started_before_its_creation_is_ignored() -> None:
+    inherited = {**record("inherited", 0, 0, 110), "created_at": stamp(100)}
+
+    assert job_from_record(inherited) is None
+
+
+def test_a_job_that_completed_before_its_creation_is_ignored() -> None:
+    inherited: dict[str, object] = {
+        "name": "inherited",
+        "conclusion": "success",
+        "created_at": stamp(100),
+        "started_at": stamp(110),
+        "completed_at": stamp(90),
+    }
+
+    assert job_from_record(inherited) is None
+
+
+def test_a_partial_rerun_ignores_jobs_inherited_from_the_previous_attempt() -> None:
+    inherited = {**record("inherited", 0, 0, 50), "created_at": stamp(107)}
+    report = analyze(
+        jobs_of(
+            [
+                inherited,
+                record("rerun", 100, 3, 97),
+                record("gate", 200, 2, 8),
+            ]
+        )
+    )
+
+    assert report is not None
+    assert [job.name for job in report.jobs] == ["rerun", "gate"]
+    assert [job.name for job in report.critical_path] == ["rerun", "gate"]
+    assert (report.elapsed, report.queue, report.execution) == (110, 5, 105)
+
+
+def test_a_completion_far_before_readiness_is_not_a_predecessor() -> None:
+    report = analyze(
+        jobs_of(
+            [
+                record("earlier", 0, 0, 10),
+                record("later", 100, 0, 10),
+            ]
+        )
+    )
+
+    assert report is not None
+    assert [job.name for job in report.critical_path] == ["later"]
+    assert (report.elapsed, report.queue, report.execution) == (10, 0, 10)
+
+
 def test_a_single_job_is_its_own_critical_path() -> None:
     report = analyze(jobs_of([record("only", 0, 30, 20)]))
 
@@ -183,6 +241,28 @@ def dags(draw: st.DrawFn) -> list[tuple[int, int, int]]:
 
 def records_of(graph: list[tuple[int, int, int]]) -> list[dict[str, object]]:
     return [record(f"j{i}", c, w, r) for i, (c, w, r) in enumerate(graph)]
+
+
+@given(
+    st.lists(
+        st.tuples(
+            st.integers(0, 3000),
+            st.integers(0, 60),
+            st.integers(1, 600),
+        ),
+        min_size=1,
+        max_size=12,
+    )
+)
+def test_every_critical_path_edge_meets_at_readiness(
+    graph: list[tuple[int, int, int]],
+) -> None:
+    report = analyze(jobs_of(records_of(graph)))
+
+    assert report is not None
+    for predecessor, successor in pairwise(report.critical_path):
+        ready_delta = (predecessor.completed_at - successor.created_at).total_seconds()
+        assert abs(ready_delta) <= READY_EPSILON_SECONDS
 
 
 @given(dags())
