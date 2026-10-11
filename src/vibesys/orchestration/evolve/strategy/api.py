@@ -10,14 +10,17 @@ from vibesys.orchestration.evolve.strategy._ids import (
     session_id,
 )
 from vibesys.orchestration.evolve.strategy._operations import (
+    EXPORT_PATCH_KIND,
     INTERPRET_KIND,
     OPERATIONS,
     RENDER_KIND,
     RETAIN_KIND,
     VERIFY_KIND,
     EvidenceReadings,
+    ExportPatch,
     InterpretEvidence,
     ParentVerification,
+    PatchExport,
     RenderedArtifacts,
     RenderRoleArtifacts,
     RetainVerifiedRevision,
@@ -50,6 +53,7 @@ from vibesys.orchestration.evolve.strategy._state import (
 from vibesys.orchestration.evolve.strategy._strategy import EvolveStrategy
 
 __all__ = [
+    "EXPORT_PATCH_KIND",
     "INTERPRET_KIND",
     "JUDGE_REPLY",
     "MUTATOR_REPLY",
@@ -66,6 +70,7 @@ __all__ = [
     "EvolveConfig",
     "EvolveStrategy",
     "EvolveStrategyState",
+    "ExportPatch",
     "InterpretEvidence",
     "JudgePrompt",
     "MetricRow",
@@ -73,6 +78,7 @@ __all__ = [
     "ObjectiveAxis",
     "ParentVerification",
     "PartialRow",
+    "PatchExport",
     "ProfilerPrompt",
     "PromptContext",
     "PromptTemplate",

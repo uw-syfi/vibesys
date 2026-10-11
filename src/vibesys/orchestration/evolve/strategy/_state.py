@@ -60,6 +60,7 @@ class WorkPhase(StrEnum):
     MEASURE = "measure"
     INTERPRET = "interpret"
     PROFILE = "profile"
+    EXPORT = "export"
     SETTLE = "settle"
     DONE = "done"
 

@@ -9,8 +9,12 @@ from vibesys.candidates.api import STOPPED
 from vibesys.orchestration.evolve.strategy import _gates as gates
 from vibesys.orchestration.evolve.strategy import _ids as ids
 from vibesys.orchestration.evolve.strategy._config import EvolveConfig
-from vibesys.orchestration.evolve.strategy._operations import EvidenceReadings, RenderedArtifacts
-from vibesys.orchestration.evolve.strategy._record import awaiting, fail, put, slot_of
+from vibesys.orchestration.evolve.strategy._operations import (
+    EvidenceReadings,
+    PatchExport,
+    RenderedArtifacts,
+)
+from vibesys.orchestration.evolve.strategy._record import awaiting, fail, put, slot_of, to_settle
 from vibesys.orchestration.evolve.strategy._state import (
     EvolveStrategyState,
     SettledSlot,
@@ -68,6 +72,10 @@ def on_operation(
         )
     if isinstance(outcome, EvidenceReadings):
         return gates.on_interpreted(state, config, slot, outcome, view)
+    if isinstance(outcome, PatchExport):
+        if outcome.status != "succeeded":
+            return fail(state, slot, f"patch export {outcome.status}: {outcome.detail}")
+        return put(state, to_settle(slot, patch=outcome.patch))
     return state
 
 

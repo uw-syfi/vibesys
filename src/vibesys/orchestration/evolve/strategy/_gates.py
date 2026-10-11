@@ -49,6 +49,15 @@ def after_gates(config: EvolveConfig, slot: SlotState) -> SlotState:
                 "passed": True,
             }
         )
+    return finish(config, slot)
+
+
+def finish(config: EvolveConfig, slot: SlotState) -> SlotState:
+    """A candidate that passed everything: export its patch when the selector ranks by code."""
+    if config.needs_code and slot.candidate is not None:
+        return slot.model_copy(
+            update={"phase": WorkPhase.EXPORT, "step": Step.NEEDED, "awaiting": None, "passed": True}
+        )
     return to_settle(slot, passed=True)
 
 

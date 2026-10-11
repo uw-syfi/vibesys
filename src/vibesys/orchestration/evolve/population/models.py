@@ -18,8 +18,8 @@ from vs_core.api import Value
 
 __all__ = [
     "CandidateOutcome",
-    "Metrics",
     "Individual",
+    "Metrics",
     "OpenEvolveSelectorConfig",
     "OpenEvolveSelectorState",
     "PopulationConfig",

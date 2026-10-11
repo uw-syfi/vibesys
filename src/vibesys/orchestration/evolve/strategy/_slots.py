@@ -21,7 +21,7 @@ from vibesys.orchestration.evolve.strategy._draft import (
     request_turn,
     turn_id,
 )
-from vibesys.orchestration.evolve.strategy._operations import InterpretEvidence
+from vibesys.orchestration.evolve.strategy._operations import ExportPatch, InterpretEvidence
 from vibesys.orchestration.evolve.strategy._prompts import PromptContext
 from vibesys.orchestration.evolve.strategy._schemas import (
     JUDGE_REPLY,
@@ -113,6 +113,7 @@ def advance(draft: Draft, slot: SlotState, *, may_start: bool = True) -> SlotSta
     handlers = {
         WorkPhase.MEASURE: _measure,
         WorkPhase.INTERPRET: _interpret,
+        WorkPhase.EXPORT: _export,
         WorkPhase.SETTLE: _settle,
     }
     return handlers[slot.phase](draft, slot)
@@ -266,6 +267,21 @@ def _interpret(draft: Draft, slot: SlotState) -> SlotState:
             identifier,
             attempt_scope(draft.view, slot.attempt, slot.generation),
             InterpretEvidence(evidence=refs),
+        )
+    )
+    return slot.model_copy(update={"step": Step.AWAITING, "awaiting": identifier})
+
+
+def _export(draft: Draft, slot: SlotState) -> SlotState:
+    if slot.step is not Step.NEEDED or slot.candidate is None:
+        return slot
+    identifier = ids.decision_id("export", slot.key)
+    draft.emit(
+        operation(
+            draft,
+            identifier,
+            attempt_scope(draft.view, slot.attempt, slot.generation),
+            ExportPatch(revision=slot.candidate),
         )
     )
     return slot.model_copy(update={"step": Step.AWAITING, "awaiting": identifier})

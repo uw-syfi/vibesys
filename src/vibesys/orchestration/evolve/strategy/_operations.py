@@ -12,10 +12,12 @@ from vibesys.metrics import EvidenceReading
 from vibesys.orchestration.evolve.strategy._prompts import PromptContext
 from vs_core.api import (
     EvidenceReadingsBase,
+    ExportPatchBase,
     InterpretEvidenceBase,
     OperationRegistration,
     OperationRegistry,
     ParentVerification,
+    PatchExport,
     RenderedArtifacts,
     RenderRoleArtifactsBase,
     RetainVerifiedRevisionBase,
@@ -28,16 +30,20 @@ RENDER_KIND = "evolve.render_role_artifacts"
 VERIFY_KIND = "evolve.verify_parent_revision"
 INTERPRET_KIND = "evolve.interpret_evidence"
 RETAIN_KIND = "evolve.retain_verified_revision"
+EXPORT_PATCH_KIND = "evolve.export_patch"
 
 __all__ = [
+    "EXPORT_PATCH_KIND",
     "INTERPRET_KIND",
     "OPERATIONS",
     "RENDER_KIND",
     "RETAIN_KIND",
     "VERIFY_KIND",
     "EvidenceReadings",
+    "ExportPatch",
     "InterpretEvidence",
     "ParentVerification",
+    "PatchExport",
     "RenderRoleArtifacts",
     "RenderedArtifacts",
     "RetainVerifiedRevision",
@@ -77,12 +83,19 @@ class RetainVerifiedRevision(RetainVerifiedRevisionBase):
     kind: Literal["evolve.retain_verified_revision"] = "evolve.retain_verified_revision"
 
 
+class ExportPatch(ExportPatchBase):
+    """Export a passing candidate's patch for a selector that ranks candidates by their code."""
+
+    kind: Literal["evolve.export_patch"] = "evolve.export_patch"
+
+
 OPERATIONS = StrategyOperations(
     namespace="evolve",
     render=RenderRoleArtifacts,
     verify=VerifyParentRevision,
     interpret=InterpretEvidence,
     retain=RetainVerifiedRevision,
+    export_patch=ExportPatch,
 )
 
 

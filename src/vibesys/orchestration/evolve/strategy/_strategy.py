@@ -18,6 +18,7 @@ from vibesys.orchestration.evolve.strategy import _turn_events as turn_events
 from vibesys.orchestration.evolve.strategy._config import EvolveConfig
 from vibesys.orchestration.evolve.strategy._draft import Draft
 from vibesys.orchestration.evolve.strategy._operations import (
+    EXPORT_PATCH_KIND,
     INTERPRET_KIND,
     OPERATIONS,
     RENDER_KIND,
@@ -69,11 +70,14 @@ class EvolveStrategy:
             OPERATIONS.schema_ref(VERIFY_KIND),
             OPERATIONS.schema_ref(INTERPRET_KIND),
         )
+        retain = OPERATIONS.schema_ref(RETAIN_KIND)
+        export = OPERATIONS.schema_ref(EXPORT_PATCH_KIND)
+        needs_code = self.config.needs_code
         return StrategyDeclaration(
             strategy_id=STRATEGY_ID,
             state_schema=STATE_SCHEMA,
-            required_operations=core,
-            optional_operations=(OPERATIONS.schema_ref(RETAIN_KIND),),
+            required_operations=(*core, retain, export) if needs_code else core,
+            optional_operations=() if needs_code else (retain, export),
             optional=frozenset({"suspend"}),
         )
 

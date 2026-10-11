@@ -130,7 +130,7 @@ def _answered(
         judged = slot.model_copy(update={"judge_invocation": event.invocation})
         return _judged(state, config, judged, reply)
     if isinstance(reply, ProfilerSummary):
-        return _profiled(state, slot, reply)
+        return _profiled(state, config, slot, reply)
     candidate = candidate_of(view, slot, event.invocation)
     if candidate is None:
         return put(state, slot.holding(payload, event.invocation))
@@ -175,7 +175,7 @@ def _corrected(
     )
     if corrected is None:
         if isinstance(correction, ReplyCorrectionPrompt):
-            return _no_answer(state, slot, f"invalid reply: {correction.error}")
+            return _no_answer(state, config, slot, f"invalid reply: {correction.error}")
         return fail(state, slot, "the turn asked to wait and the run recorded no wait")
     return put(
         state, slot.model_copy(update={"turn": corrected, "step": Step.NEEDED, "awaiting": None})
@@ -223,22 +223,24 @@ def _unfinished(
             backoff=config.drop_backoff(turn.drops),
         )
         if again is None:
-            return _no_answer(state, slot, f"the turn was lost ({event.detail or 'transport'})")
+            return _no_answer(state, config, slot, f"the turn was lost ({event.detail or 'transport'})")
         return put(
             state, slot.model_copy(update={"turn": again, "step": Step.NEEDED, "awaiting": None})
         )
     detail = event.detail or f"the turn did not complete ({event.observation.status.value})"
-    return _no_answer(state, slot, detail)
+    return _no_answer(state, config, slot, detail)
 
 
-def _no_answer(state: EvolveStrategyState, slot: SlotState, reason: str) -> EvolveStrategyState:
+def _no_answer(
+    state: EvolveStrategyState, config: EvolveConfig, slot: SlotState, reason: str
+) -> EvolveStrategyState:
     """A role produced no valid answer: a failed individual, except for the advisory profiler."""
     role = role_of(slot.phase)
     if slot.phase is WorkPhase.PROFILE:
         noted = state.model_copy(
             update={"notes": (*state.notes, f"profiler: {reason}")[-NOTE_LIMIT:]}
         )
-        return put(noted, to_settle(slot, passed=True))
+        return put(noted, gates.finish(config, slot))
     name = "mutator" if role is Role.MUTATOR else "judge"
     feedback = f"framework: the {name} returned no valid response ({reason})"
     return put(state, to_settle(slot, feedback=feedback, judge_pass=None, judge_invocation=None))
@@ -290,7 +292,7 @@ def _judged(
 
 
 def _profiled(
-    state: EvolveStrategyState, slot: SlotState, summary: ProfilerSummary
+    state: EvolveStrategyState, config: EvolveConfig, slot: SlotState, summary: ProfilerSummary
 ) -> EvolveStrategyState:
     """Keep the profiler's self-reported fitness; it settles the candidate that passed."""
     reading = ProfileReading(
@@ -298,7 +300,7 @@ def _profiled(
         perf_unit=summary.perf_unit,
         metrics=tuple(summary.metrics.items()),
     )
-    return put(state, to_settle(slot, profile=reading, passed=True))
+    return put(state, gates.finish(config, slot.model_copy(update={"profile": reading})))
 
 
 def on_suspended(state: EvolveStrategyState, event: TurnSuspended) -> EvolveStrategyState:

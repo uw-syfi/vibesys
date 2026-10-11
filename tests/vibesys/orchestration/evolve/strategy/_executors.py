@@ -17,7 +17,9 @@ from typing import TYPE_CHECKING
 from vibesys.orchestration.evolve.strategy.api import (
     EvidenceReading,
     EvidenceReadings,
+    ExportPatch,
     InterpretEvidence,
+    PatchExport,
     MetricRow,
     ParentVerification,
     PartialRow,
@@ -284,6 +286,12 @@ class Executors:
                 outcome=EvidenceReadings(
                     status="succeeded",
                     readings=tuple(self.readings[item.evidence_id] for item in typed.evidence),
+                )
+            )
+        if isinstance(typed, ExportPatch):
+            return Succeeded(
+                outcome=PatchExport(
+                    status="succeeded", patch=f"patch for {typed.revision.revision_id.root}"
                 )
             )
         assert isinstance(typed, RenderRoleArtifacts)
