@@ -81,6 +81,7 @@ const KERNEL = {
 for (const directory of [
   'features/run-control/src/state',
   'features/run-control/src/renderer/effects',
+  'run-session/src',
 ]) {
   for (const [name, source] of Object.entries(KERNEL)) {
     test(`${directory} forbids ${name}`, async t => {
@@ -89,8 +90,8 @@ for (const directory of [
   }
 }
 
-test('a control-state package pending migration is not held to the control-state rule', async t => {
-  assert.deepEqual(await lintFixture(t, 'run-session/src', KERNEL['a createStore call']), []);
+test("a control-state package's fold module may run its fold on the reducer kernel", () => {
+  assert.deepEqual(pluginDiagnostics(join(WORKSPACE_ROOT, 'run-session', 'src', 'run.ts')), []);
 });
 
 test('a feature still on the reducer kernel is not held to the control-state rule', async t => {
