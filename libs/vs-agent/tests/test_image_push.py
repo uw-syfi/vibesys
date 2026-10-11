@@ -15,12 +15,13 @@ import pytest
 
 from vs_agent.api.images import (
     DEFAULT_AGENT_IMAGE_REGISTRY,
+    DockerCommandResult,
     ImagePushError,
     agent_image_is_pushed,
     ensure_pushed,
     push_agent_image,
 )
-from vs_agent.api.testing import DockerResult, docker_result, docker_timed_out
+from vs_agent.api.testing import DockerBuildResult, docker_build_result, docker_timed_out
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -41,10 +42,12 @@ class _RegistryRunnerOptions(TypedDict, total=False):
     push_returncode: int
     push_stderr: str
     inspect_stdout: str
+    inspect_stdout_omitted_characters: int
     inspect_returncode: int
     manifest_returncode: int
     unverifiable_references: frozenset[str]
     cached_repo_digests: str | None
+    cached_stdout_omitted_characters: int
     raise_on: dict[str, Exception] | None
 
 
@@ -56,6 +59,7 @@ class _FakeRegistryRunner:
         self.push_returncode = options.get("push_returncode", 0)
         self.push_stderr = options.get("push_stderr", "")
         self.inspect_stdout = options.get("inspect_stdout", _REPO_DIGESTS)
+        self.inspect_stdout_omitted_characters = options.get("inspect_stdout_omitted_characters", 0)
         self.inspect_returncode = options.get("inspect_returncode", 0)
         self.manifest_returncode = options.get("manifest_returncode", 0)
         # References `docker manifest inspect` should report as absent even
@@ -64,6 +68,7 @@ class _FakeRegistryRunner:
         # pushed one still succeeds.
         self.unverifiable_references = options.get("unverifiable_references", frozenset())
         self.cached_repo_digests = options.get("cached_repo_digests")
+        self.cached_stdout_omitted_characters = options.get("cached_stdout_omitted_characters", 0)
         self.raise_on = options.get("raise_on") or {}
         self.calls: list[tuple[str, ...]] = []
 
@@ -74,7 +79,7 @@ class _FakeRegistryRunner:
         cwd: Path,
         timeout: float,
         on_stderr_line: Callable[[str], None] | None = None,
-    ) -> DockerResult:
+    ) -> DockerBuildResult:
         del cwd, timeout, on_stderr_line
         normalized = tuple(argv)
         self.calls.append(normalized)
@@ -82,24 +87,36 @@ class _FakeRegistryRunner:
             if marker in normalized:
                 raise exc
         if normalized[1] == "tag":
-            return docker_result(normalized, self.tag_returncode, "", "")
+            return docker_build_result(normalized, self.tag_returncode, "", "")
         if normalized[1] == "push":
-            return docker_result(normalized, self.push_returncode, "", self.push_stderr)
+            return docker_build_result(normalized, self.push_returncode, "", self.push_stderr)
         if normalized[1] == "manifest":
             reference = normalized[-1]
             returncode = (
                 1 if reference in self.unverifiable_references else self.manifest_returncode
             )
-            return docker_result(normalized, returncode, "", "")
+            return docker_build_result(normalized, returncode, "", "")
         if normalized[1] == "image" and normalized[2] == "inspect":
             # The cached-digest fast path: `docker image inspect --format
             # {{json .RepoDigests}} <image_id>`.
             stdout = self.cached_repo_digests if self.cached_repo_digests is not None else "[]"
-            return docker_result(normalized, 0, stdout, "")
+            return DockerCommandResult(
+                normalized,
+                0,
+                stdout,
+                "",
+                stdout_omitted_characters=self.cached_stdout_omitted_characters,
+            )
         if normalized[1] == "inspect":
             # The post-push digest resolution: `docker inspect --format
             # {{json .RepoDigests}} <tag>`.
-            return docker_result(normalized, self.inspect_returncode, self.inspect_stdout, "")
+            return DockerCommandResult(
+                normalized,
+                self.inspect_returncode,
+                self.inspect_stdout,
+                "",
+                stdout_omitted_characters=self.inspect_stdout_omitted_characters,
+            )
         _failure_message = f"unexpected command: {normalized}"
         raise AssertionError(_failure_message)
 
@@ -185,6 +202,15 @@ class TestPushAgentImage:
         runner = _FakeRegistryRunner(inspect_stdout=_REPO_DIGESTS)
         assert push_agent_image(_IMAGE_ID, command_runner=runner) == _DIGEST
 
+    def test_rejects_truncated_digest_json_even_when_retained_tail_is_valid(self) -> None:
+        runner = _FakeRegistryRunner(
+            inspect_stdout=f'["{_DIGEST}"]',
+            inspect_stdout_omitted_characters=2048,
+        )
+
+        with pytest.raises(ImagePushError, match="characters truncated"):
+            push_agent_image(_IMAGE_ID, command_runner=runner)
+
     def test_missing_docker_binary_raises(self) -> None:
         runner = _FakeRegistryRunner(raise_on={"tag": FileNotFoundError()})
         with pytest.raises(ImagePushError, match="Docker was not found"):
@@ -244,6 +270,15 @@ class TestEnsurePushed:
         reference = ensure_pushed(_IMAGE_ID, command_runner=runner)
 
         assert reference == _DIGEST
+        assert any(call[1] == "push" for call in runner.calls)
+
+    def test_truncated_cached_digest_json_is_not_trusted(self) -> None:
+        runner = _FakeRegistryRunner(
+            cached_repo_digests=f'["{_DIGEST}"]',
+            cached_stdout_omitted_characters=2048,
+        )
+
+        assert ensure_pushed(_IMAGE_ID, command_runner=runner) == _DIGEST
         assert any(call[1] == "push" for call in runner.calls)
 
     def test_ignores_cached_digest_for_a_different_repository(self) -> None:

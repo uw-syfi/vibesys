@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from vibesys.constants import ComputeBackend
 from vibesys.run.environment import open_run_environment
-from vs_agent.api import CONTAINER_RUNTIME_TOOLCHAIN
 from vs_runtime.api.infrastructure import (
     DockerEnvironment,
     DockerEnvironmentConfig,
@@ -28,6 +28,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api import (
+    CONTAINER_RUNTIME_TOOLCHAIN,
     ContainerRuntimeUnavailableError,
     DockerSandbox,
     SandboxKind,
@@ -36,7 +37,6 @@ from vs_sandbox.api.testing import FakeDockerEngine
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from pathlib import Path
 
     from vs_sandbox.api import CommandRunner, HostResource
 
@@ -44,10 +44,16 @@ _IMAGE_ID = "sha256:" + "c" * 64
 
 
 class _RecordingBuildRunner:
-    """Answers ``docker build`` and ``docker image inspect`` without a daemon."""
+    """Answers image builds and ``docker image inspect`` without a daemon.
+
+    The build context is deleted after the build, so the Dockerfile generated
+    from the Features is read when the build is "run" and the Feature ids it
+    copies are kept as ``selected_features``.
+    """
 
     def __init__(self) -> None:
         self.argvs: list[tuple[str, ...]] = []
+        self.selected_features: list[str] = []
 
     def run(
         self,
@@ -59,6 +65,13 @@ class _RecordingBuildRunner:
     ) -> subprocess.CompletedProcess[str]:
         del cwd, timeout, on_stderr_line
         self.argvs.append(tuple(argv))
+        if argv[1] == "build":
+            dockerfile = Path(argv[list(argv).index("--file") + 1]).read_text()
+            self.selected_features = [
+                line.split()[1].rsplit("/", 1)[-1]
+                for line in dockerfile.splitlines()
+                if line.startswith("COPY ")
+            ]
         stdout = _IMAGE_ID if argv[1] == "image" else ""
         return subprocess.CompletedProcess(tuple(argv), 0, stdout, "")
 
@@ -153,8 +166,7 @@ def test_a_docker_in_docker_task_gets_the_runtime_layer_and_a_same_path_workspac
 
     session = open_run_environment(_environment(engine, runner), request)
     try:
-        build = next(argv for argv in runner.argvs if argv[1] == "build")
-        assert f"TOOLCHAINS={CONTAINER_RUNTIME_TOOLCHAIN}" in build
+        assert f"vibesys-{CONTAINER_RUNTIME_TOOLCHAIN}" in runner.selected_features
         run = next(call for call in engine.calls if call[1] == "run")
         mounts = [run[i + 1] for i, flag in enumerate(run) if flag == "-v"]
         assert f"{request.workspace}:{request.workspace}" in mounts
@@ -176,8 +188,7 @@ def test_an_ordinary_task_keeps_the_workspace_mount_and_an_unchanged_image(
 
     session = open_run_environment(_environment(engine, runner), request)
     try:
-        build = next(argv for argv in runner.argvs if argv[1] == "build")
-        assert "TOOLCHAINS=" in build
+        assert runner.selected_features == ["vibesys-agent"]
         run = next(call for call in engine.calls if call[1] == "run")
         assert f"{request.workspace}:/workspace" in run
         assert "info" not in [call[1] for call in engine.calls]

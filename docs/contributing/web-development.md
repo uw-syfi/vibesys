@@ -375,15 +375,17 @@ library decodes the target with `ascii`/`surrogateescape`, so a raw byte above
 
 ## Desktop app
 
-The target connection design (one host helper, one connection manager, explicit run identity
-and lifecycle phases, per-screen stores) and its phased migration from what this section describes
-are in [desktop-connection.md](desktop-connection.md).
+The connection design (one host helper, one connection manager, explicit run identity and
+lifecycle phases, per-screen stores) is in [desktop-connection.md](desktop-connection.md); this
+section says how the code is laid out and how to run it.
 
 The desktop app (`clients/desktop`) ships its own copy of the web UI and
 reaches servers through its main process, without the web gateway. A server is
 a detached run (`vibesys --detach`, see `tui-architecture.md`) on this machine
-or on an SSH host; local and remote share every layer above the `Host`
-interface, and the page cannot tell them apart.
+or on an SSH host. The main process reaches every host the same way: it runs the
+host helper there (`python -m entrypoints.host_helper`) and speaks its typed
+protocol; This Mac and an SSH host differ only in how the helper is started, and
+the page cannot tell them apart.
 
 ```bash
 # The welcome view: recent runs, This Mac, and Connect to host
@@ -394,10 +396,6 @@ pnpm --dir clients --filter @vibesys/desktop start -- --host HOST [--instance ID
 
 # Start a detached run for a local project and open the window on it
 pnpm --dir clients --filter @vibesys/desktop start -- --project ~/proj [-- RUN_ARGS...]
-
-# Open the window on a server that is already listening on a control socket,
-# for example the TUI's replay server (clients/tui/dev/mock-server.ts)
-pnpm --dir clients --filter @vibesys/desktop start -- --socket /tmp/vs-mock.sock
 ```
 
 `start` builds the app, including the UI bundle (`@vibesys/web`'s
@@ -408,128 +406,98 @@ forbids connections. Its only way to the server is the preload bridge,
 `window.vibesysDesktop.connect()`, which takes no host or path: the main process
 binds the run view to one run.
 
-The app has one window with two views. It opens on the welcome view
-(`clients/desktop/welcome.html`, a React bundle built by
-`vite.welcome.config.ts` apart from the run view's, served from the same origin
-with its own narrow preload, `welcome-preload.cts`): recent runs (status refreshed from each
-host's registry, one click to reattach), This Mac's live runs and "Start a
-run", and "Connect to host", a searchable list of the concrete `Host` aliases
-in `~/.ssh/config` that also accepts a typed `user@host` (arrows, Enter, Esc).
-The main process answers the welcome view's requests only for that view's web
-contents and validates every value (host keys, paths, task names) before it
-reaches a host. Once attached, the run view (the web UI) fills the window and
-the welcome view shrinks to the title strip above it, showing the host and the
-connection status; clicking the host brings the welcome view back. Each connection is a MessagePort that the main
-process relays to a new byte stream from the window's host
-(`clients/desktop/src/relay.ts`), reframing one port message as one
-newline-delimited line in each direction (see `wire-protocol.md`). The page
-drives those connections with the browser's own `WebSocketTransport` and
-`WebSession`, so redial, resume, and reconciliation behave as in the browser.
+### Layout
 
-The main process reaches servers only through the `Host` interface
-(`clients/desktop/src/host.ts`): `ensureLink()`, `startServer(args)`,
-`dial(endpoint)`, `invoke(argv)`, and `close()`. Both implementations are a
-`DetachedHost` over a `HostAccess` (how `vibesys` runs and how a Unix socket is
-reached on that machine):
+`clients/desktop/src` is split by process, then sliced by feature, so each slice can become its
+own package; `clients/.dependency-cruiser.mjs` enforces it:
 
-- `LocalHost` runs `uv run --project CHECKOUT python -m entrypoints.launcher
-  ARGV` and dials sockets directly.
-- `SshHost` uses the system `ssh`, so `~/.ssh/config`, ProxyJump, agents, and
-  certificates work unchanged. The app owns one master connection per host
-  (`ControlMaster`, `ControlPath=/tmp/vsd-<uid>/%C`, `ControlPersist=30m`,
-  `ServerAliveInterval`). Only the master authenticates, through an askpass
-  helper that shows ssh's prompt (password, 2FA, an untrusted host key's
-  yes/no) in a native dialog, and only when the user asks (the welcome view's
-  sign-in, a Retry); a host key is never accepted silently. Every other ssh
-  run is a `BatchMode` channel over the master: `invoke` runs `uv run --project
-  CHECKOUT vibesys`, `startServer` runs it with `--detach` and reads the
-  record, and each `dial` runs the stdio bridge (`uv run --project CHECKOUT
-  python -m entrypoints.stdio_bridge --socket PATH`, see `wire-protocol.md`) on
-  its own channel. The bridge's exit status
-  names how a stream ended: 4 means the run is gone, 255 and the stall and
-  transport statuses mean the link broke, 5 is a permission failure; its
-  one-line JSON report on stderr becomes the message.
-- Remote commands work under any login shell (sh, bash, zsh, tcsh, csh, fish):
-  each is `sh -c '<one-line script>' ROLE xHEX...`, a fixed script with no
-  quote, `!`, or line break, and every datum hex-encoded for `sh` to decode.
-  `clients/desktop/src/ssh-host.shells.test.ts` runs the exact strings under
-  every installed shell.
+- `main/` is the Electron main process, in layers that point down: `app/` (the composition root,
+  the window, the lifecycle, page confinement, launch arguments, the welcome IPC boundary) ->
+  `features/` (`hosts`: checkouts, tasks, path completion, pushed listings; `run-control`: attach,
+  start, resume, stop, retry, and the run page's relay) -> `entities/` (pure projections of what a
+  helper reports) -> `platform/` (`connection`: the connection manager; `settings`: `hosts.json`
+  and `recent.json` with `SettingsStore` as their one writer). A slice is entered through its
+  `index.ts`, features never import each other, and a stateful platform slice is a pure `state/`
+  core and a `shell/`; only a shell starts processes or opens sockets.
+- `renderer/` is renderer code: the welcome view (`renderer/welcome/`) and the two sandboxed
+  preloads (`renderer/preload/`). It never imports `main/`.
+- `common/` is what both processes share: pure types, host naming, ids, the stop and resume
+  decisions, and the typed welcome IPC (`welcome-protocol.ts`).
 
-Every host, This Mac included, runs VibeSys from a source checkout: the
-directory whose `pyproject.toml` declares the `vibesys` project (for now a dev
-checkout is required on every host). This Mac defaults to the checkout the app
-was built from. On first use of an SSH host the welcome view asks "Where is
-your VibeSys checkout on HOST?", pre-filled from the `vibesys_root` that live
-servers there publish in their registry records, checks the answer on the host
-(the directory exists, its `pyproject.toml` declares `vibesys`, and `uv` is
-found on the non-interactive PATH, a login shell's PATH, or a few common
-directories), and names exactly what is missing. The checkout is stored in the
-app's user data (`hosts.json`, version 2: one `checkout` per host key), never
-in the repository. A version 1 file (free-form vibesys and Python commands) is
-migrated when empty and otherwise ignored with a message saying to remove it.
+### Connections
 
-The project directory is a separate, per-run choice: the candidate repository
-with `.vibesys/tasks/`, used as the run's working directory. "Start a run"
-offers the projects of the host's live records and recent runs (or a typed
-path), lists that project's tasks with `vibesys tasks PROJECT --json`, and
-starts `vibesys --detach --task TASK [ARGS]` in the project (extra arguments
-are split like a shell's words). A stopped run resumes with `vibesys --detach
---resume [RUN]` in its project directory. A launch that starts nothing prints a
-`DetachedLaunchFailure`, shown with its code, message, and log path;
-`run_already_live` attaches to the server already driving the run. Runs the
-user attaches to are remembered in `recent.json` in the app's user data.
+`platform/connection` is the only code that creates links and channels
+(`docs/contributing/desktop-connection.md`, "Connection manager"):
 
-The attached run has a connection supervisor (`clients/desktop/src/supervisor.ts`,
-a pure `step` core and a thin shell). When a stream reports a broken link, the
-machine wakes, or the network comes back, it restores the host link and
-confirms the run is still in the host's registry and speaks this client's
-protocol version, retrying a broken link with a finite backoff, then wakes the
-page so its own session resumes. A check can pass while every dial fails (a
-wedged server), so a recovery keeps its place in the backoff until a stream
-stays up for 30 seconds, and a dial the bridge refuses outright
-(`connect_denied`) stops at once with the bridge's report. There is one retry loop per layer: the page
-never restores links, and the supervisor never redials streams. It stops, with
-the status in the title strip and a Retry button there, on what retrying
-cannot fix: credentials the user must give, a run that ended, a protocol
-version mismatch (the message names both versions and the host's vibesys
-command), or a missing `uv`. Runs are detached: closing the app ends its
-streams and SSH masters, never a run (`vibesys instances stop ID` does).
+- A `Link` reaches one host. `LocalLink` starts each helper as a child of `/bin/sh`; `SshLink`
+  uses the system `ssh`, so `~/.ssh/config`, ProxyJump, agents, and certificates work unchanged.
+  The app owns one master connection per host (`ControlMaster`, `ControlPath=/tmp/vsd-<uid>/%C`,
+  `ControlPersist=30m`, `ServerAliveInterval`), shared by every connection to that host. Only the
+  master authenticates, through an askpass helper that shows ssh's prompt in a native dialog, and
+  only when the user asks (the welcome view's sign-in, a Retry); a host key is never accepted
+  silently. Every helper is a `BatchMode` exec channel over the master.
+- Both links start the helper with the same bootstrap (`shell/bootstrap.ts`), the only shell text
+  the app sends to a host: `sh -c '<one-line script>' vibesys-helper xHEX`, a fixed script with no
+  quote or line break, its one datum (the checkout) hex-encoded for `sh` to decode, so it means the
+  same under any login shell. It checks the checkout, finds `uv` (the non-interactive PATH, a
+  login shell's PATH, or a few common directories), and `exec`s `uv run --no-sync --project
+  CHECKOUT python -I -m entrypoints.host_helper`; otherwise it exits 64 (the checkout predates the
+  helper), 65 (not a VibeSys checkout), or 66 (no `uv`), with a word saying which.
+- `HelperChannel` is one channel: `hello`, then requests answered concurrently by id, each under
+  a deadline, every line parsed strictly against the generated contract
+  (`@vibesys/backend-client/host-helper`). A run channel's one `run.connect` makes it a byte relay
+  carrying the run protocol; its end is the helper's exit status and `ChannelEnd` line.
+- `HostConnection` is one host's connection: a pure machine (`state/host-connection.ts`: idle,
+  linking, handshaking, ready, reconnecting, offline, auth-needed, incompatible, closed) under a
+  shell that owns the control channel, every run channel, and every timer through one
+  `AsyncDisposableStack` and `AbortSignal`. It is the app's one retry loop per host, and its check
+  is the failing operation: the control channel is checked by `ping`, a run channel by a fresh
+  `run.connect` to the same run. Callers never retry: a request or a run channel waits until the
+  host is ready, or fails with the machine's terminal reason.
+- `ConnectionManager` keeps one `HostConnection` per host, and owns every connection and link:
+  quitting closes every channel and master once. Runs are detached: closing the app never ends a
+  run (`vibesys instances stop ID` does).
 
-Every implementation, including the in-memory `FakeHost`, passes the contract
-suite in `clients/desktop/src/testing/host-contract.ts`; `SshHost` runs it over
-`FakeSsh`, an in-memory ssh client and machine.
+Every implementation passes one contract suite (`testing/host-connection-contract.ts`): the
+in-memory `FakeHelper`, which speaks the helper protocol on the wire and replays the `helper-*`
+conformance scenarios, and the real helper of this checkout (`VIBESYS_REAL_CONTRACTS=1`).
 
-The welcome view (`clients/desktop/src/welcome/`) is layered like the TUI, and
-`clients/.dependency-cruiser.mjs` enforces it:
+### Welcome view and run view
 
-- `state/` is the functional core: one store per screen (welcome and title
-  strip, Recent, host panel, "Start a run", "Connect to host"), each a single
-  state union and a pure `step(state, action) -> {state, requests}` with its
-  `invariants`. Every request that awaits a reply carries a token held by the
-  state that awaits it; a reply with any other token is dropped. No React, DOM,
-  Electron, Node, or backend-client.
-- `ui/` is presentational: React components, props in and events out. Sheets
-  are native `<dialog>`s (`showModal()`), so focus containment, Esc, and focus
-  return come from the platform. No bridge, Electron, or I/O.
-- `effects/` is the shell: it performs the core's requests through the welcome
-  bridge and dispatches each reply as an action. It never imports `ui/`.
-- `main.tsx` is the composition root.
+The window opens on the welcome view (`clients/desktop/welcome.html`, a React bundle built by
+`vite.welcome.config.ts` apart from the run view's, with its own narrow preload): recent runs with
+their status, one host's panel (its checkout, its live runs, "Start a run"), and "Connect to host",
+a searchable list of the concrete `Host` aliases in `~/.ssh/config` that also accepts a typed
+`user@host`. The main process answers its requests only for that view's web contents and
+validates every value before it reaches a host. Host data is pushed, never polled: the main
+process watches each shown host's registry (`instances.watch`) and sends every change
+(`HostListing`); recent runs' statuses derive from those listings. The checkout and project fields
+complete paths as you type (`paths.complete`: one listing per directory, filtered in the view).
 
-The stores are tested model-based: seeded random sequences of user actions and
-replies (stale, duplicated, reordered) folded through each reducer, checking
-its invariants and that no stale reply is applied after every step
-(`checkModel` from `@vibesys/core-state/testing`, which also checks that every
-awaited token was issued). The stores run on core-state's store kernel.
+On first use of an SSH host the welcome view asks "Where is your VibeSys checkout on HOST?" and
+checks the answer by starting the helper there before saving it (`hosts.json`, version 2: one
+`checkout` per host key); This Mac defaults to the checkout the app was built from. "Start a run"
+lists a project's tasks (`tasks.list`) and starts it (`run.start`), extra arguments split like a
+shell's words; it can be cancelled while it starts, and the run is then stopped as soon as its
+record appears. Recent rows are stored by `(host, run id)` from the run's record when the app
+starts or attaches to it (`recent.json`, version 2).
 
-The main process has one owner of process-wide state, `AppLifecycle`
-(`clients/desktop/src/app-lifecycle.ts`): a single-instance lock (a second
-launch focuses the first instance's window and opens what it was asked to), and
-a pure quit machine (release the hosts once, bounded, then exit through the one
-`app.exit` call site). `SettingsStore` is the only writer of `hosts.json` and
-`recent.json`: it serializes updates, replaces each file atomically, and pushes
-every change of the recent runs to the welcome view. "Start a run" can be
-cancelled while it starts: the main process stops the run as soon as its record
-appears instead of attaching, and the window stays on the welcome view.
+Once attached, the run view (the web UI) fills the window and the welcome view shrinks to the
+title strip above it, showing the host and the connection status. Each page connection is a
+MessagePort the main process relays to a new run channel (`features/run-control/relay.ts`),
+reframing one port message as one newline-delimited line in each direction. The page drives those
+connections with the browser's `WebSocketTransport` and `WebSession`, which keep their resume and
+reconciliation logic but no retry timer of their own: the shell wakes the page when the host
+connection recovers.
+
+The welcome view's stores (`renderer/welcome/state/`) are pure reducers on core-state's store
+kernel; `ui/` is presentational, `effects/` the shell, `main.tsx` the composition root. They are
+tested model-based with `checkModel` from `@vibesys/core-state/testing`.
+
+`AppLifecycle` (`main/app/app-lifecycle.ts`) is the one owner of process-wide state: a
+single-instance lock (a second launch focuses the first window and opens what it was asked to)
+and a pure quit machine (release every connection once, bounded, then exit through the one
+`app.exit` call site).
 
 ## Remote host and local laptop
 

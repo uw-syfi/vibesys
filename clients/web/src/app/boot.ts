@@ -22,10 +22,14 @@ export type BootPlan =
   /** Exchange `target.bootstrapUrl` for a credential, then go live (or to the demo on failure). */
   | {readonly kind: 'bootstrap'; readonly target: GatewayBootstrapTarget};
 
-export function bootPlan(launchHref: string, remembered: Remembered): BootPlan {
+export function bootPlan(
+  launchHref: string,
+  remembered: Remembered,
+  historyState: unknown = null,
+): BootPlan {
   let target: GatewayTarget | null;
   try {
-    target = resolveGatewayTarget(launchHref, remembered.gateway);
+    target = resolveGatewayTarget(launchHref, remembered.gateway, historyState);
   } catch (reason) {
     return {kind: 'demo', error: reason instanceof Error ? reason.message : String(reason)};
   }

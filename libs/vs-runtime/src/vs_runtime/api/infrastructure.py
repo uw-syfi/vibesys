@@ -84,6 +84,7 @@ from vs_runtime._failure_classification import (
     signal_of,
 )
 from vs_runtime._fallback import FallbackTarget, ProviderFallback
+from vs_runtime._image_features import RUN_ENVIRONMENT_FEATURES_PROJECT, image_features
 from vs_runtime._input_project import InputDependency, materialize_input_project
 from vs_runtime._linux_cpu_profiler import (
     Capability as LinuxProfilerCapability,
@@ -467,6 +468,7 @@ __all__ = [
     "PAUSE_FOR_OPERATOR",
     "REMOTE_EVALUATOR_TOOLS_ROOT",
     "RESET_MARGIN_SECONDS",
+    "RUN_ENVIRONMENT_FEATURES_PROJECT",
     "SANDBOX_EVALUATOR_TOOLS_ROOT",
     "TOOL_TOKEN_PREFIX",
     "AgentConfigurationResolver",
@@ -642,6 +644,7 @@ __all__ = [
     "docker_evaluator_tools_root",
     "evaluator_agent_toolchains",
     "evaluator_container_setup",
+    "image_features",
     "job_failure",
     "load_evaluator_package",
     "load_skill_frontmatter",

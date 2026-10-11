@@ -1,15 +1,16 @@
 """The run lifecycle: its triggers and the legal moves between statuses.
 
-Pure module. It owns what a run's status may become and nothing else: no
+Pure module. It owns what a run's state may become and nothing else: no
 locks, no journal, no I/O. The status vocabulary, ``RunStatus``, lives in the
 light ``server.host_api`` with ``RunPhase``, the status a registry record
-advertises, so the record can name it without loading the server. :class:`~server.controller.RunController` owns the
-current value and the side effects of changing it, so the rules here can be
+advertises, so the record can name it without loading the server.
+:class:`~server.controller.RunController` owns the current value and the side effects of changing it, so the rules here can be
 enumerated in a unit test without composing a server.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Final
@@ -29,8 +30,8 @@ class RunTrigger(StrEnum):
     """The run acquired its resources (image, container, project) and executes.
 
     Attaching the run's journal is not readiness: a run stays ``starting``
-    through its image build and container start. Idempotent once the run is
-    under way.
+    through its image build and container start, whatever an operator
+    requests meanwhile. Idempotent once the run is under way.
     """
 
     PAUSE_REQUESTED = "pause_requested"
@@ -64,61 +65,131 @@ class IllegalRunTransitionError(Exception):
         self.trigger = trigger
 
 
-_TRANSITIONS: Final[MappingProxyType[tuple[RunStatus, RunTrigger], RunStatus]] = MappingProxyType(
+class RunRequest(StrEnum):
+    """An operator request a starting run holds until it is ready."""
+
+    PAUSE = "pause"
+    STOP = "stop"
+
+
+@dataclass(frozen=True)
+class RunState:
+    """A run's status, and the request it holds while it is still starting.
+
+    Readiness and an operator's request are separate facts. A run stays
+    ``starting`` until ``READY`` however often it is paused, resumed or
+    stopped, so its startup stage and progress stay reported through the
+    whole startup; ``requested`` remembers the last pause or stop asked for
+    and ``READY`` lands the run in the status that request leads to.
+    """
+
+    status: RunStatus
+    requested: RunRequest | None = None
+    """The pending pause or stop of a starting run; ``None`` for every other status."""
+
+    def __post_init__(self) -> None:
+        """Reject a request on a run that is no longer starting."""
+        if self.requested is not None and self.status is not RunStatus.STARTING:
+            message = f"only a starting run holds a request, not a {self.status.value!r} one"
+            raise ValueError(message)
+
+    @property
+    def pause_pending(self) -> bool:
+        """A pause waits for its boundary: requested after readiness, or held while starting."""
+        return self.status is RunStatus.PAUSING or self.requested is RunRequest.PAUSE
+
+    @property
+    def stop_pending(self) -> bool:
+        """A stop waits for its boundary: requested after readiness, or held while starting."""
+        return self.status is RunStatus.STOPPING or self.requested is RunRequest.STOP
+
+
+_STARTING = RunState(RunStatus.STARTING)
+_STARTING_PAUSE = RunState(RunStatus.STARTING, RunRequest.PAUSE)
+_STARTING_STOP = RunState(RunStatus.STARTING, RunRequest.STOP)
+_RUNNING = RunState(RunStatus.RUNNING)
+_PAUSING = RunState(RunStatus.PAUSING)
+_PAUSED = RunState(RunStatus.PAUSED)
+_STOPPING = RunState(RunStatus.STOPPING)
+_STOPPED = RunState(RunStatus.STOPPED)
+_COMPLETED = RunState(RunStatus.COMPLETED)
+_FAILED = RunState(RunStatus.FAILED)
+
+
+def _starting_moves(
+    held: RunState, *, ready: RunState
+) -> dict[tuple[RunState, RunTrigger], RunState]:
+    """The moves of a starting run holding ``held``'s request, which lands as ``ready``."""
+    return {
+        (held, RunTrigger.READY): ready,
+        # A pause cannot downgrade a stop already pending.
+        (held, RunTrigger.PAUSE_REQUESTED): (
+            _STARTING_STOP if held.requested is RunRequest.STOP else _STARTING_PAUSE
+        ),
+        (held, RunTrigger.STOP_REQUESTED): _STARTING_STOP,
+        # A resume cancels the pending request; the run keeps starting.
+        (held, RunTrigger.RESUMED): _STARTING,
+        (held, RunTrigger.COMPLETED): _COMPLETED,
+        (held, RunTrigger.FAILED): _FAILED,
+    }
+
+
+_TRANSITIONS: Final[MappingProxyType[tuple[RunState, RunTrigger], RunState]] = MappingProxyType(
     {
-        (RunStatus.STARTING, RunTrigger.READY): RunStatus.RUNNING,
-        # Requested while starting, a pause or stop is pending at once; core
-        # lands it at the first boundary after the run is ready. A resume that
-        # cancels it before then reports ``running`` while startup finishes.
-        (RunStatus.STARTING, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSING,
-        (RunStatus.STARTING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
-        (RunStatus.STARTING, RunTrigger.RESUMED): RunStatus.STARTING,
-        (RunStatus.STARTING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
-        (RunStatus.STARTING, RunTrigger.FAILED): RunStatus.FAILED,
-        (RunStatus.RUNNING, RunTrigger.READY): RunStatus.RUNNING,
-        (RunStatus.RUNNING, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSING,
-        (RunStatus.RUNNING, RunTrigger.INVOCATION_FINISHED): RunStatus.RUNNING,
-        (RunStatus.RUNNING, RunTrigger.RESUMED): RunStatus.RUNNING,
-        (RunStatus.RUNNING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
-        (RunStatus.RUNNING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
-        (RunStatus.RUNNING, RunTrigger.FAILED): RunStatus.FAILED,
-        (RunStatus.PAUSING, RunTrigger.READY): RunStatus.PAUSING,
-        (RunStatus.PAUSING, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSING,
-        (RunStatus.PAUSING, RunTrigger.INVOCATION_FINISHED): RunStatus.PAUSED,
-        (RunStatus.PAUSING, RunTrigger.RESUMED): RunStatus.RUNNING,
+        # Requested while starting, a pause or stop is held, not entered: the
+        # run reports ``starting`` until it is ready, and core lands the
+        # request at the first boundary after that.
+        **_starting_moves(_STARTING, ready=_RUNNING),
+        **_starting_moves(_STARTING_PAUSE, ready=_PAUSING),
+        **_starting_moves(_STARTING_STOP, ready=_STOPPING),
+        # Core may land a held stop before the run is ready, which abandons the
+        # startup: the run ends ``stopped`` without ever having run. A held
+        # pause has no such boundary; it lands only after ``READY``.
+        (_STARTING_STOP, RunTrigger.INVOCATION_FINISHED): _STOPPED,
+        (_RUNNING, RunTrigger.READY): _RUNNING,
+        (_RUNNING, RunTrigger.PAUSE_REQUESTED): _PAUSING,
+        (_RUNNING, RunTrigger.INVOCATION_FINISHED): _RUNNING,
+        (_RUNNING, RunTrigger.RESUMED): _RUNNING,
+        (_RUNNING, RunTrigger.STOP_REQUESTED): _STOPPING,
+        (_RUNNING, RunTrigger.COMPLETED): _COMPLETED,
+        (_RUNNING, RunTrigger.FAILED): _FAILED,
+        (_PAUSING, RunTrigger.READY): _PAUSING,
+        (_PAUSING, RunTrigger.PAUSE_REQUESTED): _PAUSING,
+        (_PAUSING, RunTrigger.INVOCATION_FINISHED): _PAUSED,
+        (_PAUSING, RunTrigger.RESUMED): _RUNNING,
         # A stop supersedes the pause pending at the same boundary.
-        (RunStatus.PAUSING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
-        (RunStatus.PAUSING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
-        (RunStatus.PAUSING, RunTrigger.FAILED): RunStatus.FAILED,
-        (RunStatus.PAUSED, RunTrigger.READY): RunStatus.PAUSED,
-        (RunStatus.PAUSED, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSED,
-        (RunStatus.PAUSED, RunTrigger.INVOCATION_FINISHED): RunStatus.PAUSED,
-        (RunStatus.PAUSED, RunTrigger.RESUMED): RunStatus.RUNNING,
+        (_PAUSING, RunTrigger.STOP_REQUESTED): _STOPPING,
+        (_PAUSING, RunTrigger.COMPLETED): _COMPLETED,
+        (_PAUSING, RunTrigger.FAILED): _FAILED,
+        (_PAUSED, RunTrigger.READY): _PAUSED,
+        (_PAUSED, RunTrigger.PAUSE_REQUESTED): _PAUSED,
+        (_PAUSED, RunTrigger.INVOCATION_FINISHED): _PAUSED,
+        (_PAUSED, RunTrigger.RESUMED): _RUNNING,
         # Leaving PAUSED releases the thread parked at the pause wait, which
         # then lands the stop at the boundary it is already standing on.
-        (RunStatus.PAUSED, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
-        (RunStatus.PAUSED, RunTrigger.COMPLETED): RunStatus.COMPLETED,
-        (RunStatus.PAUSED, RunTrigger.FAILED): RunStatus.FAILED,
-        (RunStatus.STOPPING, RunTrigger.READY): RunStatus.STOPPING,
+        (_PAUSED, RunTrigger.STOP_REQUESTED): _STOPPING,
+        (_PAUSED, RunTrigger.COMPLETED): _COMPLETED,
+        (_PAUSED, RunTrigger.FAILED): _FAILED,
+        (_STOPPING, RunTrigger.READY): _STOPPING,
         # A pause cannot downgrade a stop already pending at the boundary.
-        (RunStatus.STOPPING, RunTrigger.PAUSE_REQUESTED): RunStatus.STOPPING,
-        (RunStatus.STOPPING, RunTrigger.INVOCATION_FINISHED): RunStatus.STOPPED,
+        (_STOPPING, RunTrigger.PAUSE_REQUESTED): _STOPPING,
+        (_STOPPING, RunTrigger.INVOCATION_FINISHED): _STOPPED,
         # A resume that beats the boundary cancels the stop, like a pause.
-        (RunStatus.STOPPING, RunTrigger.RESUMED): RunStatus.RUNNING,
-        (RunStatus.STOPPING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
-        (RunStatus.STOPPING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
-        (RunStatus.STOPPING, RunTrigger.FAILED): RunStatus.FAILED,
+        (_STOPPING, RunTrigger.RESUMED): _RUNNING,
+        (_STOPPING, RunTrigger.STOP_REQUESTED): _STOPPING,
+        (_STOPPING, RunTrigger.COMPLETED): _COMPLETED,
+        (_STOPPING, RunTrigger.FAILED): _FAILED,
     }
 )
-"""Every legal move out of a status that has not ended, as data.
+"""Every legal move out of a state that has not ended, as data.
 
-Absent pairs are illegal and raise. A status that has ended is absorbing and
+Absent pairs are illegal and raise. A state that has ended is absorbing and
 is deliberately not listed: :func:`transition` answers for it first.
 """
 
 
-def transition(current: RunStatus, trigger: RunTrigger) -> RunStatus:
-    """Return the status ``trigger`` produces from ``current``.
+def transition(current: RunState, trigger: RunTrigger) -> RunState:
+    """Return the state ``trigger`` produces from ``current``.
 
     An ended status absorbs every trigger, which is what makes ``finish``
     idempotent and lets a late ``/resume`` or a boundary reached after the run
@@ -128,9 +199,9 @@ def transition(current: RunStatus, trigger: RunTrigger) -> RunStatus:
         IllegalRunTransitionError: The pair is not in the table, so the caller
             observed something the lifecycle says cannot happen.
     """
-    if current.has_ended:
+    if current.status.has_ended:
         return current
     result = _TRANSITIONS.get((current, trigger))
     if result is None:
-        raise IllegalRunTransitionError(current, trigger)
+        raise IllegalRunTransitionError(current.status, trigger)
     return result

@@ -4,7 +4,7 @@ The desktop app runs ``python -m entrypoints.host_helper`` once per channel, loc
 over stdio or remotely over one ssh exec channel. A channel carries typed JSON lines
 (``server.host_api``): a ``hello`` first, then requests answered concurrently, each
 reply echoing its request's id. A run channel ends with ``run.connect``, after which
-it is a byte relay to the run's control socket (``server.stdio_bridge``).
+it is a byte relay to the run's control socket (``server.relay``).
 ``docs/contributing/desktop-connection.md`` ("The host helper") owns the design.
 
 The module is a pure core and a thin shell; answering one request is
@@ -63,17 +63,16 @@ from server.host_helper_requests import (
     connect,
     negotiate,
 )
-from server.stdio_bridge import (
-    BridgeOutcome,
+from server.relay import (
+    ChannelEndOutcome,
     ClientStreams,
     relay,
 )
-from server.stdio_bridge_report import BridgeReport
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from server.stdio_bridge import ByteSink, ByteSource
+    from server.relay import ByteSink, ByteSource
     from vs_sim.api import Connection, Event, Threads
 
 WATCH_INTERVAL_SECONDS: Final = 1.0
@@ -554,7 +553,7 @@ def serve_channel(
     """Serve one channel until its input ends or it is relayed; the process exit status.
 
     ``0`` when the client ended a control channel; a relayed channel ends with the
-    relay's status and, when that is not ``0``, one ``BridgeReport`` line on
+    relay's status and, when that is not ``0``, one ``ChannelEnd`` line on
     ``errors``. Workers and the input pump may still be blocked when this returns;
     the caller ends the process.
     """
@@ -565,6 +564,6 @@ def serve_channel(
     if connection is None:
         return 0
     result = relay(connection, client=ClientStreams(_InboxSource(inbox), output), threads=threads)
-    if result.outcome is not BridgeOutcome.CLIENT_CLOSED:
-        errors.write(BridgeReport.of(result).line().encode())
+    if result.outcome is not ChannelEndOutcome.CLIENT_CLOSED:
+        errors.write(result.channel_end().line().encode())
     return result.exit_status

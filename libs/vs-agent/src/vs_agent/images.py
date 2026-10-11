@@ -16,25 +16,50 @@ metadata otherwise changes the manifest ID when all filesystem layers match.
 from __future__ import annotations
 
 import json
+import math
+import queue
 import re
-import subprocess
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from vs_agent import provider_policy
-from vs_agent.container_python import CONTAINER_PYTHON_HOME, CONTAINER_PYTHON_VERSION
-from vs_sim.api import StreamingCommand, SubprocessStreamingCommand
+from vs_agent.agent_feature import AGENT_USER, AGENT_WORKDIR, agent_feature
+from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
+from vs_sim.api import (
+    OsThreads,
+    PipedProcess,
+    PipedProcessLauncher,
+    ProcessTimeoutError,
+    StreamingCommand,
+    SubprocessPipedProcessLauncher,
+    Threads,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Sequence
+    import io
+    from collections.abc import Callable, Sequence
+
+    from vs_sandbox.api import FeatureRef
+    from vs_sim.api import Worker
 
 _DEFAULT_BUILD_TIMEOUT_SECONDS = 1200.0
 _DEFAULT_PUSH_TIMEOUT_SECONDS = 1200.0
 _DEFAULT_VERIFY_TIMEOUT_SECONDS = 60.0
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 _DIAGNOSTIC_LIMIT = 1000
+DOCKER_OUTPUT_TAIL_CHARACTERS = 64 * 1024
+"""Maximum characters retained from each Docker command output stream."""
+
+_OUTPUT_READ_CHARACTERS = 16 * 1024
+DOCKER_PROGRESS_LINE_CHARACTERS = 16 * 1024
+"""Maximum characters delivered for one Docker stderr progress line."""
+
+_PROCESS_SETTLE_TIMEOUT_SECONDS = 5.0
+# After a normally exited leader, leave half of the one final cleanup budget
+# for killing inherited writers and settling the readers they kept open.
+_DRAIN_GRACE_FRACTION = 0.5
 _TASK_IMAGE_REPOSITORY = "vibesys-task-build"
 #: Repository of the local tag that names a bare image ID so BuildKit can
 #: resolve it in a ``FROM`` line. Keyed by the full ID, so re-tagging is a
@@ -59,14 +84,6 @@ DEFAULT_AGENT_IMAGE_REGISTRY = "ghcr.io/uw-syfi/vibesys-agent"
 #: fast no-op.
 _SHORT_ID_LENGTH = 12
 
-#: The agent layer's build context: its Dockerfile plus nothing else. Resolved
-#: relative to this module rather than through ``importlib.resources`` so the
-#: path is always a real filesystem path Docker can build from, whether this
-#: package runs from a source checkout or an installed wheel (package data is
-#: unpacked to disk, never zipped, for this project).
-_AGENT_IMAGE_DIR = Path(__file__).resolve().parent / "images"
-_AGENT_DOCKERFILE = _AGENT_IMAGE_DIR / "agent.Dockerfile"
-
 
 class TaskImageBuildError(RuntimeError):
     """Raised when Docker cannot produce a valid immutable image."""
@@ -82,7 +99,7 @@ class TaskImageBuildError(RuntimeError):
     ) -> TaskImageBuildError:
         """Describe a Docker build failure and its diagnostic output."""
         return cls(
-            f"Could not build {target.image_label} from {target.dockerfile} "
+            f"Could not build {target.image_label} from {target.source} "
             f"(exit {returncode}): {details[:_DIAGNOSTIC_LIMIT]}"
         )
 
@@ -97,17 +114,17 @@ class TaskImageBuildError(RuntimeError):
         """Describe a failed lookup of the built image's immutable ID."""
         return cls(
             f"Could not resolve runnable {target.image_label} {image_tag} built from "
-            f"{target.dockerfile} (exit {returncode}): "
+            f"{target.source} (exit {returncode}): "
             f"{details[:_DIAGNOSTIC_LIMIT]}"
         )
 
     @classmethod
     def invalid_runnable_id(
-        cls, image_label: str, dockerfile: Path, displayed: str
+        cls, image_label: str, source: str, displayed: str
     ) -> TaskImageBuildError:
         """Describe Docker returning a value that is not an immutable image ID."""
         return cls(
-            f"Docker returned an invalid runnable {image_label} ID for {dockerfile}: {displayed!r}"
+            f"Docker returned an invalid runnable {image_label} ID for {source}: {displayed!r}"
         )
 
     @classmethod
@@ -123,7 +140,7 @@ class TaskImageBuildError(RuntimeError):
     @classmethod
     def docker_not_found(cls, action: str, target: _BuildTarget) -> TaskImageBuildError:
         """Describe Docker being unavailable for an image build action."""
-        return cls(f"Docker was not found while {action} {target.image_label}: {target.dockerfile}")
+        return cls(f"Docker was not found while {action} {target.image_label}: {target.source}")
 
     @classmethod
     def docker_timed_out(
@@ -132,7 +149,7 @@ class TaskImageBuildError(RuntimeError):
         """Describe a Docker image build action that exceeded its timeout."""
         return cls(
             f"Docker timed out after {timeout:g} seconds while {action} "
-            f"{target.image_label}: {target.dockerfile}"
+            f"{target.image_label}: {target.source}"
         )
 
 
@@ -245,13 +262,15 @@ class _StepTracker:
 
 @dataclass(frozen=True)
 class _BuildTarget:
-    """Where a Dockerfile and its build context are, and how to tag and name it.
+    """What an image is built from, where Docker runs, and how to tag and name it.
 
     Bundled so the build/inspect/error-reporting helpers below stay under the
-    project's argument-count limit now that this module builds two images.
+    project's argument-count limit. ``source`` is the human-readable origin
+    (a Dockerfile path, a ``devcontainer.json`` path, or an image ID) that
+    error messages name; ``context`` is the directory Docker commands run in.
     """
 
-    dockerfile: Path
+    source: str
     context: Path
     image_repository: str
     image_label: str
@@ -270,6 +289,169 @@ class _BuiltImage:
     image_id: str
 
 
+@dataclass(frozen=True)
+class DockerCommandResult:
+    """Exit status and bounded diagnostic tails from one Docker command.
+
+    ``stdout`` and ``stderr`` contain at most
+    :data:`DOCKER_OUTPUT_TAIL_CHARACTERS` characters each. The corresponding
+    omitted counts make truncation explicit without placing a marker in
+    machine-readable command output.
+    """
+
+    args: tuple[str, ...]
+    returncode: int
+    stdout: str
+    stderr: str
+    stdout_omitted_characters: int = 0
+    stderr_omitted_characters: int = 0
+
+    def __post_init__(self) -> None:
+        """Reject inconsistent results at the process boundary."""
+        if self.stdout_omitted_characters < 0 or self.stderr_omitted_characters < 0:
+            message = "Docker output omitted-character counts must be nonnegative"
+            raise ValueError(message)
+        if (
+            len(self.stdout) > DOCKER_OUTPUT_TAIL_CHARACTERS
+            or len(self.stderr) > DOCKER_OUTPUT_TAIL_CHARACTERS
+        ):
+            message = "Docker command output exceeds the retained-tail limit"
+            raise ValueError(message)
+
+    @property
+    def stdout_truncated(self) -> bool:
+        """Whether characters before the retained stdout tail were discarded."""
+        return self.stdout_omitted_characters > 0
+
+    @property
+    def stderr_truncated(self) -> bool:
+        """Whether characters before the retained stderr tail were discarded."""
+        return self.stderr_omitted_characters > 0
+
+    def stdout_diagnostic(self, fallback: str, *, limit: int = _DIAGNOSTIC_LIMIT) -> str:
+        """Render bounded stdout with an explicit truncation marker."""
+        return _diagnostic_text(
+            self.stdout,
+            self.stdout_omitted_characters,
+            fallback=fallback,
+            limit=limit,
+        )
+
+    def failure_diagnostic(self, fallback: str, *, limit: int = _DIAGNOSTIC_LIMIT) -> str:
+        """Prefer stderr, then stdout, as a bounded command-failure diagnostic."""
+        if self.stderr.strip() or self.stderr_truncated:
+            return _diagnostic_text(
+                self.stderr,
+                self.stderr_omitted_characters,
+                fallback=fallback,
+                limit=limit,
+            )
+        return self.stdout_diagnostic(fallback, limit=limit)
+
+
+class LegacyDockerCommandResult(Protocol):
+    """Structural contract of older ``CompletedProcess``-returning runners."""
+
+    @property
+    def args(self) -> Sequence[str] | str:
+        """The executed argument vector."""
+        ...
+
+    @property
+    def returncode(self) -> int:
+        """The process exit status."""
+        ...
+
+    @property
+    def stdout(self) -> str | None:
+        """Captured stdout, or ``None`` when capture was disabled."""
+        ...
+
+    @property
+    def stderr(self) -> str | None:
+        """Captured stderr, or ``None`` when capture was disabled."""
+        ...
+
+
+type DockerBuildResult = DockerCommandResult | LegacyDockerCommandResult
+"""Image-runner result, including legacy injected runners during migration."""
+
+
+def _bounded_result(result: DockerBuildResult) -> DockerCommandResult:
+    """Adapt an existing ``CompletedProcess`` runner to the bounded result contract."""
+    if isinstance(result, DockerCommandResult):
+        return result
+    raw_args = result.args
+    args = (raw_args,) if isinstance(raw_args, str) else tuple(raw_args)
+    stdout = result.stdout or ""
+    stderr = result.stderr or ""
+    stdout_omitted = max(0, len(stdout) - DOCKER_OUTPUT_TAIL_CHARACTERS)
+    stderr_omitted = max(0, len(stderr) - DOCKER_OUTPUT_TAIL_CHARACTERS)
+    return DockerCommandResult(
+        args=args,
+        returncode=result.returncode,
+        stdout=stdout[-DOCKER_OUTPUT_TAIL_CHARACTERS:],
+        stderr=stderr[-DOCKER_OUTPUT_TAIL_CHARACTERS:],
+        stdout_omitted_characters=stdout_omitted,
+        stderr_omitted_characters=stderr_omitted,
+    )
+
+
+def _diagnostic_text(text: str, omitted: int, *, fallback: str, limit: int) -> str:
+    """Render one retained tail within *limit*, naming discarded output."""
+    if limit <= 0:
+        message = "Docker diagnostic limit must be positive"
+        raise ValueError(message)
+    retained = text.strip()
+    if not retained and omitted == 0:
+        return fallback[:limit]
+    if omitted == 0:
+        return retained[-limit:]
+    marker = f"[... {omitted} earlier Docker output characters truncated ...]\n"
+    if len(marker) >= limit:
+        return marker[:limit]
+    return marker + retained[-(limit - len(marker)) :]
+
+
+@dataclass(frozen=True)
+class _RetainedOutput:
+    """One bounded stream suffix and the size of its discarded prefix."""
+
+    text: str
+    omitted_characters: int
+
+
+class _OutputTail:
+    """Drain arbitrary text chunks while retaining a fixed-size suffix."""
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._parts: deque[str] = deque()
+        self._retained_characters = 0
+        self._omitted_characters = 0
+
+    def append(self, text: str) -> None:
+        """Retain the newest characters from *text*."""
+        self._parts.append(text)
+        self._retained_characters += len(text)
+        excess = self._retained_characters - self._limit
+        while excess > 0:
+            oldest = self._parts[0]
+            if len(oldest) <= excess:
+                self._parts.popleft()
+                removed = len(oldest)
+            else:
+                self._parts[0] = oldest[excess:]
+                removed = excess
+            self._retained_characters -= removed
+            self._omitted_characters += removed
+            excess -= removed
+
+    def result(self) -> _RetainedOutput:
+        """Return the retained suffix and number of earlier characters discarded."""
+        return _RetainedOutput("".join(self._parts), self._omitted_characters)
+
+
 class DockerBuildRunner(Protocol):
     """Injectable process boundary for a Docker image build."""
 
@@ -280,22 +462,121 @@ class DockerBuildRunner(Protocol):
         cwd: Path,
         timeout: float,
         on_stderr_line: Callable[[str], None] | None = None,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> DockerBuildResult:
         """Run one Docker command without a shell.
 
         When ``on_stderr_line`` is given, it receives each line of the
-        command's standard error, in order, while the command runs; the
-        result still carries all of it.
+        command's standard error, in order, while the command runs. An
+        individual progress line is capped before delivery; the result keeps
+        an independently bounded tail of both streams.
         """
         ...
 
 
-class SubprocessDockerBuildRunner:
-    """Run Docker directly and capture its diagnostics."""
+class _ProgressLines:
+    """Forward bounded logical stderr lines without buffering an unbounded line."""
 
-    def __init__(self, streaming: StreamingCommand | None = None) -> None:
-        """Stream a command's stderr through ``streaming`` (a real process by default)."""
-        self._streaming = streaming or SubprocessStreamingCommand()
+    def __init__(
+        self,
+        sink: Callable[[str], None],
+        errors: queue.SimpleQueue[Exception],
+    ) -> None:
+        self._sink: Callable[[str], None] | None = sink
+        self._errors = errors
+        self._prefix = ""
+        self._line_open = False
+
+    def feed(self, text: str) -> None:
+        """Consume a fixed-size stream chunk and emit every completed line."""
+        start = 0
+        while True:
+            end = text.find("\n", start)
+            if end < 0:
+                self._append(text[start:])
+                return
+            self._append(text[start:end])
+            self._emit()
+            start = end + 1
+
+    def finish(self) -> None:
+        """Emit the final unterminated line, when present."""
+        if self._line_open:
+            self._emit()
+
+    def _append(self, text: str) -> None:
+        if text:
+            self._line_open = True
+        remaining = DOCKER_PROGRESS_LINE_CHARACTERS - len(self._prefix)
+        if remaining > 0:
+            self._prefix += text[:remaining]
+
+    def _emit(self) -> None:
+        sink = self._sink
+        if sink is not None:
+            try:
+                sink(self._prefix.removesuffix("\r"))
+            except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-994700 [BLE001]; progress observer failures are reported after both process pipes have been drained, so callbacks cannot deadlock the child.
+                self._errors.put(exc)
+                self._sink = None
+        self._prefix = ""
+        self._line_open = False
+
+
+@dataclass
+class _DockerExecution:
+    """Resources owned by one started Docker command."""
+
+    process: PipedProcess
+    streams: tuple[io.TextIOBase, io.TextIOBase]
+    workers: list[Worker]
+
+
+@dataclass(frozen=True)
+class _Settlement:
+    """Whether cleanup stopped every worker, plus cleanup failures to annotate."""
+
+    workers_stopped: bool
+    errors: tuple[BaseException, ...]
+
+
+def _cleanup_attempt[T](
+    operation: Callable[[], T],
+    errors: list[BaseException],
+    *,
+    on_failure: T,
+) -> T:
+    """Run one cleanup operation, recording every failure so later steps still run."""
+    try:
+        return operation()
+    except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010245 [BLE001]; cleanup must continue through cancellation and interpreter-level failures so an injected lifecycle effect cannot replace the primary process failure or leak later-owned resources.
+        errors.append(exc)
+        return on_failure
+
+
+class SubprocessDockerBuildRunner:
+    """Run Docker directly while continuously draining bounded diagnostics."""
+
+    def __init__(
+        self,
+        streaming: StreamingCommand | None = None,
+        *,
+        threads: Threads | None = None,
+        processes: PipedProcessLauncher | None = None,
+        cleanup_timeout: float = _PROCESS_SETTLE_TIMEOUT_SECONDS,
+    ) -> None:
+        """Use OS effects by default, retaining the positional streaming test seam.
+
+        An explicitly injected legacy ``streaming`` command remains active for
+        calls that request stderr progress. Production execution and calls
+        without a progress observer use the bounded piped-process boundary.
+        """
+        if not math.isfinite(cleanup_timeout) or cleanup_timeout < 0:
+            message = "Docker process cleanup timeout must be finite and nonnegative"
+            raise ValueError(message)
+        self._threads = threads or OsThreads()
+        self._processes = processes or SubprocessPipedProcessLauncher()
+        self._streaming = streaming
+        self._cleanup_timeout = cleanup_timeout
 
     def run(
         self,
@@ -304,22 +585,171 @@ class SubprocessDockerBuildRunner:
         cwd: Path,
         timeout: float,
         on_stderr_line: Callable[[str], None] | None = None,
-    ) -> subprocess.CompletedProcess[str]:
-        """Run one Docker command without invoking a shell."""
-        if on_stderr_line is not None:
-            return self._streaming.run(
-                argv, cwd=cwd, timeout_seconds=timeout, on_stderr_line=on_stderr_line
+    ) -> DockerCommandResult:
+        """Run one command with continuously drained, bounded output."""
+        normalized = tuple(argv)
+        if self._streaming is not None and on_stderr_line is not None:
+            result = self._streaming.run(
+                normalized,
+                cwd=cwd,
+                timeout_seconds=timeout,
+                on_stderr_line=lambda line: on_stderr_line(line[:DOCKER_PROGRESS_LINE_CHARACTERS]),
             )
-        return subprocess.run(  # noqa: S603  # lint-waiver: LW-010239 [S603]; Docker commands are constructed by the sandbox adapter and never use a shell.
-            tuple(argv),
-            cwd=cwd,
-            capture_output=True,
-            check=False,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
+            return _bounded_result(result)
+        process = self._processes.start(normalized, cwd=cwd)
+        stdout_tail = _OutputTail(DOCKER_OUTPUT_TAIL_CHARACTERS)
+        stderr_tail = _OutputTail(DOCKER_OUTPUT_TAIL_CHARACTERS)
+        drain_errors: queue.SimpleQueue[Exception] = queue.SimpleQueue()
+        execution = self._start_drains(
+            process,
+            stdout_tail,
+            stderr_tail,
+            drain_errors,
+            on_stderr_line,
         )
+        try:
+            returncode = process.wait(timeout=timeout)
+        except BaseException as failure:
+            deadline = self._threads.now() + self._cleanup_timeout
+            self._note_settlement(failure, self._settle(execution, deadline, kill=True))
+            raise
+        cleanup_started = self._threads.now()
+        deadline = cleanup_started + self._cleanup_timeout
+        drain_deadline = cleanup_started + self._cleanup_timeout * _DRAIN_GRACE_FRACTION
+        drain_settlement = self._join_drains_until(execution.workers, drain_deadline)
+        if not drain_settlement.workers_stopped:
+            settlement = self._settle(
+                execution,
+                deadline,
+                kill=True,
+                prior_errors=drain_settlement.errors,
+            )
+            message = "Docker output pipes did not settle after the process exited"
+            error = RuntimeError(message)
+            self._note_settlement(error, settlement)
+            raise error
+        close_errors = self._close_streams(execution.streams)
+        if close_errors:
+            raise close_errors[0]
+        if not drain_errors.empty():
+            raise drain_errors.get()
+        captured_stdout = stdout_tail.result()
+        captured_stderr = stderr_tail.result()
+        return DockerCommandResult(
+            args=normalized,
+            returncode=returncode,
+            stdout=captured_stdout.text,
+            stderr=captured_stderr.text,
+            stdout_omitted_characters=captured_stdout.omitted_characters,
+            stderr_omitted_characters=captured_stderr.omitted_characters,
+        )
+
+    def _start_drains(
+        self,
+        process: PipedProcess,
+        stdout_tail: _OutputTail,
+        stderr_tail: _OutputTail,
+        drain_errors: queue.SimpleQueue[Exception],
+        on_stderr_line: Callable[[str], None] | None,
+    ) -> _DockerExecution:
+        """Start both drains, cleaning up the process if either worker cannot start."""
+
+        def drain(
+            stream: io.TextIOBase,
+            tail: _OutputTail,
+            progress: _ProgressLines | None = None,
+        ) -> None:
+            try:
+                while chunk := stream.readline(_OUTPUT_READ_CHARACTERS):
+                    tail.append(chunk)
+                    if progress is not None:
+                        progress.feed(chunk)
+            except (OSError, UnicodeError, ValueError) as exc:
+                drain_errors.put(exc)
+            finally:
+                if progress is not None:
+                    progress.finish()
+
+        execution = _DockerExecution(process, (process.stdout, process.stderr), [])
+        progress = None if on_stderr_line is None else _ProgressLines(on_stderr_line, drain_errors)
+        try:
+            execution.workers.append(
+                self._threads.spawn(
+                    lambda: drain(process.stdout, stdout_tail),
+                    name="docker-stdout",
+                    daemon=True,
+                )
+            )
+            execution.workers.append(
+                self._threads.spawn(
+                    lambda: drain(process.stderr, stderr_tail, progress),
+                    name="docker-stderr",
+                    daemon=True,
+                )
+            )
+        except BaseException as failure:
+            deadline = self._threads.now() + self._cleanup_timeout
+            self._note_settlement(failure, self._settle(execution, deadline, kill=True))
+            raise
+        return execution
+
+    def _settle(
+        self,
+        execution: _DockerExecution,
+        deadline: float,
+        *,
+        kill: bool,
+        prior_errors: Sequence[BaseException] = (),
+    ) -> _Settlement:
+        """Settle one execution without allowing cleanup failures to skip later cleanup."""
+        errors = list(prior_errors)
+        if kill:
+            _cleanup_attempt(execution.process.kill_group, errors, on_failure=None)
+        _cleanup_attempt(execution.process.cancel_output, errors, on_failure=None)
+        _cleanup_attempt(
+            lambda: execution.process.wait(timeout=max(0.0, deadline - self._threads.now())),
+            errors,
+            on_failure=None,
+        )
+        worker_settlement = self._join_drains_until(execution.workers, deadline)
+        errors.extend(worker_settlement.errors)
+        errors.extend(self._close_streams(execution.streams))
+        return _Settlement(worker_settlement.workers_stopped, tuple(errors))
+
+    @staticmethod
+    def _close_streams(streams: Sequence[io.TextIOBase]) -> tuple[BaseException, ...]:
+        """Close every owned reader even when closing one reader fails."""
+        errors: list[BaseException] = []
+        for stream in streams:
+            _cleanup_attempt(stream.close, errors, on_failure=None)
+        return tuple(errors)
+
+    @staticmethod
+    def _note_settlement(failure: BaseException, settlement: _Settlement) -> None:
+        """Attach cleanup evidence without replacing the triggering exception."""
+        for error in settlement.errors:
+            failure.add_note(f"Docker cleanup also raised {type(error).__name__}")
+        if not settlement.workers_stopped:
+            failure.add_note("Docker output drain workers did not settle before cleanup expired")
+
+    def _join_drains_until(
+        self,
+        workers: Sequence[Worker],
+        deadline: float,
+    ) -> _Settlement:
+        """Join output drains against one shared deadline."""
+        errors: list[BaseException] = []
+        for worker in workers:
+            _cleanup_attempt(
+                lambda worker=worker: worker.join(max(0.0, deadline - self._threads.now())),
+                errors,
+                on_failure=None,
+            )
+        workers_stopped = not errors
+        for worker in workers:
+            if _cleanup_attempt(worker.is_alive, errors, on_failure=True):
+                workers_stopped = False
+        return _Settlement(workers_stopped, tuple(errors))
 
 
 def build_task_image(
@@ -377,7 +807,7 @@ def _build_task_image(dockerfile: Path, *, base_image: str | None, build: _Build
     """Build a validated task Dockerfile and return its tag and immutable ID."""
     extra_build_args = ("--build-arg", f"BASE_IMAGE={base_image}") if base_image is not None else ()
     target = _BuildTarget(
-        dockerfile=dockerfile,
+        source=str(dockerfile),
         context=dockerfile.parent,
         image_repository=_TASK_IMAGE_REPOSITORY,
         image_label="task image",
@@ -396,48 +826,46 @@ def _resolvable_base(base_image: str, build: _BuildRun) -> str:
         return base_image
     tag = f"{_BASE_IMAGE_REPOSITORY}:{base_image.removeprefix('sha256:')}"
     target = _BuildTarget(
-        dockerfile=_AGENT_DOCKERFILE,
-        context=_AGENT_IMAGE_DIR,
+        source=base_image,
+        context=Path.cwd(),
         image_repository=_BASE_IMAGE_REPOSITORY,
         image_label="base image",
     )
     result = _run_docker(build, ("docker", "tag", base_image, tag), action="tagging", target=target)
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "docker tag failed").strip()
+        detail = result.failure_diagnostic("docker tag failed")
         raise TaskImageBuildError.base_tag_failed(base_image, tag, result.returncode, detail)
     return tag
 
 
-def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task image, toolchains, pip extras, injected runner, timeout, and progress sink independently affect build layers, execution, or observation; callers use this public builder directly.
+def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task image, Features, injected runner, timeout, and progress sink independently affect build layers, execution, or observation; callers use this public builder directly.
     base_image: str,
     *,
     task_dockerfile: Path | None = None,
-    toolchains: Collection[str] = (),
-    pip_extras: Collection[str] = (),
+    features: Sequence[FeatureRef] = (),
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     on_progress: BuildProgressSink | None = None,
 ) -> str:
     """Build the agent layer on top of a task image, and return its image ID.
 
-    ``pip_extras`` are extra pip requirements an execution environment needs
-    inside the editor container (sorted and deduplicated like ``toolchains``).
+    The agent layer is the ``vibesys-agent`` Feature (CLIs, the ``agent`` user,
+    VibeSys's Python) followed by *features*, which the caller selects (a run
+    environment's extras, toolchains from :mod:`vs_sandbox.toolchain_features`).
+    :func:`vs_sandbox.feature_image.build_feature_image` applies them with one
+    ``docker build`` of a generated Dockerfile; the result runs as the ``agent`` user in
+    ``/workspace``.
 
     When ``task_dockerfile`` is given, the task image is built first (as
     :func:`build_task_image` does, with ``base_image`` passed through so the
     task Dockerfile may ``FROM ${BASE_IMAGE}``) and the agent layer is built on
     top of it by its unique local tag. Otherwise the agent layer is built
     directly on ``base_image``. BuildKit cannot resolve a bare ``sha256:`` ID
-    in ``FROM``, so an ID ``base_image`` is given a local tag first; the
-    ``BASE_IMAGE`` build arg is never a bare ID.
+    as a base, so an ID ``base_image`` is given a local tag first.
 
-    CLI and toolchain versions come from :mod:`vs_agent.provider_policy`
-    and are passed as build args, so a version bump changes this module's
-    caller nowhere: rebuilding with an unchanged Dockerfile and unchanged
-    build args resolves to the same image from Docker's layer cache.
-    ``toolchains`` is sorted and deduplicated before being rendered, so the
-    build args (and therefore the cache key) do not depend on collection
-    order.
+    Agent versions come from :mod:`vs_agent.provider_policy`, so a bump changes
+    no caller: rebuilding with an unchanged selection resolves to the same image
+    from Docker's per-Feature layer cache.
 
     ``on_progress``, when given, receives each build's step observations
     (the task image's, then the agent layer's), parsed from Docker's
@@ -459,31 +887,19 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     else:
         base = _resolvable_base(base_image, build)
 
-    build_args: list[str] = ["--build-arg", f"BASE_IMAGE={base}"]
-    build_args += ["--build-arg", f"NODE_VERSION={provider_policy.NODE_VERSION}"]
-    for provider, version in provider_policy.CLI_VERSIONS.items():
-        build_args += ["--build-arg", f"{provider.upper()}_VERSION={version}"]
-    build_args += ["--build-arg", f"PYTHON_VERSION={CONTAINER_PYTHON_VERSION}"]
-    build_args += ["--build-arg", f"PYTHON_HOME={CONTAINER_PYTHON_HOME}"]
-    build_args += ["--build-arg", f"TOOLCHAINS={' '.join(sorted(set(toolchains)))}"]
-    build_args += ["--build-arg", f"RUST_VERSION={provider_policy.RUST_TOOLCHAIN_VERSION}"]
-    build_args += ["--build-arg", f"GO_VERSION={provider_policy.GO_TOOLCHAIN_VERSION}"]
-    build_args += ["--build-arg", f"DOCKER_ENGINE_VERSION={provider_policy.DOCKER_ENGINE_VERSION}"]
-    build_args += [
-        "--build-arg",
-        f"DOCKER_COMPOSE_VERSION={provider_policy.DOCKER_COMPOSE_VERSION}",
-    ]
-    build_args += ["--build-arg", f"KIND_VERSION={provider_policy.KIND_VERSION}"]
-    build_args += ["--build-arg", f"KUBECTL_VERSION={provider_policy.KUBECTL_VERSION}"]
-    build_args += ["--build-arg", f"PIP_EXTRAS={' '.join(sorted(set(pip_extras)))}"]
-
-    target = _BuildTarget(
-        dockerfile=_AGENT_DOCKERFILE,
-        context=_AGENT_IMAGE_DIR,
-        image_repository=_AGENT_IMAGE_REPOSITORY,
-        image_label="agent image",
-    )
-    return _build_and_inspect(target, tuple(build_args), build).image_id
+    try:
+        built = build_feature_image(
+            base,
+            (agent_feature(), *features),
+            final=FinalImage(
+                user=AGENT_USER, workdir=AGENT_WORKDIR, image_repository=_AGENT_IMAGE_REPOSITORY
+            ),
+            command_runner=_BuildCommandRunner(build),
+            timeout=timeout,
+        )
+    except FeatureImageBuildError as exc:
+        raise TaskImageBuildError(str(exc)) from exc
+    return built.image_id
 
 
 @dataclass(frozen=True)
@@ -493,6 +909,58 @@ class _BuildRun:
     runner: DockerBuildRunner
     timeout: float
     on_progress: BuildProgressSink | None = None
+
+
+@dataclass(frozen=True)
+class _FeatureCommandResult:
+    """Bounded command output adapted to the Feature builder's narrower contract."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+class _BuildCommandRunner:
+    """Present a :class:`DockerBuildRunner` to the image mechanism.
+
+    The mechanism reports timeouts as ``TimeoutError`` and knows nothing of
+    progress, so this adapter translates the former and, for each ``docker
+    build`` it runs, reports the latter to the run's progress sink.
+    """
+
+    def __init__(self, build: _BuildRun) -> None:
+        self._build = build
+
+    def run(self, argv: Sequence[str], *, cwd: Path, timeout: float) -> _FeatureCommandResult:
+        sink = self._build.on_progress
+        tracker = _StepTracker(sink).line if sink is not None and argv[1] == "build" else None
+        try:
+            result = _bounded_result(
+                self._build.runner.run(
+                    argv,
+                    cwd=cwd,
+                    timeout=timeout,
+                    on_stderr_line=tracker,
+                )
+            )
+        except ProcessTimeoutError as exc:
+            raise TimeoutError(str(exc)) from exc
+        return _FeatureCommandResult(
+            returncode=result.returncode,
+            stdout=(
+                result.stdout_diagnostic("<empty>") if result.stdout_truncated else result.stdout
+            ),
+            stderr=(
+                _diagnostic_text(
+                    result.stderr,
+                    result.stderr_omitted_characters,
+                    fallback="<empty>",
+                    limit=_DIAGNOSTIC_LIMIT,
+                )
+                if result.stderr_truncated
+                else result.stderr
+            ),
+        )
 
 
 def _build_and_inspect(
@@ -507,7 +975,7 @@ def _build_and_inspect(
         "--tag",
         image_tag,
         "--file",
-        str(target.dockerfile),
+        target.source,
         *extra_build_args,
         str(target.context),
     )
@@ -519,7 +987,7 @@ def _build_and_inspect(
         on_stderr_line=None if build.on_progress is None else _StepTracker(build.on_progress).line,
     )
     if build_result.returncode != 0:
-        detail = (build_result.stderr or build_result.stdout or "docker build failed").strip()
+        detail = build_result.failure_diagnostic("docker build failed")
         raise TaskImageBuildError.build_failed(target, build_result.returncode, detail)
 
     inspect_argv = (
@@ -532,19 +1000,26 @@ def _build_and_inspect(
     )
     inspect_result = _run_docker(build, inspect_argv, action="inspecting", target=target)
     if inspect_result.returncode != 0:
-        detail = (inspect_result.stderr or inspect_result.stdout or "docker inspect failed").strip()
+        detail = inspect_result.failure_diagnostic("docker inspect failed")
         raise TaskImageBuildError.inspect_failed(
             target,
             image_tag,
             inspect_result.returncode,
             detail,
         )
-    image_id = inspect_result.stdout.strip()
-    if _IMAGE_ID.fullmatch(image_id) is None:
-        displayed = image_id[:_DIAGNOSTIC_LIMIT] or "<empty>"
+    if inspect_result.stdout_truncated:
+        displayed = inspect_result.stdout_diagnostic("<empty>")
         raise TaskImageBuildError.invalid_runnable_id(
             target.image_label,
-            target.dockerfile,
+            target.source,
+            displayed,
+        )
+    image_id = inspect_result.stdout.strip()
+    if _IMAGE_ID.fullmatch(image_id) is None:
+        displayed = inspect_result.stdout_diagnostic("<empty>")
+        raise TaskImageBuildError.invalid_runnable_id(
+            target.image_label,
+            target.source,
             displayed,
         )
     return _BuiltImage(tag=image_tag, image_id=image_id)
@@ -557,17 +1032,19 @@ def _run_docker(
     action: str,
     target: _BuildTarget,
     on_stderr_line: Callable[[str], None] | None = None,
-) -> subprocess.CompletedProcess[str]:
+) -> DockerCommandResult:
     try:
-        return build.runner.run(
-            argv,
-            cwd=target.dockerfile.parent,
-            timeout=build.timeout,
-            on_stderr_line=on_stderr_line,
+        return _bounded_result(
+            build.runner.run(
+                argv,
+                cwd=target.context,
+                timeout=build.timeout,
+                on_stderr_line=on_stderr_line,
+            )
         )
     except FileNotFoundError as exc:
         raise TaskImageBuildError.docker_not_found(action, target) from exc
-    except subprocess.TimeoutExpired as exc:
+    except ProcessTimeoutError as exc:
         raise TaskImageBuildError.docker_timed_out(build.timeout, action, target) from exc
 
 
@@ -635,14 +1112,14 @@ def push_agent_image(
         runner, ("docker", "tag", image_id, tag), cwd=cwd, timeout=timeout, action="tagging"
     )
     if tag_result.returncode != 0:
-        detail = (tag_result.stderr or tag_result.stdout or "docker tag failed").strip()
+        detail = tag_result.failure_diagnostic("docker tag failed")
         raise ImagePushError.tag_failed(image_id, tag, tag_result.returncode, detail)
 
     push_result = _run_registry_command(
         runner, ("docker", "push", tag), cwd=cwd, timeout=timeout, action="pushing"
     )
     if push_result.returncode != 0:
-        detail = (push_result.stderr or push_result.stdout or "docker push failed").strip()
+        detail = push_result.failure_diagnostic("docker push failed")
         raise ImagePushError.push_failed(tag, push_result.returncode, detail)
 
     inspect_result = _run_registry_command(
@@ -653,8 +1130,14 @@ def push_agent_image(
         action="inspecting",
     )
     if inspect_result.returncode != 0 or not inspect_result.stdout.strip():
-        detail = (inspect_result.stderr or inspect_result.stdout or "no output").strip()
+        detail = inspect_result.failure_diagnostic("no output")
         raise ImagePushError.digest_missing(tag, detail)
+    if inspect_result.stdout_truncated:
+        raise ImagePushError.repository_digest_missing(
+            tag,
+            repository,
+            inspect_result.stdout_diagnostic("no output"),
+        )
     # An image carries one repo digest per repository it has been pushed to
     # or pulled from, and the build tag's own digest can come first under the
     # containerd image store, so pick the entry for *repository* rather than
@@ -664,7 +1147,7 @@ def push_agent_image(
         raise ImagePushError.repository_digest_missing(
             tag,
             repository,
-            inspect_result.stdout.strip(),
+            inspect_result.stdout_diagnostic("no output"),
         )
     return digest_reference
 
@@ -690,7 +1173,7 @@ def agent_image_is_pushed(
         result = runner.run(
             ("docker", "manifest", "inspect", reference), cwd=Path.cwd(), timeout=timeout
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, ProcessTimeoutError):
         return False
     return result.returncode == 0
 
@@ -748,14 +1231,16 @@ def _cached_repo_digest(
     back to actually pushing, which reports the real failure if one exists.
     """
     try:
-        result = runner.run(
-            ("docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image_id),
-            cwd=Path.cwd(),
-            timeout=timeout,
+        result = _bounded_result(
+            runner.run(
+                ("docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image_id),
+                cwd=Path.cwd(),
+                timeout=timeout,
+            )
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, ProcessTimeoutError):
         return None
-    if result.returncode != 0:
+    if result.returncode != 0 or result.stdout_truncated:
         return None
     return _repo_digest_for(result.stdout, repository)
 
@@ -785,10 +1270,10 @@ def _run_registry_command(
     cwd: Path,
     timeout: float,
     action: str,
-) -> subprocess.CompletedProcess[str]:
+) -> DockerCommandResult:
     try:
-        return runner.run(argv, cwd=cwd, timeout=timeout)
+        return _bounded_result(runner.run(argv, cwd=cwd, timeout=timeout))
     except FileNotFoundError as exc:
         raise ImagePushError.docker_not_found(action) from exc
-    except subprocess.TimeoutExpired as exc:
+    except ProcessTimeoutError as exc:
         raise ImagePushError.docker_timed_out(timeout, action) from exc

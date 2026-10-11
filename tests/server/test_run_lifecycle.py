@@ -7,18 +7,19 @@ from hypothesis import strategies as st
 from server.host_api import FailureReason, RunPhase, StartupFact, StartupProgress, StartupStage
 from server.run_lifecycle import (
     IllegalRunTransitionError,
+    RunRequest,
+    RunState,
     RunStatus,
     RunTrigger,
     transition,
 )
 
-LEGAL: dict[tuple[RunStatus, RunTrigger], RunStatus] = {
-    (RunStatus.STARTING, RunTrigger.READY): RunStatus.RUNNING,
-    (RunStatus.STARTING, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSING,
-    (RunStatus.STARTING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
-    (RunStatus.STARTING, RunTrigger.RESUMED): RunStatus.STARTING,
-    (RunStatus.STARTING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
-    (RunStatus.STARTING, RunTrigger.FAILED): RunStatus.FAILED,
+_STARTING_STATE = RunState(RunStatus.STARTING)
+_HOLDING_PAUSE = RunState(RunStatus.STARTING, RunRequest.PAUSE)
+_HOLDING_STOP = RunState(RunStatus.STARTING, RunRequest.STOP)
+_STARTING_STATES = (_STARTING_STATE, _HOLDING_PAUSE, _HOLDING_STOP)
+
+_READY_MOVES: dict[tuple[RunStatus, RunTrigger], RunStatus] = {
     (RunStatus.RUNNING, RunTrigger.READY): RunStatus.RUNNING,
     (RunStatus.RUNNING, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSING,
     (RunStatus.RUNNING, RunTrigger.INVOCATION_FINISHED): RunStatus.RUNNING,
@@ -48,6 +49,33 @@ LEGAL: dict[tuple[RunStatus, RunTrigger], RunStatus] = {
     (RunStatus.STOPPING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
     (RunStatus.STOPPING, RunTrigger.FAILED): RunStatus.FAILED,
 }
+"""The moves past ``starting``, where a state is its status alone."""
+
+LEGAL: dict[tuple[RunState, RunTrigger], RunState] = {
+    (_STARTING_STATE, RunTrigger.READY): RunState(RunStatus.RUNNING),
+    (_STARTING_STATE, RunTrigger.PAUSE_REQUESTED): _HOLDING_PAUSE,
+    (_STARTING_STATE, RunTrigger.STOP_REQUESTED): _HOLDING_STOP,
+    (_STARTING_STATE, RunTrigger.RESUMED): _STARTING_STATE,
+    (_STARTING_STATE, RunTrigger.COMPLETED): RunState(RunStatus.COMPLETED),
+    (_STARTING_STATE, RunTrigger.FAILED): RunState(RunStatus.FAILED),
+    (_HOLDING_PAUSE, RunTrigger.READY): RunState(RunStatus.PAUSING),
+    (_HOLDING_PAUSE, RunTrigger.PAUSE_REQUESTED): _HOLDING_PAUSE,
+    (_HOLDING_PAUSE, RunTrigger.STOP_REQUESTED): _HOLDING_STOP,
+    (_HOLDING_PAUSE, RunTrigger.RESUMED): _STARTING_STATE,
+    (_HOLDING_PAUSE, RunTrigger.COMPLETED): RunState(RunStatus.COMPLETED),
+    (_HOLDING_PAUSE, RunTrigger.FAILED): RunState(RunStatus.FAILED),
+    (_HOLDING_STOP, RunTrigger.READY): RunState(RunStatus.STOPPING),
+    (_HOLDING_STOP, RunTrigger.INVOCATION_FINISHED): RunState(RunStatus.STOPPED),
+    (_HOLDING_STOP, RunTrigger.PAUSE_REQUESTED): _HOLDING_STOP,
+    (_HOLDING_STOP, RunTrigger.STOP_REQUESTED): _HOLDING_STOP,
+    (_HOLDING_STOP, RunTrigger.RESUMED): _STARTING_STATE,
+    (_HOLDING_STOP, RunTrigger.COMPLETED): RunState(RunStatus.COMPLETED),
+    (_HOLDING_STOP, RunTrigger.FAILED): RunState(RunStatus.FAILED),
+    **{
+        (RunState(current), trigger): RunState(after)
+        for (current, trigger), after in _READY_MOVES.items()
+    },
+}
 """The whole table, restated independently of the module under test."""
 
 ENDED = (RunStatus.STOPPED, RunStatus.COMPLETED, RunStatus.FAILED)
@@ -58,10 +86,11 @@ LIVE = (
     RunStatus.PAUSED,
     RunStatus.STOPPING,
 )
+LIVE_STATES = (*_STARTING_STATES, *(RunState(status) for status in LIVE[1:]))
 
 ILLEGAL = [
     (current, trigger)
-    for current in LIVE
+    for current in LIVE_STATES
     for trigger in RunTrigger
     if (current, trigger) not in LEGAL
 ]
@@ -75,93 +104,135 @@ def test_every_status_is_either_ended_or_live() -> None:
     assert [status for status in RunStatus if not status.has_ended] == list(LIVE)
 
 
+@pytest.mark.parametrize(
+    "status", [status for status in RunStatus if status is not RunStatus.STARTING], ids=str
+)
+@pytest.mark.parametrize("requested", list(RunRequest), ids=str)
+def test_only_a_starting_run_holds_a_request(status: RunStatus, requested: RunRequest) -> None:
+    with pytest.raises(ValueError, match="only a starting run holds a request"):
+        RunState(status, requested)
+
+
 @pytest.mark.parametrize(("pair", "expected"), LEGAL.items(), ids=str)
-def test_legal_transition(pair: tuple[RunStatus, RunTrigger], expected: RunStatus) -> None:
-    """Every legal move produces the status the table names."""
+def test_legal_transition(pair: tuple[RunState, RunTrigger], expected: RunState) -> None:
+    """Every legal move produces the state the table names."""
     current, trigger = pair
-    assert transition(current, trigger) is expected
+    assert transition(current, trigger) == expected
 
 
 @pytest.mark.parametrize(("current", "trigger"), ILLEGAL, ids=str)
-def test_illegal_transition_raises(current: RunStatus, trigger: RunTrigger) -> None:
+def test_illegal_transition_raises(current: RunState, trigger: RunTrigger) -> None:
     """Every move outside the table is rejected with the offending pair."""
     with pytest.raises(IllegalRunTransitionError) as raised:
         transition(current, trigger)
-    assert raised.value.current is current
+    assert raised.value.current is current.status
     assert raised.value.trigger is trigger
 
 
 def test_illegal_pairs_are_the_ones_we_expect() -> None:
-    """No invocation can finish before the run is ready.
+    """No invocation can finish before the run is ready, except where a held stop lands.
 
     Pinned so widening the table stays a deliberate edit.
     """
-    assert set(ILLEGAL) == {(RunStatus.STARTING, RunTrigger.INVOCATION_FINISHED)}
+    assert set(ILLEGAL) == {
+        (_STARTING_STATE, RunTrigger.INVOCATION_FINISHED),
+        (_HOLDING_PAUSE, RunTrigger.INVOCATION_FINISHED),
+    }
+
+
+@pytest.mark.parametrize("state", LIVE_STATES, ids=str)
+def test_a_pending_pause_or_stop_is_one_held_or_entered(state: RunState) -> None:
+    assert state.pause_pending == (
+        state.status is RunStatus.PAUSING or state.requested is RunRequest.PAUSE
+    )
+    assert state.stop_pending == (
+        state.status is RunStatus.STOPPING or state.requested is RunRequest.STOP
+    )
+
+
+def test_a_stop_held_while_starting_can_land_before_ready() -> None:
+    """Core may abandon a startup at a held stop; the run then ends ``stopped``."""
+    status = _status_after(
+        RunStatus.STARTING, RunTrigger.STOP_REQUESTED, RunTrigger.INVOCATION_FINISHED
+    )
+    assert status is RunStatus.STOPPED
+    assert _status_after(status, RunTrigger.READY) is RunStatus.STOPPED
 
 
 @pytest.mark.parametrize("ended", ENDED, ids=str)
 @pytest.mark.parametrize("trigger", list(RunTrigger), ids=str)
 def test_ended_statuses_absorb_every_trigger(ended: RunStatus, trigger: RunTrigger) -> None:
     """A run that has ended never leaves the status it ended in."""
-    assert transition(ended, trigger) is ended
+    assert transition(RunState(ended), trigger) == RunState(ended)
+
+
+def _status_after(status: RunStatus, *triggers: RunTrigger) -> RunStatus:
+    state = RunState(status)
+    for trigger in triggers:
+        state = transition(state, trigger)
+    return state.status
 
 
 def test_pause_reaches_its_boundary_then_resumes() -> None:
     """The canonical pause round trip, as the controller drives it."""
-    status = transition(RunStatus.STARTING, RunTrigger.READY)
+    status = _status_after(RunStatus.STARTING, RunTrigger.READY)
     assert status is RunStatus.RUNNING
-    status = transition(status, RunTrigger.PAUSE_REQUESTED)
+    status = _status_after(status, RunTrigger.PAUSE_REQUESTED)
     assert status is RunStatus.PAUSING
-    status = transition(status, RunTrigger.INVOCATION_FINISHED)
+    status = _status_after(status, RunTrigger.INVOCATION_FINISHED)
     assert status is RunStatus.PAUSED
-    status = transition(status, RunTrigger.RESUMED)
+    status = _status_after(status, RunTrigger.RESUMED)
     assert status is RunStatus.RUNNING
 
 
 def test_resume_before_the_boundary_cancels_the_pending_pause() -> None:
     """A ``/resume`` that beats the boundary leaves nothing pending."""
-    status = transition(RunStatus.RUNNING, RunTrigger.PAUSE_REQUESTED)
-    status = transition(status, RunTrigger.RESUMED)
+    status = _status_after(RunStatus.RUNNING, RunTrigger.PAUSE_REQUESTED, RunTrigger.RESUMED)
     assert status is RunStatus.RUNNING
-    assert transition(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.RUNNING
+    assert _status_after(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.RUNNING
 
 
 def test_stop_reaches_its_boundary_and_never_leaves() -> None:
     """The canonical stop: request, land at the boundary, stay ended."""
-    status = transition(RunStatus.RUNNING, RunTrigger.STOP_REQUESTED)
+    status = _status_after(RunStatus.RUNNING, RunTrigger.STOP_REQUESTED)
     assert status is RunStatus.STOPPING
-    status = transition(status, RunTrigger.INVOCATION_FINISHED)
+    status = _status_after(status, RunTrigger.INVOCATION_FINISHED)
     assert status is RunStatus.STOPPED
-    assert transition(status, RunTrigger.RESUMED) is RunStatus.STOPPED
+    assert _status_after(status, RunTrigger.RESUMED) is RunStatus.STOPPED
 
 
 @pytest.mark.parametrize("origin", [RunStatus.RUNNING, RunStatus.PAUSING, RunStatus.PAUSED])
 def test_stop_is_requestable_wherever_the_run_is_live(origin: RunStatus) -> None:
     """A stop supersedes a pause pending or landed at the same boundary."""
-    status = transition(origin, RunTrigger.STOP_REQUESTED)
+    status = _status_after(origin, RunTrigger.STOP_REQUESTED)
     assert status is RunStatus.STOPPING
-    assert transition(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.STOPPED
+    assert _status_after(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.STOPPED
 
 
 def test_resume_before_the_boundary_cancels_the_pending_stop() -> None:
     """A ``/resume`` that beats the stop boundary keeps the run going."""
-    status = transition(RunStatus.RUNNING, RunTrigger.STOP_REQUESTED)
-    status = transition(status, RunTrigger.RESUMED)
+    status = _status_after(RunStatus.RUNNING, RunTrigger.STOP_REQUESTED, RunTrigger.RESUMED)
     assert status is RunStatus.RUNNING
-    assert transition(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.RUNNING
+    assert _status_after(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.RUNNING
 
 
 def test_a_pause_or_stop_requested_while_starting_lands_after_ready() -> None:
-    """A control requested during startup is pending; readiness does not cancel it."""
+    """A control requested during startup is held; readiness does not cancel it."""
     for request, pending, landed in (
         (RunTrigger.PAUSE_REQUESTED, RunStatus.PAUSING, RunStatus.PAUSED),
         (RunTrigger.STOP_REQUESTED, RunStatus.STOPPING, RunStatus.STOPPED),
     ):
-        status = transition(RunStatus.STARTING, request)
+        assert _status_after(RunStatus.STARTING, request) is RunStatus.STARTING
+        status = _status_after(RunStatus.STARTING, request, RunTrigger.READY)
         assert status is pending
-        status = transition(status, RunTrigger.READY)
-        assert status is pending
-        assert transition(status, RunTrigger.INVOCATION_FINISHED) is landed
+        assert _status_after(status, RunTrigger.INVOCATION_FINISHED) is landed
+
+
+def test_a_pause_resumed_before_ready_keeps_the_run_starting() -> None:
+    """Regression: a resume during startup used to report ``running`` before readiness."""
+    status = _status_after(RunStatus.STARTING, RunTrigger.PAUSE_REQUESTED, RunTrigger.RESUMED)
+    assert status is RunStatus.STARTING
+    assert _status_after(status, RunTrigger.READY) is RunStatus.RUNNING
 
 
 _REASON = FailureReason(code="boom", stage="run", message="boom")
@@ -256,3 +327,99 @@ def test_a_failed_status_waits_for_the_failure_that_says_why() -> None:
 
     assert running.advance(status=RunStatus.FAILED) == running
     assert running.advance(failure=_REASON) == RunPhase(status=RunStatus.FAILED, reason=_REASON)
+
+
+_CONTROL = st.sampled_from(
+    [RunTrigger.PAUSE_REQUESTED, RunTrigger.RESUMED, RunTrigger.STOP_REQUESTED]
+)
+_LANDS_AS = {
+    None: RunStatus.RUNNING,
+    RunTrigger.PAUSE_REQUESTED: RunStatus.PAUSING,
+    RunTrigger.STOP_REQUESTED: RunStatus.STOPPING,
+}
+
+
+class _Fold:
+    """The controller's state and the record's phase, folded as production folds them.
+
+    The phase sees a status only when the controller publishes a change, as
+    ``entrypoints.detached_run`` does through the journal.
+    """
+
+    def __init__(self) -> None:
+        self.state = RunState(RunStatus.STARTING)
+        self.phase = _STARTING
+        self.request: RunTrigger | None = None
+
+    def apply(self, item: StartupFact | RunTrigger) -> None:
+        if isinstance(item, StartupFact):
+            self.phase = self.phase.advance(startup=item)
+            return
+        previous = self.state.status
+        self.state = transition(self.state, item)
+        if self.state.status is not previous:
+            self.phase = self.phase.advance(status=self.state.status)
+        if item is RunTrigger.RESUMED:
+            self.request = None
+        elif item is RunTrigger.STOP_REQUESTED or self.request is None:
+            self.request = item
+
+
+@given(
+    before=st.lists(st.one_of(_STARTUP, _CONTROL), max_size=16),
+    after=st.lists(st.one_of(_STARTUP, _CONTROL), max_size=6),
+)
+def test_startup_reports_starting_with_monotone_progress_until_ready(
+    before: list[StartupFact | RunTrigger], after: list[StartupFact | RunTrigger]
+) -> None:
+    """Across any interleaving of startup facts and controls, a run is ``starting`` until ready.
+
+    Before ``READY`` the status stays ``starting``, its stage never moves back,
+    and a control leaves stage and progress as they were; ``READY`` lands the
+    request still held, and the run never reports ``starting`` again.
+    """
+    fold = _Fold()
+    for item in before:
+        stage, progress = fold.phase.stage, fold.phase.progress
+        fold.apply(item)
+        assert fold.state.status is RunStatus.STARTING
+        assert fold.phase.status is RunStatus.STARTING
+        assert fold.phase.stage is not None
+        assert stage is not None
+        assert fold.phase.stage.rank >= stage.rank
+        if isinstance(item, RunTrigger):
+            assert (fold.phase.stage, fold.phase.progress) == (stage, progress)
+        elif item.stage.rank >= stage.rank:
+            assert (fold.phase.stage, fold.phase.progress) == (item.stage, item.progress)
+
+    expected = _LANDS_AS[fold.request]
+    fold.apply(RunTrigger.READY)
+    assert fold.state.status is expected
+    assert fold.phase == RunPhase(status=expected)
+    for item in after:
+        fold.apply(item)
+        assert fold.state.status is not RunStatus.STARTING
+        assert fold.phase.status is not RunStatus.STARTING
+
+
+@given(before=st.lists(st.one_of(_STARTUP, _CONTROL), max_size=16))
+def test_core_landing_a_held_stop_before_ready_ends_the_run_stopped(
+    before: list[StartupFact | RunTrigger],
+) -> None:
+    """Core lands a stop while starting only if one is held; the run then ends ``stopped``.
+
+    The controller fires the landing only while a stop is pending, as
+    ``RunController.land_stop_at_boundary`` does.
+    """
+    fold = _Fold()
+    for item in before:
+        fold.apply(item)
+    held = fold.state.stop_pending
+    assert held == (fold.request is RunTrigger.STOP_REQUESTED)
+    if held:
+        fold.apply(RunTrigger.INVOCATION_FINISHED)
+        assert fold.state == RunState(RunStatus.STOPPED)
+        assert fold.phase == RunPhase(status=RunStatus.STOPPED)
+    expected = RunStatus.STOPPED if held else _LANDS_AS[fold.request]
+    fold.apply(RunTrigger.READY)
+    assert fold.state.status is expected

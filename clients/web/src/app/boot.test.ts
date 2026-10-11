@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {serializeBrowserSession} from '../entities/gateway.js';
+import {scrubLaunchCapability, serializeBrowserSession} from '../entities/gateway.js';
 import {bootPlan} from './boot.js';
 
 const NOTHING = {gateway: null, browserSession: null};
@@ -7,6 +7,21 @@ const NOTHING = {gateway: null, browserSession: null};
 describe('bootPlan', () => {
   test('starts the replay demo when nothing names a gateway', () => {
     expect(bootPlan('http://127.0.0.1:5173/', NOTHING)).toEqual({kind: 'demo', error: null});
+  });
+
+  test('reloads a scrubbed direct gateway through its HttpOnly cookie provenance', () => {
+    const scrubbed = scrubLaunchCapability('http://127.0.0.1:8765/?token=secret');
+
+    expect(bootPlan(scrubbed.pageUrl, NOTHING, scrubbed.historyState)).toEqual({
+      kind: 'live',
+      target: {
+        gatewayUrl: 'http://127.0.0.1:8765/',
+        cleanPageUrl: 'http://127.0.0.1:8765/',
+        webSocketUrl: 'ws://127.0.0.1:8765/ws',
+        bootstrapUrl: null,
+      },
+      browserSession: null,
+    });
   });
 
   test('starts the demo with the reason when the named gateway is refused', () => {

@@ -4,14 +4,14 @@
   "compilerOptions": {
     // The preloads use the DOM's MessagePort and window, so this keeps the DOM library the
     // main build has always had.
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022", "DOM", "esnext.disposable"],
     "types": ["node"],
     "rootDir": "src",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.cts"],
-  "exclude": ["src/**/*.test.ts", "src/testing/**", "src/welcome/**"],
+  "exclude": ["src/**/*.test.ts", "src/**/testing/**", "src/renderer/welcome/**"],
   "references": [
     {"path": "../backend-client/tsconfig.lib.json"},
     {"path": "../core-state/tsconfig.lib.json"}

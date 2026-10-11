@@ -23,7 +23,7 @@ import subprocess
 import textwrap
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, cast
 
 from tests.slurm_cluster.cluster import SlurmCluster, build_image, docker
@@ -353,6 +353,22 @@ def make_request(
     )
 
 
+def make_candidate_request(
+    cluster: SlurmCluster, directory: Path, run_id: str, worktrees: Path
+) -> RunEnvironmentRequest:
+    """Build the request of one parallel candidate: its worktree under the run's *worktrees*.
+
+    As a product run does, the run owns the whole *worktrees* directory while each
+    candidate's workspace is its own subdirectory.
+    """
+    base = make_request(cluster, directory, run_id)
+    workspace = worktrees / f"candidate-{run_id}" / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / "accuracy.py").write_text(ACCURACY_SCRIPT, encoding="utf-8")
+    (workspace / "benchmark.py").write_text(BENCHMARK_SCRIPT, encoding="utf-8")
+    return replace(base, workspace=workspace, run_owned_roots=(worktrees,))
+
+
 @contextmanager
 def open_run(
     kind: str,
@@ -375,4 +391,35 @@ def open_run(
             session.close()
         finally:
             remove_run_containers(run_id)
+            cluster.cancel_all()
+
+
+@contextmanager
+def open_candidates(
+    kind: str, cluster: SlurmCluster, directory: Path, image_id: str, *, count: int
+) -> Iterator[list[OpenRun]]:
+    """Open *count* parallel candidate sessions of *kind*, alive together.
+
+    Each candidate has its own worktree under one worktrees directory, which the
+    run owns, and its own container and broker, as the dynamic loop opens them.
+    """
+    tag = secrets.token_hex(5)
+    environment = make_environment(kind, cluster, directory, image_id)
+    worktrees = cluster.root / f"worktrees-{tag}"
+    sessions: list[OpenRun] = []
+    try:
+        for index in range(count):
+            run_id = f"t{tag}c{index}"
+            request = make_candidate_request(cluster, directory, run_id, worktrees)
+            sessions.append(
+                OpenRun(open_run_environment(environment, request), request, run_id, kind)
+            )
+        yield sessions
+    finally:
+        try:
+            for opened in reversed(sessions):
+                opened.session.close()
+        finally:
+            for opened in sessions:
+                remove_run_containers(opened.run_id)
             cluster.cancel_all()

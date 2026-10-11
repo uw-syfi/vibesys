@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import signal
+import subprocess
+import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from vs_sim.child import run_in_child
@@ -26,6 +29,7 @@ if TYPE_CHECKING:
     from vs_sim.probes import CommandProbe
     from vs_sim.processes import ForegroundLauncher, ProcessLauncher, ProcessOutcome
     from vs_sim.signals import ProcessSignaller, SignalSource
+    from vs_sim.streaming import StreamingCommand
 
 type Run = Callable[[Coroutine[Any, Any, Any]], Any]
 """Run a coroutine to completion on the loop the implementation under test belongs to."""
@@ -625,3 +629,109 @@ class CommandProbeContract:
         """A command still running at the timeout gives ``None``."""
         subject = self.probe_under_test()
         assert subject.probe.run(subject.blocks_forever, timeout_seconds=0.2) is None
+
+
+@dataclass(frozen=True)
+class StreamingUnderTest:
+    """A streaming command, a directory to run in, and commands with known outcomes."""
+
+    command: StreamingCommand
+    cwd: Path
+    exits_with: Callable[[int, str, tuple[str, ...]], tuple[str, ...]]
+    """A command that writes each stderr line, then the stdout text, and exits with the status."""
+    prints_cwd: tuple[str, ...]
+    """A command that writes its working directory to stdout and exits 0."""
+    blocks_forever: tuple[str, ...]
+    """A command that never ends by itself."""
+    missing_program: tuple[str, ...]
+    """A command whose program does not exist."""
+
+
+_LINE_CHARACTERS = "".join(chr(code) for code in range(32, 127))
+
+
+def _text(rng: SeededRandom, longest: int) -> str:
+    return "".join(rng.choice(_LINE_CHARACTERS) for _ in range(rng.randint(0, longest)))
+
+
+class StreamingCommandContract:
+    """Cases for :class:`~vs_sim.streaming.StreamingCommand`. Implement :meth:`streaming_under_test`."""
+
+    def streaming_under_test(self) -> StreamingUnderTest:
+        """A fresh command with its harness."""
+        raise NotImplementedError
+
+    def test_lines_stream_in_order_and_the_result_keeps_status_and_both_streams(self) -> None:
+        """Each stderr line reaches the callback once, in order; the result holds all of it."""
+        for seed in range(_CASES):
+            rng = SeededRandom(seed)
+            subject = self.streaming_under_test()
+            status = rng.randint(0, 100)
+            stdout = _text(rng, 20)
+            lines = tuple(_text(rng, 12) for _ in range(rng.randint(0, 5)))
+            argv = subject.exits_with(status, stdout, lines)
+            seen: list[str] = []
+
+            result = subject.command.run(
+                argv, cwd=subject.cwd, timeout_seconds=30, on_stderr_line=seen.append
+            )
+
+            assert seen == list(lines), seed
+            assert result.args == argv, seed
+            assert (result.returncode, result.stdout) == (status, stdout), seed
+            assert result.stderr == "".join(f"{line}\n" for line in lines), seed
+
+    def test_the_callback_runs_on_the_calling_thread(self) -> None:
+        """No line is handed to the callback from another thread."""
+        subject = self.streaming_under_test()
+        threads: list[int] = []
+        subject.command.run(
+            subject.exits_with(0, "", ("one", "two")),
+            cwd=subject.cwd,
+            timeout_seconds=30,
+            on_stderr_line=lambda _line: threads.append(threading.get_ident()),
+        )
+        assert threads == [threading.get_ident()] * 2
+
+    def test_the_command_runs_in_the_given_directory(self) -> None:
+        """``cwd`` is the command's working directory."""
+        subject = self.streaming_under_test()
+        result = subject.command.run(
+            subject.prints_cwd,
+            cwd=subject.cwd,
+            timeout_seconds=30,
+            on_stderr_line=lambda _line: None,
+        )
+        assert result.returncode == 0
+        assert Path(result.stdout).resolve() == subject.cwd.resolve()
+
+    def test_a_missing_program_raises_file_not_found(self) -> None:
+        """A program that does not exist raises instead of returning a status."""
+        subject = self.streaming_under_test()
+        raised = False
+        try:
+            subject.command.run(
+                subject.missing_program,
+                cwd=subject.cwd,
+                timeout_seconds=30,
+                on_stderr_line=lambda _line: None,
+            )
+        except FileNotFoundError:
+            raised = True
+        assert raised, "a missing program did not raise FileNotFoundError"
+
+    def test_a_command_that_outlives_the_timeout_raises_timeout_expired(self) -> None:
+        """A command still running at the timeout is killed and ``TimeoutExpired`` is raised."""
+        subject = self.streaming_under_test()
+        raised: subprocess.TimeoutExpired | None = None
+        try:
+            subject.command.run(
+                subject.blocks_forever,
+                cwd=subject.cwd,
+                timeout_seconds=0.2,
+                on_stderr_line=lambda _line: None,
+            )
+        except subprocess.TimeoutExpired as error:
+            raised = error
+        assert raised is not None, "a command past its timeout did not raise TimeoutExpired"
+        assert (raised.cmd, raised.timeout) == (subject.blocks_forever, 0.2)

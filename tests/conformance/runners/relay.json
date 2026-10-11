@@ -1,0 +1,18 @@
+{
+  "id": "relay",
+  "description": "Unix-transport scenarios replayed through a run channel (python -m entrypoints.host_helper after hello and run.connect) against a real Unix server, by tests/e2e/test_relay.py.",
+  "groups": {
+    "bootstrap": [
+      "full-replay-bootstrap",
+      "tail-bootstrap-spine-prepend"
+    ],
+    "control": [
+      "heartbeat-probe",
+      "command-ack-roundtrip",
+      "chat-dedicated-connection"
+    ],
+    "tail-overflow": [
+      "tail-overflow-rebootstrap"
+    ]
+  }
+}

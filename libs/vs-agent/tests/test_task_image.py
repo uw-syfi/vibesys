@@ -7,13 +7,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_agent.api.images import (
+    DockerCommandResult,
     TaskImageBuildError,
     build_task_image,
 )
 from vs_agent.api.testing import (
-    DockerResult,
+    DockerBuildResult,
     FakeDockerBuildRunner,
-    docker_result,
+    docker_build_result,
+    docker_result_without_output,
     docker_timed_out,
 )
 
@@ -111,12 +113,52 @@ def test_build_translates_process_failures(
     assert len(runner.calls) == 1
 
 
-def test_build_reports_bounded_docker_failure(tmp_path: Path) -> None:
+def test_build_reports_bounded_truncated_docker_failure(tmp_path: Path) -> None:
+    retained_tail = "x" * 2000 + "specific failure tail"
     runner = FakeDockerBuildRunner(
-        build_result=docker_result(("docker",), 17, "ignored", "specific failure"),
+        build_result=DockerCommandResult(
+            args=("docker",),
+            returncode=17,
+            stdout="ignored stdout",
+            stderr=retained_tail,
+            stderr_omitted_characters=2_000_000,
+        ),
     )
 
-    with pytest.raises(TaskImageBuildError, match=r"exit 17.*specific failure"):
+    with pytest.raises(TaskImageBuildError, match=r"exit 17.*characters truncated") as caught:
+        build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner)
+
+    diagnostic = str(caught.value)
+    assert diagnostic.endswith("specific failure tail")
+    assert "ignored stdout" not in diagnostic
+    assert len(diagnostic) < 1200
+
+
+def test_build_uses_domain_fallback_when_legacy_runner_did_not_capture_output(
+    tmp_path: Path,
+) -> None:
+    runner = FakeDockerBuildRunner(
+        build_result=docker_result_without_output(("docker", "build"), returncode=17)
+    )
+
+    with pytest.raises(TaskImageBuildError, match=r"exit 17.*docker build failed"):
+        build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner)
+
+
+def test_build_rejects_truncated_stdout_even_when_tail_is_a_valid_image_id(
+    tmp_path: Path,
+) -> None:
+    runner = FakeDockerBuildRunner(
+        inspect_result=DockerCommandResult(
+            args=("docker", "image", "inspect"),
+            returncode=0,
+            stdout=_IMAGE_ID,
+            stderr="",
+            stdout_omitted_characters=91,
+        )
+    )
+
+    with pytest.raises(TaskImageBuildError, match="characters truncated"):
         build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner)
 
 
@@ -149,14 +191,14 @@ def test_build_rejects_malformed_runnable_image_id(
             "timed out after 7 seconds while inspecting",
         ),
         (
-            docker_result(("docker",), 17, "ignored", "inspect failure"),
+            docker_build_result(("docker",), 17, "ignored", "inspect failure"),
             r"Could not resolve runnable task image.*exit 17.*inspect failure",
         ),
     ],
 )
 def test_build_translates_inspect_failures(
     tmp_path: Path,
-    failure: DockerResult | BaseException,
+    failure: DockerBuildResult | BaseException,
     match: str,
 ) -> None:
     runner = FakeDockerBuildRunner(inspect_result=failure)

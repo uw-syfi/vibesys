@@ -4,9 +4,9 @@
  */
 
 import type {Seeded} from '@vibesys/core-state/testing';
-import {type StopView, stopKey} from '../stop-run.js';
-import type {ConnectionStatus} from '../supervisor.js';
-import type {ChromeState} from '../welcome-protocol.js';
+import type {ConnectionStatus} from '../common/connection-status.js';
+import {type StopView, stopKey} from '../common/stop-run.js';
+import type {ChromeState} from '../common/welcome-protocol.js';
 
 const CONNECTIONS: readonly ConnectionStatus[] = [
   {kind: 'connecting'},
@@ -16,7 +16,7 @@ const CONNECTIONS: readonly ConnectionStatus[] = [
   {kind: 'auth-needed', detail: 'password'},
   {kind: 'run-ended'},
   {kind: 'incompatible', detail: 'protocol 3 vs 4'},
-  {kind: 'failed', detail: 'no uv'},
+  {kind: 'closed'},
 ];
 
 export function randomChrome(random: Seeded): ChromeState {
@@ -26,8 +26,8 @@ export function randomChrome(random: Seeded): ChromeState {
       : {
           host: random.pick(['local', 'ssh:gpu']),
           hostLabel: 'h',
-          instanceId: random.pick([null, '0123456789ab', 'ba9876543210']),
-          runId: random.pick([null, 'run-1']),
+          instanceId: random.pick(['0123456789ab', 'ba9876543210']),
+          runId: random.pick(['run-1', 'run-2']),
           project: '/p',
           connection: random.pick(CONNECTIONS),
         };

@@ -1,0 +1,19 @@
+{
+  "id": "vibesys-rust",
+  "version": "0.1.0",
+  "name": "VibeSys Rust toolchain",
+  "description": "rustup and a pinned minimal Rust toolchain under /opt/rustup and /opt/cargo, readable by every user. Debian/Ubuntu bases only.",
+  "documentationURL": "https://github.com/uw-syfi/vibesys/blob/main/docs/contributing/devcontainer-features.md",
+  "options": {
+    "rust_version": {
+      "type": "string",
+      "default": "1.92.0",
+      "description": "Rust toolchain version; default mirrors vs_agent.provider_policy.RUST_TOOLCHAIN_VERSION."
+    }
+  },
+  "containerEnv": {
+    "RUSTUP_HOME": "/opt/rustup",
+    "CARGO_HOME": "/opt/cargo",
+    "PATH": "/opt/cargo/bin:${PATH}"
+  }
+}

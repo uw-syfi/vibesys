@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
@@ -13,9 +14,9 @@ from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from server.controller import RunController
+    from server.events import ChatThreadId
     from server.execution import ExecutionTracker
     from vibesys.api import ManagedAgent
     from vs_sim.api import Threads
@@ -31,6 +32,14 @@ class Closeable(Protocol):
         ...
 
 
+class ChatTranscript(Closeable, Protocol):
+    """Append-only persistence capability for one chat conversation."""
+
+    def append_exchange(self, question: str, answer: str) -> None:
+        """Persist one completed question and answer."""
+        ...
+
+
 @dataclass(frozen=True)
 class ExperimentChatDependencies:
     """Dependencies and resolved agent settings for one chat session."""
@@ -41,11 +50,13 @@ class ExperimentChatDependencies:
     #: Thread this session answers on, as the wire names it. ``None`` is the
     #: run's default chat, which carries no thread ID of its own, so streamed
     #: output lands in the same transcript as the terminal answer event.
-    chat_thread_id: str | None
-    state_dir: Path
+    chat_thread_id: ChatThreadId | None
+    transcript: ChatTranscript
     provider: str
     model: str
     fallback: Callable[[str], str]
+    #: Bounded complete records restored through the non-privileged user channel.
+    transcript_history: str = ""
     #: Where the turn lock comes from; ``None`` is the operating system's threads.
     threads: Threads | None = None
 
@@ -63,7 +74,8 @@ class ExperimentChatSession:
         self._executions = dependencies.executions
         self._agent = dependencies.agent
         self._chat_thread_id = dependencies.chat_thread_id
-        self._state_dir = dependencies.state_dir
+        self._transcript = dependencies.transcript
+        self._transcript_history = dependencies.transcript_history
         self._provider = dependencies.provider
         self._model = dependencies.model
         self._fallback = dependencies.fallback
@@ -108,7 +120,9 @@ class ExperimentChatSession:
             chat_thread_id=self._chat_thread_id,
         ):
             try:
-                answer = self._agent.turn(question, invocation_id=execution.execution_id)
+                answer = self._agent.turn(
+                    self._agent_message(question), invocation_id=execution.execution_id
+                )
             except Exception as exc:
                 error = exc
                 message = f"Chat agent failed: {type(exc).__name__}: {exc}"
@@ -134,15 +148,25 @@ class ExperimentChatSession:
     def close(self) -> None:
         """Release resources owned by this chat session once."""
         resources, self._resources = self._resources, None
-        if resources is not None:
-            resources.close()
+        with ExitStack() as cleanup:
+            cleanup.callback(self._transcript.close)
+            if resources is not None:
+                cleanup.callback(resources.close)
+
+    def _agent_message(self, question: str) -> str:
+        """Carry restored transcript data without granting it system-prompt authority."""
+        if not self._transcript_history:
+            return question
+        return json.dumps(
+            {
+                "untrusted_prior_chat_transcript_jsonl": self._transcript_history,
+                "question": question,
+            },
+            ensure_ascii=False,
+        )
 
     def _append_exchange(self, question: str, answer: str) -> None:
         try:
-            self._state_dir.mkdir(parents=True, exist_ok=True)
-            with (self._state_dir / "conversation.jsonl").open("a", encoding="utf-8") as transcript:
-                transcript.write(
-                    json.dumps({"question": question, "answer": answer}, ensure_ascii=False) + "\n"
-                )
+            self._transcript.append_exchange(question, answer)
         except OSError as exc:
             _LOG.warning("could not persist experiment chat: %s", exc)

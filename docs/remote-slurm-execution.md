@@ -21,8 +21,11 @@ per-run token. The agent runs a gate as `vibesys-gate --gate accuracy` or
 environment notes in the agent's prompts name it and the gates the task plans. The
 broker runs the planned gate with the
 cluster wrapper (`vs_sandbox.slurm_command`), which stages the workspace, runs
-the job, and copies the result back. The agent names only the gate and, for a
-benchmark, a result path; it cannot supply a command. Interrupting the client or
+the job, and copies the result back. The agent names only the gate and supplies no
+arguments; the broker passes the benchmark's declared result argument itself,
+relays the result file into the container's `/tmp`, and names it in the gate's
+output. The framework's own evaluation sends the argument and path explicitly,
+which the broker validates. Interrupting the client or
 dropping the connection cancels the job.
 
 The ROCprof server runs in the container and reaches the cluster through a
@@ -50,6 +53,11 @@ through its own commands instead of through the remote ROCprof capture. The
 table is rejected with any other transport. See
 [GPU commands through Slurm](slurm-gpu-commands.md) for the table, the agent's
 view, and the deprecated `--run-environment slurm-gpu` alias.
+
+The dynamic loop runs on `slurm` with or without agent GPU commands. Each
+parallel candidate gets its own container session and its own host broker,
+and a broker accepts only its own candidate's worktree, so one candidate's
+agent cannot run a GPU job in another candidate's files.
 
 ## SkyPilot configuration ownership
 

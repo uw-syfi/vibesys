@@ -34,6 +34,8 @@ from tests.server.host_helper_support import (
 from server.host_api import (
     HELPER_PROTOCOL_VERSIONS,
     PATHS_COMPLETE_CAP,
+    ChannelEnd,
+    ChannelEndOutcome,
     HelloRequest,
     HelperError,
     HelperErrorCode,
@@ -85,8 +87,7 @@ from server.host_helper_requests import (
     split_prefix,
 )
 from server.registry import FakeInstanceStore
-from server.stdio_bridge import EXIT_STATUS, BridgeOutcome
-from server.stdio_bridge_report import BridgeReport
+from server.relay import EXIT_STATUS
 from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
@@ -754,8 +755,8 @@ def test_run_connect_relays_bytes_both_ways_including_ones_sent_early(
     }
     assert seen["upstream"] == upstream
     assert relayed == downstream
-    assert status == EXIT_STATUS[BridgeOutcome.SERVER_CLOSED]
-    assert BridgeReport.model_validate_json(errors).outcome is BridgeOutcome.SERVER_CLOSED
+    assert status == EXIT_STATUS[ChannelEndOutcome.SERVER_CLOSED]
+    assert ChannelEnd.model_validate_json(errors).outcome is ChannelEndOutcome.SERVER_CLOSED
 
 
 def test_run_connect_to_a_server_that_is_gone_is_a_typed_error_and_the_channel_lives_on() -> None:

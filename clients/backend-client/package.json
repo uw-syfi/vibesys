@@ -10,6 +10,7 @@
       ".": "neutral",
       "./testing": "neutral",
       "./node": "node",
+      "./host-helper": "neutral",
       "./websocket": "dom"
     }
   },
@@ -35,6 +36,11 @@
       "types": "./dist/node/index.d.ts",
       "default": "./dist/node/index.js"
     },
+    "./host-helper": {
+      "@vibesys/source": "./src/host-helper.ts",
+      "types": "./dist/host-helper.d.ts",
+      "default": "./dist/host-helper.js"
+    },
     "./websocket": {
       "@vibesys/source": "./src/websocket.ts",
       "types": "./dist/websocket.d.ts",
@@ -48,7 +54,7 @@
     "README.md"
   ],
   "scripts": {
-    "generate:protocol": "uv run --project ../.. python -m server.api.schema src/generated/protocol.schema.json && uv run --project ../.. python -m server.api.schema --response-payload-schema src/generated/response-payload.schema.json && uv run --project ../.. python -m server.api.schema --response-payload-module src/generated/response-payload.schema.ts && uv run --project ../.. python -m server.api.schema --response-payload-fixture src/generated/response-payload.fixture.json && uv run --project ../.. python -m server.api.schema --run-event-module src/generated/run-event.schema.ts && json2ts -i src/generated/protocol.schema.json -o src/generated/protocol.generated.ts --bannerComment '/* Generated from the Python protocol models. Do not edit. */' && uv run --project ../.. python -m server.api.schema --host-helper-schema src/generated/host-helper.schema.json && json2ts -i src/generated/host-helper.schema.json -o src/generated/host-helper.generated.ts --bannerComment '/* Generated from the Python host helper models (server.host_api). Do not edit. */'",
+    "generate:protocol": "uv run --project ../.. python -m server.api.schema src/generated/protocol.schema.json && uv run --project ../.. python -m server.api.schema --response-payload-schema src/generated/response-payload.schema.json && uv run --project ../.. python -m server.api.schema --response-payload-module src/generated/response-payload.schema.ts && uv run --project ../.. python -m server.api.schema --response-payload-fixture src/generated/response-payload.fixture.json && uv run --project ../.. python -m server.api.schema --run-event-module src/generated/run-event.schema.ts && json2ts -i src/generated/protocol.schema.json -o src/generated/protocol.generated.ts --bannerComment '/* Generated from the Python protocol models. Do not edit. */' && uv run --project ../.. python -m server.api.schema --host-helper-schema src/generated/host-helper.schema.json && uv run --project ../.. python -m server.api.schema --host-helper-module src/generated/host-helper.schema.ts && json2ts -i src/generated/host-helper.schema.json -o src/generated/host-helper.generated.ts --bannerComment '/* Generated from the Python host helper models (server.host_api). Do not edit. */'",
     "build": "tsc -b tsconfig.lib.json",
     "check": "tsc -b",
     "test": "pnpm test:bun && pnpm test:node",

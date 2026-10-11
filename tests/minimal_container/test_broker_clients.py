@@ -40,6 +40,16 @@ def test_the_gate_client_returns_the_benchmark_result_to_the_shared_workspace(
     }
 
 
+def test_the_gate_client_relays_the_bare_benchmark_result_and_names_it(editor: Editor) -> None:
+    status, output = editor.gate("benchmark")
+
+    assert status == 0, output
+    (line,) = [x for x in output.splitlines() if x.startswith("benchmark result file: ")]
+    read_status, content = editor.run(f"cat {line.removeprefix('benchmark result file: ')}")
+    assert read_status == 0, content
+    assert json.loads(content) == {"score": 42}
+
+
 def test_the_gpu_client_runs_a_command_as_a_job(editor: Editor) -> None:
     status, output = editor.run(f"{shlex.quote(editor.gpu_client)} -- echo from-a-job")
 

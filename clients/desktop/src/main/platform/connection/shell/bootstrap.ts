@@ -1,0 +1,119 @@
+/**
+ * The one command the app runs on a host: the bootstrap that starts the host helper from a VibeSys
+ * checkout (`docs/contributing/desktop-connection.md`, "Bootstrap"). Every action after it is a
+ * typed message on the helper's channel; this is the only shell text the app sends to a host.
+ *
+ * The bootstrap checks the checkout and finds `uv`, then `exec`s
+ * `uv run --no-sync --project CHECKOUT python -I -m entrypoints.host_helper`. It exits before
+ * starting anything with a reserved status and one line on stdout when it cannot:
+ *
+ * - 64 `predates VERSION`: the checkout is VibeSys but older than the helper.
+ * - 65 `nodir` | `nopyproject` | `notvibesys`: the path is not a VibeSys checkout.
+ * - 66 `missing`: `uv` is on no PATH this account has, nor in the usual places.
+ *
+ * It must mean the same under any login shell (sh, bash, zsh, tcsh, fish), since ssh hands the
+ * command line to that shell. It is `sh -c '<fixed one-line script>' <role> <data>...`: the script
+ * contains no single quote, `!`, newline, or backslash pair, so every one of those shells passes it
+ * to `sh` unchanged, and each datum is hex-encoded (`x6869`), which no shell alters; the script
+ * decodes them back into `"$@"`. Locally the same script runs as a direct spawn of `/bin/sh` with an
+ * argument vector, so This Mac and an ssh host start the helper the same way.
+ */
+
+/** Directories probed for `uv` when it is on neither the host's PATH nor a login shell's. */
+const PROBED_DIRECTORIES = [
+  '$HOME/.local/bin',
+  '$HOME/.cargo/bin',
+  '/opt/homebrew/bin',
+  '/usr/local/bin',
+] as const;
+
+/** The bootstrap's reserved exit statuses, and what each means. */
+const BOOTSTRAP_STATUS = {predates: 64, notCheckout: 65, noUv: 66} as const;
+
+/**
+ * Decodes the hex-encoded arguments back into `"$@"`. `\134` (a backslash) is the one backslash in
+ * the script: a backslash before a digit is literal inside single quotes in every login shell.
+ */
+// Lines with shell `${...}` expansions are template literals that escape them as `\${`.
+const DECODE = [
+  'b=$(printf "\\134");',
+  `d() { h=\${1#x}; r=; while [ -n "$h" ]; do t=\${h#??}; p=\${h%"$t"}; v=$((0x$p));`,
+  `r="$r\${b}0$((v / 64))$((v / 8 % 8))$((v % 8))"; h=$t; done; printf %b "$r"; };`,
+  'n=$#; while [ "$n" -gt 0 ]; do set -- "$@" "$(d "$1")"; shift; n=$((n - 1)); done;',
+].join(' ');
+
+const {predates, notCheckout, noUv} = BOOTSTRAP_STATUS;
+
+/** Check checkout `$1` (`~` and `~/` mean the home directory), find `uv`, and start the helper. */
+const BOOTSTRAP_SCRIPT = [
+  DECODE,
+  `p=$1; case $p in "~") p=$HOME ;; "~/"*) p="$HOME/\${p#??}" ;; esac;`,
+  `if [ ! -d "$p" ]; then echo nodir; exit ${notCheckout}; fi;`,
+  `if [ ! -f "$p/pyproject.toml" ]; then echo nopyproject; exit ${notCheckout}; fi;`,
+  's=$(awk "/^[[]project[]]/ {s=1; next} /^[[]/ {s=0} s" "$p/pyproject.toml");',
+  `printf "%s" "$s" | grep -q "^name *= *.vibesys.[ ]*$" || { echo notvibesys; exit ${notCheckout}; };`,
+  'v=$(printf "%s" "$s" | sed -n "s/^version *= *.\\([^\\"]*\\).*/\\1/p" | head -n 1);',
+  `if [ ! -f "$p/src/entrypoints/host_helper.py" ]; then printf "predates %s" "$v"; echo; exit ${predates}; fi;`,
+  'u=$(command -v uv 2>/dev/null) || u=;',
+  `if [ -z "$u" ]; then u=$("\${SHELL:-/bin/sh}" -l -c "command -v uv" </dev/null 2>/dev/null | tail -n 1); [ -x "$u" ] || u=; fi;`,
+  `if [ -z "$u" ]; then for x in ${PROBED_DIRECTORIES.map(d => `"${d}"`).join(' ')}; do if [ -x "$x/uv" ]; then u=$x/uv; break; fi; done; fi;`,
+  `if [ -z "$u" ]; then echo missing; exit ${noUv}; fi;`,
+  'exec "$u" run --no-sync --project "$p" python -I -m entrypoints.host_helper',
+].join(' ');
+
+const ROLE = 'vibesys-helper';
+
+/** `word` as a token every shell leaves alone: `x` and its UTF-8 bytes in hex. */
+function hex(word: string): string {
+  return `x${Buffer.from(word, 'utf8').toString('hex')}`;
+}
+
+/** Refuse a checkout that cannot cross a command line intact (validated settings never do). */
+function datum(checkout: string): string {
+  if (/[\n\r\0]/.test(checkout)) {
+    throw new Error(`a checkout path contains a line break: ${JSON.stringify(checkout)}`);
+  }
+  return hex(checkout);
+}
+
+/** The remote command line of an ssh exec channel that starts the helper from `checkout`. */
+export function remoteBootstrap(checkout: string): string {
+  return ['sh', '-c', `'${BOOTSTRAP_SCRIPT}'`, ROLE, datum(checkout)].join(' ');
+}
+
+/** The local argument vector (for `/bin/sh`) that starts the helper from `checkout`. */
+export function localBootstrap(checkout: string): readonly string[] {
+  return ['-c', BOOTSTRAP_SCRIPT, ROLE, datum(checkout)];
+}
+
+/**
+ * What a bootstrap that exited before the helper answered means, for the user: the checkout at
+ * `where` (`PATH on HOST`) and the line the bootstrap printed. Null for a status it does not reserve.
+ */
+export function bootstrapProblem(
+  status: number | null,
+  stdout: string,
+  where: string,
+): string | null {
+  const line = stdout.split('\n')[0]?.trim() ?? '';
+  switch (status) {
+    case predates: {
+      const version = line.slice('predates '.length).trim() || 'unknown';
+      return `The VibeSys checkout ${where} predates the desktop helper (version ${version}). Update it, then try again.`;
+    }
+    case notCheckout:
+      if (line === 'nodir') return `${where} is not a directory.`;
+      if (line === 'nopyproject') {
+        return `${where} has no pyproject.toml; pick the directory you cloned VibeSys into.`;
+      }
+      return `${where} has a pyproject.toml, but it does not declare the vibesys project.`;
+    case noUv:
+      return (
+        `uv was not found ${where.slice(where.indexOf(' on ') + 1)}; tried the PATH of a ` +
+        `non-interactive shell, the login shell's PATH, and ${PROBED_DIRECTORIES.map(d => `${d}/uv`).join(', ')}. ` +
+        'Install uv there (https://docs.astral.sh/uv/) or put it on the PATH.'
+      );
+    default:
+      return null;
+  }
+}

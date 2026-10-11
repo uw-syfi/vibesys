@@ -11,7 +11,7 @@
       ".": "node"
     }
   },
-  "main": "dist/main.js",
+  "main": "dist/main/app/main.js",
   "exports": {},
   "scripts": {
     "build": "tsc -b tsconfig.main.json && vite build --config vite.welcome.config.ts && node scripts/copy-ui.mjs",

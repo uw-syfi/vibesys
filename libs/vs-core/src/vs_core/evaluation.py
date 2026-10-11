@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from . import _continuations, _measurements
+from . import _continuations, _job_releases, _measurements
 from .types.evaluation import (
     AgentMeasurementRequested,
     ContinuationJobsChanged,
@@ -61,4 +61,7 @@ def advance_evaluation(
 ) -> AreaChange[EvaluationState]:
     """Route each closed event variant to its sole owning subarea."""
     reducer: Reducer = EVENT_TO_SUBAREA[type(event)]
-    return reducer(state, context, event)
+    change = reducer(state, context, event)
+    # A job's release is announced to its closing attempt here, whichever subarea recorded it.
+    announced = _job_releases.job_release_signals(state, change.state, context)
+    return change.model_copy(update={"signals": (*change.signals, *announced)})

@@ -65,9 +65,9 @@ from server.host_api import (
     TasksListReply,
     TasksListRequest,
 )
-from server.stdio_bridge import (
-    BridgeOutcome,
+from server.relay import (
     BridgeResult,
+    ChannelEndOutcome,
     dial,
 )
 
@@ -76,7 +76,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from server.registry import LiveRegistry, StopEffects
-    from server.stdio_bridge import Dialer
+    from server.relay import Dialer
     from vs_sim.api import Connection
 
 SCAN_LIMIT: Final = 10_000
@@ -414,10 +414,10 @@ def _answer(request: HelperRequest, host: HelperHost) -> HelperReply | HelperErr
     return reply
 
 
-_CONNECT_ERRORS: Final[Mapping[BridgeOutcome, HelperErrorCode]] = {
-    BridgeOutcome.RUN_GONE: HelperErrorCode.RUN_GONE,
-    BridgeOutcome.CONNECT_DENIED: HelperErrorCode.CONNECT_DENIED,
-    BridgeOutcome.CONNECT_FAILED: HelperErrorCode.CONNECT_FAILED,
+_CONNECT_ERRORS: Final[Mapping[ChannelEndOutcome, HelperErrorCode]] = {
+    ChannelEndOutcome.RUN_GONE: HelperErrorCode.RUN_GONE,
+    ChannelEndOutcome.CONNECT_DENIED: HelperErrorCode.CONNECT_DENIED,
+    ChannelEndOutcome.CONNECT_FAILED: HelperErrorCode.CONNECT_FAILED,
 }
 
 

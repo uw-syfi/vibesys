@@ -174,8 +174,8 @@ roots = ["sdk/vs-evaluator", "resources/evaluators/queue"]
 id = "agent_image"
 class = "manual"
 job = "agent_image"
-roots = ["libs/vs-agent/src/vs_agent/images", "libs/vs-sandbox"]
-files = ["libs/vs-agent/src/vs_agent/images.py", "libs/vs-agent/src/vs_agent/provider_policy.py", "scripts/ci_docker_data_root.sh"]
+roots = ["libs/vs-agent/src/vs_agent/images", "libs/vs-sandbox", "libs/vs-runtime/src/vs_runtime/features"]
+files = ["libs/vs-agent/src/vs_agent/images.py", "libs/vs-agent/src/vs_agent/agent_feature.py", "libs/vs-agent/src/vs_agent/provider_policy.py", "libs/vs-runtime/src/vs_runtime/_image_features.py", "scripts/ci_docker_data_root.sh"]
 
 [[components]]
 id = "real_tiers"
@@ -186,7 +186,7 @@ job = "real_tiers"
 #   - vs-sandbox: the Slurm executor, host command broker and its client, gate
 #     runners, process execution, signal relay and the Docker sandbox they drive;
 #   - vs-slurm: the cluster connector and runner behind the `slurm` environment;
-#   - vs-agent: the agent image (agent.Dockerfile, built by both tiers) and the
+#   - vs-agent: the agent image (the Features and devcontainer CLI image, built by both tiers) and the
 #     containerized in-container servers;
 #   - vs-runtime and vs-evaluation: run environments, trusted evaluation and the
 #     evaluation tool server started in the editor container;

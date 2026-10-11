@@ -2,7 +2,7 @@
   // Tests and their fakes, with the main-process and welcome-state sources they import.
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022", "DOM", "esnext.disposable"],
     "types": ["node", "bun"],
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"

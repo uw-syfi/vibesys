@@ -26,12 +26,28 @@ export interface GatewayConnection {
   readonly browserSession: string;
 }
 
-/** Remove every launch capability from a browser-visible URL without validating it. */
-export function scrubLaunchCapability(pageHref: string): string {
+interface GatewayHistoryState {
+  readonly vibesysGateway: {
+    readonly kind: 'direct-gateway';
+    readonly version: 1;
+    /** Capability-free authority proved by the direct launch URL. */
+    readonly gatewayUrl: string;
+  };
+}
+
+export interface ScrubbedCapability {
+  readonly pageUrl: string;
+  /** Opaque, non-secret state to retain on this browser history entry. */
+  readonly historyState: GatewayHistoryState | null;
+}
+
+/** Remove every launch capability and retain only how a direct page reached its clean URL. */
+export function scrubLaunchCapability(pageHref: string): ScrubbedCapability {
   const page = new URL(pageHref);
+  const historyState = directGatewayHistoryState(page);
   page.searchParams.delete('token');
   const nested = page.searchParams.get('gateway');
-  if (nested === null) return page.toString();
+  if (nested === null) return {pageUrl: page.toString(), historyState};
   try {
     const gateway = new URL(nested, page.origin);
     if (!['http:', 'https:'].includes(gateway.protocol)) {
@@ -42,17 +58,20 @@ export function scrubLaunchCapability(pageHref: string): string {
   } catch {
     page.searchParams.delete('gateway');
   }
-  return page.toString();
+  return {pageUrl: page.toString(), historyState: null};
 }
 
 export function resolveGatewayTarget(
   pageHref: string,
   rememberedGateway: string | null,
+  historyState: unknown = null,
 ): GatewayTarget | null {
   const page = new URL(pageHref);
   const nested = page.searchParams.get('gateway');
   if (nested !== null) return targetForGateway(page, new URL(nested, page.origin), true);
   if (page.searchParams.has('token')) return targetForGateway(page, page, false);
+  const historyGateway = directGatewayFromHistory(page, historyState);
+  if (historyGateway !== null) return targetForGateway(page, historyGateway, false);
   if (rememberedGateway === null) return null;
   let remembered: URL;
   try {
@@ -61,6 +80,54 @@ export function resolveGatewayTarget(
     return null;
   }
   return remembered.origin === page.origin ? targetForGateway(page, remembered, false) : null;
+}
+
+function directGatewayHistoryState(page: URL): GatewayHistoryState | null {
+  if (
+    !['http:', 'https:'].includes(page.protocol) ||
+    !page.searchParams.has('token') ||
+    page.searchParams.has('gateway')
+  ) {
+    return null;
+  }
+  return {
+    vibesysGateway: {
+      kind: 'direct-gateway',
+      version: 1,
+      gatewayUrl: new URL('/', page.origin).toString(),
+    },
+  };
+}
+
+function directGatewayFromHistory(page: URL, value: unknown): URL | null {
+  const state = exactRecord(value, ['vibesysGateway']);
+  if (state === null) return null;
+  const provenance = exactRecord(state['vibesysGateway'], ['gatewayUrl', 'kind', 'version']);
+  if (
+    provenance === null ||
+    provenance['kind'] !== 'direct-gateway' ||
+    provenance['version'] !== 1 ||
+    typeof provenance['gatewayUrl'] !== 'string'
+  ) {
+    return null;
+  }
+  let gateway: URL;
+  try {
+    gateway = new URL(provenance['gatewayUrl']);
+  } catch {
+    return null;
+  }
+  if (!['http:', 'https:'].includes(gateway.protocol)) return null;
+  const cleanGateway = new URL('/', gateway.origin);
+  return gateway.toString() === cleanGateway.toString() && gateway.origin === page.origin
+    ? gateway
+    : null;
+}
+
+function exactRecord(value: unknown, keys: readonly string[]): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return Object.keys(record).sort().join(',') === [...keys].sort().join(',') ? record : null;
 }
 
 export function targetFromCapability(pageHref: string, capabilityUrl: string): GatewayTarget {

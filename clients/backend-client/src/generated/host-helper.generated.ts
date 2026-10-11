@@ -239,6 +239,24 @@ export type Message3 = string;
 export type Path1 = string | null;
 export type SupportedVersions = [unknown, unknown] | null;
 export type VibesysVersion2 = string | null;
+/**
+ * How a run channel's relay ended; each value has its own exit status.
+ *
+ * The relay core (``server.relay``) decides the outcome and maps it to the
+ * helper's exit status; a client reads it from the ``ChannelEnd`` line.
+ */
+export type ChannelEndOutcome =
+  | "client_closed"
+  | "server_closed"
+  | "run_gone"
+  | "connect_denied"
+  | "connect_failed"
+  | "server_stalled"
+  | "client_stalled"
+  | "server_failed"
+  | "client_failed";
+export type ExitStatus = number;
+export type Detail = string;
 
 /**
  * Root schema document for the host helper: what a client sends and what it receives.
@@ -246,6 +264,7 @@ export type VibesysVersion2 = string | null;
 export interface HostHelperDocument {
   request: Request;
   message: Message;
+  channel_end: ChannelEnd;
   [k: string]: unknown;
 }
 /**
@@ -631,4 +650,12 @@ export interface HelperError {
   path?: Path1;
   supported_versions?: SupportedVersions;
   vibesys_version?: VibesysVersion2;
+}
+/**
+ * The one stderr line a relayed run channel writes when it ends with a nonzero status.
+ */
+export interface ChannelEnd {
+  outcome: ChannelEndOutcome;
+  exit_status: ExitStatus;
+  detail: Detail;
 }

@@ -189,14 +189,22 @@ export interface DesktopSessionWiring {
 }
 
 /**
+ * The page keeps no retry timer of its own inside the desktop shell: the main process's connection
+ * manager is the one retry loop per host (`docs/contributing/desktop-connection.md`). A dial waits
+ * there until the host is ready or the manager gives up, and the shell's wake (`onWake`) redials
+ * once the host recovers.
+ */
+const DESKTOP_TIMING: TransportTiming = {reconnectDelaysMs: []};
+
+/**
  * The `WebSession` wiring for a page inside the desktop shell: the browser's `WebSocketTransport`
  * over bridge connections, and `lifecycle` plus the shell's wake reports. Everything above the
- * socket (redial, resume, reconciliation) is the browser's own code.
+ * socket (resume, reconciliation) is the browser's own code; redial happens on a wake.
  */
 export function desktopSessionOptions(
   bridge: DesktopBridge,
   lifecycle: BrowserLifecycle,
-  timing: TransportTiming = {},
+  timing: TransportTiming = DESKTOP_TIMING,
 ): DesktopSessionWiring {
   return {
     lifecycle: desktopLifecycle(lifecycle, bridge),

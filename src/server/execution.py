@@ -38,6 +38,7 @@ from vs_sim.api import SystemClock
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    from server.events import ChatThreadId
     from server.journal import WireJournal
     from vs_sim.api import Clock, Condition
 
@@ -450,7 +451,7 @@ class ExecutionTracker:
         agent_kind: str,
         round_label: str,
         invocation_id: str,
-        chat_thread_id: str | None = None,
+        chat_thread_id: ChatThreadId | None = None,
     ) -> Generator[None]:
         """Scope presentation events to one execution on the current thread.
 

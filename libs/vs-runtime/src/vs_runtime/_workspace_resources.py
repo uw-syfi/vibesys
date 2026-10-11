@@ -120,6 +120,9 @@ class WorkspaceResourceFactory:
                     log_dir=project.logger.log_dir,
                     workspace=project.project_root,
                     ref_dir=None,
+                    # A candidate session may reach only its own worktree: the run's
+                    # other candidates are not its to read or write through a broker.
+                    run_owned_roots=(),
                     git_history_root=self._project.git.history_root,
                     log=project.logger.lprint,
                 )

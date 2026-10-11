@@ -20,14 +20,14 @@ from server.chat.session import (
     ExperimentChatDependencies,
     ExperimentChatSession,
 )
-from server.events import ChatThreadCreatedData
+from server.chat.transcript import FileChatTranscriptStore
+from server.events import ChatThreadCreatedData, ChatThreadId
 from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.api import AuxiliaryAgentLaunch, AuxiliaryReadableInput
+from vibesys.api import AuxiliaryAgentLaunch
 from vs_sim.api import OsThreads, SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from server.controller import RunController
     from server.execution import ExecutionTracker
@@ -40,7 +40,6 @@ if TYPE_CHECKING:
 #: the same name the client already shows the default thread under
 #: (``DEFAULT_CHAT_THREAD_ID`` in ``clients/core-state``).
 DEFAULT_CHAT_THREAD = "default"
-_CHAT_STATE_ENV = "VIBESYS_CHAT_STATE_DIR"
 
 
 @dataclass(frozen=True)
@@ -49,8 +48,7 @@ class ChatAgentBuildRequest:
 
     session: AuxiliaryAgentFactory
     selection: AgentSelection
-    instance_id: str | None
-    shared_state_dir: Path
+    instance_id: ChatThreadId | None
 
 
 class AuxiliaryAgentFactory(Protocol):
@@ -78,23 +76,14 @@ def build_chat_agent(
 ) -> ManagedAgent:
     """Declare one chat conversation through the managed public boundary."""
     selection = request.selection
-    shared_state_dir = request.shared_state_dir
-    state_path = f"${_CHAT_STATE_ENV}"
     return request.session.create_auxiliary_agent(
         AuxiliaryAgentLaunch(
             role="chat",
             member_id=request.instance_id or DEFAULT_CHAT_THREAD,
             provider=selection.provider,
             model=selection.model,
-            system_prompt=experiment_chat_system_prompt(state_path),
-            continuation_prompt=experiment_chat_continuation_prompt(state_path),
-            readable_inputs=(
-                AuxiliaryReadableInput(
-                    path=shared_state_dir,
-                    environment_variable=_CHAT_STATE_ENV,
-                    purpose="server chat transcript",
-                ),
-            ),
+            system_prompt=experiment_chat_system_prompt(),
+            continuation_prompt=experiment_chat_continuation_prompt(),
         )
     )
 
@@ -135,12 +124,17 @@ class ExperimentChatFactory:
         self._closed = False
         self._sessions: list[ExperimentChatSession] = []
         self._default_retained = False
+        self._transcripts: FileChatTranscriptStore | None = None
 
     def start(self) -> None:
         """Install the default session and per-thread factory on the manager."""
         with self._lock:
             if self._closed:
                 raise _factory_closed_error()
+            if self._transcripts is not None:
+                raise _factory_started_error()
+            transcripts = FileChatTranscriptStore.open(self._chat_state_dir)
+            self._transcripts = transcripts
             self._manager.set_run_settings(self._defaults)
             self._manager.set_thread_factory(self._create_thread)
         default = self._build_session(
@@ -172,18 +166,22 @@ class ExperimentChatFactory:
             self._manager.clear_default_handler_and_drain()
         with self._lock:
             sessions, self._sessions = self._sessions, []
+            transcripts, self._transcripts = self._transcripts, None
         first_error: BaseException | None = None
-        for session in sessions:
+        owned_resources: list[ExperimentChatSession | FileChatTranscriptStore] = [*sessions]
+        if transcripts is not None:
+            owned_resources.append(transcripts)
+        for resource in owned_resources:
             try:
-                session.close()
-            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010246 [BLE001]; session teardown attempts every owned session even when one is cancelled.
+                resource.close()
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010246 [BLE001]; factory teardown attempts every owned session and namespace capability even when one close is cancelled; ExitStack would replace this first-error policy with exception chaining.
                 first_error = first_error or exc
         if first_error is not None:
             raise first_error
 
     def _create_thread(
         self,
-        thread_id: str,
+        thread_id: ChatThreadId,
         provider: str | None,
         model: str | None,
     ) -> ChatThreadHandle:
@@ -225,24 +223,27 @@ class ExperimentChatFactory:
         )
 
     def _build_session(
-        self, thread_id: str | None, selection: AgentSelection
+        self, thread_id: ChatThreadId | None, selection: AgentSelection
     ) -> ExperimentChatSession:
         with self._lock:
             if self._closed:
                 raise _factory_closed_error()
-        shared_state_dir = self._chat_state_dir
-        shared_state_dir.mkdir(parents=True, exist_ok=True)
-        agent = self._build_agent(
-            ChatAgentBuildRequest(
-                session=self._session,
-                selection=selection,
-                instance_id=thread_id,
-                shared_state_dir=shared_state_dir,
+            transcripts = self._transcripts
+            if transcripts is None:
+                raise _factory_not_started_error()
+            transcript = transcripts.open_transcript(thread_id)
+        try:
+            transcript_history = transcript.read_history()
+            agent = self._build_agent(
+                ChatAgentBuildRequest(
+                    session=self._session,
+                    selection=selection,
+                    instance_id=thread_id,
+                )
             )
-        )
-        state_dir = (
-            shared_state_dir if thread_id is None else shared_state_dir / "threads" / thread_id
-        )
+        except BaseException:
+            transcript.close()
+            raise
         try:
             session = ExperimentChatSession(
                 ExperimentChatDependencies(
@@ -254,7 +255,8 @@ class ExperimentChatFactory:
                     # session's events under a thread the terminal answer event
                     # does not claim.
                     chat_thread_id=thread_id,
-                    state_dir=state_dir,
+                    transcript=transcript,
+                    transcript_history=transcript_history,
                     provider=selection.provider,
                     model=selection.model,
                     fallback=self._fallback,
@@ -263,6 +265,7 @@ class ExperimentChatFactory:
                 agent,
             )
         except BaseException as construction_error:
+            transcript.close()
             try:
                 agent.close()
             except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-010247 [BLE001]; failed construction still closes resources and preserves the original exception.
@@ -282,3 +285,11 @@ class ExperimentChatFactory:
 
 def _factory_closed_error() -> RuntimeError:
     return RuntimeError("Experiment chat factory is closed")
+
+
+def _factory_not_started_error() -> RuntimeError:
+    return RuntimeError("Experiment chat factory is not started")
+
+
+def _factory_started_error() -> RuntimeError:
+    return RuntimeError("Experiment chat factory is already started")

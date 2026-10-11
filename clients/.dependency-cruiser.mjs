@@ -177,6 +177,157 @@ function webRunPageRules() {
   ];
 }
 
+// The desktop app is split by process, then sliced by feature, so each slice can move into its
+// own package (`docs/contributing/desktop-connection.md`; roadmap #1878):
+//
+// - `src/main/` is the Electron main process, in layers that point down only: `app/`
+//   (composition) -> `features/<name>/` -> `entities/` (pure projections) -> `platform/<name>/`
+//   (system services: the connection manager, the settings) -> `shared/`. A stateful platform
+//   slice is a pure `state/` core and a `shell/` that owns its processes, sockets, and timers.
+// - `src/renderer/` is the renderer code (the welcome view and the sandboxed preloads); it reaches
+//   the main process only through its preload's bridge.
+// - `src/common/` is what both processes share: pure types, entities, and the typed IPC.
+const DESKTOP = '^desktop/src/';
+const DESKTOP_MAIN = `${DESKTOP}main/`;
+const DESKTOP_MAIN_LAYERS = ['app', 'features', 'entities', 'platform', 'shared'];
+const DESKTOP_WELCOME = `${DESKTOP}renderer/welcome/`;
+const DESKTOP_SLICE = '(?:features|platform)/[^/]+';
+const DESKTOP_SLICE_SUPPORT = [TEST_FILE, `${DESKTOP}.*/testing/`];
+const UI_RUNTIME = '(?:^|/)node_modules/(?:react|react-dom|electron)/';
+
+function desktopRules() {
+  const layerRules = DESKTOP_MAIN_LAYERS.slice(1).map((layer, index) => ({
+    name: `desktop-${layer}-does-not-import-layers-above`,
+    severity: 'error',
+    from: {path: `${DESKTOP_MAIN}${layer}/`, pathNot: TEST_FILE},
+    to: {path: `${DESKTOP_MAIN}(?:${DESKTOP_MAIN_LAYERS.slice(0, index + 1).join('|')})/`},
+  }));
+  return [
+    ...layerRules,
+    {
+      name: 'desktop-renderer-does-not-import-main',
+      severity: 'error',
+      from: {path: `${DESKTOP}renderer/`},
+      to: {path: DESKTOP_MAIN},
+    },
+    {
+      name: 'desktop-main-does-not-import-renderer',
+      severity: 'error',
+      from: {path: DESKTOP_MAIN},
+      to: {path: `${DESKTOP}renderer/`},
+    },
+    {
+      // Shared by both processes, so it is pure: no runtime, no process's code, no I/O.
+      name: 'desktop-common-is-pure',
+      severity: 'error',
+      from: {path: `${DESKTOP}common/`, pathNot: TEST_FILE},
+      to: {
+        path: [`${DESKTOP}(?:main|renderer)/`, UI_RUNTIME, ...BACKEND_CLIENT],
+        dependencyTypesNot: ['type-only'],
+      },
+    },
+    {
+      name: 'desktop-common-has-no-node-runtime',
+      severity: 'error',
+      from: {path: `${DESKTOP}common/`, pathNot: TEST_FILE},
+      to: {dependencyTypes: ['core']},
+    },
+    {
+      // A functional core (a platform slice's `state/`, a welcome store) folds events into state
+      // and requests: no Node or Electron, no shell, no view.
+      name: 'desktop-state-is-pure',
+      severity: 'error',
+      from: {path: [`${DESKTOP_MAIN}.+/state/`, `${DESKTOP_WELCOME}state/`], pathNot: TEST_FILE},
+      to: {
+        path: [
+          `${DESKTOP_MAIN}.+/shell/`,
+          `${DESKTOP_WELCOME}(?:ui|effects)/`,
+          UI_RUNTIME,
+          ...BACKEND_CLIENT,
+        ],
+        dependencyTypesNot: ['type-only'],
+      },
+    },
+    {
+      name: 'desktop-state-has-no-node-runtime',
+      severity: 'error',
+      from: {
+        path: [`${DESKTOP_MAIN}.+/state/`, `${DESKTOP_WELCOME}(?:state|ui)/`],
+        pathNot: TEST_FILE,
+      },
+      to: {dependencyTypes: ['core']},
+    },
+    {
+      // Only a platform slice's shell starts processes or opens sockets.
+      name: 'desktop-only-shells-open-processes-and-sockets',
+      severity: 'error',
+      from: {path: DESKTOP, pathNot: [TEST_FILE, `${DESKTOP_MAIN}platform/[^/]+/shell/`]},
+      to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
+    },
+    {
+      // A feature never reaches another feature; cross-feature flows are wired in `app/`.
+      name: 'desktop-features-are-isolated',
+      severity: 'error',
+      from: {path: `${DESKTOP_MAIN}features/([^/]+)/`},
+      to: {path: `${DESKTOP_MAIN}features/`, pathNot: `${DESKTOP_MAIN}features/$1/`},
+    },
+    {
+      // A slice's `index.ts` is its only public surface (its test support aside). Group 1 is the
+      // importer's own slice, which may reach all of itself.
+      name: 'desktop-slices-are-entered-through-their-index',
+      severity: 'error',
+      from: {path: `${DESKTOP_MAIN}(${DESKTOP_SLICE})/`, pathNot: DESKTOP_SLICE_SUPPORT},
+      to: {path: `${DESKTOP_MAIN}${DESKTOP_SLICE}/(?!index\\.ts$)`, pathNot: `${DESKTOP_MAIN}$1/`},
+    },
+    {
+      name: 'desktop-composition-enters-slices-through-their-index',
+      severity: 'error',
+      from: {path: `${DESKTOP_MAIN}(?:app|entities|shared)/`, pathNot: DESKTOP_SLICE_SUPPORT},
+      to: {path: `${DESKTOP_MAIN}${DESKTOP_SLICE}/(?!index\\.ts$)`},
+    },
+  ];
+}
+
+/** The renderers' rules: the welcome view's layers, and what no renderer may reach. */
+function rendererRules() {
+  return [
+    {
+      name: 'desktop-welcome-ui-does-not-depend-on-shell',
+      severity: 'error',
+      from: {path: `${DESKTOP_WELCOME}ui/`, pathNot: TEST_FILE},
+      to: {
+        path: [
+          `${DESKTOP_WELCOME}effects/`,
+          `${DESKTOP_WELCOME}main\\.tsx$`,
+          ...BACKEND_CLIENT,
+          '(?:^|/)node_modules/electron/',
+        ],
+      },
+    },
+    {
+      name: 'desktop-welcome-effects-do-not-import-ui',
+      severity: 'error',
+      from: {path: `${DESKTOP_WELCOME}effects/`, pathNot: TEST_FILE},
+      to: {path: [`${DESKTOP_WELCOME}ui/`, `${DESKTOP_WELCOME}main\\.tsx$`]},
+    },
+    {
+      // Renderer code (the welcome view, the web run page) reaches the main process only
+      // through its preload's bridge.
+      name: 'renderers-do-not-import-electron',
+      severity: 'error',
+      from: {path: [DESKTOP_WELCOME, '^web/src/'], pathNot: TEST_FILE},
+      to: {path: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
+    },
+    {
+      // The web run page reaches its server only through backend-client.
+      name: 'web-opens-no-sockets-or-processes',
+      severity: 'error',
+      from: {path: '^web/src/', pathNot: TEST_FILE},
+      to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
+    },
+  ];
+}
+
 /** @type {import('dependency-cruiser').IConfiguration} */
 export default {
   forbidden: [
@@ -405,70 +556,9 @@ export default {
       from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
       to: {path: '^tui/src/session-controller\\.ts$', dependencyTypesNot: ['type-only']},
     },
-    // The desktop welcome view mirrors the TUI's layers: `state/` is the functional core (pure
-    // reducers, selectors, invariants), `ui/` is presentational (props in, events out), and
-    // `effects/` is the shell that performs the core's requests over the welcome bridge;
-    // `main.tsx` is the composition root.
-    {
-      name: 'desktop-welcome-state-is-pure',
-      severity: 'error',
-      from: {path: '^desktop/src/welcome/state/', pathNot: TEST_FILE},
-      to: {
-        path: [
-          '^desktop/src/welcome/(?:ui|effects)/',
-          '^desktop/src/welcome/main\\.tsx$',
-          '(?:^|/)node_modules/(?:react|react-dom|electron)/',
-          '^backend-client/',
-          '/node_modules/@vibesys/backend-client/',
-        ],
-        dependencyTypesNot: ['type-only'],
-      },
-    },
-    {
-      name: 'desktop-welcome-core-and-ui-have-no-node-runtime',
-      severity: 'error',
-      from: {path: '^desktop/src/welcome/(?:state|ui)/', pathNot: TEST_FILE},
-      to: {dependencyTypes: ['core']},
-    },
-    {
-      name: 'desktop-welcome-ui-does-not-depend-on-shell',
-      severity: 'error',
-      from: {path: '^desktop/src/welcome/ui/', pathNot: TEST_FILE},
-      to: {
-        path: [
-          '^desktop/src/welcome/effects/',
-          '^desktop/src/welcome/main\\.tsx$',
-          '^backend-client/',
-          '/node_modules/@vibesys/backend-client/',
-          '(?:^|/)node_modules/electron/',
-        ],
-      },
-    },
-    {
-      name: 'desktop-welcome-effects-do-not-import-ui',
-      severity: 'error',
-      from: {path: '^desktop/src/welcome/effects/', pathNot: TEST_FILE},
-      to: {path: ['^desktop/src/welcome/ui/', '^desktop/src/welcome/main\\.tsx$']},
-    },
+    ...desktopRules(),
+    ...rendererRules(),
     ...webRunPageRules(),
-    {
-      // Renderer code (the welcome view, the web run page) reaches the main process only
-      // through its preload's bridge.
-      name: 'renderers-do-not-import-electron',
-      severity: 'error',
-      from: {path: ['^desktop/src/welcome/', '^web/src/'], pathNot: TEST_FILE},
-      to: {path: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
-    },
-    {
-      // Sockets and processes belong to backend-client and the desktop's connection layer.
-      name: 'desktop-and-web-confine-sockets-and-processes',
-      severity: 'error',
-      from: {
-        path: ['^desktop/src/', '^web/src/'],
-        pathNot: [TEST_FILE, '^desktop/src/(?:ssh-host|local-host|process)\\.ts$'],
-      },
-      to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
-    },
     {
       // `index.ts` (the frontend process) and `launcher.ts` (the `vibesys` bin) run on import,
       // so nothing may import them.

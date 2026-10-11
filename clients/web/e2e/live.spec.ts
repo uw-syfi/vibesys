@@ -58,6 +58,8 @@ test('removes the launch capability while preserving same-browser history', asyn
 });
 
 test('uses the direct gateway cookie when session storage is denied', async ({page}) => {
+  const sockets: string[] = [];
+  page.on('websocket', socket => sockets.push(socket.url()));
   await page.addInitScript(() => {
     Object.defineProperty(window, 'sessionStorage', {
       configurable: true,
@@ -70,8 +72,32 @@ test('uses the direct gateway cookie when session storage is denied', async ({pa
   await withGateway(async gateway => {
     await page.goto(gateway.url);
     await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
-    expect(page.url()).toBe(new URL('/', gateway.url).toString());
+    await expect(page.getByLabel('Live gateway URL')).toHaveCount(0);
+    const cleanUrl = new URL('/', gateway.url).toString();
+    expect(page.url()).toBe(cleanUrl);
     expect(page.url()).not.toContain('token=');
+    expect(await page.evaluate(() => window.history.state)).toEqual({
+      vibesysGateway: {kind: 'direct-gateway', version: 1, gatewayUrl: cleanUrl},
+    });
+    await expect.poll(() => sockets.length).toBe(2);
+
+    await page.reload();
+    await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
+    await expect(page.getByLabel('Live gateway URL')).toHaveCount(0);
+    await expect.poll(() => sockets.length).toBe(4);
+
+    await page.goto('about:blank');
+    await page.goBack();
+    await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
+    await expect(page.getByLabel('Live gateway URL')).toHaveCount(0);
+    expect(page.url()).toBe(cleanUrl);
+    await expect.poll(() => sockets.length).toBe(6);
+    expect(
+      sockets.every(url => {
+        const parsed = new URL(url);
+        return parsed.pathname === '/ws' && parsed.search === '';
+      }),
+    ).toBe(true);
   });
 });
 

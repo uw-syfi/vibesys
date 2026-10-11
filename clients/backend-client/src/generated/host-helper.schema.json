@@ -1,5 +1,45 @@
 {
   "$defs": {
+    "ChannelEnd": {
+      "additionalProperties": false,
+      "description": "The one stderr line a relayed run channel writes when it ends with a nonzero status.",
+      "properties": {
+        "outcome": {
+          "$ref": "#/$defs/ChannelEndOutcome"
+        },
+        "exit_status": {
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "exit_status",
+        "detail"
+      ],
+      "title": "ChannelEnd",
+      "type": "object"
+    },
+    "ChannelEndOutcome": {
+      "description": "How a run channel's relay ended; each value has its own exit status.\n\nThe relay core (``server.relay``) decides the outcome and maps it to the\nhelper's exit status; a client reads it from the ``ChannelEnd`` line.",
+      "enum": [
+        "client_closed",
+        "server_closed",
+        "run_gone",
+        "connect_denied",
+        "connect_failed",
+        "server_stalled",
+        "client_stalled",
+        "server_failed",
+        "client_failed"
+      ],
+      "title": "ChannelEndOutcome",
+      "type": "string"
+    },
     "Checkout": {
       "additionalProperties": false,
       "description": "The VibeSys source checkout the helper runs from.",
@@ -1778,11 +1818,15 @@
         }
       ],
       "title": "Message"
+    },
+    "channel_end": {
+      "$ref": "#/$defs/ChannelEnd"
     }
   },
   "required": [
     "request",
-    "message"
+    "message",
+    "channel_end"
   ],
   "title": "HostHelperDocument",
   "type": "object"

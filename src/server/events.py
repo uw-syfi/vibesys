@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAliasType, get_args, get_origin
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    ValidationError,
+    WithJsonSchema,
+    model_validator,
+)
 
 from server.diagnostics import Diagnostic
 from server.event_index import (
@@ -123,6 +133,54 @@ OutputStream = Literal["stdout", "stderr"]
 """Which host stream a captured line of server output came from."""
 
 
+_CHAT_THREAD_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}")
+_CHAT_THREAD_ID_SCHEMA_PATTERN = (
+    r"^(?!(?:aux|con|nul|prn|com[1-9]|lpt[1-9])(?:\.|$))(?!.*\.$)"
+    r"[a-z0-9][a-z0-9._-]*$(?![\s\S])"
+)
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"aux", "con", "nul", "prn"}
+    | {f"com{number}" for number in range(1, 10)}
+    | {f"lpt{number}" for number in range(1, 10)}
+)
+
+
+class _InvalidChatThreadIdError(ValueError):
+    """Identify the one validation detail safe to surface during attach."""
+
+
+def validate_chat_thread_id(value: str) -> str:
+    """Return one portable path-component identity or raise with its value."""
+    if not isinstance(value, str) or _CHAT_THREAD_ID_PATTERN.fullmatch(value) is None:
+        reason = "use 1-128 lowercase ASCII letters, digits, dots, underscores, or hyphens"
+    elif value.endswith("."):
+        reason = "a portable identity cannot end with a dot"
+    elif value.partition(".")[0] in _WINDOWS_DEVICE_NAMES:
+        reason = "the name is reserved by Windows filesystems"
+    else:
+        return value
+    message = f"invalid experiment chat thread identity {value!r}: {reason}"
+    raise _InvalidChatThreadIdError(message)
+
+
+ChatThreadId = TypeAliasType(
+    "ChatThreadId",
+    Annotated[
+        str,
+        AfterValidator(validate_chat_thread_id),
+        WithJsonSchema(
+            {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": _CHAT_THREAD_ID_SCHEMA_PATTERN,
+            }
+        ),
+    ],
+)
+"""Portable identity shared by chat requests, events, and transcript paths."""
+
+
 class GateKind(StrEnum):
     """Closed set of framework-owned gates a candidate passes through."""
 
@@ -183,7 +241,7 @@ class ChatThreadCreatedData(EventPayload):
     """
 
     kind: Literal["chat_thread_created"] = "chat_thread_created"
-    thread_id: str
+    thread_id: ChatThreadId
     title: str = ""
     provider: str
     model: str
@@ -641,7 +699,7 @@ class RunEvent(BaseModel):
     execution_id: str | None = None
     # Which experiment-chat thread a chat event belongs to. None is the
     # default thread, preserving events written before threads existed.
-    chat_thread_id: str | None = None
+    chat_thread_id: ChatThreadId | None = None
     data: EventData | None = None
     # Absent on ordinary and legacy events so adding the marker does not change
     # their serialized bytes. True means the recording boundary cut variable
@@ -1183,7 +1241,7 @@ class EventStore:
                 except ValidationError as error:
                     if not is_final:
                         raise
-                    raise _complete_invalid_tail_error(self.path, record_offset) from error
+                    raise _complete_invalid_tail_error(self.path, record_offset, error) from error
                 raw_sequence = event.sequence
                 sequence = raw_sequence if raw_sequence > last_sequence else last_sequence + 1
                 if sequence != raw_sequence:
@@ -1249,7 +1307,7 @@ class EventStore:
                 position = start + relative_position
                 if position != len(records) - 1 or malformed_tail_offset is not None:
                     raise
-                raise _complete_invalid_tail_error(self.path, record.offset) from error
+                raise _complete_invalid_tail_error(self.path, record.offset, error) from error
 
     def _read_unlocked(self) -> tuple[list[RunEvent], int | None]:
         if not self.path.exists():
@@ -1264,7 +1322,7 @@ class EventStore:
                 if not is_final:
                     raise
                 if _starts_with_complete_json(line):
-                    raise _complete_invalid_tail_error(self.path, record_offset) from error
+                    raise _complete_invalid_tail_error(self.path, record_offset, error) from error
                 # Preserve access to earlier audit history if a process was
                 # interrupted during its final append.
                 return events, record_offset
@@ -1390,13 +1448,27 @@ def _ends_without_newline(path: Path) -> bool:
         return stream.read(1) != b"\n"
 
 
-def _complete_invalid_tail_error(path: Path, offset: int) -> ValueError:
+def _complete_invalid_tail_error(
+    path: Path, offset: int, validation_error: ValidationError
+) -> ValueError:
     """Corruption error for a fully written final record that fails validation.
 
     Unlike a torn append, the record is complete, so silently truncating it
     would erase a durable fact; the operator must inspect the file instead.
     """
-    return ValueError(f"complete final record at byte offset {offset} in {path} failed validation")
+    detail = next(
+        (
+            cause
+            for issue in validation_error.errors(include_url=False)
+            if isinstance(context := issue.get("ctx"), dict)
+            and isinstance(cause := context.get("error"), _InvalidChatThreadIdError)
+        ),
+        None,
+    )
+    suffix = "" if detail is None else f": {detail}"
+    return ValueError(
+        f"complete final record at byte offset {offset} in {path} failed validation{suffix}"
+    )
 
 
 def _header_from_event(event: RunEvent, sequence: int) -> EventHeader:

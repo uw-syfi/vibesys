@@ -100,3 +100,48 @@ def test_the_record_observer_is_told_each_startup_fact(tmp_path: Path) -> None:
 
 def _startup_event(data: CoreRunStartupProgressData) -> CoreEvent:
     return make_core_event(CoreEventType.RUN_STARTUP_PROGRESS, status=EventStatus.ACTIVE, data=data)
+
+
+def test_a_pause_resumed_during_the_image_build_keeps_the_run_starting(tmp_path: Path) -> None:
+    """Regression: the record lost the build's progress and read ``running`` before ready."""
+    facts: list[object] = []
+
+    class Observer:
+        def listening(self) -> None:
+            facts.append("listening")
+
+        def observe(
+            self,
+            *,
+            status: RunStatus | None = None,
+            failure: FailureReason | None = None,
+            startup: StartupFact | None = None,
+        ) -> None:
+            facts.append(status or failure or startup)
+
+    runtime = ServerRuntime(
+        run_id="run-1",
+        runs=default_runs(),
+        socket_path=tmp_path / "control.sock",
+        detach=True,
+        observer=Observer(),
+    )
+    runtime.controller.attach(tmp_path, run_id="run-1")
+    runtime.integration.project_event(_startup_event(_BUILDING))
+    runtime.controller.pause_after_call()
+    runtime.controller.resume()
+    runtime.controller.pause_after_call()
+    runtime.integration.project_event(_startup_event(_STARTING_CONTAINER))
+
+    assert runtime.controller.run_status() is RunStatus.STARTING
+    runtime.controller.ready()
+
+    assert runtime.controller.run_status() is RunStatus.PAUSING
+    assert facts == [
+        StartupFact(
+            stage=StartupStage.BUILDING_IMAGE,
+            progress=StartupProgress(done=2, total=14, label="RUN npm install -g"),
+        ),
+        StartupFact(stage=StartupStage.STARTING_CONTAINER),
+        RunStatus.PAUSING,
+    ]

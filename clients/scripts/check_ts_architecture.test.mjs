@@ -109,20 +109,10 @@ const VALID_FILES = {
   'core-state/src/shared-fixtures.test.ts': "import '@vibesys/backend-client/testing';\n",
   'core-state/src/testing/index.ts': "import './model.js';\n",
   'core-state/src/testing/model.ts': "import '../index.js';\n",
-  // The desktop: a main process whose one process module owns sockets and child processes, and the
-  // welcome view's layers (composition root -> effects -> pure state; ui renders state by type).
-  // Its own test support may build on core-state's.
-  'desktop/src/main.ts': "import './process.js';\nimport 'electron';\n",
-  'desktop/src/process.ts': "import 'node:child_process';\nimport 'node:net';\n",
-  'desktop/src/welcome/main.tsx': "import './effects/stores.js';\nimport './ui/view.js';\n",
-  'desktop/src/welcome/effects/stores.ts':
-    "import '../state/start.js';\nimport '@vibesys/core-state';\nimport '@vibesys/backend-client';\n",
-  'desktop/src/welcome/state/start.ts':
-    "import '@vibesys/core-state';\nimport type {} from '@vibesys/backend-client';\n",
-  'desktop/src/welcome/ui/view.ts': "import type {} from '../state/start.js';\n",
+  // The desktop's test support may build on core-state's.
   'desktop/src/testing/fake-chrome.ts': "import type {} from '@vibesys/core-state/testing';\n",
-  'desktop/src/welcome/state/start.test.ts':
-    "import '@vibesys/core-state/testing';\nimport '../../testing/fake-chrome.js';\nimport 'node:fs';\n",
+  'desktop/src/renderer/welcome/state/store.test.ts':
+    "import '@vibesys/core-state/testing';\nimport '../../../testing/fake-chrome.js';\nimport 'node:fs';\n",
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
   // The web run page's layers, each reaching only down: the composition enters a feature through
@@ -158,48 +148,134 @@ const VALID_FILES = {
     "import '@vibesys/core-state';\nimport '@vibesys/backend-client';\nimport 'declared-package';\n",
   'tui/benchmarks/bench.ts': "import '../src/session-model.js';\n",
   'scripts/check.mjs': "import 'node:fs';\nimport 'declared-package';\n",
+  // The desktop app's processes and slices, each reaching only down: the composition enters each
+  // slice through its index, a slice's shell owns its processes and drives its pure state, and the
+  // renderer and main share only `common/`.
+  'desktop/src/main/app/main.ts':
+    "import '../features/runs/index.js';\nimport '../platform/link/index.js';\nimport '../../common/ids.js';\n",
+  'desktop/src/main/features/runs/index.ts':
+    "import './runs.js';\nimport '../../entities/listing.js';\n",
+  'desktop/src/main/features/runs/runs.ts': "import '../../platform/link/index.js';\n",
+  'desktop/src/main/entities/listing.ts': "import type {} from '../platform/link/index.js';\n",
+  'desktop/src/main/platform/link/index.ts': "import './shell/link.js';\n",
+  'desktop/src/main/platform/link/shell/link.ts':
+    "import 'node:child_process';\nimport '../state/machine.js';\n",
+  'desktop/src/main/platform/link/state/machine.ts':
+    "import type {} from '@vibesys/backend-client';\n",
+  'desktop/src/main/platform/link/testing/fake.ts': "import '../state/machine.js';\n",
+  'desktop/src/common/ids.ts': "import type {} from '@vibesys/backend-client';\n",
+  'desktop/src/renderer/welcome/main.tsx':
+    "import './effects/stores.js';\nimport './ui/view.js';\nimport '../../common/ids.js';\n",
+  'desktop/src/renderer/welcome/effects/stores.ts': "import '../state/store.js';\n",
+  'desktop/src/renderer/welcome/state/store.ts': "import '../../../common/ids.js';\n",
+  'desktop/src/renderer/welcome/ui/view.ts': "import '../state/store.js';\n",
 };
 
 const RULE_CASES = [
   {
-    rule: 'desktop-welcome-state-is-pure',
-    files: {'desktop/src/welcome/state/start.ts': "import '../effects/stores.js';\n"},
+    rule: 'desktop-features-does-not-import-layers-above',
+    files: {'desktop/src/main/features/runs/runs.ts': "import '../../app/main.js';\n"},
   },
   {
-    rule: 'desktop-welcome-state-is-pure',
-    files: {'desktop/src/welcome/state/start.ts': "import '@vibesys/backend-client';\n"},
+    rule: 'desktop-entities-does-not-import-layers-above',
+    files: {'desktop/src/main/entities/listing.ts': "import '../features/runs/index.js';\n"},
   },
   {
-    rule: 'desktop-welcome-core-and-ui-have-no-node-runtime',
-    files: {'desktop/src/welcome/ui/view.ts': "import 'node:path';\n"},
+    rule: 'desktop-platform-does-not-import-layers-above',
+    files: {
+      'desktop/src/main/platform/link/shell/link.ts': "import '../../../entities/listing.js';\n",
+    },
+  },
+  {
+    rule: 'desktop-shared-does-not-import-layers-above',
+    files: {'desktop/src/main/shared/log.ts': "import '../platform/link/index.js';\n"},
+  },
+  {
+    rule: 'desktop-renderer-does-not-import-main',
+    files: {
+      'desktop/src/renderer/welcome/state/store.ts':
+        "import '../../../main/entities/listing.js';\n",
+    },
+  },
+  {
+    rule: 'desktop-main-does-not-import-renderer',
+    files: {'desktop/src/main/app/main.ts': "import '../../renderer/welcome/state/store.js';\n"},
+  },
+  {
+    rule: 'desktop-common-is-pure',
+    files: {'desktop/src/common/ids.ts': "import '@vibesys/backend-client';\n"},
+  },
+  {
+    rule: 'desktop-common-has-no-node-runtime',
+    files: {'desktop/src/common/ids.ts': "import 'node:path';\n"},
+  },
+  {
+    rule: 'desktop-state-is-pure',
+    files: {'desktop/src/main/platform/link/state/machine.ts': "import '../shell/link.js';\n"},
+  },
+  {
+    rule: 'desktop-state-is-pure',
+    files: {'desktop/src/renderer/welcome/state/store.ts': "import '../effects/stores.js';\n"},
+  },
+  {
+    rule: 'desktop-state-has-no-node-runtime',
+    files: {'desktop/src/main/platform/link/state/machine.ts': "import 'node:fs';\n"},
+  },
+  {
+    rule: 'desktop-only-shells-open-processes-and-sockets',
+    files: {'desktop/src/main/features/runs/runs.ts': "import 'node:net';\n"},
+  },
+  {
+    rule: 'desktop-features-are-isolated',
+    files: {
+      'desktop/src/main/features/other/index.ts': "import '../runs/index.js';\n",
+    },
+  },
+  {
+    rule: 'desktop-slices-are-entered-through-their-index',
+    files: {
+      'desktop/src/main/features/runs/runs.ts': "import '../../platform/link/shell/link.js';\n",
+    },
+  },
+  {
+    rule: 'desktop-composition-enters-slices-through-their-index',
+    files: {'desktop/src/main/app/main.ts': "import '../features/runs/runs.js';\n"},
   },
   {
     rule: 'desktop-welcome-ui-does-not-depend-on-shell',
-    files: {'desktop/src/welcome/ui/view.ts': "import '../effects/stores.js';\n"},
+    files: {'desktop/src/renderer/welcome/ui/view.ts': "import '../effects/stores.js';\n"},
   },
   {
     rule: 'desktop-welcome-effects-do-not-import-ui',
-    files: {'desktop/src/welcome/effects/stores.ts': "import '../ui/view.js';\n"},
+    files: {'desktop/src/renderer/welcome/effects/stores.ts': "import '../ui/view.js';\n"},
   },
   {
     rule: 'renderers-do-not-import-electron',
-    files: {'desktop/src/welcome/effects/stores.ts': "import 'electron';\n"},
+    files: {
+      'desktop/src/renderer/welcome/state/store.ts': "import 'electron';\n",
+      'node_modules/electron/package.json': '{"name":"electron","main":"index.js"}',
+      'node_modules/electron/index.js': 'export {};\n',
+    },
+  },
+  {
+    rule: 'core-state-has-no-node-runtime',
+    files: {'core-state/src/index.ts': "import 'node:fs';\n"},
+  },
+  {
+    rule: 'core-state-has-no-ui-runtime',
+    files: {'core-state/src/index.ts': "import '@opentui/core';\n"},
   },
   {
     rule: 'renderers-do-not-import-electron',
     files: {'web/src/platform/backend.ts': "import 'electron';\n"},
   },
   {
-    rule: 'desktop-and-web-confine-sockets-and-processes',
-    files: {'desktop/src/main.ts': "import 'node:child_process';\n"},
-  },
-  {
-    rule: 'desktop-and-web-confine-sockets-and-processes',
+    rule: 'web-opens-no-sockets-or-processes',
     files: {'web/src/platform/backend.ts': "import 'net';\n"},
   },
   {
     rule: 'desktop-does-not-depend-on-peer-frontends',
-    files: {'desktop/src/main.ts': "import '../../web/src/index.js';\n"},
+    files: {'desktop/src/main/app/main.ts': "import '../../../../web/src/index.js';\n"},
   },
   {
     rule: 'web-features-does-not-import-layers-above',
@@ -219,16 +295,11 @@ const RULE_CASES = [
   },
   {
     rule: 'production-code-does-not-import-core-state-test-support',
-    files: {'desktop/src/welcome/state/start.ts': "import '@vibesys/core-state/testing';\n"},
+    files: {
+      'desktop/src/renderer/welcome/state/store.ts': "import '@vibesys/core-state/testing';\n",
+    },
   },
-  {
-    rule: 'core-state-has-no-node-runtime',
-    files: {'core-state/src/index.ts': "import 'node:fs';\n"},
-  },
-  {
-    rule: 'core-state-has-no-ui-runtime',
-    files: {'core-state/src/index.ts': "import '@opentui/core';\n"},
-  },
+
   {
     rule: 'web-shared-does-not-import-layers-above',
     files: {'web/src/shared/store.ts': "import '../entities/run.js';\n"},

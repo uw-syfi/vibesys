@@ -4,7 +4,7 @@
   // list, so it is checked on its own (`tsc -p`) rather than through the solution.
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "esnext.disposable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
@@ -12,6 +12,6 @@
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/welcome.tsbuildinfo"
   },
-  "include": ["src/welcome/**/*.ts", "src/welcome/**/*.tsx"],
-  "exclude": ["src/welcome/**/*.test.ts"]
+  "include": ["src/renderer/welcome/**/*.ts", "src/renderer/welcome/**/*.tsx"],
+  "exclude": ["src/renderer/welcome/**/*.test.ts"]
 }

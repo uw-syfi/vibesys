@@ -23,7 +23,8 @@ Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
 ``TaskList``, and the host helper's messages: ``HELPER_PROTOCOL_VERSIONS``,
 ``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
-members, ``HelperMessage`` and its members, and ``HelperErrorCode``.
+members, ``HelperMessage`` and its members, ``HelperErrorCode``, and a relayed
+channel's end: ``ChannelEndOutcome``, ``ChannelEnd``.
 
 The helper's messages follow ``docs/contributing/desktop-connection.md``
 ("Handshake and versioning"): strict within a negotiated version, additive
@@ -857,3 +858,44 @@ _MESSAGE: TypeAdapter[HelperMessage] = TypeAdapter(HelperMessage)
 def parse_helper_message(line: bytes) -> HelperMessage:
     """Parse one helper message line strictly, as a client does."""
     return _MESSAGE.validate_json(line)
+
+
+class ChannelEndOutcome(StrEnum):
+    """How a run channel's relay ended; each value has its own exit status.
+
+    The relay core (``server.relay``) decides the outcome and maps it to the
+    helper's exit status; a client reads it from the ``ChannelEnd`` line.
+    """
+
+    CLIENT_CLOSED = "client_closed"
+    """Stdin reached end of stream or stdout was closed: the client went away."""
+    SERVER_CLOSED = "server_closed"
+    """The server closed the connection; everything it sent was relayed first."""
+    RUN_GONE = "run_gone"
+    """Nothing listens at the socket path (no file, or a stale one): the run is not there."""
+    CONNECT_DENIED = "connect_denied"
+    """The socket exists but this user may not connect to it."""
+    CONNECT_FAILED = "connect_failed"
+    """Connecting failed another way, including the connect deadline running out."""
+    SERVER_STALLED = "server_stalled"
+    """A write toward the server made no progress within the write deadline."""
+    CLIENT_STALLED = "client_stalled"
+    """A write toward stdout made no progress within the write deadline."""
+    SERVER_FAILED = "server_failed"
+    """Reading from or writing to the socket failed with an error other than a close."""
+    CLIENT_FAILED = "client_failed"
+    """Reading stdin or writing stdout failed with an error other than a close."""
+
+
+class ChannelEnd(BaseModel):
+    """The one stderr line a relayed run channel writes when it ends with a nonzero status."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    outcome: ChannelEndOutcome
+    exit_status: int
+    detail: str
+
+    def line(self) -> str:
+        """The report as one newline-terminated JSON line."""
+        return self.model_dump_json() + "\n"

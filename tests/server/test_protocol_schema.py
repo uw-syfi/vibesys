@@ -15,6 +15,7 @@ from server.api.protocol import ProtocolRequest, Response, ServerMessage
 from server.api.schema import (
     fully_populated_response,
     host_helper_json_schema,
+    host_helper_typescript,
     protocol_json_schema,
     require_supported_response_payload_schema,
     require_supported_run_event_schema,
@@ -38,6 +39,7 @@ RESPONSE_PAYLOAD_FIXTURE_PATH = Path(
     "clients/backend-client/src/generated/response-payload.fixture.json"
 )
 RUN_EVENT_MODULE_PATH = Path("clients/backend-client/src/generated/run-event.schema.ts")
+HOST_HELPER_MODULE_PATH = Path("clients/backend-client/src/generated/host-helper.schema.ts")
 
 # The public alias of every tagged union the protocol publishes. A member model
 # is only reachable through one of these, which is why the exported schema may
@@ -99,20 +101,21 @@ def test_committed_run_event_module_matches_python_contract() -> None:
     assert RUN_EVENT_MODULE_PATH.read_text() == run_event_typescript()
 
 
+def test_committed_host_helper_module_matches_python_contract() -> None:
+    assert HOST_HELPER_MODULE_PATH.read_text() == host_helper_typescript()
+
+
 @pytest.mark.parametrize(
     "keyword",
     [
         "allOf",
         "exclusiveMinimum",
         "maxItems",
-        "maxLength",
         "maximum",
         "minItems",
-        "minLength",
         "multipleOf",
         "not",
         "oneOf",
-        "pattern",
         "uniqueItems",
     ],
 )
@@ -132,6 +135,47 @@ def test_response_payload_descriptor_refuses_unimplemented_validation_keywords(
         ({"type": "string", "minimum": 0}, "minimum requires a numeric type"),
         ({"type": "integer", "minimum": True}, "minimum must be a finite number"),
         ({"type": "integer", "format": "date-time"}, "unsupported.*format"),
+        ({"type": "integer", "minLength": 1}, "string constraints require type 'string'"),
+        ({"type": "string", "minLength": True}, "minLength must be a nonnegative integer"),
+        ({"type": "string", "maxLength": -1}, "maxLength must be a nonnegative integer"),
+        ({"type": "string", "minLength": 2, "maxLength": 1}, "cannot exceed maxLength"),
+        ({"type": "string", "pattern": 1}, "pattern must be a string"),
+        ({"type": "string", "pattern": "["}, "pattern must be a valid regular expression"),
+        (
+            {"type": "string", "pattern": r"(?P<name>a)"},
+            "pattern must use the portable client regular-expression dialect",
+        ),
+        (
+            {"type": "string", "pattern": r"(?>a)"},
+            "pattern must use the portable client regular-expression dialect",
+        ),
+        (
+            {"type": "string", "pattern": "]"},
+            "pattern must use the portable client regular-expression dialect",
+        ),
+        (
+            {"type": "string", "pattern": "}"},
+            "pattern must use the portable client regular-expression dialect",
+        ),
+        (
+            {"type": "string", "pattern": "a}"},
+            "pattern must use the portable client regular-expression dialect",
+        ),
+        (
+            {"type": "string", "pattern": "{"},
+            "pattern must use the portable client regular-expression dialect",
+        ),
+        (
+            {"type": "string", "pattern": "a{"},
+            "pattern must use the portable client regular-expression dialect",
+        ),
+        *(
+            (
+                {"type": "string", "pattern": pattern},
+                "pattern must use the portable client regular-expression dialect",
+            )
+            for pattern in (r"(?=a)*", r"(?!a)+", r"(?=a){1}", r"(?=a)??")
+        ),
         ({"type": "integer", "const": "one"}, "const does not match its type"),
         ({"type": "object", "additionalProperties": {}}, "additionalProperties must be boolean"),
         ({"type": "object", "required": ["value", "value"]}, "unique strings"),
@@ -150,6 +194,17 @@ def test_response_payload_descriptor_refuses_unenforceable_keyword_values(
 ) -> None:
     with pytest.raises(ValueError, match=reason):
         require_supported_response_payload_schema(schema)
+
+
+def test_response_payload_descriptor_accepts_enforced_string_constraints() -> None:
+    descriptor = {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": r"^[a-z0-9._-]+$",
+    }
+
+    assert require_supported_response_payload_schema(descriptor) is descriptor
 
 
 def test_run_event_descriptor_accepts_only_a_complete_discriminated_union() -> None:
