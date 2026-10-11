@@ -10,6 +10,7 @@
  */
 import type {HostKey} from './host-settings.js';
 import type {StopView} from './stop-run.js';
+import type {ConnectionStatus} from './supervisor.js';
 
 export const WELCOME_CHANNELS = {
   overview: 'vibesys:welcome:overview',
@@ -39,17 +40,6 @@ export const WELCOME_EVENTS = {
   showHost: 'vibesys:welcome:show-host',
 } as const;
 
-/**
- * The attached run's link, as one closed set: what the strip shows and allows follows from it, so
- * an ended run offering Retry is not representable.
- *
- * - `connecting`, `connected`, `reconnecting`: the supervisor is working on it.
- * - `stuck`: the supervisor stopped trying on something a retry can fix (sign-in, a version
- *   mismatch, a failure); the strip offers Retry.
- * - `ended`: the run is no longer running; the strip offers Resume, never Retry.
- */
-export type RunLink = 'connecting' | 'connected' | 'reconnecting' | 'stuck' | 'ended';
-
 /** What the window shows, for the welcome view's title strip. */
 export interface ChromeState {
   /** `welcome`: the welcome view fills the window; `run`: the run view does, under the strip. */
@@ -62,10 +52,8 @@ export interface ChromeState {
     readonly instanceId: string | null;
     readonly runId: string | null;
     readonly project: string;
-    /** A short status (`connected`, `reconnecting (attempt 2)`, ...). */
-    readonly status: string;
-    readonly detail: string;
-    readonly link: RunLink;
+    /** The supervisor's view of the run's connection; the strip words it. */
+    readonly connection: ConnectionStatus;
   } | null;
   /** The stop flows past idle, by `stopKey` (host, newline, instance id). */
   readonly stops: Readonly<Record<string, StopView>>;

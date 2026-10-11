@@ -3,10 +3,20 @@
  * stores, drawn from a `Seeded` generator.
  */
 import {type StopView, stopKey} from '../stop-run.js';
-import type {ChromeState, RunLink} from '../welcome-protocol.js';
+import type {ConnectionStatus} from '../supervisor.js';
+import type {ChromeState} from '../welcome-protocol.js';
 import type {Seeded} from './seeded.js';
 
-const LINKS: readonly RunLink[] = ['connecting', 'connected', 'reconnecting', 'stuck', 'ended'];
+const CONNECTIONS: readonly ConnectionStatus[] = [
+  {kind: 'connecting'},
+  {kind: 'connected'},
+  {kind: 'reconnecting', attempt: 2},
+  {kind: 'offline', detail: 'no network'},
+  {kind: 'auth-needed', detail: 'password'},
+  {kind: 'run-ended'},
+  {kind: 'incompatible', detail: 'protocol 3 vs 4'},
+  {kind: 'failed', detail: 'no uv'},
+];
 
 export function randomChrome(random: Seeded): ChromeState {
   const attached: ChromeState['attached'] =
@@ -18,9 +28,7 @@ export function randomChrome(random: Seeded): ChromeState {
           instanceId: random.pick([null, '0123456789ab', 'ba9876543210']),
           runId: random.pick([null, 'run-1']),
           project: '/p',
-          status: 'status',
-          detail: '',
-          link: random.pick(LINKS),
+          connection: random.pick(CONNECTIONS),
         };
   const stops: Record<string, StopView> = {};
   if (attached?.instanceId != null && random.next() < 0.6) {

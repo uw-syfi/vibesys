@@ -10,6 +10,7 @@
  * `incompatible` with the two versions, never as a schema error the user cannot act on.
  */
 import {PROTOCOL_VERSION} from '@vibesys/backend-client';
+import {INSTANCE_ID} from './ids.js';
 
 /** A live detached server this client can talk to. */
 interface LiveInstance {
@@ -60,7 +61,6 @@ const RECORD_KEYS = [
   'vibesys_version',
   'vibesys_root',
 ] as const;
-const INSTANCE_ID = /^[0-9a-f]{12}$/;
 
 /** Parse one `LiveInstanceRecord` document; `path` names it in errors. */
 export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRecord {

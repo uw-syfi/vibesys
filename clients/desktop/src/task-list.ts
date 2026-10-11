@@ -3,6 +3,7 @@
  * (`src/entrypoints/tasks.py` is the authoritative definition). Parsing is strict: unknown keys and
  * wrong types are rejected, naming the path.
  */
+import {TASK_NAME} from './ids.js';
 
 export interface TaskList {
   /** The resolved project directory on the host. */
@@ -14,8 +15,6 @@ export interface TaskList {
 class TaskListError extends Error {
   override name = 'TaskListError';
 }
-
-const TASK = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 
 function object(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -49,7 +48,7 @@ export function parseTaskList(value: unknown): TaskList {
       const record = object(task, path);
       onlyKeys(record, ['name'], path);
       const name = record['name'];
-      if (typeof name !== 'string' || !TASK.test(name)) {
+      if (typeof name !== 'string' || !TASK_NAME.test(name)) {
         throw new TaskListError(`${path}.name must be a task name`);
       }
       return name;

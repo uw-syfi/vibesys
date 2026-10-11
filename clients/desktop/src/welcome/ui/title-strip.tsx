@@ -3,24 +3,25 @@
  * (`stripControls`). While a run fills the window, only this strip of the welcome view shows.
  */
 import type {JSX} from 'react';
-import {type StripControls, stripControls} from '../../welcome-model.js';
 import type {ChromeState} from '../../welcome-protocol.js';
+import {
+  connectionText,
+  type RunLink,
+  runLink,
+  type StripControls,
+  stripControls,
+} from '../state/strip.js';
 import type {Dispatch} from './common.js';
 
 type Attached = NonNullable<ChromeState['attached']>;
 
-const DOTS: Readonly<Record<Attached['link'], string>> = {
+const DOTS: Readonly<Record<RunLink, string>> = {
   connecting: 'dot warn',
   connected: 'dot ok',
   reconnecting: 'dot warn',
   stuck: 'dot error',
   ended: 'dot',
 };
-
-function connection(attached: Attached | null): string {
-  if (attached === null) return '';
-  return attached.detail === '' ? attached.status : `${attached.status}: ${attached.detail}`;
-}
 
 /** The buttons on the right of the strip, for an attached run. */
 function RunButtons(props: {
@@ -76,7 +77,7 @@ export function TitleStrip(props: {
   const {chrome, dispatch} = props;
   const attached = chrome.attached;
   const controls = stripControls(chrome);
-  const conn = connection(attached);
+  const conn = attached === null ? '' : connectionText(attached);
   const inRun = chrome.mode === 'run';
   return (
     <header>
@@ -88,7 +89,7 @@ export function TitleStrip(props: {
           title={inRun ? 'Show hosts and runs' : `Attached to a run on ${attached.hostLabel}`}
           onClick={() => dispatch({kind: inRun ? 'show-welcome' : 'show-run'})}
         >
-          <span className={DOTS[attached.link]} />
+          <span className={DOTS[runLink(attached.connection)]} />
           {attached.hostLabel}
         </button>
       )}

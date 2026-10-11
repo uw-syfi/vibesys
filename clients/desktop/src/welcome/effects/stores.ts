@@ -19,6 +19,9 @@ import {
 } from '../state/welcome.js';
 import {createStore, type Store} from './store.js';
 
+/** How often the lists look again while a stop is ending. */
+const STOP_REFRESH_MS = 3_000;
+
 export interface WelcomeStores {
   readonly welcome: Store<WelcomeState, WelcomeAction>;
   readonly recent: Store<RecentState, RecentAction>;
@@ -136,8 +139,24 @@ export function welcomeStores(
         return;
     }
   });
+  // While a stop the host accepted is ending, the lists look again every few seconds (the only
+  // refresh request; phase 5's `instances.watch` replaces it).
+  let lookAgain: ReturnType<typeof setTimeout> | undefined;
+  const watchStops = (): void => {
+    const ending = Object.values(welcome.getState().chrome.stops).some(
+      view => view.phase === 'stopping',
+    );
+    if (!ending || lookAgain !== undefined) return;
+    lookAgain = setTimeout(() => {
+      lookAgain = undefined;
+      recent.dispatch({type: 'tick'});
+      host.dispatch({type: 'tick'});
+      watchStops();
+    }, STOP_REFRESH_MS);
+  };
   bridge.onChrome(chrome => {
     welcome.dispatch({type: 'chrome', chrome});
+    watchStops();
     recent.dispatch({type: 'chrome', chrome});
     host.dispatch({type: 'chrome', chrome});
     if (chrome.mode === 'run') {

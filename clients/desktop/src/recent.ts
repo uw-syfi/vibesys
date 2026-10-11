@@ -4,6 +4,7 @@
  * its host's live registry, never stored: a run is live only while a registry record proves it.
  */
 import {type HostKey, hostFromKey, validHostPath} from './host-settings.js';
+import {INSTANCE_ID, RUN_ID, TASK_NAME} from './ids.js';
 import type {InstanceRecord} from './instances.js';
 
 /** One run the user attached to. */
@@ -28,15 +29,12 @@ export interface RecentFile {
 
 export const EMPTY_RECENT: RecentFile = {version: 1, runs: []};
 /** How many runs the list keeps. */
-export const RECENT_LIMIT = 20;
+const RECENT_LIMIT = 20;
 
 class RecentError extends Error {
   override name = 'RecentError';
 }
 
-const INSTANCE_ID = /^[0-9a-f]{12}$/;
-const RUN_ID = /^[A-Za-z0-9._-]+$/;
-const TASK = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const KEYS = ['host', 'project', 'task', 'instanceId', 'runId', 'attachedAt'] as const;
 
 function nullable(value: unknown, pattern: RegExp, path: string): string | null {
@@ -81,7 +79,7 @@ function parseRun(value: unknown, path: string): RecentRun {
   return {
     host: host as HostKey,
     project,
-    task: nullable(record['task'], TASK, `${path}.task`),
+    task: nullable(record['task'], TASK_NAME, `${path}.task`),
     instanceId,
     runId: nullable(record['runId'], RUN_ID, `${path}.runId`),
     attachedAt,

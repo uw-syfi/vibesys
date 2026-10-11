@@ -29,9 +29,8 @@ export class Seeded {
 
   /** One of `items`; `items` must not be empty. */
   pick<T>(items: readonly T[]): T {
-    const item = items[this.int(items.length)];
-    if (item === undefined) throw new Error('Seeded.pick: no items');
-    return item;
+    if (items.length === 0) throw new Error('Seeded.pick: no items');
+    return items[this.int(items.length)] as T;
   }
 }
 

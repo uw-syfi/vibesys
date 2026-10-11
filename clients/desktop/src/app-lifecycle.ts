@@ -40,6 +40,12 @@ export type QuitEffect =
 
 export const RUNNING: QuitState = {kind: 'running'};
 
+/** The process's own timers, for the shells that take a `ScheduleTimeout`. */
+export const realTimers: ScheduleTimeout = (callback, ms) => {
+  const timer = setTimeout(callback, ms);
+  return () => clearTimeout(timer);
+};
+
 /** The quit machine's step: the next state and the effects the shell performs. */
 export function quitStep(
   state: QuitState,

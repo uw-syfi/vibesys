@@ -5,7 +5,6 @@ import {
   launchedRunId,
   learnedRunId,
   parseRecent,
-  RECENT_LIMIT,
   type RecentRun,
   recentStatus,
   remember,
@@ -109,12 +108,12 @@ describe('remember', () => {
     expect(file.runs).toEqual([run({instanceId: 'ba9876543210', attachedAt: 3})]);
   });
 
-  test('keeps RECENT_LIMIT runs by default', () => {
+  test('keeps the 20 most recent runs by default', () => {
     let file = EMPTY_RECENT;
-    for (let index = 0; index < RECENT_LIMIT + 5; index += 1) {
+    for (let index = 0; index < 25; index += 1) {
       file = remember(file, run({instanceId: index.toString(16).padStart(12, '0'), runId: null}));
     }
-    expect(file.runs.length).toBe(RECENT_LIMIT);
+    expect(file.runs.length).toBe(20);
   });
 });
 

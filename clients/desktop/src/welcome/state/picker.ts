@@ -4,9 +4,48 @@
  * list is empty). Choosing a row asks the shell to show that host's panel (`show-host`).
  */
 import type {HostKey} from '../../host-settings.js';
-import {filterHosts, type HostChoice, moveSelection} from '../../welcome-model.js';
+import {validAlias} from '../../host-settings.js';
 import type {WelcomeResult} from '../../welcome-protocol.js';
 import {only, type Step} from './step.js';
+
+/** One row of the host list: an alias from `~/.ssh/config`, or the destination the user typed. */
+export interface HostChoice {
+  readonly alias: string;
+  readonly typed: boolean;
+}
+
+function usable(alias: string): boolean {
+  try {
+    validAlias(alias);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The hosts matching `query` (case-insensitive substring of the alias), in config order, then the
+ * query itself as a typed destination (`user@host` or an alias ssh resolves) when it is usable
+ * and not already listed.
+ */
+export function filterHosts(aliases: readonly string[], query: string): HostChoice[] {
+  const needle = query.trim().toLowerCase();
+  const matches = aliases
+    .filter(alias => alias.toLowerCase().includes(needle))
+    .map(alias => ({alias, typed: false}));
+  const typed = query.trim();
+  if (typed !== '' && usable(typed) && !aliases.includes(typed)) {
+    matches.push({alias: typed, typed: true});
+  }
+  return matches;
+}
+
+/** The selection after moving `delta` rows from `index` in a list of `length`, wrapping around. */
+export function moveSelection(index: number, delta: number, length: number): number {
+  if (length <= 0) return -1;
+  const start = index < 0 ? (delta > 0 ? -1 : 0) : index;
+  return (((start + delta) % length) + length) % length;
+}
 
 type Aliases =
   | {readonly kind: 'loading'; readonly token: number}
