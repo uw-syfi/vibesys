@@ -1,8 +1,8 @@
-"""Spike Dev Container Features under ``vs_agent/images/features`` are well formed.
+"""Dev Container Features under ``vs_agent/images/features`` are well formed.
 
 A Feature is a directory, and the directory contents are its public contract:
-``devcontainer-feature.json`` plus ``install.sh``. The real builds and
-``devcontainer features test`` runs are evidence in the spike PR, not CI.
+``devcontainer-feature.json`` plus ``install.sh``. Real builds run in the
+``features`` CI job (``devcontainer features test`` per base family).
 """
 
 from __future__ import annotations
@@ -18,6 +18,11 @@ from vs_agent.api import (
     CLI_VERSIONS,
     CONTAINER_PYTHON_HOME,
     CONTAINER_PYTHON_VERSION,
+    DOCKER_COMPOSE_VERSION,
+    DOCKER_ENGINE_VERSION,
+    GO_TOOLCHAIN_VERSION,
+    KIND_VERSION,
+    KUBECTL_VERSION,
     NODE_VERSION,
     RUST_TOOLCHAIN_VERSION,
 )
@@ -47,8 +52,22 @@ def _declared_ids(metadata: dict[str, Any]) -> set[str]:
     return declared
 
 
-def test_spike_features_exist() -> None:
-    assert {"vibesys-agent", "vibesys-rust"} <= FEATURE_IDS
+def test_every_layer_of_the_agent_image_is_a_feature() -> None:
+    assert FEATURE_IDS == {
+        "vibesys-agent",
+        "vibesys-rust",
+        "vibesys-go",
+        "vibesys-container-runtime",
+        "vibesys-pip-extras",
+    }
+
+
+@pytest.mark.parametrize("feature_dir", FEATURE_DIRS, ids=lambda p: p.name)
+def test_every_feature_has_a_check_script(feature_dir: Path) -> None:
+    """``devcontainer features test`` runs ``test/<id>/test.sh`` on every supported base."""
+    script = feature_dir.parents[1] / "test" / feature_dir.name / "test.sh"
+    assert script.is_file()
+    assert script.stat().st_mode & 0o111
 
 
 @pytest.mark.parametrize("feature_dir", FEATURE_DIRS, ids=lambda p: p.name)
@@ -85,14 +104,21 @@ def test_every_option_has_a_default_and_is_read_by_the_script(feature_dir: Path)
 
 def test_option_defaults_mirror_provider_policy() -> None:
     """The one source of each pin is ``provider_policy``; Feature defaults must equal it."""
-    agent = _metadata(FEATURES_SRC / "vibesys-agent")["options"]
-    rust = _metadata(FEATURES_SRC / "vibesys-rust")["options"]
-    defaults = {name: spec["default"] for name, spec in {**agent, **rust}.items()}
+    defaults = {
+        name: spec["default"]
+        for feature_dir in FEATURE_DIRS
+        for name, spec in _metadata(feature_dir).get("options", {}).items()
+    }
     expected = {
         "node_version": NODE_VERSION,
         "python_version": CONTAINER_PYTHON_VERSION,
         "python_home": CONTAINER_PYTHON_HOME,
         "rust_version": RUST_TOOLCHAIN_VERSION,
+        "go_version": GO_TOOLCHAIN_VERSION,
+        "docker_engine_version": DOCKER_ENGINE_VERSION,
+        "docker_compose_version": DOCKER_COMPOSE_VERSION,
+        "kind_version": KIND_VERSION,
+        "kubectl_version": KUBECTL_VERSION,
         **{f"{p}_version": v for p, v in CLI_VERSIONS.items()},
     }
     assert {k: defaults[k] for k in expected} == expected

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run by `devcontainer features test` after the Feature is installed with the
-# options in scenarios.json (the defaults would fail: every version is required).
+# options' defaults, which equal the vs_agent.provider_policy pins.
 set -e
 source dev-container-features-test-lib
 check "claude runs" claude --version

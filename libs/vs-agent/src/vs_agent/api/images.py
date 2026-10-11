@@ -5,6 +5,7 @@ provider and toolchain policy. Callers supply task-specific inputs and an
 optional runner seam; they do not inspect the packaged Dockerfile.
 """
 
+from vs_agent.devcontainer import KNOWN_TOOLCHAINS, devcontainer_config
 from vs_agent.images import (
     DEFAULT_AGENT_IMAGE_REGISTRY,
     DockerBuildRunner,
@@ -21,12 +22,14 @@ from vs_agent.images import (
 __all__ = [
     "DEFAULT_AGENT_IMAGE_REGISTRY",
     "DockerBuildRunner",
+    "KNOWN_TOOLCHAINS",
     "ImagePushError",
     "SubprocessDockerBuildRunner",
     "TaskImageBuildError",
     "agent_image",
     "agent_image_is_pushed",
     "build_task_image",
+    "devcontainer_config",
     "ensure_pushed",
     "push_agent_image",
 ]

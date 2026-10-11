@@ -40,10 +40,10 @@
       "default": "/opt/vibesys-python",
       "description": "Absolute path of VibeSys's Python virtual environment; default mirrors vs_agent.provider_policy."
     },
-    "pip_extras": {
+    "supplementary_groups": {
       "type": "string",
       "default": "",
-      "description": "Space-separated extra pip requirements installed next to uv (for example `modal`). Empty installs nothing."
+      "description": "Space-separated groups the `agent` user joins (created if missing), for example `docker` when the container-runtime Feature is selected. Empty adds none."
     }
   },
   "containerEnv": {

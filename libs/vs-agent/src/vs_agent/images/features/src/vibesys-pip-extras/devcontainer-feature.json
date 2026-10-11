@@ -1,0 +1,17 @@
+{
+  "id": "vibesys-pip-extras",
+  "version": "0.1.0",
+  "name": "VibeSys pip extras",
+  "description": "Extra pip requirements a run environment needs inside the editor container (the Modal environment adds the `modal` client so a candidate's `modal run` works). Debian/Ubuntu bases only.",
+  "documentationURL": "https://github.com/uw-syfi/vibesys/blob/main/docs/contributing/devcontainer-features.md",
+  "options": {
+    "requirements": {
+      "type": "string",
+      "default": "modal>=0.66",
+      "description": "Space-separated pip requirement specifiers to install into the base's `pip`."
+    }
+  },
+  "containerEnv": {
+    "PIP_BREAK_SYSTEM_PACKAGES": "1"
+  }
+}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The VibeSys agent layer as a Dev Container Feature. Mirrors the base steps of
-# agent.Dockerfile: Node from the nodejs.org tarball, the four provider CLIs,
+# the former agent.Dockerfile: Node from the nodejs.org tarball, the four provider CLIs,
 # uv, VibeSys's uv-managed Python with `mcp`, and the non-root `agent` user.
 # Self-contained: installs every package it uses and depends on no other Feature.
 set -euo pipefail
@@ -19,7 +19,7 @@ require_option gemini_version "${GEMINI_VERSION:-}"
 require_option opencode_version "${OPENCODE_VERSION:-}"
 require_option python_version "${PYTHON_VERSION:-}"
 require_option python_home "${PYTHON_HOME:-}"
-PIP_EXTRAS="${PIP_EXTRAS:-}"
+SUPPLEMENTARY_GROUPS="${SUPPLEMENTARY_GROUPS:-}"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -58,8 +58,7 @@ npm install -g --include=optional \
     "@google/gemini-cli@${GEMINI_VERSION}" \
     "opencode-ai@${OPENCODE_VERSION}"
 
-# shellcheck disable=SC2086  # PIP_EXTRAS is a space-separated requirement list.
-PIP_BREAK_SYSTEM_PACKAGES=1 pip install --no-cache-dir uv ${PIP_EXTRAS}
+PIP_BREAK_SYSTEM_PACKAGES=1 pip install --no-cache-dir uv
 
 UV_PYTHON_INSTALL_DIR=/opt/vibesys-python-install uv python install --no-cache "${PYTHON_VERSION}"
 UV_PYTHON_INSTALL_DIR=/opt/vibesys-python-install uv venv --no-cache \
@@ -87,6 +86,14 @@ if ! getent group agent >/dev/null 2>&1; then
         groupadd --gid "${gid}" agent
     fi
 fi
+
+# Groups other Features' tools are owned by (for example `docker`, which owns the
+# daemon socket of the container-runtime Feature). Creating the group here keeps
+# this Feature independent of which Feature is installed first.
+for group in ${SUPPLEMENTARY_GROUPS}; do
+    groupadd --force "${group}"
+    usermod -aG "${group}" agent
+done
 
 mkdir -p /workspace
 chown agent /workspace
