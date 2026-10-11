@@ -34,17 +34,29 @@ export interface HostsDeps {
   /** This Mac's checkout when the user has not set one: the checkout the app was built from. */
   readonly localCheckout: string;
   readonly sshConfigPath: string;
+  readonly sshConfigFilesystem?: SshConfigFilesystem;
   /** Send a host's listing to the welcome view. */
   readonly push: (listing: HostListing) => void;
 }
 
+/** The filesystem operation needed to read the user's SSH config. */
+export interface SshConfigFilesystem {
+  readText(path: string): Promise<string>;
+}
+
+const NODE_SSH_CONFIG_FILESYSTEM: SshConfigFilesystem = {
+  readText: path => readFile(path, 'utf8'),
+};
+
 export class Hosts {
   readonly #deps: HostsDeps;
+  readonly #sshConfigFilesystem: SshConfigFilesystem;
   /** Hosts whose registry the view hears, by key, with what stops hearing it. */
   readonly #watched = new Map<HostKey, () => void>();
 
   constructor(deps: HostsDeps) {
     this.#deps = deps;
+    this.#sshConfigFilesystem = deps.sshConfigFilesystem ?? NODE_SSH_CONFIG_FILESYSTEM;
     // A new connection for a watched host (its checkout changed) is watched in its place.
     deps.manager.onConnection((key, connection) => {
       if (this.#watched.has(key)) this.#watch(key, connection);
@@ -59,7 +71,14 @@ export class Hosts {
 
   /** The concrete aliases in `~/.ssh/config`. */
   async aliases(): Promise<string[]> {
-    return sshConfigHosts(await readFile(this.#deps.sshConfigPath, 'utf8').catch(() => ''));
+    let text: string;
+    try {
+      text = await this.#sshConfigFilesystem.readText(this.#deps.sshConfigPath);
+    } catch (error) {
+      if (isMissingFile(error)) return [];
+      throw error;
+    }
+    return sshConfigHosts(text);
   }
 
   /** The checkout `id` runs VibeSys from, or null when the user has not set one. */
@@ -159,6 +178,10 @@ export class Hosts {
       stopPhase();
     });
   }
+}
+
+function isMissingFile(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 }
 
 /** A helper's refusal in plain words: what failed, and the helper's own reason. */
