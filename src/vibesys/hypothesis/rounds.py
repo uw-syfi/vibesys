@@ -177,8 +177,6 @@ def close_round(config: HypothesisConfig, ledger: Ledger, facts: ClosingFacts) -
     official = facts.passed and facts.official_reason is not None
     metric = facts.benchmark_metric if official else None
     unit = facts.benchmark.metric_name if official else None
-    if reply is not None and metric is not None:
-        reply = reply.model_copy(update={"perf_metric": metric, "perf_unit": unit})  # type: ignore[attr-defined]
     attempt = AttemptState(
         agent_run_state=ledger.search,
         feedback=facts.feedback,
@@ -284,5 +282,5 @@ def planning(config: HypothesisConfig, ledger: Ledger, round_number: int) -> Pla
     decision = next_round(config, ledger, round_number)
     if isinstance(decision, Finished):
         message = "no round to plan past the round budget"
-        raise ValueError(message)
+        raise TypeError(message)
     return decision.context

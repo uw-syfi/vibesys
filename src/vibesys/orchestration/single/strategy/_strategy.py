@@ -25,6 +25,7 @@ from vibesys.orchestration.single.strategy._operations import (
     RETAIN_KIND,
     VERIFY_KIND,
     CommandCapture,
+    EvidenceReadings,
     RenderedArtifacts,
 )
 from vibesys.orchestration.single.strategy._schemas import STRATEGY_ID
@@ -106,12 +107,14 @@ class SingleStrategy:
             return self._rejected(state, event)
         if isinstance(event, OperationResult):
             return self._operation(state, view, event)
-        if isinstance(event, TurnResult):
-            if planner.owns_turn(state, event):
-                return planner.on_turn(state, view, self.config, event)
-            if events.owns_turn(state, event):
-                return events.on_turn(state, view, self.config, event)
-            return state
+        if isinstance(event, TurnResult | MeasurementResult):
+            return self._answer(state, view, event)
+        return self._lifecycle(state, event)
+
+    def _answer(
+        self, state: SingleStrategyState, view: RunView, event: TurnResult | MeasurementResult
+    ) -> SingleStrategyState:
+        """Fold an agent's reply or a measurement's result into the subject awaiting it."""
         if isinstance(event, MeasurementResult):
             if event.scope.owner.kind == "run":
                 return state.model_copy(
@@ -122,23 +125,38 @@ class SingleStrategy:
                     }
                 )
             return events.on_measurement(state, event, self.config)
-        return self._lifecycle(state, view, event)
+        if planner.owns_turn(state, event):
+            return planner.on_turn(state, view, self.config, event)
+        if events.owns_turn(state, event):
+            return events.on_turn(state, view, self.config, event)
+        return state
 
-    def _lifecycle(
-        self, state: SingleStrategyState, view: RunView, event: StrategyEvent
-    ) -> SingleStrategyState:
-        if isinstance(event, AttemptReady):
-            return events.on_ready(state, event)
-        if isinstance(event, AttemptSettled):
-            return events.on_settled(state, view, self.config, event)
-        if isinstance(event, TurnSuspended):
-            return events.on_suspended(state, event)
-        if isinstance(event, ResumeAuthorized):
-            return events.on_resume(state, event)
+    def _lifecycle(self, state: SingleStrategyState, event: StrategyEvent) -> SingleStrategyState:
+        """Fold lifecycle feedback; other feedback needs no state change here."""
+        if isinstance(event, AttemptReady | AttemptSettled | TurnSuspended | ResumeAuthorized):
+            return self._attempt_feedback(state, event)
         if isinstance(event, AttemptExhausted):
             return events.on_exhausted(state, event)
         if isinstance(event, IntentBlocked):
             return self._blocked(state, event)
+        return self._run_feedback(state, event)
+
+    def _attempt_feedback(
+        self,
+        state: SingleStrategyState,
+        event: AttemptReady | AttemptSettled | TurnSuspended | ResumeAuthorized,
+    ) -> SingleStrategyState:
+        if isinstance(event, AttemptReady):
+            return events.on_ready(state, event)
+        if isinstance(event, AttemptSettled):
+            return events.on_settled(state, self.config, event)
+        if isinstance(event, TurnSuspended):
+            return events.on_suspended(state, event)
+        return events.on_resume(state, event)
+
+    def _run_feedback(
+        self, state: SingleStrategyState, event: StrategyEvent
+    ) -> SingleStrategyState:
         if isinstance(event, ControlChanged):
             stop = state.stopping or event.control.action == "stop"
             return state.model_copy(update={"stopping": stop})
@@ -161,7 +179,9 @@ class SingleStrategy:
             or (decision is None and event.scope.owner.kind == "run")
         )
         if baseline_waits:
-            return state.model_copy(update={"baseline": candidates.on_rejected(state.baseline, detail)})
+            return state.model_copy(
+                update={"baseline": candidates.on_rejected(state.baseline, detail)}
+            )
         return events.on_blocked(state, event)
 
     @staticmethod
@@ -188,7 +208,9 @@ class SingleStrategy:
         if root in (waiting.awaiting, waiting.capture_awaiting):
             return planner.on_rejected(state, detail)
         if state.baseline.awaiting == root:
-            return state.model_copy(update={"baseline": candidates.on_rejected(state.baseline, detail)})
+            return state.model_copy(
+                update={"baseline": candidates.on_rejected(state.baseline, detail)}
+            )
         return events.on_rejected(state, event)
 
     def _operation(
@@ -217,9 +239,6 @@ class SingleStrategy:
     def _baseline_operation(
         state: SingleStrategyState, view: RunView, outcome: object
     ) -> SingleStrategyState:
-        from vibesys.orchestration.single.strategy._operations import (
-            EvidenceReadings,
-        )
 
         if not isinstance(outcome, EvidenceReadings):
             return state

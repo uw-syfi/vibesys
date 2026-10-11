@@ -129,10 +129,6 @@ class RoundPrompt(Value):
 
 
 type PromptContext = Annotated[
-    PlanPrompt
-    | RoundPrompt
-    | ResumePrompt
-    | ReplyCorrectionPrompt
-    | WaitUnrecordedPrompt,
+    PlanPrompt | RoundPrompt | ResumePrompt | ReplyCorrectionPrompt | WaitUnrecordedPrompt,
     Field(discriminator="template"),
 ]

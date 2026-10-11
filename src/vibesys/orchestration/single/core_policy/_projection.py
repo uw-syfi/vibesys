@@ -13,7 +13,9 @@ if TYPE_CHECKING:
     from vibesys.run.contracts import PluginProjection
 
 
-def project_strategy_state(state: SingleStrategyState, *, experiment_revision: int) -> PluginProjection:
+def project_strategy_state(
+    state: SingleStrategyState, *, experiment_revision: int
+) -> PluginProjection:
     """Project one strategy state; `experiment_revision` is the core revision it was read at."""
     del experiment_revision
     ledger = rounds.decode(

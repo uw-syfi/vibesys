@@ -23,7 +23,6 @@ from vibesys.orchestration.single.core_policy.api import (
     RunBounds,
     SingleCorePolicy,
     build_core_policy,
-    config_for,
     project_strategy_state,
     prompts,
     run_prompt_variables,
@@ -31,7 +30,6 @@ from vibesys.orchestration.single.core_policy.api import (
 from vibesys.orchestration.single.models import ProfileGuidedSingleOptions, SingleOptions
 from vibesys.orchestration.single.strategy.api import (
     OPERATIONS,
-    STATE_SCHEMA,
     SingleStrategyState,
     measurement_recipe,
     single_operation_registry,
@@ -41,7 +39,6 @@ from vibesys.prompts import CORE_PROTOCOL_DIR
 from vibesys.single_roles import CORE_ROLES
 from vs_runtime.api import CoreOperation, CorePlan, CorePolicy, OrchestrationPlugin
 from vs_runtime.api.core import (
-    AgentEvaluationPolicy,
     OperationCatalog,
     OperationPorts,
     RuntimeRecord,
@@ -49,6 +46,8 @@ from vs_runtime.api.core import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import BaseModel
 
     from vs_runtime.api import CoreRunContext
@@ -102,7 +101,7 @@ def single_projector(plugin_id: str) -> RuntimeRecordProjector[SingleStrategySta
     )
 
 
-def _plan_for(options_type: type[SingleRunOptions]) -> object:
+def _plan_for(options_type: type[SingleRunOptions]) -> Callable[[CoreRunContext], CorePlan]:
     def plan(context: CoreRunContext) -> CorePlan:
         options = options_type.model_validate(context.options)
         commit = context.baseline.git_commit
@@ -153,7 +152,7 @@ def _plan_for(options_type: type[SingleRunOptions]) -> object:
 def single_core_policy(options_type: type[SingleRunOptions]) -> CorePolicy:
     """The single search as a core run: its plan, operations and the roles that perform them."""
     return CorePolicy(
-        plan=_plan_for(options_type),  # type: ignore[arg-type]  # a function of CoreRunContext
+        plan=_plan_for(options_type),
         operations=tuple(
             CoreOperation(role, registration)
             for role, registration in operation_roles(OPERATIONS).items()
@@ -189,9 +188,9 @@ def single_core_registration(
     return OrchestrationRegistration(
         plugin=plugin,
         projector=single_projector(plugin_id),
-        project_max_rounds=lambda options: options_type.model_validate(
-            options.model_dump()
-        ).max_rounds,
+        project_max_rounds=lambda options: (
+            options_type.model_validate(options.model_dump()).max_rounds
+        ),
     )
 
 

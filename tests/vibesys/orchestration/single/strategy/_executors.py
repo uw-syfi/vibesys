@@ -100,7 +100,7 @@ class Executors:
     # True for a measurement whose job ends without any evidence (its infrastructure failed).
     infrastructure_failure: Callable[[MeasurementPlan], bool] = lambda _plan: False
     # What the attribution command prints (profile result protocol v1).
-    attribution: str = ''
+    attribution: str = ""
     submit: Callable[[SubmitMeasurement], Answer] | None = None
     # True for an implementer that measures its workspace through the evaluation tool during
     # its turn: the production bridge's `AgentMeasurementRequested`, admitted by core.

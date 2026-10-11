@@ -17,6 +17,7 @@ from vibesys.orchestration.single.strategy import _context as context
 from vibesys.orchestration.single.strategy import _ids as ids
 from vibesys.orchestration.single.strategy._config import SingleConfig
 from vibesys.orchestration.single.strategy._draft import invocation_for
+from vibesys.orchestration.single.strategy._focus import focus_policy
 from vibesys.orchestration.single.strategy._operations import EvidenceReadings, RenderedArtifacts
 from vibesys.orchestration.single.strategy._prompts import (
     ReplyCorrectionPrompt,
@@ -35,7 +36,6 @@ from vibesys.orchestration.single.strategy._state import (
     UnreachableReason,
     WorkPhase,
 )
-from vibesys.profile_focus import ProfileFocus
 from vs_core.api import (
     AttemptExhausted,
     AttemptReady,
@@ -96,7 +96,11 @@ def on_rejected(state: SingleStrategyState, event: Rejected) -> SingleStrategySt
 def on_ready(state: SingleStrategyState, event: AttemptReady) -> SingleStrategyState:
     """The attempt holds a slot: begin its first turn, or settle it if a stop raced."""
     record = state.round
-    if record is None or record.attempt != event.attempt.attempt_id or record.phase is not WorkPhase.START:
+    if (
+        record is None
+        or record.attempt != event.attempt.attempt_id
+        or record.phase is not WorkPhase.START
+    ):
         return state
     record = record.admitted(event.attempt.generation)
     if state.stopping:
@@ -104,7 +108,9 @@ def on_ready(state: SingleStrategyState, event: AttemptReady) -> SingleStrategyS
             update={"phase": WorkPhase.SETTLE, "step": Step.NEEDED, "failure": STOPPED}
         )
     else:
-        record = record.model_copy(update={"phase": WorkPhase.IMPLEMENT, "step": Step.NEEDED, "turn": None})
+        record = record.model_copy(
+            update={"phase": WorkPhase.IMPLEMENT, "step": Step.NEEDED, "turn": None}
+        )
     return _put(state, record)
 
 
@@ -120,7 +126,9 @@ def on_operation(
         if outcome.status != "succeeded" or not outcome.prompts or record.turn is None:
             return fail(state, record, f"prompt render {outcome.status}")
         turn = record.turn.with_prompts(outcome.prompts, outcome.tool_policy)
-        return _put(state, record.model_copy(update={"turn": turn, "step": Step.RENDERED, "awaiting": None}))
+        return _put(
+            state, record.model_copy(update={"turn": turn, "step": Step.RENDERED, "awaiting": None})
+        )
     if isinstance(outcome, EvidenceReadings):
         return _interpreted(state, config, record, outcome, view)
     return state
@@ -196,9 +204,7 @@ def _interpreted(
         return fail(state, record, f"evidence could not be decoded ({outcome.status})")
     accuracy = reading_of(readings, EvidenceKind.CORRECTNESS)
     benchmark = reading_of(readings, EvidenceKind.BENCHMARK)
-    base = record.model_copy(
-        update={"readings": readings, "step": Step.NEEDED, "awaiting": None}
-    )
+    base = record.model_copy(update={"readings": readings, "step": Step.NEEDED, "awaiting": None})
     for reading in (accuracy, benchmark):
         if reading is not None and not reading.passed:
             return _gate_failed(
@@ -255,13 +261,15 @@ def settle_retained(
         return state
     live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
     candidate = turn_candidate(view, record.attempt, invocation)
-    declined = live is not None and any(row.invocation == invocation for row in live.checkpoint_declines)
+    declined = live is not None and any(
+        row.invocation == invocation for row in live.checkpoint_declines
+    )
     if candidate is None and not declined:
         return state
     reply = _decode(record.held_reply)
     released = state.model_copy(update={"round": record.released()})
     if isinstance(reply, SingleAgentRoundResponse):
-        return _replied(released, view, config, record.released(), reply, candidate)
+        return _replied(released, config, record.released(), reply, candidate)
     return released
 
 
@@ -296,36 +304,62 @@ def on_turn(
         return _unfinished(state, view, config, record, event)
     reply = _decode(event.output_json)
     if isinstance(reply, str):
-        corrected = record.turn.corrected(
-            event.invocation, ReplyCorrectionPrompt(role="implementer", error=reply), limit=config.max_corrections
+        return _corrected(
+            state, config, record, event, ReplyCorrectionPrompt(role="implementer", error=reply)
         )
-        if corrected is None:
-            return _no_reply(state, config, record, f"invalid reply: {reply}")
-        return _put(state, record.model_copy(update={"turn": corrected, "step": Step.NEEDED, "awaiting": None}))
     if isinstance(reply, WaitingForEvaluation):
-        if not event.suspending:
-            corrected = record.turn.corrected(event.invocation, WaitUnrecordedPrompt(), limit=config.max_corrections)
-            if corrected is None:
-                return fail(state, record, "the turn asked to wait and the run recorded no wait")
-            return _put(state, record.model_copy(update={"turn": corrected, "step": Step.NEEDED, "awaiting": None}))
-        if "suspend" not in view.capabilities.lifecycle:
-            failed = fail(state, record, "the run offers no suspend capability")
-            return failed.model_copy(
-                update={
-                    "unreachable": (
-                        *failed.unreachable,
-                        Unreachable(
-                            reason=UnreachableReason.RESUME_CAPABILITY_NOT_OFFERED,
-                            subject=record.hypothesis_id,
-                        ),
-                    )
-                }
-            )
-        return _put(state, record.model_copy(update={"turn": record.turn.yielding()}))
+        return _waiting(state, view, config, record, event)
     candidate = turn_candidate(view, record.attempt, event.invocation)
     if candidate is None:
         return _put(state, record.holding(event.output_json, event.invocation))
-    return _replied(state, view, config, record, reply, candidate)
+    return _replied(state, config, record, reply, candidate)
+
+
+def _corrected(
+    state: SingleStrategyState,
+    config: SingleConfig,
+    record: RoundState,
+    event: TurnResult,
+    correction: ReplyCorrectionPrompt | WaitUnrecordedPrompt,
+) -> SingleStrategyState:
+    """Ask the role to fix its reply; the correction names the invalid turn as its predecessor."""
+    turn = record.turn
+    corrected = (
+        None
+        if turn is None
+        else turn.corrected(event.invocation, correction, limit=config.max_corrections)
+    )
+    if corrected is None:
+        if isinstance(correction, ReplyCorrectionPrompt):
+            return _no_reply(state, config, record, f"invalid reply: {correction.error}")
+        return fail(state, record, "the turn asked to wait and the run recorded no wait")
+    return _put(
+        state, record.model_copy(update={"turn": corrected, "step": Step.NEEDED, "awaiting": None})
+    )
+
+
+def _waiting(
+    state: SingleStrategyState,
+    view: RunView,
+    config: SingleConfig,
+    record: RoundState,
+    event: TurnResult,
+) -> SingleStrategyState:
+    """The reply asked to wait: only core's `TurnSuspended` completes the yield."""
+    if not event.suspending:
+        # Core recorded no wait (it refused it, or the host lost it), so no TurnSuspended will
+        # come: waiting for one would stall the run.
+        return _corrected(state, config, record, event, WaitUnrecordedPrompt())
+    if "suspend" not in view.capabilities.lifecycle:
+        failed = fail(state, record, "the run offers no suspend capability")
+        missing = Unreachable(
+            reason=UnreachableReason.RESUME_CAPABILITY_NOT_OFFERED, subject=record.hypothesis_id
+        )
+        return failed.model_copy(update={"unreachable": (*failed.unreachable, missing)})
+    turn = record.turn
+    if turn is None:
+        return state
+    return _put(state, record.model_copy(update={"turn": turn.yielding()}))
 
 
 def _unfinished(
@@ -348,9 +382,14 @@ def _unfinished(
         )
         if again is None:
             return fail(state, record, f"implementer turn was lost ({event.detail or 'transport'})")
-        return _put(state, record.model_copy(update={"turn": again, "step": Step.NEEDED, "awaiting": None}))
+        return _put(
+            state, record.model_copy(update={"turn": again, "step": Step.NEEDED, "awaiting": None})
+        )
     return _no_reply(
-        state, config, record, event.detail or f"implementer turn did not complete ({event.observation.status.value})"
+        state,
+        config,
+        record,
+        event.detail or f"implementer turn did not complete ({event.observation.status.value})",
     )
 
 
@@ -358,15 +397,21 @@ def _no_reply(
     state: SingleStrategyState, config: SingleConfig, record: RoundState, reason: str
 ) -> SingleStrategyState:
     """The attempt produced no valid response: retry within the paid budget or end the round."""
-    record = record.model_copy(update={"response_json": None, "no_valid_reply": reason, "verdict_pass": None})
+    record = record.model_copy(
+        update={"response_json": None, "no_valid_reply": reason, "verdict_pass": None}
+    )
     if record.turns_spent >= config.max_retries_per_round:
-        return _put(state, record.model_copy(update={"phase": WorkPhase.SETTLE, "step": Step.NEEDED, "awaiting": None}))
+        return _put(
+            state,
+            record.model_copy(
+                update={"phase": WorkPhase.SETTLE, "step": Step.NEEDED, "awaiting": None}
+            ),
+        )
     return _put(state, _next_turn(record, {"feedback": None}))
 
 
 def _replied(
     state: SingleStrategyState,
-    view: RunView,
     config: SingleConfig,
     record: RoundState,
     response: SingleAgentRoundResponse,
@@ -405,24 +450,39 @@ def _replied(
         return _fail_attempt(
             state,
             config,
-            record.model_copy(update={"no_valid_reply": "the implementer retained no changed candidate"}),
+            record.model_copy(
+                update={"no_valid_reply": "the implementer retained no changed candidate"}
+            ),
             "retained no changed candidate",
         )
     plan = context.plan_of(record)
     reason = rounds.official_reason(
-        config.hypotheses, ledger, round_number=record.number, requested=plan.request_official_evaluation
+        config.hypotheses,
+        ledger,
+        round_number=record.number,
+        requested=plan.request_official_evaluation,
     )
     if reason is None or not (config.accuracy_configured or config.benchmark_configured):
         return _put(
             state,
             record.model_copy(
-                update={"passed": True, "official_reason": None, "phase": WorkPhase.SETTLE, "step": Step.NEEDED}
+                update={
+                    "passed": True,
+                    "official_reason": None,
+                    "phase": WorkPhase.SETTLE,
+                    "step": Step.NEEDED,
+                }
             ),
         )
     return _put(
         state,
         record.model_copy(
-            update={"official_reason": reason, "phase": WorkPhase.MEASURE, "step": Step.NEEDED, "turn": None}
+            update={
+                "official_reason": reason,
+                "phase": WorkPhase.MEASURE,
+                "step": Step.NEEDED,
+                "turn": None,
+            }
         ),
     )
 
@@ -434,7 +494,12 @@ def _fail_attempt(
         return _put(
             state,
             record.model_copy(
-                update={"feedback": feedback, "phase": WorkPhase.SETTLE, "step": Step.NEEDED, "awaiting": None}
+                update={
+                    "feedback": feedback,
+                    "phase": WorkPhase.SETTLE,
+                    "step": Step.NEEDED,
+                    "awaiting": None,
+                }
             ),
         )
     return _put(state, _next_turn(record, {"feedback": feedback}))
@@ -451,7 +516,9 @@ def on_suspended(state: SingleStrategyState, event: TurnSuspended) -> SingleStra
     ):
         return state
     turn = record.turn.suspended(continuation.invocation, continuation.continuation_id)
-    return _put(state, record.model_copy(update={"turn": turn, "step": Step.SUSPENDED, "awaiting": None}))
+    return _put(
+        state, record.model_copy(update={"turn": turn, "step": Step.SUSPENDED, "awaiting": None})
+    )
 
 
 def on_resume(state: SingleStrategyState, event: ResumeAuthorized) -> SingleStrategyState:
@@ -472,7 +539,9 @@ def on_resume(state: SingleStrategyState, event: ResumeAuthorized) -> SingleStra
             retained_revision=record.candidate,
             timed_out=event.timeout is not None,
             evidence=tuple(item.evidence_id for item in event.evidence),
-            repeated_failure=None if event.repeated_failure is None else str(event.repeated_failure),
+            repeated_failure=None
+            if event.repeated_failure is None
+            else str(event.repeated_failure),
         ),
     )
     return _put(state, record.model_copy(update={"turn": resumed, "step": Step.NEEDED}))
@@ -507,7 +576,9 @@ def _benchmark_outcome(record: RoundState) -> tuple[FrameworkBenchmarkOutcome, f
     reading = reading_of(record.readings, EvidenceKind.BENCHMARK)
     headline: MetricRow | None = None if reading is None else reading.headline()
     if reading is None or headline is None:
-        return FrameworkBenchmarkOutcome(feedback=None if reading is None else reading.feedback), None
+        return FrameworkBenchmarkOutcome(
+            feedback=None if reading is None else reading.feedback
+        ), None
     return (
         FrameworkBenchmarkOutcome(
             feedback=reading.feedback,
@@ -522,12 +593,16 @@ def _benchmark_outcome(record: RoundState) -> tuple[FrameworkBenchmarkOutcome, f
 
 
 def on_settled(
-    state: SingleStrategyState, view: RunView, config: SingleConfig, event: AttemptSettled
+    state: SingleStrategyState, config: SingleConfig, event: AttemptSettled
 ) -> SingleStrategyState:
     """Close the round in the ledger and remember what core settled."""
     record = state.round
     settlement = event.settlement
-    if record is None or record.attempt != settlement.attempt.attempt_id or record.phase is WorkPhase.DONE:
+    if (
+        record is None
+        or record.attempt != settlement.attempt.attempt_id
+        or record.phase is WorkPhase.DONE
+    ):
         return state
     if record.failure == STOPPED:
         return _put(state, record.model_copy(update={"phase": WorkPhase.DONE, "awaiting": None}))
@@ -536,8 +611,11 @@ def on_settled(
     benchmark, metric = _benchmark_outcome(record)
     commit = None if settlement.candidate is None else settlement.candidate.revision_id.root
     passed = record.passed and record.failure is None
-    feedback = None if passed else (record.feedback or record.failure)
-    guidance = _guidance(ledger, config, record, passed=passed)
+    official = passed and record.official_reason is not None
+    if response is not None and official and metric is not None:
+        response = response.model_copy(
+            update={"perf_metric": metric, "perf_unit": benchmark.metric_name}
+        )
     closed = rounds.close_round(
         config.hypotheses,
         ledger,
@@ -546,7 +624,7 @@ def on_settled(
             plan=context.plan_of(record),
             reply=response,
             passed=passed,
-            feedback=feedback,
+            feedback=None if passed else (record.feedback or record.failure),
             official_reason=record.official_reason if passed else None,
             benchmark=benchmark,
             benchmark_metric=metric,
@@ -557,9 +635,9 @@ def on_settled(
             implementer=AgentAttribution("core", None, None),
             revalidation_required=record.gate_failed,
             verdict_pass=record.verdict_pass,
-            profile_guidance=guidance,
         ),
     )
+    closed = _focused(closed, config, passed=passed)
     encoded = rounds.encode(closed)
     benchmark_reading = reading_of(record.readings, EvidenceKind.BENCHMARK)
     retained = settlement.candidate
@@ -586,22 +664,20 @@ def on_settled(
     )
 
 
-def _guidance(
-    ledger: rounds.Ledger, config: SingleConfig, record: RoundState, *, passed: bool
-) -> object | None:
-    """The profile-guidance state after this round's result, for a profile-guided run."""
-    from vibesys.orchestration.single.strategy._planner import focus_policy  # noqa: PLC0415
-
-    policy: ProfileFocus | None = focus_policy(config)
-    state = ledger.search.profile_guidance
-    if policy is None or state is None:
-        return None
-    benchmark = reading_of(record.readings, EvidenceKind.BENCHMARK)
-    official = passed and record.official_reason is not None
-    del benchmark
-    return policy.record(
-        state,
-        round_number=record.number,
-        passed=passed and official,
-        relative_improvement=None,
+def _focused(ledger: rounds.Ledger, config: SingleConfig, *, passed: bool) -> rounds.Ledger:
+    """Record the closed round's result on the profile-guidance state of a profile-guided run."""
+    policy = focus_policy(config)
+    guidance = ledger.search.profile_guidance
+    if policy is None or guidance is None:
+        return ledger
+    record = ledger.records[-1]
+    delta = record.perf_delta_pct
+    focused = policy.record(
+        guidance,
+        round_number=record.round_number,
+        passed=passed and record.official_evaluation,
+        relative_improvement=None if delta is None else delta / 100,
+    )
+    return rounds.Ledger(
+        ledger.search.model_copy(update={"profile_guidance": focused}), ledger.carry
     )

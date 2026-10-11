@@ -92,11 +92,11 @@ def plan_prompt(
     state: SingleStrategyState,
     config: SingleConfig,
     view: RunView,
-    ledger: rounds.Ledger,
     planning: PlanningContext,
     focus: FocusView | None = None,
 ) -> PlanPrompt:
     """The new-hypothesis request: history, the frontier, carried notices and the last profile."""
+    ledger = ledger_of(state, config)
     records = ledger.records
     archive = rounds.archive_view(config.hypotheses, ledger)
     ranked = () if focus is None else focus.ranked_bottlenecks

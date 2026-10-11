@@ -17,12 +17,6 @@ from vibesys.orchestration.review import Verdict
 _ProfileGuidedInput = ProfileGuidedInput
 
 
-
-
-
-
-
-
 class SingleAgentRoundResponse(BaseModel):
     """One agent performs implementer + judge + profiler in a single shot.
 
@@ -113,12 +107,6 @@ class ProfileGuidedSingleOptions(AgentOrchestrationOptions):
             message = f"unsupported profile-guided single-agent interface {self.interface!r}"
             raise ValueError(message)
         return self
-
-
-
-
-
-
 
 
 __all__ = ["ProfileGuidedSingleOptions", "SingleAgentRoundResponse", "SingleOptions"]

@@ -31,6 +31,7 @@ from vibesys.orchestration.single.strategy._draft import (
     request_turn,
     turn_id,
 )
+from vibesys.orchestration.single.strategy._focus import BEGIN, END, OUTPUT_ARGUMENT, focus_policy
 from vibesys.orchestration.single.strategy._operations import (
     CaptureCommand,
     CommandCapture,
@@ -47,12 +48,7 @@ from vibesys.orchestration.single.strategy._state import (
     TurnRecord,
     WorkPhase,
 )
-from vibesys.profile_focus import (
-    ProfileAttributionError,
-    ProfileFocus,
-    ProfileFocusConfig,
-    parse_attribution,
-)
+from vibesys.profile_focus import ProfileAttributionError, parse_attribution
 from vs_core.api import (
     Access,
     ObservationStatus,
@@ -65,22 +61,6 @@ from vs_core.api import (
 )
 
 SUBJECT = "run"
-_BEGIN = "__VIBESYS_ATTRIBUTION_BEGIN__"
-_END = "__VIBESYS_ATTRIBUTION_END__"
-_OUTPUT_ARGUMENT = "--vs-output"
-
-
-def focus_policy(config: SingleConfig) -> ProfileFocus | None:
-    """The component-focus policy of a profile-guided run, else None."""
-    attribution = config.attribution
-    if attribution is None:
-        return None
-    return ProfileFocus(
-        ProfileFocusConfig(
-            plateau_min_rounds=attribution.min_measured_rounds,
-            min_relative_improvement=attribution.min_relative_improvement,
-        )
-    )
 
 
 def may_plan(state: SingleStrategyState, config: SingleConfig) -> bool:
@@ -127,9 +107,7 @@ def decide(draft: Draft) -> None:
     draft.update(planner=planner)
 
 
-def _continued(
-    state: SingleStrategyState, view: RunView, decision: Continue
-) -> dict[str, object]:
+def _continued(state: SingleStrategyState, view: RunView, decision: Continue) -> dict[str, object]:
     hypothesis = decision.hypothesis
     plan = hypothesis.plan
     return {
@@ -149,7 +127,7 @@ def _capture(draft: Draft, planner: PlannerState) -> PlannerState:
     attribution = draft.config.attribution
     if planner.capture_done or attribution is None or planner.capture_step is not Step.NEEDED:
         return planner
-    identifier = ids.decision_id("capture", draft.state.closed + 1)
+    identifier = ids.decision_id("capture", SUBJECT, draft.state.closed + 1)
     draft.emit(
         operation(
             draft,
@@ -158,12 +136,14 @@ def _capture(draft: Draft, planner: PlannerState) -> PlannerState:
             CaptureCommand(
                 revision=context.build_base(draft.state, draft.view),
                 argv=attribution.command,
-                output_argument=_OUTPUT_ARGUMENT,
+                output_argument=OUTPUT_ARGUMENT,
                 timeout_seconds=attribution.timeout_seconds,
             ),
         )
     )
-    return planner.model_copy(update={"capture_step": Step.AWAITING, "capture_awaiting": identifier})
+    return planner.model_copy(
+        update={"capture_step": Step.AWAITING, "capture_awaiting": identifier}
+    )
 
 
 def _turn(draft: Draft, planner: PlannerState) -> PlannerState:
@@ -178,7 +158,7 @@ def _turn(draft: Draft, planner: PlannerState) -> PlannerState:
         focus_state = ledger.search.profile_guidance
         policy = focus_policy(draft.config)
         view = None if policy is None or focus_state is None else policy.focus(focus_state)
-        prompt = context.plan_prompt(draft.state, draft.config, draft.view, ledger, planning, view)
+        prompt = context.plan_prompt(draft.state, draft.config, draft.view, planning, view)
         body = prompt
         if planner.last_error is not None and turn.charge == "correction":
             body = ReplyCorrectionPrompt(role="planner", error=planner.last_error)
@@ -204,7 +184,9 @@ def _turn(draft: Draft, planner: PlannerState) -> PlannerState:
                 scope,
             )
         )
-        return planner.model_copy(update={"step": Step.AWAITING, "awaiting": turn_id(SUBJECT, turn)})
+        return planner.model_copy(
+            update={"step": Step.AWAITING, "awaiting": turn_id(SUBJECT, turn)}
+        )
     return planner
 
 
@@ -228,7 +210,9 @@ def _failed(state: SingleStrategyState, detail: str) -> SingleStrategyState:
             "awaiting": None,
             "last_error": detail,
             "failed": True,
-            "serial": (state.planner.turn.serial + 1) if state.planner.turn else state.planner.serial,
+            "serial": (state.planner.turn.serial + 1)
+            if state.planner.turn
+            else state.planner.serial,
         }
     )
     return state.model_copy(update={"planner": planner})
@@ -247,6 +231,56 @@ def _check(plan: OrchestratorPlan, state: SingleStrategyState, config: SingleCon
     rounds.validate_plan(config.hypotheses, ledger, plan.hypothesis_updates)
 
 
+def _plan_from(
+    state: SingleStrategyState, config: SingleConfig, event: TurnResult
+) -> OrchestratorPlan | str:
+    """The reply as a validated plan, else what is wrong with it."""
+    if event.observation.status is not ObservationStatus.SUCCEEDED or event.output_json is None:
+        return (
+            event.detail or f"the designer turn did not complete ({event.observation.status.value})"
+        )
+    try:
+        plan = OrchestratorPlan.model_validate_json(event.output_json)
+        plan = plan.model_copy(
+            update={
+                "hypothesis_id": plan.hypothesis_id.strip() or f"hypothesis-{state.closed + 1:04d}",
+                "title": normalize_hypothesis_title(plan.title),
+                "recommended_skills": [],
+            }
+        )
+        _check(plan, state, config)
+    except (ValidationError, ValueError) as problem:
+        return str(problem)
+    return plan
+
+
+def _ask_again(
+    state: SingleStrategyState, view: RunView, config: SingleConfig, event: TurnResult
+) -> SingleStrategyState:
+    """The transport lost the designer's turn: ask the same question again, within the budget."""
+    planner = state.planner
+    turn = planner.turn
+    again = (
+        None
+        if turn is None
+        else turn.asked_again(
+            event.invocation,
+            now=view.run.now_at,
+            limit=config.max_turn_drops,
+            backoff=config.drop_backoff(turn.drops),
+        )
+    )
+    if again is None:
+        return _failed(state, event.detail or "the designer turn was lost")
+    return state.model_copy(
+        update={
+            "planner": planner.model_copy(
+                update={"step": Step.NEEDED, "awaiting": None, "turn": again}
+            )
+        }
+    )
+
+
 def on_turn(
     state: SingleStrategyState, view: RunView, config: SingleConfig, event: TurnResult
 ) -> SingleStrategyState:
@@ -256,53 +290,25 @@ def on_turn(
     if turn is None:
         return state
     if event.failure is TurnFailureKind.TRANSPORT_LOST:
-        again = turn.asked_again(
-            event.invocation,
-            now=view.run.now_at,
-            limit=config.max_turn_drops,
-            backoff=config.drop_backoff(turn.drops),
-        )
-        if again is None:
-            return _failed(state, event.detail or "the designer turn was lost")
-        return state.model_copy(
-            update={
-                "planner": planner.model_copy(
-                    update={"step": Step.NEEDED, "awaiting": None, "turn": again}
-                )
-            }
-        )
-    error: str
-    if event.observation.status is not ObservationStatus.SUCCEEDED or event.output_json is None:
-        error = event.detail or f"the designer turn did not complete ({event.observation.status.value})"
-        return _failed(state, error)
-    try:
-        plan = OrchestratorPlan.model_validate_json(event.output_json)
-        plan = plan.model_copy(
-            update={
-                "hypothesis_id": plan.hypothesis_id.strip()
-                or f"hypothesis-{state.closed + 1:04d}",
-                "title": normalize_hypothesis_title(plan.title),
-                "recommended_skills": [],
-            }
-        )
-        _check(plan, state, config)
-    except (ValidationError, ValueError) as problem:
-        corrected = turn.corrected(event.invocation, None, limit=config.max_corrections)
-        if corrected is None:
-            return _failed(state, str(problem))
-        return state.model_copy(
-            update={
-                "planner": planner.model_copy(
-                    update={
-                        "step": Step.NEEDED,
-                        "awaiting": None,
-                        "last_error": str(problem),
-                        "turn": corrected,
-                    }
-                )
-            }
-        )
-    return _start(state, view, config, plan)
+        return _ask_again(state, view, config, event)
+    plan = _plan_from(state, config, event)
+    if not isinstance(plan, str):
+        return _start(state, view, config, plan)
+    corrected = turn.corrected(event.invocation, None, limit=config.max_corrections)
+    if corrected is None or event.output_json is None:
+        return _failed(state, plan)
+    return state.model_copy(
+        update={
+            "planner": planner.model_copy(
+                update={
+                    "step": Step.NEEDED,
+                    "awaiting": None,
+                    "last_error": plan,
+                    "turn": corrected,
+                }
+            )
+        }
+    )
 
 
 def _start(
@@ -384,7 +390,7 @@ def on_captured(
         detail = outcome.detail or f"the attribution command exited with code {outcome.exit_code}"
         return _failed(state, f"profile-guided attribution failed: {detail}")
     try:
-        bottlenecks = parse_attribution(f"{_BEGIN}\n{outcome.output}\n{_END}")
+        bottlenecks = parse_attribution(f"{BEGIN}\n{outcome.output}\n{END}")
     except ProfileAttributionError as error:
         return _failed(state, f"profile-guided attribution failed: {error}")
     ledger = context.ledger_of(state, config)

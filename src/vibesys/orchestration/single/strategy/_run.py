@@ -43,7 +43,9 @@ def _eligible(state: SingleStrategyState) -> tuple[candidates.EligibleRound, ...
     )
 
 
-def choose_winner(state: SingleStrategyState, config: SingleConfig, baseline: RevisionRef) -> Winner:
+def choose_winner(
+    state: SingleStrategyState, config: SingleConfig, baseline: RevisionRef
+) -> Winner:
     """The best eligible candidate by the metric space; earlier rounds win ties."""
     return candidates.choose_winner(_eligible(state), config, baseline)
 

@@ -14,7 +14,13 @@ from vibesys.orchestration.single.strategy.api import (
     SingleConfig,
     SingleStrategy,
 )
-from vs_core.api import ArtifactRef, AssessmentKind, EvidenceRequirements, RevisionRef, WorkspaceMode
+from vs_core.api import (
+    ArtifactRef,
+    AssessmentKind,
+    EvidenceRequirements,
+    RevisionRef,
+    WorkspaceMode,
+)
 from vs_core.api import RunFacts as CoreRunFacts
 
 if TYPE_CHECKING:
@@ -53,8 +59,8 @@ class PolicyInputs(_Value):
     benchmark_configured: bool
     isolated_candidates: bool
     profiler_id: str = "none"
-    accuracy_seconds: Seconds | None = None
-    benchmark_seconds: Seconds | None = None
+    accuracy_seconds: Annotated[float, Field(gt=0)] | None = None
+    benchmark_seconds: Annotated[float, Field(gt=0)] | None = None
 
 
 @dataclass(frozen=True)

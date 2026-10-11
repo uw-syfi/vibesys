@@ -276,7 +276,7 @@ depends_on = ["vibesys.hypothesis", "vs_runtime", "vibesys.run.contracts"]
 [[modules]]
 path = "vibesys.orchestration.single"
 layer = "loops"
-depends_on = ["vibesys.run.endings", "vibesys.orchestration.attempts", "vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys", "vibesys.inputs", "vs_prompts", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.domains", "vibesys.hypothesis.readmodel", "vibesys.prompts", "vibesys.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.single_core", "vibesys.orchestration.single.models"]
 
 [[modules]]
 path = "vibesys.orchestration.multi"
@@ -950,7 +950,7 @@ expose = ["agent_options", "profilers", "review"]
 from = ["vibesys.orchestration"]
 
 [[interfaces]]
-expose = ["PLUGIN", "PROFILE_GUIDED_PLUGIN", "PROFILE_GUIDED_REGISTRATION", "REGISTRATION"]
+expose = ["PLUGIN", "PROFILE_GUIDED_PLUGIN", "PROFILE_GUIDED_REGISTRATION", "ProfileGuidedSingleOptions", "REGISTRATION", "SingleAgentRoundResponse", "SingleOptions"]
 from = ["vibesys.orchestration.single"]
 
 [[interfaces]]
@@ -1034,7 +1034,7 @@ path = "vibesys.plugin_catalog"
 depends_on = ["vibesys.plugin_registration", "vs_runtime", "vs_project"]
 
 [[interfaces]]
-expose = ["AgentAttribution", "ArchiveAxis", "ArchiveConflict", "ArchiveDominator", "ArchiveLatestRound", "ArchiveMetric", "ArchivePendingClaim", "ArchiveScalarReading", "ArchiveTrustedParent", "AttemptBudget", "AttemptDecision", "AttemptState", "CandidateDisposition", "CandidateEvidence", "CandidateReply", "CarryOver", "ClosedRound", "Continue", "ExhaustionNotice", "Finished", "HYPOTHESIS_TITLE_MAX_LEN", "Hypothesis", "HypothesisConfig", "HypothesisMeasurement", "HypothesisOutcome", "HypothesisResolution", "HypothesisReview", "HypothesisSearch", "HypothesisState", "HypothesisStrategy", "HypothesisStrategyUpdate", "ImplementerReply", "InvalidPlanError", "JudgeOutcome", "JudgeReviewed", "JudgeSkipReason", "JudgeSkipped", "JudgeVerdict", "MeasurementEvidence", "NewHypothesis", "NextRoundDecision", "OfficialCandidateNotRetained", "OmittedPendingClaims", "OrchestratorPlan", "ParetoArchiveView", "PerfDeltaReason", "PerfProvenance", "PerformanceProjection", "PlanningContext", "RecordInput", "RegressionNotice", "RetainedTerminalCheckpoint", "RollbackTarget", "RoundHistory", "RoundRecord", "RunEnding", "SingleAgentReply", "SkillResourceSelection", "StartedHypothesis", "TerminalWorkspaceEdits", "WorkspaceCheckpoint", "attempt_was_reviewed", "attempts", "attempts\\..*", "build_round_record", "cadence", "cadence\\..*", "derive_ending", "derive_hypothesis_title", "ending", "ending\\..*", "ending_of", "has_trusted_reading", "normalize_hypothesis_title", "notices", "notices\\..*", "parse_round_record", "plan", "plan\\..*", "rounds", "rounds\\..*", "recorded_judge_verdict", "serialize_round_record", "state", "state\\..*", "transitions", "transitions\\..*", "truncate_hypothesis_title"]
+expose = ["AgentAttribution", "ArchiveAxis", "ArchiveConflict", "ArchiveDominator", "ArchiveLatestRound", "ArchiveMetric", "ArchivePendingClaim", "ArchiveScalarReading", "ArchiveTrustedParent", "AttemptBudget", "AttemptDecision", "AttemptState", "CandidateDisposition", "CandidateEvidence", "CandidateReply", "CarryOver", "ClosedRound", "Continue", "ExhaustionNotice", "Finished", "HYPOTHESIS_TITLE_MAX_LEN", "Hypothesis", "HypothesisConfig", "HypothesisMeasurement", "HypothesisOutcome", "HypothesisResolution", "HypothesisReview", "HypothesisSearch", "HypothesisState", "HypothesisStrategy", "HypothesisStrategyUpdate", "ImplementerReply", "InvalidPlanError", "JudgeOutcome", "JudgeReviewed", "JudgeSkipReason", "JudgeSkipped", "JudgeVerdict", "MeasurementEvidence", "NewHypothesis", "NextRoundDecision", "OfficialCandidateNotRetained", "OmittedPendingClaims", "OrchestratorPlan", "ParetoArchiveView", "PerfDeltaReason", "PerfProvenance", "PerformanceProjection", "PlanningContext", "RecordInput", "RegressionNotice", "RetainedTerminalCheckpoint", "RollbackTarget", "RoundHistory", "RoundRecord", "RunEnding", "SingleAgentReply", "SkillResourceSelection", "StartedHypothesis", "TerminalWorkspaceEdits", "WorkspaceCheckpoint", "attempt_was_reviewed", "attempts", "attempts\\..*", "build_round_record", "cadence", "cadence\\..*", "derive_ending", "derive_hypothesis_title", "ending", "ending\\..*", "ending_of", "has_trusted_reading", "normalize_hypothesis_title", "notices", "notices\\..*", "parse_round_record", "plan", "plan\\..*", "rounds", "rounds\\..*", "results", "results\\..*", "record", "record\\..*", "recorded_judge_verdict", "serialize_round_record", "state", "state\\..*", "transitions", "transitions\\..*", "truncate_hypothesis_title"]
 from = ["vibesys.hypothesis"]
 
 [[interfaces]]
@@ -1313,6 +1313,55 @@ expose = ["CONTINUATION", "CONTINUING_READER", "EVALUATION_TOOL", "MEASURING", "
 path = "vibesys.dynamic_roles"
 layer = "loops"
 depends_on = ["vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.strategy"]
+
+[[modules]]
+path = "vibesys.orchestration.single.models"
+layer = "roles_search"
+depends_on = ["vibesys.hypothesis", "vibesys.inputs", "vibesys.orchestration.agent_options", "vibesys.orchestration.review"]
+
+[[interfaces]]
+expose = ["[A-Za-z][A-Za-z0-9_]*"]
+from = ["vibesys.orchestration.single.models"]
+
+[[modules]]
+path = "vibesys.orchestration.single.strategy"
+layer = "loops"
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.single.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.profile_focus", "vibesys.prompts", "vibesys.orchestration.review"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.single.strategy"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vibesys.orchestration.single.core_policy"
+layer = "loops"
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.single.models", "vibesys.orchestration.single.strategy", "vibesys.run.contracts"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.single.core_policy"]
+expose = ["api", "api\\..*"]
+
+[[interfaces]]
+from = ["vibesys.single_core"]
+expose = ["single_core_registration"]
+
+[[modules]]
+# Assembles the single core policy from the run's resolved resources: the one place that
+# stores the recipe, builds the operation catalog and reads the run record.
+path = "vibesys.single_core"
+layer = "loops"
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.single_roles", "vibesys.orchestration.single.core_policy", "vibesys.orchestration.single.models", "vibesys.orchestration.single.strategy", "vibesys.plugin_registration", "vibesys.prompts"]
+
+[[interfaces]]
+from = ["vibesys.single_roles"]
+expose = ["CORE_ROLES", "DESIGNER", "IMPLEMENTER"]
+
+[[modules]]
+# The agent roles of a core single run: host wiring (vs_runtime values, template file paths)
+# that the pure core_policy may not hold.
+path = "vibesys.single_roles"
+layer = "loops"
+depends_on = ["vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.single.core_policy", "vibesys.orchestration.single.strategy"]
 
 [[modules]]
 path = "vs_core._session_scope"

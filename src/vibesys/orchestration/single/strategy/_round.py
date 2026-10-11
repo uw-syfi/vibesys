@@ -127,7 +127,9 @@ def _start(draft: Draft, record: RoundState) -> RoundState:
 
 
 def _turn(draft: Draft, record: RoundState) -> RoundState:
-    turn = record.turn or TurnRecord(role=Role.IMPLEMENTER, serial=record.next_serial, charge="paid")
+    turn = record.turn or TurnRecord(
+        role=Role.IMPLEMENTER, serial=record.next_serial, charge="paid"
+    )
     subject = subject_of(record)
     scope = attempt_scope(draft.view, record.attempt, record.generation)
     if record.step is Step.NEEDED:
