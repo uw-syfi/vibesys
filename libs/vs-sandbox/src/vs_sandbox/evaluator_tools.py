@@ -388,6 +388,11 @@ class EvaluatorToolError(RuntimeError):
         )
 
     @classmethod
+    def builder_setup_failed(cls, detail: str) -> EvaluatorToolError:
+        """Report a failed root setup command in the evaluator tool builder."""
+        return cls(f"evaluator tool builder setup failed: {detail}")
+
+    @classmethod
     def builder_incomplete(cls) -> EvaluatorToolError:
         """Describe a builder that failed to publish every declared tool."""
         return cls("Docker evaluator tool builder did not publish every declared tool")

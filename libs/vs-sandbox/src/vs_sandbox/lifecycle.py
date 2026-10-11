@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_sandbox.execution import CommandRunner
+    from vs_sandbox.execution import CommandResult, CommandRunner
 
 
 def start_sandbox(sandbox: CommandRunner) -> None:
@@ -31,6 +31,27 @@ def start_sandbox(sandbox: CommandRunner) -> None:
         message = f"{type(sandbox).__name__} has no execution environment to start"
         raise TypeError(message)
     start()
+
+
+def execute_as_root(
+    sandbox: CommandRunner,
+    command: str,
+    *,
+    timeout: int | None = None,
+) -> CommandResult:
+    """Run *command* as root inside a started container sandbox.
+
+    Like :func:`start_sandbox`, this adapts a capability the base
+    :class:`CommandRunner` contract leaves out. A sandbox that cannot run
+    commands as root (a host sandbox, where "root" would mean the operator's
+    machine) fails immediately and by name instead of running the command as
+    the wrong user.
+    """
+    run = getattr(sandbox, "execute_as_root", None)
+    if not callable(run):
+        message = f"{type(sandbox).__name__} cannot run commands as root"
+        raise TypeError(message)
+    return run(command, timeout=timeout)
 
 
 def stop_sandbox(sandbox: CommandRunner) -> None:

@@ -82,7 +82,6 @@ class ComputeBackendImpl(Protocol):
         log_path: Path | str | None,
         bind_mounts: list[tuple[str, str, bool]],
         extra_env: dict[str, str],
-        extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
         attach_accelerator: bool = True,
         ephemeral: bool = False,
@@ -95,10 +94,10 @@ class ComputeBackendImpl(Protocol):
     ) -> CommandRunner:
         """Construct (do not start) a sandbox configured for this backend.
 
-        ``extra_init_commands`` is ignored by every current backend: a
-        Docker sandbox starts from a prebuilt agent image and installs
-        nothing at start, and a local sandbox has no separate install step.
-        Kept for protocol parity with a future backend that needs it.
+        A Docker sandbox starts from a prebuilt agent image and installs
+        nothing at start. A caller that needs root-only setup in a started
+        Docker sandbox runs it itself with
+        :func:`~vs_sandbox.lifecycle.execute_as_root`.
 
         ``lifecycle_hooks`` are invoked before the sandbox becomes ready,
         during both initial creation and replacement.
