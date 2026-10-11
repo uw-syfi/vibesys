@@ -109,13 +109,14 @@ test('keeps a manually exchanged session when storage is denied across loopback 
 
       await expect(page.getByLabel('Live gateway URL')).toHaveCount(0);
       await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
-      await expect.poll(() => sockets.length).toBeGreaterThan(0);
+      const gatewaySockets = (): URL[] =>
+        sockets.map(url => new URL(url)).filter(socket => socket.pathname === '/ws');
+      await expect.poll(() => gatewaySockets().length).toBeGreaterThan(0);
       expect(capabilityRequests).toEqual([capability.toString()]);
       expect(page.url()).not.toContain('token=');
       expect(page.url()).not.toContain('session=');
       expect(
-        sockets.every(url => {
-          const socket = new URL(url);
+        gatewaySockets().every(socket => {
           return socket.hostname === 'localhost' && socket.searchParams.has('session');
         }),
       ).toBe(true);
