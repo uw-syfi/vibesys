@@ -25,6 +25,7 @@ from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
 from tests.vibesys.orchestration.dynamic.strategy._views import empty_view, evidence_ref, revision
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
+from vibesys.orchestration.dynamic.core_policy.api import run_prompt_variables
 
 # test-isolation: evidence selection and the failure bound are strategy internals with no
 # public entry that accepts a hand-built ledger; the production shell cannot inject
@@ -90,9 +91,9 @@ def _text(prompt: ReviewPrompt, *, agent_evaluation: bool = True) -> str:
     return TemplateRenderer(root).render_template(
         "review.j2",
         **variables,
-        objective="Raise throughput.",
-        agent_evaluation=agent_evaluation,
-        plan_example="",
+        **run_prompt_variables(
+            objective="Raise throughput.", environment_notes="", agent_evaluation=agent_evaluation
+        ),
     )
 
 

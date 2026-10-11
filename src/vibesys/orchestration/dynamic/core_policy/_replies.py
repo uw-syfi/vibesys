@@ -48,6 +48,22 @@ def reply_schemas(config: DynamicConfig) -> Mapping[SchemaRef, type[BaseModel]]:
     }
 
 
+def run_prompt_variables(
+    *, objective: str, environment_notes: str, agent_evaluation: bool
+) -> dict[str, object]:
+    """The run-level variables every dynamic template reads, besides its own context's fields.
+
+    The plan carries this mapping and the renderer adds it to each prompt, so a template
+    that reads a new run-level variable gets it from here for production and for tests alike.
+    """
+    return {
+        "objective": objective,
+        "environment_notes": environment_notes,
+        "agent_evaluation": agent_evaluation,
+        "plan_example": planner_reply_example(),
+    }
+
+
 def planner_reply_example() -> str:
     """A valid planner reply with placeholder values, rendered from the reply model itself.
 
