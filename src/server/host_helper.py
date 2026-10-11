@@ -112,7 +112,7 @@ WATCH_INTERVAL_SECONDS: Final = 1.0
 SCAN_LIMIT: Final = 10_000
 """The most entries ``paths.complete`` reads from one directory."""
 MAX_LINE_BYTES: Final = 1 << 20
-"""The longest request line; a longer one is answered ``invalid_request`` and dropped."""
+"""The longest request line; a longer one is read in pieces, each answered ``invalid_request``."""
 _READ_BYTES: Final = 64 * 1024
 _MAX_ERROR_DETAIL: Final = 2000
 _MAX_REQUEST_ID: Final = 128
