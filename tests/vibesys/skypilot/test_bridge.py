@@ -471,6 +471,143 @@ def test_decoded_log_spool_replays_persisted_undelivered_suffix(tmp_path: Path) 
     assert replayed == ["durable\n"]
 
 
+def test_decoded_log_spool_replays_large_history_in_bounded_chunks(tmp_path: Path) -> None:
+    namespace = _namespace(tmp_path)
+    journal = InvocationJournal(namespace)
+    invocation_id = "4" * 32
+    record = journal.prepare(invocation_id, "5" * 64, "6" * 64)
+    record = journal.submitting(record, "lease", _attempt_resources())
+    journal.submitted(record, 9, "lease")
+    path = tmp_path / "state" / "logs" / "stdout"
+    history = ("界" * (64 * 1024 * 3)) + "unterminated"
+
+    def disconnect(_: str) -> None:
+        raise BrokenPipeError
+
+    spool = bridge_module._DecodedLogSpool(  # noqa: SLF001  # LW-994701; exercises the private durable replay implementation's fixed comparison window
+        path=path,
+        journal=journal,
+        invocation_id=invocation_id,
+        sink=disconnect,
+    )
+    with pytest.raises(BrokenPipeError):
+        spool.feed(history)
+
+    replayed: list[str] = []
+    resumed = bridge_module._DecodedLogSpool(  # noqa: SLF001  # LW-994702; verifies persisted replay is delivered in bounded chunks without retaining the complete file
+        path=path,
+        journal=journal,
+        invocation_id=invocation_id,
+        sink=replayed.append,
+    )
+    resumed.feed(history)
+    resumed.finish()
+
+    assert "".join(replayed) == history
+    assert max(map(len, replayed)) <= 64 * 1024
+
+
+def test_decoded_log_spool_holds_client_offset_after_delivery_gap(tmp_path: Path) -> None:
+    journal, path, _ = _spool_fixture(tmp_path, "7" * 32)
+    attempts: list[str] = []
+
+    def fail_once(data: str) -> None:
+        attempts.append(data)
+        if len(attempts) == 1:
+            raise BrokenPipeError
+
+    spool = bridge_module._DecodedLogSpool(  # noqa: SLF001  # LW-994703; injects a fail-first sink to verify the private spool preserves contiguous delivery offsets
+        path=path,
+        journal=journal,
+        invocation_id="7" * 32,
+        sink=fail_once,
+    )
+    with pytest.raises(BrokenPipeError):
+        spool.feed("first\n")
+    spool.feed("second\n")
+
+    interrupted = journal.load("7" * 32)
+    assert interrupted is not None
+    assert interrupted.remote_read_offset == len("first\nsecond\n")
+    assert interrupted.client_delivered_offset == 0
+    assert attempts == ["first\n"]
+
+    replayed: list[str] = []
+    resumed = bridge_module._DecodedLogSpool(  # noqa: SLF001  # LW-994704; verifies restart replays the complete contiguous suffix after a latched delivery gap
+        path=path,
+        journal=journal,
+        invocation_id="7" * 32,
+        sink=replayed.append,
+    )
+    resumed.feed("first\nsecond\n")
+    resumed.finish()
+
+    assert replayed == ["first\nsecond\n"]
+
+
+class _FailFirstOffsetsJournal(InvocationJournal):
+    """Exercise recovery from one post-append journal write failure."""
+
+    def __init__(self, namespace: StateNamespace) -> None:
+        super().__init__(namespace)
+        self._fail_next_offsets = True
+
+    def offsets(
+        self,
+        record: InvocationRecord,
+        *,
+        remote_read: int,
+        client_delivered: int,
+    ) -> InvocationRecord:
+        if self._fail_next_offsets:
+            self._fail_next_offsets = False
+            message = "journal unavailable"
+            raise OSError(message)
+        return super().offsets(
+            record,
+            remote_read=remote_read,
+            client_delivered=client_delivered,
+        )
+
+
+def test_decoded_log_spool_latches_post_append_journal_failure(tmp_path: Path) -> None:
+    journal = _FailFirstOffsetsJournal(_namespace(tmp_path))
+    invocation_id = "8" * 32
+    record = journal.prepare(invocation_id, "9" * 64, "a" * 64)
+    record = journal.submitting(record, "lease", _attempt_resources())
+    journal.submitted(record, 9, "lease")
+    path = tmp_path / "state" / "logs" / "stdout"
+    delivered: list[str] = []
+    spool = bridge_module._DecodedLogSpool(  # noqa: SLF001  # LW-994705; fault-injects journal bookkeeping after durable append in the private spool state machine
+        path=path,
+        journal=journal,
+        invocation_id=invocation_id,
+        sink=delivered.append,
+    )
+
+    with pytest.raises(OSError, match="journal unavailable"):
+        spool.feed("AAAA")
+    spool.feed("BBBB")
+
+    interrupted = journal.load(invocation_id)
+    assert interrupted is not None
+    assert interrupted.remote_read_offset == len("AAAABBBB")
+    assert interrupted.client_delivered_offset == 0
+    assert delivered == []
+
+    replayed: list[str] = []
+    resumed = bridge_module._DecodedLogSpool(  # noqa: SLF001  # LW-994706; proves restart replays the exact contiguous suffix after journal recovery
+        path=path,
+        journal=journal,
+        invocation_id=invocation_id,
+        sink=replayed.append,
+    )
+    resumed.feed("AAAABBBB")
+    resumed.finish()
+
+    assert replayed == ["AAAABBBB"]
+
+
 def test_startup_replacement_evidence_applies_only_to_preexisting_invocations(
     tmp_path: Path,
     socket_dir: Path,

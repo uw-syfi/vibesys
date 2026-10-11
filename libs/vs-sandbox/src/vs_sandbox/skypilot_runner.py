@@ -43,6 +43,8 @@ _SKY_JOB_NOT_FINISHED = 101
 _SKY_JOB_NOT_FOUND = 102
 _SKY_JOB_CANCELLED = 103
 _PROCESS_CLEANUP_TIMEOUT_SECONDS = 5.0
+_PROCESS_OUTPUT_TAIL_CHARACTERS = 64 * 1024
+_PROCESS_OUTPUT_READ_CHARACTERS = 64 * 1024
 _MAX_PENDING_OUTPUT_SEGMENTS = 1
 
 
@@ -131,6 +133,11 @@ class SkyPilotOutputError(SkyPilotCLIError):
         """Describe a queue response without a job list for the cluster."""
         return cls("SkyPilot queue JSON must map the cluster name to a job list")
 
+    @classmethod
+    def truncated_control_output(cls, operation: str) -> SkyPilotOutputError:
+        """Reject an incomplete machine-readable control-plane response."""
+        return cls(f"SkyPilot {operation} output exceeded the retained-output limit")
+
 
 class SkyPilotClusterNotReadyError(SkyPilotCLIError):
     """Raised when a cluster does not reach a reusable state in time."""
@@ -189,12 +196,30 @@ class RemoteJobStatus(StrEnum):
 
 @dataclass(frozen=True)
 class ProcessResult:
-    """Captured result from one external process."""
+    """Exit status and bounded diagnostic tails from one external process."""
 
     argv: tuple[str, ...]
     returncode: int
     stdout: str
     stderr: str
+    stdout_omitted_characters: int = 0
+    stderr_omitted_characters: int = 0
+
+    def __post_init__(self) -> None:
+        """Reject invalid truncation metadata at the process boundary."""
+        if self.stdout_omitted_characters < 0 or self.stderr_omitted_characters < 0:
+            message = "SkyPilot output omitted-character counts must be nonnegative"
+            raise ValueError(message)
+
+    @property
+    def stdout_truncated(self) -> bool:
+        """Whether characters before the retained stdout tail were discarded."""
+        return self.stdout_omitted_characters > 0
+
+    @property
+    def stderr_truncated(self) -> bool:
+        """Whether characters before the retained stderr tail were discarded."""
+        return self.stderr_omitted_characters > 0
 
 
 class CommandRunner(Protocol):
@@ -211,11 +236,12 @@ class CommandRunner(Protocol):
     ) -> ProcessResult:
         """Run one command and return its captured result.
 
-        A sink that implements :class:`CancellableOutputSink` receives output
-        concurrently and is cancelled during process cleanup. An ordinary
-        callable receives captured output synchronously after successful
-        process and pipe completion, so the runner never abandons a callback
-        in a background worker.
+        A sink that implements :class:`CancellableOutputSink` receives every
+        bounded segment concurrently and is cancelled during process cleanup.
+        An ordinary callable receives the retained tail synchronously after
+        successful process and pipe completion, so the runner never abandons
+        a callback in a background worker. The result reports how many earlier
+        characters were omitted from each retained tail.
         """
         ...
 
@@ -253,14 +279,19 @@ class SubprocessCommandRunner:
         *,
         processes: PipedProcessLauncher | None = None,
         cleanup_timeout: float = _PROCESS_CLEANUP_TIMEOUT_SECONDS,
+        max_output_characters: int = _PROCESS_OUTPUT_TAIL_CHARACTERS,
     ) -> None:
-        """Bind output threads, process ownership, and *cleanup_timeout* seconds of cleanup."""
+        """Bind process ownership and fixed cleanup and retained-output bounds."""
         if not math.isfinite(cleanup_timeout) or cleanup_timeout < 0:
             message = "cleanup_timeout must be finite and nonnegative"
+            raise ValueError(message)
+        if max_output_characters < 0:
+            message = "max_output_characters must be nonnegative"
             raise ValueError(message)
         self._threads: Threads = threads or OsThreads()
         self._processes: PipedProcessLauncher = processes or SubprocessPipedProcessLauncher()
         self._cleanup_timeout = cleanup_timeout
+        self._max_output_characters = max_output_characters
 
     def run(
         self,
@@ -274,8 +305,7 @@ class SubprocessCommandRunner:
         """Run one command while optionally forwarding output."""
         normalized = tuple(str(part) for part in argv)
         process = self._processes.start(normalized, cwd=cwd)
-        sink_errors: list[Exception] = []
-        sink_errors_lock = self._threads.lock()
+        sink_failures = _SinkFailures(self._threads.lock())
         stdout = process.stdout
         stderr = process.stderr
         outputs = (
@@ -283,15 +313,15 @@ class SubprocessCommandRunner:
                 self._threads,
                 stdout,
                 stdout_sink,
-                sink_errors=sink_errors,
-                sink_errors_lock=sink_errors_lock,
+                max_output_characters=self._max_output_characters,
+                sink_failures=sink_failures,
             ),
             _StreamOutput(
                 self._threads,
                 stderr,
                 stderr_sink,
-                sink_errors=sink_errors,
-                sink_errors_lock=sink_errors_lock,
+                max_output_characters=self._max_output_characters,
+                sink_failures=sink_failures,
             ),
         )
         drain_workers: list[Worker] = []
@@ -350,9 +380,19 @@ class SubprocessCommandRunner:
             raise SkyPilotCLIError(message)
         for output in outputs:
             output.deliver_captured()
-        if sink_errors:
-            raise sink_errors[0]
-        return ProcessResult(normalized, returncode, outputs[0].text(), outputs[1].text())
+        sink_failure = sink_failures.first
+        if sink_failure is not None:
+            raise sink_failure
+        captured_stdout = outputs[0].result()
+        captured_stderr = outputs[1].result()
+        return ProcessResult(
+            normalized,
+            returncode,
+            captured_stdout.text,
+            captured_stderr.text,
+            captured_stdout.omitted_characters,
+            captured_stderr.omitted_characters,
+        )
 
     def _cleanup_failed_run(
         self,
@@ -434,6 +474,64 @@ class SubprocessCommandRunner:
         return max(0.0, deadline - self._threads.now())
 
 
+@dataclass(frozen=True)
+class _RetainedOutput:
+    """One bounded stream suffix and the size of its discarded prefix."""
+
+    text: str
+    omitted_characters: int
+
+
+class _OutputTail:
+    """Drain arbitrary text segments while retaining a fixed-size suffix."""
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._parts: deque[str] = deque()
+        self._retained_characters = 0
+        self._omitted_characters = 0
+
+    def append(self, text: str) -> None:
+        """Retain only the newest configured number of characters."""
+        self._parts.append(text)
+        self._retained_characters += len(text)
+        excess = self._retained_characters - self._limit
+        while excess > 0:
+            oldest = self._parts[0]
+            if len(oldest) <= excess:
+                self._parts.popleft()
+                removed = len(oldest)
+            else:
+                self._parts[0] = oldest[excess:]
+                removed = excess
+            self._retained_characters -= removed
+            self._omitted_characters += removed
+            excess -= removed
+
+    def result(self) -> _RetainedOutput:
+        """Return the retained suffix and exact number of discarded characters."""
+        return _RetainedOutput("".join(self._parts), self._omitted_characters)
+
+
+class _SinkFailures:
+    """Retain the first concurrent sink failure."""
+
+    def __init__(self, lock: Lock) -> None:
+        self._lock = lock
+        self._errors: list[Exception] = []
+
+    @property
+    def first(self) -> Exception | None:
+        """Return the first recorded failure after delivery workers settle."""
+        return self._errors[0] if self._errors else None
+
+    def record(self, error: Exception) -> None:
+        """Keep the first failure without stopping either pipe drain."""
+        with self._lock:
+            if not self._errors:
+                self._errors.append(error)
+
+
 class _StreamOutput:
     """Capture one pipe and deliver its segments without blocking the drain."""
 
@@ -443,18 +541,17 @@ class _StreamOutput:
         stream: TextIOBase,
         sink: Callable[[str], None] | None,
         *,
-        sink_errors: list[Exception],
-        sink_errors_lock: Lock,
+        max_output_characters: int,
+        sink_failures: _SinkFailures,
     ) -> None:
         self._stream = stream
         self._sink = sink
-        self._parts: list[str] = []
+        self._tail = _OutputTail(max_output_characters)
         self._pending: deque[str] = deque()
         self._condition: Condition = threads.condition()
         self._input_closed = False
         self._delivery_cancelled = False
-        self._sink_errors = sink_errors
-        self._sink_errors_lock = sink_errors_lock
+        self._sink_failures = sink_failures
 
     @property
     def has_delivery_worker(self) -> bool:
@@ -473,11 +570,11 @@ class _StreamOutput:
                                 or len(self._pending) < _MAX_PENDING_OUTPUT_SEGMENTS
                             )
                         )
-                line = self._stream.readline()
+                line = self._stream.readline(_PROCESS_OUTPUT_READ_CHARACTERS)
                 if not line:
                     break
                 with self._condition:
-                    self._parts.append(line)
+                    self._tail.append(line)
                     if self.has_delivery_worker and not self._delivery_cancelled:
                         self._pending.append(line)
                     self._condition.notify_all()
@@ -509,16 +606,15 @@ class _StreamOutput:
         sink = self._sink
         if sink is None or self.has_delivery_worker:
             return
-        for data in self._parts:
-            self._deliver(sink, data)
+        retained = self._tail.result().text
+        if retained:
+            self._deliver(sink, retained)
 
     def _deliver(self, sink: Callable[[str], None], data: str) -> None:
         try:
             sink(data)
         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009053 [BLE001]; a sink failure must not stop pipe ownership or later deliveries.
-            with self._sink_errors_lock:
-                if not self._sink_errors:
-                    self._sink_errors.append(exc)
+            self._sink_failures.record(exc)
 
     def cancel_delivery(self) -> None:
         """Discard queued delivery and interrupt a cancellable active sink."""
@@ -531,9 +627,9 @@ class _StreamOutput:
             with suppress(Exception):
                 sink.cancel()
 
-    def text(self) -> str:
-        """Return all captured stream text after the drain has completed."""
-        return "".join(self._parts)
+    def result(self) -> _RetainedOutput:
+        """Return bounded capture after the drain has completed."""
+        return self._tail.result()
 
 
 @dataclass(frozen=True)
@@ -554,6 +650,24 @@ class JobResult:
     stdout: str
     stderr: str
     cluster_name: str
+    stdout_omitted_characters: int = 0
+    stderr_omitted_characters: int = 0
+
+    def __post_init__(self) -> None:
+        """Reject invalid truncation metadata at the job boundary."""
+        if self.stdout_omitted_characters < 0 or self.stderr_omitted_characters < 0:
+            message = "SkyPilot job output omitted-character counts must be nonnegative"
+            raise ValueError(message)
+
+    @property
+    def stdout_truncated(self) -> bool:
+        """Whether characters before the retained stdout tail were discarded."""
+        return self.stdout_omitted_characters > 0
+
+    @property
+    def stderr_truncated(self) -> bool:
+        """Whether characters before the retained stderr tail were discarded."""
+        return self.stderr_omitted_characters > 0
 
 
 @dataclass(frozen=True)
@@ -649,6 +763,8 @@ class SkyPilotJobRunner:
     def inspect_cluster(self, name: str, *, timeout: float = 60) -> ClusterInfo | None:
         """Return the named cluster's state, or ``None`` when it is absent."""
         result = self._control(["status", "--refresh", "--output", "json", name], timeout=timeout)
+        if result.stdout_truncated:
+            raise SkyPilotOutputError.truncated_control_output("status")
         try:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
@@ -774,6 +890,8 @@ class SkyPilotJobRunner:
             stdout=result.stdout,
             stderr=result.stderr,
             cluster_name=cluster_name,
+            stdout_omitted_characters=result.stdout_omitted_characters,
+            stderr_omitted_characters=result.stderr_omitted_characters,
         )
 
     def query_job(
@@ -786,6 +904,8 @@ class SkyPilotJobRunner:
     ) -> RemoteJobInfo | None:
         """Find exactly one job by caller-owned name and optional persisted ID."""
         result = self._control(["queue", cluster_name, "--output", "json"], timeout=timeout)
+        if result.stdout_truncated:
+            raise SkyPilotOutputError.truncated_control_output("queue")
         records = self._queue_records(result.stdout, cluster_name)
         matches = [record for record in records if record.get("job_name") == job_name]
         if not matches:

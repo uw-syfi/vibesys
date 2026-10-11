@@ -94,7 +94,7 @@ def test_subprocess_runner_drains_pipes_and_propagates_sink_failure() -> None:
             stdout_sink=broken_sink,
         )
 
-    assert calls == 1000
+    assert calls == 1
 
 
 def test_subprocess_runner_captures_both_streams_and_the_exit_status() -> None:
