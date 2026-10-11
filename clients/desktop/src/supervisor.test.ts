@@ -1,4 +1,5 @@
 import {describe, expect, test} from 'bun:test';
+import {FakeClock} from '@vibesys/backend-client/testing';
 import {type AttachedRun, checkAttachment, observedDial} from './attachment.js';
 import {SshHost} from './ssh-host.js';
 import {
@@ -13,7 +14,6 @@ import {
   type SupervisorState,
   step,
 } from './supervisor.js';
-import {FakeClock} from './testing/fake-clock.js';
 import {fakeRecord} from './testing/fake-record.js';
 import {FakeSsh} from './testing/fake-ssh.js';
 import {FakeVibesysNode} from './testing/fake-vibesys-node.js';
@@ -84,10 +84,10 @@ describe('ConnectionSupervisor scenarios', () => {
     world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'link'});
     await settle();
     expect(world.supervisor.status.kind).toBe('reconnecting');
-    world.clock.advance(CONFIG.checkTimeoutMs);
+    world.clock.advanceBy(CONFIG.checkTimeoutMs);
     await settle();
     expect(world.supervisor.status.kind).toBe('reconnecting');
-    world.clock.advance(CONFIG.delaysMs[0] ?? 0);
+    world.clock.advanceBy(CONFIG.delaysMs[0] ?? 0);
     await settle();
     expect(world.supervisor.status.kind).toBe('connected');
     expect(world.wakes()).toBe(1);
@@ -104,10 +104,10 @@ describe('ConnectionSupervisor scenarios', () => {
       for (const delay of CONFIG.delaysMs.slice(0, refusals)) {
         await settle();
         expect(world.supervisor.status.kind).toBe('reconnecting');
-        world.clock.advance(delay - 1);
+        world.clock.advanceBy(delay - 1);
         await settle();
         expect(calls).toBeLessThanOrEqual(refusals);
-        world.clock.advance(1);
+        world.clock.advanceBy(1);
       }
       await settle();
       expect(world.supervisor.status.kind).toBe('connected');
@@ -122,7 +122,7 @@ describe('ConnectionSupervisor scenarios', () => {
     world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'link'});
     await settle();
     for (let index = 0; index < 20; index += 1) {
-      world.clock.advance(SPENT);
+      world.clock.advanceBy(SPENT);
       await settle();
     }
     expect(world.supervisor.status.kind).toBe('offline');
@@ -139,12 +139,12 @@ describe('ConnectionSupervisor scenarios', () => {
     const world = await connected(() => (up ? OK : LINK));
     world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'link'});
     await settle();
-    world.clock.advance(CONFIG.delaysMs[0] ?? 0);
+    world.clock.advanceBy(CONFIG.delaysMs[0] ?? 0);
     await settle();
     expect(world.supervisor.status).toEqual({kind: 'reconnecting', attempt: 2});
     // Asleep for eight hours: the pending retry fires on wake, then the wake itself is a no-op.
     up = true;
-    world.clock.advance(8 * 3_600_000);
+    world.clock.advanceBy(8 * 3_600_000);
     world.supervisor.dispatch({type: 'resumed'});
     await settle();
     expect(world.supervisor.status.kind).toBe('connected');
@@ -159,7 +159,7 @@ describe('ConnectionSupervisor scenarios', () => {
     world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'link'});
     await settle();
     expect(world.supervisor.status.kind).toBe('auth-needed');
-    world.clock.advance(10 * SPENT);
+    world.clock.advanceBy(10 * SPENT);
     world.supervisor.dispatch({type: 'resumed'});
     world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'link'});
     await settle();
@@ -179,7 +179,7 @@ describe('ConnectionSupervisor scenarios', () => {
     for (let index = 0; index < 5; index += 1) {
       world.supervisor.dispatch({type: 'stream-ended', end: 'run-gone', detail: 'run-gone'});
       world.supervisor.dispatch({type: 'network-changed'});
-      world.clock.advance(SPENT);
+      world.clock.advanceBy(SPENT);
       await settle();
     }
     expect(world.checks.length).toBe(2);
@@ -191,7 +191,7 @@ describe('ConnectionSupervisor scenarios', () => {
     world.supervisor.dispatch({type: 'start'});
     await settle();
     expect(world.supervisor.status).toEqual({kind: 'incompatible', detail: 'protocol 2 vs 1'});
-    world.clock.advance(SPENT);
+    world.clock.advanceBy(SPENT);
     await settle();
     expect(world.checks.length).toBe(1);
   });
@@ -253,7 +253,7 @@ describe('ConnectionSupervisor when checks pass but dials fail', () => {
     world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'server_stalled'});
     for (let index = 0; index < 20; index += 1) {
       await world.pump();
-      world.clock.advance(SPENT);
+      world.clock.advanceBy(SPENT);
     }
     await world.pump();
     expect(world.supervisor.status).toEqual({kind: 'offline', detail: 'server_stalled'});
@@ -268,10 +268,10 @@ describe('ConnectionSupervisor when checks pass but dials fail', () => {
     world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'x'});
     await world.pump();
     fail = false;
-    world.clock.advance(SPENT);
+    world.clock.advanceBy(SPENT);
     await world.pump();
     expect(world.supervisor.status.kind).toBe('connected');
-    world.clock.advance(CONFIG.stableAfterMs);
+    world.clock.advanceBy(CONFIG.stableAfterMs);
     await settle();
     const before = world.checks.length;
     world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'x'});
@@ -289,7 +289,7 @@ describe('ConnectionSupervisor when checks pass but dials fail', () => {
     expect(world.supervisor.status).toEqual({kind: 'failed', detail});
     world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'x'});
     world.supervisor.dispatch({type: 'network-changed'});
-    world.clock.advance(SPENT);
+    world.clock.advanceBy(SPENT);
     await settle();
     expect(world.checks).toEqual([true]);
     expect(world.wakes()).toBe(0);
@@ -526,7 +526,7 @@ describe('supervisor over an SSH host', () => {
     node.stopAll();
     await dial().catch(() => {});
     // The stream just recovered, so this check waits its turn in the backoff.
-    clock.advance(SPENT);
+    clock.advanceBy(SPENT);
     await checked.at(-1);
     await settle();
     expect(supervisor.status.kind).toBe('run-ended');

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from server.api.design import DesignLog
@@ -84,6 +85,107 @@ class RunReadOnlyError(RuntimeError):
         super().__init__("This finished run is read-only")
 
 
+class _RunControlState(StrEnum):
+    """Lifecycle of the one control session owned by a server runtime."""
+
+    AWAITING_SESSION = "awaiting_session"
+    ACTIVE = "active"
+    ENDED = "ended"
+
+
+class RunControlUnavailableError(RuntimeError):
+    """A control command that cannot be retained until a session can consume it."""
+
+    diagnostic_code = "run_control_unavailable"
+
+    def __init__(self, state: _RunControlState) -> None:
+        """Explain whether the session is not installed yet or has ended."""
+        timing = (
+            "before the run session starts"
+            if state is _RunControlState.AWAITING_SESSION
+            else "after the run session ends"
+        )
+        super().__init__(f"Run control is unavailable {timing}")
+
+
+class RunControlSlot:
+    """Synchronize command admission with installation of one run session.
+
+    Stop is the only command whose pre-session semantics are unambiguous: it
+    means that the eventual session must stop. The slot retains that intent
+    until installation and delivers it once. Other mutating commands require
+    an active session, so rejecting them is safer than acknowledging and
+    discarding them or guessing their ordering against startup.
+    """
+
+    def __init__(self, condition: Condition) -> None:
+        """Start ready to retain a stop for the eventual session."""
+        self._condition = condition
+        self._state = _RunControlState.AWAITING_SESSION
+        self._control: RunControl | None = None
+        self._stop_pending = False
+
+    def install(self, control: RunControl) -> None:
+        """Install the session and deliver one retained stop intent, if any."""
+        with self._condition:
+            if self._state is not _RunControlState.AWAITING_SESSION:
+                message = f"cannot install run control while slot is {self._state.value}"
+                raise RuntimeError(message)
+            if self._stop_pending:
+                # Control methods are synchronous messages to the process-local
+                # session. Deliver under the shared re-entrant condition so a
+                # concurrent command cannot overtake this retained intent.
+                control.stop()
+                self._stop_pending = False
+            self._control = control
+            self._state = _RunControlState.ACTIVE
+
+    def release(self, control: RunControl) -> None:
+        """Close command admission after the installed session ends."""
+        with self._condition:
+            if self._state is not _RunControlState.ACTIVE or self._control is not control:
+                message = "cannot release a run control that is not installed"
+                raise RuntimeError(message)
+            self._control = None
+            self._state = _RunControlState.ENDED
+
+    def execute(
+        self, request: PauseCommand | ResumeCommand | SteerCommand | StopCommand
+    ) -> CommandAck:
+        """Apply one command or retain the sole command safe before startup."""
+        with self._condition:
+            control = self._control
+            if control is None:
+                if self._state is _RunControlState.AWAITING_SESSION and isinstance(
+                    request, StopCommand
+                ):
+                    self._stop_pending = True
+                    return CommandAck(action="stop", status="pending")
+                raise RunControlUnavailableError(self._state)
+            return self._execute_active(control, request)
+
+    @staticmethod
+    def _execute_active(
+        control: RunControl,
+        request: PauseCommand | ResumeCommand | SteerCommand | StopCommand,
+    ) -> CommandAck:
+        """Deliver one command while the slot prevents session release."""
+        if isinstance(request, PauseCommand):
+            control.pause()
+            return CommandAck(action="pause", status="pending")
+        if isinstance(request, ResumeCommand):
+            if request.fallback:
+                control.resume_with_fallback()
+            else:
+                control.resume()
+            return CommandAck(action="resume", status="consumed")
+        if isinstance(request, StopCommand):
+            control.stop()
+            return CommandAck(action="stop", status="pending")
+        control.steer(request.text)
+        return CommandAck(action="steer", status="pending")
+
+
 @dataclass(frozen=True)
 class SubscriptionCheckpoint:
     """One journal state captured atomically for a live subscription batch.
@@ -130,7 +232,7 @@ class RunApi:
         chat: ChatManager,
         integration: RunIntegrationAdapter,
         *,
-        session_provider: Callable[[], RunControl | None],
+        controls: RunControlSlot,
         tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
         threads: Threads | None = None,
     ) -> None:
@@ -142,7 +244,7 @@ class RunApi:
         self._journal = journal
         self._chat = chat
         self._integration = integration
-        self._session_provider = session_provider
+        self._controls = controls
         self._tui_defaults_provider = tui_defaults
         self._tui_defaults: InteractiveSetupDefaults | None = None
         self._tui_defaults_lock = threads.lock()
@@ -228,40 +330,10 @@ class RunApi:
     def _execute_command(
         self, request: PauseCommand | ResumeCommand | SteerCommand | StopCommand
     ) -> Response:
-        """Send a control message to the live run's session, if one is running.
-
-        Routes through `self._session_provider()` (a `vibesys.api.RunControl`)
-        rather than a channel this class owns: once a session's
-        `vs_runtime.api.infrastructure.RunControlChannel` is private to that
-        session (the runtime reads it at each agent invocation boundary; the
-        controller's status/journal mirror its
-        events, see `server.integration.RunIntegrationAdapter
-        ._project_control_event`), there is no run-scoped channel to hold
-        onto between requests. No run live is a graceful no-op: the command
-        still acknowledges, there is just nothing to steer.
-        """
+        """Send a command through the runtime's synchronized control slot."""
         if self._controller.is_read_only():
             raise RunReadOnlyError
-        control = self._session_provider()
-        if isinstance(request, PauseCommand):
-            if control is not None:
-                control.pause()
-            ack = CommandAck(action="pause", status="pending")
-        elif isinstance(request, ResumeCommand):
-            if control is not None:
-                if request.fallback:
-                    control.resume_with_fallback()
-                else:
-                    control.resume()
-            ack = CommandAck(action="resume", status="consumed")
-        elif isinstance(request, StopCommand):
-            if control is not None:
-                control.stop()
-            ack = CommandAck(action="stop", status="pending")
-        else:
-            if control is not None:
-                control.steer(request.text)
-            ack = CommandAck(action="steer", status="pending")
+        ack = self._controls.execute(request)
         return Response(request_id=request.request_id, ack=ack)
 
     def _execute_chat(self, request: ChatQuery) -> Response:

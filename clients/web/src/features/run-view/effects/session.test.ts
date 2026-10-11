@@ -6,13 +6,12 @@ import {
   type ProtocolResponse,
   type RequestInput,
   type RunStatus,
-  type ScheduleTimeout,
   ServerError,
   type ServerMessage,
   type SubscribeOptions,
   sameControlChannelState,
 } from '@vibesys/backend-client';
-import {event, eventBatch, snapshotResponse} from '@vibesys/backend-client/testing';
+import {event, eventBatch, FakeClock, snapshotResponse} from '@vibesys/backend-client/testing';
 import {connectRun, type TransportHooks, type TransportTiming} from '../../../platform/backend.js';
 import type {BrowserLifecycle} from '../../../platform/lifecycle.js';
 import {connectionBanners, STREAM_BANNER_COPY} from '../state/banners.js';
@@ -61,29 +60,6 @@ class FakeLifecycle implements BrowserLifecycle {
 
   listenerCount(type: LifecycleEvent): number {
     return this.#listeners[type].size;
-  }
-}
-
-/** Deterministic scheduler for the stream's reconnect backoff. */
-class ManualScheduler {
-  readonly #pending: Array<{callback: () => void; cancelled: boolean; delayMs: number}> = [];
-
-  readonly scheduleTimeout: ScheduleTimeout = (callback, delayMs = 0) => {
-    const pending = {callback, cancelled: false, delayMs};
-    this.#pending.push(pending);
-    return () => {
-      pending.cancelled = true;
-    };
-  };
-
-  runNext(): void {
-    const pending = this.#pending.shift();
-    if (pending === undefined) throw new Error('No reconnect is scheduled');
-    if (!pending.cancelled) pending.callback();
-  }
-
-  pendingDelays(): number[] {
-    return this.#pending.filter(pending => !pending.cancelled).map(pending => pending.delayMs);
   }
 }
 
@@ -235,7 +211,7 @@ class FakeTransport implements ControlTransport {
 describe('WebSession', () => {
   test('wakes after an OS sleep with an exhausted schedule and catches up exactly', async () => {
     const lifecycle = new FakeLifecycle();
-    const scheduler = new ManualScheduler();
+    const scheduler = new FakeClock();
     const {session, transport} = sessionWith(lifecycle, {
       reconnectDelaysMs: [],
       scheduleTimeout: scheduler.scheduleTimeout,
@@ -293,7 +269,7 @@ describe('WebSession', () => {
 
   test('wakes a throttled tab without waiting for its skipped reconnect timer', async () => {
     const lifecycle = new FakeLifecycle();
-    const scheduler = new ManualScheduler();
+    const scheduler = new FakeClock();
     const {session, transport} = sessionWith(lifecycle, {
       reconnectDelaysMs: [50],
       scheduleTimeout: scheduler.scheduleTimeout,
@@ -319,8 +295,9 @@ describe('WebSession', () => {
     subscription.onMessage(outputBatch('store-1', 2, 'caught up after throttling\n'));
     await recovered;
 
-    // Firing the retired callback cannot open a second subscription.
-    scheduler.runNext();
+    // The wake retired the skipped reconnect timer: nothing is left to fire,
+    // so no second subscription opens.
+    expect(scheduler.runNext()).toBe(false);
     expect(transport.subscriptions).toHaveLength(2);
     expect(session.store.getState().transcript.map(entry => entry.content)).toEqual([
       'caught up after throttling\n',
@@ -378,7 +355,7 @@ describe('WebSession', () => {
 
   test('keeps an explicit reattach behind a lifecycle stream dial', async () => {
     const lifecycle = new FakeLifecycle();
-    const scheduler = new ManualScheduler();
+    const scheduler = new FakeClock();
     const {session, transport} = sessionWith(lifecycle, {
       reconnectDelaysMs: [0],
       scheduleTimeout: scheduler.scheduleTimeout,
@@ -433,7 +410,7 @@ describe('WebSession', () => {
 
   test('coalesces reattach with a recovery bootstrap before the first batch', async () => {
     const lifecycle = new FakeLifecycle();
-    const scheduler = new ManualScheduler();
+    const scheduler = new FakeClock();
     const {session, transport} = sessionWith(lifecycle, {
       reconnectDelaysMs: [0],
       scheduleTimeout: scheduler.scheduleTimeout,
@@ -444,7 +421,7 @@ describe('WebSession', () => {
     transport.deferNextSubscribe();
     const retrying = transport.nextSubscription();
     transport.subscriptions[0]?.onDisconnect(disconnect('gateway restarted'));
-    scheduler.runNext();
+    expect(scheduler.runNext()).toBe(true);
     expect(await retrying).toMatchObject({afterSequence: 0, options: undefined});
 
     session.reattach();
@@ -553,7 +530,7 @@ describe('WebSession', () => {
 
   test('keeps the reached history floor across a resumed batch', async () => {
     const lifecycle = new FakeLifecycle();
-    const scheduler = new ManualScheduler();
+    const scheduler = new FakeClock();
     const {session, transport} = sessionWith(lifecycle, {
       reconnectDelaysMs: [0],
       scheduleTimeout: scheduler.scheduleTimeout,
@@ -564,7 +541,7 @@ describe('WebSession', () => {
     const resumed = transport.nextSubscription();
 
     transport.subscriptions[0]?.onDisconnect(disconnect('gateway restarted'));
-    scheduler.runNext();
+    expect(scheduler.runNext()).toBe(true);
     const subscription = await resumed;
     subscription.onMessage(streamBatch('run-store', 101, 0));
 
@@ -833,7 +810,7 @@ describe('WebSession', () => {
 
   test('keeps reconnect and reattach available for a forward-compatible run status', async () => {
     const lifecycle = new FakeLifecycle();
-    const scheduler = new ManualScheduler();
+    const scheduler = new FakeClock();
     const {session, transport} = sessionWith(lifecycle, {
       reconnectDelaysMs: [0],
       scheduleTimeout: scheduler.scheduleTimeout,
@@ -853,7 +830,7 @@ describe('WebSession', () => {
     });
     expect(scheduler.pendingDelays()).toEqual([0]);
 
-    scheduler.runNext();
+    expect(scheduler.runNext()).toBe(true);
     await resumed;
     expect(transport.subscriptions).toHaveLength(2);
 

@@ -30,6 +30,7 @@ h2 { font-size: 16px; margin: 0; }
 .gateway-connect-row { display: flex; gap: 10px; }
 .gateway-connect input { background: #111a2d; border: 1px solid #34425f; border-radius: 7px; color: #f1f5ff; flex: 1; font: inherit; min-width: 0; padding: 11px 13px; }
 .gateway-connect button { background: #79a8ff; border: 0; border-radius: 7px; color: #07101f; cursor: pointer; font: inherit; font-weight: 700; padding: 11px 16px; }
+.gateway-connect-status { color: #a9b8d0; margin: 0; }
 .gateway-connect-error { color: #ff9c9c; margin: 0; }
 @media (max-width: 640px) { .shell { width: min(100% - 28px, 1120px); padding-top: 28px; } .summary { grid-template-columns: 1fr; } }
 /* Inside the Electron shell the native title bar is hidden: reserve a drag strip in the page's own background for the window controls. Nothing interactive lives in it. */

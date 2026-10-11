@@ -318,6 +318,14 @@ async def test_a_run_nothing_can_wake_is_reported_stalled(tmp_path: Path) -> Non
             await drive_core(host, _config())
 
 
+async def test_a_stalled_run_reports_what_the_host_knows_about_the_cause(tmp_path: Path) -> None:
+    with open_skeleton_world(tmp_path, INERT) as world:
+        _, host = _host(world, ProbedRunClock(clock_from(1.0)))
+        start_core(host, _config())
+        with pytest.raises(RunStalledError, match=r"open intents \[\]; a submission nobody told"):
+            await drive_core(host, _config(), stall_notes=lambda: ["a submission nobody told"])
+
+
 class WaitsUntil(SkeletonStrategy):
     """Holds all work back until a run-clock time, then cancels the run."""
 

@@ -159,22 +159,108 @@ const BROWSER_SESSION_HEADER = 'X-VibeSys-Browser-Session';
 
 export type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
+export const DEFAULT_GATEWAY_BOOTSTRAP_TIMEOUT_MS = 10_000;
+
+export interface GatewayBootstrapOptions {
+  /** Stop when the feature no longer owns this exchange. */
+  readonly signal?: AbortSignal;
+  /** Test seam for the HTTP boundary. */
+  readonly fetcher?: Fetch;
+  /** Test seam for the response deadline. */
+  readonly scheduleTimeout?: ScheduleTimeout;
+  readonly timeoutMs?: number;
+}
+
 /** Exchange a gateway launch capability for this tab's browser-session credential. */
 export async function bootstrapGateway(
   capabilityUrl: string,
-  fetcher: Fetch = fetch,
+  options: GatewayBootstrapOptions = {},
 ): Promise<string> {
-  const response = await fetcher(capabilityUrl, {
-    cache: 'no-store',
-    credentials: 'include',
-    mode: 'cors',
-  });
-  if (!response.ok) throw new Error(`Gateway rejected the capability (HTTP ${response.status})`);
-  const browserSession = response.headers.get(BROWSER_SESSION_HEADER);
-  if (browserSession === null || browserSession === '') {
-    throw new Error('Gateway did not establish a browser session');
+  const timeoutMs = options.timeoutMs ?? DEFAULT_GATEWAY_BOOTSTRAP_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError('Gateway bootstrap timeout must be a positive finite number');
   }
-  return browserSession;
+  const controller = new AbortController();
+  const stopForwardingAbort = forwardAbort(options.signal, controller);
+  let cancelDeadline = (): void => undefined;
+  try {
+    cancelDeadline = (options.scheduleTimeout ?? scheduleBrowserTimeout)(() => {
+      controller.abort(new Error(`Gateway connection timed out after ${timeoutMs} ms`));
+    }, timeoutMs);
+    const response = await fetchUntilAbort(
+      options.fetcher ?? fetch,
+      capabilityUrl,
+      {
+        cache: 'no-store',
+        credentials: 'include',
+        mode: 'cors',
+        signal: controller.signal,
+      },
+      controller.signal,
+    );
+    if (!response.ok) throw new Error(`Gateway rejected the capability (HTTP ${response.status})`);
+    const browserSession = response.headers.get(BROWSER_SESSION_HEADER);
+    if (browserSession === null || browserSession === '') {
+      throw new Error('Gateway did not establish a browser session');
+    }
+    return browserSession;
+  } finally {
+    cancelDeadline();
+    stopForwardingAbort();
+  }
+}
+
+const scheduleBrowserTimeout: ScheduleTimeout = (callback, delayMs) => {
+  const timer = setTimeout(callback, delayMs);
+  return () => clearTimeout(timer);
+};
+
+function forwardAbort(source: AbortSignal | undefined, target: AbortController): () => void {
+  if (source === undefined) return () => undefined;
+  const abort = (): void => target.abort(abortReason(source));
+  if (source.aborted) {
+    abort();
+    return () => undefined;
+  }
+  source.addEventListener('abort', abort, {once: true});
+  return () => source.removeEventListener('abort', abort);
+}
+
+/** Settle on ownership loss even when a structural fetch Fake ignores its signal. */
+function fetchUntilAbort(
+  fetcher: Fetch,
+  capabilityUrl: string,
+  init: RequestInit,
+  signal: AbortSignal,
+): Promise<Response> {
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<Response>((resolve, reject) => {
+    let settled = false;
+    const finish = (complete: () => void): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', aborted);
+      complete();
+    };
+    const aborted = (): void => finish(() => reject(abortReason(signal)));
+    signal.addEventListener('abort', aborted, {once: true});
+    let request: Promise<Response>;
+    try {
+      request = fetcher(capabilityUrl, init);
+    } catch (reason) {
+      finish(() => reject(reason));
+      return;
+    }
+    void request.then(
+      response => finish(() => resolve(response)),
+      reason => finish(() => reject(reason)),
+    );
+  });
+}
+
+function abortReason(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  return new DOMException('Gateway connection was aborted', 'AbortError');
 }
 
 /** Fetch a JSONL replay fixture and validate every event; any bad line rejects the whole file. */
