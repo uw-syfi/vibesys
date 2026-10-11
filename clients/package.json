@@ -9,7 +9,7 @@
     "check:ts": "biome check . && pnpm warn:ts-file-size",
     "warn:ts-file-size": "biome lint --config-path biome.warnings.json --only=style/noExcessiveLinesPerFile .",
     "check:ts-architecture": "node scripts/check_ts_architecture.mjs && node scripts/check_ts_package_manifests.mjs",
-    "test:ts-architecture": "node --test scripts/check_ts_architecture.test.mjs scripts/check_biome_line_caps.test.mjs scripts/check_ui_no_effects.test.mjs",
+    "test:ts-architecture": "node --test scripts/check_ts_architecture.test.mjs scripts/check_biome_line_caps.test.mjs scripts/check_ui_no_effects.test.mjs scripts/check_web_fetch_confined.test.mjs",
     "test:bun-runner": "node --test scripts/run_bun_tests.test.mjs",
     "test:node-runner": "node --test scripts/run_node_tests.test.mjs",
     "check:conformance": "node scripts/check_conformance_corpus.mjs",

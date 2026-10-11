@@ -72,6 +72,109 @@ function frontendPeerRules() {
   });
 }
 
+// The web run page (`web/src`) is feature-sliced, with layers that point down only:
+// `app/` (composition) -> `features/<name>/` -> `entities/` (domain values and pure selectors)
+// -> `platform/` (system services: the one backend adapter, lifecycle, storage) -> `shared/`
+// (domain-free utilities). Inside a feature, `state/` is the pure core, `ui/` is presentational,
+// and `effects/` is the shell. `docs/contributing/web-development.md` describes the layout.
+const WEB = '^web/src/';
+const WEB_LAYERS = ['app', 'features', 'entities', 'platform', 'shared'];
+const BACKEND_CLIENT = ['^backend-client/', '/node_modules/@vibesys/backend-client/'];
+const CORE_STATE = ['^core-state/', '/node_modules/@vibesys/core-state/'];
+const WEB_BACKEND_ADAPTER = `${WEB}platform/backend\\.ts$`;
+const WEB_FEATURE_PART = part => `${WEB}features/[^/]+/${part}/`;
+
+function webRunPageRules() {
+  const layerRules = WEB_LAYERS.slice(1).map((layer, index) => ({
+    name: `web-${layer}-does-not-import-layers-above`,
+    severity: 'error',
+    from: {path: `${WEB}${layer}/`, pathNot: TEST_FILE},
+    to: {path: `${WEB}(?:${WEB_LAYERS.slice(0, index + 1).join('|')})/`},
+  }));
+  return [
+    ...layerRules,
+    {
+      name: 'web-layers-do-not-import-the-package-surface',
+      severity: 'error',
+      // `index.ts` is the package's public surface; nothing inside the layers reaches back to it.
+      from: {path: `${WEB}(?:${WEB_LAYERS.join('|')})/`},
+      to: {path: `${WEB}index\\.ts$`},
+    },
+    {
+      // A feature never reaches another feature; cross-feature flows are wired in `app/`.
+      name: 'web-features-are-isolated',
+      severity: 'error',
+      from: {path: `${WEB}features/([^/]+)/`},
+      to: {path: `${WEB}features/`, pathNot: `${WEB}features/$1/`},
+    },
+    {
+      // A feature's `index.ts` is its only public surface.
+      name: 'web-features-are-entered-through-their-index',
+      severity: 'error',
+      from: {path: WEB, pathNot: `${WEB}features/`},
+      to: {path: `${WEB}features/[^/]+/(?!index\\.ts$)`},
+    },
+    {
+      // The functional core (domain values and each feature's reducers) does no I/O: no React,
+      // no platform services, no backend-client runtime values. Generated types and core-state
+      // are the inputs it folds.
+      name: 'web-core-is-pure',
+      severity: 'error',
+      from: {path: [`${WEB}entities/`, WEB_FEATURE_PART('state')], pathNot: TEST_FILE},
+      to: {
+        path: [
+          `${WEB}platform/`,
+          '(?:^|/)node_modules/(?:react|react-dom|electron)/',
+          ...BACKEND_CLIENT,
+        ],
+        dependencyTypesNot: ['type-only'],
+      },
+    },
+    {
+      name: 'web-feature-state-does-not-import-its-shell-or-view',
+      severity: 'error',
+      from: {path: WEB_FEATURE_PART('state'), pathNot: TEST_FILE},
+      to: {path: [WEB_FEATURE_PART('ui'), WEB_FEATURE_PART('effects')]},
+    },
+    {
+      // Presentational components render props and report events; `ui-no-*.grit` forbids their
+      // I/O calls and effect hooks, and this forbids reaching anything that does I/O.
+      name: 'web-feature-ui-does-not-depend-on-shell',
+      severity: 'error',
+      from: {path: WEB_FEATURE_PART('ui'), pathNot: TEST_FILE},
+      to: {
+        path: [
+          WEB_FEATURE_PART('effects'),
+          `${WEB}platform/`,
+          ...BACKEND_CLIENT,
+          '(?:^|/)node_modules/electron/',
+        ],
+      },
+    },
+    {
+      name: 'web-feature-effects-do-not-import-ui',
+      severity: 'error',
+      from: {path: WEB_FEATURE_PART('effects'), pathNot: TEST_FILE},
+      to: {path: WEB_FEATURE_PART('ui')},
+    },
+    {
+      // One path to the backend: `platform/backend.ts` is the only module that imports
+      // backend-client's runtime values (`web-fetch-only-in-backend.grit` holds `fetch` to it).
+      name: 'web-backend-client-only-in-backend-adapter',
+      severity: 'error',
+      from: {path: WEB, pathNot: [TEST_FILE, WEB_BACKEND_ADAPTER]},
+      to: {path: BACKEND_CLIENT, dependencyTypesNot: ['type-only']},
+    },
+    {
+      // `shared/` is domain-free: no run, protocol, or connection vocabulary reaches it.
+      name: 'web-shared-is-domain-free',
+      severity: 'error',
+      from: {path: `${WEB}shared/`, pathNot: TEST_FILE},
+      to: {path: [...BACKEND_CLIENT, ...CORE_STATE]},
+    },
+  ];
+}
+
 /** @type {import('dependency-cruiser').IConfiguration} */
 export default {
   forbidden: [
@@ -336,6 +439,7 @@ export default {
       from: {path: '^desktop/src/welcome/effects/', pathNot: TEST_FILE},
       to: {path: ['^desktop/src/welcome/ui/', '^desktop/src/welcome/main\\.tsx$']},
     },
+    ...webRunPageRules(),
     {
       // Renderer code (the welcome view, the web run page) reaches the main process only
       // through its preload's bridge.
