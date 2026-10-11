@@ -16,7 +16,8 @@ registry.
 
 Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``INSTANCE_ID_PATTERN``, ``InstanceId``, ``RunId``, ``RunStatus``,
-``StartupStage``, ``FailureReason``, ``RunPhase``, ``InstanceStatus``,
+``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
+``RunPhase``, ``InstanceStatus``,
 ``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
 ``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
@@ -40,6 +41,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    NonNegativeInt,
     PositiveInt,
     StringConstraints,
     TypeAdapter,
@@ -61,8 +63,8 @@ InstanceId = Annotated[str, StringConstraints(pattern=INSTANCE_ID_PATTERN)]
 RunId = Annotated[str, StringConstraints(min_length=1)]
 """The durable run a server drives; ``vs_project`` owns its full syntax."""
 
-RECORD_VERSION = 3
-"""The registry record version this checkout writes and reads."""
+RECORD_VERSION = 4
+"""The registry record version this checkout writes; it also reads version 3."""
 
 
 class RunStatus(StrEnum):
@@ -105,10 +107,36 @@ class RunStatus(StrEnum):
 
 
 class StartupStage(StrEnum):
-    """Where a starting run is, in the order it gets there."""
+    """Where a starting run is, in the order it gets there.
+
+    Declaration order is the order: a starting run only moves to a later stage.
+    """
 
     RESOLVING = "resolving"
-    """The server validates the request and its configuration."""
+    """The server validates the request, its configuration, and the project."""
+    BUILDING_IMAGE = "building_image"
+    """The agent image is being built (the first build on a host takes minutes)."""
+    STARTING_CONTAINER = "starting_container"
+    """The image is built; the agent's container is being started."""
+
+    @property
+    def rank(self) -> int:
+        """Position in the startup order."""
+        return list(StartupStage).index(self)
+
+
+class StartupProgress(BaseModel):
+    """How far a startup stage has come: ``done`` of ``total`` steps, now on ``label``.
+
+    ``total`` is ``None`` when the stage does not know it. ``label`` names the
+    step now running (an image build's Dockerfile instruction), as data.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    done: NonNegativeInt
+    total: int | None = Field(default=None, ge=1)
+    label: str = ""
 
 
 class FailureReason(BaseModel):
@@ -121,17 +149,28 @@ class FailureReason(BaseModel):
     message: str
 
 
+class StartupFact(BaseModel):
+    """A starting run reached ``stage``, or progressed within it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    stage: StartupStage
+    progress: StartupProgress | None = None
+
+
 class RunPhase(BaseModel):
     """A run's lifecycle status with the detail its status needs.
 
-    ``stage`` says where a ``starting`` run is; ``reason`` says why a
-    ``failed`` one ended. Neither is present for any other status.
+    ``stage`` (and, when the stage reports it, ``progress``) says where a
+    ``starting`` run is; ``reason`` says why a ``failed`` one ended. None of
+    them is present for any other status.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     status: RunStatus
     stage: StartupStage | None = None
+    progress: StartupProgress | None = None
     reason: FailureReason | None = None
 
     @model_validator(mode="after")
@@ -139,29 +178,51 @@ class RunPhase(BaseModel):
         if (self.stage is not None) != (self.status is RunStatus.STARTING):
             message = "stage is present exactly when status is starting"
             raise ValueError(message)
+        if self.progress is not None and self.stage is None:
+            message = "progress is present only with a startup stage"
+            raise ValueError(message)
         if (self.reason is not None) != (self.status is RunStatus.FAILED):
             message = "reason is present exactly when status is failed"
             raise ValueError(message)
         return self
 
     def advance(
-        self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+        self,
+        *,
+        status: RunStatus | None = None,
+        failure: FailureReason | None = None,
+        startup: StartupFact | None = None,
     ) -> RunPhase:
-        """Return the phase after one observed fact: a status change or a failure.
+        """Return the phase after one observed fact: a status change, a failure, or a startup step.
 
         The fold is monotone: an ended phase absorbs every fact, and ``failed``
         is entered only with its reason, from the failure's diagnostic, so a
-        status change to ``failed`` waits for the event that says why.
-        ``starting`` keeps its stage until the run leaves it. The statuses
-        themselves move by ``server.run_lifecycle``'s rules; this projects them.
+        status change to ``failed`` waits for the event that says why. A
+        failure while the run is past ``resolving`` names the startup stage it
+        failed in. ``starting`` only moves to a later stage (a startup fact of
+        an earlier stage, or after ``starting``, changes nothing), and keeps
+        its stage until the run leaves it. The statuses themselves move by
+        ``server.run_lifecycle``'s rules; this projects them.
         """
         if self.status.has_ended:
             return self
         if failure is not None:
-            return RunPhase(status=RunStatus.FAILED, reason=failure)
+            return RunPhase(status=RunStatus.FAILED, reason=self._failed_in(failure))
+        if startup is not None:
+            return self._started(startup)
         if status is None or status in {RunStatus.STARTING, RunStatus.FAILED, self.status}:
             return self
         return RunPhase(status=status)
+
+    def _started(self, startup: StartupFact) -> RunPhase:
+        if self.stage is None or startup.stage.rank < self.stage.rank:
+            return self
+        return RunPhase(status=RunStatus.STARTING, stage=startup.stage, progress=startup.progress)
+
+    def _failed_in(self, failure: FailureReason) -> FailureReason:
+        if self.stage is None or self.stage is StartupStage.RESOLVING:
+            return failure
+        return failure.model_copy(update={"stage": self.stage.value})
 
 
 class InstanceStatus(StrEnum):
@@ -174,7 +235,7 @@ class InstanceStatus(StrEnum):
 
 
 class LiveInstanceRecord(BaseModel):
-    """What a detached server publishes about itself (version 3).
+    """What a detached server publishes about itself (version 4).
 
     ``run_id`` is allocated by the launcher before the server starts, so the
     record names its run from the first time it is published. ``phase`` is the
@@ -185,7 +246,7 @@ class LiveInstanceRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[3] = RECORD_VERSION
+    version: Literal[4] = RECORD_VERSION
     id: InstanceId
     status: InstanceStatus
     phase: RunPhase
@@ -224,9 +285,14 @@ class UnreadableRecord(BaseModel):
     version: int | None
 
 
-def parse_record(instance_id: str, raw: str) -> LiveInstanceRecord | UnreadableRecord:
-    """Parse one stored record, strictly, if it is of the version this reader knows.
+_READABLE_RECORD_VERSIONS = frozenset({3, RECORD_VERSION})
 
+
+def parse_record(instance_id: str, raw: str) -> LiveInstanceRecord | UnreadableRecord:
+    """Parse one stored record, strictly, if it is of a version this reader knows.
+
+    A version 3 record is upgraded: version 4 only added startup stages and
+    progress to its phase, so every version 3 phase is a version 4 phase.
     Records of earlier versions predate phases and tombstones and are not
     upgraded: their servers report no phase this reader could stand behind.
     """
@@ -238,7 +304,11 @@ def parse_record(instance_id: str, raw: str) -> LiveInstanceRecord | UnreadableR
     if not isinstance(version, int) or isinstance(version, bool):
         return UnreadableRecord(id=instance_id, version=None)
     try:
-        record = LiveInstanceRecord.model_validate(document) if version == RECORD_VERSION else None
+        record = (
+            LiveInstanceRecord.model_validate({**document, "version": RECORD_VERSION})
+            if version in _READABLE_RECORD_VERSIONS
+            else None
+        )
     except ValidationError:
         record = None
     if record is None or record.id != instance_id:
@@ -247,11 +317,11 @@ def parse_record(instance_id: str, raw: str) -> LiveInstanceRecord | UnreadableR
 
 
 class InstanceList(BaseModel):
-    """``vibesys instances list --json``: the detached servers on this node (version 3)."""
+    """``vibesys instances list --json``: the detached servers on this node (version 4)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[3] = 3
+    version: Literal[4] = 4
     instances: tuple[LiveInstanceRecord, ...]
     """Servers alive now."""
     ended: tuple[LiveInstanceRecord, ...] = ()

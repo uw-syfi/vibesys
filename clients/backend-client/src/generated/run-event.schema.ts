@@ -641,6 +641,7 @@ const runEventSchema: Record<string, unknown> = {
         "server_ready",
         "configuration_failed",
         "run_started",
+        "run_startup_progress",
         "experiments_changed",
         "run_interrupted",
         "run_status_changed",
@@ -1735,6 +1736,37 @@ const runEventSchema: Record<string, unknown> = {
       "title": "RunStartedData",
       "type": "object"
     },
+    "RunStartupProgressData": {
+      "description": "A starting run reached ``stage``, or progressed within it.\n\nJournaled while the run acquires its resources, before it is ready. The\nstage only moves forward; ``progress`` is present when the stage reports\nit (an image build's steps done of total, and the step now running).",
+      "properties": {
+        "kind": {
+          "const": "run_startup_progress",
+          "default": "run_startup_progress",
+          "title": "Kind",
+          "type": "string"
+        },
+        "stage": {
+          "$ref": "#/$defs/StartupStage"
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StartupProgress"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "stage"
+      ],
+      "title": "RunStartupProgressData",
+      "type": "object"
+    },
     "RunStatus": {
       "description": "Lifecycle status of one run, as frontends observe it.\n\nThis is the authoritative closed set for the ``status`` field of\n``RunSnapshot`` and of ``RunStatusChangedData``; the generated TypeScript\nprotocol types derive their union from it.\n\n``PAUSING`` and ``PAUSED`` are distinct because a pause is only applied at\nan invocation boundary: ``/pause`` records the request, and the run keeps\nexecuting the call already in flight until it reaches that boundary.\n``STOPPING`` and ``STOPPED`` split the same way for ``/stop``, whose\nboundary is where the run ends instead of where it parks.",
       "enum": [
@@ -1795,6 +1827,50 @@ const runEventSchema: Record<string, unknown> = {
       "required": [
         "kind"
       ]
+    },
+    "StartupProgress": {
+      "additionalProperties": false,
+      "description": "How far a startup stage has come: ``done`` of ``total`` steps, now on ``label``.\n\n``total`` is ``None`` when the stage does not know it. ``label`` names the\nstep now running (an image build's Dockerfile instruction), as data.",
+      "properties": {
+        "done": {
+          "minimum": 0,
+          "title": "Done",
+          "type": "integer"
+        },
+        "total": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total"
+        },
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "done"
+      ],
+      "title": "StartupProgress",
+      "type": "object"
+    },
+    "StartupStage": {
+      "description": "Where a starting run is, in the order it gets there.\n\nDeclaration order is the order: a starting run only moves to a later stage.",
+      "enum": [
+        "resolving",
+        "building_image",
+        "starting_container"
+      ],
+      "title": "StartupStage",
+      "type": "string"
     },
     "SubprocessOutputData": {
       "description": "Captured output from a managed subprocess.",
@@ -2246,6 +2322,7 @@ const runEventSchema: Record<string, unknown> = {
               "run_failed": "#/$defs/RunFailedData",
               "run_interrupted": "#/$defs/RunInterruptedData",
               "run_started": "#/$defs/RunStartedData",
+              "run_startup_progress": "#/$defs/RunStartupProgressData",
               "run_status_changed": "#/$defs/RunStatusChangedData",
               "server_ready": "#/$defs/ServerReadyData",
               "subprocess_output": "#/$defs/SubprocessOutputData",
@@ -2287,6 +2364,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/RunStartedData"
+            },
+            {
+              "$ref": "#/$defs/RunStartupProgressData"
             },
             {
               "$ref": "#/$defs/RunFailedData"

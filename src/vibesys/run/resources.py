@@ -21,7 +21,11 @@ from vibesys.constants import (
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import (
     CoreEventType,
+    CoreEventWriter,
+    EventStatus,
     ExperimentsChangedData,
+    RunStartupProgressData,
+    StartupProgressData,
 )
 from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
@@ -85,6 +89,8 @@ from vs_runtime.api import (
     boot_trace,
 )
 from vs_runtime.api.infrastructure import (
+    EnvironmentStartup,
+    EnvironmentStartupSink,
     ModelArtifactRequest,
     ProjectRunBaselineMissingError,
     ProjectRunDirtyResumeError,
@@ -603,6 +609,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 project_path_policy=project_path_policy,
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
                 docker_in_docker=bundle.docker_in_docker,
+                startup=_startup_reporter(integration.events),
             )
         environment_resources = open_run_environment_resources(
             run_environment_request,
@@ -663,6 +670,27 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     for line in boot_trace.drain_log_lines():
         logger.lprint(line)
     return result
+
+
+def _startup_reporter(events: CoreEventWriter) -> EnvironmentStartupSink:
+    """Publish each startup observation of the run environment as a core event."""
+
+    def report(startup: EnvironmentStartup) -> None:
+        progress = startup.progress
+        events.emit(
+            CoreEventType.RUN_STARTUP_PROGRESS,
+            status=EventStatus.ACTIVE,
+            data=RunStartupProgressData(
+                stage=startup.stage,
+                progress=None
+                if progress is None
+                else StartupProgressData(
+                    done=progress.done, total=progress.total, label=progress.label
+                ),
+            ),
+        )
+
+    return report
 
 
 def _run_facts(

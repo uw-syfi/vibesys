@@ -157,16 +157,19 @@ class ServerParts:
         *,
         record: RunRecord | None = None,
     ) -> None:
-        """Attach the integration and core event journal to durable state.
+        """Attach the integration and core event journal to durable state, and mark the run ready.
 
         Mirrors what `vibesys.run.integration.LocalRunIntegration.attach`
         does for its own `events` journal in production: this harness has no
         session, so `core_events` needs its own attach call to write
-        ``core-events.jsonl`` under *log_dir*.
+        ``core-events.jsonl`` under *log_dir*. Like a session's readiness
+        (`RunIntegrationAdapter.handle_run_ready`), it then moves the run out
+        of ``starting``.
         """
         run_id = record.run_id if record is not None else HARNESS_RUN_ID
         self.integration.attach(log_dir, run_id=run_id, record=record)
         self.core_events.attach(log_dir, run_id)
+        self.controller.ready()
 
     def close(self) -> None:
         """Release subscriptions owned by the integration adapter."""

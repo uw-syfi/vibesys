@@ -19,6 +19,7 @@ from server.event_index import (
     source_stat,
     write_event_index,
 )
+from server.host_api import StartupProgress, StartupStage
 from server.run_lifecycle import RunStatus
 from vibesys.api import (
     AgentOutputChannel,
@@ -65,6 +66,7 @@ class EventType(StrEnum):
     SERVER_READY = "server_ready"
     CONFIGURATION_FAILED = "configuration_failed"
     RUN_STARTED = "run_started"
+    RUN_STARTUP_PROGRESS = "run_startup_progress"
     EXPERIMENTS_CHANGED = "experiments_changed"
     RUN_INTERRUPTED = "run_interrupted"
     RUN_STATUS_CHANGED = "run_status_changed"
@@ -271,6 +273,19 @@ class RunInterruptedData(EventPayload):
     kind: Literal["run_interrupted"] = "run_interrupted"
     reason: str
     signal: str | None = None
+
+
+class RunStartupProgressData(EventPayload):
+    """A starting run reached ``stage``, or progressed within it.
+
+    Journaled while the run acquires its resources, before it is ready. The
+    stage only moves forward; ``progress`` is present when the stage reports
+    it (an image build's steps done of total, and the step now running).
+    """
+
+    kind: Literal["run_startup_progress"] = "run_startup_progress"
+    stage: StartupStage
+    progress: StartupProgress | None = None
 
 
 class RunStatusChangedData(EventPayload):
@@ -572,6 +587,7 @@ EventData = Annotated[
     | OutputData
     | ServerReadyData
     | RunStartedData
+    | RunStartupProgressData
     | RunFailedData
     | RunInterruptedData
     | RunStatusChangedData

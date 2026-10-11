@@ -22,6 +22,7 @@ from vs_sim.processes import (
 )
 from vs_sim.randomness import RandomSource, SeededRandom, SystemRandomSource, derive_seed
 from vs_sim.signals import LoopSignalSource, PidfdProcessSignaller, ProcessSignaller, SignalSource
+from vs_sim.streaming import StreamingCommand, SubprocessStreamingCommand
 
 __all__ = [
     "BlockingRunner",
@@ -51,8 +52,10 @@ __all__ = [
     "SignalSource",
     "Sleeper",
     "SleepingClock",
+    "StreamingCommand",
     "SubprocessLauncher",
     "SubprocessProbe",
+    "SubprocessStreamingCommand",
     "SystemClock",
     "SystemRandomSource",
     "ThreadBlockingRunner",

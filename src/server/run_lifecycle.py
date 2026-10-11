@@ -25,11 +25,12 @@ class RunTrigger(StrEnum):
     transition table decides whether that boundary is where a pause lands.
     """
 
-    ATTACHED = "attached"
-    """Durable run storage was attached; the run may execute.
+    READY = "ready"
+    """The run acquired its resources (image, container, project) and executes.
 
-    A run can be attached more than once (a later attach re-bootstraps the
-    journal), so this trigger is idempotent once the run is under way.
+    Attaching the run's journal is not readiness: a run stays ``starting``
+    through its image build and container start. Idempotent once the run is
+    under way.
     """
 
     PAUSE_REQUESTED = "pause_requested"
@@ -65,17 +66,23 @@ class IllegalRunTransitionError(Exception):
 
 _TRANSITIONS: Final[MappingProxyType[tuple[RunStatus, RunTrigger], RunStatus]] = MappingProxyType(
     {
-        (RunStatus.STARTING, RunTrigger.ATTACHED): RunStatus.RUNNING,
+        (RunStatus.STARTING, RunTrigger.READY): RunStatus.RUNNING,
+        # Requested while starting, a pause or stop is pending at once; core
+        # lands it at the first boundary after the run is ready. A resume that
+        # cancels it before then reports ``running`` while startup finishes.
+        (RunStatus.STARTING, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSING,
+        (RunStatus.STARTING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
+        (RunStatus.STARTING, RunTrigger.RESUMED): RunStatus.STARTING,
         (RunStatus.STARTING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
         (RunStatus.STARTING, RunTrigger.FAILED): RunStatus.FAILED,
-        (RunStatus.RUNNING, RunTrigger.ATTACHED): RunStatus.RUNNING,
+        (RunStatus.RUNNING, RunTrigger.READY): RunStatus.RUNNING,
         (RunStatus.RUNNING, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSING,
         (RunStatus.RUNNING, RunTrigger.INVOCATION_FINISHED): RunStatus.RUNNING,
         (RunStatus.RUNNING, RunTrigger.RESUMED): RunStatus.RUNNING,
         (RunStatus.RUNNING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
         (RunStatus.RUNNING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
         (RunStatus.RUNNING, RunTrigger.FAILED): RunStatus.FAILED,
-        (RunStatus.PAUSING, RunTrigger.ATTACHED): RunStatus.PAUSING,
+        (RunStatus.PAUSING, RunTrigger.READY): RunStatus.PAUSING,
         (RunStatus.PAUSING, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSING,
         (RunStatus.PAUSING, RunTrigger.INVOCATION_FINISHED): RunStatus.PAUSED,
         (RunStatus.PAUSING, RunTrigger.RESUMED): RunStatus.RUNNING,
@@ -83,7 +90,7 @@ _TRANSITIONS: Final[MappingProxyType[tuple[RunStatus, RunTrigger], RunStatus]] =
         (RunStatus.PAUSING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
         (RunStatus.PAUSING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
         (RunStatus.PAUSING, RunTrigger.FAILED): RunStatus.FAILED,
-        (RunStatus.PAUSED, RunTrigger.ATTACHED): RunStatus.PAUSED,
+        (RunStatus.PAUSED, RunTrigger.READY): RunStatus.PAUSED,
         (RunStatus.PAUSED, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSED,
         (RunStatus.PAUSED, RunTrigger.INVOCATION_FINISHED): RunStatus.PAUSED,
         (RunStatus.PAUSED, RunTrigger.RESUMED): RunStatus.RUNNING,
@@ -92,7 +99,7 @@ _TRANSITIONS: Final[MappingProxyType[tuple[RunStatus, RunTrigger], RunStatus]] =
         (RunStatus.PAUSED, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
         (RunStatus.PAUSED, RunTrigger.COMPLETED): RunStatus.COMPLETED,
         (RunStatus.PAUSED, RunTrigger.FAILED): RunStatus.FAILED,
-        (RunStatus.STOPPING, RunTrigger.ATTACHED): RunStatus.STOPPING,
+        (RunStatus.STOPPING, RunTrigger.READY): RunStatus.STOPPING,
         # A pause cannot downgrade a stop already pending at the boundary.
         (RunStatus.STOPPING, RunTrigger.PAUSE_REQUESTED): RunStatus.STOPPING,
         (RunStatus.STOPPING, RunTrigger.INVOCATION_FINISHED): RunStatus.STOPPED,

@@ -21,7 +21,9 @@ from server.events import (
     EventStatus,
     EventType,
     RunStartedData,
+    RunStatusChangedData,
 )
+from server.host_api import RunStatus
 from server.integration import (
     _CORE_FAILURE_CONTEXTS,
     _EVENT_DATA_ADAPTER,
@@ -575,3 +577,27 @@ def test_run_started_identity_round_trip_through_the_wire_bridge() -> None:
     assert isinstance(wire, RunStartedData)
     assert wire.outer_loop == "plain"
     assert wire.input == "objective"
+
+
+def test_a_run_is_starting_until_its_session_reports_it_ready(tmp_path: Path) -> None:
+    project, run_id = _project_run(tmp_path / "project")
+    parts = build_server_parts()
+    parts.integration.attach(project.state.log_directory(run_id), run_id=run_id)
+    assert parts.controller.run_status() is RunStatus.STARTING
+
+    _attach_test_run(
+        parts,
+        project,
+        run_id,
+        AgentSelection(provider="codex", model="gpt-test"),
+        project.state.log_directory(run_id),
+    )
+
+    assert parts.controller.run_status() is RunStatus.RUNNING
+    statuses = [
+        (event.data.previous, event.data.status)
+        for event in parts.journal.read()
+        if isinstance(event.data, RunStatusChangedData)
+    ]
+    assert statuses == [(RunStatus.STARTING, RunStatus.RUNNING)]
+    parts.integration.close()

@@ -425,7 +425,7 @@ def test_list_json_is_one_versioned_document() -> None:
     assert code == 0
     listing = InstanceList.model_validate_json(output)
     assert [record.id for record in listing.instances] == [INSTANCE]
-    assert json.loads(output)["version"] == 3
+    assert json.loads(output)["version"] == 4
 
 
 def test_list_human_names_each_server_or_says_there_are_none() -> None:

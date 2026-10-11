@@ -58,6 +58,11 @@ from vs_runtime._container_runtime_policy import (
     reject_docker_in_docker,
 )
 from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
+from vs_runtime._environment_startup import (
+    EnvironmentStartup,
+    EnvironmentStartupSink,
+    EnvironmentStartupStage,
+)
 from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
@@ -126,7 +131,7 @@ source of truth an environment consults."""
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_agent.api.images import DockerBuildRunner
+    from vs_agent.api.images import BuildProgressSink, DockerBuildRunner, ImageBuildProgress
     from vs_project.api import StateNamespace
     from vs_sandbox.api import (
         CommandRunner,
@@ -363,6 +368,9 @@ class RunEnvironmentRequest:
     #: run it (a sandbox container with a Docker daemon of its own under
     #: Sysbox). Every other environment rejects the request.
     docker_in_docker: bool = False
+    #: Where a container environment reports its startup stages and image
+    #: build progress while it opens; ``None`` reports nothing.
+    startup: EnvironmentStartupSink | None = None
 
 
 class _AgentPathSandbox(Protocol):
@@ -703,6 +711,23 @@ def _host_evaluation_plan(request: RunEnvironmentRequest) -> TrustedEvaluationPl
     )
 
 
+def _report_startup(
+    request: RunEnvironmentRequest,
+    stage: EnvironmentStartupStage,
+    progress: ImageBuildProgress | None = None,
+) -> None:
+    if request.startup is not None:
+        request.startup(EnvironmentStartup(stage=stage, progress=progress))
+
+
+def _image_build_progress(request: RunEnvironmentRequest) -> BuildProgressSink | None:
+    """Report that the image build begins, and where its progress goes."""
+    _report_startup(request, EnvironmentStartupStage.BUILDING_IMAGE)
+    if request.startup is None:
+        return None
+    return partial(_report_startup, request, EnvironmentStartupStage.BUILDING_IMAGE)
+
+
 class _OrphanReaper(Protocol):
     """End the agent processes and containers a dead run host left behind."""
 
@@ -835,6 +860,7 @@ class DockerEnvironment:
             _docker_backend_image(request),
             toolchains=toolchains,
             command_runner=self.config.build_runner,
+            on_progress=_image_build_progress(request),
         )
         workspace_root = _workspace_root(request, same_path=extras.same_path_workspace)
         resources, docker_symlinks = _container_mount_plan(
@@ -888,6 +914,7 @@ class DockerEnvironment:
             and attaches_accelerator(docker_in_docker=request.docker_in_docker),
             run_id=request.run_id,
         )
+        _report_startup(request, EnvironmentStartupStage.STARTING_CONTAINER)
         log(f"[docker] starting container with image {container_image}")
         return sandbox
 
@@ -1103,6 +1130,7 @@ class SkyPilotEnvironment(DockerEnvironment):
             container_image = image_helpers.agent_image(
                 _docker_backend_image(request),
                 toolchains=evaluator_agent_toolchains(requirements),
+                on_progress=_image_build_progress(request),
             )
             container_image = _ensure_pushed_for_remote_backend(
                 container_image,
@@ -1146,6 +1174,7 @@ class SkyPilotEnvironment(DockerEnvironment):
                 attach_accelerator=False,
                 run_id=request.run_id,
             )
+            _report_startup(request, EnvironmentStartupStage.STARTING_CONTAINER)
             start_sandbox(sandbox)
         except Exception:
             bridge.close()
@@ -1273,6 +1302,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             _docker_backend_image(request),
             toolchains=evaluator_agent_toolchains(requirements),
             pip_extras=_MODAL_EDITOR_PIP_EXTRAS,
+            on_progress=_image_build_progress(request),
         )
         container_image = _ensure_pushed_for_remote_backend(
             container_image,
@@ -1371,6 +1401,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                 runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
             ),
         )
+        _report_startup(request, EnvironmentStartupStage.STARTING_CONTAINER)
         return SandboxSession.start(
             sandbox=sandbox,
             view=RunEnvironmentView(

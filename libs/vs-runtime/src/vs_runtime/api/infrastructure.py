@@ -59,6 +59,11 @@ from vs_runtime._checkpoint import (
 )
 from vs_runtime._container_runtime_policy import DockerInDockerUnsupportedError
 from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
+from vs_runtime._environment_startup import (
+    EnvironmentStartup,
+    EnvironmentStartupSink,
+    EnvironmentStartupStage,
+)
 from vs_runtime._evaluator_packages import (
     PACKAGE_ROOT_TOKEN,
     TOOL_TOKEN_PREFIX,
@@ -488,6 +493,9 @@ __all__ = [
     "DockerEnvironmentFacts",
     "DockerInDockerUnsupportedError",
     "DurableEventJournal",
+    "EnvironmentStartup",
+    "EnvironmentStartupSink",
+    "EnvironmentStartupStage",
     "EvaluatorPackageError",
     "EvaluatorPackageMetadata",
     "EvaluatorPackageNotFoundError",

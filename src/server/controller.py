@@ -52,12 +52,19 @@ class RunController:
         run_id: str,
         record: RunRecord | None = None,
     ) -> None:
-        """Attach durable presentation storage for ``run_id`` and an optional run record."""
+        """Attach durable presentation storage for ``run_id`` and an optional run record.
+
+        Attaching changes no status: the run is ``starting`` until ``ready``.
+        """
         with self._condition:
             if record is not None:
                 self._attached_run = record
             self._journal.attach(log_dir, run_id=run_id)
-            self._apply_locked(RunTrigger.ATTACHED)
+
+    def ready(self) -> None:
+        """The run acquired its resources and executes: leave ``starting``."""
+        with self._condition:
+            self._apply_locked(RunTrigger.READY)
 
     def attach_read_only(self, log_dir: Path, *, run_id: str | None = None) -> None:
         """Open an ended journal without appending lifecycle or query events."""
