@@ -16,22 +16,30 @@ if TYPE_CHECKING:
     from vs_runtime.api import AgentToolBindingContext
 
 
+def profiler_server(tool_context: object) -> ToolServerDescriptor | None:
+    """The selected profiler's analysis server, or None when the run has no profiler.
+
+    It reads captured profiles and writes nothing to run state, so a core run may offer it
+    to a role that declares the profiler tool `stateless`.
+    """
+    context = cast("AgentToolContext", tool_context)
+    if context.profiler_id == "none":
+        return None
+    support_name = f"{context.profiler_id}_profiler"
+    return StdioServerDescriptor(
+        name=f"vibesys-{context.profiler_id.replace('_', '-')}-profiler",
+        command="python",
+        args=(f"{support_name}/server.py",),
+        env=context.profiler_env,
+    )
+
+
 def _profiler_tool(
     context: object, _binding: AgentToolBindingContext
 ) -> tuple[ToolServerDescriptor, ...]:
     """Bind the selected profiler's analysis server to one agent session."""
-    resolved = cast("AgentToolContext", context)
-    if resolved.profiler_id == "none":
-        return ()
-    support_name = f"{resolved.profiler_id}_profiler"
-    return (
-        StdioServerDescriptor(
-            name=f"vibesys-{resolved.profiler_id.replace('_', '-')}-profiler",
-            command="python",
-            args=(f"{support_name}/server.py",),
-            env=resolved.profiler_env,
-        ),
-    )
+    server = profiler_server(cast("AgentToolContext", context))
+    return () if server is None else (server,)
 
 
 def _issue_board_tool(
@@ -100,3 +108,9 @@ _EVALUATION_ROLES: Mapping[str, EvaluationAgentRole] = {
     "portfolio_dispatch": EvaluationAgentRole.PORTFOLIO_DISPATCH,
     "profiler": EvaluationAgentRole.PROFILER,
 }
+
+
+STATELESS_TOOL_SERVERS: Mapping[str, Callable[[object], ToolServerDescriptor | None]] = {
+    "profiler": profiler_server,
+}
+"""Agent tools that hold no run state, by tool id: a core run may offer them to a role."""

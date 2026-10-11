@@ -108,6 +108,16 @@ if TYPE_CHECKING:
 type _AgentToolResolver = Callable[
     [object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]
 ]
+type StatelessToolServer = Callable[[object], ToolServerDescriptor | None]
+"""The server of a tool that holds no run state, for a run's tool context; None if it has none."""
+
+
+def _tool_context(resources: _PreparedRun) -> AgentToolContext:
+    return AgentToolContext(
+        resources.facts.profiler_id, resources.environment_resources.view.profiler_mcp_env
+    )
+
+
 _EVALUATION_CLEANUP_FAILURE = "evaluation agent cleanup failed"
 _SERVICES_CLEANUP_FAILURE = "evaluation and profiler services did not close"
 
@@ -172,7 +182,7 @@ class _ProductHostFactory:
         | None
     )
     options: BaseModel | None = None
-    stateless_tool_servers: Mapping[str, ToolServerDescriptor] | None = None
+    stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None
     core_services: CoreServices | None = field(default=None, init=False)
     evaluation_backend: SemanticEvaluationBackend | None = field(default=None, init=False)
     evaluation_service: EvaluationAgentService | None = field(default=None, init=False)
@@ -242,10 +252,7 @@ class _ProductHostFactory:
             ),
             root_agent_environment_opener=self._root_agent_environment_opener(),
         )
-        tool_context = AgentToolContext(
-            resources.facts.profiler_id,
-            resources.environment_resources.view.profiler_mcp_env,
-        )
+        tool_context = _tool_context(resources)
         agent_runtime = self._agent_runtime(
             resources,
             session_store,
@@ -502,6 +509,14 @@ class _ProductHostFactory:
             profiler=profiler_service,
         )
 
+    def _stateless_tool_servers(self, resources: _PreparedRun) -> dict[str, ToolServerDescriptor]:
+        """The server of each stateless tool this run's environment can serve, by tool id."""
+        context = _tool_context(resources)
+        served = {
+            tool: server(context) for tool, server in (self.stateless_tool_servers or {}).items()
+        }
+        return {tool: server for tool, server in served.items() if server is not None}
+
     def _core_services(  # noqa: PLR0913  # lint-waiver: LW-948090 [PLR0913]; each argument is an independently owned resource the host already opened, and the composition reads them once.
         self,
         resources: _PreparedRun,
@@ -604,7 +619,8 @@ class _ProductHostFactory:
                 clock=self.timing.clock,
                 agent_lifecycle=self.integration.agent_execution_event,
                 evaluation_diagnostics=self._evaluation_diagnostic,
-                stateless_tool_servers=dict(self.stateless_tool_servers or {}),
+                stateless_tool_servers=self._stateless_tool_servers(resources),
+                commands=agent_runtime.commands,
                 measurement_observer=CoreMeasurementEvents(self.integration.events),
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id
@@ -862,7 +878,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     timing: RunTiming,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
     | None = None,
-    stateless_tool_servers: Mapping[str, ToolServerDescriptor] | None = None,
+    stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None,
 ) -> AsyncIterator[CoreHost]:
     """Open the host of a plugin whose ``core`` policy the runtime drives.
 

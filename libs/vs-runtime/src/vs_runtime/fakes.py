@@ -594,6 +594,15 @@ class FakeWorkspaces:
         """Return the fixed candidate-isolation capability."""
         return self._supports_parallel_candidates
 
+    def host_died(self) -> None:
+        """The host dies: live candidates stay on disk with no handle to release them."""
+        for candidate in self._candidates:
+            candidate.orphaned = not candidate.discarded
+
+    def leaked_candidates(self) -> tuple[FakeCandidateWorkspace, ...]:
+        """Worktrees on disk that no live handle owns."""
+        return tuple(c for c in self._candidates if c.orphaned and not c.discarded)
+
     @property
     def candidates(self) -> tuple[FakeCandidateWorkspace, ...]:
         """Return candidates in creation order, including discarded ones."""
@@ -618,10 +627,10 @@ class FakeWorkspaces:
             workspace_id = f"candidate-{len(self._candidates) + 1}"
         else:
             workspace_id = member_workspace_id(member_id)
-            if any(
-                not candidate.discarded and candidate.id == workspace_id
-                for candidate in self._candidates
-            ):
+            for leftover in self.leaked_candidates():
+                if leftover.id == workspace_id:  # a restarted host replaces a dead one's worktree
+                    leftover.discard_leftover()
+            if any(not c.discarded and c.id == workspace_id for c in self._candidates):
                 message = f"member {member_id!r} already has a live candidate workspace"
                 raise RuntimeContractError(message)
         candidate = FakeCandidateWorkspace(
@@ -1087,6 +1096,7 @@ class FakeCandidateWorkspace(FakeWorkspace):
         self._owner = owner
         self._invalidate_sessions = invalidate_sessions
         self._discarded = False
+        self.orphaned = False
         self._revision_prefix = config.revision_prefix
 
     def knows_revision(self, revision: str) -> bool:
@@ -1106,6 +1116,10 @@ class FakeCandidateWorkspace(FakeWorkspace):
     def discarded(self) -> bool:
         """Return whether the isolated workspace has been released."""
         return self._discarded
+
+    def discard_leftover(self) -> None:
+        """Remove the worktree a dead host left."""
+        self._discarded = True
 
     @property
     def trusted_input_baseline(self) -> str | None:

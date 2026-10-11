@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from vs_core.api import CoreState, LifecycleCapability, Strategy
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import Project, StateNamespace, StateStore
-    from vs_runtime.api import AgentRole, CorePolicy, RunFacts
+    from vs_runtime.api import AgentRole, Commands, CorePolicy, RunFacts
     from vs_runtime.api.core import (
         CommitObserver,
         CoreRuntimeBindings,
@@ -150,6 +150,8 @@ class CoreResources:
     """Receives one line for each agent evaluation call the run refused as busy."""
     stateless_tool_servers: Mapping[str, ToolServerDescriptor] = field(default_factory=dict)
     """The server of each stateless tool a role may declare, keyed by tool id."""
+    commands: Commands | None = None
+    """Sandboxed process execution in a run workspace, which a command-capturing operation uses."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -368,6 +370,7 @@ def _catalog(
         commit_of=commit_of,
         retention_label=policy.retention_label,
         variables=plan.prompt_variables,
+        commands=resources.commands,
     )
     return build_operation_catalog(registrations, production_owners(registrations, ports))
 

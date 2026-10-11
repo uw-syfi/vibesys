@@ -4,8 +4,11 @@ A profile-guided strategy runs a configured profiler command against a retained 
 reads what it wrote. The command runs in a throwaway isolated candidate created from that
 revision, through the runtime's own output capture (it appends the output argument and a
 temporary path, bounds the output and removes the file), and the candidate is discarded on
-every path. Nothing durable changes, so the operation is a query: inspection answers by
-running again. A revision the run does not retain is refused as an outcome, not an error; a
+every path. Nothing durable changes, so the operation is a query. The candidate is created
+under a member identity derived from the request's identity, so the worktree a host that died
+mid-capture leaves behind is replaced by the replay's, never accumulated; inspection proves
+nothing happened (the executor seals a finished result, so a finished capture is never rerun)
+and the request is executed again. A revision the run does not retain is refused as an outcome, not an error; a
 command that cannot run at all (the sandbox failed) propagates as an infrastructure failure.
 """
 
@@ -13,7 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, cast
 
-from vs_runtime._operation_catalog import Applied, Inspection
+from vs_runtime._operation_catalog import Inspection, NotApplied
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -52,16 +55,19 @@ class CaptureCommandOwner:
         self, request: OperationRequest, context: ExecutionContext
     ) -> Mapping[str, object]:
         """Capture the command's output at the revision; infrastructure errors raise."""
-        del context
-        return await self.capture(request)
+        return await self.capture(request, context.payload_digest)
 
     async def inspect(self, request: OperationRequest, context: ExecutionContext) -> Inspection:
-        """A query has no effect to prove, so inspection answers by running again."""
-        del context
-        return Applied(await self.capture(request))
+        """Inspection never runs the command: a query leaves no effect to prove."""
+        del request, context
+        return NotApplied()
 
-    async def capture(self, request: OperationRequest) -> Mapping[str, object]:
-        """Run the command at the revision, or say why not; the shared body of execute and inspect."""
+    async def capture(self, request: OperationRequest, identity: str) -> Mapping[str, object]:
+        """Run the command at the revision, or say why not.
+
+        ``identity`` names this execution (the executed request's payload digest): the same
+        identity always uses the same candidate path.
+        """
         asked = cast("CaptureRequest", request)
         commit = self._commit_of(asked.revision)
         if commit is None:
@@ -70,7 +76,9 @@ class CaptureCommandOwner:
             return _refused("revision is not retained by the run workspace")
         if not self._workspaces.supports_parallel_candidates:
             return _refused("the run has no isolated candidate workspaces to run the command in")
-        candidate = await self._workspaces.create_candidate(commit)
+        candidate = await self._workspaces.create_candidate(
+            commit, member_id=f"capture-{identity[:32]}"
+        )
         try:
             result = await self._commands.capture_output(
                 asked.argv,

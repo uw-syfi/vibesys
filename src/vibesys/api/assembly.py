@@ -73,6 +73,10 @@ class SessionImplementations:
         Mapping[str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]]
         | None
     ) = None
+    stateless_tool_servers: Mapping[str, Callable[[object], ToolServerDescriptor | None]] | None = (
+        None
+    )
+    """The server of each tool that holds no run state, which a core run may offer a role."""
     git_repository: GitRepositoryFactory | None = None
     """Builds the run's ``GitRepository`` implementations; ``None`` runs the Git CLI."""
     threads: Threads | None = None

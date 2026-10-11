@@ -69,7 +69,7 @@ def _compose(tmp_path: Path, tool: str, *, stateless: bool = False, served: bool
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
-                stateless_tool_servers={tool: SERVER} if served else None,
+                stateless_tool_servers={tool: lambda _context: SERVER} if served else None,
             ):
                 return
         finally:
