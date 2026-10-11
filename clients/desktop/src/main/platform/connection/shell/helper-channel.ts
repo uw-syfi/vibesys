@@ -13,7 +13,7 @@
  * its process: disposing it (or aborting `signal`) ends the process and fails what is in flight.
  */
 import {Duplex} from 'node:stream';
-import type {ScheduleTimeout} from '@vibesys/backend-client';
+import type {ScheduleTimeout} from '@vibesys/transport';
 import {
   type ChannelEndOutcome,
   HELPER_CLIENT_VERSIONS,

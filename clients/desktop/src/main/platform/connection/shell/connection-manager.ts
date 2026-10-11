@@ -6,7 +6,7 @@
  * the manager (quitting) closes every connection, waits for their channels to end, then releases
  * every link, once. Runs are detached and keep going.
  */
-import {DEFAULT_RECONNECT_DELAYS_MS, type ScheduleTimeout} from '@vibesys/backend-client';
+import {DEFAULT_RECONNECT_DELAYS_MS, type ScheduleTimeout} from '@vibesys/transport';
 import {type HostId, type HostKey, hostKey} from '../../../../common/hosts.js';
 import type {ConnectionConfig} from '../state/host-connection.js';
 import {HostConnection} from './host-connection.js';

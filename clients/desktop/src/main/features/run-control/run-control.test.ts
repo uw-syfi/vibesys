@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {FakeClock} from '@vibesys/backend-client/testing';
+import {FakeClock} from '@vibesys/transport/testing';
 import type {ConnectionStatus} from '../../../common/connection-status.js';
 import {exactResumeRunId} from '../../../common/resume-run.js';
 import {
