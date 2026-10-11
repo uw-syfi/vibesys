@@ -20,7 +20,8 @@
           "action": "create",
           "iteration": 1,
           "note": "",
-          "payload": null
+          "payload": null,
+          "key": null
         },
         {
           "timestamp": "<TIMESTAMP>",
@@ -28,7 +29,8 @@
           "action": "open->in_progress",
           "iteration": 1,
           "note": "claimed for processing",
-          "payload": null
+          "payload": null,
+          "key": null
         },
         {
           "timestamp": "<TIMESTAMP>",
@@ -43,7 +45,8 @@
               "server.py"
             ],
             "self_check": "Ran the accuracy checker locally."
-          }
+          },
+          "key": null
         },
         {
           "timestamp": "<TIMESTAMP>",
@@ -57,10 +60,12 @@
             "feedback": "",
             "verdict": "pass",
             "new_issues_filed": []
-          }
+          },
+          "key": null
         }
       ],
-      "closed_iter": 1
+      "closed_iter": 1,
+      "create_key": null
     }
   ]
 }
