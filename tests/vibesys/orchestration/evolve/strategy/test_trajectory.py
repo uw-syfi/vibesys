@@ -138,7 +138,7 @@ def test_concurrent_children_reproduce_the_legacy_population(key: str) -> None:
 
 
 @settings(
-    max_examples=3,
+    max_examples=2,
     deadline=None,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
 )

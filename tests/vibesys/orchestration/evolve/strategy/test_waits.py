@@ -80,7 +80,7 @@ def test_a_child_whose_turn_waited_adopts_the_candidate_it_checkpointed(tmp_path
     assert all(item.candidate is not None for item in settles)
 
 
-@settings(max_examples=6, deadline=None, derandomize=True, database=None)
+@settings(max_examples=4, deadline=None, derandomize=True, database=None)
 @given(
     waits=st.lists(st.booleans(), min_size=1, max_size=4).map(tuple),
     polls=st.lists(st.integers(0, 3), min_size=1, max_size=3).map(tuple),

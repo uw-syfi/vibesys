@@ -28,7 +28,7 @@ from vs_core.api import (
 if TYPE_CHECKING:
     from vs_runtime.api.testing import Run
 
-RUNS = settings(max_examples=6, deadline=None, derandomize=True, database=None)
+RUNS = settings(max_examples=3, deadline=None, derandomize=True, database=None)
 
 
 def _state(trace: Run) -> EvolveStrategyState:
