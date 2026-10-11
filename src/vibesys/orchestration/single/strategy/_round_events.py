@@ -8,8 +8,7 @@ leave the state unchanged.
 from pydantic import TypeAdapter, ValidationError
 
 from vibesys.candidates.api import STOPPED
-from vibesys.hypothesis import rounds
-from vibesys.hypothesis.record import AgentAttribution
+from vibesys.hypothesis import AgentAttribution, rounds
 from vibesys.metrics import FrameworkBenchmarkOutcome, MetricRow, accept_readings, reading_of
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.models import SingleAgentRoundResponse

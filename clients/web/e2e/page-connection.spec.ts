@@ -1,7 +1,6 @@
 import {createServer} from 'node:net';
 import {expect, test} from '@playwright/test';
 import {
-  CONTROLS_BANNER_COPY,
   LIVE_SESSION_HEADER_COPY,
   PAGE_CONNECTION_BANNER_COPY,
 } from '../src/features/run-view/index.js';
@@ -22,9 +21,13 @@ test('identifies a live page whose gateway is unreachable on cold start', async 
     ).toBeVisible();
     await expect(page.locator('.status')).toHaveText(LIVE_SESSION_HEADER_COPY.unreachable.status);
 
-    // The page-level diagnosis does not repurpose or replace the command-path
-    // diagnosis. Both name their own scope, and replay mode is not involved.
-    await expect(page.getByTestId('controls-banner')).toContainText(CONTROLS_BANNER_COPY.cold);
+    // Startup establishes the stream's store identity before it asks for a
+    // fenced snapshot, so this failed stream dial has not made a claim about
+    // the independent control channel. The page and stream name the observed
+    // outage without inventing a controls failure, and replay mode is not
+    // involved.
+    await expect(page.getByTestId('stream-banner')).toBeVisible();
+    await expect(page.getByTestId('controls-banner')).toHaveCount(0);
     await expect(page.getByTestId('replay-banner')).toHaveCount(0);
     expect(pageErrors).toEqual([]);
   } finally {

@@ -287,6 +287,10 @@ export class SocketSessionController implements SessionController {
   #paneRefreshWanted: PaneView | null = null;
   /** Single-flight guard for the supplemental design-log refresh. */
   #designFetch: Promise<void> | null = null;
+  /** One refresh requested after the current design query started. */
+  #designRefreshPending = false;
+  /** Stop is terminal for this controller, so no supplemental query starts afterward. */
+  #designRefreshAllowed = true;
   readonly #reconciler = new StreamReconciler({backfillChunk: BACKFILL_CHUNK});
   /** Serializes the consumer effect of applying one shared backfill outcome. */
   #historyFetch: Promise<boolean> | null = null;
@@ -491,6 +495,8 @@ export class SocketSessionController implements SessionController {
   }
 
   async stop(): Promise<void> {
+    this.#designRefreshAllowed = false;
+    this.#designRefreshPending = false;
     await this.#stream.close();
     await this.client.close();
   }
@@ -1132,14 +1138,23 @@ export class SocketSessionController implements SessionController {
    * The design log annotates the hypothesis drill-down, so it rides the same
    * triggers as the experiment fetch but never its promise: the query runs git
    * over the run's history, and the landing view must not wait on that to
-   * report boot. Single-flighted on its own so overlapping refreshes collapse.
-   * Best effort: on failure the drill-down keeps whatever it last showed and
-   * stays quiet, because `/design` reports errors through the pane.
+   * report boot. Single-flighted on its own so overlapping refreshes collapse,
+   * with one follow-up retained when an invalidation arrives mid-flight. Best
+   * effort: on failure the drill-down keeps whatever it last showed and stays
+   * quiet, because `/design` reports errors through the pane.
    */
   #refreshDesignLog(): Promise<void> {
-    if (this.#designFetch !== null) return this.#designFetch;
+    if (!this.#designRefreshAllowed) return Promise.resolve();
+    if (this.#designFetch !== null) {
+      this.#designRefreshPending = true;
+      return this.#designFetch;
+    }
     const fetch = this.#requestDesignLog().finally(() => {
       this.#designFetch = null;
+      if (this.#designRefreshAllowed && this.#designRefreshPending) {
+        this.#designRefreshPending = false;
+        void this.#refreshDesignLog();
+      }
     });
     this.#designFetch = fetch;
     return fetch;

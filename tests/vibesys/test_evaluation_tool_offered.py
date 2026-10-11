@@ -20,6 +20,7 @@ from vs_project.api import Project
 from vs_runtime.api.core import (
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
+    OwedSubmissions,
     ReceiptStore,
     ScopeWorkspaces,
     StoreWorkspaceReceipts,
@@ -52,6 +53,7 @@ def _bridge(tmp_path: Path) -> AgentEvaluationBridge:
             cast("RuntimeWorkspaces", FakeWorkspaces(FakeWorkspace())),
             StoreWorkspaceReceipts(ReceiptStore(namespace)),
         ),
+        OwedSubmissions(ReceiptStore(namespace)),
     )
 
 

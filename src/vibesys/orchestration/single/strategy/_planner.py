@@ -15,10 +15,10 @@ from vibesys.hypothesis import (
     Finished,
     InvalidPlanError,
     OrchestratorPlan,
+    StartedHypothesis,
     normalize_hypothesis_title,
     rounds,
 )
-from vibesys.hypothesis.results import StartedHypothesis
 from vibesys.orchestration.single.strategy import _context as context
 from vibesys.orchestration.single.strategy import _ids as ids
 from vibesys.orchestration.single.strategy._config import SingleConfig

@@ -15,6 +15,8 @@ export {
   type PersistentEventStreamCallbacks,
   type PersistentEventStreamOptions,
   type StreamConnectionState,
+  type StreamMessageContext,
+  type StreamRebootstrapDisposition,
   type StreamTransport,
 } from './persistent-event-stream.js';
 export type {

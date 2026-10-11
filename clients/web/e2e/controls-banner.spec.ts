@@ -14,10 +14,10 @@ import {withGateway} from './gateway.js';
  * about.
  *
  * The page holds two sockets on one URL, told apart by their first client
- * frame: the control channel opens with `query.snapshot` (the session's
- * `start()` issues it), the event stream with `subscribe`. Both are proxied to
- * the real gateway, so the run, the capability token, and the replay keep
- * working while only the control socket is interfered with.
+ * frame: the event stream opens with `subscribe`, then its first batch names
+ * the store for the control channel's fenced `query.snapshot`. Both are
+ * proxied to the real gateway, so the run, the capability token, and the replay
+ * keep working while only the control socket is interfered with.
  *
  * Sustaining an outage: `ControlChannel`'s backoff is finite (500, 1000, 2000,
  * 4000, 8000 ms) and a single close produces a banner that lives under a
@@ -64,6 +64,10 @@ interface EventBatch {
   readonly events?: Array<{readonly type?: string}>;
 }
 
+interface SnapshotResponse {
+  readonly snapshot?: {readonly status?: string};
+}
+
 /**
  * Split a batch at its run-ending event: the events before it, safe to fold
  * now, and the tail from that event on, which is what terminates the run.
@@ -88,6 +92,42 @@ function splitAtTerminal(frame: string): {prefix: string | null; tail: string} |
     prefix: index === 0 ? null : JSON.stringify({...batch, events: events.slice(0, index)}),
     tail: JSON.stringify({...batch, events: events.slice(index)}),
   };
+}
+
+/** Keep a withheld terminal event and the snapshot on the page consistent. */
+function maskTerminalSnapshot(frame: string, injection: Injection): string {
+  if (!(injection.holdTerminal || injection.stripTerminal)) return frame;
+  let response: SnapshotResponse;
+  try {
+    response = JSON.parse(frame) as SnapshotResponse;
+  } catch {
+    return frame;
+  }
+  if (response.snapshot?.status !== 'completed') return frame;
+  return JSON.stringify({...response, snapshot: {...response.snapshot, status: 'running'}});
+}
+
+/** Forward one gateway reply after applying the active stream injection. */
+function forwardGatewayReply(
+  frame: string,
+  kind: SocketKind,
+  injection: Injection,
+  observed: Observed,
+  send: (frame: string) => void,
+): void {
+  if (kind === 'control') {
+    send(maskTerminalSnapshot(frame, injection));
+    return;
+  }
+  const split = kind === 'stream' ? splitAtTerminal(frame) : null;
+  if (split === null || !(injection.holdTerminal || injection.stripTerminal)) {
+    send(frame);
+    return;
+  }
+  if (split.prefix !== null) send(split.prefix);
+  if (injection.stripTerminal) return;
+  observed.held.push(split.tail);
+  observed.releaseTerminal = () => send(split.tail);
 }
 
 /** Proxy both sockets to the gateway, classify them, and interfere on demand. */
@@ -133,15 +173,7 @@ async function injectFrames(page: Page, injection: Injection): Promise<Observed>
         server.send(message);
       });
       server.onMessage(message => {
-        const split = kind === 'stream' ? splitAtTerminal(String(message)) : null;
-        if (split === null || !(injection.holdTerminal || injection.stripTerminal)) {
-          ws.send(message);
-          return;
-        }
-        if (split.prefix !== null) ws.send(split.prefix);
-        if (injection.stripTerminal) return;
-        observed.held.push(split.tail);
-        observed.releaseTerminal = () => ws.send(split.tail);
+        forwardGatewayReply(String(message), kind, injection, observed, frame => ws.send(frame));
       });
       ws.onClose(() => {
         if (kind === 'stream') observed.streamSocketClosed = true;
@@ -201,7 +233,7 @@ test('reports a dead control channel without disturbing the live transcript', as
     await expect(controls).toHaveCount(0);
     await expect(stream).toHaveCount(0);
     const foldedBefore = await transcript.textContent();
-    expect(observed.kinds).toEqual(['control', 'stream']);
+    expect(observed.kinds).toEqual(['stream', 'control']);
 
     await breakControlChannel(observed, injection);
 

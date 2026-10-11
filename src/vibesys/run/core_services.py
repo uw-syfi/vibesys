@@ -35,6 +35,7 @@ from vs_runtime.api.core import (
     IgnoreMeasurement,
     MeasurementServices,
     OperationPorts,
+    OwedSubmissions,
     ProductionSessionResolver,
     ReceiptEvidenceLedger,
     ReceiptStore,
@@ -349,6 +350,7 @@ def _agent_bridge(
         evaluation_socket_path(resources.project.root, resources.run_id),
         plan.agent_evaluation,
         ScopeWorkspaces(resources.workspaces, StoreWorkspaceReceipts(receipts)),
+        OwedSubmissions(receipts),
         resources.evaluation_diagnostics,
     )
 

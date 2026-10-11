@@ -23,14 +23,16 @@ import asyncio
 import hashlib
 import json
 import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
+from tests.support.owed_submissions import owed_namespace
 from tests.support.skeleton_strategy import ATTEMPT, DECLARATION, DIGEST
 from tests.support.waiting_loop_strategy import LoopState, LoopStrategy
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
@@ -66,16 +68,20 @@ from vs_runtime.api.core import (
     CoreStartup,
     ExecutionResult,
     OrphanWaitError,
+    OwedSubmissions,
+    ReceiptStore,
     RequestExecutors,
     RunLoopConfig,
+    RunStalledError,
     RuntimeCommitError,
     RuntimeCommitUncertainError,
     drive_core,
     empty_catalog,
     handle_for,
     new_core_state,
-    start_core,
+    start_core_awaiting_lease,
 )
+from vs_runtime.api.executor_contracts import FaultingNamespace, ProcessKilledError
 from vs_runtime.api.testing import FakePublicationDelivery, ScriptedExecutors
 from vs_runtime.contracts import AgentRole, AgentTool
 from vs_sim.api.testing import VirtualClock, run_virtual
@@ -84,7 +90,14 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_core.api import CoreEvent, Transition
-    from vs_runtime.api.core import ExecutionContext, SnapshotWorkspace
+    from vs_project.api import StateNamespace
+    from vs_runtime.api.core import (
+        ExecutionContext,
+        Publication,
+        PublicationAcknowledgement,
+        PublicationContext,
+        SnapshotWorkspace,
+    )
 
 from tests.support.skeleton_world import IMPLEMENTATION, Implementation
 
@@ -127,6 +140,8 @@ class Turn:
     late: Program = ()
     """Calls made with the turn's token after it ended, before the next request runs."""
     restart: bool = False
+    edit: bool = True
+    """Whether the agent changes its candidate; otherwise the turn starts on the content the last left."""
     """The host restarts after the turn's calls and before its yield is read."""
     at_start: Callable[[Agent], Awaitable[None]] | None = None
     """A probe that runs when the turn starts, before its program."""
@@ -247,6 +262,52 @@ def _submitted(request: SubmitMeasurement) -> Answer:
     return Running(resource_id=ResourceId(root=handle_for(request.request_id)))
 
 
+@dataclass(frozen=True)
+class Crash:
+    """How one host process ends.
+
+    ``ledger_at`` is a boundary of the owed record's writes (see ``FaultingNamespace``: an
+    even number is just before a write, an odd one just after it). The host dies there, in
+    the middle of an agent's call; the agent's later calls fail until a new host starts, and
+    the dead host's loop is stopped at its next publication, so what it had admitted and not
+    yet committed may or may not reach the record. ``publish_at`` is the n-th publication of
+    the process, where it dies between requests. Either, both or neither may be set.
+    """
+
+    ledger_at: int | None = None
+    publish_at: int | None = None
+
+
+@dataclass
+class Mortality:
+    """Whether the current host process is dead, and the publication it dies at."""
+
+    dead: bool = False
+    publish_at: int | None = None
+    published: int = 0
+
+
+class MortalDelivery:
+    """The publication ledger of a host that can die at a publication or once marked dead."""
+
+    def __init__(self, inner: FakePublicationDelivery, mortality: Mortality) -> None:
+        self._inner = inner
+        self._mortality = mortality
+
+    def read(self) -> tuple[Publication, ...]:
+        """The acknowledged publication history."""
+        return self._inner.read()
+
+    async def publish(
+        self, publication: Publication, context: PublicationContext
+    ) -> PublicationAcknowledgement:
+        """Publish, unless the process is dead or dies at this publication."""
+        self._mortality.published += 1
+        if self._mortality.dead or self._mortality.published == self._mortality.publish_at:
+            raise ProcessKilledError
+        return await self._inner.publish(publication, context)
+
+
 @dataclass
 class Agent:
     """The scripted agent: runs a turn's program through the bridge's wire frames."""
@@ -264,6 +325,11 @@ class Agent:
     view: ShellView | None = None
     shell: CoreRuntime[LoopState] | None = None
     current: Turn | None = None
+    mortality: Mortality = field(default_factory=Mortality)
+    read: list[tuple[str, str]] = field(default_factory=list)
+    """(candidate content, handle) for every handle reply the agent read."""
+    budget_refused: list[str] = field(default_factory=list)
+    """The candidate content of every submit that core's budget refused."""
     run_over: bool = False
     """Set once the run is terminal: a call may then meet the shell's own commit error."""
 
@@ -274,7 +340,20 @@ class Agent:
         return dict(descriptor.runtime_env)["VS_EVALUATION_TOKEN"]
 
     async def call(self, token: str, step: Step, *, count: bool = True) -> bool:
-        """One tool call; True when it succeeded. A refusal must carry its template text."""
+        """One tool call; True when it succeeded. A refusal must carry its template text.
+
+        A call that meets the host's death fails as a dropped connection does, and so does
+        every call until the next host starts."""
+        if self.mortality.dead:
+            return False
+        try:
+            return await self._call(token, step, count=count)
+        except ProcessKilledError:
+            self.mortality.dead = True
+            return False
+
+    async def _call(self, token: str, step: Step, *, count: bool = True) -> bool:
+        """One tool call on a live host."""
         assert self.bridge is not None
         match step:
             case ("submit",):
@@ -316,8 +395,10 @@ class Agent:
         await asyncio.sleep(0)
         slow.hold.set()
         arrived.cancel()
-        await first
-        return await retry
+        _, answered = await asyncio.gather(first, retry, return_exceptions=True)
+        if isinstance(answered, BaseException):
+            raise answered
+        return answered
 
     async def _record(self, step: Step, raw: bytes, *, count: bool) -> bool:
         """File one reply: an error with its text, a new handle, or an accepted wait."""
@@ -325,9 +406,12 @@ class Agent:
         if isinstance(reply, SocketFailure):
             assert reply.error
             self.errors.append(reply.error)
+            if step[0] in ("submit", "timeout_retry") and "submission budget" in reply.error:
+                self.budget_refused.append(self.workspaces.edits[-1])
             return False
         if step[0] in ("submit", "timeout_retry") and "handle_id" in reply.result:  # type: ignore[operator]
             self.handles.append(reply.result["handle_id"])  # type: ignore[index]
+            self.read.append((self.workspaces.edits[-1], reply.result["handle_id"]))  # type: ignore[index]
         elif count:
             self.waits_accepted += 1
         return True
@@ -338,7 +422,8 @@ class Agent:
         self.seen += 1
         turn = self.turns[index] if index < len(self.turns) else Turn()
         self.current = turn
-        self.workspaces.edit()
+        if turn.edit:
+            self.workspaces.edit()
         token = self.token(scope)
         waiting = False
         if turn.at_start is not None:
@@ -431,6 +516,20 @@ class Played:
     shell: CoreRuntime[LoopState]
     agent: Agent
     view: ShellView
+    directory: tempfile.TemporaryDirectory[str] | None = None
+
+
+@pytest.fixture(autouse=True)
+def isolated_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Project state is written below the test's own directory."""
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "operator-state"))
+
+
+class UnrecoverableRestartError(Exception):
+    """The host died with a request in flight, and the scripted executors cannot inspect it.
+
+    Recovering such a request is core's and the executors' (their contract suites cover it);
+    the scripts here answer only requests they are asked to run, never an inspection."""
 
 
 def play(
@@ -438,12 +537,35 @@ def play(
     total: int,
     *,
     finished_in_submit_round: bool = False,
+    crashes: tuple[Crash, ...] = (),
+) -> Played:
+    """Drive a fresh run (see ``_play``) with owed submissions kept in a temporary project."""
+    directory = tempfile.TemporaryDirectory()
+    played = _play(
+        turns,
+        total,
+        namespace=owed_namespace(Path(directory.name)),
+        finished_in_submit_round=finished_in_submit_round,
+        crashes=crashes,
+    )
+    played.directory = directory  # removed when the run is dropped
+    return played
+
+
+def _play(
+    turns: tuple[Turn, ...],
+    total: int,
+    *,
+    namespace: StateNamespace,
+    finished_in_submit_round: bool = False,
+    crashes: tuple[Crash, ...] = (),
 ) -> Played:
     """Drive a fresh run, with ``turns`` as the agent's fresh turns, to its end.
 
     With ``finished_in_submit_round`` the executor answers each of the agent's own submissions as
     already finished, with its evidence, as a verdict-cache replay does; otherwise the job is
-    still running."""
+    still running. Each of ``crashes`` ends one host process; the next one starts over the same
+    durable run record and the same owed record, as after a restart."""
     limits = Limits(max_turns=4 * total + 4, max_measurement_submissions=64)
     state = new_core_state(
         "run",
@@ -457,46 +579,77 @@ def play(
     workspaces = Workspaces()
     shells: list[CoreRuntime[LoopState]] = []
     views: list[ShellView] = []
+    ledgers: list[OwedSubmissions] = []
     diagnostics: list[str] = []
 
     def make_bridge() -> AgentEvaluationBridge:
-        bridge = AgentEvaluationBridge(Path("unused.sock"), POLICY, workspaces, diagnostics.append)
-        bridge.attach(views[0], clock)
+        bridge = AgentEvaluationBridge(
+            Path("unused.sock"), POLICY, workspaces, ledgers[-1], diagnostics.append
+        )
+        bridge.attach(views[-1], clock)
         return bridge
 
-    agent = Agent(turns, workspaces, make_bridge, diagnostics=diagnostics)
+    delivery = FakePublicationDelivery(store)  # the subscribers outlive the host
+    mortality = Mortality()
+    agent = Agent(turns, workspaces, make_bridge, diagnostics=diagnostics, mortality=mortality)
     executors = AgentExecutors(
         agent,
-        lambda: shells[0].record.envelope.core,
+        lambda: shells[-1].record.envelope.core,
         finished_in_submit_round=finished_in_submit_round,
     )
-    shell = cast(
-        "CoreRuntime[LoopState]",
-        CoreRuntime(
-            store,
-            LoopStrategy(total=total),  # type: ignore[arg-type]
-            state,
-            bindings=CoreRuntimeBindings(
-                registry=OperationRegistry(),
-                executors=RequestExecutors(
-                    workspaces=executors,  # type: ignore[arg-type]  # one scripted object serves each role
-                    sessions=executors,  # type: ignore[arg-type]
-                    evaluation=executors,  # type: ignore[arg-type]
-                    operations=executors,  # type: ignore[arg-type]
-                    semantic_events=executors,  # type: ignore[arg-type]
+
+    def boot(crash: Crash) -> CoreRunHost:
+        """Start a host process over the durable record, dying where ``crash`` says."""
+        shell = cast(
+            "CoreRuntime[LoopState]",
+            CoreRuntime(
+                store,
+                LoopStrategy(total=total),  # type: ignore[arg-type]
+                state,
+                bindings=CoreRuntimeBindings(
+                    registry=OperationRegistry(),
+                    executors=RequestExecutors(
+                        workspaces=executors,  # type: ignore[arg-type]  # one scripted object serves each role
+                        sessions=executors,  # type: ignore[arg-type]
+                        evaluation=executors,  # type: ignore[arg-type]
+                        operations=executors,  # type: ignore[arg-type]
+                        semantic_events=executors,  # type: ignore[arg-type]
+                    ),
                 ),
             ),
-        ),
-    )
-    shells.append(shell)
-    views.append(ShellView(shell))
-    agent.view, agent.shell = views[0], shell
-    agent.bridge = make_bridge()
-    host = CoreRunHost(shell, FakePublicationDelivery(store), clock)
+        )
+        shells.append(shell)
+        views.append(ShellView(shell))
+        ledgers.append(
+            OwedSubmissions(
+                ReceiptStore(cast("StateNamespace", FaultingNamespace(namespace, crash.ledger_at)))
+            )
+        )
+        agent.view, agent.shell = views[-1], shell
+        agent.bridge = make_bridge()
+        mortality.dead, mortality.published, mortality.publish_at = False, 0, crash.publish_at
+        return CoreRunHost(shell, MortalDelivery(delivery, mortality), clock)
+
     config = RunLoopConfig(host_id="property", lease_duration=LEASE, max_dispatches=400)
-    start_core(host, config)
-    run_virtual(clock, drive_core(host, config))
-    return Played(shell, agent, views[0])
+    died = False
+    for crash in (*crashes, Crash()):
+        host = boot(crash)
+
+        async def run(host: CoreRunHost = host) -> None:
+            await start_core_awaiting_lease(host, config)
+            await drive_core(host, config)
+
+        try:
+            run_virtual(clock, run())
+        except ProcessKilledError:
+            died = True
+            continue
+        except RunStalledError as error:
+            if died:
+                raise UnrecoverableRestartError from error
+            raise
+        break
+    return Played(shells[-1], agent, views[-1])
 
 
 def check(played: Played) -> None:
@@ -767,3 +920,98 @@ def test_a_submit_slower_than_the_agents_deadline_is_one_submission_the_agent_ca
     assert len(played.agent.handles) == 1
     assert [c.request_id for c in state.evaluation.agent_calls if c.request_id is not None] != []
     assert played.agent.waits_accepted == 1, "the agent could wait on the submission it retried"
+
+
+_RESTART_STEPS = st.one_of(
+    st.sampled_from((("submit",), ("lose",), ("timeout_retry",))),
+    st.tuples(st.just("wait"), st.lists(st.integers(0, 2), min_size=1, max_size=2).map(tuple)),
+)
+_CRASH = st.builds(
+    Crash,
+    ledger_at=st.none() | st.integers(0, 10),
+    publish_at=st.none() | st.integers(1, 12),
+)
+
+
+def check_owed(played: Played) -> None:
+    """What every run owes the agent, whatever restarts it went through.
+
+    The budget refuses a second submission of the same candidate only after the agent has
+    read the first one's handle; every handle read is one core charged, and one candidate has
+    one handle; each charged submission the agent never read is in the stall report.
+    """
+    agent = played.agent
+    state = played.shell.record.envelope.core
+    charged = {
+        handle_for(call.request_id)
+        for call in state.evaluation.agent_calls
+        if call.request_id is not None
+    }
+    read_contents = {content for content, _ in agent.read}
+    assert set(agent.budget_refused) <= read_contents, "refused a retry whose handle was never read"
+    assert {handle for _, handle in agent.read} <= charged
+    for content in read_contents:
+        assert len({handle for seen, handle in agent.read if seen == content}) == 1
+    assert agent.bridge is not None
+    noted = agent.bridge.unacknowledged()
+    unread = charged - {handle for _, handle in agent.read}
+    assert all(any(handle in note for handle in charged) for note in noted)
+    assert all(any(handle in note for note in noted) for handle in unread)
+
+
+@settings(
+    max_examples=_EXAMPLES,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+)
+@given(
+    programs=st.lists(st.lists(_RESTART_STEPS, max_size=4).map(tuple), min_size=1, max_size=3),
+    edits=st.lists(st.booleans(), min_size=3, max_size=3),
+    crashes=st.lists(_CRASH, max_size=2).map(tuple),
+)
+def test_no_restart_loses_or_repeats_a_charged_submission(
+    programs: list[Program], edits: list[bool], crashes: tuple[Crash, ...]
+) -> None:
+    """Hosts die at any request and at any write of the owed record; the promise to the agent holds.
+
+    The agent's calls are lost, retried, repeated across turns that may leave the candidate
+    unchanged, and cut by the host's death. After each death a new host starts over the same
+    run record and the same owed record."""
+    turns = tuple(
+        Turn(program=program, edit=edit) for program, edit in zip(programs, edits, strict=False)
+    )
+    try:
+        played = play(turns, len(turns), crashes=crashes)
+    except UnrecoverableRestartError:
+        assume(condition=False)
+    check_owed(played)
+
+
+@pytest.mark.parametrize("dies_at_request", range(1, 7))
+def test_a_submission_the_agent_never_read_is_its_retry_after_a_host_restart(
+    dies_at_request: int,
+) -> None:
+    """The failing live shape: a lost reply, a restart, then the retry on unchanged content.
+
+    The first turn's reply is lost (the connection was abandoned) and the host dies at some
+    later request, with the charge committed or not depending on where. The second turn finds
+    the candidate as it was and submits again. Before the fix the owed submission lived in the
+    first host's memory: the retry was refused as an exhausted budget and the first measurement
+    ran on with nobody waiting for it.
+    """
+    turns = (Turn(program=(("lose",),)), Turn(program=(("submit",),), edit=False))
+    played = play(turns, 2, crashes=(Crash(publish_at=dies_at_request),))
+    check_owed(played)
+    state = played.shell.record.envelope.core
+    charged = [c.request_id for c in state.evaluation.agent_calls if c.request_id is not None]
+    assert len(charged) == 1, "the budget is charged once"
+    assert played.agent.errors == []
+    assert played.agent.handles == [handle_for(charged[0])], "the retry got the first handle"
+    jobs = [
+        job.resource_id.root
+        for job in state.evaluation.jobs
+        if job.scope.owner == ATTEMPT.attempt_id
+    ]
+    assert jobs.count(handle_for(charged[0])) == 1, "the first measurement is the one that runs"
+    assert played.agent.bridge is not None
+    assert played.agent.bridge.unacknowledged() == ()

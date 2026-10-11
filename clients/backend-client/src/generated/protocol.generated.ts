@@ -46,6 +46,7 @@ export type RequestId4 = string;
 export type ClientId4 = string;
 export type Timestamp4 = string;
 export type Type4 = "query.snapshot";
+export type ExpectedStoreId = string | null;
 export type ProtocolVersion5 = 1;
 export type RequestId5 = string;
 export type ClientId5 = string;
@@ -707,6 +708,11 @@ export interface StopCommand {
 }
 /**
  * Request the current run snapshot.
+ *
+ * ``expected_store_id`` fences the read to the event store whose batch established a
+ * client's sequence space. None preserves the unfenced request used by
+ * clients that do not combine a snapshot with a live subscription. An empty
+ * string is a real fence for the pre-attachment store, not an alias for None.
  */
 export interface SnapshotQuery {
   protocol_version?: ProtocolVersion4;
@@ -714,6 +720,7 @@ export interface SnapshotQuery {
   client_id?: ClientId4;
   timestamp?: Timestamp4;
   type: Type4;
+  expected_store_id?: ExpectedStoreId;
 }
 /**
  * Send a message to an experiment-chat thread.

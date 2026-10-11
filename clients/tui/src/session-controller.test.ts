@@ -1450,6 +1450,62 @@ describe('session controller', () => {
     expect(transport.experimentRequests).toBe(3);
   });
 
+  for (const staleOutcome of ['success', 'failure'] as const) {
+    it(`follows a ${staleOutcome} stale design request with one current refresh`, async () => {
+      const transport = new InvalidatedDesignTransport();
+      const controller = new SocketSessionController(transport);
+      await controller.start();
+      expect(transport.designRequests).toBe(1);
+
+      transport.design = [
+        {
+          round: 1,
+          base: 'aaa1111',
+          commit: 'bbb2222',
+          files: [{path: 'src/queue.rs', change: 'modified'}],
+        },
+      ];
+      transport.emitExperimentChange(1);
+      transport.emitExperimentChange(2);
+      transport.emitExperimentChange(3);
+      expect(transport.experimentRequests).toBe(2);
+
+      // The first invalidation's experiment request finishes while the old
+      // design query is still held. The burst asks for only one more
+      // experiment request, and every resulting design refresh coalesces.
+      await transport.resolveExperiments();
+      await settlePromiseEffects();
+      expect(transport.experimentRequests).toBe(3);
+      await transport.resolveExperiments();
+      await settlePromiseEffects();
+
+      await transport.settleDesign(staleOutcome);
+      await settlePromiseEffects();
+      expect(transport.designRequests).toBe(2);
+
+      await transport.settleDesign('success');
+      await settlePromiseEffects();
+      expect(controller.state.designLog?.map(round => round.round)).toEqual([1]);
+      expect(transport.designRequests).toBe(2);
+      await controller.stop();
+    });
+  }
+
+  it('retires a queued design refresh when the controller stops', async () => {
+    const transport = new InvalidatedDesignTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emitExperimentChange(1);
+    await transport.resolveExperiments();
+    await settlePromiseEffects();
+
+    await controller.stop();
+    await transport.settleDesign('success');
+    await settlePromiseEffects();
+
+    expect(transport.designRequests).toBe(1);
+  });
+
   it('opens the selected hypothesis with /open-round', async () => {
     const transport = new FakeTransport();
     transport.experiments = [
@@ -3542,6 +3598,114 @@ class RevisionedExperimentsTransport implements ServerTransport {
   }
 }
 
+/** Holds experiment and design answers so invalidations can cross both requests exactly. */
+class InvalidatedDesignTransport implements ServerTransport {
+  design: NonNullable<ProtocolResponse['design']> = [];
+  experimentRequests = 0;
+  designRequests = 0;
+  readonly #pendingExperiments: Array<{
+    readonly response: Promise<ProtocolResponse>;
+    readonly resolve: (response: ProtocolResponse) => void;
+  }> = [];
+  readonly #pendingDesign: Array<{
+    readonly response: Promise<ProtocolResponse>;
+    readonly resolve: (response: ProtocolResponse) => void;
+    readonly reject: (error: Error) => void;
+    readonly value: ProtocolResponse;
+  }> = [];
+  #message: ((message: ServerMessage) => void) | null = null;
+
+  request(input: RequestInput): Promise<ProtocolResponse> {
+    const base = {
+      protocol_version: 1 as const,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true as const,
+    };
+    if (input.type === 'query.snapshot') {
+      return Promise.resolve({...base, snapshot: {run_id: 'run', status: 'running', sequence: 0}});
+    }
+    if (input.type === 'query.experiments') {
+      this.experimentRequests += 1;
+      if (this.experimentRequests === 1) {
+        return Promise.resolve({...base, experiments: [], experiments_ready: true});
+      }
+      let resolve!: (response: ProtocolResponse) => void;
+      const response = new Promise<ProtocolResponse>(done => {
+        resolve = done;
+      });
+      this.#pendingExperiments.push({response, resolve});
+      return response;
+    }
+    if (input.type === 'query.design') {
+      this.designRequests += 1;
+      const value = {...base, design: [...this.design], design_ready: true};
+      let resolve!: (response: ProtocolResponse) => void;
+      let reject!: (error: Error) => void;
+      const response = new Promise<ProtocolResponse>((done, fail) => {
+        resolve = done;
+        reject = fail;
+      });
+      this.#pendingDesign.push({response, resolve, reject, value});
+      return response;
+    }
+    return Promise.resolve(base);
+  }
+
+  async resolveExperiments(): Promise<void> {
+    const pending = this.#pendingExperiments.shift();
+    if (pending === undefined) throw new Error('No pending experiment request');
+    pending.resolve({
+      protocol_version: 1,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true,
+      experiments: [],
+      experiments_ready: true,
+    });
+    await pending.response;
+  }
+
+  async settleDesign(outcome: 'success' | 'failure'): Promise<void> {
+    const pending = this.#pendingDesign.shift();
+    if (pending === undefined) throw new Error('No pending design request');
+    if (outcome === 'success') {
+      pending.resolve(pending.value);
+      await pending.response;
+      return;
+    }
+    const rejected = pending.response.catch(() => undefined);
+    pending.reject(new Error('design query failed'));
+    await rejected;
+  }
+
+  subscribe(
+    _afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    this.#message = onMessage;
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  emitExperimentChange(sequence: number): void {
+    this.#message?.({
+      type: 'event',
+      event: {
+        sequence,
+        run_id: 'run',
+        timestamp: '2026-01-01T00:00:00Z',
+        type: 'experiments_changed',
+        data: {kind: 'experiments_changed', reason: 'round_persisted', revision: sequence},
+      },
+    });
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 /**
  * A backend whose design query the test holds open, so a slow /design can
  * overlap the next pane command the way the live git-backed query does.
@@ -3915,6 +4079,14 @@ function patchRequests(transport: FakeTransport): RequestInput[] {
 
 function designQueries(transport: DeferredDesignTransport): number {
   return transport.requests.filter(request => request.type === 'query.design').length;
+}
+
+/** Drain promise continuations only, without wall-clock time or scheduler ordering. */
+async function settlePromiseEffects(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 function entry(
