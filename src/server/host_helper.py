@@ -4,7 +4,7 @@ The desktop app runs ``python -m entrypoints.host_helper`` once per channel, loc
 over stdio or remotely over one ssh exec channel. A channel carries typed JSON lines
 (``server.host_api``): a ``hello`` first, then requests answered concurrently, each
 reply echoing its request's id. A run channel ends with ``run.connect``, after which
-it is a byte relay to the run's control socket (``server.stdio_bridge``).
+it is a byte relay to the run's control socket (``server.relay``).
 ``docs/contributing/desktop-connection.md`` ("The host helper") owns the design.
 
 The module is a pure core and a thin shell:
@@ -90,7 +90,7 @@ from server.host_api import (
     TasksListRequest,
     parse_helper_request,
 )
-from server.stdio_bridge import (
+from server.relay import (
     BridgeResult,
     ChannelEndOutcome,
     ClientStreams,
@@ -103,7 +103,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from server.registry import LiveRegistry, StopEffects
-    from server.stdio_bridge import ByteSink, ByteSource, Dialer
+    from server.relay import ByteSink, ByteSource, Dialer
     from vs_sim.api import Connection, Event, Threads
 
 WATCH_INTERVAL_SECONDS: Final = 1.0

@@ -242,7 +242,7 @@ export type VibesysVersion2 = string | null;
 /**
  * How a run channel's relay ended; each value has its own exit status.
  *
- * The relay core (``server.stdio_bridge``) decides the outcome and maps it to the
+ * The relay core (``server.relay``) decides the outcome and maps it to the
  * helper's exit status; a client reads it from the ``ChannelEnd`` line.
  */
 export type ChannelEndOutcome =

@@ -25,7 +25,7 @@
       "type": "object"
     },
     "ChannelEndOutcome": {
-      "description": "How a run channel's relay ended; each value has its own exit status.\n\nThe relay core (``server.stdio_bridge``) decides the outcome and maps it to the\nhelper's exit status; a client reads it from the ``ChannelEnd`` line.",
+      "description": "How a run channel's relay ended; each value has its own exit status.\n\nThe relay core (``server.relay``) decides the outcome and maps it to the\nhelper's exit status; a client reads it from the ``ChannelEnd`` line.",
       "enum": [
         "client_closed",
         "server_closed",

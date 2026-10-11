@@ -190,7 +190,7 @@ def test_run_connect_makes_the_channel_a_relay_to_the_run(
                 "run_id": "run-e2e",
                 "protocol_version": 1,
             }
-            for name in runner_group("stdio-bridge", "control")[:2]:
+            for name in runner_group("relay", "control")[:2]:
                 assert len(run_steps(channel, load_scenario(name))) == 1
             assert channel.finish() == (0, b"")
     finally:

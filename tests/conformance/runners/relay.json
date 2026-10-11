@@ -1,6 +1,6 @@
 {
-  "id": "stdio-bridge",
-  "description": "Unix-transport scenarios replayed through a run channel (python -m entrypoints.host_helper after hello and run.connect) against a real Unix server, by tests/e2e/test_stdio_bridge.py.",
+  "id": "relay",
+  "description": "Unix-transport scenarios replayed through a run channel (python -m entrypoints.host_helper after hello and run.connect) against a real Unix server, by tests/e2e/test_relay.py.",
   "groups": {
     "bootstrap": [
       "full-replay-bootstrap",

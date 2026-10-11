@@ -28,7 +28,7 @@ from server.host_helper_os import (
 )
 from server.instances import ControlSocketStopRequester
 from server.registry import FileInstanceStore, LiveRegistry, StopEffects, host_facts, instance_root
-from server.stdio_bridge import FdSink, FdSource
+from server.relay import FdSink, FdSource
 from vs_sim.api import (
     OsThreads,
     PidfdProcessSignaller,

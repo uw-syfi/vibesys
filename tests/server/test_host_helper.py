@@ -84,7 +84,7 @@ from server.host_helper import (
     step,
 )
 from server.registry import FakeInstanceStore
-from server.stdio_bridge import EXIT_STATUS
+from server.relay import EXIT_STATUS
 from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
 
 if TYPE_CHECKING:

@@ -189,8 +189,8 @@ itself a write and would re-enter the same stalled `drain()`.
 The Unix path has no equivalent deadline: its blocking write stalls the handler thread
 indefinitely, which is pre-existing behavior this contract records rather than changes. Its
 gone-client probe fires only while the stream is idle. So the two transports agree on the stall and
-differ on the ceiling. A remote client that reaches the Unix transport through the stdio
-bridge gets a ceiling at the bridge instead (see [The stdio bridge](#the-stdio-bridge)).
+differ on the ceiling. A remote client that reaches the Unix transport through the relay
+gets a ceiling at the relay instead (see [The relay](#the-relay)).
 
 ### WP-HEARTBEAT: the application heartbeat is optional and probe advertised
 
@@ -264,18 +264,18 @@ The field is defined in `src/server/api/protocol.py` and generated into the Type
 corpus reserves a two-client scenario that asserts independent attribution with one Unix and one
 WebSocket subscriber live in one process.
 
-## The stdio bridge
+## The relay
 
-A remote client (the desktop over SSH) reaches a run's Unix transport through the stdio bridge, the
-relay core `src/server/stdio_bridge.py` that a host helper run channel becomes after its
+A remote client (the desktop over SSH) reaches a run's Unix transport through the relay, the
+relay core `src/server/relay.py` that a host helper run channel becomes after its
 `run.connect` (see [desktop-connection.md](desktop-connection.md)). It is not a third transport.
 The client opens one run channel per protocol connection over its own ssh exec channel, so
 `WP-ROLES` holds unchanged: a control, subscribe, or chat connection is one helper process. The
-bridge connects to the socket and copies bytes in both
+relay connects to the socket and copies bytes in both
 directions between its stdin/stdout and the socket. It does not parse or re-frame: every Unix
 transport decision above (`WP-GRANULARITY`, `WP-NEWLINE`, `WP-PROTOCOL-ERROR`, and the rest) holds
 through it, and the client keeps its `NewlineFramer` (`WP-FRAMER`) because its side is still a byte
-stream. The conformance runner `tests/conformance/runners/stdio-bridge.json` replays the Unix
+stream. The conformance runner `tests/conformance/runners/relay.json` replays the Unix
 scenarios through a real helper's run channel to hold it to that.
 
 **Ends.** A relayed channel ends with one exit status per outcome, and, whenever the status is not
@@ -299,15 +299,15 @@ Status 1 stays an uncaught error and 2 a usage error. So a client can tell "the 
 from "the transport is broken" (5, 6, and the stalls) from "the server ended this connection" (3)
 without parsing text.
 
-On stdin end of stream the bridge closes the socket, which the server reads as the client's FIN
+On stdin end of stream the relay closes the socket, which the server reads as the client's FIN
 (`WP-DISCONNECT`), so a closed ssh channel releases a subscription exactly as a closed Unix client
 does. Replies still in flight toward a client that closed its stdin are dropped; a client keeps
 stdin open for a connection's whole life. In the other direction, a write toward the server that
-finds it closed does not end the bridge by itself: the server may have written a final
-`protocol_error` frame before its close (`WP-PROTOCOL-ERROR`), so the bridge ends only when its
+finds it closed does not end the relay by itself: the server may have written a final
+`protocol_error` frame before its close (`WP-PROTOCOL-ERROR`), so the relay ends only when its
 socket read reaches end of stream, after relaying that frame.
 
-**Deadlines.** `src/server/stdio_bridge.py:BridgeLimits` names every bound:
+**Deadlines.** `src/server/relay.py:BridgeLimits` names every bound:
 
 | Bound | Value | Role |
 | --- | --- | --- |
@@ -315,12 +315,12 @@ socket read reaches end of stream, after relaying that frame.
 | `connect_timeout_seconds` | 5s | How long connecting to the socket may take |
 
 The write deadline is the hop's answer to the Unix path having none. A half-open ssh hop (a slept
-laptop, a partition) stops draining the channel; once ssh's window and the pipe fill, the bridge's
-stdout write stops progressing, and after 40s the bridge closes the socket and exits with
+laptop, a partition) stops draining the channel; once ssh's window and the pipe fill, the relay's
+stdout write stops progressing, and after 40s the relay closes the socket and exits with
 `client_stalled`. The server then sees an ordinary client FIN, so a dead remote client pins server
 resources for no longer than the WebSocket gateway's `write_deadline_seconds`, which has the same
 value. A hop that is idle (no frame to write) is reaped by ssh's own liveness instead: when sshd
-closes the channel the bridge reads end of stream on stdin.
+closes the channel the relay reads end of stream on stdin.
 
 ## The conformance corpus
 
