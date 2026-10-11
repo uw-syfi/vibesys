@@ -6,14 +6,12 @@
  */
 
 import {createStore, type Store} from '@vibesys/core-state';
-import type {HostKey} from '../../../common/hosts.js';
+import type {HostKey, HostListing, RecentRun} from '@vibesys/entities';
 import type {
   ChromeState,
-  HostListing,
   WelcomeBridge,
   WelcomeEvent,
   WelcomeOverview,
-  WelcomeRecent,
   WelcomeResult,
 } from '../../../common/welcome-protocol.js';
 import {
@@ -60,7 +58,7 @@ export type Confirm = (question: string) => boolean;
 
 type WelcomePush =
   | ({readonly kind: 'chrome'} & WelcomeEvent<ChromeState>)
-  | ({readonly kind: 'recent'} & WelcomeEvent<readonly WelcomeRecent[]>)
+  | ({readonly kind: 'recent'} & WelcomeEvent<readonly RecentRun[]>)
   | ({readonly kind: 'listing'} & WelcomeEvent<HostListing>)
   | ({readonly kind: 'show-host'} & WelcomeEvent<HostKey>);
 

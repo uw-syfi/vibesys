@@ -11,7 +11,7 @@
  * effects and feeds results back.
  */
 import type {StopOutcome} from '@vibesys/contracts/host-helper';
-import type {HostKey} from './hosts.js';
+import type {HostKey} from './host.js';
 
 /** Key of a run's stop flow in `ChromeState.stops`. */
 export function stopKey(host: HostKey, instanceId: string): string {
@@ -42,7 +42,7 @@ export type StopEvent =
 /** What to do next, besides showing the new state. */
 type StopEffect = {readonly kind: 'stop'; readonly force: boolean} | null;
 
-export const IDLE: StopState = {phase: 'idle'};
+export const STOP_IDLE: StopState = {phase: 'idle'};
 
 export interface StopStep {
   readonly state: StopState;
@@ -72,7 +72,7 @@ function transition(state: StopState, event: StopEvent): StopState {
         ? {phase: 'confirming', force: event.force}
         : state;
     case 'confirming':
-      if (event.type === 'cancel' || event.type === 'abandon') return IDLE;
+      if (event.type === 'cancel' || event.type === 'abandon') return STOP_IDLE;
       return event.type === 'confirm'
         ? {phase: 'stopping', force: state.force, accepted: false}
         : state;
@@ -86,7 +86,7 @@ function transition(state: StopState, event: StopEvent): StopState {
 /** A stop command that is in flight: it fails, or the host reports what it observed. */
 function afterCommand(state: StopState, event: StopEvent): StopState {
   if (state.phase !== 'stopping') return state;
-  if (event.type === 'abandon') return IDLE;
+  if (event.type === 'abandon') return STOP_IDLE;
   if (event.type === 'failed') return {phase: 'error', message: event.message, canForce: false};
   return event.type === 'result' ? afterOutcome(event.outcome, state.force) : state;
 }

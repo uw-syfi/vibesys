@@ -4,8 +4,7 @@
  * `(host, runId)`, recorded from the run's record when the app starts or attaches to it, never
  * later and never guessed; its status comes from the host's registry, never from this file.
  */
-import {type HostKey, hostFromKey, validHostPath} from '../../../common/hosts.js';
-import {isRunId, isTaskName} from '../../../common/ids.js';
+import {type HostKey, hostFromKey, isRunId, isTaskName, validHostPath} from '@vibesys/entities';
 import {object, onlyKeys, SettingsError} from './parse.js';
 
 /** One run the user opened. */

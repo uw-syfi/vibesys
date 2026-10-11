@@ -1,11 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {
-  hostFromKey,
-  hostKey,
-  SettingsError,
-  validAlias,
-  validHostPath,
-} from '../../../common/hosts.js';
+import {hostFromKey, hostKey, SettingsError, validAlias, validHostPath} from '@vibesys/entities';
 import {
   EMPTY_SETTINGS,
   parseSettings,

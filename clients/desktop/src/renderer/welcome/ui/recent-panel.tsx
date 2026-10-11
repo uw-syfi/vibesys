@@ -1,9 +1,8 @@
 /** Recent: the runs this user opened, each with its status on its host and what it allows. */
+
+import {type RecentRun, type RecentStatus, resumeDecision, stopKey} from '@vibesys/entities';
 import type {JSX, ReactNode} from 'react';
-import type {RecentStatus} from '../../../common/recent-status.js';
-import {resumeDecision} from '../../../common/resume-run.js';
-import {stopKey} from '../../../common/stop-run.js';
-import type {ChromeState, WelcomeRecent} from '../../../common/welcome-protocol.js';
+import type {ChromeState} from '../../../common/welcome-protocol.js';
 import {type ListsState, statusOf} from '../state/lists.js';
 import {commands, StopControls, type WelcomeSenders} from './common.js';
 
@@ -21,7 +20,7 @@ function statusText(status: RecentStatus): {text: string; className: string} {
 }
 
 function RowActions(props: {
-  readonly run: WelcomeRecent;
+  readonly run: RecentRun;
   readonly status: RecentStatus;
   readonly chrome: ChromeState;
   readonly send: WelcomeSenders;

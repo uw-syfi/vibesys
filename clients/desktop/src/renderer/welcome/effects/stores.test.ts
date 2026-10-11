@@ -1,17 +1,13 @@
 import {describe, expect, test} from 'bun:test';
 import type {Store} from '@vibesys/core-state';
-import type {HostKey} from '../../../common/hosts.js';
-import type {ResumeRunId} from '../../../common/resume-run.js';
+import type {HostKey, HostListing, HostSummary, RecentRun, ResumeRunId} from '@vibesys/entities';
 import type {
   ChromeState,
-  HostListing,
   PathCompletion,
   StartOutcome,
   WelcomeBridge,
   WelcomeEvent,
-  WelcomeHost,
   WelcomeOverview,
-  WelcomeRecent,
   WelcomeResult,
 } from '../../../common/welcome-protocol.js';
 import type {HostAction, HostState} from '../state/host.js';
@@ -45,7 +41,7 @@ class FakeWelcomeBridge implements WelcomeBridge {
   readonly cancelledCheckouts: number[] = [];
   checkout = '/vibesys';
   readonly #chrome: Array<(event: WelcomeEvent<ChromeState>) => void> = [];
-  readonly #recent: Array<(event: WelcomeEvent<readonly WelcomeRecent[]>) => void> = [];
+  readonly #recent: Array<(event: WelcomeEvent<readonly RecentRun[]>) => void> = [];
   readonly #showHost: Array<(event: WelcomeEvent<HostKey>) => void> = [];
   readonly #listing: Array<(event: WelcomeEvent<HostListing>) => void> = [];
   #sequence = 0;
@@ -58,7 +54,7 @@ class FakeWelcomeBridge implements WelcomeBridge {
     return {ok: true, value: []};
   }
 
-  async host(host: HostKey): Promise<WelcomeResult<WelcomeHost>> {
+  async host(host: HostKey): Promise<WelcomeResult<HostSummary>> {
     this.hostCalls.push(host);
     return {ok: true, value: {key: host, label: host, checkout: this.checkout}};
   }
@@ -128,7 +124,7 @@ class FakeWelcomeBridge implements WelcomeBridge {
     this.#chrome.push(listener);
   }
 
-  onRecent(listener: (event: WelcomeEvent<readonly WelcomeRecent[]>) => void): void {
+  onRecent(listener: (event: WelcomeEvent<readonly RecentRun[]>) => void): void {
     this.#recent.push(listener);
   }
 
@@ -149,7 +145,7 @@ class FakeWelcomeBridge implements WelcomeBridge {
     for (const listener of this.#chrome) listener(event);
   }
 
-  emitRecent(value: readonly WelcomeRecent[]): void {
+  emitRecent(value: readonly RecentRun[]): void {
     const event = this.#event(value);
     for (const listener of this.#recent) listener(event);
   }
@@ -382,7 +378,7 @@ function chrome(runId: string): ChromeState {
   };
 }
 
-function recent(runId: string): WelcomeRecent {
+function recent(runId: string): RecentRun {
   return {
     host: `ssh:${runId}`,
     hostLabel: runId,

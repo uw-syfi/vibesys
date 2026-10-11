@@ -3,13 +3,20 @@
  * request to the feature that owns it (`hosts`, `run-control`), keeps the window's state
  * (`ChromeState`) in step, and opens what a launch asked for.
  */
+
+import {
+  type HostId,
+  type HostKey,
+  hostFromKey,
+  hostKey,
+  hostLabel,
+  type RecentRun,
+} from '@vibesys/entities';
 import {ipcMain} from 'electron';
-import {type HostId, type HostKey, hostFromKey, hostKey, hostLabel} from '../../common/hosts.js';
 import {
   type ChromeState,
   WELCOME_EVENTS,
   type WelcomeOverview,
-  type WelcomeRecent,
 } from '../../common/welcome-protocol.js';
 import type {Hosts} from '../features/hosts/index.js';
 import type {RunControl} from '../features/run-control/index.js';
@@ -36,7 +43,7 @@ function rendererGeneration(
 }
 
 /** The recent runs as the welcome view lists them. */
-function welcomeRecent(recent: RecentFile): WelcomeRecent[] {
+function welcomeRecent(recent: RecentFile): RecentRun[] {
   return recent.runs.map(run => ({...run, hostLabel: hostLabel(hostFromKey(run.host))}));
 }
 

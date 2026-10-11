@@ -14,12 +14,18 @@ import type {
   InstanceList,
   LiveInstanceRecord,
 } from '@vibesys/contracts/host-helper';
-import type {ConnectionStatus} from '../../../common/connection-status.js';
-import {type HostId, hostFromKey, hostKey, hostLabel} from '../../../common/hosts.js';
-import type {ResumeRunId} from '../../../common/resume-run.js';
-import type {StopView} from '../../../common/stop-run.js';
+import {
+  type ConnectionStatus,
+  type HostId,
+  hostFromKey,
+  hostKey,
+  hostLabel,
+  liveRecord,
+  type ResumeRunId,
+  type StopView,
+} from '@vibesys/entities';
 import type {ChromeState, StartOutcome} from '../../../common/welcome-protocol.js';
-import {connectionStatus, liveRecord} from '../../entities/listing.js';
+import {connectionStatus} from '../../entities/connection.js';
 import type {HostConnection, Phase} from '../../platform/connection/index.js';
 import type {RecentRun} from '../../platform/settings/index.js';
 import {type RelayPort, relay} from './relay.js';

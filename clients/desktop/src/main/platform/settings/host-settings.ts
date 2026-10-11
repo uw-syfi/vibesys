@@ -7,13 +7,13 @@
  * which the app starts the host helper.
  */
 import {
-  ALIAS,
   type HostId,
   type HostKey,
   hostFromKey,
   hostKey,
+  SSH_ALIAS,
   validHostPath,
-} from '../../../common/hosts.js';
+} from '@vibesys/entities';
 import {object, onlyKeys, SettingsError} from './parse.js';
 
 /** How the app runs VibeSys on one host. */
@@ -102,7 +102,7 @@ export function sshConfigHosts(text: string): string[] {
     if (match === null) continue;
     for (const name of (match[1] ?? '').split(/\s+/)) {
       const unquoted = name.replace(/^"(.*)"$/, '$1');
-      if (/[*?!]/.test(unquoted) || !ALIAS.test(unquoted) || hosts.includes(unquoted)) continue;
+      if (/[*?!]/.test(unquoted) || !SSH_ALIAS.test(unquoted) || hosts.includes(unquoted)) continue;
       hosts.push(unquoted);
     }
   }

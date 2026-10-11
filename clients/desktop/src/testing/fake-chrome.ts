@@ -4,8 +4,7 @@
  */
 
 import type {Seeded} from '@vibesys/core-state/testing';
-import type {ConnectionStatus} from '../common/connection-status.js';
-import {type StopView, stopKey} from '../common/stop-run.js';
+import {type ConnectionStatus, type StopView, stopKey} from '@vibesys/entities';
 import type {ChromeState} from '../common/welcome-protocol.js';
 
 const CONNECTIONS: readonly ConnectionStatus[] = [

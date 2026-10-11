@@ -1,5 +1,6 @@
 import {describe, expect, test} from 'bun:test';
-import type {ChromeState, HostListing, WelcomeRecent} from '../../common/welcome-protocol.js';
+import type {HostListing, RecentRun} from '@vibesys/entities';
+import type {ChromeState} from '../../common/welcome-protocol.js';
 import {WelcomeFeed} from './welcome-feed.js';
 
 describe('WelcomeFeed', () => {
@@ -28,7 +29,7 @@ describe('WelcomeFeed', () => {
   });
 });
 
-function values(recentRuns: readonly WelcomeRecent[]) {
+function values(recentRuns: readonly RecentRun[]) {
   return {
     settingsProblem: null,
     recent: recentRuns,
@@ -52,7 +53,7 @@ function chrome(runId: string): ChromeState {
   };
 }
 
-function recent(runId: string): WelcomeRecent {
+function recent(runId: string): RecentRun {
   return {
     host: 'local',
     hostLabel: 'This Mac',

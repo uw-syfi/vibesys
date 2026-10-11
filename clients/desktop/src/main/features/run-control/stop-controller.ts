@@ -5,10 +5,10 @@
  * the caller reports what it sees and is told, through `changed`, when a view must be redrawn.
  */
 import type {InstanceStopResult} from '@vibesys/contracts/host-helper';
-import type {HostKey} from '../../../common/hosts.js';
 import {
   confirmText,
-  IDLE,
+  type HostKey,
+  STOP_IDLE,
   type StopEvent,
   type StopState,
   type StopStep,
@@ -16,7 +16,7 @@ import {
   stopKey,
   stopStep,
   stopView,
-} from '../../../common/stop-run.js';
+} from '@vibesys/entities';
 
 export interface StopDeps {
   /** Ask the host to stop the instance, distinguishing withdrawal from answer and failure. */
@@ -147,7 +147,7 @@ export class StopController {
   }
 
   #step(key: string, event: StopEvent): StopStep {
-    const step = stopStep(this.#states.get(key) ?? IDLE, event);
+    const step = stopStep(this.#states.get(key) ?? STOP_IDLE, event);
     if (step.state.phase === 'idle') this.#states.delete(key);
     else this.#states.set(key, step.state);
     this.#deps.changed();

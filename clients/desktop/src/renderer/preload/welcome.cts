@@ -9,18 +9,14 @@
  * in step.
  */
 import electron = require('electron');
-import type {HostKey} from '../../common/hosts.js';
-import type {ResumeRunId} from '../../common/resume-run.js';
+import type {HostKey, HostListing, HostSummary, RecentRun, ResumeRunId} from '@vibesys/entities';
 import type {
   ChromeState,
-  HostListing,
   PathCompletion,
   StartOutcome,
   WelcomeBridge,
   WelcomeEvent,
-  WelcomeHost,
   WelcomeOverview,
-  WelcomeRecent,
   WelcomeResult,
 } from '../../common/welcome-protocol.js';
 
@@ -64,7 +60,7 @@ const bridge: WelcomeBridge = {
   platform: process.platform,
   overview: () => call<WelcomeOverview>(CHANNELS.overview),
   hosts: () => call<string[]>(CHANNELS.hosts),
-  host: (host: HostKey) => call<WelcomeHost>(CHANNELS.host, host),
+  host: (host: HostKey) => call<HostSummary>(CHANNELS.host, host),
   setCheckout: (host: HostKey, path: string, change: number) =>
     call<string>(CHANNELS.setCheckout, host, path, change),
   cancelCheckout: (change: number) => call<null>(CHANNELS.cancelCheckout, change),
@@ -84,7 +80,7 @@ const bridge: WelcomeBridge = {
   stop: (host: HostKey, instance: string, force: boolean) =>
     call<null>(CHANNELS.stop, host, instance, force),
   onChrome: (listener: (event: WelcomeEvent<ChromeState>) => void) => on(EVENTS.chrome, listener),
-  onRecent: (listener: (event: WelcomeEvent<readonly WelcomeRecent[]>) => void) =>
+  onRecent: (listener: (event: WelcomeEvent<readonly RecentRun[]>) => void) =>
     on(EVENTS.recent, listener),
   onShowHost: (listener: (event: WelcomeEvent<HostKey>) => void) =>
     on(EVENTS.showHost, listener),

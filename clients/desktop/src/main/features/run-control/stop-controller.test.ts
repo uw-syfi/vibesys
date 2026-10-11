@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
+import {stopKey} from '@vibesys/entities';
 import {FakeClock} from '@vibesys/transport/testing';
-import {stopKey} from '../../../common/stop-run.js';
 import {DEFAULT_CONNECTION_CONFIG, HostConnection} from '../../platform/connection/index.js';
 import {FakeLink, record} from '../../platform/connection/testing/fake-helper.js';
 import {StopController, type StopDeps} from './stop-controller.js';

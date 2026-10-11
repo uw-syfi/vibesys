@@ -2,19 +2,13 @@
  * The main process's ordered welcome feed: every push gets one sequence, and the latest values
  * needed for an authoritative bootstrap snapshot are retained beside that sequence.
  */
-import type {HostKey} from '../../common/hosts.js';
-import type {
-  ChromeState,
-  HostListing,
-  WelcomeEvent,
-  WelcomeOverview,
-  WelcomeRecent,
-} from '../../common/welcome-protocol.js';
+import type {HostKey, HostListing, RecentRun} from '@vibesys/entities';
+import type {ChromeState, WelcomeEvent, WelcomeOverview} from '../../common/welcome-protocol.js';
 
 export interface WelcomeSnapshotValues {
   readonly settingsProblem: string | null;
   /** A disk read used until this process has published a newer Recent value. */
-  readonly recent: readonly WelcomeRecent[];
+  readonly recent: readonly RecentRun[];
   readonly chrome: ChromeState;
   readonly host: HostKey;
 }
@@ -22,14 +16,14 @@ export interface WelcomeSnapshotValues {
 /** The single sequence and retained state behind the welcome snapshot-plus-stream handoff. */
 export class WelcomeFeed {
   #sequence = 0;
-  #recent: readonly WelcomeRecent[] | null = null;
+  #recent: readonly RecentRun[] | null = null;
   readonly #listings = new Map<HostKey, HostListing>();
 
   chrome(value: ChromeState): WelcomeEvent<ChromeState> {
     return this.#next(value);
   }
 
-  recent(value: readonly WelcomeRecent[]): WelcomeEvent<readonly WelcomeRecent[]> {
+  recent(value: readonly RecentRun[]): WelcomeEvent<readonly RecentRun[]> {
     this.#recent = value;
     return this.#next(value);
   }

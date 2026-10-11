@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {Seeded} from '@vibesys/core-state/testing';
-import {isInstanceId, isRunId, isTaskName} from '../../common/ids.js';
+import {isInstanceId, isRunId, isTaskName} from '@vibesys/entities';
 import {WELCOME_CHANNELS, type WelcomeResult} from '../../common/welcome-protocol.js';
 import {
   bindWelcomeIpc,

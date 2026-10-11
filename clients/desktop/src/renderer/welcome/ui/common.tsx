@@ -3,9 +3,9 @@
  * sheet. Components render the state they are given and report events; they perform no I/O and
  * hold no state that changes behavior.
  */
+
+import type {HostKey, StopView} from '@vibesys/entities';
 import type {InputHTMLAttributes, JSX, MouseEvent, ReactNode, SyntheticEvent} from 'react';
-import type {HostKey} from '../../../common/hosts.js';
-import type {StopView} from '../../../common/stop-run.js';
 import {
   type CompletionAction,
   type CompletionField,

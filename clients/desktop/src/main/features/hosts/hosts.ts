@@ -9,12 +9,15 @@ import type {PathsCompleteReply} from '@vibesys/contracts/host-helper';
 import {
   type HostId,
   type HostKey,
+  type HostListing,
+  type HostSummary,
   hostKey,
   hostLabel,
+  hostListing,
   validHostPath,
-} from '../../../common/hosts.js';
-import type {HostListing, PathCompletion, WelcomeHost} from '../../../common/welcome-protocol.js';
-import {connectionStatus, hostListing} from '../../entities/listing.js';
+} from '@vibesys/entities';
+import type {PathCompletion} from '../../../common/welcome-protocol.js';
+import {connectionStatus} from '../../entities/connection.js';
 import {
   type ConnectionManager,
   HelperRequestError,
@@ -104,7 +107,7 @@ export class Hosts {
   }
 
   /** `id` as its panel shows it; from now on its runs are pushed to the view. */
-  async host(id: HostId): Promise<WelcomeHost> {
+  async host(id: HostId): Promise<HostSummary> {
     const checkout = await this.checkout(id);
     if (checkout !== null) await this.watch(id);
     return {key: hostKey(id), label: hostLabel(id), checkout};

@@ -6,10 +6,16 @@
  * paths, ids, task names, run arguments) before anything reaches a host, or throws naming what is
  * wrong. `bindWelcomeIpc` answers the channels only for the welcome view's own web contents.
  */
-import {type HostId, hostFromKey, validHostPath} from '../../common/hosts.js';
-import {isInstanceId, isTaskName} from '../../common/ids.js';
-import {exactResumeRunId, type ResumeRunId} from '../../common/resume-run.js';
-import {shellWords} from '../../common/shell-words.js';
+import {
+  exactResumeRunId,
+  type HostId,
+  hostFromKey,
+  isInstanceId,
+  isTaskName,
+  type ResumeRunId,
+  shellWords,
+  validHostPath,
+} from '@vibesys/entities';
 import {WELCOME_CHANNELS, type WelcomeResult} from '../../common/welcome-protocol.js';
 import {ConnectionError} from '../platform/connection/index.js';
 

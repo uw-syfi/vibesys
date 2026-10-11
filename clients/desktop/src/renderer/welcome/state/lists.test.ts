@@ -1,12 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {checkModel, type Seeded} from '@vibesys/core-state/testing';
-import {exactResumeRunId} from '../../../common/resume-run.js';
-import type {
-  HostListing,
-  PathCompletion,
-  WelcomeRecent,
-  WelcomeResult,
-} from '../../../common/welcome-protocol.js';
+import {exactResumeRunId, type HostListing, type RecentRun} from '@vibesys/entities';
+import type {PathCompletion, WelcomeResult} from '../../../common/welcome-protocol.js';
 import {randomChrome} from '../../../testing/fake-chrome.js';
 import {
   COMPLETION_EMPTY,
@@ -26,7 +21,7 @@ import {
 } from './picker.js';
 import {type RunCommand, WELCOME_INITIAL, type WelcomeAction, welcomeStep} from './welcome.js';
 
-function run(host: string, runId: string): WelcomeRecent {
+function run(host: string, runId: string): RecentRun {
   return {host, hostLabel: host, project: '/p', task: 'spsc', runId, attachedAt: 1};
 }
 

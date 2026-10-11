@@ -2,23 +2,24 @@
  * The host panel: one host's VibeSys checkout (or the form asking for it), its runs as the host
  * pushes them, and "Start a run…"; or why the host cannot be reached, with Sign in.
  */
+
+import {
+  type HostKey,
+  type HostListing,
+  type HostRun,
+  type HostSummary,
+  stopKey,
+  suggestProjects,
+} from '@vibesys/entities';
 import type {FormEvent, JSX, KeyboardEvent, ReactNode} from 'react';
-import type {HostKey} from '../../../common/hosts.js';
-import {suggestProjects} from '../../../common/recent-status.js';
-import {stopKey} from '../../../common/stop-run.js';
-import type {
-  ChromeState,
-  HostListing,
-  WelcomeHost,
-  WelcomeRun,
-} from '../../../common/welcome-protocol.js';
+import type {ChromeState} from '../../../common/welcome-protocol.js';
 import type {CompletionState} from '../state/completion.js';
 import {type CheckoutForm, type HostAction, type HostState, hostLabelOf} from '../state/host.js';
 import type {ListsState} from '../state/lists.js';
 import {commands, PathInput, StopControls, type WelcomeSenders} from './common.js';
 
 function RunRow(props: {
-  readonly run: WelcomeRun;
+  readonly run: HostRun;
   readonly host: HostKey;
   readonly chrome: ChromeState;
   readonly send: WelcomeSenders;
@@ -49,7 +50,7 @@ function RunRow(props: {
 }
 
 function RunTable(props: {
-  readonly data: WelcomeHost;
+  readonly data: HostSummary;
   readonly listing: HostListing | undefined;
   readonly chrome: ChromeState;
   readonly send: WelcomeSenders;
@@ -121,7 +122,7 @@ function Unavailable(props: {
   }
 }
 
-function formStatus(form: CheckoutForm, data: WelcomeHost): string {
+function formStatus(form: CheckoutForm, data: HostSummary): string {
   if (form.error !== null) return form.error;
   if (form.checking !== null) return `Checking ${form.value.trim()} on ${data.label}…`;
   return '';
@@ -130,7 +131,7 @@ function formStatus(form: CheckoutForm, data: WelcomeHost): string {
 /** "Where is your VibeSys checkout on HOST?", checked by the host before it is saved. */
 function CheckoutQuestion(props: {
   readonly form: CheckoutForm;
-  readonly data: WelcomeHost;
+  readonly data: HostSummary;
   readonly host: (action: HostAction) => void;
   readonly completion: CompletionState;
   readonly send: WelcomeSenders;
