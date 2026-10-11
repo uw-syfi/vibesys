@@ -17,6 +17,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING, assert_never
 
+from .types.attempts import AttemptPhase
 from .types.common import LifecycleClass, RunStatus, Value
 from .types.evaluation import (
     ContinuationPhase,
@@ -51,6 +52,7 @@ class WaitKind(StrEnum):
     SESSION = "session"
     RECOVERY_CHECK = "recovery-check"
     OWNED_JOB = "owned-job"
+    RELEASE_DEPENDENCY = "release-dependency"
 
 
 class Producer(StrEnum):
@@ -288,6 +290,27 @@ def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
     return found
 
 
+def _release_waits(core: CoreState) -> list[Wait]:
+    """A closing attempt's dependency on a job that is already released.
+
+    A job that is still live is named by its own wait above. A closing attempt that still lists
+    a job as unreleased after the job ended, with its release recorded, waits for an event that
+    was already due: the attempt can never reach terminal, and its settlement never completes.
+    """
+    released = {
+        job.resource_id
+        for job in (*core.evaluation.jobs, *core.evaluation.registered_jobs)
+        if job.resource_id is not None and job.terminal and job.released
+    }
+    return [
+        Wait(waiter=WaitKind.RELEASE_DEPENDENCY, subject=edge.identity.root, producer=None)
+        for attempt in core.attempts.attempts
+        if attempt.phase in (AttemptPhase.CLOSING, AttemptPhase.BLOCKED)
+        for edge in attempt.release_dependencies
+        if edge.kind == "job" and edge.identity in released
+    ]
+
+
 def _observes(intent: Intent, resource: object) -> bool:
     request = intent.request
     return isinstance(request, ObserveOwnedJob | InspectOwnedJob) and (
@@ -305,6 +328,7 @@ def waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[Wait, ...]
         *_session_waits(core, pending),
         *_recovery_waits(core),
         *_job_waits(core, pending),
+        *_release_waits(core),
     )
 
 

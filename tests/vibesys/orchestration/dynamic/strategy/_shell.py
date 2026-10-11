@@ -120,7 +120,9 @@ def _status(answer: Answer | _InvalidReply) -> tuple[ObservationStatus, bool, bo
 
 def _reports_job(answer: Answer | _InvalidReply) -> bool:
     """Whether an executor that took a job request reports the job's own state with it."""
-    return isinstance(answer, Succeeded) or (isinstance(answer, Failed) and answer.accepted)
+    return isinstance(answer, Succeeded | Running) or (
+        isinstance(answer, Failed) and answer.accepted
+    )
 
 
 def _lifecycle_event(request: Request, observed: RequestObserved) -> OwnerEvent | None:
@@ -169,6 +171,11 @@ class ScriptedExecutors:
         answer = self._parsed(request, self._script(request, self._core()))
         observed = self._observed(request, answer, context.now_at)
         owner_events = self._owner_events(request, answer, observed)
+        if isinstance(request, ObserveOwnedJob) and isinstance(answer, Running):
+            # A poll is a query: it completes with the job's state, and the state it found is
+            # the job's own observation. The job is still running; the poll is not.
+            owner_events = (self._job_event(request, observed),)
+            observed = self._observed(request, Succeeded(), context.now_at)
         self.journal.observe_event(observed)
         for event in owner_events:
             if isinstance(event, JobObserved):

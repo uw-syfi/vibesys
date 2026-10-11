@@ -573,6 +573,15 @@ def _describe(core: CoreState, notes: Sequence[str]) -> str:
         f"run {core.run.run_id.root} stalled at core revision {core.revision} "
         f"with status {core.run.status.value}; open intents {open_intents}"
     )
+    # An attempt that cannot finish closing is the usual reason nothing else is left to do.
+    waiting = [
+        f"{attempt.attempt_id.root} {attempt.phase.value} on "
+        f"{[f'{edge.kind}:{edge.identity.root}' for edge in attempt.release_dependencies]}"
+        for attempt in core.attempts.attempts
+        if attempt.release_dependencies
+    ]
+    if waiting:
+        text += f"; attempts waiting for a release {waiting}"
     if notes:
         text += f"; {'; '.join(notes)}"
     return text
