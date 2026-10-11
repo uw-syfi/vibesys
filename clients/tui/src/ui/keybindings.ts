@@ -175,19 +175,6 @@ export function bindKeybindings(
       key.preventDefault();
       return;
     }
-    if (controller.state.errorBanner !== null && key.name === 'escape') {
-      controller.dismissErrorBanner();
-      key.preventDefault();
-      return;
-    }
-    // The command input's own error clears the same way: Esc goes back one
-    // level (tui/conventions.md), and a stale input error is a level to leave
-    // just as much as the banner is.
-    if (controller.state.inputError !== null && key.name === 'escape') {
-      controller.clearInputError();
-      key.preventDefault();
-      return;
-    }
     if (
       key.ctrl &&
       key.name === 'w' &&
@@ -300,6 +287,22 @@ export function bindKeybindings(
         if (actions.completeChatInput()) key.preventDefault();
         return;
       }
+      return;
+    }
+    // Persistent errors belong to the surface behind a modal. Escape closes
+    // the foreground chat/menu/picker/viewer/overlay first, then reaches the
+    // banner or command input on the next press. The palette and notepad make
+    // the same claim in their earlier containment blocks.
+    if (controller.state.errorBanner !== null && key.name === 'escape') {
+      controller.dismissErrorBanner();
+      key.preventDefault();
+      return;
+    }
+    // The command input's own error clears at the same level as the banner:
+    // after foreground modals, before panes and the command input itself.
+    if (controller.state.inputError !== null && key.name === 'escape') {
+      controller.clearInputError();
+      key.preventDefault();
       return;
     }
     // With the chat closed (or never open), Escape's next layer is the

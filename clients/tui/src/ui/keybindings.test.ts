@@ -65,14 +65,14 @@ function stubClipboard(): SelectionClipboard {
   return {copySelection: () => 'no-selection'} as unknown as SelectionClipboard;
 }
 
-function stubActions(): KeybindingActions {
+function stubActions(calls: string[] = []): KeybindingActions {
   return {
     completeInput: () => false,
     navigateSuggestions: () => false,
     navigateChatSuggestions: () => false,
     completeChatInput: () => false,
     inputIsEmpty: () => true,
-    closeChat: () => {},
+    closeChat: () => calls.push('closeChat'),
     toggleLatestPrompt: () => {},
     toggleSelectedTool: () => false,
     revealSelectedEntry: () => {},
@@ -122,7 +122,7 @@ function bound(state: SessionState): {keyInput: FakeKeyInput; calls: string[]} {
     controller,
     stubViewport(),
     stubClipboard(),
-    stubActions(),
+    stubActions(calls),
   );
   return {keyInput, calls};
 }
@@ -152,4 +152,120 @@ describe('F4 pane zoom', () => {
     // through to the panes, the same claim every other modal already has.
     expect(key.defaultPrevented).toBe(true);
   });
+});
+
+describe('foreground modal key ownership', () => {
+  const initial = initialSessionState();
+  const banner: NonNullable<SessionState['errorBanner']> = {
+    titleKind: 'run',
+    message: 'Run failed',
+    detail: null,
+    hint: null,
+    diagnosticId: 'diagnostic-1',
+    severity: 'fatal',
+    scope: 'run',
+    agentKind: null,
+    roundLabel: null,
+    invocationId: null,
+    count: 1,
+  };
+  const modals: Array<{
+    name: string;
+    state: Partial<SessionState>;
+    closesWith: string;
+  }> = [
+    {
+      name: 'notepad',
+      state: {notepad: {...initial.notepad, open: true}},
+      closesWith: 'closeNotepad',
+    },
+    {
+      name: 'command palette',
+      state: {palette: {query: '', selected: 0}},
+      closesWith: 'closePalette',
+    },
+    {
+      name: 'chat menu',
+      state: {
+        chatMenu: {
+          kind: 'model',
+          title: 'Harness and model',
+          rows: [{kind: 'note', label: 'Loading options…'}],
+          selected: -1,
+          pending: true,
+          error: null,
+          customModels: {},
+        },
+      },
+      closesWith: 'closeChatMenu',
+    },
+    {
+      name: 'theme picker',
+      state: {themePicker: {selected: 'dark'}},
+      closesWith: 'closeThemePicker',
+    },
+    {
+      name: 'diff viewer',
+      state: {
+        diffViewer: {
+          round: 1,
+          base: 'base',
+          head: 'head',
+          files: [{path: 'src/main.ts', change: 'modified'}],
+          index: 0,
+          hunk: 0,
+          patches: {},
+        },
+      },
+      closesWith: 'closeDiffViewer',
+    },
+    {
+      name: 'command overlay',
+      state: {overlay: {kind: 'detail', content: 'Command result'}},
+      closesWith: 'live',
+    },
+    {
+      name: 'modal chat',
+      state: {chatOpen: true},
+      closesWith: 'closeChat',
+    },
+  ];
+
+  for (const error of [{errorBanner: banner}, {inputError: 'Invalid command'}]) {
+    const errorName = 'errorBanner' in error ? 'error banner' : 'input error';
+    for (const modal of modals) {
+      it(`keeps Escape on the ${modal.name} ahead of the ${errorName}`, () => {
+        const {keyInput, calls} = bound({...initialSessionState(), ...error, ...modal.state});
+
+        const key = pressKey('escape');
+        keyInput.emit(key);
+
+        expect(calls).toEqual([modal.closesWith]);
+        expect(key.defaultPrevented).toBe(true);
+      });
+    }
+  }
+
+  for (const errorCase of [
+    {
+      name: 'error banner',
+      state: {errorBanner: banner},
+      clearsWith: 'dismissErrorBanner',
+    },
+    {
+      name: 'input error',
+      state: {inputError: 'Invalid command'},
+      clearsWith: 'clearInputError',
+    },
+  ]) {
+    it(`dismisses the ${errorCase.name} once no modal is open`, () => {
+      const {keyInput, calls} = bound({...initialSessionState(), ...errorCase.state});
+
+      const key = pressKey('escape');
+      keyInput.emit(key);
+
+      expect(calls).toEqual([errorCase.clearsWith]);
+      expect(key.defaultPrevented).toBe(true);
+    });
+  }
 });
