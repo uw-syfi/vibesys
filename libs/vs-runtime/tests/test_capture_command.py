@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Literal
+from typing import Any, Literal
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_core.api import CaptureCommandBase, RevisionId, RevisionRef
+from vs_core.api import CaptureCommandBase, HostFence, HostId, RevisionId, RevisionRef
 from vs_runtime.api import CommandResult
-from vs_runtime.api.core import CaptureCommandOwner, NotApplied
+from vs_runtime.api.core import CaptureCommandOwner, ExecutionContext, NotApplied
 from vs_runtime.api.testing import FakeCommands, FakeWorkspace, FakeWorkspaces
 from vs_sim.api.testing import arrival
 
@@ -97,13 +97,14 @@ async def test_a_run_without_isolated_candidates_refuses_instead_of_touching_the
     assert not commands.calls
 
 
-class _HangingCommands:
+class _HangingCommands(FakeCommands):
     """A command runner whose process never returns: the host dies while it runs."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.started = asyncio.Event()
 
-    async def capture_output(self, argv: tuple[str, ...], **_kwargs: object) -> CommandResult:
+    async def capture_output(self, argv: tuple[str, ...], **_kwargs: Any) -> CommandResult:
         del argv
         self.started.set()
         await asyncio.Event().wait()
@@ -122,7 +123,7 @@ async def test_a_host_that_dies_mid_capture_leaves_nothing_after_the_replay(iden
         FakeWorkspace(known_revisions=retained), supports_parallel_candidates=True
     )
     hanging = _HangingCommands()
-    dying = CaptureCommandOwner(workspaces, hanging, workspaces, _commit_of)  # type: ignore[arg-type]  # only capture_output is used
+    dying = CaptureCommandOwner(workspaces, hanging, workspaces, _commit_of)
     first = asyncio.ensure_future(dying.capture(_request("r1"), identity))
     try:
         await arrival(hanging.started.wait(), first)
@@ -142,6 +143,9 @@ async def test_a_host_that_dies_mid_capture_leaves_nothing_after_the_replay(iden
 
 async def test_inspection_never_runs_the_command() -> None:
     owner, _, commands = _owner({"r1"})
-    verdict = await owner.inspect(_request("r1"), None)  # type: ignore[arg-type]  # the context is unused
+    context = ExecutionContext(
+        fence=HostFence(host_id=HostId(root="h"), epoch=1), now_at=0.0, payload_digest="d"
+    )
+    verdict = await owner.inspect(_request("r1"), context)
     assert isinstance(verdict, NotApplied)
     assert not commands.calls
