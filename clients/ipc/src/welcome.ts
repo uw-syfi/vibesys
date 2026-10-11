@@ -112,6 +112,20 @@ export type WelcomeResult<T> =
   | {readonly ok: false; readonly error: string; readonly authNeeded: boolean};
 
 /**
+ * A bridge call that rejected (the main process went away) as a failed result, so a store waiting
+ * on the reply always gets one.
+ */
+export function settled<T>(call: Promise<WelcomeResult<T>>): Promise<WelcomeResult<T>> {
+  return call.catch(
+    (error: unknown): WelcomeResult<T> => ({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      authNeeded: false,
+    }),
+  );
+}
+
+/**
  * What the welcome preload exposes to the welcome view (`window.vibesysWelcome`): one function per
  * request channel, and one subscription per event. The main process validates every argument.
  */

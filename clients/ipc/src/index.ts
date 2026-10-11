@@ -23,6 +23,7 @@ export {
   type ChromeState,
   type PathCompletion,
   type StartOutcome,
+  settled,
   WELCOME_CHANNELS,
   WELCOME_EVENTS,
   type WelcomeBridge,
