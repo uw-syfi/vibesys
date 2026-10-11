@@ -24,7 +24,9 @@ from tests.vibesys.orchestration.multi.strategy._replies import (
 )
 from tests.vibesys.orchestration.multi.strategy._run import FACTS, run_shell
 
+from vibesys.hypothesis import rounds
 from vibesys.metrics import MetricSpace, Objective
+from vibesys.orchestration.multi.strategy.api import MultiStrategyState
 from vs_core.api import (
     AssessmentKind,
     LocalValidationReport,
@@ -76,6 +78,40 @@ def _validations(run: Run) -> list[Operation]:
         for item in run.decisions
         if isinstance(item, Operation) and type(item.request).__name__ == "ValidateLocal"
     ]
+
+
+def test_unmeasured_frontier_claim_is_evidence_but_not_framework_retention() -> None:
+    executors = Executors(
+        planner=deque([plan_reply("h1"), plan_reply("h2"), plan_reply("h3")]),
+        implementer=deque(
+            [
+                implemented(
+                    "disproven",
+                    candidate_disposition="pareto_frontier",
+                    candidate_metrics={"throughput": 75.0},
+                    candidate_evaluation_artifact="agent-profile.json",
+                    candidate_retention_reason="agent reports a tradeoff",
+                ),
+                implemented(),
+                implemented(),
+            ]
+        ),
+        judge=deque(reviewed() for _ in range(3)),
+    )
+
+    run = run_shell(executors, max_rounds=3, official_eval_every=2)
+    first = _settles(run)[0]
+    state = MultiStrategyState.model_validate(run.state)
+    ledger = rounds.decode(rounds.EncodedLedger(state.search_json, state.carry_json))
+    first_record = ledger.records[0]
+
+    assert (first.eligible, first.retention) == (False, "candidate")
+    assert first.candidate is not None
+    assert _starts(run)[1].workspace.base == first.candidate
+    assert first_record.hypothesis_outcome == "disproven"
+    assert first_record.candidate_disposition == "pareto_frontier"
+    assert first_record.candidate_retention_reason == "agent reports a tradeoff"
+    assert first_record.candidate_retained is False
 
 
 # -- turn-taking ----------------------------------------------------------------------------

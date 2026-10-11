@@ -7,19 +7,26 @@ from dataclasses import replace
 from vibesys.hypothesis import (
     AgentAttribution,
     CandidateDisposition,
+    HypothesisConfig,
     HypothesisOutcome,
+    HypothesisSearch,
     OrchestratorPlan,
     RoundRecord,
 )
 from vibesys.hypothesis.attempts import (
     AttemptState,
     JudgeReviewed,
+    JudgeSkipped,
+    JudgeSkipReason,
     PerformanceProjection,
 )
+from vibesys.hypothesis.readmodel import AgentRunProjection, project_hypothesis_state
 from vibesys.hypothesis.record import RecordInput, build_round_record
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import FrameworkBenchmarkOutcome, MetricSpace, Objective
 from vibesys.orchestration.multi.models import ImplementerResponse
+from vibesys.orchestration.review import Verdict
+from vibesys.orchestration.single.models import SingleAgentRoundResponse
 
 
 def _record_input() -> RecordInput:
@@ -135,7 +142,7 @@ def test_gate_retry_carries_approved_candidate_when_agent_omits_it() -> None:
     assert record.candidate_disposition == CandidateDisposition.PARETO_FRONTIER.value
     assert record.candidate_metrics == {"throughput": 12.0}
     assert record.candidate_evaluation_artifact == "approved.json"
-    assert record.candidate_retained
+    assert record.candidate_retained is False
 
 
 def test_failed_review_does_not_retain_agent_candidate() -> None:
@@ -147,6 +154,133 @@ def test_failed_review_does_not_retain_agent_candidate() -> None:
     assert record.judge_verdict == "fail"
     assert not record.official_evaluation
     assert record.candidate_retained is False
+
+
+def _unmeasured_candidate_input(
+    disposition: CandidateDisposition,
+    *,
+    outcome: HypothesisOutcome = HypothesisOutcome.DISPROVEN,
+) -> RecordInput:
+    data = _record_input()
+    assert data.attempt.implementation is not None
+    data.attempt.implementation.hypothesis_outcome = outcome
+    data.attempt.implementation.candidate_disposition = disposition
+    data.attempt.implementation.candidate_metrics = {"throughput": 12.0}
+    data.attempt.implementation.candidate_evaluation_artifact = "agent-profile.json"
+    data.attempt.implementation.candidate_operating_point = "agent-selected workload"
+    data.attempt.implementation.candidate_retention_reason = "agent reports a tradeoff"
+    data.attempt.official_reason = None
+    data.attempt.framework_benchmark = FrameworkBenchmarkOutcome()
+    data.attempt.framework_perf_metric = None
+    return replace(
+        data,
+        projection=PerformanceProjection(
+            metric=12.0,
+            unit="throughput",
+            provenance="implementer",
+            profile_skipped=False,
+            accepted_metrics={"throughput": 12.0},
+            accepted_evaluation_artifact="agent-profile.json",
+            next_single_response=None,
+        ),
+        framework_benchmark_configured=False,
+        accuracy_configured=False,
+    )
+
+
+def test_unmeasured_frontier_claim_cannot_retain_a_disproven_candidate() -> None:
+    record = build_round_record(_unmeasured_candidate_input(CandidateDisposition.PARETO_FRONTIER))
+
+    assert record.hypothesis_outcome == HypothesisOutcome.DISPROVEN.value
+    assert record.candidate_retained is False
+    assert record.candidate_disposition == CandidateDisposition.PARETO_FRONTIER.value
+    assert record.candidate_metrics == {"throughput": 12.0}
+    assert record.candidate_evaluation_artifact == "agent-profile.json"
+    assert record.candidate_retention_reason == "agent reports a tradeoff"
+
+
+def test_unmeasured_prerequisite_claim_cannot_retain_a_disproven_candidate() -> None:
+    record = build_round_record(_unmeasured_candidate_input(CandidateDisposition.PREREQUISITE))
+
+    assert record.hypothesis_outcome == HypothesisOutcome.DISPROVEN.value
+    assert record.candidate_retained is False
+    assert record.candidate_disposition == CandidateDisposition.PREREQUISITE.value
+
+
+def test_deferred_frontier_claim_cannot_create_a_retention_decision() -> None:
+    data = _unmeasured_candidate_input(CandidateDisposition.PARETO_FRONTIER)
+    data.attempt.judge = JudgeSkipped(JudgeSkipReason.SPARSE_REVIEW_POLICY)
+
+    record = build_round_record(replace(data, reviewed=False))
+
+    assert record.passed
+    assert record.judge_verdict == "deferred"
+    assert not record.reviewed
+    assert record.candidate_retained is False
+
+
+def test_trusted_frontier_measurement_can_retain_a_disproven_hypothesis_candidate() -> None:
+    data = _record_input()
+    assert data.attempt.implementation is not None
+    data.attempt.implementation.hypothesis_outcome = HypothesisOutcome.DISPROVEN
+
+    record = build_round_record(data)
+
+    assert record.hypothesis_outcome == HypothesisOutcome.DISPROVEN.value
+    assert record.perf_provenance == "framework"
+    assert record.candidate_retained is True
+
+
+def test_unmeasured_retention_stays_false_across_resume_and_read_model_projection() -> None:
+    data = _unmeasured_candidate_input(CandidateDisposition.PARETO_FRONTIER)
+    record = build_round_record(data)
+    stored_hypothesis = data.hypothesis.model_copy(update={"rounds": [record]}, deep=True)
+    stored = HypothesisState(metrics=data.state.metrics, hypotheses=[stored_hypothesis])
+
+    resumed = HypothesisSearch(HypothesisConfig(max_rounds=2)).resume(stored, stored.metrics)
+    projected = AgentRunProjection.model_validate(project_hypothesis_state(resumed).payload)
+
+    hypothesis = resumed.by_id(data.hypothesis.hypothesis_id)
+    assert hypothesis is not None
+    assert hypothesis.candidate_retained is False
+    assert projected.hypotheses[0].kept is False
+
+
+def test_single_and_multi_replies_share_unmeasured_retention_policy() -> None:
+    multi_data = _unmeasured_candidate_input(CandidateDisposition.PARETO_FRONTIER)
+    assert multi_data.attempt.implementation is not None
+    response = multi_data.attempt.implementation
+    single_response = SingleAgentRoundResponse(
+        summary="cache added",
+        expected_behavior="higher throughput",
+        self_review="reviewed",
+        feedback="",
+        verdict=Verdict.PASS,
+        bottlenecks="",
+        suggestions="",
+        profile_analysis="",
+        perf_metric=12.0,
+        perf_unit="throughput",
+        candidate_disposition=response.candidate_disposition,
+        candidate_metrics=response.candidate_metrics,
+        candidate_evaluation_artifact=response.candidate_evaluation_artifact,
+        candidate_operating_point=response.candidate_operating_point,
+        candidate_retention_reason=response.candidate_retention_reason,
+    )
+    single_attempt = replace(
+        multi_data.attempt,
+        implementation=None,
+        single_agent_response=single_response,
+    )
+    single_data = replace(multi_data, attempt=single_attempt)
+
+    multi_record = build_round_record(multi_data)
+    single_record = build_round_record(single_data)
+
+    assert multi_record.candidate_retained is False
+    assert single_record.candidate_retained is False
+    assert single_record.candidate_disposition == multi_record.candidate_disposition
+    assert single_record.candidate_metrics == multi_record.candidate_metrics
 
 
 # --- causal baseline selection (build_round_record -> metric_baseline) -----
