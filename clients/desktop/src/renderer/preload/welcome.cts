@@ -17,6 +17,7 @@ import type {
   PathCompletion,
   StartOutcome,
   WelcomeBridge,
+  WelcomeEvent,
   WelcomeHost,
   WelcomeOverview,
   WelcomeRecent,
@@ -54,8 +55,8 @@ function call<T>(channel: string, ...args: unknown[]): Promise<WelcomeResult<T>>
   return electron.ipcRenderer.invoke(channel, ...args) as Promise<WelcomeResult<T>>;
 }
 
-function on<T>(channel: string, listener: (value: T) => void): void {
-  electron.ipcRenderer.on(channel, (_event, value: T) => listener(value));
+function on<T>(channel: string, listener: (event: WelcomeEvent<T>) => void): void {
+  electron.ipcRenderer.on(channel, (_event, event: WelcomeEvent<T>) => listener(event));
 }
 
 const bridge: WelcomeBridge = {
@@ -79,10 +80,13 @@ const bridge: WelcomeBridge = {
   retry: () => call<null>(CHANNELS.retry),
   stop: (host: HostKey, instance: string, force: boolean) =>
     call<null>(CHANNELS.stop, host, instance, force),
-  onChrome: (listener: (state: ChromeState) => void) => on(EVENTS.chrome, listener),
-  onRecent: (listener: (recent: readonly WelcomeRecent[]) => void) => on(EVENTS.recent, listener),
-  onShowHost: (listener: (host: HostKey) => void) => on(EVENTS.showHost, listener),
-  onListing: (listener: (listing: HostListing) => void) => on(EVENTS.listing, listener),
+  onChrome: (listener: (event: WelcomeEvent<ChromeState>) => void) => on(EVENTS.chrome, listener),
+  onRecent: (listener: (event: WelcomeEvent<readonly WelcomeRecent[]>) => void) =>
+    on(EVENTS.recent, listener),
+  onShowHost: (listener: (event: WelcomeEvent<HostKey>) => void) =>
+    on(EVENTS.showHost, listener),
+  onListing: (listener: (event: WelcomeEvent<HostListing>) => void) =>
+    on(EVENTS.listing, listener),
 };
 
 electron.contextBridge.exposeInMainWorld('vibesysWelcome', bridge);

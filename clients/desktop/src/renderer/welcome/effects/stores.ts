@@ -7,7 +7,15 @@
 
 import {createStore, type Store} from '@vibesys/core-state';
 import type {HostKey} from '../../../common/hosts.js';
-import type {WelcomeBridge, WelcomeResult} from '../../../common/welcome-protocol.js';
+import type {
+  ChromeState,
+  HostListing,
+  WelcomeBridge,
+  WelcomeEvent,
+  WelcomeOverview,
+  WelcomeRecent,
+  WelcomeResult,
+} from '../../../common/welcome-protocol.js';
 import {
   COMPLETION_EMPTY,
   type CompletionAction,
@@ -49,6 +57,12 @@ function settled<T>(call: Promise<WelcomeResult<T>>): Promise<WelcomeResult<T>> 
 
 /** Ask the user a yes/no question (the window's native confirm). */
 export type Confirm = (question: string) => boolean;
+
+type WelcomePush =
+  | ({readonly kind: 'chrome'} & WelcomeEvent<ChromeState>)
+  | ({readonly kind: 'recent'} & WelcomeEvent<readonly WelcomeRecent[]>)
+  | ({readonly kind: 'listing'} & WelcomeEvent<HostListing>)
+  | ({readonly kind: 'show-host'} & WelcomeEvent<HostKey>);
 
 function command(
   bridge: WelcomeBridge,
@@ -136,11 +150,8 @@ function completionStore(bridge: WelcomeBridge): Store<CompletionState, Completi
   });
 }
 
-/**
- * Build the stores over `bridge`, showing `firstHost`'s panel, and subscribe to its events.
- * `confirm` asks before a resume.
- */
-export function welcomeStores(
+/** Build the stores over `bridge`, showing `firstHost`'s panel. */
+function createWelcomeStores(
   bridge: WelcomeBridge,
   confirm: Confirm,
   firstHost: HostKey,
@@ -166,17 +177,77 @@ export function welcomeStores(
     }
   });
   const completion = completionStore(bridge);
-  bridge.onChrome(chrome => {
-    welcome.dispatch({type: 'chrome', chrome});
-    host.dispatch({type: 'chrome', chrome});
-    if (chrome.mode === 'run') {
-      start.dispatch({type: 'run-shown'});
-      picker.dispatch({type: 'close'});
-    }
-  });
-  bridge.onRecent(runs => lists.dispatch({type: 'runs', runs}));
-  bridge.onListing(listing => lists.dispatch({type: 'listing', listing}));
-  bridge.onShowHost(key => host.dispatch({type: 'show', host: key}));
   host.dispatch({type: 'show', host: firstHost});
   return {welcome, lists, host, start, picker, completion};
+}
+
+function applyPush(stores: WelcomeStores, push: WelcomePush): void {
+  switch (push.kind) {
+    case 'chrome':
+      stores.welcome.dispatch({type: 'chrome', chrome: push.value});
+      stores.host.dispatch({type: 'chrome', chrome: push.value});
+      if (push.value.mode === 'run') {
+        stores.start.dispatch({type: 'run-shown'});
+        stores.picker.dispatch({type: 'close'});
+      }
+      return;
+    case 'recent':
+      stores.lists.dispatch({type: 'runs', runs: push.value});
+      return;
+    case 'listing':
+      stores.lists.dispatch({type: 'listing', listing: push.value});
+      return;
+    case 'show-host':
+      stores.host.dispatch({type: 'show', host: push.value});
+      return;
+  }
+}
+
+function applyOverview(stores: WelcomeStores, overview: WelcomeOverview): void {
+  applyPush(stores, {kind: 'chrome', sequence: overview.eventCursor, value: overview.chrome});
+  applyPush(stores, {kind: 'recent', sequence: overview.eventCursor, value: overview.recent});
+  for (const listing of overview.listings) {
+    applyPush(stores, {kind: 'listing', sequence: overview.eventCursor, value: listing});
+  }
+  if (overview.settingsProblem !== null) {
+    stores.welcome.dispatch({type: 'problem', text: overview.settingsProblem});
+  }
+}
+
+/**
+ * Subscribe before asking for the overview, then replay every push that crossed that request.
+ *
+ * The main process captures the overview and its event cursor atomically after every asynchronous
+ * read. It includes the latest value of each push-only host listing. Events through that cursor
+ * are therefore covered by the overview; replaying only later events leaves no gap and cannot
+ * repeat an effect already represented by the snapshot.
+ */
+export async function loadWelcomeStores(
+  bridge: WelcomeBridge,
+  confirm: Confirm,
+): Promise<WelcomeResult<WelcomeStores>> {
+  const buffered: WelcomePush[] = [];
+  let receive = (push: WelcomePush): void => {
+    buffered.push(push);
+  };
+  bridge.onChrome(event => receive({kind: 'chrome', ...event}));
+  bridge.onRecent(event => receive({kind: 'recent', ...event}));
+  bridge.onListing(event => receive({kind: 'listing', ...event}));
+  bridge.onShowHost(event => receive({kind: 'show-host', ...event}));
+
+  const overview = await settled(bridge.overview());
+  if (!overview.ok) {
+    buffered.length = 0;
+    receive = () => undefined;
+    return overview;
+  }
+
+  const stores = createWelcomeStores(bridge, confirm, overview.value.host);
+  applyOverview(stores, overview.value);
+  for (const push of buffered) {
+    if (push.sequence > overview.value.eventCursor) applyPush(stores, push);
+  }
+  buffered.length = 0;
+  receive = push => applyPush(stores, push);
+  return {ok: true, value: stores};
 }

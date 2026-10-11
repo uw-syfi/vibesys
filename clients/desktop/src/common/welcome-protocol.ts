@@ -45,6 +45,13 @@ export const WELCOME_EVENTS = {
   listing: 'vibesys:welcome:listing',
 } as const;
 
+/** One ordered welcome event from the main process. */
+export interface WelcomeEvent<T> {
+  /** Monotonically increases for every welcome event sent by this window. */
+  readonly sequence: number;
+  readonly value: T;
+}
+
 /** What the window shows, for the welcome view's title strip. */
 export interface ChromeState {
   /** `welcome`: the welcome view fills the window; `run`: the run view does, under the strip. */
@@ -76,9 +83,13 @@ export interface WelcomeRecent {
 }
 
 export interface WelcomeOverview {
+  /** Events at or before this cursor are already covered by this overview. */
+  readonly eventCursor: number;
   /** Why the app's settings file was ignored, when it was. */
   readonly settingsProblem: string | null;
   readonly recent: readonly WelcomeRecent[];
+  /** The latest value heard from every host watch. */
+  readonly listings: readonly HostListing[];
   readonly chrome: ChromeState;
   /** The host whose panel to show first (a launch may name one). */
   readonly host: HostKey;
@@ -170,8 +181,8 @@ export interface WelcomeBridge {
   showWelcome(): Promise<WelcomeResult<null>>;
   retry(): Promise<WelcomeResult<null>>;
   stop(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
-  onChrome(listener: (state: ChromeState) => void): void;
-  onRecent(listener: (recent: readonly WelcomeRecent[]) => void): void;
-  onShowHost(listener: (host: HostKey) => void): void;
-  onListing(listener: (listing: HostListing) => void): void;
+  onChrome(listener: (event: WelcomeEvent<ChromeState>) => void): void;
+  onRecent(listener: (event: WelcomeEvent<readonly WelcomeRecent[]>) => void): void;
+  onShowHost(listener: (event: WelcomeEvent<HostKey>) => void): void;
+  onListing(listener: (event: WelcomeEvent<HostListing>) => void): void;
 }

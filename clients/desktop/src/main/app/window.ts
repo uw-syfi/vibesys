@@ -16,7 +16,7 @@ import {
   type WebContentsView,
 } from 'electron';
 import {CONNECT_CHANNEL, WAKE_CHANNEL} from '../../common/bridge-protocol.js';
-import type {ChromeState} from '../../common/welcome-protocol.js';
+import type {ChromeState, WelcomeEvent} from '../../common/welcome-protocol.js';
 import type {RelayPort} from '../features/run-control/index.js';
 import {APP_ENTRY_URL, isAppPage} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
@@ -112,9 +112,9 @@ export class AppWindow {
     };
   }
 
-  /** Send `value` to the welcome view on `channel`. */
-  send(channel: string, value: unknown): void {
-    if (!this.welcome.webContents.isDestroyed()) this.welcome.webContents.send(channel, value);
+  /** Send one ordered `event` to the welcome view on `channel`. */
+  sendWelcome<T>(channel: string, event: WelcomeEvent<T>): void {
+    if (!this.welcome.webContents.isDestroyed()) this.welcome.webContents.send(channel, event);
   }
 
   /** Ask the user a stop question; resolves true on "Stop". */

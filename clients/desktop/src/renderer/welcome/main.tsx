@@ -8,7 +8,7 @@ import type {Store} from '@vibesys/core-state';
 import {type JSX, StrictMode, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
 import type {WelcomeBridge} from '../../common/welcome-protocol.js';
-import {type WelcomeStores, welcomeStores} from './effects/stores.js';
+import {loadWelcomeStores, type WelcomeStores} from './effects/stores.js';
 import {WelcomeView} from './ui/welcome-view.js';
 import './ui/welcome.css';
 
@@ -45,17 +45,12 @@ function Root({stores}: {readonly stores: WelcomeStores}): JSX.Element {
 async function load(root: HTMLElement, bridge: WelcomeBridge): Promise<void> {
   document.documentElement.dataset['platform'] = bridge.platform;
   const reactRoot = createRoot(root);
-  const overview = await bridge.overview();
-  if (!overview.ok) {
-    reactRoot.render(<p className="status error">{overview.error}</p>);
+  const loaded = await loadWelcomeStores(bridge, question => window.confirm(question));
+  if (!loaded.ok) {
+    reactRoot.render(<p className="status error">{loaded.error}</p>);
     return;
   }
-  const {chrome, recent, settingsProblem, host} = overview.value;
-  const stores = welcomeStores(bridge, question => window.confirm(question), host);
-  stores.welcome.dispatch({type: 'chrome', chrome});
-  stores.host.dispatch({type: 'chrome', chrome});
-  stores.lists.dispatch({type: 'runs', runs: recent});
-  if (settingsProblem !== null) stores.welcome.dispatch({type: 'problem', text: settingsProblem});
+  const stores = loaded.value;
   reactRoot.render(
     <StrictMode>
       <Root stores={stores} />

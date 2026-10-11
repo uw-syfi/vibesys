@@ -29,6 +29,7 @@ import {
 } from './app-security.js';
 import {Desktop} from './desktop.js';
 import {type LaunchPlan, parseLaunch} from './launch-args.js';
+import {WelcomeFeed} from './welcome-feed.js';
 import {AppWindow} from './window.js';
 
 /** The repository checkout this app was built in: This Mac's VibeSys checkout by default. */
@@ -84,13 +85,14 @@ async function openWindow(manager: ConnectionManager): Promise<Desktop> {
     log,
   });
   let desktop: Desktop | null = null;
+  const welcome = new WelcomeFeed();
   const changed = (): void => desktop?.chromeChanged();
   const hosts = new Hosts({
     manager,
     settings,
     localCheckout: REPOSITORY_ROOT,
     sshConfigPath: join(homedir(), '.ssh', 'config'),
-    push: listing => window.send(WELCOME_EVENTS.listing, listing),
+    push: listing => window.sendWelcome(WELCOME_EVENTS.listing, welcome.listing(listing)),
   });
   const runs: RunControl = new RunControl({
     connection: id => hosts.connection(id),
@@ -106,7 +108,7 @@ async function openWindow(manager: ConnectionManager): Promise<Desktop> {
     connect: port => runs.connect(port),
     closed: () => runs.detach(),
   });
-  desktop = new Desktop({window, hosts, runs, settings, log});
+  desktop = new Desktop({window, welcome, hosts, runs, settings, log});
   // A machine that slept has dead connections nobody has noticed yet: check them now.
   powerMonitor.on('resume', () => manager.wake());
   watchNetwork(manager);

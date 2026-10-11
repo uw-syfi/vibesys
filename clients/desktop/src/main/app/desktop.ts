@@ -15,12 +15,14 @@ import type {Hosts} from '../features/hosts/index.js';
 import type {RunControl} from '../features/run-control/index.js';
 import type {RecentFile, SettingsStore} from '../platform/settings/index.js';
 import type {LaunchPlan} from './launch-args.js';
+import type {WelcomeFeed} from './welcome-feed.js';
 import {bindWelcomeIpc, type WelcomeRequest} from './welcome-ipc.js';
 import type {AppWindow} from './window.js';
 import {WELCOME_URL} from './window.js';
 
 export interface DesktopDeps {
   readonly window: AppWindow;
+  readonly welcome: WelcomeFeed;
   readonly hosts: Hosts;
   readonly runs: RunControl;
   readonly settings: SettingsStore;
@@ -40,7 +42,8 @@ export class Desktop {
   constructor(deps: DesktopDeps) {
     this.#deps = deps;
     deps.settings.onRecentChanged(recent => {
-      deps.window.send(WELCOME_EVENTS.recent, welcomeRecent(recent));
+      const value = welcomeRecent(recent);
+      deps.window.sendWelcome(WELCOME_EVENTS.recent, deps.welcome.recent(value));
       void this.#watchRecent(recent);
     });
     bindWelcomeIpc(ipcMain, deps.window.welcome.webContents, WELCOME_URL, request =>
@@ -64,7 +67,7 @@ export class Desktop {
 
   /** Send the window's state to the welcome view. */
   chromeChanged(): void {
-    this.#deps.window.send(WELCOME_EVENTS.chrome, this.chrome());
+    this.#deps.window.sendWelcome(WELCOME_EVENTS.chrome, this.#deps.welcome.chrome(this.chrome()));
   }
 
   /** Open what the launch asked for. */
@@ -73,7 +76,10 @@ export class Desktop {
       case 'welcome':
         if (plan.host !== null) {
           this.#firstHost = hostKey(plan.host);
-          this.#deps.window.send(WELCOME_EVENTS.showHost, this.#firstHost);
+          this.#deps.window.sendWelcome(
+            WELCOME_EVENTS.showHost,
+            this.#deps.welcome.showHost(this.#firstHost),
+          );
         }
         this.#mode('welcome');
         return;
@@ -107,12 +113,13 @@ export class Desktop {
   async #overview(): Promise<WelcomeOverview> {
     const recent = await this.#deps.settings.recent();
     void this.#watchRecent(recent);
-    return {
-      settingsProblem: await this.#deps.hosts.settingsProblem(),
+    const settingsProblem = await this.#deps.hosts.settingsProblem();
+    return this.#deps.welcome.snapshot({
+      settingsProblem,
       recent: welcomeRecent(recent),
       chrome: this.chrome(),
       host: this.#firstHost,
-    };
+    });
   }
 
   /** Answer one validated welcome request. */
