@@ -1,0 +1,17 @@
+// Presentational code under a `ui/` directory renders state it is given. It does not perform
+// I/O, so network calls and sockets belong to the shell (effects/controller layer).
+language js;
+
+or {
+  `fetch($args)`,
+  `new WebSocket($args)`,
+  `new EventSource($args)`,
+  `new XMLHttpRequest($args)`,
+  `navigator.sendBeacon($args)`
+} as $call where {
+  register_diagnostic(
+    span = $call,
+    message = "ui/ code is presentational and must not do I/O (network, sockets). Take the data as props and emit events; the shell executes effects.",
+    severity = "error"
+  )
+}

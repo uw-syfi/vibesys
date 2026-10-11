@@ -280,6 +280,16 @@ above 1,500, so a split can be planned before the hard limit. Test files keep th
 exemption needed for fixture-heavy suites, but have an explicit 10,000-line file cap. The warning
 pass excludes tests and runs as part of `pnpm check:ts`.
 
+Biome also enforces the presentational layer. Production files under any `ui/` directory of a
+client package may not call `fetch`, open a `WebSocket`/`EventSource`/`XMLHttpRequest`, use
+`useEffect`/`useLayoutEffect`/`useInsertionEffect`, schedule timers, or import
+`@vibesys/backend-client`, `electron`, or `node:*`. The GritQL plugins are in
+`clients/lint-rules/` and are attached to `ui/` globs in `clients/biome.json`;
+`clients/scripts/check_ui_no_effects.test.mjs` is their test. The timer rule excludes five OpenTUI
+widgets that own spinner or elapsed-time refresh (`activity-bar`, `agent-map`, `chat-composer`,
+`experiment-log`, `round-rail`), listed by path in `biome.json`; moving those timers behind an
+injected scheduler removes the exclusions.
+
 ### Regression tests for rendering bugs
 
 Pick the test layer by where the symptom lives, and require that the test fails at the merge base:

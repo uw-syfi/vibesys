@@ -56,6 +56,28 @@
   },
   "overrides": [
     {
+      "includes": ["**/ui/**/*.ts", "**/ui/**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
+      "plugins": [
+        "./lint-rules/ui-no-io-calls.grit",
+        "./lint-rules/ui-no-effect-hooks.grit",
+        "./lint-rules/ui-no-io-imports.grit"
+      ]
+    },
+    {
+      "includes": [
+        "**/ui/**/*.ts",
+        "**/ui/**/*.tsx",
+        "!**/*.test.ts",
+        "!**/*.test.tsx",
+        "!tui/src/ui/activity-bar.ts",
+        "!tui/src/ui/agent-map.ts",
+        "!tui/src/ui/chat-composer.ts",
+        "!tui/src/ui/experiment-log.ts",
+        "!tui/src/ui/round-rail.ts"
+      ],
+      "plugins": ["./lint-rules/ui-no-timers.grit"]
+    },
+    {
       "includes": ["**/*.test.ts", "**/*.test.tsx"],
       "linter": {
         "rules": {
