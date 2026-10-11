@@ -23,6 +23,8 @@ export type {
   HelperError,
   HelperErrorCode,
   HelperFeature,
+  InstanceInspection,
+  InstanceInspectionMetadata,
   InstanceList,
   InstanceStatus,
   InstanceStopResult,

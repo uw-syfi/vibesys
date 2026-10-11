@@ -80,6 +80,8 @@ export class FakeHelper {
   readonly channels: FakeProcess[] = [];
   /** How many helpers were started: one per channel. */
   spawned = 0;
+  /** Features this helper version recognizes. */
+  readonly features = new Set(['instances_watch', 'paths_complete', 'instances_inspect']);
   readonly #watches = new Set<() => void>();
   #nextInstance = 1;
 
@@ -218,9 +220,7 @@ class HelperSession {
           });
           return;
         }
-        this.#features = (request.features ?? []).filter(
-          f => f === 'instances_watch' || f === 'paths_complete',
-        );
+        this.#features = (request.features ?? []).filter(feature => helper.features.has(feature));
         this.#send({
           type: 'hello',
           request_id: id,
@@ -237,6 +237,34 @@ class HelperSession {
       case 'instances.list':
         this.#send({type: 'instances.list', request_id: id, listing: helper.listing()});
         return;
+      case 'instances.inspect': {
+        if (!this.#negotiated('instances_inspect', id)) return;
+        const record = [...helper.host.instances, ...helper.host.ended].find(
+          entry => entry.id === request.instance_id,
+        );
+        const controlSocket = record?.socket_path ?? `/tmp/${request.instance_id}.sock`;
+        const serverLog = record?.log_path ?? `/tmp/${request.instance_id}.log`;
+        this.#send({
+          type: 'instances.inspect',
+          request_id: id,
+          inspection: {
+            version: 1,
+            id: request.instance_id,
+            state:
+              record === undefined
+                ? 'ended'
+                : helper.host.instances.includes(record)
+                  ? 'live'
+                  : 'ended',
+            record: record ?? null,
+            metadata: null,
+            control_socket_path: controlSocket,
+            server_log_path: serverLog,
+            log: null,
+          },
+        });
+        return;
+      }
       case 'instances.watch': {
         if (!this.#negotiated('instances_watch', id)) return;
         this.#send({type: 'instances.watch', request_id: id, watch_id: id});

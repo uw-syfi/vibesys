@@ -76,4 +76,21 @@ describe('parseWelcomeRequest', () => {
       parseWelcomeRequest(WELCOME_CHANNELS.resume, ['local', '/p', '-oProxyCommand']),
     ).toThrow('a run id is 1-128 lowercase');
   });
+
+  test('inspection validates the host and id and treats only true as log consent', () => {
+    expect(
+      parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['ssh:gpu', '0123456789ab', true]),
+    ).toEqual({
+      kind: 'inspect',
+      host: {kind: 'ssh', alias: 'gpu'},
+      instance: '0123456789ab',
+      includeLog: true,
+    });
+    expect(
+      parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '0123456789ab', 'true']),
+    ).toMatchObject({includeLog: false});
+    expect(() => parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '../etc'])).toThrow(
+      'pick a run to inspect',
+    );
+  });
 });

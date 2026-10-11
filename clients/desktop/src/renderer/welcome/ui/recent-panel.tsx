@@ -28,6 +28,19 @@ function RowActions(props: {
 }): ReactNode {
   const {run, status, chrome, send} = props;
   const dispatch = commands(send);
+  const inspect = (instanceId: string): void =>
+    send.inspector({
+      type: 'open',
+      target: {
+        host: run.host,
+        hostLabel: run.hostLabel,
+        instanceId,
+        task: run.task,
+        runId: run.runId,
+        project: run.project,
+        focusFallbackId: 'recent-section',
+      },
+    });
   switch (status.kind) {
     case 'live': {
       const instance = status.instanceId;
@@ -44,17 +57,39 @@ function RowActions(props: {
             view={chrome.stops[stopKey(run.host, instance)]}
             stop={force => dispatch({kind: 'stop', host: run.host, instance, force})}
           />
+          <button type="button" onClick={() => inspect(instance)}>
+            Inspect
+          </button>
         </>
       );
     }
     case 'ended': {
       const decision = resumeDecision(run.runId);
-      if (decision.kind === 'unavailable') return <span className="muted">{decision.reason}</span>;
+      const instance = status.instanceId;
+      if (decision.kind === 'unavailable') {
+        return (
+          <>
+            <span className="muted">{decision.reason}</span>
+            {instance === null ? null : (
+              <button type="button" onClick={() => inspect(instance)}>
+                Inspect
+              </button>
+            )}
+          </>
+        );
+      }
       const resume = {host: run.host, project: run.project, run: decision.runId};
       return (
-        <button type="button" onClick={() => dispatch({kind: 'resume', ...resume})}>
-          Resume…
-        </button>
+        <>
+          <button type="button" onClick={() => dispatch({kind: 'resume', ...resume})}>
+            Resume…
+          </button>
+          {instance === null ? null : (
+            <button type="button" onClick={() => inspect(instance)}>
+              Inspect
+            </button>
+          )}
+        </>
       );
     }
     case 'unknown':

@@ -7,7 +7,7 @@ import type {ConnectionConfig} from '../state/host-connection.js';
 import {ECHO_SERVER, FakeHelper, FakeLink, record} from '../testing/fake-helper.js';
 import {hostConnectionContract, phaseReached} from '../testing/host-connection-contract.js';
 import {ConnectionManager} from './connection-manager.js';
-import {ConnectionError} from './helper-channel.js';
+import {ConnectionError, HelperRequestError} from './helper-channel.js';
 import {HostConnection} from './host-connection.js';
 import {LocalLink, nodeSpawn} from './link.js';
 
@@ -59,6 +59,21 @@ hostConnectionContract(
 );
 
 describe('HostConnection over the FakeHelper', () => {
+  test('does not send inspection to a helper that did not negotiate it', async () => {
+    const link = new FakeLink();
+    link.helper.features.delete('instances_inspect');
+    await using connection = fakeConnection(link);
+
+    const error: unknown = await connection
+      .request({type: 'instances.inspect', instance_id: '0123456789ab', include_log: false})
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(HelperRequestError);
+    if (!(error instanceof HelperRequestError)) throw error;
+    expect(error.code).toBe('feature_not_negotiated');
+    expect(connection.phase.kind).toBe('ready');
+  });
+
   test('a dropped link is checked, restored, and the registry watch resumes', async () => {
     const link = new FakeLink();
     await using connection = fakeConnection(link);

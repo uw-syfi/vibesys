@@ -20,10 +20,11 @@ import {commands, PathInput, StopControls, type WelcomeSenders} from './common.j
 function RunRow(props: {
   readonly run: WelcomeRun;
   readonly host: HostKey;
+  readonly hostLabel: string;
   readonly chrome: ChromeState;
   readonly send: WelcomeSenders;
 }): JSX.Element {
-  const {run, host, chrome} = props;
+  const {run, host, hostLabel, chrome} = props;
   const dispatch = commands(props.send);
   return (
     <tr>
@@ -43,6 +44,25 @@ function RunRow(props: {
           view={chrome.stops[stopKey(host, run.id)]}
           stop={force => dispatch({kind: 'stop', host, instance: run.id, force})}
         />
+        <button
+          type="button"
+          onClick={() =>
+            props.send.inspector({
+              type: 'open',
+              target: {
+                host,
+                hostLabel,
+                instanceId: run.id,
+                task: null,
+                runId: run.runId,
+                project: run.projectRoot,
+                focusFallbackId: 'host-panel',
+              },
+            })
+          }
+        >
+          Inspect
+        </button>
       </td>
     </tr>
   );
@@ -84,7 +104,14 @@ function RunTable(props: {
       </thead>
       <tbody>
         {listing.live.map(run => (
-          <RunRow key={run.id} run={run} host={data.key} chrome={chrome} send={send} />
+          <RunRow
+            key={run.id}
+            run={run}
+            host={data.key}
+            hostLabel={data.label}
+            chrome={chrome}
+            send={send}
+          />
         ))}
       </tbody>
     </table>

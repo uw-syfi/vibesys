@@ -41,6 +41,7 @@ describe('recentStatus', () => {
       };
       expect(recentStatus(RECENT, listing)).toEqual({
         kind: 'ended',
+        instanceId: latest?.id ?? null,
         status: latest?.status ?? null,
         reason: null,
       });

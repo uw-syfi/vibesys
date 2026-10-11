@@ -149,6 +149,8 @@ export class Desktop {
       case 'stop':
         await runs.stop(request.host, request.instance, request.force);
         return null;
+      case 'inspect':
+        return hosts.inspect(request.host, request.instance, request.includeLog);
       case 'show-run':
       case 'show-welcome':
         this.#mode(request.kind === 'show-run' ? 'run' : 'welcome');

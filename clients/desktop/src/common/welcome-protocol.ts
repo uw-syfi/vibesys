@@ -10,6 +10,7 @@
  * Host data reaches the view as pushes (`listing`), folded from the host helper's
  * `instances.watch`: there is no refresh request to forget, and no timer.
  */
+import type {InstanceInspection} from '@vibesys/backend-client/host-helper';
 import type {ConnectionStatus} from './connection-status.js';
 import type {HostKey} from './hosts.js';
 import type {ResumeRunId} from './resume-run.js';
@@ -31,6 +32,7 @@ export const WELCOME_CHANNELS = {
   showWelcome: 'vibesys:welcome:show-welcome',
   retry: 'vibesys:welcome:retry',
   stop: 'vibesys:welcome:stop',
+  inspect: 'vibesys:welcome:inspect',
 } as const;
 
 /** The events the main process sends the welcome view. */
@@ -141,6 +143,8 @@ export type WelcomeResult<T> =
   | {readonly ok: true; readonly value: T}
   | {readonly ok: false; readonly error: string; readonly authNeeded: boolean};
 
+export type WelcomeInspection = InstanceInspection;
+
 /**
  * What the welcome preload exposes to the welcome view (`window.vibesysWelcome`): one function per
  * request channel, and one subscription per event. The main process validates every argument.
@@ -170,6 +174,11 @@ export interface WelcomeBridge {
   showWelcome(): Promise<WelcomeResult<null>>;
   retry(): Promise<WelcomeResult<null>>;
   stop(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
+  inspect(
+    host: HostKey,
+    instance: string,
+    includeLog: boolean,
+  ): Promise<WelcomeResult<WelcomeInspection>>;
   onChrome(listener: (state: ChromeState) => void): void;
   onRecent(listener: (recent: readonly WelcomeRecent[]) => void): void;
   onShowHost(listener: (host: HostKey) => void): void;

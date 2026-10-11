@@ -46,6 +46,12 @@ export type WelcomeRequest =
       readonly instance: string;
       readonly force: boolean;
     }
+  | {
+      readonly kind: 'inspect';
+      readonly host: HostId;
+      readonly instance: string;
+      readonly includeLog: boolean;
+    }
   | {readonly kind: 'show-run'}
   | {readonly kind: 'show-welcome'}
   | {readonly kind: 'retry'};
@@ -124,6 +130,13 @@ export function parseWelcomeRequest(channel: Channel, args: readonly unknown[]):
         host: hostFromKey(first),
         instance: instance(second, 'stop'),
         force: third === true,
+      };
+    case WELCOME_CHANNELS.inspect:
+      return {
+        kind: 'inspect',
+        host: hostFromKey(first),
+        instance: instance(second, 'inspect'),
+        includeLog: third === true,
       };
     case WELCOME_CHANNELS.showRun:
       return {kind: 'show-run'};

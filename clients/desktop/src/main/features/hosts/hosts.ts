@@ -13,7 +13,12 @@ import {
   hostLabel,
   validHostPath,
 } from '../../../common/hosts.js';
-import type {HostListing, PathCompletion, WelcomeHost} from '../../../common/welcome-protocol.js';
+import type {
+  HostListing,
+  PathCompletion,
+  WelcomeHost,
+  WelcomeInspection,
+} from '../../../common/welcome-protocol.js';
 import {connectionStatus, hostListing} from '../../entities/listing.js';
 import {
   type ConnectionManager,
@@ -143,6 +148,26 @@ export class Hosts {
       })),
       truncated: reply.truncated,
     };
+  }
+
+  /** One coherent observation of a detached server and, when requested, its bounded log tail. */
+  async inspect(id: HostId, instanceId: string, includeLog: boolean): Promise<WelcomeInspection> {
+    const connection = await this.connection(id);
+    try {
+      const reply = await connection.request({
+        type: 'instances.inspect',
+        instance_id: instanceId,
+        include_log: includeLog,
+      });
+      return reply.inspection;
+    } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        throw new Error(
+          `Run inspection is unavailable on ${hostLabel(id)}. Update its VibeSys checkout.`,
+        );
+      }
+      throw plain(error, `Could not inspect ${instanceId}`);
+    }
   }
 
   #watch(key: HostKey, connection: HostConnection): void {

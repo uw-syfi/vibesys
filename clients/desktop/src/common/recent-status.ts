@@ -11,7 +11,12 @@ export type RecentStatus =
   /** A live server drives it; attach to `instanceId`. */
   | {readonly kind: 'live'; readonly instanceId: string; readonly status: string}
   /** Its server ended; `status` is the phase it ended in, when the host still remembers it. */
-  | {readonly kind: 'ended'; readonly status: string | null; readonly reason: string | null}
+  | {
+      readonly kind: 'ended';
+      readonly instanceId: string | null;
+      readonly status: string | null;
+      readonly reason: string | null;
+    }
   /** The host cannot be asked now, or has not answered yet. */
   | {readonly kind: 'unknown'};
 
@@ -30,7 +35,12 @@ export function recentStatus(run: WelcomeRecent, listing: HostListing | undefine
         latest === undefined || entry.startedAt > latest.startedAt ? entry : latest,
       undefined,
     );
-  return {kind: 'ended', status: ended?.status ?? null, reason: ended?.reason ?? null};
+  return {
+    kind: 'ended',
+    instanceId: ended?.id ?? null,
+    status: ended?.status ?? null,
+    reason: ended?.reason ?? null,
+  };
 }
 
 /**

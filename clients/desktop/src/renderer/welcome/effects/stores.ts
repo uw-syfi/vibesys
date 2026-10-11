@@ -16,6 +16,12 @@ import {
   completionStep,
 } from '../state/completion.js';
 import {type HostAction, type HostState, hostInitial, hostStep} from '../state/host.js';
+import {
+  INSPECTOR_CLOSED,
+  type InspectorAction,
+  type InspectorState,
+  inspectorStep,
+} from '../state/inspector.js';
 import {LISTS_EMPTY, type ListsAction, type ListsState, listsStep} from '../state/lists.js';
 import {PICKER_CLOSED, type PickerAction, type PickerState, pickerStep} from '../state/picker.js';
 import {START_CLOSED, type StartAction, type StartState, startStep} from '../state/start.js';
@@ -34,6 +40,7 @@ export interface WelcomeStores {
   readonly start: Store<StartState, StartAction>;
   readonly picker: Store<PickerState, PickerAction>;
   readonly completion: Store<CompletionState, CompletionAction>;
+  readonly inspector: Store<InspectorState, InspectorAction>;
 }
 
 /** A bridge call that rejected (the main process went away) as a failed result. */
@@ -136,6 +143,34 @@ function completionStore(bridge: WelcomeBridge): Store<CompletionState, Completi
   });
 }
 
+function inspectorStore(
+  bridge: WelcomeBridge,
+  copy: (value: string) => Promise<void>,
+): Store<InspectorState, InspectorAction> {
+  return createStore(inspectorStep, INSPECTOR_CLOSED, (request, dispatch) => {
+    switch (request.kind) {
+      case 'inspect':
+        void settled(bridge.inspect(request.host, request.instance, request.includeLog)).then(
+          result => dispatch({type: 'inspection-reply', token: request.token, result}),
+        );
+        return;
+      case 'copy':
+        void copy(request.value).then(
+          () =>
+            dispatch({type: 'copy-reply', token: request.token, label: request.label, error: null}),
+          (error: unknown) =>
+            dispatch({
+              type: 'copy-reply',
+              token: request.token,
+              label: request.label,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+        );
+        return;
+    }
+  });
+}
+
 /**
  * Build the stores over `bridge`, showing `firstHost`'s panel, and subscribe to its events.
  * `confirm` asks before a resume.
@@ -144,6 +179,7 @@ export function welcomeStores(
   bridge: WelcomeBridge,
   confirm: Confirm,
   firstHost: HostKey,
+  copy: (value: string) => Promise<void>,
 ): WelcomeStores {
   const welcome = createStore(welcomeStep, WELCOME_INITIAL, (request, dispatch) => {
     void settled(command(bridge, confirm, request.command)).then(result =>
@@ -166,6 +202,7 @@ export function welcomeStores(
     }
   });
   const completion = completionStore(bridge);
+  const inspector = inspectorStore(bridge, copy);
   bridge.onChrome(chrome => {
     welcome.dispatch({type: 'chrome', chrome});
     host.dispatch({type: 'chrome', chrome});
@@ -178,5 +215,5 @@ export function welcomeStores(
   bridge.onListing(listing => lists.dispatch({type: 'listing', listing}));
   bridge.onShowHost(key => host.dispatch({type: 'show', host: key}));
   host.dispatch({type: 'show', host: firstHost});
-  return {welcome, lists, host, start, picker, completion};
+  return {welcome, lists, host, start, picker, completion, inspector};
 }

@@ -11,6 +11,7 @@
     ],
     "registry": [
       "helper-instances-empty",
+      "helper-instances-inspect-ended",
       "helper-instances-watch",
       "helper-run-stop-not-running",
       "helper-run-connect-gone"

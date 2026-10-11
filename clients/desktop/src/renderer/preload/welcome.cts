@@ -18,6 +18,7 @@ import type {
   StartOutcome,
   WelcomeBridge,
   WelcomeHost,
+  WelcomeInspection,
   WelcomeOverview,
   WelcomeRecent,
   WelcomeResult,
@@ -42,6 +43,7 @@ const CHANNELS: Channels = {
   showWelcome: 'vibesys:welcome:show-welcome',
   retry: 'vibesys:welcome:retry',
   stop: 'vibesys:welcome:stop',
+  inspect: 'vibesys:welcome:inspect',
 };
 const EVENTS: Events = {
   chrome: 'vibesys:welcome:chrome',
@@ -79,6 +81,8 @@ const bridge: WelcomeBridge = {
   retry: () => call<null>(CHANNELS.retry),
   stop: (host: HostKey, instance: string, force: boolean) =>
     call<null>(CHANNELS.stop, host, instance, force),
+  inspect: (host: HostKey, instance: string, includeLog: boolean) =>
+    call<WelcomeInspection>(CHANNELS.inspect, host, instance, includeLog),
   onChrome: (listener: (state: ChromeState) => void) => on(EVENTS.chrome, listener),
   onRecent: (listener: (recent: readonly WelcomeRecent[]) => void) => on(EVENTS.recent, listener),
   onShowHost: (listener: (host: HostKey) => void) => on(EVENTS.showHost, listener),

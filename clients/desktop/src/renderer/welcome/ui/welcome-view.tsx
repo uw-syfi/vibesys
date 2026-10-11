@@ -6,6 +6,7 @@
 import type {JSX} from 'react';
 import type {CompletionState} from '../state/completion.js';
 import type {HostState} from '../state/host.js';
+import type {InspectorState} from '../state/inspector.js';
 import type {ListsState} from '../state/lists.js';
 import type {PickerState} from '../state/picker.js';
 import type {StartState} from '../state/start.js';
@@ -13,6 +14,7 @@ import type {WelcomeState} from '../state/welcome.js';
 import {commands, type WelcomeSenders} from './common.js';
 import {HostPanel} from './host-panel.js';
 import {HostPicker} from './host-picker.js';
+import {InspectorSheet} from './inspector-sheet.js';
 import {RecentPanel} from './recent-panel.js';
 import {StartSheet} from './start-sheet.js';
 import {TitleStrip} from './title-strip.js';
@@ -26,6 +28,7 @@ export interface WelcomeViewProps {
   readonly start: StartState;
   readonly picker: PickerState;
   readonly completion: CompletionState;
+  readonly inspector: InspectorState;
   readonly send: WelcomeSenders;
 }
 
@@ -35,7 +38,11 @@ export function WelcomeView(props: WelcomeViewProps): JSX.Element {
   const visible = chrome.mode === 'welcome';
   return (
     <div className={visible ? 'view' : 'view strip'}>
-      <TitleStrip chrome={chrome} dispatch={commands(send)} />
+      <TitleStrip
+        chrome={chrome}
+        dispatch={commands(send)}
+        inspect={target => send.inspector({type: 'open', target})}
+      />
       <main>
         <div className="column">
           <div className="hero">
@@ -70,6 +77,7 @@ export function WelcomeView(props: WelcomeViewProps): JSX.Element {
       </main>
       <StartSheet state={props.start} completion={props.completion} visible={visible} send={send} />
       <HostPicker state={props.picker} visible={visible} picker={send.picker} />
+      <InspectorSheet state={props.inspector} send={send.inspector} />
     </div>
   );
 }

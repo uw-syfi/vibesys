@@ -17,6 +17,8 @@
     "build": "tsc -b tsconfig.main.json && vite build --config vite.welcome.config.ts && node scripts/copy-ui.mjs",
     "check": "tsc -b && tsc -p tsconfig.welcome.json",
     "test": "node ../scripts/run_bun_tests.mjs ./src",
+    "pretest:e2e": "pnpm build",
+    "test:e2e": "playwright test",
     "start": "pnpm build && electron ."
   },
   "dependencies": {
@@ -26,6 +28,7 @@
     "react-dom": "19.1.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.55.0",
     "@types/bun": "1.4.2",
     "@types/node": "^24.0.0",
     "@types/react": "19.1.13",

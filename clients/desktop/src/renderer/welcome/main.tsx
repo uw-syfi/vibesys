@@ -31,12 +31,14 @@ function Root({stores}: {readonly stores: WelcomeStores}): JSX.Element {
       start={useStore(stores.start)}
       picker={useStore(stores.picker)}
       completion={useStore(stores.completion)}
+      inspector={useStore(stores.inspector)}
       send={{
         welcome: stores.welcome.dispatch,
         host: stores.host.dispatch,
         start: stores.start.dispatch,
         picker: stores.picker.dispatch,
         completion: stores.completion.dispatch,
+        inspector: stores.inspector.dispatch,
       }}
     />
   );
@@ -51,7 +53,12 @@ async function load(root: HTMLElement, bridge: WelcomeBridge): Promise<void> {
     return;
   }
   const {chrome, recent, settingsProblem, host} = overview.value;
-  const stores = welcomeStores(bridge, question => window.confirm(question), host);
+  const stores = welcomeStores(
+    bridge,
+    question => window.confirm(question),
+    host,
+    value => navigator.clipboard.writeText(value),
+  );
   stores.welcome.dispatch({type: 'chrome', chrome});
   stores.host.dispatch({type: 'chrome', chrome});
   stores.lists.dispatch({type: 'runs', runs: recent});

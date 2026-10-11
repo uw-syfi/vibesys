@@ -3,7 +3,14 @@
  * sheet. Components render the state they are given and report events; they perform no I/O and
  * hold no state that changes behavior.
  */
-import type {InputHTMLAttributes, JSX, MouseEvent, ReactNode, SyntheticEvent} from 'react';
+import {
+  type InputHTMLAttributes,
+  type JSX,
+  type MouseEvent,
+  type ReactNode,
+  type SyntheticEvent,
+  useRef,
+} from 'react';
 import type {HostKey} from '../../../common/hosts.js';
 import type {StopView} from '../../../common/stop-run.js';
 import {
@@ -13,9 +20,11 @@ import {
   suggestions,
 } from '../state/completion.js';
 import type {HostAction} from '../state/host.js';
+import type {InspectorAction} from '../state/inspector.js';
 import type {PickerAction} from '../state/picker.js';
 import type {StartAction} from '../state/start.js';
 import type {RunCommand, WelcomeAction} from '../state/welcome.js';
+import {restoreLogicalFocus} from './focus-return.js';
 
 /** Where the view's events go: one dispatcher per screen store. */
 export interface WelcomeSenders {
@@ -24,6 +33,7 @@ export interface WelcomeSenders {
   readonly start: (action: StartAction) => void;
   readonly picker: (action: PickerAction) => void;
   readonly completion: (action: CompletionAction) => void;
+  readonly inspector: (action: InspectorAction) => void;
 }
 
 export type Dispatch = (command: RunCommand) => void;
@@ -54,9 +64,25 @@ export function Sheet(props: {
   readonly label: string;
   readonly close: () => void;
   readonly children: ReactNode;
+  /** Stable focus target used when a redraw removes the element that opened the sheet. */
+  readonly focusFallbackId?: string;
 }): JSX.Element {
+  const opener = useRef<HTMLElement | null>(null);
+  const fallbackId = useRef<string | undefined>(undefined);
   const follow = (dialog: HTMLDialogElement | null): void => {
-    if (dialog !== null) syncDialog(dialog, props.open);
+    if (dialog === null) return;
+    if (props.open && !dialog.open) {
+      opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      fallbackId.current = props.focusFallbackId;
+      dialog.showModal();
+    } else if (!props.open && dialog.open) {
+      dialog.close();
+      const fallback =
+        fallbackId.current === undefined ? null : document.getElementById(fallbackId.current);
+      restoreLogicalFocus(opener.current, fallback);
+      opener.current = null;
+      fallbackId.current = undefined;
+    }
   };
   const onCancel = (event: SyntheticEvent<HTMLDialogElement>): void => {
     event.preventDefault();
