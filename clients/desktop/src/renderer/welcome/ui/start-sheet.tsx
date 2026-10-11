@@ -2,10 +2,12 @@
  * "Start a run": a project, its tasks (listed by the host), extra arguments, and Start. While the
  * start runs the form is read-only; Cancel (or Esc) then cancels the start ("Cancelling…").
  */
+
+import {Button, Dialog} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import type {CompletionState} from '../state/completion.js';
 import {type StartAction, type StartState, startable, type Tasks} from '../state/start.js';
-import {PathInput, Sheet, type WelcomeSenders} from './common.js';
+import {PathInput, type WelcomeSenders} from './common.js';
 
 type Form = Extract<StartState, {kind: 'editing' | 'starting'}>;
 
@@ -89,9 +91,9 @@ function StartForm(props: {
             if (tasks.kind === 'idle') start({type: 'list-tasks'});
           }}
         />
-        <button type="button" disabled={!editing} onClick={() => start({type: 'list-tasks'})}>
+        <Button disabled={!editing} onClick={() => start({type: 'list-tasks'})}>
           List tasks
-        </button>
+        </Button>
       </div>
       <div className="tasks">
         <TaskChoices tasks={tasks} enabled={editing} start={start} />
@@ -110,17 +112,14 @@ function StartForm(props: {
         {line.text}
       </p>
       <div className="actions">
-        <button type="button" onClick={() => start({type: 'close'})}>
-          Cancel
-        </button>
-        <button
-          type="button"
-          className="primary"
+        <Button onClick={() => start({type: 'close'})}>Cancel</Button>
+        <Button
+          variant="primary"
           disabled={startable(state) === null}
           onClick={() => start({type: 'start'})}
         >
           Start run
-        </button>
+        </Button>
       </div>
     </>
   );
@@ -149,12 +148,12 @@ export function StartSheet(props: {
     body = <StartForm state={state} completion={props.completion} send={send} />;
   }
   return (
-    <Sheet
+    <Dialog
       open={state.kind !== 'closed' && props.visible}
       label="Start a run"
-      close={() => start({type: 'close'})}
+      dismiss={() => start({type: 'close'})}
     >
       {body}
-    </Sheet>
+    </Dialog>
   );
 }

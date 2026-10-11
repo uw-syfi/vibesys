@@ -3,6 +3,8 @@
  * sheets. Presentational: it renders each screen store's state and reports events through `send`.
  * While a run fills the window only the title strip shows, and the sheets wait closed.
  */
+
+import {Button} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {CompletionState} from '../state/completion.js';
 import type {HostState} from '../state/host.js';
@@ -60,9 +62,7 @@ export function WelcomeView(props: WelcomeViewProps): JSX.Element {
           <section>
             <h2>Other hosts</h2>
             <div className="row">
-              <button type="button" onClick={() => send.picker({type: 'open'})}>
-                Connect to host…
-              </button>
+              <Button onClick={() => send.picker({type: 'open'})}>Connect to host…</Button>
               <span className="muted">Hosts from ~/.ssh/config, or type user@host.</span>
             </div>
           </section>

@@ -8,11 +8,20 @@
   "vibesys": {
     "layer": "app",
     "entries": {
-      ".": "node"
+      ".": "node",
+      "./renderer": "dom"
     }
   },
-  "main": "dist/main/app/main.js",
-  "exports": {},
+  "main": "dist/main/index.js",
+  "exports": {
+    ".": {
+      "@vibesys/source": "./src/main/index.ts",
+      "default": "./dist/main/index.js"
+    },
+    "./renderer": {
+      "@vibesys/source": "./src/renderer/index.ts"
+    }
+  },
   "scripts": {
     "build": "tsc -b tsconfig.main.json && vite build --config vite.welcome.config.ts && node scripts/copy-ui.mjs",
     "check": "tsc -b && tsc -p tsconfig.welcome.json",
@@ -25,6 +34,7 @@
     "@vibesys/entities": "workspace:*",
     "@vibesys/ipc": "workspace:*",
     "@vibesys/transport": "workspace:*",
+    "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
     "react-dom": "19.1.1"
   },

@@ -25,7 +25,8 @@
     "@vibesys/ipc": "workspace:*",
     "@vibesys/transport": "workspace:*",
     "react": "19.1.1",
-    "react-dom": "19.1.1"
+    "react-dom": "19.1.1",
+    "@vibesys/ui": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "1.55.0",

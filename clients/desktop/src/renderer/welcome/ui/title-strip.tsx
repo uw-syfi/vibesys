@@ -5,6 +5,7 @@
 
 import type {ResumeRunId} from '@vibesys/entities';
 import type {ChromeState} from '@vibesys/ipc';
+import {Button, StatusChip, type Tone} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   connectionText,
@@ -17,12 +18,12 @@ import type {Dispatch} from './common.js';
 
 type Attached = NonNullable<ChromeState['attached']>;
 
-const DOTS: Readonly<Record<RunLink, string>> = {
-  connecting: 'dot warn',
-  connected: 'dot ok',
-  reconnecting: 'dot warn',
-  stuck: 'dot error',
-  ended: 'dot',
+const TONES: Readonly<Record<RunLink, Tone>> = {
+  connecting: 'warn',
+  connected: 'ok',
+  reconnecting: 'warn',
+  stuck: 'error',
+  ended: 'idle',
 };
 
 /** The buttons on the right of the strip, for an attached run. */
@@ -43,35 +44,21 @@ function RunButtons(props: {
   const decision = controls.resume;
   return (
     <>
-      {controls.stop ? (
-        <button type="button" onClick={() => stop(false)}>
-          Stop run
-        </button>
-      ) : null}
-      {controls.force ? (
-        <button type="button" onClick={() => stop(true)}>
-          Force stop
-        </button>
-      ) : null}
+      {controls.stop ? <Button onClick={() => stop(false)}>Stop run</Button> : null}
+      {controls.force ? <Button onClick={() => stop(true)}>Force stop</Button> : null}
       {decision?.kind === 'available' ? (
-        <button type="button" className="primary" onClick={() => resume(decision.runId)}>
+        <Button variant="primary" onClick={() => resume(decision.runId)}>
           Resume…
-        </button>
+        </Button>
       ) : null}
       {decision?.kind === 'unavailable' ? (
         <span id="strip-resume-state" className="muted" title={decision.reason}>
           {decision.reason}
         </span>
       ) : null}
-      {controls.retry ? (
-        <button type="button" onClick={() => dispatch({kind: 'retry'})}>
-          Retry
-        </button>
-      ) : null}
+      {controls.retry ? <Button onClick={() => dispatch({kind: 'retry'})}>Retry</Button> : null}
       {controls.back ? (
-        <button type="button" onClick={() => dispatch({kind: 'show-run'})}>
-          Back to run
-        </button>
+        <Button onClick={() => dispatch({kind: 'show-run'})}>Back to run</Button>
       ) : null}
     </>
   );
@@ -90,15 +77,12 @@ export function TitleStrip(props: {
     <header>
       <span className="brand">VibeSys</span>
       {attached === null ? null : (
-        <button
-          className="chip"
-          type="button"
+        <StatusChip
+          tone={TONES[runLink(attached.connection)]}
+          label={attached.hostLabel}
           title={inRun ? 'Show hosts and runs' : `Attached to a run on ${attached.hostLabel}`}
-          onClick={() => dispatch({kind: inRun ? 'show-welcome' : 'show-run'})}
-        >
-          <span className={DOTS[runLink(attached.connection)]} />
-          {attached.hostLabel}
-        </button>
+          press={() => dispatch({kind: inRun ? 'show-welcome' : 'show-run'})}
+        />
       )}
       <span id="conn" className={controls.retry ? 'error' : 'muted'} title={conn}>
         {conn}

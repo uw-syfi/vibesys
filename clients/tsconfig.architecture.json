@@ -7,6 +7,8 @@
       "@vibesys/contracts/testing": ["contracts/src/testing/index.ts"],
       "@vibesys/core-state": ["core-state/src/index.ts"],
       "@vibesys/core-state/testing": ["core-state/src/testing/index.ts"],
+      "@vibesys/desktop": ["desktop/src/main/index.ts"],
+      "@vibesys/desktop/renderer": ["desktop/src/renderer/index.ts"],
       "@vibesys/entities": ["entities/src/index.ts"],
       "@vibesys/ipc": ["ipc/src/index.ts"],
       "@vibesys/transport": ["transport/src/index.ts"],
@@ -15,6 +17,7 @@
       "@vibesys/transport/websocket": ["transport/src/websocket.ts"],
       "@vibesys/tui": ["tui/src/index.ts"],
       "@vibesys/ui": ["ui/src/index.ts"],
+      "@vibesys/ui/tokens.css": ["ui/src/tokens.css"],
       "@vibesys/web": ["web/src/index.ts"]
     }
   }
