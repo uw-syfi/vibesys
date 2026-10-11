@@ -265,6 +265,9 @@ WebSocket subscriber live in one process.
 
 ## The stdio bridge
 
+The bridge entrypoint is to be replaced by the host helper's `run.connect`, which keeps this relay
+and its outcomes; see [desktop-connection.md](desktop-connection.md).
+
 A remote client (the desktop over SSH) reaches a run's Unix transport through the stdio bridge,
 `python -m entrypoints.stdio_bridge --socket PATH` (`src/entrypoints/stdio_bridge.py` over
 `src/server/stdio_bridge.py`). It is not a third transport. The client runs one bridge per protocol

@@ -343,6 +343,10 @@ library decodes the target with `ascii`/`surrogateescape`, so a raw byte above
 
 ## Desktop app
 
+The target connection design (one host helper, one connection manager, explicit run identity
+and lifecycle phases, per-screen stores) and its phased migration from what this section describes
+are in [desktop-connection.md](desktop-connection.md).
+
 The desktop app (`clients/desktop`) ships its own copy of the web UI and
 reaches servers through its main process, without the web gateway. A server is
 a detached run (`vibesys --detach`, see `tui-architecture.md`) on this machine
