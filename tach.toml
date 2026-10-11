@@ -157,11 +157,11 @@ depends_on = ["server.controller", "server.events", "vibesys.api"]
 
 [[modules]]
 path = "server.run_lifecycle"
-depends_on = []
+depends_on = ["server.host_api"]
 
 [[modules]]
 path = "server.runtime"
-depends_on = ["server.read_model", "server.settings", "server.chat", "server.events", "server.execution", "server.journal", "vibesys.api", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics", "vs_sim.api"]
+depends_on = ["server.read_model", "server.settings", "server.chat", "server.events", "server.execution", "server.journal", "vibesys.api", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics", "server.host_api", "vs_sim.api"]
 
 [[modules]]
 path = "server.settings"

@@ -50,6 +50,8 @@ describe('registry records', () => {
         hostname: 'node-1',
         vibesysVersion: '0.0.0+fake',
         vibesysRoot: null,
+        phase: null,
+        endedAt: null,
       },
     });
   });
@@ -123,6 +125,29 @@ describe('registry records', () => {
         expect(() => parseInstanceList(document)).toThrow('listing.unverified[1]');
       }
     }
+  });
+
+  test('a version 3 record carries its phase, and a listing reports the servers that ended', () => {
+    const failed = {
+      ...fakeRecord(ID, SOCKET),
+      version: 3,
+      run_id: 'run-7',
+      log_path: '/run/server.log',
+      ended_at: 1_700_000_100,
+      phase: {status: 'failed', stage: null, reason: {code: 'x', stage: 'run', message: 'boom'}},
+    };
+    const listing = parseInstanceList({version: 3, instances: [], ended: [failed]});
+    const [record] = listing.ended ?? [];
+    expect(listing.records).toEqual([]);
+    expect(record?.kind === 'compatible' && record.instance.phase).toEqual({
+      status: 'failed',
+      stage: null,
+      reason: {code: 'x', stage: 'run', message: 'boom'},
+    });
+    expect(record?.kind === 'compatible' && record.instance.endedAt).toBe(1_700_000_100);
+    expect(() => parseInstanceRecord({...failed, phase: {status: 'gone'}})).toThrow(
+      'record.phase.status',
+    );
   });
 
   test('a version 2 record always names its run, and a listing reports records it cannot read', () => {

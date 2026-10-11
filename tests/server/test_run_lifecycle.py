@@ -1,7 +1,10 @@
 """Exhaustive rules of the run lifecycle state machine."""
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
+from server.host_api import FailureReason, RunPhase, StartupStage
 from server.run_lifecycle import (
     IllegalRunTransitionError,
     RunStatus,
@@ -148,3 +151,31 @@ def test_resume_before_the_boundary_cancels_the_pending_stop() -> None:
     status = transition(status, RunTrigger.RESUMED)
     assert status is RunStatus.RUNNING
     assert transition(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.RUNNING
+
+
+_REASON = FailureReason(code="boom", stage="run", message="boom")
+_FACTS = st.one_of(
+    st.builds(dict, status=st.sampled_from(RunStatus)),
+    st.builds(dict, failure=st.just(_REASON)),
+)
+
+
+@given(facts=st.lists(_FACTS, max_size=12))
+def test_a_phase_only_moves_forward_and_names_why_it_failed(facts: list[dict]) -> None:
+    phase = RunPhase(status=RunStatus.STARTING, stage=StartupStage.RESOLVING)
+    for fact in facts:
+        after = phase.advance(**fact)
+        if phase.status.has_ended:
+            assert after == phase
+        if after.status is RunStatus.STARTING:
+            assert phase.status is RunStatus.STARTING
+        if after.status is RunStatus.FAILED:
+            assert after.reason == _REASON
+        phase = after
+
+
+def test_a_failed_status_waits_for_the_failure_that_says_why() -> None:
+    running = RunPhase(status=RunStatus.RUNNING)
+
+    assert running.advance(status=RunStatus.FAILED) == running
+    assert running.advance(failure=_REASON) == RunPhase(status=RunStatus.FAILED, reason=_REASON)

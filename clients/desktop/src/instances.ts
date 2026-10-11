@@ -25,6 +25,28 @@ interface LiveInstance {
   readonly vibesysVersion: string;
   /** The VibeSys checkout the server runs from; null for an install, or a server too old to say. */
   readonly vibesysRoot: string | null;
+  /** The run's lifecycle phase (record version 3); null from an older host. */
+  readonly phase: RunPhase | null;
+  /** When the server exited, for an ended record; null while it lives. */
+  readonly endedAt: number | null;
+}
+
+const RUN_STATUSES = [
+  'starting',
+  'running',
+  'pausing',
+  'paused',
+  'stopping',
+  'stopped',
+  'completed',
+  'failed',
+] as const;
+
+/** `RunPhase` in `src/server/host_api.py`: the run's status with its stage or failure reason. */
+interface RunPhase {
+  readonly status: (typeof RUN_STATUSES)[number];
+  readonly stage: string | null;
+  readonly reason: {readonly code: string; readonly stage: string; readonly message: string} | null;
 }
 
 /** What one record says: a server this client can read, or one that speaks another protocol. */
@@ -39,6 +61,8 @@ export type InstanceRecord =
 
 export interface InstanceListing {
   readonly records: readonly InstanceRecord[];
+  /** Servers that exited in the last day, with the phase their run ended in; absent before version 3. */
+  readonly ended?: readonly InstanceRecord[];
   /** Registry ids whose liveness the host could not establish. */
   readonly unverified: readonly string[];
   /** Live servers whose record the host could not read (another version, or corrupt); absent from an older host. */
@@ -102,17 +126,15 @@ export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRe
       vibesysVersion: typeof vibesysVersion === 'string' ? vibesysVersion : null,
     };
   }
-  onlyKeys(record, RECORD_KEYS, path);
-  // Version 2 names its run from the first write; version 1 (an older host) may not yet.
-  const version = record['version'];
-  if (version !== 1 && version !== 2) throw new RecordError(`${path}.version must be 1 or 2`);
+  const version = recordVersion(record, path);
+  onlyKeys(record, version === 3 ? [...RECORD_KEYS, ...RECORD_V3_KEYS] : RECORD_KEYS, path);
   const id = instanceId(record['id'], `${path}.id`);
   const status = record['status'];
   if (status !== 'starting' && status !== 'serving') {
     throw new RecordError(`${path}.status must be "starting" or "serving"`);
   }
   const runId =
-    version === 2 ? string(record, 'run_id', path) : nullableString(record, 'run_id', path);
+    version === 1 ? nullableString(record, 'run_id', path) : string(record, 'run_id', path);
   const socketPath = absolutePath(record, 'socket_path', path);
   const vibesysRoot = nullableString(record, 'vibesys_root', path);
   const pid = number(record, 'pid', path);
@@ -132,17 +154,69 @@ export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRe
       hostname: string(record, 'hostname', path),
       vibesysVersion: string(record, 'vibesys_version', path),
       vibesysRoot,
+      ...lifecycle(record, version, path),
     },
+  };
+}
+
+/**
+ * Version 2 names its run from the first write; version 1 (an older host) may not yet. Version 3
+ * adds the run's phase, the server's log, and, once it exited, `ended_at`.
+ */
+function recordVersion(record: Record<string, unknown>, path: string): 1 | 2 | 3 {
+  const version = record['version'];
+  if (version !== 1 && version !== 2 && version !== 3) {
+    throw new RecordError(`${path}.version must be 1, 2 or 3`);
+  }
+  return version;
+}
+
+function lifecycle(
+  record: Record<string, unknown>,
+  version: 1 | 2 | 3,
+  path: string,
+): Pick<LiveInstance, 'phase' | 'endedAt'> {
+  if (version !== 3) return {phase: null, endedAt: null};
+  const endedAt = record['ended_at'] == null ? null : number(record, 'ended_at', path);
+  return {phase: runPhase(record['phase'], `${path}.phase`), endedAt};
+}
+
+const RECORD_V3_KEYS = ['phase', 'log_path', 'ended_at'] as const;
+
+function runPhase(value: unknown, path: string): RunPhase {
+  const phase = object(value, path);
+  onlyKeys(phase, ['status', 'stage', 'reason'], path);
+  const status = phase['status'];
+  if (!RUN_STATUSES.some(known => known === status)) {
+    throw new RecordError(`${path}.status must be a run status`);
+  }
+  const reason = phase['reason'] ?? null;
+  return {
+    status: status as RunPhase['status'],
+    stage: nullableString(phase, 'stage', path),
+    reason: reason === null ? null : failureReason(reason, `${path}.reason`),
+  };
+}
+
+function failureReason(value: unknown, path: string): NonNullable<RunPhase['reason']> {
+  const reason = object(value, path);
+  onlyKeys(reason, ['code', 'stage', 'message'], path);
+  return {
+    code: string(reason, 'code', path),
+    stage: string(reason, 'stage', path),
+    message: string(reason, 'message', path),
   };
 }
 
 /** Parse a `vibesys instances list --json` document. */
 export function parseInstanceList(value: unknown): InstanceListing {
   const listing = object(value, 'listing');
-  onlyKeys(listing, ['version', 'instances', 'unreadable', 'unverified'], 'listing');
-  if (listing['version'] !== 1 && listing['version'] !== 2) {
-    throw new RecordError('listing.version must be 1 or 2');
+  onlyKeys(listing, ['version', 'instances', 'ended', 'unreadable', 'unverified'], 'listing');
+  if (listing['version'] !== 1 && listing['version'] !== 2 && listing['version'] !== 3) {
+    throw new RecordError('listing.version must be 1, 2 or 3');
   }
+  const ended = listing['ended'] ?? [];
+  if (!Array.isArray(ended)) throw new RecordError('listing.ended must be a list');
   const instances = listing['instances'];
   if (!Array.isArray(instances)) throw new RecordError('listing.instances must be a list');
   const unverified = listing['unverified'] ?? [];
@@ -155,6 +229,13 @@ export function parseInstanceList(value: unknown): InstanceListing {
     ...(listing['unreadable'] === undefined
       ? {}
       : {unreadable: unreadableRecords(listing['unreadable'])}),
+    ...(listing['ended'] === undefined
+      ? {}
+      : {
+          ended: ended.map((record, index) =>
+            parseInstanceRecord(record, `listing.ended[${index}]`),
+          ),
+        }),
   };
 }
 

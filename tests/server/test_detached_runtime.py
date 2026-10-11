@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from server.host_api import FailureReason, RunStatus
+
 
 def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
     tmp_path: Path,
@@ -41,6 +43,11 @@ def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
     class Observer:
         def listening(self) -> None:
             milestones.append("listening")
+
+        def observe(
+            self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+        ) -> None:
+            milestones.append(str(status or failure))
 
     runtime = ServerRuntime(
         run_id="run-1",
@@ -63,7 +70,7 @@ def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
     # A detached run's callback starts only once the transport accepts clients.
     assert started.wait(timeout=DEADLOCK_GUARD_S)
     assert runtime.transport_listening.is_set()
-    assert milestones == ["listening"]
+    assert milestones == ["running", "listening"]
 
     # A client that attaches mid-run is served through the reconnect bootstrap.
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:

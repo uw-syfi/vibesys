@@ -14,7 +14,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from entrypoints import launcher
-from entrypoints.detached_run import RecordPublisher
+from entrypoints.detached_run import SERVER_EXITED, RecordPublisher
 from entrypoints.detached_run import main as detached_run_main
 from entrypoints.instances import main as instances_main
 from entrypoints.instances import run
@@ -29,14 +29,19 @@ from entrypoints.server import (
 from server.host_api import (
     DetachedLaunchErrorCode,
     DetachedLaunchFailure,
+    FailureReason,
     InstanceList,
     InstanceStatus,
     InstanceStopResult,
     LiveInstanceRecord,
+    RunPhase,
+    RunStatus,
+    StartupStage,
     StopOutcome,
 )
 from server.instances import ControlSocketStopRequester
 from server.registry import (
+    TOMBSTONE_RETENTION_SECONDS,
     FakeInstanceStore,
     FileInstanceStore,
     InstanceHold,
@@ -70,7 +75,9 @@ def _record(
     return LiveInstanceRecord(
         id=instance_id,
         status=status,
+        phase=RunPhase(status=RunStatus.RUNNING),
         socket_path=socket_path,
+        log_path="/run/server.log",
         project_root="/project",
         run_id=run_id,
         pid=4242,
@@ -396,7 +403,7 @@ def _run(argv: list[str], store: FakeInstanceStore) -> tuple[int, str]:
     clock = ManualClock()
     return run(
         argv,
-        registry=LiveRegistry(store),
+        registry=LiveRegistry(store, ManualClock()),
         # Nothing listens on the simulated network, so every stop falls back
         # to the signal path, as it does for a server that does not answer.
         effects=StopEffects(
@@ -416,7 +423,7 @@ def test_list_json_is_one_versioned_document() -> None:
     assert code == 0
     listing = InstanceList.model_validate_json(output)
     assert [record.id for record in listing.instances] == [INSTANCE]
-    assert json.loads(output)["version"] == 2
+    assert json.loads(output)["version"] == 3
 
 
 def test_list_human_names_each_server_or_says_there_are_none() -> None:
@@ -424,7 +431,10 @@ def test_list_human_names_each_server_or_says_there_are_none() -> None:
 
     assert INSTANCE in _run(["list"], store)[1]
     hold.release()
-    assert _run(["list"], store)[1] == "No detached VibeSys servers are running on this node.\n"
+    assert f"{INSTANCE}  failed (ended): " in _run(["list"], store)[1]
+    assert _run(["list"], FakeInstanceStore())[1] == (
+        "No detached VibeSys servers are running on this node.\n"
+    )
 
 
 def test_stop_json_reports_a_typed_outcome() -> None:
@@ -458,21 +468,93 @@ def test_the_command_reads_this_users_runtime_root(
     assert [entry.name for entry in (tmp_path / "vibesys").iterdir()] == ["instances"]
 
 
-def test_a_detached_server_record_names_its_run_from_the_first_publish() -> None:
-    store = FakeInstanceStore()
-    registry = LiveRegistry(store)
+def _starting(instance_id: str) -> LiveInstanceRecord:
+    return _record(instance_id, "/run/s.sock", InstanceStatus.STARTING).model_copy(
+        update={"phase": RunPhase(status=RunStatus.STARTING, stage=StartupStage.RESOLVING)}
+    )
+
+
+def test_a_detached_server_record_follows_its_run_and_names_it_throughout() -> None:
+    clock = ManualClock(100.0)
+    registry = LiveRegistry(FakeInstanceStore(), clock)
+    phases: list[tuple[InstanceStatus, RunPhase, str]] = []
+
+    def seen() -> None:
+        record = registry.find(INSTANCE)
+        assert record is not None
+        phases.append((record.status, record.phase, record.run_id))
 
     with registry.register(INSTANCE) as hold:
-        publisher = RecordPublisher(hold, _record(INSTANCE, "/run/s.sock", InstanceStatus.STARTING))
-        starting = registry.find(INSTANCE)
+        publisher = RecordPublisher(hold, _starting(INSTANCE), clock)
+        seen()
         publisher.listening()
-        serving = registry.find(INSTANCE)
+        seen()
+        publisher.observe(status=RunStatus.RUNNING)
+        seen()
+        publisher.observe(status=RunStatus.STOPPING)
+        publisher.observe(status=RunStatus.STOPPED)
+        publisher.end()
 
-    assert starting is not None
-    assert (starting.status, starting.run_id) == (InstanceStatus.STARTING, _RUN_ID)
-    assert serving is not None
-    assert (serving.status, serving.run_id) == (InstanceStatus.SERVING, _RUN_ID)
+    assert phases == [
+        (
+            InstanceStatus.STARTING,
+            RunPhase(status=RunStatus.STARTING, stage=StartupStage.RESOLVING),
+            _RUN_ID,
+        ),
+        (
+            InstanceStatus.SERVING,
+            RunPhase(status=RunStatus.STARTING, stage=StartupStage.RESOLVING),
+            _RUN_ID,
+        ),
+        (InstanceStatus.SERVING, RunPhase(status=RunStatus.RUNNING), _RUN_ID),
+    ]
+    (ended,) = registry.list().ended
+    assert (ended.phase, ended.ended_at, ended.run_id) == (
+        RunPhase(status=RunStatus.STOPPED),
+        100.0,
+        _RUN_ID,
+    )
+
+
+_EARLY_FAILURE = FailureReason(
+    code="sandbox_start_failed",
+    stage="run",
+    message="docker run --gpus all: could not select device driver",
+)
+
+
+def test_a_run_that_fails_at_startup_shows_its_reason_to_a_client_that_comes_later() -> None:
+    # Supersedes holding a failed server open for a first client (#1826): the
+    # reason lives in the tombstone, so the server exits at once and a client
+    # that lists the host afterwards still reads why the run ended.
+    clock = ManualClock(100.0)
+    registry = LiveRegistry(FakeInstanceStore(), clock)
+    with registry.register(INSTANCE) as hold:
+        publisher = RecordPublisher(hold, _starting(INSTANCE), clock)
+        publisher.listening()
+        publisher.observe(status=RunStatus.FAILED)
+        publisher.observe(failure=_EARLY_FAILURE)
+        publisher.end()
+
+    clock.advance(TOMBSTONE_RETENTION_SECONDS - 1)
+    listing = registry.list()
+    assert listing.instances == ()
+    (ended,) = listing.ended
+    assert ended.phase == RunPhase(status=RunStatus.FAILED, reason=_EARLY_FAILURE)
+    assert ended.log_path == "/run/server.log"
+
+    clock.advance(1)
     assert registry.list() == InstanceList(instances=())
+
+
+def test_a_server_that_exits_before_its_run_ends_leaves_a_failed_tombstone() -> None:
+    clock = ManualClock(100.0)
+    registry = LiveRegistry(FakeInstanceStore(), clock)
+    with registry.register(INSTANCE) as hold:
+        RecordPublisher(hold, _starting(INSTANCE), clock).end()
+
+    (ended,) = registry.list().ended
+    assert ended.phase == RunPhase(status=RunStatus.FAILED, reason=SERVER_EXITED)
 
 
 @pytest.mark.parametrize("missing", ["--instance-id", "--run-id", "--control-socket"])

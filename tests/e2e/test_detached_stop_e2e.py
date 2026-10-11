@@ -21,7 +21,14 @@ import pytest
 
 from launch import default_runs
 from server.api.protocol import SubscribeRequest
-from server.host_api import InstanceStatus, LiveInstanceRecord, StopOutcome, StopRoute
+from server.host_api import (
+    InstanceStatus,
+    LiveInstanceRecord,
+    RunPhase,
+    RunStatus,
+    StopOutcome,
+    StopRoute,
+)
 from server.instances import ControlSocketStopRequester
 from server.registry import (
     FileInstanceStore,
@@ -34,7 +41,7 @@ from server.registry import (
 )
 from server.runtime import ServerRuntime
 from vibesys.run.integration import LocalRunIntegration
-from vs_sim.api import OsThreads, UnixNetwork
+from vs_sim.api import OsThreads, SystemClock, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -126,7 +133,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     instance_id = new_instance_id()
     socket_path = instance_socket_path(root, instance_id)
     socket_path.parent.mkdir(parents=True, mode=0o700)
-    registry = LiveRegistry(FileInstanceStore(root))
+    registry = LiveRegistry(FileInstanceStore(root), SystemClock())
     runtime = ServerRuntime(
         run_id="run-1", runs=default_runs(), socket_path=socket_path, detach=True
     )
@@ -155,6 +162,8 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
                 LiveInstanceRecord(
                     id=instance_id,
                     status=InstanceStatus.SERVING,
+                    phase=RunPhase(status=RunStatus.RUNNING),
+                    log_path=str(root / "server.log"),
                     socket_path=str(socket_path),
                     project_root=str(root),
                     run_id="run-1",

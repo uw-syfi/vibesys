@@ -11,10 +11,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from entrypoints.server import _DetachedGatewayEffects
-from server.host_api import StopOutcome, StopRoute
+from server.host_api import RunStatus, StopOutcome, StopRoute
 from server.instances import ControlSocketStopRequester
-from server.registry import FileInstanceStore, LiveRegistry, StopEffects, instance_root
-from vs_sim.api import OsThreads, PidfdProcessSignaller, UnixNetwork
+from server.registry import CRASHED, FileInstanceStore, LiveRegistry, StopEffects, instance_root
+from vs_sim.api import OsThreads, PidfdProcessSignaller, SystemClock, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S, stop_process
 
 if TYPE_CHECKING:
@@ -27,7 +27,7 @@ INSTANCE = "00000000e2e0"
 @pytest.fixture
 def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LiveRegistry:
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    return LiveRegistry(FileInstanceStore(instance_root(os.environ, os.getuid())))
+    return LiveRegistry(FileInstanceStore(instance_root(os.environ, os.getuid())), SystemClock())
 
 
 @pytest.fixture
@@ -58,20 +58,28 @@ def test_a_killed_server_is_listed_until_it_dies_and_then_removed(
     holder.send_signal(signal.SIGKILL)
     holder.wait(timeout=HANG_GUARD_S)
 
-    assert registry.list().instances == ()
+    listing = registry.list()
+    assert listing.instances == ()
+    assert [(record.id, record.phase.reason) for record in listing.ended] == [(INSTANCE, CRASHED)]
     assert registry.find(INSTANCE) is None
     assert registry.list().unverified == ()
 
 
-def test_a_server_that_exits_cleanly_leaves_nothing_behind(
+def test_a_server_that_exits_cleanly_leaves_only_its_tombstone(
     registry: LiveRegistry, holder: subprocess.Popen[str], tmp_path: Path
 ) -> None:
     assert holder.stdin is not None
     holder.stdin.close()
     assert holder.wait(timeout=HANG_GUARD_S) == 0
 
-    assert list((tmp_path / "vibesys" / "instances").iterdir()) == []
-    assert registry.list().instances == ()
+    assert [entry.name for entry in (tmp_path / "vibesys" / "instances").iterdir()] == [
+        f"{INSTANCE}.json"
+    ]
+    listing = registry.list()
+    assert listing.instances == ()
+    assert [(record.id, record.phase.status) for record in listing.ended] == [
+        (INSTANCE, RunStatus.COMPLETED)
+    ]
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="stable pid signalling needs Linux pidfds")

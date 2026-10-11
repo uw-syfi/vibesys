@@ -9,13 +9,17 @@ exit (``kill -9`` included), and a lister that observes the lock free knows
 the owner is gone and removes its files. There are no pid checks (pids are
 reused), no heartbeats, and no cleanup daemon.
 
-The registry answers "what is running on this node now". Finished runs are
-the per-project run history's business and are reopened read-only from it.
+The registry answers "what is running on this node now, and what ended here
+in the last day". A server that exits leaves its last record, with the phase
+its run ended in, as a tombstone; a server that died without writing one is
+reported as crashed. A listing removes tombstones older than
+``TOMBSTONE_RETENTION_SECONDS``. Older runs are the per-project run history's
+business and are reopened read-only from it.
 
 Layout under ``instance_root``::
 
     instances/<id>.lock   lifetime lock, published only once held
-    instances/<id>.json   LiveInstanceRecord, written by the holder
+    instances/<id>.json   LiveInstanceRecord, written by the holder; its tombstone after
     runs/<id>/control.sock, runs/<id>/server.log
 
 The module is light: it imports the standard library, Pydantic, the record
@@ -51,9 +55,13 @@ from typing import TYPE_CHECKING, Protocol
 
 from server.host_api import (
     INSTANCE_ID_PATTERN,
+    RECORD_VERSION,
+    FailureReason,
     InstanceList,
     InstanceStopResult,
     LiveInstanceRecord,
+    RunPhase,
+    RunStatus,
     StopOutcome,
     StopRoute,
     UnreadableRecord,
@@ -83,6 +91,14 @@ _FALLBACK_PARENT = Path("/tmp")  # noqa: S108  # lint-waiver: LW-178202 [S108]; 
 _STOP_POLL_SECONDS = 0.05
 STOP_TIMEOUT_SECONDS = 10.0
 """How long ``stop`` waits for a stopped server to finish its run teardown."""
+TOMBSTONE_RETENTION_SECONDS = 24 * 60 * 60
+"""How long an ended server's record stays listed; the next listing after removes it."""
+CRASHED = FailureReason(
+    code="server_crashed",
+    stage="server",
+    message="The server exited without recording how its run ended; see its log.",
+)
+"""The reason a listing records for a server that died without a tombstone."""
 
 
 # --- lock primitives -------------------------------------------------------
@@ -245,64 +261,113 @@ class Verdict(StrEnum):
     LIVE = "live"
     """The owner holds the lock and has published a valid record."""
     UNREADABLE = "unreadable"
-    """The owner holds the lock and published a record this reader cannot interpret."""
+    """A record this reader cannot interpret, of a live owner or a newer checkout."""
     PENDING = "pending"
-    """The owner holds the lock but has no record yet (or any more)."""
+    """The owner holds the lock but has no record yet."""
+    ENDED = "ended"
+    """No process holds the lock, and the owner left a tombstone younger than a day."""
+    CRASHED = "crashed"
+    """No process holds the lock, and the owner died without leaving a tombstone."""
     DEAD = "dead"
-    """No process holds the lock: the files are leftovers to remove."""
+    """No process holds the lock, and nothing left is worth reporting: remove it."""
     UNVERIFIED = "unverified"
     """The lock could not be read; report it, and neither trust nor remove it."""
 
 
-def judge(observation: InstanceObservation) -> Verdict:
-    """Decide one id from its observed lock state and record."""
+def judge(observation: InstanceObservation, now: float) -> Verdict:
+    """Decide one id from its observed lock state and record, at time ``now``."""
+    record = observation.record
     match observation.lock:
         case LockState.HELD:
-            match observation.record:
+            match record:
                 case LiveInstanceRecord():
                     return Verdict.LIVE
                 case UnreadableRecord():
                     return Verdict.UNREADABLE
                 case None:
                     return Verdict.PENDING
-        case LockState.FREE | LockState.ABSENT:
-            return Verdict.DEAD
         case LockState.UNKNOWN:
             return Verdict.UNVERIFIED
+        case LockState.FREE | LockState.ABSENT:
+            return _judge_left_behind(record, now)
+
+
+def _judge_left_behind(record: LiveInstanceRecord | UnreadableRecord | None, now: float) -> Verdict:
+    """Decide what an owner that no longer holds its lock left behind."""
+    match record:
+        case LiveInstanceRecord(ended_at=None):
+            return Verdict.CRASHED
+        case LiveInstanceRecord(ended_at=float() as ended_at):
+            fresh = now - ended_at < TOMBSTONE_RETENTION_SECONDS
+            return Verdict.ENDED if fresh else Verdict.DEAD
+        case UnreadableRecord(version=int() as version) if version > RECORD_VERSION:
+            # A newer checkout's tombstone; that checkout's lister ages it.
+            return Verdict.UNREADABLE
+        case _:
+            return Verdict.DEAD
+
+
+def crashed(record: LiveInstanceRecord, now: float) -> LiveInstanceRecord:
+    """The tombstone of a server that died, at ``now``, without writing its own."""
+    return LiveInstanceRecord.model_validate(
+        {
+            **record.model_dump(),
+            "phase": RunPhase(status=RunStatus.FAILED, reason=CRASHED),
+            "ended_at": now,
+        }
+    )
 
 
 @dataclass(frozen=True)
 class Survey:
-    """A listing decision: what to report and what to remove."""
+    """A listing decision: what to report, what tombstones to write, and what to remove."""
 
     live: tuple[LiveInstanceRecord, ...]
+    ended: tuple[LiveInstanceRecord, ...]
+    buried: tuple[LiveInstanceRecord, ...]
+    """Crashed servers' new tombstones, also in ``ended``."""
     unreadable: tuple[UnreadableRecord, ...]
     unverified: tuple[str, ...]
     dead: tuple[str, ...]
 
 
-def survey(observations: Iterable[InstanceObservation]) -> Survey:
+def survey(observations: Iterable[InstanceObservation], now: float) -> Survey:
     """Partition observations, ordered by start time then id for a stable listing."""
     live: list[LiveInstanceRecord] = []
+    ended: list[LiveInstanceRecord] = []
+    buried: list[LiveInstanceRecord] = []
     unreadable: list[UnreadableRecord] = []
     unverified: list[str] = []
     dead: list[str] = []
     for observation in observations:
-        verdict = judge(observation)
-        if isinstance(observation.record, LiveInstanceRecord) and verdict is Verdict.LIVE:
-            live.append(observation.record)
-        elif isinstance(observation.record, UnreadableRecord) and verdict is Verdict.UNREADABLE:
-            unreadable.append(observation.record)
-        elif verdict is Verdict.UNVERIFIED:
-            unverified.append(observation.id)
-        elif verdict is Verdict.DEAD:
-            dead.append(observation.id)
+        record = observation.record
+        match judge(observation, now), record:
+            case Verdict.LIVE, LiveInstanceRecord():
+                live.append(record)
+            case Verdict.ENDED, LiveInstanceRecord():
+                ended.append(record)
+            case Verdict.CRASHED, LiveInstanceRecord():
+                buried.append(crashed(record, now))
+            case Verdict.UNREADABLE, UnreadableRecord():
+                unreadable.append(record)
+            case Verdict.UNVERIFIED, _:
+                unverified.append(observation.id)
+            case Verdict.DEAD, _:
+                dead.append(observation.id)
+            case _:
+                pass
     return Survey(
-        live=tuple(sorted(live, key=lambda record: (record.started_at, record.id))),
+        live=_by_start(live),
+        ended=_by_start([*ended, *buried]),
+        buried=_by_start(buried),
         unreadable=tuple(sorted(unreadable, key=lambda record: record.id)),
         unverified=tuple(sorted(unverified)),
         dead=tuple(sorted(dead)),
     )
+
+
+def _by_start(records: Iterable[LiveInstanceRecord]) -> tuple[LiveInstanceRecord, ...]:
+    return tuple(sorted(records, key=lambda record: (record.started_at, record.id)))
 
 
 def driving(listing: InstanceList, run_id: str) -> LiveInstanceRecord | None:
@@ -325,7 +390,7 @@ class InstanceHold(Protocol):
         ...
 
     def release(self) -> None:
-        """Remove the record, then the lock; idempotent."""
+        """Drop the lock, leaving the last record as the tombstone; idempotent."""
         ...
 
 
@@ -333,10 +398,10 @@ class InstanceStore(Protocol):
     """The registry's storage: lifetime locks and records keyed by id.
 
     Contract: ``hold`` publishes an id's lock only once it is held, and fails
-    with ``FileExistsError`` if the id was ever published and not reaped; a
-    held lock observes ``HELD`` until the holder releases it or dies; ``reap``
-    removes an id's files only when no live holder exists and reports whether
-    it did.
+    with ``FileExistsError`` while that lock is published; a held lock observes
+    ``HELD`` until the holder releases it (then ``ABSENT``, its record kept) or
+    dies (then ``FREE``); ``reap`` removes an id's files and ``bury`` replaces
+    its record, each only when no live holder exists, reporting whether it did.
     """
 
     def ids(self) -> tuple[str, ...]:
@@ -349,6 +414,10 @@ class InstanceStore(Protocol):
 
     def reap(self, instance_id: str) -> bool:
         """Remove a dead id's files; False (and nothing removed) if a holder lives."""
+        ...
+
+    def bury(self, record: LiveInstanceRecord) -> bool:
+        """Write a dead holder's tombstone; False (and nothing written) if a holder lives."""
         ...
 
     def hold(self, instance_id: str) -> InstanceHold:
@@ -408,6 +477,11 @@ def instance_socket_path(root: Path, instance_id: str) -> Path:
     return instance_run_directory(root, instance_id) / "control.sock"
 
 
+def instance_log_path(root: Path, instance_id: str) -> Path:
+    """Return the file one instance's stdout and stderr go to."""
+    return instance_run_directory(root, instance_id) / "server.log"
+
+
 def new_instance_id() -> str:
     """Return a fresh random registry id."""
     return secrets.token_hex(6)
@@ -423,23 +497,22 @@ class FileInstanceHold:
 
     def publish(self, record: LiveInstanceRecord) -> None:
         """Write the record through a private temporary file and rename it."""
-        temporary = self._record_path.with_name(
-            f".{self._record_path.name}.{secrets.token_hex(6)}.tmp"
-        )
-        try:
-            descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                stream.write(record.model_dump_json() + "\n")
-            temporary.replace(self._record_path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        _write_record(self._record_path, record)
 
     def release(self) -> None:
-        """Remove the record first, so no observer sees it without its lock."""
-        try:
-            self._record_path.unlink(missing_ok=True)
-        finally:
-            self._lock.release()
+        """Drop the lock; the record stays as the tombstone."""
+        self._lock.release()
+
+
+def _write_record(path: Path, record: LiveInstanceRecord) -> None:
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
+    try:
+        descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(record.model_dump_json() + "\n")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 class FileInstanceStore:
@@ -475,6 +548,23 @@ class FileInstanceStore:
                 instance_socket_path(self._root, instance_id),
             ),
         )
+
+    def bury(self, record: LiveInstanceRecord) -> bool:
+        """Replace the record under the lock, if nobody holds it."""
+        lock_path = self._lock_path(record.id)
+        try:
+            descriptor = os.open(lock_path, os.O_RDWR)
+        except FileNotFoundError:
+            # A released lock is never published again, so no holder can return.
+            _write_record(self._record_path(record.id), record)
+            return True
+        try:
+            if not try_lock(descriptor):
+                return False
+            _write_record(self._record_path(record.id), record)
+            return True
+        finally:
+            os.close(descriptor)
 
     def hold(self, instance_id: str) -> FileInstanceHold:
         """Publish a held lock for ``instance_id``."""
@@ -520,11 +610,11 @@ class FakeInstanceHold:
         self._store.entries[self._id].raw = record.model_dump_json()
 
     def release(self) -> None:
-        """Remove record and lock; idempotent."""
+        """Drop the lock and keep the record; idempotent."""
         if self._released:
             return
         self._released = True
-        self._store.entries.pop(self._id, None)
+        self._store.entries[self._id].lock = LockState.ABSENT
 
     def crash(self) -> None:
         """Die without cleanup: the kernel frees the lock, the files remain."""
@@ -569,6 +659,14 @@ class FakeInstanceStore:
         del self.entries[instance_id]
         return True
 
+    def bury(self, record: LiveInstanceRecord) -> bool:
+        """Replace a dead entry's record."""
+        entry = self.entries.get(_checked_id(record.id))
+        if entry is None or entry.lock in {LockState.HELD, LockState.UNKNOWN}:
+            return False
+        entry.raw = record.model_dump_json()
+        return True
+
     def hold(self, instance_id: str) -> FakeInstanceHold:
         """Claim a never-published id."""
         if _checked_id(instance_id) in self._published:
@@ -592,19 +690,26 @@ class StopEffects:
 
 
 class LiveRegistry:
-    """List, find, register and stop live servers over one ``InstanceStore``."""
+    """List, find, register and stop detached servers over one ``InstanceStore``."""
 
-    def __init__(self, store: InstanceStore) -> None:
-        """Compose the pure decisions with ``store``."""
+    def __init__(self, store: InstanceStore, clock: Clock) -> None:
+        """Compose the pure decisions with ``store``; ``clock`` ages tombstones."""
         self._store = store
+        self._clock = clock
 
     def list(self) -> InstanceList:
-        """Report live servers and remove the files of dead ones."""
-        decision = survey(self._store.observe(instance_id) for instance_id in self._store.ids())
+        """Report live and recently ended servers; bury the crashed and remove the expired."""
+        decision = survey(
+            (self._store.observe(instance_id) for instance_id in self._store.ids()),
+            self._clock.now(),
+        )
+        for record in decision.buried:
+            self._store.bury(record)
         for instance_id in decision.dead:
             self._store.reap(instance_id)
         return InstanceList(
             instances=decision.live,
+            ended=decision.ended,
             unreadable=decision.unreadable,
             unverified=decision.unverified,
         )
@@ -612,7 +717,7 @@ class LiveRegistry:
     def find(self, instance_id: str) -> LiveInstanceRecord | None:
         """Return the record of a live server, else ``None``."""
         observation = self._store.observe(instance_id)
-        live = judge(observation) is Verdict.LIVE
+        live = judge(observation, self._clock.now()) is Verdict.LIVE
         return (
             observation.record
             if live and isinstance(observation.record, LiveInstanceRecord)
@@ -641,7 +746,6 @@ class LiveRegistry:
         """
         record = self.find(instance_id)
         if record is None:
-            self._store.reap(instance_id)
             return InstanceStopResult(id=instance_id, outcome=StopOutcome.NOT_RUNNING)
         if not force and effects.requester.request_stop(record.socket_path):
             released = self._await_release(instance_id, effects)
@@ -659,7 +763,6 @@ class LiveRegistry:
         except NotImplementedError:
             return InstanceStopResult(id=instance_id, outcome=StopOutcome.UNSUPPORTED)
         if not sent:
-            self._store.reap(instance_id)
             return InstanceStopResult(id=instance_id, outcome=StopOutcome.NOT_RUNNING)
         released = self._await_release(instance_id, effects)
         return InstanceStopResult(
@@ -669,13 +772,12 @@ class LiveRegistry:
         )
 
     def _await_release(self, instance_id: str, effects: StopEffects) -> bool:
-        """Wait, bounded, for the holder to drop its lock; reap its files if it did."""
+        """Wait, bounded, for the holder to drop its lock; its tombstone stays for listings."""
         deadline = effects.clock.now() + STOP_TIMEOUT_SECONDS
         while self._held(instance_id):
             if effects.clock.now() >= deadline:
                 return False
             effects.pause(_STOP_POLL_SECONDS)
-        self._store.reap(instance_id)
         return True
 
     def _held(self, instance_id: str) -> bool:

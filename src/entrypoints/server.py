@@ -22,6 +22,7 @@ from launch import default_runs
 from server.host_api import (
     DetachedLaunchErrorCode,
     DetachedLaunchFailure,
+    FailureReason,
     InstanceStatus,
     LiveInstanceRecord,
 )
@@ -29,6 +30,7 @@ from server.registry import (
     FileInstanceStore,
     LiveRegistry,
     driving,
+    instance_log_path,
     instance_root,
     instance_run_directory,
     instance_socket_path,
@@ -52,7 +54,7 @@ from vibesys.api.request import generate_experiment_name, repository_name_from_e
 from vs_github.api import GitHubCLI, GitHubCLIError
 from vs_project.api import Project
 from vs_sandbox.api import relay_signals
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, SystemClock
 
 _WEB_PORT_MAX = 65_535
 _DETACHED_START_TIMEOUT_SECONDS = 10.0
@@ -499,12 +501,12 @@ def _spawn_detached_instance(
     ``arguments`` name the run (``--run-id``); the server publishes it in its
     first record, before it loads the engine (``entrypoints.detached_run``).
     """
-    registry = LiveRegistry(FileInstanceStore(root))
+    registry = LiveRegistry(FileInstanceStore(root), SystemClock())
     instance_id = new_instance_id()
     run_directory = instance_run_directory(root, instance_id)
     run_directory.parent.mkdir(mode=0o700, exist_ok=True)
     run_directory.mkdir(mode=0o700)
-    log_path = run_directory / "server.log"
+    log_path = instance_log_path(root, instance_id)
     descriptor = os.open(log_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
     with os.fdopen(descriptor, "w+b") as output:
 
@@ -910,7 +912,7 @@ def _start_detached_instance(
     # the diagnostic here rather than in a detached server's log.
     run_id: str = cli.parse_cli_invocation(_headless_argv(arguments)).args.run_id
     root = instance_root(os.environ, os.getuid())
-    live = driving(LiveRegistry(FileInstanceStore(root)).list(), run_id)
+    live = driving(LiveRegistry(FileInstanceStore(root), SystemClock()).list(), run_id)
     if live is not None:
         raise _DetachedLiveRunError(live)
     return _spawn_detached_instance([*arguments, "--run-id", run_id], root, effects)
@@ -933,6 +935,13 @@ def main(argv: list[str] | None = None, *, observer: ServerLifecycleObserver | N
     try:
         _serve(sys.argv[1:] if argv is None else argv, observer)
     except ConfigurationError as exc:
+        if observer is not None:
+            diagnostic = exc.diagnostic
+            observer.observe(
+                failure=FailureReason(
+                    code=diagnostic.code, stage=diagnostic.stage, message=diagnostic.message
+                )
+            )
         cli.render_configuration_error(exc)
     except WebSocketBindError as exc:
         sys.stderr.write(f"{exc}\n")

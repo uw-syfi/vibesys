@@ -17,7 +17,7 @@ import argparse
 import os
 import sys
 
-from server.host_api import InstanceList, InstanceStopResult, StopOutcome
+from server.host_api import InstanceList, InstanceStopResult, LiveInstanceRecord, StopOutcome
 from server.instances import ControlSocketStopRequester
 from server.registry import (
     FileInstanceStore,
@@ -58,18 +58,29 @@ def _parser() -> argparse.ArgumentParser:
 
 def format_list(listing: InstanceList) -> str:
     """Render a listing for a terminal, one server per line."""
-    if not listing.instances and not listing.unverified:
+    if not (listing.instances or listing.ended or listing.unreadable or listing.unverified):
         return "No detached VibeSys servers are running on this node."
     lines = [
-        f"{record.id}  {record.status}  pid {record.pid}  "
-        f"run {record.run_id or '-'}  {record.project_root}"
-        for record in listing.instances
+        f"{record.id}  {_phase(record)}  pid {record.pid}  run {record.run_id}  "
+        f"{record.project_root}"
+        for record in (*listing.instances, *listing.ended)
     ]
+    lines.extend(
+        f"{record.id}  unreadable (record version {record.version})"
+        for record in listing.unreadable
+    )
     lines.extend(
         f"{instance_id}  unverified (its lock could not be read)"
         for instance_id in listing.unverified
     )
     return "\n".join(lines)
+
+
+def _phase(record: LiveInstanceRecord) -> str:
+    phase = record.phase
+    detail = phase.stage or (phase.reason.message if phase.reason else None)
+    ended = " (ended)" if record.ended_at is not None else ""
+    return f"{phase.status}{ended}" + (f": {detail}" if detail else "")
 
 
 def format_stop(result: InstanceStopResult) -> str:
@@ -119,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     code, output = run(
         sys.argv[1:] if argv is None else argv,
-        registry=LiveRegistry(FileInstanceStore(root)),
+        registry=LiveRegistry(FileInstanceStore(root), threads),
         effects=StopEffects(
             requester=ControlSocketStopRequester(UnixNetwork()),
             signaller=PidfdProcessSignaller(),

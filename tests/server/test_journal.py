@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from server.diagnostics import (
+    Diagnostic,
     DiagnosticRetryability,
     DiagnosticScope,
     DiagnosticSeverity,
@@ -25,6 +26,7 @@ from server.events import (
     AgentExecutionActivityData,
     AgentExecutionFinishedData,
     AgentExecutionStartedData,
+    ConfigurationFailedData,
     EventData,
     EventStatus,
     EventType,
@@ -36,6 +38,8 @@ from server.events import (
     RunEvent,
     make_event,
 )
+from server.host_api import FailureReason
+from server.runtime import failure_reason
 
 
 def _events(path: Path) -> list[dict[str, object]]:
@@ -492,3 +496,33 @@ def test_unknown_event_envelope_keys_stay_rejected() -> None:
                 '"sequence"', '"driver": "agentshim", "sequence"', 1
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "data", "stage"),
+    [
+        (EventType.RUN_FAILED, None, "run"),
+        (EventType.RUN_INTERRUPTED, None, "run"),
+        (
+            EventType.CONFIGURATION_FAILED,
+            ConfigurationFailedData(code="c", stage="resume_resolution", message="m", exit_code=2),
+            "resume_resolution",
+        ),
+    ],
+)
+def test_the_event_a_run_failed_with_names_its_reason(
+    tmp_path: Path, event_type: EventType, data: ConfigurationFailedData | None, stage: str
+) -> None:
+    current = build_server_parts(tmp_path / "instance")
+    diagnostic = Diagnostic(
+        code="sandbox_start_failed", summary="no GPU", scope=DiagnosticScope.RUN
+    )
+    current.journal.record(event_type, status=EventStatus.FAILED, data=data, diagnostic=diagnostic)
+    current.journal.record(EventType.OUTPUT, data=None)
+
+    *_, failed, output = current.journal.read()
+
+    assert failure_reason(failed) == FailureReason(
+        code="sandbox_start_failed", stage=stage, message="no GPU"
+    )
+    assert failure_reason(output) is None

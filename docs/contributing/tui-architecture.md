@@ -183,20 +183,31 @@ $XDG_RUNTIME_DIR/vibesys/            (else /tmp/vibesys-<uid>/), mode 0700
   runs/<id>/server.log               the server's stdout and stderr
 ```
 
-A record (version 2) always names its `run_id`. Its `vibesys_root` is the absolute path of the
-VibeSys source checkout the server runs from (the directory whose `pyproject.toml` declares the
-`vibesys` project), or `null` for a server run from an installed distribution. The desktop app uses
-it to suggest the checkout to run `vibesys` from on that host.
+A record (version 3) always names its `run_id` and its run's `phase`: the `RunStatus` with the
+startup `stage` while `starting`, or the failure `reason` (`code`, `stage`, `message`) once
+`failed`. The server folds the phase from the `run_status_changed` events and the diagnostic of
+the failure event it journals, and rewrites its record atomically on each change. `log_path` is the
+server's log. `vibesys_root` is the absolute path of the VibeSys source checkout the server runs
+from (the directory whose `pyproject.toml` declares the `vibesys` project), or `null` for a server
+run from an installed distribution. The desktop app uses it to suggest the checkout to run
+`vibesys` from on that host.
+
+When a server exits, on any path, it leaves its last record, with the phase its run ended in and
+`ended_at`, as a tombstone; a server that dies without one (`kill -9`) is reported, and recorded,
+as `failed` with reason `server_crashed`. `vibesys instances list` reports tombstones under `ended`
+for 24 hours, and the next listing after that removes them. A run that fails before any client
+attaches is therefore still visible, with its reason, to a client that looks later.
 
 Records carry their own `version`, because two checkouts on one host share one registry. A lister
-parses every version it knows strictly and upgrades it (a version 1 record upgrades once it names
-its run); a live server's record that it cannot read (another version, or corrupt) is listed under
-`unreadable` with its id and claimed version, never dropped and never a failure of the listing.
+parses the version it knows strictly; a live server's record that it cannot read (another version,
+or corrupt) is listed under `unreadable` with its id and claimed version, never dropped and never a
+failure of the listing. A newer checkout's tombstone is left for that checkout's lister to age.
 
 The root is never under `$HOME`, which may be on NFS. Liveness is proven, not read from the record:
 the server holds an exclusive `flock` on its lock file for its lifetime, and the kernel releases it
-on any exit, `kill -9` included. `vibesys instances list [--json]` reports a record only while its
-lock is held and removes the files of every id whose lock is free. The web gateway's project-local
+on any exit, `kill -9` included. `vibesys instances list [--json]` reports a server as live only
+while its lock is held; once the lock is free it reports the server's tombstone and, after a day,
+removes its files. The web gateway's project-local
 record keeps its own format (`server.transport.discovery`); its claim and startup-log hold use the
 same lock primitives from `server.registry`.
 
@@ -212,7 +223,7 @@ one `InstanceStopResult`:
 
 | `outcome` | Exit | Meaning |
 | --- | --- | --- |
-| `stopped` | 0 | The server stopped and its record is gone. |
+| `stopped` | 0 | The server stopped; its record is now a tombstone. |
 | `stopping` | 0 | The server accepted the stop; its active agent call outlasted the wait, and it exits on its own after it. Poll `instances list`. |
 | `not_running` | 1 | No live server holds the id. |
 | `still_running` | 1 | The server was signalled and still held its lock when the wait ended. |

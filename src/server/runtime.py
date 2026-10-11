@@ -22,9 +22,11 @@ from server.events import (
     EventStatus,
     EventType,
     RunInterruptedData,
+    RunStatusChangedData,
     ServerReadyData,
 )
 from server.execution import ExecutionTracker
+from server.host_api import FailureReason
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
@@ -71,6 +73,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from server.events import RunEvent
+    from server.host_api import RunStatus
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
     from vs_sim.api import Threads
@@ -82,14 +86,36 @@ DETACHED_DRAIN_TIMEOUT_SECONDS = 2.0
 _TERMINAL_EVENT_TYPES = frozenset(
     {EventType.RUN_FINISHED, EventType.RUN_FAILED, EventType.RUN_INTERRUPTED}
 )
+_FAILURE_EVENT_TYPES = frozenset(
+    {EventType.RUN_FAILED, EventType.RUN_INTERRUPTED, EventType.CONFIGURATION_FAILED}
+)
 
 
 class ServerLifecycleObserver(Protocol):
-    """Told when a server reaches the milestones a registry advertises."""
+    """Told the facts a registry record advertises: the server's milestones and its run's phase."""
 
     def listening(self) -> None:
         """The control socket accepts connections."""
         ...
+
+    def observe(
+        self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+    ) -> None:
+        """The run's status changed, or it failed for ``failure``."""
+        ...
+
+
+def failure_reason(event: RunEvent) -> FailureReason | None:
+    """Why the run failed, if ``event`` is the failure that ended it."""
+    diagnostic = event.diagnostic
+    if event.type not in _FAILURE_EVENT_TYPES or diagnostic is None:
+        return None
+    stage = (
+        event.data.stage
+        if isinstance(event.data, ConfigurationFailedData)
+        else diagnostic.scope.value
+    )
+    return FailureReason(code=diagnostic.code, stage=stage, message=diagnostic.summary)
 
 
 class ServerRuntime:
@@ -186,6 +212,10 @@ class ServerRuntime:
             threads=self.threads,
         )
         self.chat.enable_terminal_retention()
+        if observer is not None:
+            self.journal.add_listener(
+                partial(_report_phase_facts, observer), replay_filter=lambda _header: False
+            )
         self.session: RunSession | None = None
         self.handle: RunHandle | None = None
 
@@ -430,3 +460,12 @@ class ServerRuntime:
     def _terminal_recorded_after(self, sequence: int) -> bool:
         """Return whether the run callback already emitted its terminal event."""
         return any(event.type in _TERMINAL_EVENT_TYPES for event in self.journal.read(sequence))
+
+
+def _report_phase_facts(observer: ServerLifecycleObserver, event: RunEvent) -> None:
+    """Tell ``observer`` the lifecycle facts in one journaled event."""
+    if isinstance(event.data, RunStatusChangedData):
+        observer.observe(status=event.data.status)
+    failure = failure_reason(event)
+    if failure is not None:
+        observer.observe(failure=failure)
