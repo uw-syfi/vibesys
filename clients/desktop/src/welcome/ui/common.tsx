@@ -3,7 +3,7 @@
  * sheet. Components render the state they are given and report events; they perform no I/O and
  * hold no state that changes behavior.
  */
-import {type JSX, type MouseEvent, type ReactNode, useEffect, useRef} from 'react';
+import type {JSX, MouseEvent, ReactNode, SyntheticEvent} from 'react';
 import type {StopView} from '../../stop-run.js';
 import type {HostAction} from '../state/host.js';
 import type {PickerAction} from '../state/picker.js';
@@ -25,10 +25,21 @@ export function commands(send: WelcomeSenders): Dispatch {
   return command => send.welcome({type: 'command', command});
 }
 
+/** Make `dialog`'s native open state match `open`. */
+function syncDialog(dialog: HTMLDialogElement, open: boolean): void {
+  if (open && !dialog.open) dialog.showModal();
+  if (!open && dialog.open) dialog.close();
+}
+
 /**
  * A modal `<dialog>` shown while `open`. `showModal()` gives focus containment, an inert page
  * behind, Esc (the `cancel` event), and focus back to the opener on close. Esc and a press on the
  * backdrop ask to `close`; the store decides whether the sheet closes.
+ *
+ * The ref callback is a new function on every render, so React calls it after every commit: the
+ * dialog follows the store without an effect hook. A dialog the browser closed on its own
+ * (Chromium closes it on a second Esc with no user activation in between) opens again while the
+ * store still holds the sheet open.
  */
 export function Sheet(props: {
   readonly open: boolean;
@@ -36,32 +47,24 @@ export function Sheet(props: {
   readonly close: () => void;
   readonly children: ReactNode;
 }): JSX.Element {
-  const ref = useRef<HTMLDialogElement>(null);
-  // `open` follows the store: run after every render, so a dialog the browser closed on its own
-  // (Chromium closes it on a second Esc without user activation in between, `cancel` or not)
-  // opens again while the store still holds the sheet open.
-  const sync = (): void => {
-    const dialog = ref.current;
-    if (dialog === null) return;
-    if (props.open && !dialog.open) dialog.showModal();
-    if (!props.open && dialog.open) dialog.close();
+  const follow = (dialog: HTMLDialogElement | null): void => {
+    if (dialog !== null) syncDialog(dialog, props.open);
   };
-  useEffect(sync);
-  const onCancel = (event: {preventDefault(): void}): void => {
+  const onCancel = (event: SyntheticEvent<HTMLDialogElement>): void => {
     event.preventDefault();
     props.close();
   };
-  const onClose = (): void => {
+  const onClose = (event: SyntheticEvent<HTMLDialogElement>): void => {
     if (!props.open) return;
     props.close();
-    sync();
+    syncDialog(event.currentTarget, true);
   };
   const onMouseDown = (event: MouseEvent<HTMLDialogElement>): void => {
-    if (event.target === ref.current) props.close();
+    if (event.target === event.currentTarget) props.close();
   };
   return (
     <dialog
-      ref={ref}
+      ref={follow}
       className="sheet"
       aria-label={props.label}
       onCancel={onCancel}
