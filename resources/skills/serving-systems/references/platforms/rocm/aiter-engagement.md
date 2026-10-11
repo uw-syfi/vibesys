@@ -78,7 +78,7 @@ before concluding anything about relative hardware performance"
   under: verify under the real serving load, not just the tuning run's own
   acceptance gate.
 
-Source: `examples/model-serving/qwen3.5-9b-mi210/config/platforms/mi210.toml`.
+Source: `examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/config/platforms/mi210.toml`.
 
 ## Verify
 

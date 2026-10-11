@@ -73,15 +73,15 @@ describe('StopController', () => {
     });
     await w.controller.request(TARGET, false);
     expect(w.controller.views()[KEY]).toMatchObject({phase: 'stopping', text: 'Stopping…'});
-    // Still listed: still stopping, and a second request neither asks nor stops again.
-    w.controller.observeRegistry(HOST, new Set([TARGET.instanceId]));
+    // Unverified is not proof of ending: still stopping, and a second request does nothing.
+    w.controller.observeRegistry(HOST, {records: [], unverified: [TARGET.instanceId]});
     await w.controller.request(TARGET, false);
     expect(w.asked).toHaveLength(1);
     expect(w.controller.views()[KEY]?.phase).toBe('stopping');
     // Another host's registry says nothing about this run.
-    w.controller.observeRegistry('local', new Set());
+    w.controller.observeRegistry('local', {records: [], unverified: []});
     expect(w.controller.views()[KEY]?.phase).toBe('stopping');
-    w.controller.observeRegistry(HOST, new Set());
+    w.controller.observeRegistry(HOST, {records: [], unverified: []});
     expect(w.controller.views()[KEY]?.phase).toBe('ended');
   });
 

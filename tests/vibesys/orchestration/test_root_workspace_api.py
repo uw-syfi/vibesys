@@ -10,11 +10,12 @@ from tests.support.docker_environment import (
     fake_docker_environment,
     host_container_backend,
 )
+from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.inputs import load_input_bundle
+from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
 from vibesys.run.host import open_product_run_host
@@ -31,11 +32,12 @@ _PLUGIN = capability_plugin("workspace")
 
 def _write_project(root: Path) -> None:
     root.mkdir(parents=True)
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Improve the queue.\n",
     )
 
 
@@ -45,7 +47,7 @@ def _request(project_root: Path) -> RunRequest:
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id="workspace", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "workspace"}}),
-        input_bundle=load_input_bundle(project_root),
+        input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name="workspace",
         agent_backend="stub",

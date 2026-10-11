@@ -22,6 +22,7 @@ from tests.composition.dynamic._harness import (
     run_request,
     workstream,
 )
+from tests.support.task_project import task_path
 
 from vibesys.dynamic_roles import ORCHESTRATOR
 
@@ -83,7 +84,7 @@ def test_a_crashing_candidate_is_measured_by_its_class_and_the_planner_reads_the
     """
     loop_input = LoopInput.create(tmp_path)
     killed, reported = _KILLED_CRASH + _FENCE, _REPORTED_CRASH + _FENCE
-    benchmark = loop_input.root / "benchmark.py"
+    benchmark = task_path(loop_input.root) / "benchmark.py"
     benchmark.write_text(
         _killed(killed, _KILLED_VALUE)
         + _reported(reported, _REPORTED_VALUE)

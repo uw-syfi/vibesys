@@ -54,9 +54,10 @@ the completed state without an agent CLI or credentials. A second invocation
 from the same checkout reuses that gateway instead of competing for port 8765.
 
 The production build writes `clients/web/dist/.vibesys-web-build.json`. That
-manifest identifies the build and records the source contents from
-`clients/web/src`, `clients/backend-client/src`, and `clients/core-state/src`.
-The gateway refuses the checkout's default bundle when any recorded source has
+manifest identifies the build and records every tracked input that can change
+the production browser bundle, including the three client source trees, HTML
+entrypoint, Vite configuration, package metadata, and locked dependency graph.
+The gateway refuses the checkout's default bundle when any recorded input has
 changed or the manifest is missing, and reports the changed path plus
 `pnpm --dir clients/web build`. `--no-build` still reuses the last build, but
 only while that build matches the current workspace. The build ID is stored in
@@ -145,6 +146,35 @@ arguments follow `--`:
 ```bash
 uv run python -m entrypoints.web live --project /path/to/project --task TASK --open -- --outer-loop agent --local
 ```
+
+## Run page layout
+
+`clients/web/src` is feature-sliced, with layers that point down only
+(`app/` -> `features/` -> `entities/` -> `platform/` -> `shared/`), enforced by
+`clients/.dependency-cruiser.mjs`:
+
+- `app/` composes: the browser and desktop entries (`main.tsx`,
+  `desktop-main.tsx`), the pure boot decision (`boot.ts`), and `compose.tsx`,
+  which builds the feature stores, injects platform services into them, and
+  wires cross-feature flows (replayed events fold into the run view).
+- `features/<name>/` is one slice (`run-view`, `gateway-connect`, `replay`)
+  with `state/` (a pure `step(state, action) -> {state, requests}` reducer,
+  request tokens that drop stale replies, `invariants`), `ui/` (presentational
+  React, props in and events out), and `effects/` (performs the requests through
+  injected services; never imports `ui/`). Its `index.ts` is its only public
+  surface, and a feature never imports another feature.
+- `entities/` holds domain values and pure functions shared by features (the
+  run fold, connection state, gateway URL policy). No I/O.
+- `platform/` holds system services: `backend.ts` is the only module that
+  imports backend-client runtime values or calls `fetch`
+  (`lint-rules/web-fetch-only-in-backend.grit`), plus the browser lifecycle,
+  tab storage, and the desktop bridge transport.
+- `shared/` is domain-free: the store container and the seeded model-test
+  helpers.
+
+The reducers are tested model-based, like the desktop welcome view's: seeded
+random action and reply sequences, checking each reducer's invariants and that
+no stale reply is applied after every step.
 
 ## Gateway HTTP hygiene
 
@@ -377,8 +407,9 @@ forbids connections. Its only way to the server is the preload bridge,
 binds the run view to one run.
 
 The app has one window with two views. It opens on the welcome view
-(`clients/desktop/src/welcome.html`, served from the same origin with its own
-narrow preload, `welcome-preload.cts`): recent runs (status refreshed from each
+(`clients/desktop/welcome.html`, a React bundle built by
+`vite.welcome.config.ts` apart from the run view's, served from the same origin
+with its own narrow preload, `welcome-preload.cts`): recent runs (status refreshed from each
 host's registry, one click to reattach), This Mac's live runs and "Start a
 run", and "Connect to host", a searchable list of the concrete `Host` aliases
 in `~/.ssh/config` that also accepts a typed `user@host` (arrows, Enter, Esc).
@@ -466,31 +497,36 @@ Every implementation, including the in-memory `FakeHost`, passes the contract
 suite in `clients/desktop/src/testing/host-contract.ts`; `SshHost` runs it over
 `FakeSsh`, an in-memory ssh client and machine.
 
-### Gateway window
+The welcome view (`clients/desktop/src/welcome/`) is layered like the TUI, and
+`clients/.dependency-cruiser.mjs` enforces it:
 
-`scripts/run-desktop.sh` opens the same live web UI in an Electron window
-(`clients/desktop`). It starts the gateway with `entrypoints.web live`, then
-opens the window on the capability URL, passed in the `VIBESYS_DESKTOP_URL`
-environment variable rather than on a command line.
+- `state/` is the functional core: one store per screen (welcome and title
+  strip, Recent, host panel, "Start a run", "Connect to host"), each a single
+  state union and a pure `step(state, action) -> {state, requests}` with its
+  `invariants`. Every request that awaits a reply carries a token held by the
+  state that awaits it; a reply with any other token is dropped. No React, DOM,
+  Electron, Node, or backend-client.
+- `ui/` is presentational: React components, props in and events out. Sheets
+  are native `<dialog>`s (`showModal()`), so focus containment, Esc, and focus
+  return come from the platform. No bridge, Electron, or I/O.
+- `effects/` is the shell: it performs the core's requests through the welcome
+  bridge and dispatches each reply as an action. It never imports `ui/`.
+- `main.tsx` is the composition root.
 
-```bash
-# Gateway and window on this machine
-./scripts/run-desktop.sh --project ~/proj [-- extra run args]
-./scripts/run-desktop.sh --demo
+The stores are tested model-based: seeded random sequences of user actions and
+replies (stale, duplicated, reordered) folded through each reducer, checking
+its invariants and that no stale reply is applied after every step
+(`clients/desktop/src/testing/model.ts`).
 
-# Gateway on an SSH host, window on the laptop
-./scripts/run-desktop.sh --remote USER@HOST --remote-repo '~/vibesys' \
-  --project '~/proj' [-- extra run args]
-```
-
-With `--remote`, the project and repository paths are paths on the host, and
-SSH must authenticate with a key (no prompts). The script forwards the port
-through an SSH control connection that it closes when the window closes. The
-local and remote port are the same (`--port`, default 8765) because the
-gateway checks the exact browser `Origin`; the script fails if the local port is
-busy. The gateway is detached and keeps running after the window closes; the
-script prints the exact `entrypoints.web stop` command at exit. Electron
-downloads its binary the first time the window starts.
+The main process has one owner of process-wide state, `AppLifecycle`
+(`clients/desktop/src/app-lifecycle.ts`): a single-instance lock (a second
+launch focuses the first instance's window and opens what it was asked to), and
+a pure quit machine (release the hosts once, bounded, then exit through the one
+`app.exit` call site). `SettingsStore` is the only writer of `hosts.json` and
+`recent.json`: it serializes updates, replaces each file atomically, and pushes
+every change of the recent runs to the welcome view. "Start a run" can be
+cancelled while it starts: the main process stops the run as soon as its record
+appears instead of attaching, and the window stays on the welcome view.
 
 ## Remote host and local laptop
 

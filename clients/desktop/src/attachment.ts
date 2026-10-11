@@ -8,7 +8,12 @@
 import type {Duplex} from 'node:stream';
 import type {Endpoint, Host} from './host.js';
 import {HostError} from './host.js';
-import {parseInstanceList, RecordError, versionSkewMessage} from './instances.js';
+import {
+  instanceObservation,
+  parseInstanceList,
+  RecordError,
+  versionSkewMessage,
+} from './instances.js';
 import type {CheckFailure, CheckOutcome, StreamEnd} from './supervisor.js';
 
 /** The run a window is attached to, and how to name its host in messages. */
@@ -35,15 +40,12 @@ export async function checkAttachment(
       return {ok: true};
     }
     const listing = parseInstanceList(await run.host.invoke(['instances', 'list', '--json']));
-    const record = listing.records.find(candidate =>
-      candidate.kind === 'compatible'
-        ? candidate.instance.id === run.instanceId
-        : candidate.id === run.instanceId,
-    );
-    if (record === undefined) {
-      return listing.unverified.includes(run.instanceId)
-        ? {ok: false, cause: 'link', detail: `the host could not confirm run ${run.instanceId}`}
-        : {ok: false, cause: 'run-gone', detail: `run ${run.instanceId} is no longer running`};
+    const record = instanceObservation(listing, run.instanceId);
+    if (record.kind === 'unverified') {
+      return {ok: false, cause: 'link', detail: `the host could not confirm run ${run.instanceId}`};
+    }
+    if (record.kind === 'absent') {
+      return {ok: false, cause: 'run-gone', detail: `run ${run.instanceId} is no longer running`};
     }
     if (record.kind === 'incompatible') {
       return {

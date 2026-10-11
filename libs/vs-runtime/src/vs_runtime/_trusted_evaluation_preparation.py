@@ -167,6 +167,8 @@ def evaluator_container_setup(
             "{ apt-get update -qq && apt-get install -y -qq python3 ca-certificates tar; }",
         ]
     )
+    if not rootless:
+        commands.extend(_system_package_commands(requirements))
     if "go" in toolchains:
         go_destination = (
             f"$PWD/{REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/go" if rootless else "/usr/local/go"
@@ -242,6 +244,26 @@ def evaluator_container_setup(
                 "export RUSTUP_HOME CARGO_HOME; fi"
             )
     return commands
+
+
+def _system_package_commands(requirements: TrustedEvaluatorRequirements) -> list[str]:
+    """Install the Debian packages the declared tools need to build (root, in a container)."""
+    packages = sorted(
+        {name for spec in requirements.tools.values() for name in spec.system_packages}
+    )
+    if not packages:
+        return []
+    names = shlex.join(packages)
+    # Retrying because archive mirrors fail transiently; `dpkg -s` makes a
+    # rerun against an image that already has the packages a no-op.
+    return [
+        f"dpkg -s {names} >/dev/null 2>&1 || {{ "
+        "installed=; for attempt in 1 2 3 4 5; do "
+        f"if apt-get update -qq && apt-get install -y -qq --no-install-recommends {names}; "
+        "then installed=1; break; fi; sleep $((attempt * 5)); done; "
+        '[ -n "$installed" ] || '
+        f"{{ echo 'failed to install packages for evaluator tools: {names}' >&2; exit 1; }}; }}"
+    ]
 
 
 def remote_evaluator_setup_command(

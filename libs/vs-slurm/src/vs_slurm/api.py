@@ -2,8 +2,9 @@
 
 The library stages a local workspace, submits one Slurm job, waits for its
 terminal state, and collects declared artifacts. The built-in transport uses
-OpenSSH and rsync with credentials managed outside VibeSys. Sites with custom
-gateways can instead provide a versioned JSON connector executable.
+OpenSSH and rsync with credentials managed outside VibeSys. A host that is
+itself a submit node uses the local transport instead. Sites with custom
+gateways can provide a versioned JSON connector executable.
 """
 
 from typing import Protocol
@@ -31,6 +32,7 @@ from .config import (
     SlurmConfig,
     SlurmConfigError,
     SlurmConnectorTransport,
+    SlurmLocalTransport,
     SlurmService,
     SlurmSshTransport,
     SlurmTransport,
@@ -123,6 +125,7 @@ __all__ = [
     "SlurmJobRunner",
     "SlurmJobStatus",
     "SlurmJobWaitResult",
+    "SlurmLocalTransport",
     "SlurmPhase",
     "SlurmProcess",
     "SlurmRawState",

@@ -35,18 +35,17 @@ from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from vs_sandbox.agent_gpu import (
+    AgentGpuConfig,
+    GpuCommand,
+    GpuLauncher,
+)
 from vs_sandbox.benchmark_output import (
     OUTPUT_ARGUMENT_COUNT,
     BenchmarkOutputKind,
     classify_benchmark_output,
 )
 from vs_sandbox.host_command_client import SOCKET_ENV, TOKEN_ENV
-from vs_sandbox.slurm_gpu import (
-    GpuCommand,
-    GpuLauncher,
-    SlurmGpuConfig,
-    SlurmGpuLauncher,
-)
 from vs_sim.api import Network, OsThreads, Threads, UnixNetwork
 
 if TYPE_CHECKING:
@@ -185,8 +184,7 @@ class HostCommandBrokerError(PermissionError):
 class GateRunner(Protocol):
     """Runs one planned trusted gate to completion.
 
-    :class:`~vs_sandbox.gate_runners.SlurmCommandGateRunner` and
-    :class:`~vs_sandbox.gate_runners.SrunGateRunner` are the real ones. The
+    :class:`~vs_sandbox.gate_runners.SlurmCommandGateRunner` is the real one. The
     broker has already validated *arguments* against the plan.
     """
 
@@ -221,13 +219,13 @@ class GpuCommands:
 
     *host_env* is the submit host's environment a job may inherit; only its
     baseline subset reaches the job. *confinement* is the job's explicit
-    confinement policy.
+    confinement policy. *launcher* starts the job's ``srun``.
     """
 
-    config: SlurmGpuConfig
+    config: AgentGpuConfig
     confinement: JobConfinement
     host_env: Mapping[str, str]
-    launcher: GpuLauncher | None = None
+    launcher: GpuLauncher
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,9 +378,7 @@ class HostCommandBroker:
         self._worktree_roots = tuple(path.resolve() for path in roots.worktree_roots)
         self._gpu = gpu
         self._gates = gates
-        self._launcher: GpuLauncher | None = (
-            None if gpu is None else (gpu.launcher or SlurmGpuLauncher(gpu.config))
-        )
+        self._launcher: GpuLauncher | None = None if gpu is None else gpu.launcher
         self._listener: Listener | None = None
         self._acceptor: Worker | None = None
         self._in_flight: set[Event] = set()

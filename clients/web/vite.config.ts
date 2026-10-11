@@ -2,6 +2,7 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import react from '@vitejs/plugin-react';
 import {defineConfig, type Plugin} from 'vite';
+import {webBuildInputs} from './build-inputs.js';
 import {webBuildManifest} from './build-manifest.js';
 import {workspaceSourceAliases} from './workspace-source-aliases.js';
 
@@ -31,11 +32,7 @@ export default defineConfig({
     replayFixturePlugin(),
     webBuildManifest({
       workspaceRoot,
-      sourceRoots: [
-        fileURLToPath(new URL('./src', import.meta.url)),
-        fileURLToPath(new URL('../backend-client/src', import.meta.url)),
-        fileURLToPath(new URL('../core-state/src', import.meta.url)),
-      ],
+      buildInputs: webBuildInputs(),
     }),
   ],
   resolve: {

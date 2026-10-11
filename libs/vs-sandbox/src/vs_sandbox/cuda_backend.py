@@ -87,7 +87,6 @@ class CudaBackend:
         log_path: Path | str | None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
         extra_env: dict[str, str] | None = None,
-        extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
         attach_accelerator: bool = True,
         ephemeral: bool = False,
@@ -104,10 +103,6 @@ class CudaBackend:
 
         bind_mounts = bind_mounts or []
         extra_env = extra_env or {}
-        # Accepted for ComputeBackendImpl protocol parity but unused: neither
-        # the LOCAL sandbox nor the agent-image-based DOCKER sandbox runs
-        # per-launch install commands.
-        del extra_init_commands
         lifecycle_hooks = lifecycle_hooks or []
 
         # Pick a GPU lazily on first sandbox creation.

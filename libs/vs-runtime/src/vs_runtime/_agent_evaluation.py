@@ -30,6 +30,14 @@ Every failure of a call is a ``ToolRefusal`` answered to the agent; none reaches
 shell's commit. ``yielded`` asks core again when the turn is reported and, if the scope
 changed since the wait was validated, ends the turn without suspending.
 
+A submission the agent has not learned of is never lost. The reply that carries a handle
+may not reach the agent (its tool deadline expired while the host snapshotted the workspace
+behind a busy lock, or the agent's process died). Core has already charged the budget, so a
+submission stays *unacknowledged* until its reply is written to a live connection. The next
+``submit_evaluation`` for the same candidate content, in this turn or a later one, returns
+that handle and charges nothing; ``unacknowledged`` lists what is still owed, for the
+run loop's stall report.
+
 The yield is held in memory until the turn is reported. A host restart in that window
 loses it; the turn then ends without suspending and its measurement result reaches the
 strategy as an ordinary ``MeasurementResult``.
@@ -45,7 +53,7 @@ import hmac
 import os
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -72,6 +80,7 @@ from vs_core.api import (
     suspension_refusal,
 )
 from vs_evaluation.api import (
+    RECEIPT_LINE,
     AgentEvaluationCall,
     RunStoppingReply,
     SocketFailure,
@@ -265,6 +274,17 @@ class AdmissionShell(Protocol):
         ...
 
 
+class _Pending(NamedTuple):
+    """A charged submission whose handle has not yet reached the agent."""
+
+    revision: str
+    deadline_at: float
+
+
+def _nothing() -> None:
+    """The acknowledgement of an answer that carries no handle."""
+
+
 @dataclass
 class _Scoped:
     """One scope's last snapshot, and the submissions and recorded wait of its current turn."""
@@ -275,6 +295,11 @@ class _Scoped:
     submitted: dict[str, float] = field(default_factory=dict)
     """Handle to the measurement's deadline, for each submission of ``turn`` not yet yielded."""
     waits: tuple[str, ...] = ()
+    unacknowledged: dict[str, _Pending] = field(default_factory=dict)
+    """Handle to its candidate and deadline, for each submission whose reply was not delivered.
+
+    Unlike ``submitted`` this survives the turn: the agent that never learned a handle
+    asks again, possibly in its next turn, and must be given this one."""
 
     def begin(self, turn: InvocationId | None) -> None:
         """Join ``turn``; a handle or wait of an earlier turn is not this turn's to use."""
@@ -364,7 +389,7 @@ class AgentEvaluationBridge:
         try:
             frame = await reader.readline()
             try:
-                reply = await self.handle(frame)
+                reply, acknowledge = await self.answer(frame)
             except Exception:
                 # Run state the bridge cannot trust: the shell's halt ends the run. Tell
                 # the agent to stop instead of retrying, then let the error surface.
@@ -373,28 +398,56 @@ class AgentEvaluationBridge:
                 raise
             writer.write(reply + b"\n")
             await writer.drain()
+            # The client says it read the whole reply before it closes; an abandoned
+            # connection ends without the line and leaves the submission owed.
+            if await reader.readline() == RECEIPT_LINE:
+                acknowledge()
         except (ConnectionError, asyncio.LimitOverrunError, ValueError):
             pass
         finally:
             writer.close()
 
     async def handle(self, frame: bytes) -> bytes:
-        """Answer one wire frame: a typed success, or a typed failure naming the problem."""
+        """Answer one wire frame: a typed success, or a typed failure naming the problem.
+
+        The caller receives the bytes directly, so a submission they carry is acknowledged.
+        """
+        reply, acknowledge = await self.answer(frame)
+        acknowledge()
+        return reply
+
+    async def answer(self, frame: bytes) -> tuple[bytes, Callable[[], None]]:
+        """The reply to one frame, and the call that records that the agent received it.
+
+        A transport calls the second value once the client confirmed it read the whole
+        reply. A submission whose reply was never confirmed stays owed to the agent (see
+        the module docstring); ``handle`` is for a caller that has the bytes in hand.
+        """
+        acknowledge = _nothing
         try:
             call = _CALLS.validate_json(frame)
             if isinstance(call, SubmitCall):
-                result = await self._submit(self._scope_of(call.token))
+                result, acknowledge = await self._submit(self._scope_of(call.token))
             elif isinstance(call, WaitCall):
                 result = self._validate_wait(self._scope_of(call.token), call.handles)
             else:
-                return self._failure(ToolRefusal.REFUSED)
+                return self._failure(ToolRefusal.REFUSED), acknowledge
         except ValidationError:
-            return self._failure(ToolRefusal.MALFORMED)
+            return self._failure(ToolRefusal.MALFORMED), acknowledge
         except PermissionError:
-            return self._failure(ToolRefusal.UNKNOWN_CALLER)
+            return self._failure(ToolRefusal.UNKNOWN_CALLER), acknowledge
         except ToolRefusedError as error:
-            return self._failure(error.reason, error)
-        return SocketSuccess(result=result.model_dump(mode="json")).model_dump_json().encode()
+            return self._failure(error.reason, error), acknowledge
+        reply = SocketSuccess(result=result.model_dump(mode="json")).model_dump_json().encode()
+        return reply, acknowledge
+
+    def unacknowledged(self) -> tuple[str, ...]:
+        """One line per charged submission whose handle never reached its agent."""
+        return tuple(
+            f"{handle} (candidate {pending.revision[:12]}, scope {key})"
+            for key, scoped in self._scopes.items()
+            for handle, pending in scoped.unacknowledged.items()
+        )
 
     @staticmethod
     def _failure(reason: ToolRefusal, error: ToolRefusedError | None = None) -> bytes:
@@ -403,7 +456,13 @@ class AgentEvaluationBridge:
 
     # submit
 
-    async def _submit(self, scope: Scope) -> SubmittedReply | RunStoppingReply:
+    async def _submit(
+        self, scope: Scope
+    ) -> tuple[SubmittedReply | RunStoppingReply, Callable[[], None]]:
+        """Admit the caller's candidate, or hand back the handle it was never told.
+
+        The second value acknowledges the handle once its reply reached the agent.
+        """
         shell, clock = self._bound()
         if self._executing(scope) is None:
             # A stale token: the turn it was issued for ended. Core takes no submission
@@ -415,6 +474,14 @@ class AgentEvaluationBridge:
                 raise ToolRefusedError(ToolRefusal.WORKSPACE_GONE)
             scoped = self._scoped(scope)
             revision = await self._revision(workspace, scoped)
+            owed = next(
+                (h for h, pending in scoped.unacknowledged.items() if pending.revision == revision),
+                None,
+            )
+            if owed is not None:
+                # A retry of a submission whose reply was lost: the same one, not a second.
+                scoped.submitted[owed] = scoped.unacknowledged[owed].deadline_at
+                return SubmittedReply(handle_id=owed), self._acknowledger(scoped, owed)
             now = clock.now()
             call_id = f"agent:{uuid.uuid4().hex}"
             event = AgentMeasurementRequested(
@@ -427,10 +494,18 @@ class AgentEvaluationBridge:
                 (r for r in transition.requests if isinstance(r, SubmitMeasurement)), None
             )
             if request is None or request.request_id is None:
-                return self._refusal(transition, call_id)
+                return self._refusal(transition, call_id), _nothing
             handle = handle_for(request.request_id)
             scoped.submitted[handle] = request.deadline_at
-            return SubmittedReply(handle_id=handle)
+            scoped.unacknowledged[handle] = _Pending(revision, request.deadline_at)
+            return SubmittedReply(handle_id=handle), self._acknowledger(scoped, handle)
+
+    @staticmethod
+    def _acknowledger(scoped: _Scoped, handle: str) -> Callable[[], None]:
+        def acknowledge() -> None:
+            scoped.unacknowledged.pop(handle, None)
+
+        return acknowledge
 
     def _admit(self, shell: AdmissionShell, event: CoreEvent, now: float) -> Transition:
         """Ask core about the event; only the shell's busy refusal (``AdmissionBusyError``) is transient.

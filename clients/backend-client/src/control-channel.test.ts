@@ -5,11 +5,11 @@ import {
   type ControlConnection,
   type ControlConnectionHandlers,
   type IssuedRequest,
-  type ScheduleTimeout,
 } from './control-channel.js';
 import {BackendClientError} from './errors.js';
 import type {ProtocolResponse} from './protocol.js';
 import {expect} from './test-support/expect.js';
+import {FakeClock} from './testing/index.js';
 
 /**
  * How one fake connection behaves once the channel holds it.
@@ -83,19 +83,6 @@ class FakeConnector {
   };
 }
 
-class FakeScheduler {
-  readonly #scheduled = new Map<() => void, number>();
-
-  readonly schedule: ScheduleTimeout = (callback, delayMs) => {
-    this.#scheduled.set(callback, delayMs);
-    return () => this.#scheduled.delete(callback);
-  };
-
-  pendingDelays(): number[] {
-    return [...this.#scheduled.values()];
-  }
-}
-
 function deferred(): {readonly promise: Promise<void>; readonly resolve: () => void} {
   let settle = (): void => {};
   const promise = new Promise<void>(resolve => {
@@ -156,7 +143,7 @@ describe('ControlChannel', () => {
   for (const report of ['drop', 'fault'] as const) {
     it(`lets close own teardown from the initial ${report} callback`, async () => {
       const connector = new FakeConnector([]);
-      const scheduler = new FakeScheduler();
+      const scheduler = new FakeClock();
       const connectionClosed = deferred();
       const adopted: {handlers?: ControlConnectionHandlers} = {};
       let connectionCloseCalls = 0;
@@ -209,7 +196,7 @@ describe('ControlChannel', () => {
 
   it('does not leave a retry timer when a failed-dial callback closes the channel', async () => {
     const connector = new FakeConnector(['rejects']);
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const reported = deferred();
     let closing: Promise<void> | null = null;
     let channel: ControlChannel;

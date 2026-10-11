@@ -13,8 +13,8 @@ import httpx
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.examples.example_task import load_example_task, task_root
 
-from vibesys.inputs import load_input_bundle
 from vs_evaluator_protocol.api import (
     Measurement,
     PartialMeasurement,
@@ -28,7 +28,8 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 _REPO_ROOT = Path(__file__).parents[2]
-_BUNDLE = _REPO_ROOT / "examples" / "model-serving" / "qwen3.5-9b-mi210"
+_PROJECT = _REPO_ROOT / "examples" / "model-serving" / "qwen3.5-9b-mi210"
+_BUNDLE = task_root(_PROJECT)
 _ASSETS_ENV = "QWEN35_BENCH_ASSETS"
 
 
@@ -47,16 +48,25 @@ def run(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 def test_manifest_runs_quick_mode_through_the_adapter() -> None:
-    bundle = load_input_bundle(_BUNDLE)
+    bundle = load_example_task(_PROJECT)
     manifest = bundle.manifest
 
     assert manifest.evaluator is not None
     assert manifest.evaluator.name == "vibesys-evaluator-request-factory"
     assert manifest.benchmark.entrypoint == "request-factory-adapter"
-    assert manifest.benchmark.args == ("benchmark/run.py", "--mode", "quick")
+    assert manifest.benchmark.args == (
+        "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/run.py",
+        "--mode",
+        "quick",
+    )
     assert manifest.benchmark.result is None
     assert manifest.benchmark.result_protocol == 2
-    assert manifest.accuracy.command == ("uv", "run", "python", "accuracy_checker/checker.py")
+    assert manifest.accuracy.command == (
+        "uv",
+        "run",
+        "python",
+        "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py",
+    )
     assert (_BUNDLE / "accuracy_checker" / "golden.json").is_file()
 
 

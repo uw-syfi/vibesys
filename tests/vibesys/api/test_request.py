@@ -16,9 +16,9 @@ from vibesys.api.request import (
     default_skill_roots,
     experiment_origin_matches,
     generate_experiment_name,
-    load_input_bundle,
     load_objective,
     load_project_task,
+    load_task,
     make_run_environment_spec,
     repository_name_from_experiment,
     resolve_skill_source_dirs,
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 _NAMES = [
     "InputBundle",
-    "load_input_bundle",
+    "load_task",
     "load_project_task",
     "load_objective",
     "with_operator_constraints",
@@ -64,7 +64,7 @@ def test_request_names_are_exported_and_importable() -> None:
     # Also exercise the direct `from vibesys.api.request import ...` names bound above,
     # so an unused-import lint would catch a broken re-export.
     assert InputBundle is not None
-    assert load_input_bundle is not None
+    assert load_task is not None
     assert load_project_task is not None
     assert load_objective is not None
     assert with_operator_constraints is not None

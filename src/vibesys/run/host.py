@@ -68,8 +68,6 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.infrastructure_skills import create_installed_skills
 from vs_sandbox.api import HostResource, HostResourceAccess
-from vs_sandbox.api.slurm import load_slurm_policy, read_slurm_evaluation_plan
-from vs_slurm.api import load_slurm_config
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
@@ -616,12 +614,9 @@ class _ProductHostFactory:
         view = resources.environment_resources.view
         capacity = 1
         lifecycle: frozenset[LifecycleCapability] = frozenset()
-        if view.env_kind == "slurm":
-            plan = read_slurm_evaluation_plan(
-                resources.environment_resources.request.log_dir / "slurm-evaluation-plan.json"
-            )
-            capacity = load_slurm_config(plan.config_path).evaluation_capacity
-            if plan.profile_command is not None:
+        if view.cluster_evaluation is not None:
+            capacity = view.cluster_evaluation.evaluation_capacity
+            if view.cluster_evaluation.captures_profile:
                 lifecycle = frozenset({"profile-capture"})
         config = self.request.config
         return CoreEnvironment(
@@ -651,18 +646,14 @@ class _ProductHostFactory:
         workspaces: Workspaces,
         namespace: StateNamespace,
     ) -> SlurmSemanticEvaluationExecutor | None:
-        """Select the environment-specific semantic execution adapter at composition."""
-        if resources.environment_resources.view.env_kind != "slurm":
+        """Build the cluster's semantic execution adapter when the environment reports one."""
+        cluster = resources.environment_resources.view.cluster_evaluation
+        if cluster is None:
             return None
-        plan = read_slurm_evaluation_plan(
-            resources.environment_resources.request.log_dir / "slurm-evaluation-plan.json"
-        )
-        config = load_slurm_config(plan.config_path)
-        policy = load_slurm_policy(plan.config_path)
         return SlurmSemanticEvaluationExecutor(
-            config,
-            policy,
-            plan,
+            cluster.settings.config,
+            cluster.settings.policy,
+            cluster.plan,
             resources.evaluation_plan,
             workspaces,
             namespace,

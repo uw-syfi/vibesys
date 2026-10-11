@@ -20,9 +20,11 @@ pytestmark = pytest.mark.slurm_cluster
 _CLIENT = "^python3 .*vibesys-g(pu|ate)"
 
 
-def _hold(run: OpenRun) -> str:
-    """The agent command that starts a job which runs until it is cancelled."""
-    if run.session.view.env_kind == "slurm-gpu":
+def _hold(run: OpenRun, via: str) -> str:
+    """The agent command that starts a job, a gate or a GPU command, that runs until cancelled."""
+    if via == "gpu":
+        if not run.has_gpu_commands:
+            pytest.skip("this environment has no agent GPU commands")
         return '"$VIBESYS_GPU" -- sleep 600'
     run.set_mode("accuracy", "hold")
     return f"{run.launcher()} --gate accuracy"
@@ -32,13 +34,15 @@ def _signal_client(run: OpenRun, number: signal.Signals) -> None:
     run.agent(f"kill -{number.value} $(pgrep -f '{_CLIENT}')")
 
 
+@pytest.mark.parametrize("via", ["gate", "gpu"])
 @pytest.mark.parametrize(
     ("number", "status"), [(signal.SIGTERM, 143), (signal.SIGINT, 130), (signal.SIGKILL, 137)]
 )
 def test_signalling_the_agents_client_cancels_the_job_and_gives_the_shell_status(
-    run: OpenRun, slurm_cluster: SlurmCluster, number: signal.Signals, status: int
+    run: OpenRun, slurm_cluster: SlurmCluster, number: signal.Signals, status: int, via: str
 ) -> None:
-    pending = in_background(lambda: run.agent(_hold(run)))
+    command = _hold(run, via)
+    pending = in_background(lambda: run.agent(command))
     job = slurm_cluster.wait_for_job("")
 
     _signal_client(run, number)
@@ -50,11 +54,13 @@ def test_signalling_the_agents_client_cancels_the_job_and_gives_the_shell_status
     assert slurm_cluster.job_state(job) == "CANCELLED"
 
 
+@pytest.mark.parametrize("via", ["gate", "gpu"])
 def test_cancelling_the_agents_command_stops_its_client_and_its_job(
-    run: OpenRun, slurm_cluster: SlurmCluster
+    run: OpenRun, slurm_cluster: SlurmCluster, via: str
 ) -> None:
     cancel = threading.Event()
-    pending = in_background(lambda: run.agent(_hold(run), cancel=cancel))
+    command = _hold(run, via)
+    pending = in_background(lambda: run.agent(command, cancel=cancel))
     job = slurm_cluster.wait_for_job("")
 
     cancel.set()

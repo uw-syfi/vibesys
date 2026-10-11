@@ -7,16 +7,14 @@
  * - `--project PATH [-- RUN_ARGS...]`: start a detached run for that project on this machine and
  *   open the bundled UI on it.
  * - `--socket PATH`: open the bundled UI on a server already listening at that control socket.
- * - `VIBESYS_DESKTOP_URL` set: the legacy gateway window (`scripts/run-desktop.sh`), unchanged.
  *
  * Errors name the offending argument, so the shell can print them as they are.
  */
 import {isAbsolute, resolve} from 'node:path';
 import {type HostId, SettingsError, validAlias} from './host-settings.js';
-import {type LaunchTarget, parseLaunchUrl} from './launch-url.js';
+import {INSTANCE_ID} from './ids.js';
 
 export type LaunchPlan =
-  | {readonly kind: 'gateway'; readonly target: LaunchTarget}
   | {readonly kind: 'welcome'; readonly host: HostId | null}
   | {readonly kind: 'instance'; readonly host: HostId; readonly instanceId: string}
   | {readonly kind: 'start'; readonly project: string; readonly runArgs: readonly string[]}
@@ -25,8 +23,7 @@ export type LaunchPlan =
 const USAGE =
   'usage: vibesys-desktop [--host NAME] [--instance ID]\n' +
   '       vibesys-desktop --project PATH [-- RUN_ARGS...]\n' +
-  '       vibesys-desktop --socket PATH\n' +
-  '       or VIBESYS_DESKTOP_URL=<gateway URL> vibesys-desktop';
+  '       vibesys-desktop --socket PATH';
 
 export class LaunchError extends Error {
   override name = 'LaunchError';
@@ -35,21 +32,12 @@ export class LaunchError extends Error {
 type Option = '--project' | '--socket' | '--host' | '--instance';
 const OPTIONS: readonly Option[] = ['--project', '--socket', '--host', '--instance'];
 const PATH_OPTIONS: ReadonlySet<Option> = new Set(['--project', '--socket']);
-const INSTANCE_ID = /^[0-9a-f]{12}$/;
 
 /**
- * The plan for `argv` (the arguments after the app itself) and `gatewayUrl`
- * (`VIBESYS_DESKTOP_URL`). Relative paths resolve against `cwd`, the directory the user ran from.
+ * The plan for `argv` (the arguments after the app itself). Relative paths resolve against `cwd`,
+ * the directory the user ran from.
  */
-export function parseLaunch(
-  argv: readonly string[],
-  gatewayUrl: string | undefined,
-  cwd: string,
-): LaunchPlan {
-  if (gatewayUrl !== undefined && gatewayUrl !== '') {
-    if (argv.length > 0) throw new LaunchError('VIBESYS_DESKTOP_URL does not take arguments');
-    return {kind: 'gateway', target: parseLaunchUrl(gatewayUrl)};
-  }
+export function parseLaunch(argv: readonly string[], cwd: string): LaunchPlan {
   // `pnpm start -- ARGS` hands the app its `--` separator too. Run arguments only ever follow a
   // `--project`, so a leading separator carries nothing and is dropped.
   const options = argv[0] === '--' ? argv.slice(1) : argv;

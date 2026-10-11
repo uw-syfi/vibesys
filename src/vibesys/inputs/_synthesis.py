@@ -1,13 +1,11 @@
-"""Synthesize an input bundle from standalone CLI flags.
+"""Synthesize a one-task project from standalone CLI flags.
 
-External users who install VibeSys as a package do not have the repository
-``examples/`` bundles on disk. Rather than require them to hand-assemble the
-``OBJECTIVE.md`` + ``vibesys.input.toml`` bundle shape, they can pass the same
-information as separate flags (objective, domain, evaluator commands, optional
-reference/evaluator directories). This module materializes those flags into a
-conventional bundle directory that :func:`vibesys.inputs.load_input_bundle`
-then loads unchanged, so every downstream consumer keeps seeing a real
-``InputBundle`` rooted at a real directory.
+Automation can pass a task's contents as separate flags (objective, domain,
+evaluator commands, optional reference/evaluator directories) instead of
+writing a project. This module materializes those flags into a project whose
+single task, ``default``, lives in ``.vibesys/tasks/default/``, which
+:func:`vibesys.inputs.load_task` then loads unchanged, so every downstream
+consumer keeps seeing a real ``InputBundle`` rooted at a real directory.
 """
 
 from __future__ import annotations
@@ -19,31 +17,27 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from vibesys.inputs._manifest import MANIFEST_NAME, InputManifest
+from vs_project.api import Project
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.constants import DomainName
-#: Bundle-relative directory name used to stage trusted evaluator source
-#: supplied by standalone flags. It lives inside the synthesized bundle so the
-#: bundle is self-contained; ``load_input_bundle(...)`` permits sources that
-#: resolve here.
+#: Task-relative directory name used to stage trusted evaluator source
+#: supplied by standalone flags. It lives inside the synthesized task so the
+#: project is self-contained; ``[evaluator].source`` resolves within the task.
 EVALUATOR_SRC_DIRNAME = "_evaluator_src"
 
+#: The one task a synthesized project defines.
+SYNTHESIZED_TASK_NAME = "default"
+
 #: Top-level entries the synthesizer owns. An ``--evaluator-dir`` whose contents
-#: are copied into the bundle root must not collide with any of these.
-_RESERVED_ROOT_ENTRIES = frozenset(
-    {
-        "OBJECTIVE.md",
-        MANIFEST_NAME,
-        "reference",
-        EVALUATOR_SRC_DIRNAME,
-    }
-)
+#: are copied into the project root must not collide with any of these.
+_RESERVED_ROOT_ENTRIES = frozenset({".vibesys", MANIFEST_NAME})
 
 
 class InputSynthesisError(ValueError):
-    """Raised when standalone input flags cannot be synthesized into a bundle."""
+    """Raised when standalone input flags cannot be synthesized into a project."""
 
     @classmethod
     def source_missing(cls, label: str, path: Path) -> InputSynthesisError:
@@ -65,8 +59,8 @@ class InputSynthesisError(ValueError):
 
     @classmethod
     def reserved_entry_collision(cls, name: str) -> InputSynthesisError:
-        """Describe evaluator contents that collide with a bundle-owned entry."""
-        return cls(f"--input-evaluator-dir entry collides with a reserved bundle name: {name}")
+        """Describe evaluator contents that collide with a project-owned entry."""
+        return cls(f"--input-evaluator-dir entry collides with a reserved project name: {name}")
 
     @classmethod
     def invalid_manifest(cls, error: Exception) -> InputSynthesisError:
@@ -75,16 +69,16 @@ class InputSynthesisError(ValueError):
 
     @classmethod
     def destination_exists(cls, path: Path) -> InputSynthesisError:
-        """Describe a synthesized bundle destination that already exists."""
-        return cls(f"synthesized bundle directory already exists: {path}")
+        """Describe a synthesized project destination that already exists."""
+        return cls(f"synthesized project directory already exists: {path}")
 
 
 @dataclass(frozen=True)
 class SynthesizedInputSpec:
-    """Resolved standalone-input flags describing a bundle to synthesize.
+    """Resolved standalone-input flags describing a project to synthesize.
 
     Directory fields are absolute source paths on the operator's machine; their
-    contents are copied into the synthesized bundle so it is self-contained.
+    contents are copied into the synthesized project so it is self-contained.
     """
 
     objective: str
@@ -158,7 +152,7 @@ def _render_manifest_toml(spec: SynthesizedInputSpec) -> str:
 
     This is a purpose-built emitter for exactly the tables the synthesizer
     generates, not a general TOML writer. The output round-trips through
-    :func:`vibesys.inputs.load_input_bundle`, which re-validates it. The
+    :func:`vibesys.inputs.load_task`, which re-validates it. The
     same shape is validated eagerly via :func:`_build_manifest_dict`.
     """
     lines: list[str] = [
@@ -197,12 +191,12 @@ def _copy_tree_into(source: Path, destination: Path) -> None:
     shutil.copytree(source, destination, symlinks=True)
 
 
-def _copy_evaluator_dir_contents(evaluator_dir: Path, bundle_root: Path) -> None:
-    """Copy each top-level entry of ``evaluator_dir`` into the bundle root."""
+def _copy_evaluator_dir_contents(evaluator_dir: Path, project_root: Path) -> None:
+    """Copy each top-level entry of ``evaluator_dir`` into the project root."""
     for child in sorted(evaluator_dir.iterdir()):
         if child.name in _RESERVED_ROOT_ENTRIES:
             raise InputSynthesisError.reserved_entry_collision(child.name)
-        target = bundle_root / child.name
+        target = project_root / child.name
         if child.is_dir():
             _copy_tree_into(child, target)
         else:
@@ -210,10 +204,12 @@ def _copy_evaluator_dir_contents(evaluator_dir: Path, bundle_root: Path) -> None
 
 
 def synthesize_input_bundle(spec: SynthesizedInputSpec, destination: Path) -> Path:
-    """Materialize ``spec`` into a bundle directory at ``destination``.
+    """Materialize ``spec`` into a one-task project at ``destination``.
 
-    Returns the created bundle root. The caller loads it with
-    ``load_input_bundle(root)``.
+    Returns the created project root. The objective, manifest, reference, and
+    evaluator source go to ``.vibesys/tasks/default/``; ``--input-evaluator-dir``
+    contents go to the project root, where the commands run. The caller loads
+    it with ``load_task(root)``.
     """
     manifest = _build_manifest_dict(spec)
     try:
@@ -246,13 +242,15 @@ def synthesize_input_bundle(spec: SynthesizedInputSpec, destination: Path) -> Pa
     if evaluator_dir is not None:
         _copy_evaluator_dir_contents(evaluator_dir, root)
 
+    task = Project.open(root).configuration_path() / "tasks" / SYNTHESIZED_TASK_NAME
+    task.mkdir(parents=True)
     objective_text = spec.objective if spec.objective.endswith("\n") else spec.objective + "\n"
-    (root / "OBJECTIVE.md").write_text(objective_text)
-    (root / MANIFEST_NAME).write_text(_render_manifest_toml(spec))
+    (task / "OBJECTIVE.md").write_text(objective_text)
+    (task / MANIFEST_NAME).write_text(_render_manifest_toml(spec))
 
     if reference_dir is not None:
-        _copy_tree_into(reference_dir, root / "reference")
+        _copy_tree_into(reference_dir, task / "reference")
     if evaluator_source_dir is not None:
-        _copy_tree_into(evaluator_source_dir, root / EVALUATOR_SRC_DIRNAME)
+        _copy_tree_into(evaluator_source_dir, task / EVALUATOR_SRC_DIRNAME)
 
     return root

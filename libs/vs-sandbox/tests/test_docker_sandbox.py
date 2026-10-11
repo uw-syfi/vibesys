@@ -411,6 +411,30 @@ class TestExecute:
         finally:
             sandbox.stop()
 
+    def test_execute_as_root_runs_the_command_through_docker_exec_as_root(
+        self, tmp_path: Path
+    ) -> None:
+        sandbox, engine = self._started(tmp_path)
+        try:
+            before = len(engine.calls)
+            result = sandbox.execute_as_root("apt-get install -y libssl-dev")
+            exec_call = [call for call in engine.calls[before:] if call[1] == "exec"][-1]
+
+            assert result.exit_code == 0
+            assert exec_call[exec_call.index("-u") + 1] == "root"
+            assert exec_call[-3:] == ("bash", "-c", "apt-get install -y libssl-dev")
+        finally:
+            sandbox.stop()
+
+    def test_execute_does_not_run_as_root(self, tmp_path: Path) -> None:
+        sandbox, engine = self._started(tmp_path)
+        try:
+            sandbox.execute("true")
+
+            assert "-u" not in [call for call in engine.calls if call[1] == "exec"][-1]
+        finally:
+            sandbox.stop()
+
     def test_a_container_removed_underneath_reports_the_daemon_error(self, tmp_path: Path) -> None:
         sandbox, engine = self._started(tmp_path)
         engine.run(("docker", "rm", "-f", sandbox.container_id), timeout_seconds=1)

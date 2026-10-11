@@ -22,10 +22,7 @@ from vs_runtime._run_environment import (
     SkyPilotEnvironment,
 )
 from vs_runtime._slurm_environment import SlurmEnvironment
-from vs_runtime._slurm_gpu_environment import SlurmGpuEnvironment
 from vs_sandbox.api import backend_is_host_only
-from vs_sandbox.api.slurm import configured_capture_lifecycle, load_slurm_policy
-from vs_slurm.api import load_slurm_config
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -64,6 +61,15 @@ def resolve_run_environment_spec(
         "running the agent on the host under Seatbelt"
     )
     return replace(spec, name="host", options={})
+
+
+def run_environment_deprecation(environment: RunEnvironment) -> str | None:
+    """Return the deprecation notice of a built environment, or ``None``.
+
+    A run reports it once when it launches. Opening an environment (done for
+    every candidate session) must not, or the notice repeats.
+    """
+    return environment.deprecation if isinstance(environment, SlurmEnvironment) else None
 
 
 def run_environment_record(spec: RunEnvironmentSpec) -> RunEnvironmentRecord:
@@ -118,7 +124,10 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
     if spec.name == "slurm":
         return SlurmEnvironment.from_options(spec.options)
     if spec.name == "slurm-gpu":
-        return SlurmGpuEnvironment(Path(str(spec.options["config_path"])), spec.resources)
+        # Deprecated alias: the old file, translated, opens the slurm environment.
+        return SlurmEnvironment.from_slurm_gpu(
+            Path(str(spec.options["config_path"])), spec.resources
+        )
     message = f"unknown run environment: {spec.name!r}"
     raise ValueError(message)
 
@@ -133,11 +142,7 @@ def validate_run_environment_profile(
     Invalid operator policy or workload requirements raise ``ValueError``.
     """
     if isinstance(environment, SlurmEnvironment):
-        configured_capture_lifecycle(
-            load_slurm_config(environment.config_path),
-            load_slurm_policy(environment.config_path),
-            profile_command,
-        )
+        environment.validate_profile(profile_command)
 
 
 def make_run_environment_spec(  # noqa: PLR0913  # lint-waiver: LW-009086 [PLR0913]; the compatibility builder accepts each independent CLI environment option.

@@ -22,11 +22,12 @@ uv run python -m entrypoints.web rotate --instance clients/web/.vibesys-demo/web
 ```
 
 Each production build emits `dist/.vibesys-web-build.json`, which inventories
-the web, backend-client, and core-state sources used by the build. A live
-gateway rejects this default bundle after any of those sources changes and
-prints `pnpm --dir clients/web build` as the repair. Pass `--no-build` only to
-reuse a build that still matches the checkout. The gateway's instance record
-and the `live` and `status` commands expose the build ID.
+the source trees, HTML entrypoint, Vite configuration, package metadata, and
+locked dependency graph used by the build. A live gateway rejects this default
+bundle after any recorded input changes and prints
+`pnpm --dir clients/web build` as the repair. Pass `--no-build` only to reuse a
+build that still matches the checkout. The gateway's instance record and the
+`live` and `status` commands expose the build ID.
 
 This command invokes the browser entrypoint directly. It does not start the
 OpenTUI client. Re-running the command reuses the same live demo gateway. The

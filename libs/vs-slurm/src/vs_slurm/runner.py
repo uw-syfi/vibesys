@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import shlex
 import subprocess
@@ -24,6 +25,7 @@ from .config import (
     SlurmConfig,
     SlurmConfigError,
     SlurmConnectorTransport,
+    SlurmLocalTransport,
     SlurmService,
     SlurmSshTransport,
     shell_join_with_port,
@@ -526,8 +528,13 @@ class SlurmJobRunner:
         pause: Callable[[float], None] | None = None,
         invocation_id: Callable[[], str] = lambda: uuid.uuid4().hex,
         scratch_root: Path | None = None,
+        host_environment: Callable[[], Mapping[str, str]] | None = None,
     ) -> None:
         """Create a runner with injectable process, clock, and identity effects.
+
+        ``host_environment`` returns this process's environment, from which the
+        local transport takes its login-like one (``login_environment``); this
+        process's own when omitted.
 
         ``pause`` replaces the pause between polls wholesale (tests advance a
         virtual clock with it). Left unset, a wait that has a ``cancel_event``
@@ -545,6 +552,7 @@ class SlurmJobRunner:
         self._transport = _make_transport(
             config,
             process=self._process,
+            host_environment=host_environment or (lambda: os.environ),
         )
         self._operations = RemoteOperations(self._transport, config, scratch_root)
         self._clock = clock
@@ -1358,6 +1366,10 @@ class _ProcessTransport:
         self._process = process
         self._timeout = timeout
 
+    def _launch(self, argv: Sequence[str]) -> Sequence[str]:
+        """Return the argv to start for *argv*; a transport may wrap the program."""
+        return argv
+
     def _run(
         self,
         argv: Sequence[str],
@@ -1366,7 +1378,7 @@ class _ProcessTransport:
         stdin: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         try:
-            result = self._process(argv, stdin=stdin, timeout=self._timeout)
+            result = self._process(self._launch(argv), stdin=stdin, timeout=self._timeout)
         except FileNotFoundError as exc:
             raise SlurmError.transport_unavailable(operation) from exc
         except subprocess.TimeoutExpired as exc:
@@ -1376,23 +1388,22 @@ class _ProcessTransport:
         return result
 
 
-class _SshTransport(_ProcessTransport):
+class _RsyncTransport(_ProcessTransport):
+    """Transfers as rsync copies; *destination* prefixes the remote side's path."""
+
     def __init__(
         self,
-        config: SlurmSshTransport,
+        rsync_command: tuple[str, ...],
         *,
+        remote_shell: tuple[str, ...],
+        destination: str,
         process: SlurmProcess,
         timeout: float,
     ) -> None:
         super().__init__(process, timeout)
-        self._config = config
-
-    def exec(self, command: str) -> _TransportResponse:
-        result = self._run(
-            (*self._config.ssh_command, "--", self._config.host, command),
-            operation="exec",
-        )
-        return _TransportResponse(stdout=result.stdout, stderr=result.stderr)
+        self._rsync_command = rsync_command
+        self._remote_shell = remote_shell
+        self._destination = destination
 
     def sync_to(
         self,
@@ -1406,51 +1417,115 @@ class _SshTransport(_ProcessTransport):
         if delete:
             options.append("--delete")
         options.extend(f"--exclude={item}" for item in excludes)
-        self._run(
-            (
-                *self._config.rsync_command,
-                *options,
-                "-e",
-                shlex.join(self._config.ssh_command),
-                "--",
-                f"{local}/",
-                self._remote(remote, trailing_slash=True),
-            ),
-            operation="sync_to",
+        self._rsync(
+            options, f"{local}/", self._remote(remote, trailing_slash=True), operation="sync_to"
         )
 
     def put(self, local: Path, remote: PurePosixPath) -> None:
-        self._run(
-            (
-                *self._config.rsync_command,
-                "-a",
-                "-e",
-                shlex.join(self._config.ssh_command),
-                "--",
-                str(local),
-                self._remote(remote),
-            ),
-            operation="put",
-        )
+        self._rsync(["-a"], str(local), self._remote(remote), operation="put")
 
     def get(self, remote: PurePosixPath, local: Path, *, kind: Literal["file", "tree"]) -> None:
         tree = kind == "tree"
-        self._run(
-            (
-                *self._config.rsync_command,
-                "-a",
-                "-e",
-                shlex.join(self._config.ssh_command),
-                "--",
-                self._remote(remote, trailing_slash=tree),
-                f"{local}/" if tree else str(local),
-            ),
+        self._rsync(
+            ["-a"],
+            self._remote(remote, trailing_slash=tree),
+            f"{local}/" if tree else str(local),
             operation="get",
+        )
+
+    def _rsync(self, options: list[str], source: str, target: str, *, operation: str) -> None:
+        self._run(
+            (*self._rsync_command, *options, *self._remote_shell, "--", source, target),
+            operation=operation,
         )
 
     def _remote(self, path: PurePosixPath, *, trailing_slash: bool = False) -> str:
         suffix = "/" if trailing_slash else ""
-        return f"{self._config.host}:{path.as_posix()}{suffix}"
+        return f"{self._destination}{path.as_posix()}{suffix}"
+
+
+class _SshTransport(_RsyncTransport):
+    def __init__(
+        self,
+        config: SlurmSshTransport,
+        *,
+        process: SlurmProcess,
+        timeout: float,
+    ) -> None:
+        super().__init__(
+            config.rsync_command,
+            remote_shell=("-e", shlex.join(config.ssh_command)),
+            destination=f"{config.host}:",
+            process=process,
+            timeout=timeout,
+        )
+        self._config = config
+
+    def exec(self, command: str) -> _TransportResponse:
+        result = self._run(
+            (*self._config.ssh_command, "--", self._config.host, command),
+            operation="exec",
+        )
+        return _TransportResponse(stdout=result.stdout, stderr=result.stderr)
+
+
+_LOGIN_ENVIRONMENT_NAMES = frozenset(
+    {"HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ", "TMPDIR"}
+)
+_LOGIN_ENVIRONMENT_PREFIX = "LC_"
+
+
+def login_environment(host: Mapping[str, str]) -> dict[str, str]:
+    """Return the part of *host* that a login session would also have.
+
+    The local transport runs its programs in this environment and nothing else,
+    which is what the SSH transport gets from sshd: a fresh one. A host process
+    can hold credentials, and inside a Slurm allocation or batch job it holds
+    ``SLURM_*`` variables that would redirect the gate's own ``sbatch`` to the
+    wrong job. The names kept are the identity and locale ones a login sets
+    (``HOME USER LOGNAME SHELL PATH LANG LC_* TZ``) and ``TMPDIR``; every other
+    name, ``SLURM_*``, ``SBATCH_*``, ``SALLOC_*`` and ``SRUN_*`` included, is dropped.
+    """
+    return {
+        name: value
+        for name, value in host.items()
+        if name in _LOGIN_ENVIRONMENT_NAMES
+        or (
+            name.startswith(_LOGIN_ENVIRONMENT_PREFIX)
+            and len(name) > len(_LOGIN_ENVIRONMENT_PREFIX)
+        )
+    }
+
+
+class _LocalTransport(_RsyncTransport):
+    def __init__(
+        self,
+        config: SlurmLocalTransport,
+        *,
+        process: SlurmProcess,
+        timeout: float,
+        host_environment: Callable[[], Mapping[str, str]],
+    ) -> None:
+        super().__init__(
+            config.rsync_command,
+            remote_shell=(),
+            destination="",
+            process=process,
+            timeout=timeout,
+        )
+        self._config = config
+        self._host_environment = host_environment
+
+    def _launch(self, argv: Sequence[str]) -> Sequence[str]:
+        # ``env -i`` gives the program the login environment and nothing of this
+        # process's.
+        environment = login_environment(self._host_environment())
+        clean = ("env", "-i", *(f"{name}={value}" for name, value in sorted(environment.items())))
+        return (*clean, *argv)
+
+    def exec(self, command: str) -> _TransportResponse:
+        result = self._run((*self._config.shell_command, command), operation="exec")
+        return _TransportResponse(stdout=result.stdout, stderr=result.stderr)
 
 
 class _ConnectorTransport(_ProcessTransport):
@@ -1527,19 +1602,25 @@ class _ConnectorTransport(_ProcessTransport):
         return _TransportResponse(stdout=response.stdout, stderr=response.stderr)
 
 
-def _make_transport(config: SlurmConfig, *, process: SlurmProcess) -> _Transport:
-    transport = config.transport
-    if isinstance(transport, SlurmSshTransport):
-        return _SshTransport(
-            transport,
-            process=process,
-            timeout=config.transport_timeout_seconds,
-        )
-    return _ConnectorTransport(
-        transport,
-        process=process,
-        timeout=config.transport_timeout_seconds,
-    )
+def _make_transport(
+    config: SlurmConfig,
+    *,
+    process: SlurmProcess,
+    host_environment: Callable[[], Mapping[str, str]],
+) -> _Transport:
+    timeout = config.transport_timeout_seconds
+    match config.transport:
+        case SlurmSshTransport():
+            return _SshTransport(config.transport, process=process, timeout=timeout)
+        case SlurmLocalTransport():
+            return _LocalTransport(
+                config.transport,
+                process=process,
+                timeout=timeout,
+                host_environment=host_environment,
+            )
+        case SlurmConnectorTransport():
+            return _ConnectorTransport(config.transport, process=process, timeout=timeout)
 
 
 def _run_process(

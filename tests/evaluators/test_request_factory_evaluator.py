@@ -359,3 +359,18 @@ def test_task_adapter_rejects_missing_separator_or_script(arguments: list[str]) 
 
     with pytest.raises(ValueError, match=r"usage: adapter\.py"):
         adapter.main(arguments)
+
+
+def test_request_factory_declares_the_native_dependencies_of_its_openssl_build() -> None:
+    package = resolve_evaluator_package(
+        _PACKAGE_ROOT.parent,
+        EvaluatorPackageRequirement(
+            name="vibesys-evaluator-request-factory",
+            version="0.1.0",
+        ),
+    )
+
+    tool = package.metadata.tools["request-factory"]
+
+    # req-frontend links OpenSSL via openssl-sys, which finds it with pkg-config.
+    assert {"pkg-config", "libssl-dev"} <= set(tool.system_packages)

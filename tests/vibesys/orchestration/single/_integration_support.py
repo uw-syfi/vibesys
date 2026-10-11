@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.task_project import write_task
 
 from launch.testing import create_session
 from vibesys.api import (
@@ -18,7 +19,7 @@ from vibesys.api import (
     ResumeRef,
     RunRequest,
 )
-from vibesys.inputs import ProfileGuidedInput, load_input_bundle
+from vibesys.inputs import ProfileGuidedInput, load_task
 from vibesys.metrics import MetricSpace
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.orchestration.single import (
@@ -136,12 +137,12 @@ def write_input(
 ) -> Path:
     """Create a self-contained project that can be copied and resumed."""
     root.mkdir(parents=True)
-    (root / "OBJECTIVE.md").write_text(f"{objective}\n", encoding="utf-8")
     (root / "queue.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         f'version = 1\n[agent]\ndomain = "{domain}"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
-        encoding="utf-8",
+        objective=f"{objective}\n",
     )
     return root
 
@@ -166,7 +167,7 @@ def execute(
     observed_events: list[CoreEvent] | None = None,
 ) -> tuple[RunStatus, str, Path]:
     """Run the explicit plugin through the public product session."""
-    bundle = load_input_bundle(project_root)
+    bundle = load_task(project_root)
     registration = REGISTRATION
     if isinstance(options_override, PluginRunOptions):
         registration = PROFILE_GUIDED_REGISTRATION

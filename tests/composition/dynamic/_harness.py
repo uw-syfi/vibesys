@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Protocol
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.slurm_environment import with_fake_image_build
+from tests.support.task_project import write_task
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
@@ -428,17 +429,18 @@ class LoopInput:
         """
         root = base / "project"
         root.mkdir(parents=True)
-        (root / "OBJECTIVE.md").write_text("Raise queue throughput.\n", encoding="utf-8")
         (root / "queue.py").write_text("VALUE = 1\n", encoding="utf-8")
-        (root / "benchmark.py").write_text(_BENCHMARK, encoding="utf-8")
-        (root / "accuracy.py").write_text(_ACCURACY, encoding="utf-8")
-        (root / "vibesys.input.toml").write_text(
+        task = write_task(
+            root,
             'version = 1\n[agent]\ndomain = "generic"\n'
-            '[accuracy]\ncommand = ["python", "accuracy.py"]\ntimeout_seconds = 30\n'
-            '[benchmark]\ncommand = ["python", "benchmark.py"]\n'
+            '[accuracy]\ncommand = ["python", ".vibesys/tasks/default/accuracy.py"]\n'
+            "timeout_seconds = 30\n"
+            '[benchmark]\ncommand = ["python", ".vibesys/tasks/default/benchmark.py"]\n'
             "timeout_seconds = 30\nresult_protocol = 2\n",
-            encoding="utf-8",
+            objective="Raise queue throughput.\n",
         )
+        (task / "benchmark.py").write_text(_BENCHMARK, encoding="utf-8")
+        (task / "accuracy.py").write_text(_ACCURACY, encoding="utf-8")
         connector = FakeConnector(base / "cluster")
         cluster = connector.state
         remote = base / "remote"

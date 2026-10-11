@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import server.runtime as runtime_module
@@ -52,5 +53,5 @@ if __name__ == "__main__":
     BlockedRuntime.transports = int(sys.argv[1])
     runtime_module.ServerRuntime = BlockedRuntime  # ty: ignore[invalid-assignment]  # LW-155503 [invalid-assignment]; the child swaps the dynamically imported runtime class for its fake
     cli.parse_cli_invocation = lambda _argv: object()  # ty: ignore[invalid-assignment]  # LW-155504 [invalid-assignment]; the child replaces CLI parsing with a fixed fake
-    cli.build_run_request = lambda _invocation: object()  # ty: ignore[invalid-assignment]  # LW-155505 [invalid-assignment]; the child replaces request building with a fixed fake
+    cli.build_run_request = lambda _invocation: SimpleNamespace(resolved_run_id="run-1")  # ty: ignore[invalid-assignment]  # LW-155505 [invalid-assignment]; the child replaces request building with a fixed fake
     main(["--control-socket", "/unused/control.sock", "--local"])

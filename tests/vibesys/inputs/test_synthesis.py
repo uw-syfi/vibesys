@@ -15,7 +15,7 @@ from vibesys.errors import ConfigurationError
 from vibesys.inputs import (
     InputSynthesisError,
     SynthesizedInputSpec,
-    load_input_bundle,
+    load_task,
     synthesize_input_bundle,
 )
 
@@ -38,7 +38,7 @@ def _minimal_spec(**overrides: object) -> SynthesizedInputSpec:
 def test_synthesize_minimal_bundle_round_trips(tmp_path: Path) -> None:
     root = synthesize_input_bundle(_minimal_spec(), tmp_path / "bundle")
 
-    bundle = load_input_bundle(root)
+    bundle = load_task(root)
 
     assert bundle.domain == DomainName.LLM_SERVING
     assert bundle.objective == "Serve the model quickly.\n"
@@ -62,14 +62,16 @@ def test_synthesize_populates_optional_fields(tmp_path: Path) -> None:
     )
     root = synthesize_input_bundle(spec, tmp_path / "bundle")
 
-    bundle = load_input_bundle(root)
+    bundle = load_task(root)
 
     assert bundle.manifest.accuracy.timeout_seconds == 120
     assert bundle.manifest.benchmark.timeout_seconds == 300
     assert bundle.benchmark_result is not None
     assert bundle.benchmark_result.metric == "latency_ms"
     assert bundle.benchmark_result.json_argument == "--result-json"
-    assert bundle.reference_path == (root / "reference").resolve()
+    assert (
+        bundle.reference_path == (root / ".vibesys" / "tasks" / "default" / "reference").resolve()
+    )
     assert bundle.reference_path is not None
     assert (bundle.reference_path / "golden.txt").read_text() == "42\n"
 
@@ -85,15 +87,57 @@ def test_synthesize_copies_evaluator_dir_contents_into_root(tmp_path: Path) -> N
     assert (root / "checker.py").read_text() == "print('ok')\n"
     assert (root / "pkg" / "helper.py").read_text() == "X = 1\n"
     # The manifest and objective the synthesizer owns are still intact.
-    load_input_bundle(root)
+    load_task(root)
 
 
 def test_synthesize_rejects_evaluator_dir_reserved_name_collision(tmp_path: Path) -> None:
     evaluator = tmp_path / "eval"
-    (evaluator / "reference").mkdir(parents=True)
+    (evaluator / ".vibesys").mkdir(parents=True)
 
-    with pytest.raises(InputSynthesisError, match="reserved bundle name"):
+    with pytest.raises(InputSynthesisError, match="reserved project name"):
         synthesize_input_bundle(_minimal_spec(evaluator_dir=evaluator), tmp_path / "bundle")
+
+
+def test_synthesize_rejects_evaluator_dir_root_manifest(tmp_path: Path) -> None:
+    evaluator = tmp_path / "eval"
+    evaluator.mkdir()
+    (evaluator / "vibesys.input.toml").write_text("version = 1\n")
+
+    with pytest.raises(InputSynthesisError, match="reserved project name"):
+        synthesize_input_bundle(_minimal_spec(evaluator_dir=evaluator), tmp_path / "bundle")
+
+
+def test_synthesize_writes_a_one_task_project(tmp_path: Path) -> None:
+    reference = tmp_path / "ref"
+    reference.mkdir()
+    (reference / "golden.txt").write_text("42\n")
+    evaluator = tmp_path / "eval"
+    evaluator.mkdir()
+    (evaluator / "checker.py").write_text("print('ok')\n")
+    evaluator_source = tmp_path / "evalsrc"
+    evaluator_source.mkdir()
+    (evaluator_source / "check.py").write_text("Y = 2\n")
+
+    root = synthesize_input_bundle(
+        _minimal_spec(
+            reference_dir=reference,
+            evaluator_dir=evaluator,
+            evaluator_source_dir=evaluator_source,
+        ),
+        tmp_path / "bundle",
+    )
+
+    task = root / ".vibesys" / "tasks" / "default"
+    assert load_task(root).task_name == "default"
+    assert (task / "OBJECTIVE.md").is_file()
+    assert (task / "vibesys.input.toml").is_file()
+    assert (task / "reference" / "golden.txt").read_text() == "42\n"
+    assert (task / "_evaluator_src" / "check.py").read_text() == "Y = 2\n"
+    assert (root / "checker.py").read_text() == "print('ok')\n"
+    assert not (root / "OBJECTIVE.md").exists()
+    assert not (root / "vibesys.input.toml").exists()
+    assert not (root / "reference").exists()
+    assert not (root / "_evaluator_src").exists()
 
 
 def test_synthesize_requires_both_benchmark_result_fields(tmp_path: Path) -> None:
@@ -121,7 +165,7 @@ def test_synthesize_escapes_special_characters_in_commands(tmp_path: Path) -> No
     )
     root = synthesize_input_bundle(spec, tmp_path / "bundle")
 
-    bundle = load_input_bundle(root)
+    bundle = load_task(root)
     assert bundle.accuracy_command == ("python", "-c", 'print("hi")')
     assert bundle.objective == 'Handle "quotes" and\nnewlines.\n'
 

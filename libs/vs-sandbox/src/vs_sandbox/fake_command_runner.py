@@ -16,7 +16,7 @@ call is recorded for direct assertions.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,6 +44,7 @@ class FakeExecution:
     command: str
     timeout: int | None
     cancellable: bool = False
+    as_root: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +177,14 @@ class FakeLifecycleRunner(FakeCommandRunner):
         self.start_count += 1
         if self.start_error is not None:
             raise self.start_error
+
+    def execute_as_root(self, command: str, *, timeout: int | None = None) -> CommandResult:
+        """Run *command* like :meth:`execute` and record it as a root execution."""
+        before = len(self.calls)
+        result = self.execute(command, timeout=timeout)
+        for index in range(before, len(self.calls)):
+            self.calls[index] = replace(self.calls[index], as_root=True)
+        return result
 
     def stop(self) -> None:
         """Record one lifecycle stop attempt and raise a scripted error."""
