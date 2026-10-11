@@ -13,7 +13,8 @@ hardware target:
 | `h100` | A single NVIDIA H100 (CUDA graphs, diffusion-token trimming, VAE layout). |
 | `macbook` | Apple Silicon (MLX / Metal, cross-step caches, quantization). |
 
-Run one task from this directory (each task has its own README):
+Copy the project with `vibesys example new model-serving/show-o2-1.5B-HQ DEST`, then run one
+task from `DEST` (each task has its own README):
 
 ```bash
 vibesys --runs-dir /work/vibesys-runs --local --task default

@@ -384,6 +384,25 @@ listing. `--json` prints one `TaskList` document (defined in
 A missing project, a project without `.vibesys/tasks/`, or an invalid task exits
 with status 1, prints the reason on stderr, and prints nothing on stdout.
 
+## Examples
+
+`vibesys example list [--json]` lists the example catalog of a VibeSys source
+checkout (`examples/registry.toml`) by category, one example per line with its
+tasks. `--json` prints one `ExampleList` document (defined in
+`src/entrypoints/example_catalog.py`):
+
+```json
+{"version": 1, "checkout": "/home/me/src/vibesys", "examples": [{"name": "data-structures/stack", "category": "data-structures", "tasks": ["mpmc", "mpsc", "spmc", "spsc"], "external_repo": false}]}
+```
+
+`vibesys example new EXAMPLE DEST` copies the example's tracked files into
+`DEST`, runs `git init`, commits them, and prints the `vibesys --task ...` line
+to run next. An `external_repo` example is cloned at the commit the checkout
+pins. `DEST` must be absent or empty and outside the checkout; otherwise, and
+for an unknown or ambiguous example, the command exits 1 with the reason on
+stderr and leaves `DEST` as it was. `--checkout PATH` selects another VibeSys
+checkout's catalog.
+
 ## Repository Validation
 
 Run `vibesys validate [PROJECT] --task NAME` to check a task's static harness

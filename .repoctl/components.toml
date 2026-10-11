@@ -132,7 +132,7 @@ depends_on = ["example_validation", "microservice_evaluator", "native_evaluator_
 
 [[components]]
 id = "example_validation"
-files = ["src/entrypoints/headless.py", "src/vibesys/run/project_policy.py", "scripts/example_repositories.py", "tests/vibesys/test_microservice_inputs.py", "tests/vibesys/test_kubernetes_inputs.py", "tests/vibesys/test_kubernetes_runtime.py", "tests/vibesys/test_input_sources.py", "tests/examples/test_example_registry.py", "tests/support/example_registry.py"]
+files = ["src/entrypoints/headless.py", "src/entrypoints/example_catalog.py", "src/vibesys/run/project_policy.py", "scripts/example_repositories.py", "tests/vibesys/test_microservice_inputs.py", "tests/vibesys/test_kubernetes_inputs.py", "tests/vibesys/test_kubernetes_runtime.py", "tests/vibesys/test_input_sources.py", "tests/examples/test_example_registry.py", "tests/support/example_registry.py"]
 roots = ["src/vibesys/inputs"]
 
 # The build-and-run tests of the example evaluators (the `native_build` marker) run in the

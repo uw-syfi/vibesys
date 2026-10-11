@@ -16,8 +16,10 @@ Every task loads `./ordered-map-candidate.so`, which `make` builds from
 evaluate it with the versioned `vibesys-evaluator-ordered-map` package
 (`resources/evaluators/ordered-map` in the VibeSys repository).
 
-The project lives inside the VibeSys repository, so it cannot hold its own
-`.git` directory. Copy it to a new directory, make that copy a Git repository,
-and run one task there:
+The project lives inside the VibeSys repository, so runs start from a copy.
+`vibesys example new` copies it into a new Git repository and prints the
+command to run:
 
+    vibesys example new data-structures/ordered-map ~/work/ordered-map
+    cd ~/work/ordered-map
     vibesys --task mw

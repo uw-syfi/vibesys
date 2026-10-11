@@ -127,6 +127,28 @@ The timeout bounds the load after readiness and cannot exceed the remaining
 capture deadline. Profiling provides diagnostic evidence; accuracy and benchmark
 acceptance still use their own unchanged gates.
 
+## Start from an Example
+
+The examples under `examples/<category>/` in a VibeSys source checkout are
+project roots in this layout. Runs never use them in place: copy one into a
+new repository first.
+
+```bash
+vibesys example list                     # categories, examples, and their tasks
+vibesys example new data-structures/stack ~/work/stack
+cd ~/work/stack
+vibesys --task spsc
+```
+
+`example new` copies the files the checkout tracks under the example, runs
+`git init`, makes one initial commit, and prints the `vibesys --task ...` line
+to run. The destination must be absent or an empty directory, outside the
+checkout. An example registered with `external_repo = true` is cloned from its
+repository at the commit the checkout pins instead. A unique last path
+component (`stack`) also selects an example. `vibesys example list --json`
+prints one `ExampleList` document (`entrypoints.example_catalog`), which the
+desktop app reads.
+
 ## Container Topologies
 
 A `microservices` candidate is not a process the agent starts on its own: it is
@@ -268,6 +290,8 @@ maintained by people.
 - `vibesys validate [PROJECT] --task NAME` checks the static task contract
   without starting an agent or executing the checker and benchmark.
 - `vibesys tasks [PROJECT] [--json]` lists the tasks a project defines.
+- `vibesys example list [--json]` and `vibesys example new EXAMPLE DEST` list the
+  example catalog and copy an example into a new project.
 
 Legacy root input bundles remain valid positional arguments without `--task`.
 

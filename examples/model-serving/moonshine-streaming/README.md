@@ -13,7 +13,8 @@ benchmark, reference, test audio) and differ only in the objective and the start
 | `from-scratch` | The agent writes the serving system itself. |
 | `vllm` | The workspace holds a pinned vLLM checkout (`vllm/`) to start from. |
 
-Run one task from this directory (each task has its own README):
+Copy the project with `vibesys example new model-serving/moonshine-streaming DEST`, then run one
+task from `DEST` (each task has its own README):
 
 ```bash
 vibesys --runs-dir /work/vibesys-runs --local --task from-scratch

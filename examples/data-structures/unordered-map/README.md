@@ -14,8 +14,10 @@ Every task loads `./unordered-map-candidate.so`, which `make` builds from
 evaluate it with the versioned `vibesys-evaluator-unordered-map` package
 (`resources/evaluators/unordered-map` in the VibeSys repository).
 
-The project lives inside the VibeSys repository, so it cannot hold its own
-`.git` directory. Copy it to a new directory, make that copy a Git repository,
-and run one task there:
+The project lives inside the VibeSys repository, so runs start from a copy.
+`vibesys example new` copies it into a new Git repository and prints the
+command to run:
 
+    vibesys example new data-structures/unordered-map ~/work/unordered-map
+    cd ~/work/unordered-map
     vibesys --task mw

@@ -24,11 +24,8 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support import run_test_command
 from tests.support.example_registry import (
-    REGISTRY_RELATIVE,
     REPO_ROOT,
-    Check,
-    ExampleEntry,
-    Layout,
+    example_root,
     external_repo_missing,
     load_registry,
     require_external_repo_checkout,
@@ -38,6 +35,7 @@ from tests.support.example_registry import (
 )
 
 from entrypoints.cli import _run_validate
+from entrypoints.example_catalog import REGISTRY_RELATIVE, Check, ExampleEntry, Layout
 from vibesys.errors import ConfigurationError
 from vibesys.run.project_policy import build_project_path_policy, trusted_project_input_paths
 from vs_project.api import Project
@@ -72,14 +70,14 @@ def _require_present(entry: ExampleEntry) -> None:
 def _tasks(entry: ExampleEntry) -> tuple[str, ...]:
     if entry.layout is Layout.LEGACY:
         return ()
-    return tuple(task.name.value for task in Project.open(entry.root).discover_tasks())
+    return tuple(task.name.value for task in Project.open(example_root(entry)).discover_tasks())
 
 
 # --- registry completeness (fail closed) ------------------------------------
 
 
 def test_registry_entries_exist() -> None:
-    missing = [entry.path for entry in ENTRIES if not (entry.root).is_dir()]
+    missing = [entry.path for entry in ENTRIES if not example_root(entry).is_dir()]
     assert not missing, f"{REGISTRY_RELATIVE} lists paths that do not exist: {missing}"
 
 
@@ -94,8 +92,8 @@ def test_every_example_directory_is_registered() -> None:
 @pytest.mark.parametrize("entry", [pytest.param(e, id=e.path) for e in ENTRIES])
 def test_registered_layout_and_tasks_match_disk(entry: ExampleEntry) -> None:
     _require_present(entry)
-    has_tasks = (entry.root / ".vibesys" / "tasks").is_dir()
-    has_manifest = (entry.root / "vibesys.input.toml").is_file()
+    has_tasks = (example_root(entry) / ".vibesys" / "tasks").is_dir()
+    has_manifest = (example_root(entry) / "vibesys.input.toml").is_file()
     if entry.layout is Layout.TASK:
         assert has_tasks, f"{entry.path}: registered as layout=task but has no .vibesys/tasks"
         on_disk = set(_tasks(entry))
@@ -163,7 +161,7 @@ def test_example_validates(entry: ExampleEntry, capsys: pytest.CaptureFixture[st
     _require_present(entry)
     failures: list[str] = []
     for task in _tasks(entry) or (None,):
-        argv = [str(entry.root), *(("--task", task) if task else ())]
+        argv = [str(example_root(entry)), *(("--task", task) if task else ())]
         try:
             _run_validate(argv)
         except ConfigurationError as error:
@@ -204,8 +202,8 @@ def _command_strings(manifest: Path) -> list[str]:
 
 def _manifest(entry: ExampleEntry, task: str | None) -> Path:
     if task is None:
-        return entry.root / "vibesys.input.toml"
-    return Project.open(entry.root).select_task(task).manifest_path
+        return example_root(entry) / "vibesys.input.toml"
+    return Project.open(example_root(entry)).select_task(task).manifest_path
 
 
 def _referenced_paths(entry: ExampleEntry, task: str | None) -> set[str]:
@@ -219,7 +217,7 @@ def _referenced_paths(entry: ExampleEntry, task: str | None) -> set[str]:
             and "${" not in text
             and bare != "."
             and not bare.startswith("..")
-            and (entry.root / bare).exists()
+            and (example_root(entry) / bare).exists()
         ):
             found.add(bare)
         for match in _ROOT_REF.finditer(text):
@@ -243,7 +241,7 @@ def _missing_references(entry: ExampleEntry, task: str | None) -> list[str]:
         supplied = (*_RUNTIME_DIRS, *destinations)
         if any(relative == d or relative.startswith(f"{d}/") for d in supplied):
             continue
-        if not (entry.root / relative).exists():
+        if not (example_root(entry) / relative).exists():
             missing.append(
                 f"{entry.path} task={task}: command references ${{PROJECT_ROOT}}/{relative}, "
                 "which does not exist"
@@ -271,7 +269,7 @@ def test_task_inputs_are_read_only_for_the_agent(entry: ExampleEntry, tmp_path: 
     _require_present(entry)
     project = tmp_path / "project"
     shutil.copytree(
-        entry.root,
+        example_root(entry),
         project,
         symlinks=True,
         ignore=shutil.ignore_patterns(".git", "target", "node_modules", "__pycache__"),

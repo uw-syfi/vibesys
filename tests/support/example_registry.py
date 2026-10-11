@@ -10,18 +10,15 @@ from __future__ import annotations
 
 import configparser
 import os
-import tomllib
-from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Self
 
 import pytest
-from pydantic import BaseModel, ConfigDict, model_validator
 from scripts.example_repositories import is_example_repository_path
 
+from entrypoints.example_catalog import ExampleEntry, Layout, Registry
+from entrypoints.example_catalog import load_registry as load_catalog_registry
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
-REGISTRY_PATH = REPO_ROOT / "examples" / "registry.toml"
-REGISTRY_RELATIVE = "examples/registry.toml"
 
 FETCH_HINT = "run `uv run python scripts/example_repositories.py`"
 
@@ -29,102 +26,14 @@ FETCH_HINT = "run `uv run python scripts/example_repositories.py`"
 _PRUNED_DIRS = frozenset({".git", "target", "node_modules", "__pycache__"})
 
 
-class Layout(StrEnum):
-    """How an example carries its task definitions."""
-
-    TASK = "task"  # `.vibesys/tasks/<task>/` inside the example directory
-    LEGACY = "legacy"  # root `vibesys.input.toml` and `OBJECTIVE.md`
+def load_registry() -> Registry:
+    """Parse and validate this checkout's registry."""
+    return load_catalog_registry(REPO_ROOT)
 
 
-class Check(StrEnum):
-    """Static checks that run for every example and every task."""
-
-    VALIDATE = "validate"  # the `vibesys validate` contract
-    PATH_REFS = "path-refs"  # `${PROJECT_ROOT}/...` paths in task commands exist
-    TRUST_POLICY = "trust-policy"  # files the commands read are read-only for the agent
-
-
-class KnownFailing(BaseModel):
-    """A check that fails today; strict xfail, so it must be removed once it passes."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    check: Check
-    reason: str
-    tracking: str  # issue or PR link
-
-
-class Skip(BaseModel):
-    """A check that cannot run because it needs source absent from the checkout."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    check: Check
-    reason: str
-
-
-class ExampleEntry(BaseModel):
-    """One registered example."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    path: str  # repo-relative POSIX path
-    layout: Layout
-    tasks: Literal["all"] | tuple[str, ...] = "all"  # legacy examples have no tasks
-    # True when the task files and app source come from another repository that
-    # scripts/example_repositories.py checks out (a submodule under repositories/).
-    external_repo: bool = False
-    known_failing: tuple[KnownFailing, ...] = ()
-    skips: tuple[Skip, ...] = ()
-
-    @model_validator(mode="after")
-    def _consistent(self) -> Self:
-        problems: list[str] = []
-        if self.layout is Layout.LEGACY and self.tasks != "all":
-            problems.append("legacy examples have no tasks; omit `tasks`")
-        declared = [item.check for item in (*self.known_failing, *self.skips)]
-        if len(declared) != len(set(declared)):
-            problems.append("a check may be declared known_failing or skipped once")
-        if problems:
-            message = f"{self.path}: " + "; ".join(problems)
-            raise ValueError(message)
-        return self
-
-    @property
-    def root(self) -> Path:
-        """Absolute example root."""
-        return REPO_ROOT / self.path
-
-    def known_failure(self, check: Check) -> KnownFailing | None:
-        """Return the registered known failure for ``check``, if any."""
-        return next((item for item in self.known_failing if item.check is check), None)
-
-    def skip(self, check: Check) -> Skip | None:
-        """Return the explicit skip for ``check``, if any."""
-        return next((item for item in self.skips if item.check is check), None)
-
-
-class Registry(BaseModel):
-    """The parsed ``examples/registry.toml``."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    version: Literal[1]
-    example: tuple[ExampleEntry, ...]
-
-    @model_validator(mode="after")
-    def _unique_paths(self) -> Self:
-        paths = [entry.path for entry in self.example]
-        duplicates = sorted({path for path in paths if paths.count(path) > 1})
-        if duplicates:
-            message = f"duplicate registry paths: {duplicates}"
-            raise ValueError(message)
-        return self
-
-
-def load_registry(path: Path = REGISTRY_PATH) -> Registry:
-    """Parse and validate the registry."""
-    return Registry.model_validate(tomllib.loads(path.read_text()))
+def example_root(entry: ExampleEntry) -> Path:
+    """Absolute root of a registered example in this checkout."""
+    return REPO_ROOT / entry.path
 
 
 def require_external_repos() -> bool:
