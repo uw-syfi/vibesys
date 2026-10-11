@@ -130,9 +130,11 @@ form (`sh -c '<fixed script>' ROLE xHEX...`, every datum hex encoded, see
 [web-development.md](web-development.md)); locally it is a direct `spawn` with an argument vector.
 The script only resolves the interpreter and `exec`s it:
 
-1. If the host setting is a checkout: `uv run --no-sync --project CHECKOUT python -I -m
+1. If the host setting is a checkout (and the fallback for any host without the console script): `uv run --no-sync --project CHECKOUT python -I -m
    entrypoints.host_helper` (about 40 ms over a bare interpreter, measured).
-2. If it is an installed distribution: the `#!` interpreter of its `vibesys` script.
+2. If it is an installed distribution: its `vibesys-host-helper` console script, which the wheel
+   ships so the bootstrap needs no `#!` parsing. The bootstrap prefers this script and falls back to
+   `python -m entrypoints.host_helper` from the checkout (step 1).
 3. If the checkout predates the helper (no `src/entrypoints/host_helper.py`), the script exits with
    a reserved status (`64`) and prints the checkout's version from `pyproject.toml`. The app shows
    "this checkout predates the desktop helper (version X); update it", never argparse output.
@@ -192,14 +194,14 @@ either the method's result or `HelperError`.
 | `run.connect` | `instance_id`, `role: control \| subscribe \| chat` | `connected {run_id, protocol_version}` then relay | Run channels only. The run's `run_id` comes back here, so the page never derives it. |
 | `ping` | none | `pong` | Control channel liveness for the supervisor. |
 
-`projects.recent` from the first sketch is not a helper method: Recent is the app's own record of
-what this user opened, across hosts, and has one writer (the settings store). What the host knows,
-the runs of a project and their status, is `runs.list`. See [open questions](#open-questions).
+There is no `projects.recent` method: Recent is the app's own record of what this user opened,
+across hosts, and has one writer (the settings store). What the host knows, the runs of a project
+and their status, is `runs.list`. See [Decisions and alternatives](#decisions-and-alternatives).
 
 `run.stop` needs the run protocol's `command.stop` and `Response`, and `Response`'s payload types
-import the engine. Until the run protocol's control envelope is split (phase 4 follow-up), the
-helper serves `run.stop` by running the stop path in a worker that imports it on first use; the
-import guard lists that one path as its only exception, with the follow-up issue named in the test.
+import the engine. The run protocol's control envelope (the requests and responses `run.stop`
+needs) is therefore split from the engine-importing modules first, as step one of phase 4 (see
+[Phases](#phases)), so the helper imports only the envelope and the import guard has no exceptions.
 
 ### Handshake and versioning
 
@@ -282,7 +284,9 @@ Facts enter once:
 - **Record**: the server rewrites its record atomically (temp file, rename) on each phase change,
   throttled to one write per second for progress.
 - **Ended records**: when a server exits, its last record (terminal phase and reason) stays in the
-  registry as a tombstone for 24 hours. `survey` reports a free lock with a terminal record as
+  registry as a tombstone for 24 hours; the next listing after that removes it, with no coupling to
+  client acknowledgements. Finished runs stay reachable from run history (`runs.list`), not the
+  live registry. `survey` reports a free lock with a terminal record as
   `ended`, and a free lock with a non-terminal record as `ended {failed: crashed}` with the server
   log path. A run that dies before any client attaches is therefore visible with its reason, and
   the bounded wait for a first client (the current fix for that symptom) is no longer needed.
@@ -369,10 +373,10 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
 
 | Guard | Tier | Asserts |
 | --- | --- | --- |
-| Import closure (`tests/architecture/test_light_entrypoints.py`, new) | deterministic | The static module-level import closure (AST, excluding `TYPE_CHECKING` blocks and function-local imports) of `entrypoints.host_helper`, `entrypoints.instances`, `entrypoints.tasks`, and the launcher's dispatch stays within an allowlist: the standard library, `pydantic`, `vs_sim.api`, `vs_project.api`, `server.host_api`, `server.registry`, `server.host_helper`, `server.stdio_bridge`. No `vibesys.*`, `vs_runtime`, `vs_agent`, `mcp`, `server.api`, `server.events`. |
+| Import closure (`tests/architecture/test_light_entrypoints.py`, new) | deterministic | The static module-level import closure (AST, excluding `TYPE_CHECKING` blocks and function-local imports) of `entrypoints.host_helper`, `entrypoints.instances`, `entrypoints.tasks`, and the launcher's dispatch stays within an allowlist: the standard library, `pydantic`, `vs_sim.api`, `vs_project.api`, `server.host_api`, `server.registry`, `server.host_helper`, `server.stdio_bridge`, and the run protocol's control envelope. The allowlist has zero exceptions: no module is listed as a temporary hole. No `vibesys.*`, `vs_runtime`, `vs_agent`, `mcp`, `server.api`, `server.events`. |
 | Helper startup | real (`tests/e2e`) | A real helper answers `hello` and its loaded-module set (reported by `python -X importtime`) is within the allowlist and under a module-count ceiling that only shrinks. Wall time is reported as a metric against the 300 ms budget, not asserted, because a test's result must not depend on timing. |
 | Helper conformance | deterministic and real | Scenarios under `tests/conformance/scenarios/` (`helper-*`) are request and reply transcripts. Runner `tests/conformance/runners/host-helper.json` replays them against the Python helper in process (deterministic) and against any helper command over stdio (real), so another implementation is tested by pointing the runner at its command. |
-| Store invariants | deterministic | For each screen store, seeded random sequences of actions and replies (including stale, duplicated, and reordered replies) are folded through the reducer; after every step an `invariants(state)` function holds: no Retry on an ended phase, Start enabled only with a picked task listed for the current project, at most one awaited token per request slot, no reply applied with a stale token. Failing seeds are pinned as examples. |
+| Store invariants | deterministic | For each screen store, seeded random sequences of actions and replies (including stale, duplicated, and reordered replies) are folded through the reducer; after every step an `invariants(state)` function holds: no Retry on an ended phase, Start enabled only with a picked task listed for the current project, at most one awaited token per request slot, no reply applied with a stale token. The generator runs across many seeds with no new dependency, and failing seeds are printed for replay, then pinned as examples. |
 | Supervisor and quit machines | deterministic | Same model-based style over `HostConnection.step` and the quit machine: no orphan waits (every waiting state has a timer or channel that will produce its event), terminal states are absorbing. |
 | Journeys | real (CI job) | Playwright drives the real Electron app against a host that runs the real helper locally: connect, start (with a fake run that reports startup stages), attach, drop the channel, stop, resume, quit. Assertions are on rendered phase and identity, with bounded waits that only guard hangs. |
 | Record versions | deterministic | Property: a listing over any mix of known, unknown, and malformed record versions returns every id exactly once, in `live`, `ended`, or `unreadable`. |
@@ -457,7 +461,7 @@ Each phase merges on its own and leaves the app working.
 | 1. Light host commands | Split `server.registry` (lock, store, survey) and `server.host_api` (records) out of `server.instances` and `server.transport.discovery`; stop `server.transport`'s package `__init__` from importing both transports; make the launcher's `boot_trace` mark light and dispatch `instances` and `tasks` in process. Add the import-closure guard. | Guard test green. `vibesys instances list --json` and `vibesys tasks --json` import none of the denied modules; measured time reported in the PR (target under 400 ms locally). No behavior change. |
 | 2. Explicit run identity | `--run-id`; resume target resolved before detaching; record version 2 with required `run_id`, published before engine import; every event carries the run id; listing reports unknown record versions as `unreadable`. App stores Recent by run id at start. | Regression tests for the inferred-identity class (first event of a detached run names the run; resume latest records the resolved id; listing over mixed versions). Web client no longer latches identity from data. |
 | 3. Lifecycle phases | `RunPhase`; `run_startup_progress`; image-build progress from `vs_sandbox`; record phase updates; tombstones with reason. App renders phase only. | A run failing at startup shows `failed` with its reason in `instances.list` with no client attached. Image build shows progress. Property test for listing tombstones. |
-| 4. Host helper | `server.host_api` messages in the schema pipeline; `server.host_helper` and `entrypoints.host_helper` with every method; helper conformance scenarios and runner; delete `entrypoints.stdio_bridge`. Follow-up: split the run protocol's control envelope so `run.stop` needs no engine import. | Conformance runner green in process and over a real process; startup guard green; the app still works on today's code paths (the helper is additive until phase 5). |
+| 4. Host helper | `server.host_api` messages in the schema pipeline; `server.host_helper` and `entrypoints.host_helper` with every method; helper conformance scenarios and runner; delete `entrypoints.stdio_bridge`. Step one (a small phase 3.5 if it lands separately): split the run protocol's control envelope (requests and responses needed by `run.stop`) from the engine-importing modules. | Step one: the import-closure guard passes with zero allowlisted modules. Then: conformance runner green in process and over a real process; startup guard green; the app still works on today's code paths (the helper is additive until phase 5). |
 | 5. Connection manager | `ConnectionManager`, `HostConnection` with pure step; bootstrap line; channels; real-operation checks; warm masters; local uses the same path. Delete the per-action scripts and host implementations listed above. | Contract suite over a fake helper and over the real helper; journey test (connect, start, attach, drop, stop, resume, quit); connect to a populated host under 1 s with a warm master (measured, reported). |
 | 6. Screen stores and app lifecycle | React welcome, host panel, start-run sheet, run strip on per-screen stores with tokens and `<dialog>`; `AppLifecycle` with single-instance lock, quit machine, settings store. | Model-based invariant tests per store; quit and second-launch journey steps. Can land before phase 5 against today's welcome bridge. |
 
@@ -474,21 +478,28 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Light host commands and import guard (phase 1) | not built (#1829) |
 | Explicit run identity (phase 2) | not built |
 | Lifecycle phases, progress, tombstones (phase 3) | not built |
+| Control envelope split (phase 4, step one) | not built |
 | Host helper and its contract (phase 4) | not built |
 | Connection manager (phase 5) | not built |
 | Screen stores and app lifecycle (phase 6) | not built |
 
-## Open questions
+## Decisions and alternatives
 
-These need a maintainer decision:
+Maintainer decisions on the questions this design first left open.
 
-1. **`projects.recent`.** This design keeps Recent as app-owned settings and adds `runs.list` on the
-   host. Should a host instead keep a per-user list of recently used projects (a second writer, on
-   the host)?
-2. **Tombstone retention.** 24 hours, or until a client acknowledges the ended run?
-3. **`fast-check`.** The store invariant tests use a seeded generator today; adopting `fast-check`
-   as a dependency would give shrinking.
-4. **Helper on installed distributions.** Should the wheel ship a `vibesys-host-helper` console
-   script whose interpreter is the bootstrap's, so step 2 needs no `#!` parsing?
-5. **`run.stop` interim.** Accept the one lazily imported stop path in phase 4, or split the run
-   protocol's control envelope first?
+1. **Host-side `runs.list` replaces `projects.recent`; Recent stays app-owned.** Alternative: a
+   per-user recent-projects list kept on each host. Reason: one writer for the Recent list; the
+   host only reports facts it owns.
+2. **Ended-run tombstones are kept 24 hours, then removed by the next listing.** Alternative: keep
+   until a client acknowledges the ended run. Reason: no coupling to client acknowledgements; a day
+   covers reattach after sleep, and a weekend is out of scope because finished runs stay reachable
+   from run history, not the live registry.
+3. **No new `fast-check` dependency.** Store invariant tests use a seeded generator run across many
+   seeds, with failing seeds printed for replay. Reason: avoids a dependency for what the existing
+   seeded approach already gives; revisit if shrinking becomes necessary.
+4. **The wheel ships a `vibesys-host-helper` console script.** The bootstrap prefers it and falls
+   back to `python -m entrypoints.host_helper` from the checkout. Reason: installed hosts need no
+   `#!` parsing.
+5. **Split the run protocol's control envelope before the helper lands.** Alternative: accept one
+   lazily imported stop path as a guard exception in phase 4. Reason: an exception in the guard is
+   exactly the kind of hole the guard exists to prevent.
