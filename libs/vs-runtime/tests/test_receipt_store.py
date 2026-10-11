@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,6 +26,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.executor_contexts import RevocableLease, context_for
 from vs_runtime.api.operation_fixtures import SCOPE
+from vs_sim.api.testing import Gate
 
 if TYPE_CHECKING:
     from vs_runtime.api.core import ExecutionContext
@@ -65,10 +67,80 @@ class Performer:
         return Settled(Done(value=self.calls))
 
 
+class HeldPerformer:
+    """A counted effect whose completion the test controls."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.started = Gate()
+        self.release = Gate()
+
+    async def __call__(self, *, resumed: bool) -> Settled[Done]:
+        del resumed
+        self.calls += 1
+        self.started.open()
+        await self.release.wait()
+        return Settled(Done(value=1))
+
+
+class HeldTransientPerformer:
+    """A transient effect whose completion the test controls."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.started = Gate()
+        self.release = Gate()
+
+    async def __call__(self, *, resumed: bool) -> Transient[Done]:
+        del resumed
+        self.calls += 1
+        self.started.open()
+        await self.release.wait()
+        return Transient(Done(value=1))
+
+
+class PerformerError(RuntimeError):
+    """An ordinary performer failure the receipt boundary must propagate."""
+
+    def __init__(self) -> None:
+        super().__init__("performer failed")
+
+
+class HeldFailingPerformer:
+    """A failing effect whose exception the test releases after a follower queues."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.started = Gate()
+        self.release = Gate()
+
+    async def __call__(self, *, resumed: bool) -> Settled[Done]:
+        del resumed
+        self.calls += 1
+        self.started.open()
+        await self.release.wait()
+        raise PerformerError
+
+
 async def run(
-    store: ReceiptStore, effect: Performer, context: ExecutionContext, key: str = "r1"
+    store: ReceiptStore,
+    effect: Performer | HeldPerformer | HeldTransientPerformer | HeldFailingPerformer,
+    context: ExecutionContext,
+    key: str = "r1",
 ) -> object:
     return await store.run_once(key, owner="o", context=context, result_type=Done, perform=effect)
+
+
+async def scheduled_run(
+    store: ReceiptStore,
+    effect: Performer | HeldPerformer | HeldTransientPerformer | HeldFailingPerformer,
+    context: ExecutionContext,
+    scheduled: Gate,
+    key: str = "r1",
+) -> object:
+    """Announce delivery before entering the public receipt boundary."""
+    scheduled.open()
+    return await run(store, effect, context, key)
 
 
 def store_at(root: Path) -> ReceiptStore:
@@ -92,6 +164,183 @@ async def test_a_settled_effect_runs_once_however_often_the_request_is_replayed(
             again = await run(store_at(Path(raw)), effect, ctx)
             assert again == Replayed(first.result)
         assert effect.calls == 1
+
+
+async def test_a_live_duplicate_waits_for_and_replays_the_in_flight_result() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        store = store_at(Path(raw))
+        effect = HeldPerformer()
+        context = context_for(request())
+        first = asyncio.create_task(run(store, effect, context))
+        await effect.started.wait(first)
+        scheduled = Gate()
+        duplicate = asyncio.create_task(scheduled_run(store, effect, context, scheduled))
+        await scheduled.wait(duplicate)
+
+        assert effect.calls == 1
+        effect.release.open()
+        performed, shared = await asyncio.gather(first, duplicate)
+
+        assert performed == Performed(Done(value=1))
+        assert shared is performed
+        assert await run(store, Performer(), context) == Replayed(Done(value=1))
+
+
+@settings(deadline=None, max_examples=20)
+@given(duplicates=st.integers(min_value=1, max_value=5))
+async def test_any_number_of_live_duplicates_share_one_performer(duplicates: int) -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        store = store_at(Path(raw))
+        effect = HeldPerformer()
+        context = context_for(request())
+        first = asyncio.create_task(run(store, effect, context))
+        await effect.started.wait(first)
+        scheduled = [Gate() for _ in range(duplicates)]
+        followers = [
+            asyncio.create_task(scheduled_run(store, effect, context, gate)) for gate in scheduled
+        ]
+        for gate, follower in zip(scheduled, followers, strict=True):
+            await gate.wait(follower)
+
+        assert effect.calls == 1
+        effect.release.open()
+        results = await asyncio.gather(first, *followers)
+
+        assert results == [Performed(Done(value=1)) for _ in range(duplicates + 1)]
+        assert all(result is results[0] for result in results)
+
+
+async def test_live_duplicates_share_a_transient_outcome_before_a_later_retry() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        store = store_at(Path(raw))
+        effect = HeldTransientPerformer()
+        context = context_for(request())
+        first = asyncio.create_task(run(store, effect, context))
+        await effect.started.wait(first)
+        scheduled = Gate()
+        duplicate = asyncio.create_task(scheduled_run(store, effect, context, scheduled))
+        await scheduled.wait(duplicate)
+
+        effect.release.open()
+        original, shared = await asyncio.gather(first, duplicate)
+
+        assert original == Performed(Done(value=1))
+        assert shared is original
+        assert effect.calls == 1
+
+        retry = Performer()
+        assert await run(store, retry, context) == Performed(Done(value=1))
+        assert retry.resumed == [True]
+
+
+async def test_a_conflicting_live_duplicate_never_enters_the_performer() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        store = store_at(Path(raw))
+        effect = HeldPerformer()
+        first_context = context_for(request())
+        conflicting = context_for(request().model_copy(update={"diagnostic": "other"}))
+        first = asyncio.create_task(run(store, effect, first_context))
+        await effect.started.wait(first)
+        scheduled = Gate()
+        duplicate = asyncio.create_task(scheduled_run(store, effect, conflicting, scheduled))
+        await scheduled.wait(duplicate)
+
+        assert effect.calls == 1
+        effect.release.open()
+        performed, rejected = await asyncio.gather(first, duplicate)
+
+        assert performed == Performed(Done(value=1))
+        assert rejected == Conflict()
+
+
+async def test_canceling_a_live_duplicate_does_not_cancel_the_performer() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        store = store_at(Path(raw))
+        effect = HeldPerformer()
+        context = context_for(request())
+        first = asyncio.create_task(run(store, effect, context))
+        await effect.started.wait(first)
+        scheduled = Gate()
+        duplicate = asyncio.create_task(scheduled_run(store, effect, context, scheduled))
+        await scheduled.wait(duplicate)
+
+        duplicate.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await duplicate
+        assert effect.calls == 1
+
+        effect.release.open()
+        assert await first == Performed(Done(value=1))
+
+
+async def test_canceling_the_active_delivery_is_shared_with_its_queued_follower() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        store = store_at(Path(raw))
+        context = context_for(request())
+        leader_effect = HeldPerformer()
+        leader = asyncio.create_task(run(store, leader_effect, context))
+        await leader_effect.started.wait(leader)
+        scheduled = Gate()
+        follower = asyncio.create_task(scheduled_run(store, leader_effect, context, scheduled))
+        await scheduled.wait(follower)
+        assert not follower.done()
+
+        leader.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await leader
+        leader_effect.release.open()
+        with pytest.raises(asyncio.CancelledError):
+            await follower
+        assert leader_effect.calls == 1
+
+        retry = Performer()
+        assert await run(store, retry, context) == Performed(Done(value=1))
+        assert retry.resumed == [True]
+
+
+async def test_a_performer_exception_is_shared_with_its_queued_follower() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        store = store_at(Path(raw))
+        context = context_for(request())
+        leader_effect = HeldFailingPerformer()
+        leader = asyncio.create_task(run(store, leader_effect, context))
+        await leader_effect.started.wait(leader)
+        scheduled = Gate()
+        follower = asyncio.create_task(scheduled_run(store, leader_effect, context, scheduled))
+        await scheduled.wait(follower)
+        assert not follower.done()
+
+        leader_effect.release.open()
+        with pytest.raises(PerformerError, match="performer failed") as original:
+            await leader
+        with pytest.raises(PerformerError, match="performer failed") as shared:
+            await follower
+        assert shared.value is original.value
+        assert leader_effect.calls == 1
+
+        retry = Performer()
+        assert await run(store, retry, context) == Performed(Done(value=1))
+        assert retry.resumed == [True]
+
+
+async def test_different_request_identities_remain_concurrent() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        store = store_at(Path(raw))
+        effect = HeldPerformer()
+        first = asyncio.create_task(run(store, effect, context_for(request("r1")), "r1"))
+        await effect.started.wait(first)
+        scheduled = Gate()
+        second = asyncio.create_task(
+            scheduled_run(store, effect, context_for(request("r2")), scheduled, "r2")
+        )
+        await scheduled.wait(second)
+
+        assert effect.calls == 2
+        effect.release.open()
+        assert await asyncio.gather(first, second) == [
+            Performed(Done(value=1)),
+            Performed(Done(value=1)),
+        ]
 
 
 async def test_a_transient_result_is_not_sealed_and_the_retry_is_told_it_resumes() -> None:

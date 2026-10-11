@@ -16,13 +16,14 @@ it is resuming, so it inspects instead of repeating.
 
 from __future__ import annotations
 
+import asyncio
 import fcntl
 import hashlib
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -140,6 +141,25 @@ class Performer[ResultT: BaseModel](Protocol):
 type Execution[ResultT: BaseModel] = Replayed[ResultT] | Performed[ResultT] | Conflict | Declined
 
 
+@dataclass(frozen=True, slots=True)
+class _Returned:
+    execution: object
+
+
+@dataclass(frozen=True, slots=True)
+class _Raised:
+    error: BaseException
+
+
+type _RunOutcome = _Returned | _Raised
+
+
+@dataclass(frozen=True, slots=True)
+class _RunGate:
+    payload_digest: str
+    outcome: asyncio.Future[_RunOutcome]
+
+
 class ReceiptStore:
     """Atomic, cross-process receipt files below one state namespace."""
 
@@ -152,6 +172,7 @@ class ReceiptStore:
         self._lock_path = namespace.external_directory() / "receipts.lock"
         self._guard = threading.RLock()
         self._depth = 0
+        self._run_gates: dict[str, _RunGate] = {}
 
     @staticmethod
     def _path(family: str, part: str, key: str) -> str:
@@ -310,8 +331,68 @@ class ReceiptStore:
         request and may have finished its effect, so the effect must inspect before
         it repeats anything. A ``Settled`` result is sealed only while authority
         still holds; a ``Transient`` one is returned unsealed, and the next attempt
-        resumes from the ``begun`` marker.
+        resumes from the ``begun`` marker. Concurrent identical deliveries to this
+        live store share one outcome by ``key``. Only a delivery arriving after that
+        in-flight outcome retires can resume an unsealed attempt.
         """
+        admitted = self._admit_run(key, context.payload_digest)
+        if isinstance(admitted, Conflict):
+            return admitted
+        gate, leader = admitted
+        if not leader:
+            return await self._share_run(gate)
+        try:
+            execution = await self._execute_once(
+                key,
+                owner=owner,
+                context=context,
+                result_type=result_type,
+                perform=perform,
+            )
+        except BaseException as error:
+            gate.outcome.set_result(_Raised(error))
+            raise
+        else:
+            gate.outcome.set_result(_Returned(execution))
+            return execution
+        finally:
+            self._retire_run(key, gate)
+
+    def _admit_run(self, key: str, payload_digest: str) -> tuple[_RunGate, bool] | Conflict:
+        """Join an identical in-flight run, reject a conflict, or become its leader."""
+        with self._guard:
+            gate = self._run_gates.get(key)
+            if gate is not None:
+                if gate.payload_digest != payload_digest:
+                    return Conflict()
+                return gate, False
+            gate = _RunGate(payload_digest, asyncio.get_running_loop().create_future())
+            self._run_gates[key] = gate
+            return gate, True
+
+    async def _share_run[ResultT: BaseModel](self, gate: _RunGate) -> Execution[ResultT]:
+        """Wait without letting this follower cancel the shared leader."""
+        outcome = await asyncio.shield(gate.outcome)
+        if isinstance(outcome, _Raised):
+            raise outcome.error
+        return cast("Execution[ResultT]", outcome.execution)
+
+    def _retire_run(self, key: str, gate: _RunGate) -> None:
+        """Forget the completed leader so a later delivery can resume durable state."""
+        with self._guard:
+            if self._run_gates.get(key) is gate:
+                del self._run_gates[key]
+
+    async def _execute_once[ResultT: BaseModel](
+        self,
+        key: str,
+        *,
+        owner: str,
+        context: ExecutionContext,
+        result_type: type[ResultT],
+        perform: Performer[ResultT],
+    ) -> Execution[ResultT]:
+        """Apply the durable receipt state machine for one admitted leader."""
         try:
             start = self._start(key, owner, context, result_type)
             if not isinstance(start, bool):

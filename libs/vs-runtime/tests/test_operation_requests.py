@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import tempfile
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -65,15 +67,16 @@ from vs_runtime.api.operation_fixtures import (
 )
 from vs_runtime.api.operation_fixtures import revision as revision_ref
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
+from vs_sim.api.testing import Gate
 
 pytestmark = pytest.mark.asyncio
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterator
+    from collections.abc import Awaitable, Callable, Iterator, Mapping
 
     from pydantic import BaseModel
 
-    from vs_core.api import Request
+    from vs_core.api import OperationRequest, Request
     from vs_project.api import StateNamespace
 
 FENCE = HostFence(host_id=HostId(root="host"), epoch=1)
@@ -131,6 +134,24 @@ class CrashingReceipts(NamespaceOperationReceipts):
         self._maybe("after_intent")
 
 
+class HeldEchoOwner(EchoOwner):
+    """The public EchoOwner with an explicit gate around its external effect."""
+
+    def __init__(self, owner: EchoOwner) -> None:
+        super().__init__(owner.log)
+        self.calls = 0
+        self.started = Gate()
+        self.release = Gate()
+
+    async def execute(
+        self, request: OperationRequest, context: ExecutionContext
+    ) -> BaseModel | Mapping[str, object]:
+        self.calls += 1
+        self.started.open()
+        await self.release.wait()
+        return await super().execute(request, context)
+
+
 @contextmanager
 def workspace() -> Iterator[tuple[Path, StateNamespace]]:
     with tempfile.TemporaryDirectory() as raw:
@@ -161,6 +182,37 @@ def pick(items: tuple[OperationScenario, ...], name: str) -> OperationScenario:
 async def test_every_scenario_name_is_listed_so_none_escapes_the_shared_tests() -> None:
     with workspace() as (root, namespace):
         assert tuple(item.name for item in scenarios(root, namespace)) == SCENARIO_NAMES
+
+
+async def test_concurrent_deliveries_execute_one_registered_operation() -> None:
+    with workspace() as (root, namespace):
+        items = scenarios(root, namespace)
+        echo = pick(items, "echo")
+        owner = echo.entry.owner
+        assert isinstance(owner, EchoOwner)
+        held = HeldEchoOwner(owner)
+        entry = OperationEntry.owned(echo.entry.registration, held)
+        items = tuple(replace(item, entry=entry) if item is echo else item for item in items)
+        request = execute_request(catalog_of(items), echo.request, "req-concurrent")
+        context = context_for(request)
+        runner = executor(items, namespace)
+        first = asyncio.create_task(runner.execute(request, context))
+        await held.started.wait(first)
+        scheduled = Gate()
+
+        async def deliver_again() -> ExecutionResult:
+            scheduled.open()
+            return await runner.execute(request, context)
+
+        duplicate = asyncio.create_task(deliver_again())
+        await scheduled.wait(duplicate)
+
+        assert held.calls == 1
+        held.release.open()
+        original, replay = await asyncio.gather(first, duplicate)
+
+        assert observed(replay) == observed(original)
+        assert echo.effects() == 1
 
 
 async def baseline(name: str) -> tuple[RequestObserved, int]:
