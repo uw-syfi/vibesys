@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import {HostError} from './host.js';
 import {type CheckedHost, HostPool} from './host-pool.js';
 import type {HostId} from './host-settings.js';
+import {SettingsStore} from './settings-store.js';
 import {FakeHost} from './testing/fake-host.js';
 import {fakeRecord} from './testing/fake-record.js';
 
@@ -29,8 +30,11 @@ function pool(
   const built: Built[] = [];
   const hosts = new HostPool({
     sshConfigPath: join(directory, 'config'),
-    settingsPath: join(directory, 'hosts.json'),
-    recentPath: join(directory, 'recent.json'),
+    settings: new SettingsStore({
+      settingsPath: join(directory, 'hosts.json'),
+      recentPath: join(directory, 'recent.json'),
+      log: message => logged.push(message),
+    }),
     localCheckout: '/Users/me/src/vibesys',
     factory: async (id, checkout) => {
       built.push({id, checkout});

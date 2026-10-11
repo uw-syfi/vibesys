@@ -1,22 +1,15 @@
 import {describe, expect, test} from 'bun:test';
 import {parseInstanceRecord} from './instances.js';
-import {type StopView, stopKey} from './stop-run.js';
-import {parseTaskList} from './task-list.js';
+import {parseTaskList, taskListProblem} from './task-list.js';
+import {randomChrome} from './testing/fake-chrome.js';
 import {fakeRecord} from './testing/fake-record.js';
+import {Seeded} from './testing/seeded.js';
 import {
   filterHosts,
-  hostOnReturn,
   moveSelection,
-  NO_TASKS,
-  recentChanged,
   stripControls,
   suggestCheckout,
   suggestProjects,
-  type TaskPicker,
-  taskChosen,
-  tasksAnswered,
-  tasksCleared,
-  tasksRequested,
 } from './welcome-model.js';
 import type {ChromeState} from './welcome-protocol.js';
 
@@ -143,147 +136,50 @@ describe('parseTaskList', () => {
   });
 });
 
-const TASKS = ['mpmc', 'mpsc', 'spsc', 'verus-mpmc-open'];
-
-function pick<T>(random: () => number, items: readonly T[]): T {
-  const item = items[Math.floor(random() * items.length)];
-  if (item === undefined) throw new Error('pick from an empty list');
-  return item;
-}
-
-describe('task picker', () => {
-  test('regression: a slow earlier list never clears the task the user picked', () => {
-    let picker = tasksRequested(NO_TASKS);
-    const first = picker.request;
-    picker = tasksRequested(picker);
-    picker = tasksAnswered(picker, picker.request, {ok: true, tasks: TASKS});
-    picker = taskChosen(picker, 'mpsc');
-    const after = tasksAnswered(picker, first, {ok: true, tasks: TASKS});
-    expect(after).toBe(picker);
-    expect(after.chosen).toBe('mpsc');
-  });
-
-  /** One random user or host event; answers may come for any request issued so far. */
-  function randomStep(random: () => number, picker: TaskPicker, issued: number[]): TaskPicker {
-    const roll = random();
-    if (roll < 0.25) {
-      const next = tasksRequested(picker);
-      issued.push(next.request);
-      return next;
+describe('taskListProblem', () => {
+  test('regression: task-list errors are plain language, never a command line or usage dump', () => {
+    const cases: [string, string][] = [
+      [
+        'vibesys tasks: Project root does not exist: /x',
+        'Could not read the tasks of /x: Project root does not exist: /x',
+      ],
+      [
+        'usage: vibesys [-h] ...\nvibesys: error: argument command: invalid choice: tasks',
+        'The VibeSys checkout on this host is too old to list tasks. Update it, then try again.',
+      ],
+    ];
+    for (const [stderr, expected] of cases) {
+      expect(taskListProblem('/x', {kind: 'exited', stderr})).toBe(expected);
     }
-    if (roll < 0.3) return tasksCleared(picker);
-    if (roll < 0.7 && issued.length > 0) {
-      const request = pick(random, issued);
-      const tasks = TASKS.slice(0, Math.floor(random() * (TASKS.length + 1)));
-      const answer =
-        random() < 0.2 ? ({ok: false, error: 'no'} as const) : ({ok: true, tasks} as const);
-      const next = tasksAnswered(picker, request, answer);
-      if (request !== picker.request) expect(next).toBe(picker);
-      return next;
+    const random = new Seeded(5);
+    for (let round = 0; round < 200; round += 1) {
+      const stderr = Array.from({length: random.int(4)}, () =>
+        random.pick(['usage: vibesys', 'Traceback', 'vibesys tasks --json', 'exited with 2', '']),
+      ).join('\n');
+      const said = taskListProblem('/p', {kind: 'exited', stderr});
+      expect(said).not.toContain('--json');
+      expect(said).not.toContain('exited with');
+      expect(said).not.toContain('usage:');
     }
-    return taskChosen(picker, pick(random, [...TASKS, 'unknown']));
-  }
-
-  test('chosen is always a listed task, and only the latest request is ever shown', () => {
-    const random = generator(7);
-    for (let round = 0; round < 300; round += 1) {
-      let picker: TaskPicker = NO_TASKS;
-      const issued: number[] = [];
-      for (let step = 0; step < 12; step += 1) {
-        picker = randomStep(random, picker, issued);
-        const listed = picker.list.kind === 'listed' ? picker.list.tasks : [];
-        if (picker.chosen !== null) expect(listed).toContain(picker.chosen);
-      }
-    }
-  });
-
-  test('a project with one task has it chosen', () => {
-    const picker = tasksRequested(NO_TASKS);
-    expect(tasksAnswered(picker, picker.request, {ok: true, tasks: ['spsc']}).chosen).toBe('spsc');
-    expect(tasksAnswered(picker, picker.request, {ok: true, tasks: TASKS}).chosen).toBeNull();
   });
 });
 
-type Attached = NonNullable<ChromeState['attached']>;
-
-function attachedRun(random: () => number): Attached {
-  const ended = random() < 0.3;
-  return {
-    host: pick(random, ['local', 'ssh:gpu']),
-    hostLabel: 'h',
-    instanceId: pick(random, [null, '0123456789ab', 'ba9876543210']),
-    runId: pick(random, [null, 'run-1']),
-    project: '/p',
-    status: ended ? 'run ended' : pick(random, ['connected', 'cannot connect', 'connecting']),
-    detail: '',
-    stuck: ended || random() < 0.4,
-    ended,
-  };
-}
-
-function chromeState(random: () => number): ChromeState {
-  const attached = random() < 0.2 ? null : attachedRun(random);
-  const stops: Record<string, StopView> = {};
-  if (attached?.instanceId != null && random() < 0.6) {
-    const phase = pick(random, ['idle', 'stopping', 'ended', 'error'] as const);
-    stops[stopKey(attached.host, attached.instanceId)] = {
-      phase,
-      text: phase,
-      canForce: phase === 'error' && random() < 0.5,
-    };
+/** The strip's controls agree with the window state they come from. */
+function checkStrip(state: ChromeState): void {
+  const controls = stripControls(state);
+  if (controls.resume) {
+    expect([controls.retry, controls.stop, controls.force]).toEqual([false, false, false]);
   }
-  return {mode: pick(random, ['welcome', 'run'] as const), attached, stops};
+  if (state.attached?.link === 'ended') expect(controls.resume).toBe(true);
+  expect(controls.retry).toBe(state.attached?.link === 'stuck' && !controls.resume);
+  if (state.attached === null) expect(Object.values(controls).some(Boolean)).toBe(false);
+  expect(controls.back).toBe(state.attached !== null && state.mode === 'welcome');
+  if (controls.stop) expect(state.attached?.instanceId).not.toBeNull();
 }
 
 describe('stripControls', () => {
   test('regression: an ended run offers Resume and never Retry', () => {
-    const random = generator(3);
-    for (let round = 0; round < 500; round += 1) {
-      const state = chromeState(random);
-      const controls = stripControls(state);
-      if (controls.resume) {
-        expect(controls.retry).toBe(false);
-        expect(controls.stop).toBe(false);
-        expect(controls.force).toBe(false);
-      }
-      if (state.attached?.ended === true) expect(controls.resume).toBe(true);
-      if (state.attached === null) expect(Object.values(controls).some(Boolean)).toBe(false);
-      expect(controls.back).toBe(state.attached !== null && state.mode === 'welcome');
-      if (controls.stop) expect(state.attached?.instanceId).not.toBeNull();
-    }
-  });
-});
-
-describe('recentChanged', () => {
-  test('regression: attaching to a different run, or learning its id, changes the recent runs', () => {
-    const random = generator(11);
-    for (let round = 0; round < 500; round += 1) {
-      const before = chromeState(random);
-      const after = chromeState(random);
-      const same =
-        after.attached === null ||
-        (before.attached !== null &&
-          before.attached.host === after.attached.host &&
-          before.attached.instanceId === after.attached.instanceId &&
-          before.attached.runId === after.attached.runId);
-      expect(recentChanged(before, after)).toBe(!same);
-      expect(recentChanged(after, after)).toBe(false);
-    }
-  });
-});
-
-describe('hostOnReturn', () => {
-  test('regression: coming back to the welcome view redraws the attached run host panel', () => {
-    const random = generator(17);
-    for (let round = 0; round < 500; round += 1) {
-      const before = chromeState(random);
-      const after = chromeState(random);
-      const shown = pick(random, ['local', 'ssh:gpu-box', 'ssh:login-node'] as const);
-      const returned = before.mode === 'run' && after.mode === 'welcome';
-      expect(hostOnReturn(before, after, shown)).toBe(
-        returned ? (after.attached?.host ?? shown) : null,
-      );
-      expect(hostOnReturn(after, after, shown)).toBeNull();
-    }
+    const random = new Seeded(3);
+    for (let round = 0; round < 500; round += 1) checkStrip(randomChrome(random));
   });
 });

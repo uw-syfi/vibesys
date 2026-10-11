@@ -1,9 +1,9 @@
 /**
- * The welcome view's decisions, as pure functions: which hosts the host list shows for a query,
- * where the keyboard selection moves, and what the checkout and project fields suggest. The page
- * and the main process only render and fetch; every choice is made here and tested here.
+ * The welcome view's pure decisions shared by its stores (`welcome/`) and the main process: which
+ * hosts the host list shows for a query, where the keyboard selection moves, what the checkout and
+ * project fields suggest, and which title-strip controls a window state allows.
  */
-import {type HostKey, validAlias} from './host-settings.js';
+import {validAlias} from './host-settings.js';
 import type {InstanceRecord} from './instances.js';
 import type {RecentRun} from './recent.js';
 import {stopKey} from './stop-run.js';
@@ -108,97 +108,14 @@ export function stripControls(state: ChromeState): StripControls {
     attached.instanceId === null
       ? undefined
       : state.stops[stopKey(attached.host, attached.instanceId)];
-  const ended = attached.ended || stop?.phase === 'ended';
+  const ended = attached.link === 'ended' || stop?.phase === 'ended';
   return {
     stop: attached.instanceId !== null && !ended && stop?.phase !== 'stopping',
     force: !ended && (stop?.canForce ?? false),
     resume: ended,
-    retry: attached.stuck && !ended,
+    retry: attached.link === 'stuck' && !ended,
     back: state.mode === 'welcome',
     stopText: ended ? '' : (stop?.text ?? ''),
     stopError: !ended && stop?.phase === 'error',
   };
-}
-
-/**
- * True when the recent runs may have changed between two window states: a different run is now
- * attached, or the attached run's id became known (the main process records the run each time).
- */
-export function recentChanged(before: ChromeState, after: ChromeState): boolean {
-  const run = after.attached;
-  if (run === null) return false;
-  const was = before.attached;
-  return (
-    was === null ||
-    was.host !== run.host ||
-    was.instanceId !== run.instanceId ||
-    was.runId !== run.runId
-  );
-}
-
-/**
- * The host panel to redraw when the window comes back from a run to the welcome view, or null when
- * it did not. The run's host when one is attached (its panel lists that run), else the panel shown
- * (`shown`). The lists were drawn before the run view covered them, so they are stale by now.
- */
-export function hostOnReturn(
-  before: ChromeState,
-  after: ChromeState,
-  shown: HostKey,
-): HostKey | null {
-  if (before.mode !== 'run' || after.mode !== 'welcome') return null;
-  return after.attached?.host ?? shown;
-}
-
-/** The task list of "Start a run": what the latest "List tasks" answered. */
-type TaskList =
-  | {readonly kind: 'idle'}
-  | {readonly kind: 'loading'}
-  | {readonly kind: 'listed'; readonly tasks: readonly string[]}
-  | {readonly kind: 'failed'; readonly error: string};
-
-/**
- * The task picker: the latest list request, its answer, and the chosen task. Only the latest
- * request's answer is shown, so a slow earlier answer never replaces the list the user picked
- * from. `chosen` is always one of the listed tasks, or null.
- */
-export interface TaskPicker {
-  readonly request: number;
-  readonly list: TaskList;
-  readonly chosen: string | null;
-}
-
-export type TaskAnswer =
-  | {readonly ok: true; readonly tasks: readonly string[]}
-  | {readonly ok: false; readonly error: string};
-
-export const NO_TASKS: TaskPicker = {request: 0, list: {kind: 'idle'}, chosen: null};
-
-/** No list (the form was opened again); answers to earlier requests are ignored. */
-export function tasksCleared(picker: TaskPicker): TaskPicker {
-  return {request: picker.request + 1, list: {kind: 'idle'}, chosen: null};
-}
-
-/** A new list request, numbered `request`; earlier requests' answers are ignored from now on. */
-export function tasksRequested(picker: TaskPicker): TaskPicker {
-  return {request: picker.request + 1, list: {kind: 'loading'}, chosen: null};
-}
-
-/** Request `request` answered; a project with exactly one task has it chosen. */
-export function tasksAnswered(picker: TaskPicker, request: number, answer: TaskAnswer): TaskPicker {
-  if (request !== picker.request || picker.list.kind !== 'loading') return picker;
-  if (!answer.ok) return {...picker, list: {kind: 'failed', error: answer.error}};
-  const [only, ...rest] = answer.tasks;
-  return {
-    ...picker,
-    list: {kind: 'listed', tasks: answer.tasks},
-    chosen: only !== undefined && rest.length === 0 ? only : null,
-  };
-}
-
-/** The user picked `task`; ignored unless the shown list has it. */
-export function taskChosen(picker: TaskPicker, task: string): TaskPicker {
-  return picker.list.kind === 'listed' && picker.list.tasks.includes(task)
-    ? {...picker, chosen: task}
-    : picker;
 }

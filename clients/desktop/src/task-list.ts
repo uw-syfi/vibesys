@@ -56,3 +56,26 @@ export function parseTaskList(value: unknown): TaskList {
     }),
   };
 }
+
+/** What failed while listing a project's tasks, as the host reported it. */
+export type TaskListFailure =
+  /** `vibesys tasks` exited unsuccessfully; `stderr` is what it printed. */
+  | {readonly kind: 'exited'; readonly stderr: string}
+  /** It printed something that is not a task list this app reads. */
+  | {readonly kind: 'unreadable'};
+
+/**
+ * The sentence the start-run sheet shows when `project`'s tasks could not be listed: plain
+ * language, never a command line or a usage dump.
+ */
+export function taskListProblem(project: string, failure: TaskListFailure): string {
+  if (failure.kind === 'unreadable') {
+    return 'The VibeSys checkout on this host answered with a task list this app cannot read. Update the checkout or the app.';
+  }
+  const said = /^vibesys tasks: (.+)$/m.exec(failure.stderr)?.[1]?.trim();
+  if (said !== undefined) return `Could not read the tasks of ${project}: ${said}`;
+  if (/usage:|invalid choice|unrecognized arguments/i.test(failure.stderr)) {
+    return 'The VibeSys checkout on this host is too old to list tasks. Update it, then try again.';
+  }
+  return `Could not read the tasks of ${project}. The host's VibeSys reported an error; the app log has its output.`;
+}

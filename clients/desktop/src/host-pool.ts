@@ -7,16 +7,13 @@
  * the recent-runs list. Electron-free: the main process supplies paths and the system, and tests
  * supply a `HostFactory` over fakes.
  */
-import {readFile, rename, writeFile} from 'node:fs/promises';
+import {readFile} from 'node:fs/promises';
 import type {Host} from './host.js';
 import {HostError} from './host.js';
 import {
-  EMPTY_SETTINGS,
   type HostId,
   hostKey,
   hostLabel,
-  parseSettings,
-  type SettingsFile,
   settingsFor,
   sshConfigHosts,
   validHostPath,
@@ -29,9 +26,10 @@ import {
   versionSkewMessage,
 } from './instances.js';
 import {checkLocalCheckout, checkoutPython, LocalHost} from './local-host.js';
-import {EMPTY_RECENT, parseRecent, type RecentFile, type RecentRun, remember} from './recent.js';
+import {type RecentFile, type RecentRun, remember} from './recent.js';
+import type {SettingsStore} from './settings-store.js';
 import {SshHost} from './ssh-host.js';
-import {parseTaskList} from './task-list.js';
+import {parseTaskList, taskListProblem} from './task-list.js';
 import type {WelcomeRun} from './welcome-protocol.js';
 
 /** A `Host` that can also check the checkout it was built with. */
@@ -47,8 +45,8 @@ export type HostFactory = (id: HostId, checkout: string) => Promise<CheckedHost>
 
 export interface HostPoolOptions {
   readonly sshConfigPath: string;
-  readonly settingsPath: string;
-  readonly recentPath: string;
+  /** The settings files' one writer. */
+  readonly settings: SettingsStore;
   /** This Mac's checkout when the user has not set one: the checkout the app was built from. */
   readonly localCheckout: string;
   readonly factory: HostFactory;
@@ -78,23 +76,15 @@ export class HostPool {
   readonly #hosts = new Map<string, Promise<CheckedHost>>();
   /** Hosts replaced by a checkout change, still serving the run attached through them. */
   readonly #retired: Promise<CheckedHost>[] = [];
-  #settingsProblem: string | null = null;
-  /** The last update of `recent.json`; each update reads the file the one before wrote. */
-  #recentUpdate: Promise<void> = Promise.resolve();
 
   constructor(options: HostPoolOptions) {
     this.#options = options;
   }
 
-  /** Why the settings file was ignored, when it was. */
-  get settingsProblem(): string | null {
-    return this.#settingsProblem;
-  }
-
   /** Why the settings file is ignored, reading it afresh; null when it is fine or absent. */
   async settingsCheck(): Promise<string | null> {
-    await this.#settings();
-    return this.#settingsProblem;
+    await this.#options.settings.hosts();
+    return this.#options.settings.hostsProblem;
   }
 
   /** Establish the link to `id` now, prompting when the host asks (the user's own action). */
@@ -114,7 +104,7 @@ export class HostPool {
 
   /** The checkout `id` runs VibeSys from, or null when the user has not set one. */
   async checkout(id: HostId): Promise<string | null> {
-    const saved = settingsFor(await this.#settings(), id)?.checkout ?? null;
+    const saved = settingsFor(await this.#options.settings.hosts(), id)?.checkout ?? null;
     if (saved !== null) return saved;
     return id.kind === 'local' ? this.#options.localCheckout : null;
   }
@@ -150,8 +140,7 @@ export class HostPool {
     const checkout = validHostPath(path, `the VibeSys checkout on ${hostLabel(id)}`);
     const candidate = this.#options.factory(id, checkout);
     const root = await (await candidate).verifyCheckout();
-    const next = withHostSettings(await this.#settings(), id, {checkout});
-    await writeJson(this.#options.settingsPath, next);
+    await this.#options.settings.updateHosts(current => withHostSettings(current, id, {checkout}));
     const key = hostKey(id);
     const previous = this.#hosts.get(key);
     if (previous !== undefined) this.#retired.push(previous);
@@ -216,35 +205,41 @@ export class HostPool {
     return (await this.host(id)).stopInstance(instanceId, {force});
   }
 
-  /** The tasks `project` defines on `id`, read with `vibesys tasks PROJECT --json`. */
+  /**
+   * The tasks `project` defines on `id`, read with `vibesys tasks PROJECT --json`. A failure of the
+   * command is reported in plain language (`taskListProblem`); its own output goes to the log.
+   */
   async tasks(id: HostId, project: unknown): Promise<string[]> {
     const path = validHostPath(project, 'the project directory');
     const host = await this.host(id);
-    return [...parseTaskList(await host.invoke(['tasks', path, '--json'])).tasks];
+    let listing: unknown;
+    try {
+      listing = await host.invoke(['tasks', path, '--json']);
+    } catch (error) {
+      if (!(error instanceof HostError)) throw error;
+      if (error.kind !== 'failed' && error.kind !== 'malformed') throw error;
+      this.#options.log(`listing the tasks of ${path} on ${hostLabel(id)}: ${error.message}`);
+      const failure =
+        error.kind === 'malformed'
+          ? ({kind: 'unreadable'} as const)
+          : ({kind: 'exited', stderr: error.stderr ?? ''} as const);
+      throw new HostError(error.kind, taskListProblem(path, failure));
+    }
+    try {
+      return [...parseTaskList(listing).tasks];
+    } catch (error) {
+      this.#options.log(`listing the tasks of ${path}: ${(error as Error).message}`);
+      throw new HostError('malformed', taskListProblem(path, {kind: 'unreadable'}));
+    }
   }
 
   async recent(): Promise<RecentFile> {
-    let text: string;
-    try {
-      text = await readFile(this.#options.recentPath, 'utf8');
-    } catch {
-      return EMPTY_RECENT;
-    }
-    try {
-      return parseRecent(JSON.parse(text) as unknown);
-    } catch (error) {
-      this.#options.log(`ignoring ${this.#options.recentPath}: ${(error as Error).message}`);
-      return EMPTY_RECENT;
-    }
+    return this.#options.settings.recent();
   }
 
-  /** Record `run` in `recent.json`. Updates run one at a time, so none overwrites another. */
+  /** Record `run` in the recent runs (through the settings store, the files' one writer). */
   async remember(run: RecentRun): Promise<void> {
-    const update = this.#recentUpdate.then(async () => {
-      await writeJson(this.#options.recentPath, remember(await this.recent(), run));
-    });
-    this.#recentUpdate = update.catch(() => undefined);
-    await update;
+    await this.#options.settings.updateRecent(current => remember(current, run));
   }
 
   async closeAll(): Promise<void> {
@@ -259,33 +254,4 @@ export class HostPool {
       ),
     );
   }
-
-  async #settings(): Promise<SettingsFile> {
-    let text: string;
-    try {
-      text = await readFile(this.#options.settingsPath, 'utf8');
-    } catch {
-      this.#settingsProblem = null;
-      return EMPTY_SETTINGS;
-    }
-    try {
-      const parsed = parseSettings(JSON.parse(text) as unknown);
-      this.#settingsProblem = null;
-      return parsed;
-    } catch (error) {
-      this.#settingsProblem = `${this.#options.settingsPath}: ${(error as Error).message}`;
-      this.#options.log(`ignoring ${this.#settingsProblem}`);
-      return EMPTY_SETTINGS;
-    }
-  }
-}
-
-/**
- * Replace `path` with `value` as JSON, private to the user. The text goes to a sibling file first and
- * is renamed over `path`, so a reader sees the old file or the new one, never a partial write.
- */
-async function writeJson(path: string, value: unknown): Promise<void> {
-  const staging = `${path}.${process.pid}.tmp`;
-  await writeFile(staging, `${JSON.stringify(value, null, 2)}\n`, {mode: 0o600});
-  await rename(staging, path);
 }

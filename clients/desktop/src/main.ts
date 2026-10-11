@@ -46,6 +46,7 @@ import {
   contentType,
   isAppPage,
 } from './app-assets.js';
+import {AppLifecycle} from './app-lifecycle.js';
 import {controlDirectory, installAskpass} from './askpass.js';
 import {type AttachedRun, checkAttachment, observedDial} from './attachment.js';
 import {CONNECT_CHANNEL, WAKE_CHANNEL} from './bridge-protocol.js';
@@ -62,24 +63,28 @@ import {
 import {type InstanceRecord, versionSkewMessage} from './instances.js';
 import {type LaunchPlan, parseLaunch} from './launch-args.js';
 import {isAllowedRequest, isAppUrl, type LaunchTarget, originOf} from './launch-url.js';
-import {QuitGate} from './quit-gate.js';
-import {launchedRunId, learnedRunId, type RunLaunch, recentStatus} from './recent.js';
+import {
+  launchedRunId,
+  learnedRunId,
+  type RecentFile,
+  type RunLaunch,
+  recentStatus,
+} from './recent.js';
 import {type RelayPort, relay} from './relay.js';
+import {SettingsStore} from './settings-store.js';
 import {shellWords} from './shell-words.js';
 import {StopController} from './stop-controller.js';
-import {
-  type ConnectionStatus,
-  ConnectionSupervisor,
-  isTerminal,
-  type StreamEnd,
-} from './supervisor.js';
+import {type ConnectionStatus, ConnectionSupervisor, type StreamEnd} from './supervisor.js';
 import {suggestCheckout, suggestProjects} from './welcome-model.js';
 import {
-  CHROME_CHANNEL,
   type ChromeState,
+  type RunLink,
+  type StartOutcome,
   WELCOME_CHANNELS,
+  WELCOME_EVENTS,
   type WelcomeHost,
   type WelcomeOverview,
+  type WelcomeRecent,
   type WelcomeRecentStatus,
   type WelcomeResult,
 } from './welcome-protocol.js';
@@ -95,6 +100,8 @@ const WELCOME_URL = 'app://vibesys/welcome.html';
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../', import.meta.url)).replace(/\/+$/, '');
 /** How often the main process looks for the network coming back. */
 const NETWORK_POLL_MS = 5_000;
+/** How long quitting waits for the hosts to be released before exiting anyway. */
+const RELEASE_BOUND_MS = 5_000;
 
 function log(message: string): void {
   console.error(`vibesys-desktop: ${message}`);
@@ -262,6 +269,29 @@ function statusDetail(status: ConnectionStatus, hostName: string): string {
   }
 }
 
+/** The attached run's link as the strip shows it (`RunLink`). */
+function runLink(status: ConnectionStatus): RunLink {
+  switch (status.kind) {
+    case 'connecting':
+    case 'connected':
+      return status.kind;
+    case 'reconnecting':
+    case 'offline':
+      return 'reconnecting';
+    case 'run-ended':
+      return 'ended';
+    case 'auth-needed':
+    case 'incompatible':
+    case 'failed':
+      return 'stuck';
+  }
+}
+
+/** The recent runs as the welcome view lists them. */
+function welcomeRecent(recent: RecentFile): WelcomeRecent[] {
+  return recent.runs.map(run => ({...run, hostLabel: hostLabel(hostFromKey(run.host))}));
+}
+
 interface RunBinding {
   readonly view: WebContentsView;
   readonly run: AttachedRun;
@@ -287,6 +317,10 @@ class DesktopApp {
   #run: RunBinding | null = null;
   #mode: 'welcome' | 'run' = 'welcome';
   #online = true;
+  /** The host whose panel the welcome view shows first. */
+  #firstHost: HostKey = 'local';
+  /** Starts the welcome view asked for, by its start token; true once cancelled. */
+  readonly #starts = new Map<number, {cancelled: boolean}>();
 
   constructor(pool: HostPool) {
     this.#pool = pool;
@@ -329,11 +363,23 @@ class DesktopApp {
   /** Show the welcome view, on `host`'s panel when given. */
   showWelcome(host: HostId | null): void {
     if (host !== null) {
-      void this.#welcome.webContents.executeJavaScript(
-        `window.location.hash = ${JSON.stringify(hostKey(host))}`,
-      );
+      this.#firstHost = hostKey(host);
+      this.#send(WELCOME_EVENTS.showHost, hostKey(host));
     }
     this.#setMode('welcome');
+  }
+
+  /** Bring the window to the front (a second launch of the app asked for it). */
+  focus(): void {
+    if (this.#window.isDestroyed()) return;
+    if (this.#window.isMinimized()) this.#window.restore();
+    this.#window.show();
+    this.#window.focus();
+  }
+
+  /** Tell the welcome view the recent runs changed (the settings store wrote them). */
+  recentChanged(recent: RecentFile): void {
+    this.#send(WELCOME_EVENTS.recent, welcomeRecent(recent));
   }
 
   #setMode(mode: 'welcome' | 'run'): void {
@@ -374,16 +420,17 @@ class DesktopApp {
               project: run.project,
               status: statusLabel(run.status),
               detail: statusDetail(run.status, run.run.hostName),
-              stuck: isTerminal(run.status),
-              ended: run.status.kind === 'run-ended',
+              link: runLink(run.status),
             },
     };
   }
 
   #sendChrome(): void {
-    if (!this.#welcome.webContents.isDestroyed()) {
-      this.#welcome.webContents.send(CHROME_CHANNEL, this.chrome());
-    }
+    this.#send(WELCOME_EVENTS.chrome, this.chrome());
+  }
+
+  #send(channel: string, value: unknown): void {
+    if (!this.#welcome.webContents.isDestroyed()) this.#welcome.webContents.send(channel, value);
   }
 
   /** End the attached run's view and supervisor; the run itself keeps going on its host. */
@@ -483,17 +530,25 @@ class DesktopApp {
     );
   }
 
-  /** Start a detached run of `task` on `id` in `project` and attach to it. */
+  /**
+   * Start a detached run of `task` on `id` in `project` and attach to it. When `cancel` says the
+   * start was cancelled by the time the run's record appears, the run is stopped instead.
+   */
   async startRun(
     id: HostId,
     project: string,
     task: string | null,
     args: readonly string[],
-  ): Promise<void> {
-    await this.#launch(id, project, task, {kind: 'start'}, [
-      ...(task === null ? [] : ['--task', task]),
-      ...args,
-    ]);
+    cancel: {readonly cancelled: boolean} = {cancelled: false},
+  ): Promise<StartOutcome> {
+    return this.#launch(
+      id,
+      project,
+      task,
+      {kind: 'start'},
+      [...(task === null ? [] : ['--task', task]), ...args],
+      cancel,
+    );
   }
 
   /** Resume stopped run `run` (the latest when empty) of `project` on `id`, detached, and attach. */
@@ -510,7 +565,8 @@ class DesktopApp {
     task: string | null,
     launch: RunLaunch,
     args: readonly string[],
-  ): Promise<void> {
+    cancel: {readonly cancelled: boolean} = {cancelled: false},
+  ): Promise<StartOutcome> {
     const host = await this.#pool.host(id);
     const server = await host.startServer(args, {cwd: project});
     if (server.record.kind === 'incompatible') {
@@ -524,6 +580,19 @@ class DesktopApp {
       );
     }
     const {instance} = server.record;
+    if (cancel.cancelled) {
+      // Cancelled while starting: stop the run this start launched (never one that was already
+      // live), and stay on the welcome view.
+      if (!server.alreadyLive) {
+        log(`the start was cancelled; stopping run ${instance.id}`);
+        try {
+          await this.#pool.stopRun(id, instance.id, false);
+        } catch (error) {
+          log(`could not stop cancelled run ${instance.id}: ${(error as Error).message}`);
+        }
+      }
+      return 'cancelled';
+    }
     log(
       server.alreadyLive
         ? `the run is already live as ${instance.id}; attaching to it`
@@ -539,6 +608,7 @@ class DesktopApp {
       runId,
       task,
     );
+    return 'started';
   }
 
   async #remember(
@@ -615,11 +685,11 @@ class DesktopApp {
     const handle = this.#handle.bind(this);
     const pool = this.#pool;
     handle(WELCOME_CHANNELS.overview, async () => {
-      const recent = await pool.recent();
       return {
         settingsProblem: await pool.settingsCheck(),
-        recent: recent.runs.map(run => ({...run, hostLabel: hostLabel(hostFromKey(run.host))})),
+        recent: welcomeRecent(await pool.recent()),
         chrome: this.chrome(),
+        host: this.#firstHost,
       } satisfies WelcomeOverview;
     });
     handle(WELCOME_CHANNELS.recentStatus, async key => {
@@ -687,17 +757,31 @@ class DesktopApp {
       await this.attachInstance(id, instance, known?.task ?? null);
       return null;
     });
-    handle(WELCOME_CHANNELS.start, async (key, project, task, args) => {
+    handle(WELCOME_CHANNELS.start, async (key, project, task, args, token) => {
       if (typeof task !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,127}$/.test(task)) {
         throw new Error("pick one of the project's tasks");
       }
+      const start = startToken(token);
+      if (this.#starts.has(start)) throw new Error('that start was already asked for');
       const words = typeof args === 'string' ? shellWords(args) : [];
-      await this.startRun(
-        hostFromKey(key),
-        validHostPath(project, 'the project directory'),
-        task,
-        words,
-      );
+      const cancel = {cancelled: false};
+      this.#starts.set(start, cancel);
+      try {
+        return await this.startRun(
+          hostFromKey(key),
+          validHostPath(project, 'the project directory'),
+          task,
+          words,
+          cancel,
+        );
+      } finally {
+        this.#starts.delete(start);
+      }
+    });
+    handle(WELCOME_CHANNELS.cancelStart, async token => {
+      // A start that already ended has nothing left to cancel.
+      const cancel = this.#starts.get(startToken(token));
+      if (cancel !== undefined) cancel.cancelled = true;
       return null;
     });
     handle(WELCOME_CHANNELS.resume, async (key, project, run) => {
@@ -779,6 +863,14 @@ class DesktopApp {
   }
 }
 
+/** A start token from the welcome view: a positive safe integer. */
+function startToken(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error('a start is named by a positive integer');
+  }
+  return value;
+}
+
 function failure(error: unknown): WelcomeResult<never> {
   return {
     ok: false,
@@ -792,14 +884,29 @@ function runBundled(plan: Exclude<LaunchPlan, {kind: 'gateway'}>): void {
     {scheme: APP_SCHEME, privileges: {standard: true, secure: true}},
   ]);
   let desktop: DesktopApp | null = null;
-  const quit = new QuitGate({
+  const lifecycle = new AppLifecycle({
     // Runs are detached and keep going; quitting ends this app's streams and SSH masters only.
     release: async () => {
       await desktop?.pool.closeAll();
     },
+    // The app's one exit call site.
     exit: code => app.exit(code),
+    scheduleTimeout: realTimers,
+    releaseBoundMs: RELEASE_BOUND_MS,
   });
-  app.on('will-quit', event => quit.willQuit(event));
+  // One instance per user-data directory: it is the settings files' only writer. A second launch
+  // hands its arguments to the first instance (`second-instance`) and exits.
+  if (!app.requestSingleInstanceLock()) {
+    log('VibeSys is already running; showing its window');
+    lifecycle.quit(0);
+    return;
+  }
+  app.on('second-instance', (_event, argv) => {
+    if (desktop === null) return;
+    desktop.focus();
+    void secondLaunch(desktop, argv);
+  });
+  app.on('will-quit', event => lifecycle.willQuit(event));
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => app.quit());
   app.on('web-contents-created', (_event, contents) => guard(contents, isAppPage));
   app.on('window-all-closed', () => app.quit());
@@ -810,11 +917,15 @@ function runBundled(plan: Exclude<LaunchPlan, {kind: 'gateway'}>): void {
     Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenu()));
     const userData = app.getPath('userData');
     const uid = process.getuid?.() ?? 0;
-    desktop = new DesktopApp(
+    const settings = new SettingsStore({
+      settingsPath: join(userData, 'hosts.json'),
+      recentPath: join(userData, 'recent.json'),
+      log,
+    });
+    const opened = new DesktopApp(
       new HostPool({
         sshConfigPath: join(homedir(), '.ssh', 'config'),
-        settingsPath: join(userData, 'hosts.json'),
-        recentPath: join(userData, 'recent.json'),
+        settings,
         localCheckout: REPOSITORY_ROOT,
         factory: systemHostFactory({
           controlPath: join(await controlDirectory(uid), '%C'),
@@ -823,15 +934,34 @@ function runBundled(plan: Exclude<LaunchPlan, {kind: 'gateway'}>): void {
         log,
       }),
     );
-    desktop.bindConnections();
-    desktop.bindWelcome();
+    desktop = opened;
+    settings.onRecentChanged(recent => opened.recentChanged(recent));
+    opened.bindConnections();
+    opened.bindWelcome();
     try {
-      await openPlan(desktop, plan);
+      await openPlan(opened, plan);
     } catch (error) {
       log((error as Error).message);
-      void quit.exit(1);
+      lifecycle.quit(1);
     }
   });
+}
+
+/** Open what a second launch of the app asked for, in this instance's window. */
+async function secondLaunch(desktop: DesktopApp, argv: readonly string[]): Promise<void> {
+  let plan: LaunchPlan;
+  try {
+    plan = parseLaunch(argv.slice(app.isPackaged ? 1 : 2), undefined, '.');
+  } catch (error) {
+    log(`ignoring a second launch's arguments: ${(error as Error).message}`);
+    return;
+  }
+  if (plan.kind === 'gateway') return;
+  try {
+    await openPlan(desktop, plan);
+  } catch (error) {
+    log((error as Error).message);
+  }
 }
 
 async function openPlan(
