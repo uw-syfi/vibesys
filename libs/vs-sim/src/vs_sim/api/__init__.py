@@ -10,6 +10,8 @@ from vs_sim.concurrency import Condition, Event, Lock, OsThreads, Threads, Worke
 from vs_sim.network import Connection, Listener, Network, UnixNetwork
 from vs_sim.probes import CommandProbe, ProbeResult, SubprocessProbe
 from vs_sim.processes import (
+    CapturedTextProcess,
+    CapturedTextProcessLauncher,
     ForegroundChild,
     ForegroundLauncher,
     InheritedStdioLauncher,
@@ -23,6 +25,7 @@ from vs_sim.processes import (
     ProcessSpec,
     ProcessTimeoutError,
     RunningProcess,
+    SubprocessCapturedTextProcessLauncher,
     SubprocessLauncher,
     SubprocessMergedOutputProcessLauncher,
     SubprocessPipedProcessLauncher,
@@ -34,6 +37,8 @@ from vs_sim.streaming import StreamingCommand, SubprocessStreamingCommand
 
 __all__ = [
     "BlockingRunner",
+    "CapturedTextProcess",
+    "CapturedTextProcessLauncher",
     "Clock",
     "CommandProbe",
     "Condition",
@@ -67,6 +72,7 @@ __all__ = [
     "Sleeper",
     "SleepingClock",
     "StreamingCommand",
+    "SubprocessCapturedTextProcessLauncher",
     "SubprocessLauncher",
     "SubprocessMergedOutputProcessLauncher",
     "SubprocessPipedProcessLauncher",

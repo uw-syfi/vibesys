@@ -30,6 +30,7 @@ from .config import (
     SlurmSshTransport,
     shell_join_with_port,
 )
+from .owned_process import OwnedProcessRunner
 from .remote_operations import (
     RemoteOperationClaim,
     RemoteOperationEvidence,
@@ -1623,27 +1624,14 @@ def _make_transport(
             return _ConnectorTransport(config.transport, process=process, timeout=timeout)
 
 
+_OWNED_PROCESS = OwnedProcessRunner()
+
+
 def _run_process(
     argv: Sequence[str], *, stdin: str | None, timeout: float
 ) -> subprocess.CompletedProcess[str]:
-    # lint-waiver: LW-020071 [S603]; configured transport argv is the library's
-    # > process boundary. Shell parsing would weaken argument separation, while
-    # > wrapping subprocess again would expose the same argv and timeout.
-    return subprocess.run(  # noqa: S603
-        argv,
-        input=stdin,
-        stdin=subprocess.DEVNULL if stdin is None else None,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        encoding="utf-8",
-        # Each call is bounded by its timeout. In its own process group, a
-        # signal aimed at the caller's group (Ctrl-C, a sandbox stopping its
-        # command) cannot kill an in-flight sbatch or squeue, which would lose
-        # the job id or the chance to cancel the job.
-        process_group=0,
-    )
+    result = _OWNED_PROCESS.run(argv, stdin=stdin, timeout=timeout)
+    return subprocess.CompletedProcess(result.argv, result.returncode, result.stdout, result.stderr)
 
 
 def _validate_request(

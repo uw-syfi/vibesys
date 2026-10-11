@@ -36,6 +36,7 @@ from vs_sim.crash import (
     restart_until_done,
 )
 from vs_sim.fakes import (
+    FakeCapturedTextProcessLauncher,
     FakeForegroundChild,
     FakeForegroundLauncher,
     FakeMergedOutputProcessLauncher,
@@ -105,6 +106,7 @@ __all__ = [
     "CommandProbeContract",
     "CrashableClock",
     "EventTrace",
+    "FakeCapturedTextProcessLauncher",
     "FakeForegroundChild",
     "FakeForegroundLauncher",
     "FakeMergedOutputProcessLauncher",
