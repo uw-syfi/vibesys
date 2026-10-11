@@ -18,6 +18,8 @@ from vibesys.orchestration.dynamic.strategy._prompts import (
     HistoryRow,
     ImplementPrompt,
     PlannerPrompt,
+    ProfileHistoryRow,
+    ProfileHistoryStatus,
     ProfilePrompt,
     ReviewPrompt,
 )
@@ -27,15 +29,17 @@ from vibesys.orchestration.dynamic.strategy._state import (
     DynamicStrategyState,
     HypothesisRecord,
     RoundRecord,
+    WorkKind,
     WorkPhase,
 )
-from vs_core.api import RunView
+from vs_core.api import EvidenceKind, RunView
 
 _HISTORY_ROWS = 20
 _HISTORY_TITLE_CHARS = 200
 _HISTORY_SUMMARY_CHARS = 600
 _CUT = " [cut]"
 _HISTORY_FAILURE_CHARS = 1200
+_PROFILE_EVIDENCE_IDS = 8
 _RETRY_TEXT_CHARS = 1200
 
 
@@ -139,6 +143,43 @@ def _history_row(record: HypothesisRecord, running: frozenset[str]) -> HistoryRo
     )
 
 
+def _profile_history_row(record: AttemptRecord) -> ProfileHistoryRow:
+    """Project a profile attempt without copying its lifecycle into strategy state."""
+    reading = next(
+        (item for item in reversed(record.readings) if item.kind is EvidenceKind.PROFILING),
+        None,
+    )
+    finished = record.phase is WorkPhase.DONE
+    observed = finished and reading is not None and reading.passed
+    status = (
+        ProfileHistoryStatus.OBSERVED
+        if observed
+        else ProfileHistoryStatus.FAILED
+        if finished
+        else ProfileHistoryStatus.RUNNING
+    )
+    diagnosis = "" if not observed or reading is None else reading.feedback
+    failure = (
+        record.failure
+        or ("" if reading is None or reading.passed else reading.feedback)
+        or ("profile produced no trusted evidence" if finished else "")
+    )
+    detail = diagnosis or failure
+    return ProfileHistoryRow(
+        profile_id=record.plan.work_id,
+        sequence=record.sequence,
+        target_hypothesis_id=record.plan.parent_hypothesis_id,
+        revision=record.parent,
+        question=_bounded(record.plan.question, _HISTORY_SUMMARY_CHARS),
+        decision_impact=_bounded(record.plan.decision_impact, _HISTORY_SUMMARY_CHARS),
+        status=status,
+        evidence_ids=tuple(item.evidence_id for item in record.evidence[:_PROFILE_EVIDENCE_IDS]),
+        diagnosis=_bounded(diagnosis, _HISTORY_FAILURE_CHARS),
+        failure=_bounded(failure, _HISTORY_FAILURE_CHARS),
+        detail_fence=_fence(detail),
+    )
+
+
 def _unexplained(last: RoundRecord | None) -> str:
     """The reason a round ended, unless its failure tail already says it."""
     if last is None or not last.failure or last.failure == last.failure_tail:
@@ -169,7 +210,12 @@ def planner_prompt(
     """The free-slot planning request: budget, offered parents and compact history."""
     running = frozenset(item.plan.work_id for item in active(state))
     rows = tuple(_history_row(item, running) for item in state.hypotheses)
-    shown = rows[-_HISTORY_ROWS:]
+    profiles = tuple(
+        _profile_history_row(item) for item in state.attempts if item.plan.kind is WorkKind.PROFILE
+    )
+    history = tuple(sorted((*rows, *profiles), key=lambda item: item.sequence))
+    shown = history[-_HISTORY_ROWS:]
+    shown_sequences = {item.sequence for item in shown}
     return PlannerPrompt(
         capacity=capacity(state, config),
         in_flight=len(running),
@@ -179,7 +225,9 @@ def planner_prompt(
         offer_snapshot=offer_snapshot(state, view),
         buildable=tuple(_buildable(item) for item in offered(state, view)),
         history=shown,
-        older_ids=tuple(item.hypothesis_id for item in rows[:-_HISTORY_ROWS]),
+        older_ids=tuple(
+            item.hypothesis_id for item in rows if item.sequence not in shown_sequences
+        ),
         baseline=state.baseline.metrics,
         input_failure=state.baseline.failure,
         profiling=config.profiling,

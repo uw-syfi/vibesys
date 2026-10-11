@@ -83,9 +83,30 @@ The framework provides isolated candidate workspaces, runs independent reviews, 
 owns trusted evaluation and winner adoption. Only evaluated, accepted candidates can
 be adopted or offered as a parent.
 
-## Compact hypothesis history
+## Compact workstream history
 {% if history %}
 {% for row in history %}
+{% if row.kind is defined and row.kind == "profile" %}
+- profile `{{ row.profile_id }}` #{{ row.sequence }}: {{ row.status.value }}, target {% if row.target_hypothesis_id %}hypothesis `{{ row.target_hypothesis_id }}`{% else %}base revision{% endif %} `{{ rev(row.revision) }}`
+  Question: {{ row.question }}
+  Decision impact: {{ row.decision_impact }}
+{% if row.evidence_ids %}
+  Trusted evidence: {% for evidence_id in row.evidence_ids %}`{{ evidence_id.root }}`{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}
+{% if row.diagnosis %}
+  Profile diagnosis:
+  {{ row.detail_fence }}
+{{ row.diagnosis | indent(2, true) }}
+  {{ row.detail_fence }}
+{% endif %}
+{% if row.failure %}
+  Why it failed:
+  {{ row.detail_fence }}
+{{ row.failure | indent(2, true) }}
+  {{ row.detail_fence }}
+{% endif %}
+
+{% else %}
 - `{{ row.hypothesis_id }}` #{{ row.sequence }} "{{ row.title }}": {{ row.status }}, strategy {{ row.strategy }}{% if row.outcome %}, outcome {{ row.outcome }}{% endif %}{% if row.candidate %}, candidate `{{ rev(row.candidate) }}`{% endif %}{% if row.review_passed is not none %}, review passed: {{ row.review_passed }}{% endif %}{% if row.accuracy_passed is not none %}, accuracy passed: {{ row.accuracy_passed }}{% endif %}{% if row.benchmark_passed is not none %}, benchmark passed: {{ row.benchmark_passed }}{% endif %}{% for m in row.metrics %}; {{ metric(m) }}{% endfor %}{% if row.partial %}; partial {{ partial(row.partial) }}{% endif %}{% if row.summary %}: {{ row.summary }}{% endif %}
 {% if row.failure %}
   Why it ended: {{ row.failure }}
@@ -97,6 +118,7 @@ be adopted or offered as a parent.
   {{ row.failure_fence }}
 {% endif %}
 
+{% endif %}
 {% endfor %}
 {% else %}
 none yet

@@ -71,6 +71,34 @@ class HistoryRow(Value):
     failure_fence: str = "```"
 
 
+class ProfileHistoryStatus(StrEnum):
+    """What the trusted profile attempt established for its target."""
+
+    RUNNING = "running"
+    OBSERVED = "observed"
+    FAILED = "failed"
+
+
+class ProfileHistoryRow(Value):
+    """One planned profile and the trusted evidence it produced."""
+
+    kind: Literal["profile"] = "profile"
+    profile_id: str
+    sequence: int = Field(gt=0)
+    target_hypothesis_id: str | None = None
+    revision: RevisionRef
+    question: str
+    decision_impact: str
+    status: ProfileHistoryStatus
+    evidence_ids: tuple[EvidenceId, ...] = ()
+    diagnosis: str = ""
+    failure: str = ""
+    detail_fence: str = "```"
+
+
+type WorkstreamHistoryRow = HistoryRow | ProfileHistoryRow
+
+
 class PlannerPrompt(Value):
     """Free-slot planning request."""
 
@@ -82,7 +110,7 @@ class PlannerPrompt(Value):
     base_accuracy_passed: bool | None
     offer_snapshot: str
     buildable: tuple[BuildableRow, ...] = ()
-    history: tuple[HistoryRow, ...] = ()
+    history: tuple[WorkstreamHistoryRow, ...] = ()
     older_ids: tuple[str, ...] = ()
     baseline: tuple[MetricRow, ...] = ()
     input_failure: str | None = None
