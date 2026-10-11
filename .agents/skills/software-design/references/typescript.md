@@ -1,8 +1,10 @@
 # TypeScript
 
-Workspace: pnpm packages under `clients/` (`backend-client`, `core-state`,
-`tui`, `web`). Lint: Biome. Boundaries: dependency-cruiser and a package
-manifest check.
+Workspace: pnpm packages under `clients/`, one per concept (`contracts`,
+`store`, `run-state`, `transport`, `hosts`, `runs`, `run-session`, `ipc`, `ui`,
+`features/*`, `apps/*`); the graph and its rules are in
+[clients-architecture.md](../../../../docs/contributing/clients-architecture.md).
+Lint: Biome. Boundaries: dependency-cruiser and the package-graph checker.
 
 ## Size cues
 
@@ -17,15 +19,15 @@ manifest check.
 A package's public interface is its `exports` in `package.json`. Importing
 anything else in another package is an error.
 
-- **Layering.** `backend-client` is the lowest layer; `core-state` sits on it;
-  `tui` and `web` sit on both and do not import each other. Rules live in
-  `clients/.dependency-cruiser.mjs`.
-- **No deep imports.** `workspace-packages-use-public-exports` and
-  `workspace-packages-have-no-deep-imports` reject imports of another
-  package's internal files or build output.
-- **Allowed workspace dependencies.** `clients/scripts/check_ts_package_manifests.mjs`
-  lists each package's permitted workspace dependencies and forbidden
-  prefixes (for example, `core-state` may not depend on `@opentui/*`).
+- **Layering and runtimes.** Each package declares its layer and its entries'
+  runtimes in `package.json` (`"vibesys"`); `clients/scripts/check_package_graph.mjs`
+  is the one home of the rules between packages (layer direction, declared and
+  exported imports, runtime reachability, third-party confinement such as no
+  `@opentui/*` outside an app).
+- **No deep imports.** `imports-use-exports` in the package-graph checker rejects
+  a specifier its target does not export; `workspace-packages-use-public-exports`
+  in `clients/.dependency-cruiser.mjs` rejects a relative path into another
+  package.
 - **New or split package.** The package set comes from the workspace on disk
   (`clients/scripts/workspace_layout.mjs`), so the scanned paths follow from
   the directories you create. Declare the policy the gates ask for: the
@@ -39,8 +41,8 @@ anything else in another package is an error.
 - **Closed sets.** A string-literal union. When the values cross the backend
   boundary, take the union from the generated protocol types, never a
   hand-written copy. Branch exhaustively so a new member is a compile error.
-- **Generated types.** Never edit `backend-client/src/generated/`. Regenerate
-  with `pnpm generate:protocol` (from `clients/backend-client`) and review the
+- **Generated types.** Never edit `contracts/src/generated/`. Regenerate
+  with `pnpm generate:protocol` (from `clients/contracts`) and review the
   diff.
 - **State.** Frontend state changes only from backend events; keep folds pure
   and pass time as event data. See [functional-core.md](functional-core.md).
@@ -53,10 +55,10 @@ Named by module.
 
 | Rule | Look at |
 | --- | --- |
-| 1, 2 | `@vibesys/core-state` (small `exports`, logic behind it) |
+| 1, 2 | `@vibesys/run-state` (small `exports`, logic behind it) |
 | 4 | The layering rules in `.dependency-cruiser.mjs` |
-| 6 | The backend-neutral versus `backend-client/src/node` split behind the `./node` export |
-| 8 | `@vibesys/backend-client` generated protocol types |
+| 6 | The runtime-neutral `@vibesys/transport` versus the Node-only `@vibesys/transport-node` |
+| 8 | `@vibesys/contracts` generated protocol types |
 
 ## Commands
 
@@ -66,5 +68,5 @@ From `clients/`:
 pnpm check:ts                  # biome
 pnpm check:ts-architecture     # dependency-cruiser + manifest check
 pnpm check:knip
-pnpm generate:protocol         # in backend-client, after changing protocol models
+pnpm generate:protocol         # in contracts, after changing protocol models
 ```

@@ -212,7 +212,8 @@ class RunLauncher(Protocol):
     """Starts a detached run as ``vibesys --detach`` does.
 
     Contract: returns the started server's record or the launch's typed failure,
-    never raises for a failed launch.
+    never raises for a failed launch, and settles within the detached launcher's
+    bounded startup period.
     """
 
     def start(

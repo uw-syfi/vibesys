@@ -10,7 +10,7 @@
       "!**/*.test.ts",
       "!**/*.test.tsx",
       "!**/dist",
-      "!backend-client/src/generated"
+      "!contracts/src/generated"
     ]
   },
   "linter": {

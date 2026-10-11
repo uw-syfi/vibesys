@@ -11,9 +11,13 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.cts"],
-  "exclude": ["src/**/*.test.ts", "src/**/testing/**", "src/renderer/welcome/**"],
+  "exclude": ["src/**/*.test.ts", "src/**/testing/**"],
   "references": [
-    {"path": "../backend-client/tsconfig.lib.json"},
-    {"path": "../core-state/tsconfig.lib.json"}
+    {"path": "../transport/tsconfig.lib.json"},
+    {"path": "../contracts/tsconfig.lib.json"},
+    {"path": "../hosts/tsconfig.lib.json"},
+    {"path": "../runs/tsconfig.lib.json"},
+    {"path": "../features/start-run/tsconfig.state.json"},
+    {"path": "../ipc/tsconfig.lib.json"}
   ]
 }

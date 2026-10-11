@@ -13,8 +13,9 @@
  * machine's terminal reason (offline, auth-needed, incompatible, closed) or with the failure itself.
  * A run dial the link broke is reported to the machine, whose recovery ends in ready.
  */
-import type {ScheduleTimeout} from '@vibesys/backend-client';
-import type {InstanceList} from '@vibesys/backend-client/host-helper';
+
+import type {InstanceList} from '@vibesys/contracts/host-helper';
+import type {ScheduleTimeout} from '@vibesys/transport';
 import {
   type Cause,
   type ConnectionConfig,

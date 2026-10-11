@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import type {HypothesisRound} from '@vibesys/backend-client';
+import type {HypothesisRound} from '@vibesys/contracts';
 import {
   designRoundHeading,
   fileChangeCounts,

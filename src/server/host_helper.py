@@ -51,9 +51,12 @@ from server.host_api import (
     InstancesUnwatchRequest,
     InstancesWatchReply,
     InstancesWatchRequest,
+    LiveInstanceRecord,
     PathsCompleteRequest,
     RunConnectReply,
     RunConnectRequest,
+    RunStartReply,
+    RunStartRequest,
     parse_helper_request,
 )
 from server.host_helper_requests import (
@@ -94,6 +97,8 @@ class ChannelState:
     negotiated: Negotiated | None = None
     pending: Mapping[str, float] = field(default_factory=dict)
     """Requests in flight, by id, with the time their deadline passes."""
+    starting: frozenset[str] = frozenset()
+    """``run.start`` workers still owned after their client deadline passes."""
     watches: Mapping[str, InstanceList | None] = field(default_factory=dict)
     """Open watches, by id, with the listing last pushed on each."""
     connecting: str | None = None
@@ -143,10 +148,18 @@ type ChannelEvent = Received | Answered | Observed | Tick | InputEnded
 
 
 @dataclass(frozen=True)
+class StopStartedRun:
+    """Stop a newly started instance whose identity cannot reach the client."""
+
+    instance_id: str
+
+
+@dataclass(frozen=True)
 class Send:
-    """Write one message line to the client."""
+    """Write one message line to the client, compensating an undeliverable start."""
 
     message: HelperMessage
+    if_undelivered: StopStartedRun | None = None
 
 
 @dataclass(frozen=True)
@@ -189,7 +202,7 @@ class Close:
     """The channel is done: input ended and nothing is in flight."""
 
 
-type ChannelOutput = Send | Execute | Watch | Unwatch | Relay | Release | Close
+type ChannelOutput = Send | Execute | Watch | Unwatch | Relay | Release | StopStartedRun | Close
 
 _GATED: Final[Mapping[type[object], HelperFeature]] = {
     InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
@@ -258,7 +271,7 @@ def _tick(state: ChannelState, at: float) -> tuple[ChannelState, tuple[ChannelOu
 def _maybe_close(
     state: ChannelState, outputs: list[ChannelOutput]
 ) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
-    if state.input_ended and not state.pending:
+    if state.input_ended and not state.pending and not state.starting:
         outputs.append(Close())
     return state, tuple(outputs)
 
@@ -315,7 +328,7 @@ def _admission(
     elif isinstance(request, HelloRequest):
         message = "hello was already negotiated on this channel"
         refusal = _error(request_id, HelperErrorCode.INCOMPATIBLE, message)
-    elif request_id in state.pending or request_id in state.watches:
+    elif request_id in state.pending or request_id in state.starting or request_id in state.watches:
         message = f"request id {request_id!r} is already open on this channel"
         refusal = _error(request_id, HelperErrorCode.DUPLICATE_REQUEST_ID, message)
     else:
@@ -349,10 +362,12 @@ def _admit(
                 Send(InstancesUnwatchReply(request_id=request_id, watch_id=watch_id)),
             )
         case RunConnectRequest():
-            if state.pending or state.watches:
+            if state.pending or state.starting or state.watches:
                 message = "run.connect needs a channel with no other request or watch open"
                 return state, (Send(_error(request_id, HelperErrorCode.CHANNEL_BUSY, message)),)
             state = replace(state, connecting=request_id)
+        case RunStartRequest():
+            state = replace(state, starting=state.starting | {request_id})
         case _:
             pass
     pending = {**state.pending, request_id: at + request.deadline_ms / 1000}
@@ -362,17 +377,31 @@ def _admit(
 def _answered(
     state: ChannelState, request_id: str, reply: HelperReply | HelperError
 ) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
+    state = replace(state, starting=state.starting - {request_id})
+    compensation = _start_compensation(reply)
     if request_id not in state.pending:
-        # Its deadline already answered for it; a connection it opened has no taker.
-        return state, ((Release(request_id),) if isinstance(reply, RunConnectReply) else ())
+        # Its deadline already answered for it; resources it created have no taker.
+        outputs: list[ChannelOutput] = []
+        if isinstance(reply, RunConnectReply):
+            outputs.append(Release(request_id))
+        elif compensation is not None:
+            outputs.append(compensation)
+        return _maybe_close(state, outputs)
     pending = {rid: d for rid, d in state.pending.items() if rid != request_id}
     state = replace(state, pending=pending)
-    outputs: list[ChannelOutput] = [Send(reply)]
+    outputs = [Send(reply, if_undelivered=compensation)]
     if request_id == state.connecting:
         if isinstance(reply, RunConnectReply):
             return replace(state, connecting=None, relaying=True), (*outputs, Relay(request_id))
         state = replace(state, connecting=None)
     return _maybe_close(state, outputs)
+
+
+def _start_compensation(reply: HelperReply | HelperError) -> StopStartedRun | None:
+    """Return the cleanup owned by a newly created, undeliverable start reply."""
+    if isinstance(reply, RunStartReply) and isinstance(reply.launch, LiveInstanceRecord):
+        return StopStartedRun(reply.launch.id)
+    return None
 
 
 # ----- the shell -----
@@ -445,6 +474,7 @@ class _Channel:
         self._watches: dict[str, Event] = {}
         self._handed_over: str | None = None
         self._closed = False
+        self._compensating: set[str] = set()
 
     def post(self, event: ChannelEvent) -> None:
         with self._inbox.cond:
@@ -456,13 +486,19 @@ class _Channel:
         cond = self._inbox.cond
         with cond:
             while True:
-                self._take_input()
-                while self._events and not (self._closed or self._handed_over):
+                if not self._closed:
+                    self._take_input()
+                while self._events and self._handed_over is None:
                     self._apply(self._events.pop(0))
-                if self._closed:
+                if self._closed and not self._state.starting and not self._compensating:
                     return None
                 if self._handed_over is not None:
-                    return self._held.pop(self._handed_over)
+                    if not self._compensating:
+                        return self._held.pop(self._handed_over)
+                    # The relay owns the channel now. Only compensation can delay
+                    # handoff, and its worker notifies this condition when it settles.
+                    cond.wait()
+                    continue
                 deadline = next_deadline(self._state)
                 if not self._events and not self._input_ready():
                     timeout = None if deadline is None else max(deadline - self._threads.now(), 0.0)
@@ -471,7 +507,7 @@ class _Channel:
 
     def _input_ready(self) -> bool:
         inbox = self._inbox
-        if not accepts_input(self._state):
+        if self._closed or not accepts_input(self._state):
             return False
         return b"\n" in inbox.buffer or len(inbox.buffer) >= MAX_LINE_BYTES or inbox.ended
 
@@ -491,12 +527,8 @@ class _Channel:
 
     def _perform(self, output: ChannelOutput) -> None:
         match output:
-            case Send(message=message):
-                try:
-                    self._output.write(message.model_dump_json().encode() + b"\n")
-                except OSError:
-                    # The client stopped reading: nobody is left to answer.
-                    self._closed = True
+            case Send():
+                self._send(output)
             case Execute(request=request):
                 self._threads.spawn(lambda: self._execute(request), name=f"helper-{request.type}")
             case Watch(watch_id=watch_id):
@@ -509,10 +541,27 @@ class _Channel:
                 self._handed_over = request_id
             case Release(request_id=request_id):
                 self._held.pop(request_id).close()
+            case StopStartedRun(instance_id=instance_id):
+                self._begin_stop_started(instance_id)
             case Close():
                 self._closed = True
             case _:
                 assert_never(output)
+
+    def _send(self, output: Send) -> None:
+        try:
+            self._output.write(output.message.model_dump_json().encode() + b"\n")
+        except OSError:
+            # The client stopped reading: nobody is left to answer.
+            if output.if_undelivered is not None:
+                self._begin_stop_started(output.if_undelivered.instance_id)
+            self._closed = True
+
+    def _begin_stop_started(self, instance_id: str) -> None:
+        if instance_id in self._compensating:
+            return
+        self._compensating.add(instance_id)
+        self._threads.spawn(lambda: self._stop_started(instance_id), name="helper-stop-started")
 
     def _execute(self, request: HelperRequest) -> None:
         try:
@@ -541,6 +590,14 @@ class _Channel:
             self.post(Observed(watch_id, self._host.registry.read()))
             stop.wait(WATCH_INTERVAL_SECONDS)
 
+    def _stop_started(self, instance_id: str) -> None:
+        try:
+            self._host.registry.stop(instance_id, self._host.stop_effects)
+        finally:
+            with self._inbox.cond:
+                self._compensating.remove(instance_id)
+                self._inbox.cond.notify_all()
+
 
 def serve_channel(
     *,
@@ -554,8 +611,9 @@ def serve_channel(
 
     ``0`` when the client ended a control channel; a relayed channel ends with the
     relay's status and, when that is not ``0``, one ``ChannelEnd`` line on
-    ``errors``. Workers and the input pump may still be blocked when this returns;
-    the caller ends the process.
+    ``errors``. A ``run.start`` worker and any compensation it owns settle before
+    this returns; other workers and the input pump may still be blocked, and the
+    caller ends the process.
     """
     inbox = _Inbox(threads)
     threads.spawn(lambda: inbox.pump(source), name="helper-input")

@@ -28,7 +28,12 @@ from wheel_targets import resolve_wheel_target
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
-_WORKSPACE_RUNTIME_PACKAGES = ("@vibesys/backend-client", "@vibesys/core-state")
+_WORKSPACE_RUNTIME_PACKAGES = (
+    "@vibesys/contracts",
+    "@vibesys/run-state",
+    "@vibesys/transport",
+    "@vibesys/transport-node",
+)
 
 
 class ReleaseBuildError(RuntimeError):

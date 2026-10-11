@@ -45,24 +45,28 @@ const FETCHES = {
 };
 
 for (const [name, source] of Object.entries(FETCHES)) {
-  test(`web/src forbids ${name} outside the backend adapter`, async t => {
-    assert.equal((await lintFixture(t, 'web/src', source)).length, 1);
+  test(`apps/web/src forbids ${name} outside the backend adapter`, async t => {
+    assert.equal((await lintFixture(t, 'apps/web/src', source)).length, 1);
   });
 }
 
-test('a property named fetch is not the global', async t => {
-  const source = 'export const load = (client: {fetch(): void}) => client.fetch();\n';
-  assert.deepEqual(await lintFixture(t, 'web/src', source), []);
+test('a feature package forbids fetch', async t => {
+  assert.equal((await lintFixture(t, 'features/replay/src', FETCHES.call)).length, 1);
 });
 
-test('web/src test files may fetch', async t => {
-  assert.deepEqual(await lintFixture(t, 'web/src', FETCHES.call, 'sample.test.ts'), []);
+test('a property named fetch is not the global', async t => {
+  const source = 'export const load = (client: {fetch(): void}) => client.fetch();\n';
+  assert.deepEqual(await lintFixture(t, 'apps/web/src', source), []);
+});
+
+test('apps/web/src test files may fetch', async t => {
+  assert.deepEqual(await lintFixture(t, 'apps/web/src', FETCHES.call, 'sample.test.ts'), []);
 });
 
 test('the backend adapter itself may fetch', () => {
-  assert.deepEqual(pluginDiagnostics(join(WORKSPACE_ROOT, 'web/src/platform/backend.ts')), []);
+  assert.deepEqual(pluginDiagnostics(join(WORKSPACE_ROOT, 'apps/web/src/platform/backend.ts')), []);
 });
 
-test('code outside web/src is not held to the web rule', async t => {
+test('code outside the web app and the features is not held to the web rule', async t => {
   assert.deepEqual(await lintFixture(t, 'scripts', FETCHES.call), []);
 });

@@ -323,7 +323,7 @@ def test_checked_in_policy_names_one_existing_job_for_every_check() -> None:
             {"pr-ci", "release-wheels"},
         ),
         (
-            ["clients/backend-client/src/index.ts"],
+            ["clients/transport/src/index.ts"],
             {"tui"},
             {"pr-ci", "release-wheels"},
         ),

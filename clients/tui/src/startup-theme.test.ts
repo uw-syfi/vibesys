@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import type {ProtocolResponse} from '@vibesys/backend-client';
+import type {ProtocolResponse} from '@vibesys/contracts';
 import {resolveStartupTheme} from './startup-theme.js';
 
 describe('resolveStartupTheme', () => {

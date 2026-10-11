@@ -42,7 +42,7 @@ breakpoint/error/issue-form tables. This file is the workflow.
   `cargo` when running real rounds on the queue example. `claude` CLI installed
   and authenticated (`claude -p "ok"` returns `ok`) for real-provider runs.
 - TUI built: `clients/tui/dist/launcher.js` and `dist/index.js` exist. If not:
-  `pnpm install --frozen-lockfile && pnpm --dir clients/backend-client generate:protocol && pnpm build:clients`.
+  `pnpm install --frozen-lockfile && pnpm --dir clients/contracts generate:protocol && pnpm build:clients`.
 - Python env: `<repo>/.venv` with `vibesys` installed (`uv sync`). Export
   `VIBESYS_PYTHON=<repo>/.venv/bin/python`.
 - A standalone candidate repo (its own git root). The bundled `queue-rs` example
@@ -286,10 +286,10 @@ re-runnable** repro before writing it up.
    - Same wrong pixels when frozen with `/pause`, no log anomaly → **render/UI**
      state (`clients/tui/src/ui/**` or `session-model`/`session-controller`).
    - Wrong data present but formatted correctly (a count, a status, a selection
-     surviving refetch) → **core-state** fold or a **backend projection**
+     surviving refetch) → **run-state** fold or a **backend projection**
      (`src/vibesys/server/**`), not rendering.
    - Traceback / `protocol_error` / malformed frame in `backend.log`, or the
-     event stream and the persisted record disagree → **backend-client framing**
+     event stream and the persisted record disagree → **transport framing**
      or **Python backend/loop** (`src/vibesys/loops/**`, `server/**`).
    State which one your evidence supports; the ticket's "Affected subsystem" and
    the eventual fix both hinge on it.
@@ -341,40 +341,41 @@ one symptom and leave the record corrupt. Confirm the root cause explains every
 symptom you observed before changing anything.
 
 **Respect the layer boundaries (they are enforced).** The TypeScript frontend is
-three packages with one legal dependency direction, checked by
+a few packages with one legal dependency direction, checked by
 `pnpm check:ts-architecture`:
 
 ```
-@vibesys/backend-client  <-  @vibesys/core-state  <-  @vibesys/tui
+@vibesys/contracts  <-  @vibesys/transport  <-  @vibesys/transport-node  <-  @vibesys/tui
+@vibesys/contracts  <-  @vibesys/run-state  <-  @vibesys/tui
 ```
 
 Ownership (put the fix where the state lives, per `tui-architecture.md`):
 
 | Symptom | Owner | Where |
 | --- | --- | --- |
-| Protocol types, socket framing, connection lifecycle, requests, event subscription | `backend-client` | `clients/backend-client/**` |
-| Status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics (a pure fold over snapshot + ordered events) | `core-state` | `clients/core-state/**` |
+| Protocol types, socket framing, connection lifecycle, requests, event subscription | `transport`, `transport-node` | `clients/transport/**`, `clients/transport-node/**` |
+| Status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics (a pure fold over snapshot + ordered events) | `run-state` | `clients/run-state/**` |
 | Focus, selection, layout, zoom, theme, modals, drafts, query progress; widgets, rendering, key/mouse | `tui` | `clients/tui/src/**`, `ui/**` |
 | Event/query payloads, run state, projection into experiments/design/rounds, the optimization loop | Python backend | `src/vibesys/server/**`, `src/vibesys/loops/**` |
 
 Rules that follow from this and from AGENTS.md and the `software-design` skill:
 - **Backend events are the frontend contract.** Emit semantic fields from the
   backend; do formatting, truncation, color, and layout in the consumer. Do not
-  move presentation into `server/**`, and do not teach `core-state` about themes,
+  move presentation into `server/**`, and do not teach `run-state` about themes,
   layout, or OpenTUI (it has no Node/renderer dependency).
 - **Unidirectional flow.** A frontend action may send a command, but must not
   optimistically mutate backend-authoritative state; the resulting backend event
   does. Do not add a reverse or cross-package relative import to reach a value;
   thread it through the owning package's public entry point.
 - **Fold vs render.** A selection-survives-refetch, count, or status bug belongs
-  in the `core-state` fold (keyed by id, clock passed in explicitly), not in a
+  in the `run-state` fold (keyed by id, clock passed in explicitly), not in a
   widget. A misaligned border, wrong breakpoint, or focus-indicator bug belongs
   in `clients/tui/src/ui/**`.
 
 **Contract changes are authoritative-first.** If the fix needs a new or changed
 event/query field, edit the one authoritative definition
 (`src/vibesys/server/protocol.py`), then regenerate the TS bindings
-(`pnpm --dir clients/backend-client generate:protocol`) rather than hand-editing
+(`pnpm --dir clients/contracts generate:protocol`) rather than hand-editing
 generated files. Keep changes additive/backward-compatible; bump the protocol
 version only for an incompatible change. Round-trip a representative payload at
 the boundary in a test. The committed-schema drift test must stay green (a
@@ -389,7 +390,7 @@ duplication or clarifies data flow**, keep it in a separate commit from the bug
 fix, and never let it cross a package boundary the architecture check forbids.
 Prefer extending the canonical module over adding a compatibility shim.
 
-**Add a regression test at the layer that owned the bug.** core-state fold test
+**Add a regression test at the layer that owned the bug.** run-state fold test
 for a projection/selection bug; a `*.test.ts` render/app/controller test in
 `clients/tui/src/**` for a UI bug; a Python `tests/**` test for a
 backend/loop/projection bug. The test should fail on the unfixed code and pass

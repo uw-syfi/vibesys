@@ -152,8 +152,9 @@ def test_live_help_states_that_no_build_still_checks_freshness(
         web.main(["live", "--help"])
 
     assert exit_info.value.code == 0
-    help_text = capsys.readouterr().out
-    assert "reuse the last verified clients/web build" in help_text
+    # argparse wraps the help at the terminal width, so compare the words, not the line breaks.
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "reuse the last verified clients/apps/web build" in help_text
     assert "rejects it if the workspace sources have changed" in help_text
 
 
@@ -188,7 +189,7 @@ def test_run_dev_invokes_vite_with_the_requested_address(
     assert result == 7
     [child] = children.children
     assert child.argv == ("pnpm", "dev", "--host", "127.0.0.1", "--port", "5173")
-    assert child.cwd == tmp_path / "clients" / "web"
+    assert child.cwd == tmp_path / "clients" / "apps" / "web"
 
 
 @given(polls_before_publication=integers(min_value=0, max_value=100))
@@ -277,7 +278,7 @@ def test_a_failed_bundle_build_stops_the_live_launch(status: int) -> None:
         with pytest.raises(SystemExit, match=f"build failed with status {status}"):
             effects.build(Path("/repository"))
 
-    assert [child.cwd for child in children.children] == [Path("/repository/clients/web")]
+    assert [child.cwd for child in children.children] == [Path("/repository/clients/apps/web")]
 
 
 def test_run_live_rejects_missing_project_for_non_demo_mode(tmp_path: Path) -> None:
@@ -329,7 +330,7 @@ def test_run_live_demo_stages_replay_log_for_gateway(
     effects = web._DefaultWebLiveEffects(_exits_with(0))  # noqa: SLF001  # lint-waiver: LW-101701 [SLF001]; isolate the helper from a detached server process
     assert _run_live(args, tmp_path, effects) == 0
     replay_log = cast("Path", captured["replay_log"])
-    runtime_dir = tmp_path / "clients" / "web" / ".vibesys-demo"
+    runtime_dir = tmp_path / "clients" / "apps" / "web" / ".vibesys-demo"
     assert replay_log == runtime_dir / "run-events.jsonl"
     assert replay_log.read_text() == replay_source.read_text()
     assert captured["instance"] == runtime_dir / "web-gateway.json"

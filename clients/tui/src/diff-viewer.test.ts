@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import type {DesignFileChange, DesignRound} from '@vibesys/backend-client';
+import type {DesignFileChange, DesignRound} from '@vibesys/contracts';
 import {
   applyDiffPatch,
   closeDiffViewer,

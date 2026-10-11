@@ -18,6 +18,10 @@ from vs_core._draft import (
     workspace_for,
 )
 from vs_core._evidence_views import (
+    TurnCandidate,
+    TurnCandidateFailed,
+    TurnCandidatePending,
+    TurnCandidateRetained,
     ledger_refs,
     trusted_keys,
     turn_candidate,
@@ -900,6 +904,10 @@ __all__ = [
     "TraceFrame",
     "Transition",
     "TrustedBaseline",
+    "TurnCandidate",
+    "TurnCandidateFailed",
+    "TurnCandidatePending",
+    "TurnCandidateRetained",
     "TurnChain",
     "TurnFailureKind",
     "TurnInputsReserved",

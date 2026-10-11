@@ -10,8 +10,8 @@
  * Errors name the offending argument, so the shell can print them as they are.
  */
 import {isAbsolute, resolve} from 'node:path';
-import {type HostId, SettingsError, validAlias} from '../../common/hosts.js';
-import {isInstanceId} from '../../common/ids.js';
+import {type HostId, HostValidationError, validAlias} from '@vibesys/hosts';
+import {isInstanceId} from '@vibesys/runs';
 
 export type LaunchPlan =
   | {readonly kind: 'welcome'; readonly host: HostId | null}
@@ -65,7 +65,7 @@ function hostAlias(alias: string): string {
   try {
     return validAlias(alias);
   } catch (error) {
-    if (error instanceof SettingsError) throw new LaunchError(`--host: ${error.message}`);
+    if (error instanceof HostValidationError) throw new LaunchError(`--host: ${error.message}`);
     throw error;
   }
 }

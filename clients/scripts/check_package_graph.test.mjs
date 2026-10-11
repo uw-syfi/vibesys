@@ -4,6 +4,7 @@ import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 import test from 'node:test';
 import {
+  domainWords,
   owningEntry,
   packageGraphErrors,
   RULES,
@@ -59,12 +60,17 @@ function validWorkspace() {
     ui: {
       manifest: {
         name: '@vibesys/ui',
-        vibesys: {layer: 'foundation', entries: {'.': 'dom'}},
-        exports: {'.': source('index')},
+        vibesys: {layer: 'foundation', entries: {'.': 'dom', './tokens.css': 'dom'}},
+        exports: {
+          '.': source('index'),
+          './tokens.css': {'@vibesys/source': './src/tokens.css', default: './src/tokens.css'},
+        },
         dependencies: {react: '19.1.1'},
       },
       files: {
         'src/index.ts': "import 'react';\nexport const button = 1;\n",
+        'src/index.test.ts': "test('a button for any run', () => {});\n",
+        'src/tokens.css': ':root { --accent: blue; }\n',
         'tsconfig.lib.json': project({lib: ['ES2022', 'DOM'], include: ['src']}),
       },
     },
@@ -218,6 +224,15 @@ const RULE_CASES = {
   'references-match-dependencies': workspace => {
     workspace.connection.files['tsconfig.lib.json'].references = [];
   },
+  'domain-free': workspace => {
+    workspace.ui.files['src/index.ts'] += 'export const runStatus = 2;\n';
+    workspace.ui.files['src/tokens.css'] += '.host-row { color: red; }\n';
+  },
+  'bucket-names': workspace => {
+    // A foundation package named for where things go rather than what it owns.
+    workspace['shared-models'] = structuredClone(workspace.contracts);
+    workspace['shared-models'].manifest.name = '@vibesys/shared-models';
+  },
 };
 
 test('every package-graph rule has a failing fixture', () => {
@@ -243,7 +258,7 @@ test('legacy packages skip only the per-entry project rules', async t => {
   const workspace = validWorkspace();
   workspace.legacy = {
     manifest: {
-      name: '@vibesys/web',
+      name: '@vibesys/desktop',
       vibesys: {layer: 'app', entries: {'.': 'dom'}},
       dependencies: {'@vibesys/connection': 'workspace:*'},
     },
@@ -278,6 +293,12 @@ const EXTERNAL_CASES = {
   'a bare Node builtin in a dom entry': workspace => {
     workspace.ui.files['src/index.ts'] += "import 'fs';\n";
   },
+  'a Node builtin in a neutral entry': workspace => {
+    workspace.contracts.files['src/index.ts'] += "import 'node:fs';\n";
+  },
+  'the terminal UI runtime outside an app': workspace => {
+    workspace.contracts.files['src/index.ts'] += "import '@opentui/core';\n";
+  },
   'React declared by a package with no dom entry': workspace => {
     workspace.contracts.manifest.dependencies = {'react-dom': '19.1.1'};
   },
@@ -309,4 +330,41 @@ test('a file belongs to its exact entry, else the deepest index directory', () =
   assert.equal(owningEntry(entries, 'src/node/client.ts').subpath, './node');
   assert.equal(owningEntry(entries, 'src/websocket.ts').subpath, './websocket');
   assert.equal(owningEntry(entries, 'src/framer.ts').subpath, '.');
+});
+
+test('domain words are matched per word, across case changes and plurals', () => {
+  assert.deepEqual(domainWords('const runStatus = hostKeys; // starting tasks'), [
+    'run',
+    'host',
+    'task',
+  ]);
+  assert.deepEqual(domainWords('const trunk = ghost; brunch; Dialog; tokens'), []);
+  assert.deepEqual(domainWords('running hosting; gatewayUrl replays transcripts listing'), [
+    'run',
+    'host',
+    'gateway',
+    'replay',
+    'transcript',
+    'listing',
+  ]);
+  assert.deepEqual(domainWords('a rounded string; padding, rendering'), []);
+});
+
+test('a bucket name is allowed above the domain layer and as part of a longer word', async t => {
+  const workspace = validWorkspace();
+  workspace['web-app'].manifest.name = '@vibesys/app-shared';
+  workspace['web-app'].manifest.vibesys.layer = 'app';
+  workspace['core-model'] = structuredClone(workspace.contracts);
+  workspace['core-model'].manifest.name = '@vibesys/coresident';
+  assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
+});
+
+test('a stylesheet entry is a dom asset with no project', async t => {
+  const workspace = validWorkspace();
+  workspace.ui.manifest.vibesys.entries['./tokens.css'] = 'neutral';
+  const errors = packageGraphErrors(await materialize(t, workspace));
+  assert.deepEqual(
+    errors.map(error => error.split(':')[0]),
+    ['entry-capability'],
+  );
 });

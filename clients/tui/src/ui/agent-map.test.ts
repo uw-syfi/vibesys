@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, test} from 'bun:test';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
-import type {AgentPhase} from '@vibesys/core-state';
+import type {AgentPhase} from '@vibesys/run-state/rounds';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
 import {resolveTheme} from '../theme.js';

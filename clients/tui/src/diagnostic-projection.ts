@@ -1,4 +1,4 @@
-import {type CoreDiagnostic, type CoreState, latestDiagnosticChange} from '@vibesys/core-state';
+import {type CoreDiagnostic, type CoreState, latestDiagnosticChange} from '@vibesys/run-state';
 
 /** Whether a rebootstrap replaced one established run with another or unknown log. */
 export function coreOwnsDifferentRun(previous: CoreState, next: CoreState): boolean {

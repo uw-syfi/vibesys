@@ -72,6 +72,10 @@ from vs_core.api import (
     ResumeAuthorized,
     RevisionRef,
     RunView,
+    TurnCandidate,
+    TurnCandidateFailed,
+    TurnCandidatePending,
+    TurnCandidateRetained,
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
@@ -515,11 +519,17 @@ def _awaits_checkpoint(result: ImplementerResult) -> bool:
 
 def _candidate_of(
     view: RunView, record: AttemptRecord, invocation: InvocationRef
-) -> RevisionRef | None:
-    """The revision the reply's turn chain retained, by core's one rule (`TurnChain.candidate`)."""
-    if record.turn is None:
-        return None
-    return record.turn.candidate(view, record.attempt, invocation)
+) -> TurnCandidate | None:
+    """Resolve the current invocation through its shared logical turn chain."""
+    return (
+        None
+        if record.turn is None
+        else record.turn.candidate_outcome(view, record.attempt, invocation)
+    )
+
+
+def _checkpoint_failure(candidate: TurnCandidateFailed) -> str:
+    return f"implementer checkpoint declined ({candidate.reason.value})"
 
 
 def settle_retained(
@@ -534,17 +544,16 @@ def settle_retained(
         invocation = record.held_invocation
         if not record.holds_reply or invocation is None or record.held_reply is None:
             continue
-        live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
         candidate = _candidate_of(view, record, invocation)
-        declined = live is not None and any(
-            row.invocation == invocation for row in live.checkpoint_declines
-        )
-        if candidate is None and not declined:
+        if candidate is None or isinstance(candidate, TurnCandidatePending):
             continue
         reply = _decode(Role.IMPLEMENTER, record.held_reply)
         state = _put(state, index, record.released())
-        if isinstance(reply, ImplementerResult):
-            state = _implemented(state, index, config, reply, candidate)
+        if isinstance(candidate, TurnCandidateFailed):
+            state = fail(state, index, _checkpoint_failure(candidate))
+            continue
+        if isinstance(candidate, TurnCandidateRetained) and isinstance(reply, ImplementerResult):
+            state = _implemented(state, index, config, reply, candidate.revision)
     return state
 
 
@@ -681,14 +690,21 @@ def _answered(
             )
         return _yielded(state, index, view)
     if isinstance(reply, ImplementerResult):
-        candidate = _candidate_of(view, state.attempts[index], event.invocation)
-        if candidate is None and _awaits_checkpoint(reply):
-            return _put(
-                state,
-                index,
-                state.attempts[index].holding(event.output_json or "", event.invocation),
-            )
-        return _implemented(state, index, config, reply, candidate)
+        if not _awaits_checkpoint(reply):
+            result = _implemented(state, index, config, reply, None)
+        else:
+            candidate = _candidate_of(view, state.attempts[index], event.invocation)
+            if candidate is None or isinstance(candidate, TurnCandidatePending):
+                result = _put(
+                    state,
+                    index,
+                    state.attempts[index].holding(event.output_json or "", event.invocation),
+                )
+            elif isinstance(candidate, TurnCandidateFailed):
+                result = fail(state, index, _checkpoint_failure(candidate))
+            else:
+                result = _implemented(state, index, config, reply, candidate.revision)
+        return result
     return _reviewed(state, index, config, reply, event)
 
 

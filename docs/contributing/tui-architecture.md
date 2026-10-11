@@ -16,20 +16,22 @@ run without the server. `entrypoints` composes either the headless integration
 or the server runtime. Tach enforces this direction in CI; see
 [architecture.md](architecture.md) for the generated graph.
 
-The TypeScript frontend has four packages with one allowed dependency direction:
+The TypeScript frontend packages have one allowed dependency direction (the full graph is in
+[clients-architecture.md](clients-architecture.md)):
 
 ```text
-@vibesys/backend-client <- @vibesys/core-state <- @vibesys/tui
-                         \____________________<- @vibesys/web
+@vibesys/contracts <- @vibesys/transport <- @vibesys/transport-node <- @vibesys/tui
+@vibesys/contracts <- @vibesys/transport <- @vibesys/app-web
+@vibesys/contracts <- @vibesys/run-state <- @vibesys/tui, @vibesys/app-web
 ```
 
-`@vibesys/tui` and `@vibesys/web` may depend on the lower layers. They never depend on each other,
+`@vibesys/tui` and `@vibesys/app-web` may depend on the lower layers. They never depend on each other,
 and reverse imports and cross-package relative imports are forbidden and checked by
 `pnpm check:ts-architecture`.
 
 Dependency-cruiser parses and resolves the TypeScript graph for dependency direction, cycles,
 unresolvable or undeclared imports, public package entry points, and the runtime-independence rules
-for `core-state`. `tsconfig.architecture.json` maps workspace package names to their public source
+for `run-state`. `tsconfig.architecture.json` maps workspace package names to their public source
 entry points, so the check does not depend on prior builds. A small manifest check covers forbidden
 workspace dependencies that are declared but unused, because they do not appear in a source
 dependency graph. Rule regressions run as part of `pnpm test:clients`.
@@ -60,18 +62,18 @@ therefore gated on its first commit. Beyond the package direction, it enforces:
 
 | State or behavior | Owner |
 | --- | --- |
-| Generated protocol types, socket framing, connection lifecycle, requests, event subscription | `backend-client` |
-| Run identity, status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics | `core-state` |
+| Generated protocol types and their validator | `contracts` |
+| Framing, connection lifecycle, requests, event subscription | `transport` (Unix socket: `transport-node`) |
+| Run identity, status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics | `run-state` |
 | Focus, selection, layout, zoom, theme, modals, drafts, query progress | `tui` |
 | Terminal widgets, rendering, keyboard and mouse events | `tui` |
 | Browser bindings, presentation, and browser-only interaction state | `web` |
 
-`@vibesys/backend-client` is the runtime-neutral entry. It exports protocol types, parsing,
-framing-independent stream policy, and the transport interfaces. `@vibesys/backend-client/node`
-contains the Unix-socket implementation used by the TUI, while
-`@vibesys/backend-client/websocket` contains the browser WebSocket implementation. The neutral
-entry and WebSocket entry have no Node builtin imports. The package exports and dependency-cruiser
-rule enforce this split, so a browser bundle cannot accidentally pull in `node:net`.
+`@vibesys/transport` is the runtime-neutral entry. It exports framing, stream policy, the control
+channel, and the transport interfaces. `@vibesys/transport/websocket` contains the browser
+WebSocket implementation, and `@vibesys/transport-node` the Unix-socket implementation used by
+the TUI. Each entry compiles with only its runtime's library and types, so a Node builtin in
+`@vibesys/transport` is a type error and a browser bundle cannot pull in `node:net`.
 
 The backend client performs I/O and exposes validated protocol messages. Core state is a pure fold
 over snapshots, ordered events, and active-execution checkpoints. The TUI owns all interaction and
@@ -88,15 +90,15 @@ those values before the replacement run is presented.
 Only backend messages change core state. A frontend action may send a command, but the command does
 not optimistically change backend-authoritative state. The resulting backend event does.
 
-The web client is a presentation adapter over `core-state`. Its React external-store binding owns
+The web client is a presentation adapter over `run-state`. Its React external-store binding owns
 subscriptions and browser presentation state; it does not fold events or copy TUI state logic.
 Recorded replay fixtures are served by the development harness and folded through the same
-`core-state` reducer used by live clients.
+`run-state` reducer used by live clients.
 
 The browser launch path keeps the server composition shared. `vibesys --web` starts the existing
 Unix adapter and a loopback WebSocket gateway around the same `RunApi` and
 `SubscriptionTracker`; the gateway changes only framing, not request dispatch, replay, batching, or
-store-identity handling. It binds `127.0.0.1`, serves the built `clients/web/dist` bundle from the
+store-identity handling. It binds `127.0.0.1`, serves the built `clients/apps/web/dist` bundle from the
 same port, and prints a capability-bearing page URL. The bundle's build manifest inventories the
 tracked source, configuration, entrypoint, package, and dependency-lock inputs and supplies an
 opaque build ID to the instance record; the entrypoint rejects the checkout's default bundle when
@@ -136,7 +138,7 @@ journal and validates any explicit identity against it. Mixed recorded identitie
 an identity-less legacy log requires an explicit identity. This validation uses the event index and
 does not turn replay into an eager full-journal read.
 
-`core-state` has no Node runtime, OpenTUI, theme, layout, focus, or query-result dependencies. Its
+`run-state` has no Node runtime, OpenTUI, theme, layout, focus, or query-result dependencies. Its
 time-dependent selectors require an explicit clock value so tests remain deterministic. Transcript
 labels and tones are semantic annotations derived from event fields; the TUI decides whether and how
 to display them.
@@ -289,7 +291,7 @@ pnpm build:clients
 `pnpm check:knip` (knip, configured in `clients/knip.config.ts`) fails on unused files, exports,
 dependencies, and unlisted or unresolved imports. Entry points are the package `bin` and `exports`
 plus the declared test, harness, and benchmark files; an export used nowhere in the workspace should
-lose its `export` or be deleted. `backend-client/src/generated/` is ignored because the generator
+lose its `export` or be deleted. `contracts/src/generated/` is ignored because the generator
 exports every schema type, and the `index.ts` of each library package is its public API. Add an
 entry point to `knip.config.ts` (with a comment saying who runs it) rather than suppressing a
 finding. The config keys its per-package policy off the derived workspace layout, so a package
@@ -309,7 +311,7 @@ pass excludes tests and runs as part of `pnpm check:ts`.
 Biome also enforces the presentational layer. Production files under any `ui/` directory of a
 client package may not call `fetch`, open a `WebSocket`/`EventSource`/`XMLHttpRequest`, use
 `useEffect`/`useLayoutEffect`/`useInsertionEffect`, schedule timers, or import
-`@vibesys/backend-client`, `electron`, or `node:*`. The GritQL plugins are in
+`@vibesys/transport`, `@vibesys/transport-node`, `electron`, or `node:*`. The GritQL plugins are in
 `clients/lint-rules/` and are attached to `ui/` globs in `clients/biome.json`;
 `clients/scripts/check_ui_no_effects.test.mjs` is their test. The timer rule excludes five OpenTUI
 widgets that own spinner or elapsed-time refresh (`activity-bar`, `agent-map`, `chat-composer`,

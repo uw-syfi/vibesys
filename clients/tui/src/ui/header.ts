@@ -22,13 +22,9 @@
  *   gives each role a tone: the run state carries a verdict, the phase and the
  *   title are content, the metadata recedes.
  */
-import {
-  activeRunFocus,
-  agentKindText,
-  type CoreRunStatus,
-  hasRunEnded,
-  phaseText,
-} from '@vibesys/core-state';
+
+import {type CoreRunStatus, hasRunEnded} from '@vibesys/run-state';
+import {activeRunFocus, agentKindText, phaseText} from '@vibesys/run-state/rounds';
 import type {SessionState} from '../session-model.js';
 import type {Theme} from '../theme.js';
 import {displayWidth, truncateToWidth} from './text-width.js';

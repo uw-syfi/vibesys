@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import posixpath
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -36,6 +36,7 @@ from server.host_api import (
     PATHS_COMPLETE_CAP,
     ChannelEnd,
     ChannelEndOutcome,
+    DetachedLaunchFailure,
     HelloRequest,
     HelperError,
     HelperErrorCode,
@@ -69,10 +70,12 @@ from server.host_helper import (
     Relay,
     Release,
     Send,
+    StopStartedRun,
     Tick,
     Unwatch,
     Watch,
     accepts_input,
+    serve_channel,
     step,
 )
 from server.host_helper_requests import (
@@ -86,14 +89,14 @@ from server.host_helper_requests import (
     select_completions,
     split_prefix,
 )
-from server.registry import FakeInstanceStore
+from server.registry import FakeInstanceStore, StopEffects
 from server.relay import EXIT_STATUS
-from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
+from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sim.api import Listener
+    from vs_sim.api import Event, Listener
 
 ALL_FEATURES = tuple(feature.value for feature in HelperFeature)
 
@@ -632,6 +635,287 @@ def test_a_request_past_its_deadline_is_answered_deadline_exceeded(
     reply, waited = threads.run(main)
     assert (reply["request_id"], reply["code"]) == ("s", "deadline_exceeded")
     assert waited == pytest.approx(1.5)
+
+
+@dataclass
+class _StoppingRequester:
+    """Acknowledges a stop and makes the simulated detached server exit."""
+
+    stop: Callable[[], None]
+    requested: list[str] = field(default_factory=list)
+
+    def request_stop(self, socket_path: str) -> bool:
+        self.requested.append(socket_path)
+        self.stop()
+        return True
+
+
+@dataclass
+class _GatedStoppingRequester:
+    """Expose an acknowledged stop while keeping its cleanup in flight."""
+
+    entered: Event
+    permit: Event
+    stop: Callable[[], None]
+    requested: list[str] = field(default_factory=list)
+
+    def request_stop(self, socket_path: str) -> bool:
+        self.requested.append(socket_path)
+        self.entered.set()
+        assert self.permit.wait(HANG_GUARD_S)
+        self.stop()
+        return True
+
+
+@dataclass
+class _RejectRunStartOutput:
+    """Writes ordinary replies to the client but rejects a successful start reply."""
+
+    client: ChannelClient
+    rejected: int = 0
+
+    def write(self, data: bytes) -> None:
+        if json.loads(data)["type"] == "run.start":
+            self.rejected += 1
+            raise BrokenPipeError
+        self.client.write(data)
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_a_start_that_finishes_after_its_deadline_is_stopped_before_channel_exit(
+    seed: int, tmp_path: Path
+) -> None:
+    project = _project(tmp_path / f"p{seed}")
+    threads = SimThreads(schedule_seed=seed)
+    network = SimNetwork(threads)
+    store = FakeInstanceStore()
+    gate = threads.event()
+    started = record("0123456789ab", project_root=str(project))
+    holds: list[Any] = []
+
+    def slow(_project: Path, _arguments: tuple[str, ...]) -> LiveInstanceRecord:
+        gate.wait(HANG_GUARD_S * 2)
+        hold = store.hold(started.id)
+        hold.publish(started)
+        holds.append(hold)
+        return started
+
+    def stop() -> None:
+        holds[0].release()
+
+    requester = _StoppingRequester(stop)
+    host = replace(
+        fake_host(threads, network, store=store, launcher=FakeRunLauncher(slow)),
+        stop_effects=StopEffects(
+            requester=requester,
+            signaller=FakeProcessSignaller(set()),
+            clock=threads,
+            pause=threads.sleep,
+        ),
+    )
+
+    def main() -> tuple[dict[str, Any], LiveInstanceRecord | None]:
+        client = ChannelClient(threads)
+        worker = serve_on(threads, client, ByteBuffer(), host)
+        client.send(_hello())
+        client.receive()
+        client.send(_request("run.start", "s", 1500, project=str(project)))
+        reply = client.receive()
+        client.close()
+        gate.set()
+        worker.join(HANG_GUARD_S)
+        assert not worker.is_alive()
+        return reply, host.registry.find(started.id)
+
+    reply, still_live = threads.run(main)
+    assert reply["code"] == "deadline_exceeded"
+    assert requester.requested == [started.socket_path]
+    assert still_live is None
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_an_undeliverable_successful_start_is_stopped_before_channel_exit(
+    seed: int, tmp_path: Path
+) -> None:
+    project = _project(tmp_path / f"p{seed}")
+    threads = SimThreads(schedule_seed=seed)
+    network = SimNetwork(threads)
+    store = FakeInstanceStore()
+    started = record("0123456789ab", project_root=str(project))
+    holds: list[Any] = []
+
+    def launch(_project: Path, _arguments: tuple[str, ...]) -> LiveInstanceRecord:
+        hold = store.hold(started.id)
+        hold.publish(started)
+        holds.append(hold)
+        return started
+
+    def stop() -> None:
+        holds[0].release()
+
+    requester = _StoppingRequester(stop)
+    host = replace(
+        fake_host(threads, network, store=store, launcher=FakeRunLauncher(launch)),
+        stop_effects=StopEffects(
+            requester=requester,
+            signaller=FakeProcessSignaller(set()),
+            clock=threads,
+            pause=threads.sleep,
+        ),
+    )
+
+    def main() -> tuple[int, LiveInstanceRecord | None]:
+        client = ChannelClient(threads)
+        output = _RejectRunStartOutput(client)
+        worker = threads.spawn(
+            lambda: serve_channel(
+                host=host,
+                source=client,
+                output=output,
+                errors=ByteBuffer(),
+                threads=threads,
+            ),
+            name="helper",
+        )
+        client.send(_hello())
+        client.receive()
+        client.send(_request("run.start", "s", project=str(project)))
+        worker.join(HANG_GUARD_S)
+        assert not worker.is_alive()
+        return output.rejected, host.registry.find(started.id)
+
+    rejected, still_live = threads.run(main)
+    assert rejected == 1
+    assert requester.requested == [started.socket_path]
+    assert still_live is None
+
+
+def test_a_late_successful_start_owns_compensation_until_input_can_close() -> None:
+    state, _ = step(ChannelState(), Received(_line(_hello()), 0.0), "v")
+    state, _ = step(state, Answered("h", PingReply(request_id="h")), "v")
+    start = _request("run.start", "s", 1000, project="/project")
+    state, _ = step(state, Received(_line(start), 0.0), "v")
+    state, outputs = step(state, InputEnded(), "v")
+    assert Close() not in outputs
+    state, outputs = step(state, Tick(1.0), "v")
+    assert Close() not in outputs
+
+    started = record("0123456789ab")
+    state, outputs = step(state, Answered("s", RunStartReply(request_id="s", launch=started)), "v")
+
+    assert outputs == (StopStartedRun(started.id), Close())
+    assert not state.starting
+
+
+def test_a_run_channel_stays_busy_until_an_expired_start_is_compensated() -> None:
+    state, _ = step(ChannelState(), Received(_line(_hello()), 0.0), "v")
+    state, _ = step(state, Answered("h", PingReply(request_id="h")), "v")
+    start = _request("run.start", "s", 1000, project="/project")
+    state, _ = step(state, Received(_line(start), 0.0), "v")
+    state, _ = step(state, Tick(1.0), "v")
+    connect = _request("run.connect", "c", instance_id="0123456789ab", role="subscribe")
+
+    state, outputs = step(state, Received(_line(connect), 1.0), "v")
+
+    (sent,) = outputs
+    assert isinstance(sent, Send)
+    assert isinstance(sent.message, HelperError)
+    assert sent.message.code is HelperErrorCode.CHANNEL_BUSY
+    assert state.starting == frozenset({"s"})
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_relay_handoff_waits_for_late_start_compensation(seed: int, tmp_path: Path) -> None:
+    project = _project(tmp_path / f"p{seed}")
+    threads = SimThreads(schedule_seed=seed)
+    network = SimNetwork(threads)
+    listener = network.listen("run.sock")
+    store = FakeInstanceStore()
+    launch_permit = threads.event()
+    stop_entered = threads.event()
+    stop_permit = threads.event()
+    server_received = threads.event()
+    started = record("0123456789ab", project_root=str(project))
+    holds: list[Any] = []
+
+    def launch(_project: Path, _arguments: tuple[str, ...]) -> LiveInstanceRecord:
+        assert launch_permit.wait(HANG_GUARD_S)
+        hold = store.hold(started.id)
+        hold.publish(started)
+        holds.append(hold)
+        return started
+
+    def stop() -> None:
+        holds[0].release()
+
+    requester = _GatedStoppingRequester(stop_entered, stop_permit, stop)
+    host = replace(
+        fake_host(threads, network, store=store, launcher=FakeRunLauncher(launch)),
+        stop_effects=StopEffects(
+            requester=requester,
+            signaller=FakeProcessSignaller(set()),
+            clock=threads,
+            pause=threads.sleep,
+        ),
+    )
+
+    def serve_run() -> None:
+        connection = listener.accept(HANG_GUARD_S)
+        assert connection.recv(1, HANG_GUARD_S) == b"x"
+        server_received.set()
+        connection.close()
+
+    def main() -> tuple[dict[str, Any], dict[str, Any], int | None]:
+        server = threads.spawn(serve_run, name="server")
+        client = ChannelClient(threads)
+        worker = serve_on(threads, client, ByteBuffer(), host)
+        client.send(_hello())
+        client.receive()
+        client.send(_request("run.start", "s", 1000, project=str(project)))
+        expired = client.receive()
+        launch_permit.set()
+        assert stop_entered.wait(HANG_GUARD_S)
+
+        client.send(_request("run.connect", "c", instance_id=started.id, role="subscribe"))
+        connected = client.receive()
+        client.send(b"x")
+        assert not server_received.is_set()
+
+        stop_permit.set()
+        assert server_received.wait(HANG_GUARD_S)
+        worker.join(HANG_GUARD_S)
+        server.join(HANG_GUARD_S)
+        assert not worker.is_alive()
+        assert not server.is_alive()
+        return expired, connected, client.status
+
+    expired, connected, status = threads.run(main)
+    assert (expired["request_id"], expired["code"]) == ("s", "deadline_exceeded")
+    assert (connected["request_id"], connected["type"]) == ("c", "run.connect")
+    assert requester.requested == [started.socket_path]
+    assert status == EXIT_STATUS[ChannelEndOutcome.SERVER_CLOSED]
+
+
+def test_a_late_failed_start_does_not_stop_the_existing_instance_it_reports() -> None:
+    state, _ = step(ChannelState(), Received(_line(_hello()), 0.0), "v")
+    state, _ = step(state, Answered("h", PingReply(request_id="h")), "v")
+    start = _request("run.start", "s", 1000, project="/project")
+    state, _ = step(state, Received(_line(start), 0.0), "v")
+    state, _ = step(state, InputEnded(), "v")
+    state, _ = step(state, Tick(1.0), "v")
+    existing = record("0123456789ab")
+    failure = DetachedLaunchFailure(
+        code="run_already_live",
+        stage="resume_resolution",
+        message="already live",
+        exit_code=1,
+        live_instance=existing,
+    )
+
+    state, outputs = step(state, Answered("s", RunStartReply(request_id="s", launch=failure)), "v")
+
+    assert outputs == (Close(),)
+    assert not state.starting
 
 
 @pytest.mark.parametrize("seed", range(6))

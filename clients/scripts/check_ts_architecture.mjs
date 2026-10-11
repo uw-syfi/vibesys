@@ -4,9 +4,8 @@
  * The architecture gate: dependency-cruiser over every source directory the workspace has.
  *
  * The scan roots are derived from `workspace_layout.mjs` instead of being listed here, because a
- * listed root silently skips a package or a directory that joins the workspace later. That is how
- * `web/e2e` stayed unscanned while `production-dependencies-are-declared`, the rule that should
- * have reported its undeclared `@playwright/test` import, was present and correct.
+ * listed root silently skips a package or a directory that joins the workspace later, as `web/e2e`
+ * once was: a rule present and correct never saw its undeclared `@playwright/test` import.
  */
 
 import {dirname, join, resolve} from 'node:path';

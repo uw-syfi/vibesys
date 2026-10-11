@@ -1,6 +1,6 @@
 import {BoxRenderable, type CliRenderer, TextRenderable} from '@opentui/core';
+import {formatPerformanceDelta} from '@vibesys/run-state/performance';
 import {
-  formatPerformanceDelta,
   hasActiveAgentTiming,
   type RoundKey,
   type RoundOutcome,
@@ -8,7 +8,7 @@ import {
   roundAgentElapsedMs,
   roundOutcome,
   sameRoundKey,
-} from '@vibesys/core-state';
+} from '@vibesys/run-state/rounds';
 import {hypothesisRoundFor} from '../experiments.js';
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';

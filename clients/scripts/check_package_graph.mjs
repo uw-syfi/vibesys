@@ -40,6 +40,15 @@
  * - `references-match-dependencies`: the package's tsconfig projects reference a project of every
  *   workspace dependency and of no other workspace package. A missing reference is not a compiler
  *   error (the import resolves to the dependency's source), so this is where it is caught.
+ * - `domain-free`: the production source of a domain-free package (`DOMAIN_FREE`) names no word of
+ *   the product's domain (`DOMAIN_WORDS`), in identifiers, strings, or comments, so a primitive
+ *   that grows a domain concept is caught where the layer rule alone cannot see it.
+ * - `bucket-names`: a foundation, core, or domain package is named for the one concept it owns, so
+ *   no segment of its name is a bucket word (`BUCKET_NAMES`: entities, core, common, ...). A bucket
+ *   name invites unrelated code in, which the layer rule cannot see.
+ *
+ * An export whose source is a stylesheet (`./tokens.css`) is a `dom` asset, not a compiled entry:
+ * it has no tsconfig project, and bundlers resolve it through the same source condition.
  *
  * Imports are read with TypeScript's pre-processor, so a specifier in a comment or a string is not
  * an import. Resolution-level rules (a relative path into another package, third-party imports)
@@ -71,6 +80,8 @@ export const RULES = [
   'entry-projects',
   'entry-capability',
   'references-match-dependencies',
+  'domain-free',
+  'bucket-names',
 ];
 
 /** Layer ranks. A package may depend only on a strictly lower rank. */
@@ -95,22 +106,64 @@ export const FEATURE_ENTRIES = {'./state': 'neutral', './renderer': 'dom', './ma
 export const EXTERNAL_DEPENDENCIES = [
   {packages: ['react', 'react-dom'], runtimes: ['dom']},
   {packages: ['electron'], runtimes: ['node'], layers: ['feature', 'app']},
+  {packages: ['@opentui/core'], runtimes: ['node'], layers: ['app']},
 ];
 const NODE_BUILTINS = {runtimes: ['node']};
 
 /**
  * Packages that predate the per-entry layout, with the rules they skip until the item named in
  * the migration table moves them. The per-entry project rules (`entry-projects` stands for all
- * three) cannot apply to their single tsconfig per package; desktop's one `node` entry also holds
- * its React welcome view, which the external-dependency rule would reject. Every other rule
- * applies. This table only shrinks.
+ * three) cannot apply to their single tsconfig per package. Every other rule applies. This table
+ * only shrinks.
  */
 export const LEGACY_EXEMPTIONS = {
-  '@vibesys/backend-client': new Set(['entry-projects']),
-  '@vibesys/desktop': new Set(['entry-projects', 'external-dependencies']),
+  '@vibesys/desktop': new Set(['entry-projects']),
   '@vibesys/tui': new Set(['entry-projects']),
-  '@vibesys/web': new Set(['entry-projects']),
 };
+
+/**
+ * Packages whose production source must stay free of the product's domain, and the words that
+ * name it. Matching is per word: identifiers are split at case changes (`runStatus` is `run` and
+ * `status`), and a plural `s` is dropped.
+ */
+export const DOMAIN_FREE = new Set(['@vibesys/ui', '@vibesys/store']);
+export const DOMAIN_WORDS = new Set([
+  'agent',
+  'candidate',
+  'checkout',
+  'experiment',
+  'gateway',
+  'host',
+  'instance',
+  'listing',
+  'project',
+  'replay',
+  'resume',
+  'round',
+  'run',
+  'ssh',
+  'task',
+  'transcript',
+  'vibesys',
+  'welcome',
+]);
+
+/**
+ * Words no foundation, core, or domain package name may contain as a segment: each names a place to
+ * put things rather than a concept, so the package it names grows into a junk drawer.
+ */
+export const BUCKET_NAMES = new Set([
+  'common',
+  'core',
+  'entities',
+  'helpers',
+  'misc',
+  'shared',
+  'utils',
+]);
+const NAMED_LAYERS = new Set(['foundation', 'core', 'domain']);
+
+const STYLESHEET = /\.css$/;
 
 function ruleApplies(skipped) {
   return error => !skipped.has(error.slice(0, error.indexOf(':')));
@@ -152,6 +205,10 @@ export function packageGraphErrors(root) {
     if (!skipped.has('entry-projects')) {
       errors.push(...projectErrors(root, workspacePackage, byName));
     }
+    if (DOMAIN_FREE.has(workspacePackage.name)) {
+      errors.push(...domainWordErrors(root, workspacePackage));
+    }
+    errors.push(...bucketNameErrors(workspacePackage));
   }
   return errors;
 }
@@ -541,23 +598,32 @@ function capabilityErrors(where, runtime, options) {
   return errors;
 }
 
+/** The project rules for one entry: a stylesheet is a `dom` asset; anything else has its project. */
+function entryProjectErrors(packageRoot, directory, entry) {
+  if (STYLESHEET.test(entry.source ?? '')) {
+    if (entry.runtime === 'dom') return [];
+    return [
+      violation(
+        'entry-capability',
+        `${directory}/package.json`,
+        `the stylesheet entry ${entry.subpath} must be dom, not ${entry.runtime}`,
+      ),
+    ];
+  }
+  const file = entryProject(entry.subpath);
+  const where = `${directory}/${file}`;
+  if (!existsSync(join(packageRoot, file))) {
+    return [violation('entry-projects', where, `missing; it compiles the ${entry.subpath} entry`)];
+  }
+  return capabilityErrors(where, entry.runtime, parsedProject(join(packageRoot, file)).options);
+}
+
 function projectErrors(root, workspacePackage, byName) {
   const {directory, manifest} = workspacePackage;
   const packageRoot = join(root, directory);
-  const errors = [];
-  for (const entry of packageEntries(workspacePackage)) {
-    const file = entryProject(entry.subpath);
-    const where = `${directory}/${file}`;
-    if (!existsSync(join(packageRoot, file))) {
-      errors.push(
-        violation('entry-projects', where, `missing; it compiles the ${entry.subpath} entry`),
-      );
-      continue;
-    }
-    errors.push(
-      ...capabilityErrors(where, entry.runtime, parsedProject(join(packageRoot, file)).options),
-    );
-  }
+  const errors = packageEntries(workspacePackage).flatMap(entry =>
+    entryProjectErrors(packageRoot, directory, entry),
+  );
   const referenced = new Set();
   for (const file of readdirSync(packageRoot).filter(file =>
     /^tsconfig(?:\..+)?\.json$/.test(file),
@@ -598,6 +664,76 @@ function projectErrors(root, workspacePackage, byName) {
     }
   }
   return errors;
+}
+
+// --- domain-free packages ---------------------------------------------------------------------
+
+/**
+ * The stems a word may be an inflection of: the word, without a plural `s`, and without `ing`
+ * (undoubling a final consonant, so `running` is `run`). Not `ed`: `rounded` names a shape.
+ */
+function stems(word) {
+  const candidates = [word, word.replace(/s$/, '')];
+  if (word.endsWith('ing') && word.length > 5) {
+    const stem = word.slice(0, -3);
+    candidates.push(stem, stem.replace(/([b-df-hj-np-tv-z])\1$/, '$1'));
+  }
+  return candidates;
+}
+
+/** The domain words in `text`: its words split at case changes, lower-cased, without inflection. */
+export function domainWords(text) {
+  const found = new Set();
+  for (const word of text.replace(/([a-z0-9])([A-Z])/g, '$1 $2').split(/[^A-Za-z]+/)) {
+    const match = stems(word.toLowerCase()).find(stem => DOMAIN_WORDS.has(stem));
+    if (match !== undefined) found.add(match);
+  }
+  return [...found];
+}
+
+function domainWordErrors(root, workspacePackage) {
+  const {name, directory} = workspacePackage;
+  const packageRoot = join(root, directory);
+  const stylesheets = packageEntries(workspacePackage)
+    .map(({source}) => source)
+    .filter(source => STYLESHEET.test(source ?? '') && existsSync(join(packageRoot, source)));
+  const errors = [];
+  for (const path of [
+    ...sourceFiles(packageRoot).filter(file => !isTestCode(file)),
+    ...stylesheets,
+  ]) {
+    const words = domainWords(readFileSync(join(packageRoot, path), 'utf8'));
+    if (words.length > 0) {
+      errors.push(
+        violation(
+          'domain-free',
+          `${directory}/${path}`,
+          `${name} is domain-free, but this names ${words.join(', ')}; ` +
+            'keep the concept in the package that owns it and pass data in as props',
+        ),
+      );
+    }
+  }
+  return errors;
+}
+
+// --- bucket names -----------------------------------------------------------------------------
+
+function bucketNameErrors({name, directory, manifest}) {
+  if (!NAMED_LAYERS.has(manifest.vibesys.layer)) return [];
+  const buckets = name
+    .slice(SCOPE.length)
+    .split('-')
+    .filter(segment => BUCKET_NAMES.has(segment));
+  if (buckets.length === 0) return [];
+  return [
+    violation(
+      'bucket-names',
+      `${directory}/package.json`,
+      `${name} (${manifest.vibesys.layer}) is named for a bucket (${buckets.join(', ')}), not the ` +
+        'concept it owns; name it for that concept, or split it into one package per concept',
+    ),
+  ];
 }
 
 function main() {

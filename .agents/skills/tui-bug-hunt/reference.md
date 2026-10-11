@@ -199,7 +199,7 @@ is documented here only for context and is not used for finding bugs.
   shows empty), #425 (chat fails after Omnigent, event-loop reentry), #276
   (stale invalid-owner error).
 - **Backend/protocol affecting TUI:** #444 (package boundaries
-  backend-client←core-state←tui), #282 (chat wired to real agent), #329 (stub
+  transport←core-state←tui), #282 (chat wired to real agent), #329 (stub
   launch time), #267 (Bun worker EACCES in CI).
 - **Features/UX:** #194 (multi-turn chat), #260 (themes), #283 (split-pane viz),
   #285 (hypothesis-log landing), #396 (agent graph), #432 (F4 zoom).

@@ -83,8 +83,9 @@ def main() -> None:
         errors=FdSink(_STDERR_FD),
         threads=threads,
     )
-    # A request worker, a watch, or the input pump may still be blocked on the
-    # registry, a launch, or stdin; the channel's outcome is decided, so leave at once.
+    # A non-start request worker, a watch, or the input pump may still be blocked on the
+    # registry or stdin. Starts and their cleanup settle before serve_channel returns.
+    # The channel's outcome is decided, so leave at once.
     os._exit(status)
 
 

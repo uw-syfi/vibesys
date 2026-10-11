@@ -1,0 +1,58 @@
+{
+  "name": "@vibesys/transport",
+  "version": "0.1.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "vibesys": {
+    "layer": "core",
+    "entries": {
+      ".": "neutral",
+      "./testing": "neutral",
+      "./websocket": "dom"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "@vibesys/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "@vibesys/source": "./src/testing/index.ts",
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    },
+    "./websocket": {
+      "@vibesys/source": "./src/websocket.ts",
+      "types": "./dist/websocket.d.ts",
+      "default": "./dist/websocket.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.*.tsbuildinfo",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.lib.json tsconfig.testing.json tsconfig.websocket.json",
+    "check": "tsc -b",
+    "test": "pnpm test:bun && pnpm test:node",
+    "test:bun": "node ../scripts/run_bun_tests.mjs ./src",
+    "test:node": "node ../scripts/run_node_tests.mjs ./src"
+  },
+  "dependencies": {
+    "@vibesys/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/node": "^24.0.0",
+    "expect": "30.5.2",
+    "typescript": "^5.8.3"
+  }
+}

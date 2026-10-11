@@ -23,13 +23,13 @@ import {createConnection, type Socket} from 'node:net';
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
+import type {RunEvent, RunSnapshot} from '@vibesys/contracts';
 import {
   type ActiveExecutionCheckpoint,
   initialCoreState,
   reduceEventBatch,
   reduceSnapshot,
-} from '@vibesys/core-state';
+} from '@vibesys/run-state';
 import {canonicalJournalEvents, type RunEventRecord, readJournalRecords} from './journal.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));

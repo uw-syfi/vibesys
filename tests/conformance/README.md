@@ -6,7 +6,7 @@ socket and a WebSocket gateway (#811). Both must reproduce the framing and conne
 written down in [`docs/contributing/wire-protocol.md`](../../docs/contributing/wire-protocol.md).
 This corpus is the fixtures that hold them to it.
 
-There is exactly one copy. The client-side fold suite (`@vibesys/backend-client`, #812) and the
+There is exactly one copy. The client-side fold suite (`@vibesys/transport`, #812) and the
 server-side scenario suite (`src/server`, #811) both read the files here. Neither keeps a private
 copy, so a fixture change moves both suites at once.
 
@@ -22,7 +22,7 @@ tests/conformance/
 ```
 
 - `events/` proves event-kind coverage. There is one file per member of the `EventType` enum in the
-  generated schema (`clients/backend-client/src/generated/protocol.schema.json`). The corpus gate
+  generated schema (`clients/contracts/src/generated/protocol.schema.json`). The corpus gate
   enumerates the enum and fails if a kind has no fixture, so a new event kind cannot land without
   one. Each file is a single valid `RunEvent` instance; the filename stem is its `type`.
 
@@ -46,8 +46,8 @@ tests/conformance/
 | Reader | Language | Lands in | Uses |
 | --- | --- | --- | --- |
 | corpus gate | Node (`clients/scripts/check_conformance_corpus.mjs`) | 888a (this) | validates coverage, structure, decision anchoring, and the execution partition |
-| event fold runner | TypeScript (`clients/core-state/src/conformance.test.ts`) | follow-up to 888a | folds every shared event fixture through `core-state`, both batched and incrementally |
-| client scenario runner | TypeScript | 888b | replays connection scenarios through the client transport and `core-state` |
+| event fold runner | TypeScript (`clients/run-state/src/conformance.test.ts`) | follow-up to 888a | folds every shared event fixture through `run-state`, both batched and incrementally |
+| client scenario runner | TypeScript | 888b | replays connection scenarios through the client transport and `run-state` |
 | server scenario suite | Python (`tests/conformance/test_server_transports.py`) | follow-up to #811 | replays the bootstrap, control-path, and simultaneous two-client scenarios on every transport each declares |
 | relay runner | Python (`tests/e2e/test_relay.py`) | #1785 | replays the Unix bootstrap, control-path, and tail-overflow scenarios through a real host helper's run channel |
 | host helper runner | Python (`tests/conformance/test_host_helper.py`, `tests/e2e/test_host_helper.py`) | #1887 | replays the `helper-*` scenarios against the helper in process and over stdio against a real helper command (`VIBESYS_HOST_HELPER_COMMAND` points it at another implementation) |
@@ -79,7 +79,7 @@ From the repository root:
 ```bash
 node clients/scripts/check_conformance_corpus.mjs       # one-shot check, prints violations and exits non-zero
 pnpm --dir clients test:conformance                     # the same check under node --test, with failure-mode tests
-pnpm --dir clients --filter @vibesys/core-state test    # folds the shared event fixtures through core state
+pnpm --dir clients --filter @vibesys/run-state test    # folds the shared event fixtures through core state
 uv run pytest -q tests/conformance/test_server_transports.py  # exercises both server transports
 ```
 

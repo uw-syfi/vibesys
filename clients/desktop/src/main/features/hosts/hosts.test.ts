@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
-import {FakeClock} from '@vibesys/backend-client/testing';
+import {FakeClock} from '@vibesys/transport/testing';
 import {ConnectionManager} from '../../platform/connection/index.js';
 import {FakeLink} from '../../platform/connection/testing/fake-helper.js';
 import {SettingsStore, settingsFor, withHostSettings} from '../../platform/settings/index.js';
