@@ -30,6 +30,9 @@
     },
     {
       "path": "../store/tsconfig.testing.json"
+    },
+    {
+      "path": "../machine/tsconfig.testing.json"
     }
   ]
 }

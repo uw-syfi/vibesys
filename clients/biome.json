@@ -95,6 +95,7 @@
         "features/*/src/**/state/**/*.tsx",
         "features/*/src/**/effects/**/*.ts",
         "features/*/src/**/effects/**/*.tsx",
+        "connection/src/state/**/*.ts",
         "!**/*.test.ts",
         "!**/*.test.tsx",
         "!features/gateway-connect/src/renderer/effects/gateway-connect.ts",
@@ -106,6 +107,7 @@
       "includes": [
         "features/run-control/src/**/*.ts",
         "features/run-control/src/**/*.tsx",
+        "connection/src/**/*.ts",
         "!**/*.test.ts",
         "!**/*.test.tsx"
       ],
