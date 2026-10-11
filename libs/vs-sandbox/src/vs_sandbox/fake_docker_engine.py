@@ -110,6 +110,22 @@ _RUN_ERROR_EXIT = 125
 _DEFAULT_RUNTIMES = ("runc",)
 
 
+def _bind_mounts(arguments: Sequence[str]) -> tuple[dict[str, Path], frozenset[str]]:
+    """Return the ``-v`` mounts of a ``docker run`` as ``container path -> host path``.
+
+    The second result names the container paths mounted ``:ro``.
+    """
+    mounts: dict[str, Path] = {}
+    read_only: set[str] = set()
+    for index, argument in enumerate(arguments[:-1]):
+        if argument == "-v":
+            host, container, *options = arguments[index + 1].split(":")
+            mounts[container] = Path(host)
+            if "ro" in options:
+                read_only.add(container)
+    return mounts, frozenset(read_only)
+
+
 @dataclass(frozen=True, slots=True)
 class FakeContainer:
     """What ``docker ps -a`` shows of one container the daemon still holds."""
@@ -120,11 +136,14 @@ class FakeContainer:
     running: bool
     mounts: Mapping[str, Path] = field(default_factory=dict)
     """Each bind mount as ``container path -> host path``."""
+    read_only_mounts: frozenset[str] = frozenset()
+    """The container paths of ``mounts`` that were mounted ``:ro``."""
 
 
 @dataclass(slots=True)
 class _Container:
     mounts: dict[str, Path]
+    read_only_mounts: frozenset[str]
     workdir: str
     name: str = ""
     labels: dict[str, str] = field(default_factory=dict)
@@ -252,6 +271,7 @@ class FakeDockerEngine:
                 dict(container.labels),
                 container.running,
                 dict(container.mounts),
+                container.read_only_mounts,
             )
             for identifier, container in self._containers.items()
         )
@@ -343,7 +363,7 @@ class FakeDockerEngine:
         return container.mounts[best] / target[len(best) :].lstrip("/")
 
     def _create(self, arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-        mounts: dict[str, Path] = {}
+        mounts, read_only = _bind_mounts(arguments)
         labels: dict[str, str] = {}
         workdir = "/"
         runtime: str | None = None
@@ -355,9 +375,6 @@ class FakeDockerEngine:
             elif argument == "--label":
                 key, _, value = arguments[index + 1].partition("=")
                 labels[key] = value
-            elif argument == "-v":
-                host, container, *_ = arguments[index + 1].split(":")
-                mounts[container] = Path(host)
             elif argument == "--workdir":
                 workdir = arguments[index + 1]
             elif argument == "--runtime":
@@ -368,7 +385,9 @@ class FakeDockerEngine:
             )
             return subprocess.CompletedProcess(arguments, _RUN_ERROR_EXIT, "", stderr)
         identifier = f"fake{len(self._containers):04d}{uuid.uuid4().hex[:8]}"
-        self._containers[identifier] = _Container(mounts, workdir, name, labels, runtime, env=env)
+        self._containers[identifier] = _Container(
+            mounts, read_only, workdir, name, labels, runtime, env=env
+        )
         if self._runs_lost_after_creating:
             if self._runs_lost_after_creating.pop(0):
                 raise subprocess.TimeoutExpired(arguments, 0)

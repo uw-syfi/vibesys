@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from tests.support import run_test_command
 
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import (
@@ -119,6 +120,39 @@ def _as_mount_tuples(resources: Sequence[HostResource]) -> list[tuple[str, str, 
         )
         for resource in resources
     ]
+
+
+def _add_linked_worktree(repository: Path, worktree: Path) -> None:
+    """Create *repository* with one commit and *worktree* as its linked worktree."""
+    identity = ("-c", "user.name=t", "-c", "user.email=t@example.invalid")
+    repository.mkdir()
+    for args in (
+        ("init", "-q"),
+        ("commit", "-q", "--allow-empty", "-m", "base"),
+        ("worktree", "add", "-q", "--detach", str(worktree)),
+    ):
+        run_test_command(["git", *identity, *args], cwd=repository, check=True, capture_output=True)
+
+
+def _assert_worktree_git_is_read_only_at_its_host_path(
+    root: Path, backends: dict[str, FakeBackend]
+) -> None:
+    """Check each environment's linked worktree ``<root>/<name>/workspace`` has readable Git.
+
+    Its own gitdir and the shared objects and refs are mounted read-only at their
+    host path, which the worktree's ``.git`` file names, and hooks are withheld.
+    """
+    for name, backend in backends.items():
+        repository = root / name / "project" / ".git"
+        by_path = {resource.path: resource for resource in backend.calls[0][1]["resources"]}
+        for readable in (
+            repository / "worktrees" / "workspace",
+            repository / "objects",
+            repository / "refs",
+        ):
+            assert by_path[readable].access is HostResourceAccess.READ_ONLY, (name, readable)
+            assert by_path[readable].agent_path is None, (name, readable)
+        assert repository / "hooks" not in by_path, name
 
 
 def _fake_agent_path(
@@ -2185,6 +2219,7 @@ def test_docker_modal_and_skypilot_build_the_same_kind_of_sandbox_from_one_resou
     ) -> None:
         root = tmp_path / env_name
         root.mkdir()
+        _add_linked_worktree(root / "project", root / "workspace")
         _open(
             env,
             _request(
@@ -2271,6 +2306,9 @@ remote_artifact_root = "/remote/vibesys"
         by_env = {env_name: mounts[agent_path] for env_name, mounts in resources_by_env.items()}
         accesses = {resource.access for resource in by_env.values()}
         assert accesses == {expected}, (agent_path, by_env)
+
+    # (d) The workspace is a linked Git worktree.
+    _assert_worktree_git_is_read_only_at_its_host_path(tmp_path, backends)
 
     # (c) Nothing outside the workspace-related mounts each plan legitimately
     # marks writable (SkyPilot's caller-state bridge, the shared login) is

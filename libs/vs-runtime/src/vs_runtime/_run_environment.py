@@ -80,6 +80,7 @@ from vs_sandbox.api import (
     DeviceLease,
     EnvironmentBindMount,
     HostResource,
+    HostResourceAccess,
     ProjectPathPolicy,
     SandboxKind,
     SandboxLifecycleHooks,
@@ -89,6 +90,7 @@ from vs_sandbox.api import (
     deduplicate_host_resources,
     evaluator_helpers,
     host_resource_for_mount,
+    linked_worktree_git_paths,
     require_sysbox_runtime,
     start_sandbox,
     stop_sandbox,
@@ -1715,6 +1717,15 @@ def _container_mount_plan(
             mask_root=request.log_dir / "sandbox-hidden",
             container_root=root,
         )
+    )
+
+    # A candidate workspace is a linked Git worktree whose ``.git`` file names its
+    # metadata by host path. Mounted at that same path, read-only, ``git status``
+    # and ``git diff`` work in the container while history and other candidates'
+    # refs and worktrees stay unwritable.
+    resources.extend(
+        HostResource(path, HostResourceAccess.READ_ONLY, "linked worktree Git metadata")
+        for path in linked_worktree_git_paths(request.workspace)
     )
 
     if (
