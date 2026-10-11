@@ -4,13 +4,11 @@ Configuration is an input of the strategy, never persisted state: restarting the
 strategy with the same options reproduces every scientific decision.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
-from vibesys.metrics import MetricSpace
+from vibesys.candidates.api import CandidateConfig
 from vs_core.api import ArtifactRef
 
 if TYPE_CHECKING:
@@ -20,10 +18,8 @@ type Positive = Annotated[int, Field(gt=0)]
 type Duration = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 
 
-class DynamicConfig(BaseModel):
+class DynamicConfig(CandidateConfig):
     """Scientific policy: budgets, cadence, ranking space and per-role deadlines."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     # The evaluation recipe artifact every measurement plan cites.
     recipe: ArtifactRef
@@ -44,10 +40,6 @@ class DynamicConfig(BaseModel):
     # budget inside one provider outage.
     turn_drop_backoff_seconds: Duration = 5.0
     turn_drop_backoff_cap_seconds: Duration = 120.0
-    max_input_measurement_attempts: Positive = 3
-    metric_space: MetricSpace = Field(default_factory=MetricSpace)
-    benchmark_configured: bool = True
-    accuracy_configured: bool = True
     profiling: bool = False
     # Whether a profile workstream also submits a profile measurement after its turn.
     profile_measurement: bool = False
@@ -72,7 +64,7 @@ class DynamicConfig(BaseModel):
         return self.max_rounds * self.max_in_flight
 
     @classmethod
-    def from_options(cls, options: DynamicOptions, **overrides: object) -> DynamicConfig:
+    def from_options(cls, options: "DynamicOptions", **overrides: object) -> "DynamicConfig":
         """Project the validated plugin options; `overrides` supply launch capabilities."""
         return cls.model_validate(
             {

@@ -1,48 +1,18 @@
-"""Run-level policy: when the search is over, which candidate wins, and how it ends.
+"""Dynamic's run phases: when the search is over, over the shared candidate policy.
 
-The winner is the best winner-eligible retained candidate by the configured metric
-space, else the trusted baseline. Adoption is proposed once, and the run stops
-only after core reports the adoption result.
-
-A run ends in one of three typed ways, so that success always means the operator
-has a trusted, measured result to use:
-
-- ``adopted``: a retained, accuracy-verified candidate beat the input (success);
-- ``no improvement``: no candidate did, but the input was measured and trusted, so
-  the operator keeps it (success);
-- ``no trusted result``: the input failed its measurement and no trusted candidate
-  was found, so there is nothing to keep (failure).
+What is chosen, proposed and stopped with is `vibesys.candidates`. This module owns what only
+the strategy knows: when nothing is in flight and nothing more will be scheduled, and which
+finished rounds are eligible.
 """
 
+from vibesys.candidates import api as candidates
 from vibesys.hypothesis import RunEnding
 from vibesys.orchestration.dynamic.strategy import _context as context
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._draft import Draft
-from vibesys.orchestration.dynamic.strategy._ids import decision_id
-from vibesys.orchestration.dynamic.strategy._settlement import measurement
-from vibesys.orchestration.dynamic.strategy._state import (
-    DynamicStrategyState,
-    HypothesisRecord,
-    RoundRecord,
-    RunPhase,
-    Winner,
-)
-from vs_core.api import (
-    AdoptionResult,
-    ObservationStatus,
-    ProposeWinner,
-    RetainedCandidate,
-    RevisionRef,
-    RunResultProposal,
-    Selection,
-    Stop,
-    TrustedBaseline,
-    run_scope,
-)
-
-
-def _reason(ending: RunEnding, detail: str) -> str:
-    return f"{ending.value}: {detail}"
+from vibesys.orchestration.dynamic.strategy._ids import IDS
+from vibesys.orchestration.dynamic.strategy._state import DynamicStrategyState, RunPhase, Winner
+from vs_core.api import AdoptionResult, RevisionRef
 
 
 def search_over(state: DynamicStrategyState, config: DynamicConfig) -> bool:
@@ -56,9 +26,15 @@ def search_over(state: DynamicStrategyState, config: DynamicConfig) -> bool:
     )
 
 
-def _eligible(state: DynamicStrategyState) -> tuple[tuple[HypothesisRecord, RoundRecord], ...]:
+def _eligible(state: DynamicStrategyState) -> tuple[candidates.EligibleRound, ...]:
     return tuple(
-        (hypothesis, row)
+        candidates.EligibleRound(
+            hypothesis_id=hypothesis.hypothesis_id,
+            sequence=row.sequence,
+            settlement=row.settlement,
+            candidate=row.candidate,
+            metrics=row.metrics,
+        )
         for hypothesis in state.hypotheses
         for row in hypothesis.rounds
         if row.eligible and row.candidate is not None and row.settlement is not None
@@ -69,27 +45,7 @@ def choose_winner(
     state: DynamicStrategyState, config: DynamicConfig, baseline: RevisionRef
 ) -> Winner:
     """The best eligible candidate by the metric space; earlier rounds win ties."""
-    points = sorted(_eligible(state), key=lambda item: item[1].sequence)
-    best = config.metric_space.best(
-        points, lambda item: measurement(item[1].metrics[0] if item[1].metrics else None)
-    )
-    if best is None and points and not any(row.metrics for _, row in points):
-        best = points[-1]  # no benchmark configured: the latest eligible candidate
-    if best is None:
-        return Winner(settlement=None, revision=baseline, hypothesis_id=None)
-    hypothesis, row = best
-    if row.candidate is None:
-        return Winner(settlement=None, revision=baseline, hypothesis_id=None)
-    return Winner(
-        settlement=row.settlement, revision=row.candidate, hypothesis_id=hypothesis.hypothesis_id
-    )
-
-
-def selection_of(winner: Winner) -> Selection:
-    """The core selection a winner proposes for adoption."""
-    if winner.settlement is None:
-        return TrustedBaseline(revision=winner.revision)
-    return RetainedCandidate(settlement_id=winner.settlement, revision=winner.revision)
+    return candidates.choose_winner(_eligible(state), config, baseline)
 
 
 def decide(draft: Draft) -> None:
@@ -112,37 +68,19 @@ def _propose(draft: Draft) -> None:
         _stop(draft)
         return
     winner = choose_winner(state, draft.config, draft.view.facts.baseline)
-    draft.emit(
-        ProposeWinner(
-            decision_id=decision_id("propose", "run"),
-            scope=run_scope(draft.view),
-            selection=selection_of(winner),
-        )
-    )
+    draft.emit(candidates.proposal(IDS, draft.view, winner))
     draft.update(phase=RunPhase.ADOPTING, winner=winner)
 
 
 def _stop(draft: Draft) -> None:
     state = draft.state
-    winner = state.winner
-    stopping = state.stopping
-    if winner is None:
-        result = RunResultProposal(
-            outcome="cancelled" if stopping else "failure", reason=_no_winner_reason(state)
-        )
-    else:
-        ending = RunEnding.NO_IMPROVEMENT if winner.hypothesis_id is None else RunEnding.ADOPTED
-        result = RunResultProposal(
-            outcome="cancelled" if stopping else "success",
-            reason=_reason(ending, winner.hypothesis_id or "kept the trusted input"),
-            selection=selection_of(winner),
-        )
     draft.emit(
-        Stop(
-            decision_id=decision_id("stop", "run"),
-            scope=run_scope(draft.view),
-            mode="drain",
-            result=result,
+        candidates.stop(
+            IDS,
+            draft.view,
+            state.winner,
+            stopping=state.stopping,
+            no_winner_reason=_no_winner_reason(state),
         )
     )
     draft.update(phase=RunPhase.FINISHED)
@@ -154,13 +92,12 @@ def _no_winner_reason(state: DynamicStrategyState) -> str:
     detail = state.baseline.failure or "the input did not pass its measurement"
     if state.planner.last_error:
         detail = f"{detail}; {state.planner.last_error}"
-    return _reason(RunEnding.NO_TRUSTED_RESULT, detail)
+    return candidates.ending_reason(RunEnding.NO_TRUSTED_RESULT, detail)
 
 
 def on_adoption(state: DynamicStrategyState, event: AdoptionResult) -> DynamicStrategyState:
     """Stop after a successful adoption; a failed one stops without a winner."""
-    if state.phase is not RunPhase.ADOPTING:
+    phase, winner = candidates.after_adoption(state.phase, state.winner, event)
+    if phase is state.phase and winner is state.winner:
         return state
-    if event.observation.status is ObservationStatus.SUCCEEDED:
-        return state.model_copy(update={"phase": RunPhase.STOPPING})
-    return state.model_copy(update={"phase": RunPhase.STOPPING, "winner": None})
+    return state.model_copy(update={"phase": phase, "winner": winner})

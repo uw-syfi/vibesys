@@ -8,6 +8,7 @@ prompt text.
 import hashlib
 import re
 
+from vibesys.candidates.api import BaselineStage
 from vibesys.orchestration.dynamic.strategy import _review_evidence as review_evidence
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._parents import ParentOption, options
@@ -22,7 +23,6 @@ from vibesys.orchestration.dynamic.strategy._prompts import (
 )
 from vibesys.orchestration.dynamic.strategy._state import (
     AttemptRecord,
-    BaselineStage,
     BlockerKind,
     DynamicStrategyState,
     HypothesisRecord,

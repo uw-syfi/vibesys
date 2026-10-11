@@ -14,6 +14,7 @@ from enum import StrEnum
 
 from pydantic import Field
 
+from vibesys.candidates.api import BaselineState, RunPhase, Winner
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.metrics import AcceptedReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.strategy._parents import ParentSnapshot
@@ -35,16 +36,6 @@ from vs_core.api import (
 )
 
 STATE_SCHEMA = SchemaRef(name="dynamic.strategy-state", version=1)
-
-
-class RunPhase(StrEnum):
-    """Where the whole search is."""
-
-    SEARCHING = "searching"
-    SELECTING = "selecting"
-    ADOPTING = "adopting"
-    STOPPING = "stopping"
-    FINISHED = "finished"
 
 
 class Role(StrEnum):
@@ -135,32 +126,6 @@ class PlannerState(Value):
     failed: bool = False
     # Fresh planning turns asked in this call after corrections ran out.
     retries: int = Field(default=0, ge=0)
-
-
-class BaselineStage(StrEnum):
-    """Input measurement progress; the baseline gates candidates and adoption."""
-
-    NEEDED = "needed"
-    AWAITING = "awaiting"
-    INTERPRET = "interpret"
-    INTERPRETING = "interpreting"
-    MEASURED = "measured"
-    UNMEASURABLE = "unmeasurable"
-    NOT_CONFIGURED = "not-configured"
-
-
-class BaselineState(Value):
-    """The input revision's reading, measured once per run."""
-
-    stage: BaselineStage = BaselineStage.NEEDED
-    attempts: int = Field(default=0, ge=0)
-    awaiting: DecisionId | None = None
-    evidence: tuple[EvidenceKey, ...] = ()
-    accuracy_passed: bool | None = None
-    benchmark_passed: bool | None = None
-    metrics: tuple[MetricRow, ...] = ()
-    partial: PartialRow | None = None
-    failure: str | None = None
 
 
 class RoundRecord(Value):
@@ -261,14 +226,6 @@ class AttemptRecord(AttemptTrack[TurnRecord]):
     # The serial the next first turn of a role takes: one past every serial used in this
     # attempt, so a retry's turn and a later review never reuse a turn's decision ID.
     next_serial: int = Field(default=0, ge=0)
-
-
-class Winner(Value):
-    """The retained candidate proposed for adoption, or the trusted baseline."""
-
-    settlement: SettlementId | None
-    revision: RevisionRef
-    hypothesis_id: str | None
 
 
 class DynamicStrategyState(StrategyState):

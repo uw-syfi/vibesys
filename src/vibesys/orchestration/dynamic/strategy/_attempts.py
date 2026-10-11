@@ -9,10 +9,10 @@ awaiting step; events (see `_attempt_events`) move it on. Lifecycle facts such a
 whether a turn is dispatched or a slot is held stay in core.
 """
 
+from vibesys.candidates.api import STOPPED, stages
 from vibesys.orchestration.dynamic.strategy import _context as context
 from vibesys.orchestration.dynamic.strategy import _ids as ids
 from vibesys.orchestration.dynamic.strategy import _review_evidence as review_evidence
-from vibesys.orchestration.dynamic.strategy._baseline import stages
 from vibesys.orchestration.dynamic.strategy._draft import (
     Draft,
     measurement_plan,
@@ -32,7 +32,7 @@ from vibesys.orchestration.dynamic.strategy._schemas import (
     JUDGE_REPLY,
     PROFILER_REPLY,
 )
-from vibesys.orchestration.dynamic.strategy._settlement import STOPPED, settle_for
+from vibesys.orchestration.dynamic.strategy._settlement import settle_for
 from vibesys.orchestration.dynamic.strategy._state import (
     AttemptRecord,
     Role,

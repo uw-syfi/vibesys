@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import TypeAdapter, ValidationError
 
+from vibesys.candidates.api import STOPPED, stages
 from vibesys.hypothesis import HypothesisConfig, HypothesisOutcome
 from vibesys.hypothesis.cadence import keeps_hypothesis_active, review_due
 from vibesys.metrics import AcceptedReading, reading_of
@@ -23,7 +24,6 @@ from vibesys.orchestration.dynamic.models import (
 from vibesys.orchestration.dynamic.strategy import _ids as ids
 from vibesys.orchestration.dynamic.strategy import _review_evidence as review_evidence
 from vibesys.orchestration.dynamic.strategy._attempts import measured_revision, role_of, subject_of
-from vibesys.orchestration.dynamic.strategy._baseline import stages
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._draft import invocation_for
 from vibesys.orchestration.dynamic.strategy._evidence import accept_readings
@@ -43,7 +43,6 @@ from vibesys.orchestration.dynamic.strategy._prompts import (
     ResumePrompt,
     WaitUnrecordedPrompt,
 )
-from vibesys.orchestration.dynamic.strategy._settlement import STOPPED
 from vibesys.orchestration.dynamic.strategy._state import (
     AttemptRecord,
     Blocker,
