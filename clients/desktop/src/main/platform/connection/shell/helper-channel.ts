@@ -108,6 +108,11 @@ export class HelperChannel implements AsyncDisposable {
   /** Settles once the process has ended, with why (null: the app ended it). */
   readonly ended: Promise<ConnectionError | null>;
 
+  /** True only while neither the protocol nor the process adapter has observed termination. */
+  get active(): boolean {
+    return this.#failure === null && this.#process.running;
+  }
+
   private constructor(process: SpawnedProcess, options: ChannelOptions) {
     this.#process = process;
     this.#options = options;
