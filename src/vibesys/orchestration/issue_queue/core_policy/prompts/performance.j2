@@ -2,7 +2,11 @@
 Run performance evaluation {{ iteration }}.
 
 {% include '_run_context.j2' %}
-No profiler tool is available in this run; do not attempt a profile.
+{% if facts.profiler_id == "none" %}
+No profiler is configured; do not attempt a profile.
+{% else %}
+Profiler `{{ facts.profiler_id }}` is available through the fixed `profiler` tool and executes on the {{ facts.profile_execution.value }} path.
+{% endif %}
 Configured load levels: {% if load_levels_json is none %}"discover a low, medium, high, and saturation workload"{% else %}{{ load_levels_json }}{% endif +%}
 Prior performance records:
 {% if prior %}
@@ -20,12 +24,15 @@ shape could change the ceiling. Save and read structured benchmark output for
 every run. You work in your own checkout of the accumulated candidate, which is discarded when
 this evaluation ends, so scratch files and logs can go anywhere in it. Diagnose the limiting
 resource separately at low, medium, and saturation load. Compare with both the
-immediately prior result and the best recorded result. Always stop any server process
-that this turn started, including after benchmark failure.
+immediately prior result and the best recorded result.
+
+Profiling is optional, limited to one run, and must answer a specific unresolved
+bottleneck question. Do not attempt profiling when profiler is `none`. Always stop any server process
+that this turn started, including after benchmark or profiling failure.
 
 The board below lists every issue. Before filing, check it for the same work. File at
 most {{ max_new_issues }} non-duplicate issues in `new_issues`, ranked by impact over effort.
-Each issue background must cite code_evidence or metric_evidence and name expected_impact,
+Each issue background must cite code_evidence, metric_evidence, or profile_evidence and name expected_impact,
 effort, and scope. Each description must contain `## Background`, `## Acceptance criteria`,
 and `## Notes`.
 

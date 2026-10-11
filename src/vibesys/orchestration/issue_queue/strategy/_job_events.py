@@ -60,7 +60,6 @@ from vs_core.api import (
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
-    turn_candidate,
 )
 from vs_issue_tracker.api import AppliedChanges, IssueType
 
@@ -504,6 +503,13 @@ def _written_turn(
     return _evaluated(state, reply, payload)
 
 
+def _candidate_of(view: RunView, job: Job, invocation: InvocationRef) -> RevisionRef | None:
+    """The revision the reply's turn chain retained, by core's one rule (`TurnChain.candidate`)."""
+    if job.turn is None:
+        return None
+    return job.turn.candidate(view, job.attempt, invocation)
+
+
 def settle_retained(
     state: IssueQueueStrategyState, view: RunView, config: IssueQueueConfig
 ) -> IssueQueueStrategyState:
@@ -517,7 +523,7 @@ def settle_retained(
         return state
     invocation = job.held_invocation
     live = next((item for item in view.attempts if item.attempt_id == job.attempt), None)
-    candidate = turn_candidate(view, job.attempt, invocation)
+    candidate = _candidate_of(view, job, invocation)
     declined = live is not None and any(
         row.invocation == invocation for row in live.checkpoint_declines
     )
@@ -570,7 +576,7 @@ def _answered(
     """Accept a role's result. A write turn's waits for its checkpoint to be readable."""
     payload = event.output_json or ""
     if isinstance(reply, IssueImplementerResult | IssuePerfEvalResult):
-        candidate = turn_candidate(view, job.attempt, event.invocation)
+        candidate = _candidate_of(view, job, event.invocation)
         if candidate is None:
             return _with(state, job.holding(payload, event.invocation))
         return _written_turn(state, reply, payload, candidate)

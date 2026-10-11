@@ -14,7 +14,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from vibesys.orchestration.issue_queue.strategy.api import OPERATIONS, RenderRoleArtifacts
+from vibesys.orchestration.issue_queue.strategy.api import (
+    OPERATIONS,
+    RenderRoleArtifacts,
+    plain_operation_registry,
+)
 from vs_core.api import (
     AdoptRevision,
     ArtifactId,
@@ -35,6 +39,7 @@ from vs_core.api import (
     ObservationStatus,
     ObserveOwnedJob,
     OwnedJob,
+    RenderedArtifacts,
     Request,
     ResourceId,
     ResumeSessionTurn,
@@ -144,6 +149,9 @@ class Executors:
     operations: RegisteredOperationRequests = field(init=False)
     # Requests the real operation executor was handed, so an inspection of one is its to answer.
     operation_ids: set[str] = field(default_factory=set)
+    # The order in which workspaces retained a revision: a later one built on the earlier ones,
+    # so it is the better candidate of this world (the issue queue adopts its last tip).
+    ranks: dict[str, int] = field(default_factory=dict)
     _disk: tempfile.TemporaryDirectory[str] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -176,6 +184,8 @@ class Executors:
         match request:
             case ObserveOwnedJob():
                 return self._observe(request, core)
+            case ExecuteRegisteredOperation():
+                return self._operation(request)
             case SubmitMeasurement():
                 # A job is named by its request, as the agent evaluation bridge names the
                 # handle it gives the agent.
@@ -184,6 +194,32 @@ class Executors:
                 return Running(resource_id=ResourceId(root=handle_for(request.request_id)))
             case _:
                 return self._answer(request)
+
+    def _operation(self, request: ExecuteRegisteredOperation) -> Answer:
+        """An operation answered in process: a board operation is performed by the real owner."""
+        typed = plain_operation_registry().decode(request.operation)
+        if isinstance(typed, RenderRoleArtifacts):
+            return Succeeded(
+                outcome=RenderedArtifacts(
+                    status="succeeded",
+                    prompts=(
+                        ArtifactRef(
+                            artifact_id=ArtifactId(root=f"prompt:{request.operation_id.root}"),
+                            digest="prompt",
+                        ),
+                    ),
+                )
+            )
+        return Succeeded(outcome=self.owner.perform(typed))
+
+    def headline(self, commit: str) -> float | None:
+        """The throughput of a candidate in this world: its rank among the revisions retained."""
+        rank = self.ranks.get(commit)
+        return None if rank is None else float(rank + 1)
+
+    def _retained(self, revision: RevisionRef) -> RevisionRef:
+        self.ranks.setdefault(revision.revision_id.root, len(self.ranks))
+        return revision
 
     def _answer(self, request: Request) -> Answer:
         """What an executor that needs no view of core reports for ``request``."""
@@ -203,7 +239,7 @@ class Executors:
             case SnapshotAndRetain():
                 attempt = request.attempt.attempt_id.root
                 kept = self.bases[attempt] if attempt in self.unchanged else None
-                answer = Succeeded(revision=kept or self.revision_of(attempt))
+                answer = Succeeded(revision=self._retained(kept or self.revision_of(attempt)))
             case RetainRevision():
                 answer = Succeeded(revision=request.revision)
             case AdoptRevision() | VerifyAdoption():

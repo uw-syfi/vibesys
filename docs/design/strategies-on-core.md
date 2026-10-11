@@ -658,7 +658,7 @@ design adds one derived bound, `max_issues_per_round` (default `2 * max_issues_p
 |---|---|---|---|
 | `plain-implementer` | `READ_WRITE` | `CONTINUATION` plus `MCP_SERVERS` | `evaluation` when a gate is configured |
 | `plain-judge` | `READ_ONLY` | `CONTINUATION` plus `MCP_SERVERS` | `evaluation` when a gate is configured |
-| `plain-perf-evaluator` | `LIMITED` (artifact directory) | `CONTINUATION` | `profiler` (stateless, B15) |
+| `plain-perf-evaluator` | `READ_WRITE` (isolated child) | `CONTINUATION` plus `MCP_SERVERS` | `profiler` (stateless, B15) |
 
 The legacy judge and evaluator hold the `issue-board` tool and `READ_WRITE` access so they
 can file issues; on core they file by reply (8.3, option I1), so neither needs the tool or
@@ -717,10 +717,10 @@ build differs from it, and why.
 - **One workspace mode.** Jobs run in isolated child workspaces; an environment that cannot
   open them is refused with `require_candidate_sandboxes`, as `dynamic` does. The
   `EXCLUSIVE_ROOT` choice of 4.4 is the `single` port's to make.
-- **No profiler tool.** The evaluator keeps `CONTINUATION` but not the stateless profiler
-  server: core admits such a server (B15), but no production host provides one yet, so the
-  evaluator's prompt says no profiler is available. Following up needs the launch to pass
-  `stateless_tool_servers`.
+- **Profiler tool.** The evaluator declares the stateless `profiler` tool (B15). The host
+  leaves it out of the role in a run whose selected profiler is `none`, and the evaluator's
+  prompt then says no profiler is configured; otherwise it names the profiler and its execution
+  path, and allows one profile per evaluation.
 - **Core-protocol templates are copied.** The correction, resume and wait templates are
   duplicated from `dynamic` until B13 is built.
 - **Reply contracts changed (Q10).** Replies no longer echo `issue_id`; the judge and the

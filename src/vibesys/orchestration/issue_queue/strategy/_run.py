@@ -9,7 +9,7 @@ run whose issues changed nothing adopts nothing.
 
 from vibesys.candidates import api as candidates
 from vibesys.orchestration.issue_queue.strategy._draft import Draft
-from vibesys.orchestration.issue_queue.strategy._ids import IDS
+from vibesys.orchestration.issue_queue.strategy._ids import IDS, decision_of_operation
 from vibesys.orchestration.issue_queue.strategy._measure import verification_plan
 from vibesys.orchestration.issue_queue.strategy._state import (
     IssueQueueStrategyState,
@@ -19,6 +19,7 @@ from vibesys.orchestration.issue_queue.strategy._state import (
 from vs_core.api import (
     AdoptionFailed,
     AdoptionResult,
+    IntentBlocked,
     Measure,
     MeasurementResult,
     Rejected,
@@ -107,6 +108,22 @@ def on_measurement(
     """The final candidate's accuracy measurement ended; core decides at adoption whether it proved it."""
     if state.verification.step is not Step.AWAITING or event.scope.owner.kind != "run":
         return state
+    return state.model_copy(update={"verification": Verification(done=True)})
+
+
+def on_blocked(
+    state: IssueQueueStrategyState, event: IntentBlocked
+) -> IssueQueueStrategyState | None:
+    """The final accuracy measurement was blocked, so its proof will not come.
+
+    The run goes on to propose the adoption, which core refuses without an accepted accuracy
+    proof; the run then stops without a winner and says why. None when the blocked request is
+    not the one this step awaits.
+    """
+    if state.verification.step is not Step.AWAITING or event.scope.owner.kind != "run":
+        return None
+    if decision_of_operation(event.target.root) is not None:
+        return None
     return state.model_copy(update={"verification": Verification(done=True)})
 
 

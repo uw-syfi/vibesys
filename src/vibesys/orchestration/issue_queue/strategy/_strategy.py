@@ -154,7 +154,7 @@ class IssueQueueStrategy:
             return job_events.on_resume(state, event)
         if isinstance(event, AttemptExhausted):
             return job_events.on_exhausted(state, event)
-        return job_events.on_blocked(state, event)
+        return run.on_blocked(state, event) or job_events.on_blocked(state, event)
 
     def _run_feedback(
         self, state: IssueQueueStrategyState, event: StrategyEvent

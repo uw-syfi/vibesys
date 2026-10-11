@@ -14,10 +14,13 @@ from tests.vibesys.orchestration.issue_queue.strategy._executors import Executor
 from tests.vibesys.orchestration.issue_queue.strategy._replies import evaluated, implemented, judged
 from tests.vibesys.orchestration.issue_queue.strategy._run import kinds, run_shell
 
-from vs_core.api import ProposeWinner, RequestTurn, Stop
+from vs_core.api import ProposeWinner, RequestTurn, Stop, SubmitMeasurement
+from vs_core.testing.drive import Unknown
 from vs_issue_tracker.api import IssueStatus
 
 if TYPE_CHECKING:
+    from vs_core.api import CoreState, Request
+    from vs_core.testing.drive import Answer
     from vs_runtime.api.testing import Run
 
 
@@ -147,6 +150,25 @@ def test_the_work_is_not_adopted_when_the_final_candidate_fails_the_accuracy_gat
     assert not any(
         status is IssueStatus.OPEN for status in (i.status for i in executors.tracker.list())
     )
+
+
+class _SilentVerification(Executors):
+    """The trusted accuracy measurement of the final candidate never reports."""
+
+    def __call__(self, request: Request, core: CoreState) -> Answer:
+        if isinstance(request, SubmitMeasurement) and request.plan.purpose == "official":
+            return Unknown()
+        return super().__call__(request, core)
+
+
+def test_a_final_accuracy_measurement_core_blocks_ends_the_run_without_an_adoption() -> None:
+    executors = _SilentVerification(
+        implementer=deque([implemented()]), judge=deque([judged()]), perf=deque([evaluated()])
+    )
+    trace = run_shell(executors)
+    result = _stop(trace).result
+    assert result.outcome == "failure"
+    assert "not adopted" in result.reason
 
 
 def test_an_invalid_reply_is_corrected_once_and_then_accepted() -> None:

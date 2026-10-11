@@ -21,6 +21,16 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
     reviewed,
 )
 from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, LIMITS, config
+from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors as PlainExecutors
+from tests.vibesys.orchestration.issue_queue.strategy._replies import (
+    evaluated as plain_evaluated,
+)
+from tests.vibesys.orchestration.issue_queue.strategy._replies import (
+    implemented as plain_implemented,
+)
+from tests.vibesys.orchestration.issue_queue.strategy._replies import judged as plain_judged
+from tests.vibesys.orchestration.issue_queue.strategy._run import config as plain_config
+from tests.vibesys.orchestration.issue_queue.strategy._run import harness as plain_harness
 from tests.vibesys.orchestration.multi.strategy._executors import Executors as MultiExecutors
 from tests.vibesys.orchestration.multi.strategy._replies import (
     implemented as multi_implemented,
@@ -50,6 +60,8 @@ from vibesys.orchestration.dynamic.strategy.api import (
     DynamicStrategyState,
     dynamic_operation_registry,
 )
+from vibesys.orchestration.issue_queue.core_policy.api import reply_schemas as plain_reply_schemas
+from vibesys.orchestration.issue_queue.strategy.api import IssueQueueConfig, IssueQueueStrategy
 from vibesys.orchestration.multi.core_policy.api import reply_schemas as multi_reply_schemas
 from vibesys.orchestration.multi.strategy.api import MultiConfig, MultiStrategy
 from vibesys.orchestration.single.core_policy.api import reply_schemas as single_reply_schemas
@@ -279,6 +291,68 @@ def multi_subject(
     )
 
 
+class PlainWorld(PlainExecutors):
+    """The issue queue's scripted roles and its board, which is a real owner over a fake tracker.
+
+    The board operations are answered by `IssueBoardOwner.perform`, so a run reads and writes a
+    board that keeps its state across the suite's restarts; the judge and the performance
+    evaluator also file issues the run then works.
+    """
+
+    def __init__(self, passes: tuple[bool, ...], filings: tuple[tuple[str, ...], ...]) -> None:
+        super().__init__(
+            implementer=deque(plain_implemented(f"turn {n}") for n in range(24)),
+            judge=deque(
+                plain_judged(passed=passes[n % len(passes)], bugs=filings[n % len(filings)][:1])
+                for n in range(24)
+            ),
+            perf=deque(plain_evaluated(*filings[n % len(filings)]) for n in range(8)),
+        )
+
+
+@st.composite
+def _plain_world(draw: st.DrawFn) -> Callable[[], World]:
+    passes = tuple(draw(st.lists(st.booleans(), min_size=1, max_size=3)))
+    filings = tuple(
+        draw(
+            st.lists(
+                st.lists(st.sampled_from(("a", "b", "c")), max_size=2, unique=True).map(tuple),
+                min_size=1,
+                max_size=3,
+            )
+        )
+    )
+    return lambda: PlainWorld(passes, filings)
+
+
+def plain_subject(name: str, settings: IssueQueueConfig, *, sweeps_crashes: bool) -> Subject:
+    """The issue queue (`plain`) under ``settings``."""
+    return Subject(
+        name=name,
+        new_strategy=lambda: IssueQueueStrategy(config=settings),
+        harness=plain_harness(settings),
+        schemas=plain_reply_schemas(settings),
+        worlds=_plain_world(),
+        default_world=lambda: PlainWorld((True,), (("a",),)),
+        smallest_world=lambda: PlainWorld((True,), ((),)),
+        sweeps_crashes=sweeps_crashes,
+        issued=frozenset(
+            {
+                "adopt_revision",
+                "close_session",
+                "dispatch_turn",
+                "ensure_session",
+                "ensure_workspace",
+                "execute_registered_operation",
+                "observe_owned_job",
+                "snapshot_and_retain",
+                "submit_measurement",
+                "verify_adoption",
+            }
+        ),
+    )
+
+
 _GUIDED = {
     "profiler_id": "linux_cpu",
     "profiler_support_name": "linux_cpu_profiler",
@@ -296,6 +370,10 @@ SUBJECTS = {
             "single-cadence",
             single_config(max_rounds=3, official_eval_every=2),
             sweeps_crashes=False,
+        ),
+        plain_subject("plain", plain_config(max_rounds=1), sweeps_crashes=True),
+        plain_subject(
+            "plain-rounds", plain_config(max_rounds=2, max_issues_per_round=2), sweeps_crashes=False
         ),
         multi_subject("multi", multi_config(max_rounds=1), sweeps_crashes=True),
         multi_subject(

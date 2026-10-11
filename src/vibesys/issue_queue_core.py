@@ -47,7 +47,9 @@ from vibesys.orchestration.issue_queue.strategy.api import (
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
+    AgentCapability,
     AgentRole,
+    AgentTool,
     CoreOperation,
     CorePlan,
     CorePolicy,
@@ -82,11 +84,17 @@ def _role(role: Role, template: str, kind: RoleKind) -> AgentRole:
 IMPLEMENTER = _role(Role.IMPLEMENTER, "implementer_system_prompt.j2", MEASURING_WRITER)
 JUDGE = _role(Role.JUDGE, "judge_system_prompt.j2", MEASURING_READER)
 # The evaluator starts servers and writes its measurements in its own checkout, which is discarded
-# when its attempt settles; it needs no evaluation tool.
+# when its attempt settles; it needs no evaluation tool. It reads captures through the stateless
+# profiler tool, which holds no run state (so it is no second writer beside core) and which the
+# host leaves out of the role in a run whose selected profiler is `none`.
 PERF_EVALUATOR = _role(
     Role.PERF,
     "performance_system_prompt.j2",
-    RoleKind(WorkspaceAccess.READ_WRITE, CONTINUATION),
+    RoleKind(
+        WorkspaceAccess.READ_WRITE,
+        CONTINUATION | {AgentCapability.MCP_SERVERS},
+        (AgentTool(id="profiler", stateless=True),),
+    ),
 )
 CORE_ROLES = (IMPLEMENTER, JUDGE, PERF_EVALUATOR)
 

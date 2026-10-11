@@ -124,14 +124,17 @@ def translator_for(script: WaitingTurns, bridge: AgentEvaluationBridge) -> type[
                 return result
             (descriptor,) = bridge.servers(_ROLE, request.scope)
             token = dict(descriptor.runtime_env)["VS_EVALUATION_TOKEN"]
-            reply, _ = await bridge.answer(SubmitCall(token=token).model_dump_json().encode())
+            reply, confirm = await bridge.answer(SubmitCall(token=token).model_dump_json().encode())
             handle = json.loads(reply).get("result", {}).get("handle_id")
+            # The agent has read the reply; only now does its client confirm the receipt.
+            confirm()
             if handle is not None:
                 # The loop runs the submission while the agent works: it owns its job by now.
                 assert script.clock is not None
                 await script.clock.sleep(3.0)
                 call = WaitCall(token=token, handles=(handle,))
-                await bridge.answer(call.model_dump_json().encode())
+                _, confirm_wait = await bridge.answer(call.model_dump_json().encode())
+                confirm_wait()
             suspension = bridge.yielded(request)
             events = tuple(
                 event.model_copy(update={"suspension": suspension})
