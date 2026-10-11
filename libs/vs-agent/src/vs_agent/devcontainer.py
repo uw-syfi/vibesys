@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -87,7 +88,9 @@ def devcontainer_config(
 
     features: dict[str, dict[str, str]] = {
         "vibesys-agent": _agent_options(
-            groups=(_DOCKER_GROUP,) if provider_policy.CONTAINER_RUNTIME_TOOLCHAIN in selected else ()
+            groups=(_DOCKER_GROUP,)
+            if provider_policy.CONTAINER_RUNTIME_TOOLCHAIN in selected
+            else ()
         )
     }
     if requirements:
@@ -96,9 +99,13 @@ def devcontainer_config(
     for toolchain, feature in _TOOLCHAIN_FEATURES.items():
         if toolchain in selected:
             features[feature] = options[feature]
+    keyed = {f"./{_FEATURES_REFERENCE_DIR}/{name}": opts for name, opts in features.items()}
     return {
         "image": base_image,
-        "features": {f"./{_FEATURES_REFERENCE_DIR}/{name}": opts for name, opts in features.items()},
+        "features": keyed,
+        # Without this the CLI orders Features alphabetically, which would put
+        # the toolchains that change most often ahead of the agent layer.
+        "overrideFeatureInstallOrder": list(keyed),
         "containerUser": "agent",
     }
 
@@ -125,8 +132,27 @@ def _toolchain_options() -> Mapping[str, dict[str, str]]:
     }
 
 
-def write_workspace(root: Path, config: Mapping[str, object]) -> Path:
-    """Lay out *config* and the Feature sources under *root*; return the config path.
+@dataclass(frozen=True)
+class AgentWorkspace:
+    """The files :func:`write_workspace` laid out for one image build."""
+
+    config: Path
+    finish_dockerfile: Path
+
+
+#: Runs after the devcontainer CLI. The CLI keeps the base image's user and
+#: working directory (it records ``containerUser`` only in a metadata label), so
+#: this fixed stage makes the image run as ``agent`` in ``/workspace``.
+_FINISH_DOCKERFILE = """\
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+WORKDIR /workspace
+USER agent
+"""
+
+
+def write_workspace(root: Path, config: Mapping[str, object]) -> AgentWorkspace:
+    """Lay out *config*, the Feature sources, and the finishing stage under *root*.
 
     The devcontainer CLI resolves ``./features/<id>`` relative to the
     ``.devcontainer/`` directory, so the sources are copied beside the file.
@@ -136,4 +162,6 @@ def write_workspace(root: Path, config: Mapping[str, object]) -> Path:
     shutil.copytree(FEATURES_SOURCE_DIR, devcontainer_dir / _FEATURES_REFERENCE_DIR)
     config_path = devcontainer_dir / "devcontainer.json"
     config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    return config_path
+    finish = root / "finish.Dockerfile"
+    finish.write_text(_FINISH_DOCKERFILE, encoding="utf-8")
+    return AgentWorkspace(config=config_path, finish_dockerfile=finish)

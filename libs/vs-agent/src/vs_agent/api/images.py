@@ -21,8 +21,8 @@ from vs_agent.images import (
 
 __all__ = [
     "DEFAULT_AGENT_IMAGE_REGISTRY",
-    "DockerBuildRunner",
     "KNOWN_TOOLCHAINS",
+    "DockerBuildRunner",
     "ImagePushError",
     "SubprocessDockerBuildRunner",
     "TaskImageBuildError",

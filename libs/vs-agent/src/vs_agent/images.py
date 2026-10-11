@@ -15,19 +15,20 @@ metadata otherwise changes the manifest ID when all filesystem layers match.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from vs_agent import provider_policy
-from vs_agent.container_python import CONTAINER_PYTHON_HOME, CONTAINER_PYTHON_VERSION
+from vs_agent.devcontainer import devcontainer_config, write_workspace
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
+    from collections.abc import Collection, Mapping, Sequence
 
 _DEFAULT_BUILD_TIMEOUT_SECONDS = 1200.0
 _DEFAULT_PUSH_TIMEOUT_SECONDS = 1200.0
@@ -53,13 +54,23 @@ DEFAULT_AGENT_IMAGE_REGISTRY = "ghcr.io/uw-syfi/vibesys-agent"
 #: fast no-op.
 _SHORT_ID_LENGTH = 12
 
-#: The agent layer's build context: its Dockerfile plus nothing else. Resolved
-#: relative to this module rather than through ``importlib.resources`` so the
-#: path is always a real filesystem path Docker can build from, whether this
-#: package runs from a source checkout or an installed wheel (package data is
-#: unpacked to disk, never zipped, for this project).
-_AGENT_IMAGE_DIR = Path(__file__).resolve().parent / "images"
-_AGENT_DOCKERFILE = _AGENT_IMAGE_DIR / "agent.Dockerfile"
+#: Repository of the intermediate image the devcontainer CLI produces (the base
+#: plus every Feature). It is untagged again once the final image is built.
+_FEATURES_STAGE_REPOSITORY = "vibesys-features-build"
+_DEVCONTAINER_CLI_REPOSITORY = "vibesys-devcontainer-cli"
+
+#: The Docker socket the containerized devcontainer CLI drives. It is
+#: root-equivalent on the host, the same trust Docker access already grants.
+_DOCKER_SOCKET = "/var/run/docker.sock"
+
+#: The Dockerfile of the image that runs the devcontainer CLI. Resolved relative
+#: to this module rather than through ``importlib.resources`` so the path is
+#: always a real filesystem path Docker can build from, whether this package
+#: runs from a source checkout or an installed wheel (package data is unpacked
+#: to disk, never zipped, for this project).
+_DEVCONTAINER_CLI_DOCKERFILE = (
+    Path(__file__).resolve().parent / "images" / "devcontainer-cli" / "Dockerfile"
+)
 
 
 class TaskImageBuildError(RuntimeError):
@@ -76,7 +87,7 @@ class TaskImageBuildError(RuntimeError):
     ) -> TaskImageBuildError:
         """Describe a Docker build failure and its diagnostic output."""
         return cls(
-            f"Could not build {target.image_label} from {target.dockerfile} "
+            f"Could not build {target.image_label} from {target.source} "
             f"(exit {returncode}): {details[:_DIAGNOSTIC_LIMIT]}"
         )
 
@@ -91,17 +102,17 @@ class TaskImageBuildError(RuntimeError):
         """Describe a failed lookup of the built image's immutable ID."""
         return cls(
             f"Could not resolve runnable {target.image_label} {image_tag} built from "
-            f"{target.dockerfile} (exit {returncode}): "
+            f"{target.source} (exit {returncode}): "
             f"{details[:_DIAGNOSTIC_LIMIT]}"
         )
 
     @classmethod
     def invalid_runnable_id(
-        cls, image_label: str, dockerfile: Path, displayed: str
+        cls, image_label: str, source: str, displayed: str
     ) -> TaskImageBuildError:
         """Describe Docker returning a value that is not an immutable image ID."""
         return cls(
-            f"Docker returned an invalid runnable {image_label} ID for {dockerfile}: {displayed!r}"
+            f"Docker returned an invalid runnable {image_label} ID for {source}: {displayed!r}"
         )
 
     @classmethod
@@ -117,7 +128,7 @@ class TaskImageBuildError(RuntimeError):
     @classmethod
     def docker_not_found(cls, action: str, target: _BuildTarget) -> TaskImageBuildError:
         """Describe Docker being unavailable for an image build action."""
-        return cls(f"Docker was not found while {action} {target.image_label}: {target.dockerfile}")
+        return cls(f"Docker was not found while {action} {target.image_label}: {target.source}")
 
     @classmethod
     def docker_timed_out(
@@ -126,7 +137,7 @@ class TaskImageBuildError(RuntimeError):
         """Describe a Docker image build action that exceeded its timeout."""
         return cls(
             f"Docker timed out after {timeout:g} seconds while {action} "
-            f"{target.image_label}: {target.dockerfile}"
+            f"{target.image_label}: {target.source}"
         )
 
 
@@ -197,13 +208,15 @@ class ImagePushError(RuntimeError):
 
 @dataclass(frozen=True)
 class _BuildTarget:
-    """Where a Dockerfile and its build context are, and how to tag and name it.
+    """What an image is built from, where Docker runs, and how to tag and name it.
 
     Bundled so the build/inspect/error-reporting helpers below stay under the
-    project's argument-count limit now that this module builds two images.
+    project's argument-count limit. ``source`` is the human-readable origin
+    (a Dockerfile path, a ``devcontainer.json`` path, or an image ID) that
+    error messages name; ``context`` is the directory Docker commands run in.
     """
 
-    dockerfile: Path
+    source: str
     context: Path
     image_repository: str
     image_label: str
@@ -315,12 +328,14 @@ def _build_task_image(
     """Build a validated task Dockerfile and return its tag and immutable ID."""
     extra_build_args = ("--build-arg", f"BASE_IMAGE={base_image}") if base_image is not None else ()
     target = _BuildTarget(
-        dockerfile=dockerfile,
+        source=str(dockerfile),
         context=dockerfile.parent,
         image_repository=_TASK_IMAGE_REPOSITORY,
         image_label="task image",
     )
-    return _build_and_inspect(target, extra_build_args, runner=runner, timeout=timeout)
+    return _build_and_inspect(
+        target, extra_build_args, dockerfile=dockerfile, runner=runner, timeout=timeout
+    )
 
 
 def _resolvable_base(base_image: str, *, runner: DockerBuildRunner, timeout: float) -> str:
@@ -334,8 +349,8 @@ def _resolvable_base(base_image: str, *, runner: DockerBuildRunner, timeout: flo
         return base_image
     tag = f"{_BASE_IMAGE_REPOSITORY}:{base_image.removeprefix('sha256:')}"
     target = _BuildTarget(
-        dockerfile=_AGENT_DOCKERFILE,
-        context=_AGENT_IMAGE_DIR,
+        source=base_image,
+        context=Path.cwd(),
         image_repository=_BASE_IMAGE_REPOSITORY,
         image_label="base image",
     )
@@ -359,24 +374,28 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
 ) -> str:
     """Build the agent layer on top of a task image, and return its image ID.
 
-    ``pip_extras`` are extra pip requirements an execution environment needs
-    inside the editor container (sorted and deduplicated like ``toolchains``).
+    The agent layer is a set of Dev Container Features
+    (:func:`~vs_agent.api.images.devcontainer_config`) applied to the base by the
+    devcontainer CLI, which runs in a container with the Docker socket mounted
+    so the host needs only Docker. The result runs as the ``agent`` user in
+    ``/workspace``: the CLI keeps the base's user and working directory, so a
+    final three-line build sets both.
+
+    ``toolchains`` (``rust``, ``go``, ``container-runtime``) and ``pip_extras``
+    (extra pip requirements an execution environment needs inside the editor
+    container) are sorted and deduplicated, so the cache key does not depend on
+    collection order.
 
     When ``task_dockerfile`` is given, the task image is built first (as
     :func:`build_task_image` does, with ``base_image`` passed through so the
     task Dockerfile may ``FROM ${BASE_IMAGE}``) and the agent layer is built on
     top of it by its unique local tag. Otherwise the agent layer is built
     directly on ``base_image``. BuildKit cannot resolve a bare ``sha256:`` ID
-    in ``FROM``, so an ID ``base_image`` is given a local tag first; the
-    ``BASE_IMAGE`` build arg is never a bare ID.
+    as a base, so an ID ``base_image`` is given a local tag first.
 
-    CLI and toolchain versions come from :mod:`vs_agent.provider_policy`
-    and are passed as build args, so a version bump changes this module's
-    caller nowhere: rebuilding with an unchanged Dockerfile and unchanged
-    build args resolves to the same image from Docker's layer cache.
-    ``toolchains`` is sorted and deduplicated before being rendered, so the
-    build args (and therefore the cache key) do not depend on collection
-    order.
+    Versions come from :mod:`vs_agent.provider_policy`, so a bump changes no
+    caller: rebuilding with an unchanged selection resolves to the same image
+    from Docker's per-Feature layer cache.
     """
     if timeout <= 0:
         message = "agent image build timeout must be positive"
@@ -394,37 +413,107 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     else:
         base = _resolvable_base(base_image, runner=runner, timeout=timeout)
 
-    build_args: list[str] = ["--build-arg", f"BASE_IMAGE={base}"]
-    build_args += ["--build-arg", f"NODE_VERSION={provider_policy.NODE_VERSION}"]
-    for provider, version in provider_policy.CLI_VERSIONS.items():
-        build_args += ["--build-arg", f"{provider.upper()}_VERSION={version}"]
-    build_args += ["--build-arg", f"PYTHON_VERSION={CONTAINER_PYTHON_VERSION}"]
-    build_args += ["--build-arg", f"PYTHON_HOME={CONTAINER_PYTHON_HOME}"]
-    build_args += ["--build-arg", f"TOOLCHAINS={' '.join(sorted(set(toolchains)))}"]
-    build_args += ["--build-arg", f"RUST_VERSION={provider_policy.RUST_TOOLCHAIN_VERSION}"]
-    build_args += ["--build-arg", f"GO_VERSION={provider_policy.GO_TOOLCHAIN_VERSION}"]
-    build_args += ["--build-arg", f"DOCKER_ENGINE_VERSION={provider_policy.DOCKER_ENGINE_VERSION}"]
-    build_args += [
-        "--build-arg",
-        f"DOCKER_COMPOSE_VERSION={provider_policy.DOCKER_COMPOSE_VERSION}",
-    ]
-    build_args += ["--build-arg", f"KIND_VERSION={provider_policy.KIND_VERSION}"]
-    build_args += ["--build-arg", f"KUBECTL_VERSION={provider_policy.KUBECTL_VERSION}"]
-    build_args += ["--build-arg", f"PIP_EXTRAS={' '.join(sorted(set(pip_extras)))}"]
+    config = devcontainer_config(base, toolchains=toolchains, pip_extras=pip_extras)
+    return _build_features_image(config, runner=runner, timeout=timeout).image_id
 
+
+def _build_features_image(
+    config: Mapping[str, object], *, runner: DockerBuildRunner, timeout: float
+) -> _BuiltImage:
+    """Build *config* through the containerized devcontainer CLI, then set user and workdir."""
+    cli_image = _devcontainer_cli_image(runner=runner, timeout=timeout)
+    # The CLI container sees the workspace at the same absolute path, because it
+    # hands that path to the host's Docker daemon as the build context.
+    with tempfile.TemporaryDirectory(
+        prefix="vibesys-agent-image-", ignore_cleanup_errors=True
+    ) as tmp:
+        root = Path(tmp).resolve()
+        workspace = write_workspace(root, config)
+        target = _BuildTarget(
+            source=str(workspace.config),
+            context=root,
+            image_repository=_AGENT_IMAGE_REPOSITORY,
+            image_label="agent image",
+        )
+        features_tag = f"{_FEATURES_STAGE_REPOSITORY}:{uuid.uuid4().hex}"
+        cli_argv = (
+            "docker",
+            "run",
+            "--rm",
+            "--volume",
+            f"{_DOCKER_SOCKET}:{_DOCKER_SOCKET}",
+            "--volume",
+            f"{root}:{root}",
+            cli_image,
+            "build",
+            "--workspace-folder",
+            str(root),
+            "--image-name",
+            features_tag,
+        )
+        result = _run_docker(runner, cli_argv, timeout=timeout, action="building", target=target)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "devcontainer build failed").strip()
+            raise TaskImageBuildError.build_failed(target, result.returncode, detail)
+        try:
+            return _build_and_inspect(
+                target,
+                ("--build-arg", f"BASE_IMAGE={features_tag}"),
+                dockerfile=workspace.finish_dockerfile,
+                runner=runner,
+                timeout=timeout,
+            )
+        finally:
+            # Only the name: the final image keeps every layer. Best effort,
+            # because a leftover stage tag is harmless.
+            _run_docker(
+                runner,
+                ("docker", "image", "rm", features_tag),
+                timeout=timeout,
+                action="untagging",
+                target=target,
+            )
+
+
+def _devcontainer_cli_image(*, runner: DockerBuildRunner, timeout: float) -> str:
+    """Build (or find in the layer cache) the image that runs the devcontainer CLI.
+
+    The tag is keyed by the Dockerfile's content, so editing the pinned CLI,
+    Node, or Docker client versions yields a new image, and an unchanged one
+    is a cache hit that costs about a second.
+    """
+    digest = hashlib.sha256(_DEVCONTAINER_CLI_DOCKERFILE.read_bytes()).hexdigest()[
+        :_SHORT_ID_LENGTH
+    ]
+    tag = f"{_DEVCONTAINER_CLI_REPOSITORY}:{digest}"
     target = _BuildTarget(
-        dockerfile=_AGENT_DOCKERFILE,
-        context=_AGENT_IMAGE_DIR,
-        image_repository=_AGENT_IMAGE_REPOSITORY,
-        image_label="agent image",
+        source=str(_DEVCONTAINER_CLI_DOCKERFILE),
+        context=_DEVCONTAINER_CLI_DOCKERFILE.parent,
+        image_repository=_DEVCONTAINER_CLI_REPOSITORY,
+        image_label="devcontainer CLI image",
     )
-    return _build_and_inspect(target, tuple(build_args), runner=runner, timeout=timeout).image_id
+    argv = (
+        "docker",
+        "build",
+        "--provenance=false",
+        "--tag",
+        tag,
+        "--file",
+        str(_DEVCONTAINER_CLI_DOCKERFILE),
+        str(target.context),
+    )
+    result = _run_docker(runner, argv, timeout=timeout, action="building", target=target)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "docker build failed").strip()
+        raise TaskImageBuildError.build_failed(target, result.returncode, detail)
+    return tag
 
 
 def _build_and_inspect(
     target: _BuildTarget,
     extra_build_args: Sequence[str],
     *,
+    dockerfile: Path,
     runner: DockerBuildRunner,
     timeout: float,
 ) -> _BuiltImage:
@@ -437,7 +526,7 @@ def _build_and_inspect(
         "--tag",
         image_tag,
         "--file",
-        str(target.dockerfile),
+        str(dockerfile),
         *extra_build_args,
         str(target.context),
     )
@@ -472,7 +561,7 @@ def _build_and_inspect(
         displayed = image_id[:_DIAGNOSTIC_LIMIT] or "<empty>"
         raise TaskImageBuildError.invalid_runnable_id(
             target.image_label,
-            target.dockerfile,
+            target.source,
             displayed,
         )
     return _BuiltImage(tag=image_tag, image_id=image_id)
@@ -487,7 +576,7 @@ def _run_docker(
     target: _BuildTarget,
 ) -> subprocess.CompletedProcess[str]:
     try:
-        return runner.run(argv, cwd=target.dockerfile.parent, timeout=timeout)
+        return runner.run(argv, cwd=target.context, timeout=timeout)
     except FileNotFoundError as exc:
         raise TaskImageBuildError.docker_not_found(action, target) from exc
     except subprocess.TimeoutExpired as exc:

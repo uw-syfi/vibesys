@@ -29,6 +29,12 @@ def _features(config: dict[str, object]) -> dict[str, dict[str, str]]:
     return {key.removeprefix("./features/"): options for key, options in features.items()}
 
 
+def _features_by_key(config: dict[str, object]) -> dict[str, object]:
+    features = config["features"]
+    assert isinstance(features, dict)
+    return features
+
+
 def _declared(feature: str) -> dict[str, Any]:
     metadata = json.loads((FEATURES_SRC / feature / "devcontainer-feature.json").read_text())
     return metadata["options"]
@@ -87,9 +93,7 @@ def test_agent_joins_the_docker_group_exactly_with_the_container_runtime(
 ) -> None:
     agent = _features(devcontainer_config("base:1", toolchains=toolchains))["vibesys-agent"]
 
-    assert agent["supplementary_groups"] == (
-        "docker" if "container-runtime" in toolchains else ""
-    )
+    assert agent["supplementary_groups"] == ("docker" if "container-runtime" in toolchains else "")
 
 
 @given(extras=_requirements.filter(bool))
@@ -111,3 +115,15 @@ def test_unknown_toolchain_is_rejected_by_name(name: str) -> None:
 def test_pip_requirement_must_be_one_word(requirement: str) -> None:
     with pytest.raises(ValueError, match="pip requirement"):
         devcontainer_config("base:1", pip_extras=[requirement])
+
+
+@given(toolchains=_toolchains, extras=_requirements)
+def test_install_order_is_explicit_and_covers_every_selected_feature(
+    toolchains: list[str], extras: list[str]
+) -> None:
+    config = devcontainer_config("base:1", toolchains=toolchains, pip_extras=extras)
+
+    order = config["overrideFeatureInstallOrder"]
+    assert isinstance(order, list)
+    assert order == list(_features_by_key(config))
+    assert order[0] == "./features/vibesys-agent"

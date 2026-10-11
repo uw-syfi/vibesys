@@ -53,13 +53,13 @@ def _declared_ids(metadata: dict[str, Any]) -> set[str]:
 
 
 def test_every_layer_of_the_agent_image_is_a_feature() -> None:
-    assert FEATURE_IDS == {
+    assert {
         "vibesys-agent",
         "vibesys-rust",
         "vibesys-go",
         "vibesys-container-runtime",
         "vibesys-pip-extras",
-    }
+    } == FEATURE_IDS
 
 
 @pytest.mark.parametrize("feature_dir", FEATURE_DIRS, ids=lambda p: p.name)
