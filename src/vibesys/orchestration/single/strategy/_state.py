@@ -15,7 +15,8 @@ from pydantic import Field
 
 from vibesys.candidates.api import BaselineState, RunPhase, Winner
 from vibesys.metrics import AcceptedReading, MetricRow
-from vibesys.orchestration.single.strategy._prompts import LastProfile, PromptContext
+from vibesys.orchestration.single.strategy._prompts import PromptContext
+from vibesys.serial_search.api import LastProfile
 from vs_core.api import (
     AttemptTrack,
     DecisionId,

@@ -36,6 +36,7 @@ from vibesys.orchestration.single.strategy.api import (
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
 from vibesys.prompts import CORE_PROTOCOL_DIR
+from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
 from vibesys.single_roles import CORE_ROLES
 from vs_runtime.api import CoreOperation, CorePlan, CorePolicy, OrchestrationPlugin
 from vs_runtime.api.core import (
@@ -159,7 +160,7 @@ def single_core_policy(options_type: type[SingleRunOptions]) -> CorePolicy:
         ),
         retention_label=RETENTION_LABEL,
         prompt_templates=Path(prompts.__file__).parent,
-        prompt_fallback_roots=(CORE_PROTOCOL_DIR,),
+        prompt_fallback_roots=(SERIAL_SEARCH_PROMPTS, CORE_PROTOCOL_DIR),
         artifact_directories=ARTIFACT_DIRECTORIES,
     )
 

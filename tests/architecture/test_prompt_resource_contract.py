@@ -442,7 +442,7 @@ def render_packaged_prompts(installed: Path) -> int:
         common = shared.parent
         free, _ = resolve_free_variables(path, search_roots=search_roots)
         template_inputs = context
-        if "core_policy" in parts or "core_protocol" in parts:
+        if {"core_policy", "core_protocol", "serial_search"} & set(parts):
             template_inputs = context | core_policy_context()
         assert free <= template_inputs.keys() | {"response"}, (
             path,

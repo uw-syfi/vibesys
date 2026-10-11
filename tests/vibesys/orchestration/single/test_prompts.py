@@ -16,21 +16,22 @@ from hypothesis import strategies as st
 
 import vibesys.orchestration.single.core_policy.prompts as templates
 from vibesys.orchestration.single.core_policy.api import run_prompt_variables
-from vibesys.orchestration.single.strategy._prompts import (
+from vibesys.orchestration.single.strategy.api import PlanPrompt, PromptTemplate, RoundPrompt
+from vibesys.prompts import CORE_PROTOCOL_DIR
+from vibesys.serial_search.api import (
+    PROMPTS_DIR,
     Bottleneck,
     FrontierRow,
     LastProfile,
     PendingClaim,
     RoundRow,
 )
-from vibesys.orchestration.single.strategy.api import PlanPrompt, PromptTemplate, RoundPrompt
-from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import RevisionId, RevisionRef
 from vs_prompts.api import TemplateRenderer
 
 _ROOT = Path(templates.__file__).parent
 _OBJECTIVE = "Raise queue throughput."
-_RENDERER = TemplateRenderer(_ROOT, fallback_roots=(CORE_PROTOCOL_DIR,))
+_RENDERER = TemplateRenderer(_ROOT, fallback_roots=(PROMPTS_DIR, CORE_PROTOCOL_DIR))
 _TEXT = st.text(alphabet="abcdefg hij", min_size=1, max_size=12)
 _REVISIONS = st.sampled_from(("a1", "b2")).map(
     lambda name: RevisionRef(revision_id=RevisionId(root=name), digest=f"git-commit:{name}")
