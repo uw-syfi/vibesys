@@ -1,0 +1,48 @@
+{
+  "name": "@vibesys/feature-start-run",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibesys": {
+    "layer": "feature",
+    "entries": {
+      "./state": "neutral",
+      "./renderer": "dom"
+    }
+  },
+  "exports": {
+    "./state": {
+      "@vibesys/source": "./src/state/index.ts",
+      "types": "./dist/state/index.d.ts",
+      "default": "./dist/state/index.js"
+    },
+    "./renderer": {
+      "@vibesys/source": "./src/renderer/index.ts",
+      "types": "./dist/renderer/index.d.ts",
+      "default": "./dist/renderer/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.*.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.state.json tsconfig.renderer.json",
+    "check": "tsc -b",
+    "test": "node ../../scripts/run_bun_tests.mjs ./src"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/react": "19.1.13",
+    "@types/react-dom": "19.1.9",
+    "react-dom": "19.1.1",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@vibesys/core-state": "workspace:*",
+    "@vibesys/entities": "workspace:*",
+    "@vibesys/ipc": "workspace:*",
+    "@vibesys/ui": "workspace:*",
+    "react": "19.1.1"
+  }
+}

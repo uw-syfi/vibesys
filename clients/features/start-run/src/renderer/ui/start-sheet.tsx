@@ -3,11 +3,26 @@
  * start runs the form is read-only; Cancel (or Esc) then cancels the start ("Cancelling…").
  */
 
+import type {HostKey} from '@vibesys/entities';
 import {Button, Dialog} from '@vibesys/ui';
-import type {JSX, ReactNode} from 'react';
-import type {CompletionState} from '../state/completion.js';
-import {type StartAction, type StartState, startable, type Tasks} from '../state/start.js';
-import {PathInput, type WelcomeSenders} from './common.js';
+import type {InputHTMLAttributes, JSX, ReactNode} from 'react';
+import {type StartAction, type StartState, startable, type Tasks} from '../../state/start.js';
+
+/**
+ * Renders the project field: a host path input the app supplies (another feature completes paths
+ * on the host), given the sheet's value, events, and input attributes. It is called, not mounted
+ * as a component, so the field keeps its identity (and its focus) while the app rebuilds this
+ * function on every render.
+ */
+export type ProjectField = (
+  props: {
+    readonly host: HostKey;
+    readonly value: string;
+    readonly change: (value: string) => void;
+    /** Paths to offer besides the completions (recent projects). */
+    readonly offers: readonly string[];
+  } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'list'>,
+) => ReactNode;
 
 type Form = Extract<StartState, {kind: 'editing' | 'starting'}>;
 
@@ -61,11 +76,10 @@ function status(state: Form): {text: string; error: boolean} {
 
 function StartForm(props: {
   readonly state: Form;
-  readonly completion: CompletionState;
-  readonly send: WelcomeSenders;
+  readonly projectField: ProjectField;
+  readonly start: (action: StartAction) => void;
 }): JSX.Element {
-  const {state, send} = props;
-  const start = send.start;
+  const {state, start, projectField} = props;
   const editing = state.kind === 'editing';
   const tasks = state.kind === 'editing' ? state.tasks : state.listed;
   const line = status(state);
@@ -73,24 +87,21 @@ function StartForm(props: {
     <>
       <h2>Start a run on {state.host.label}</h2>
       <div className="row">
-        <PathInput
-          autoFocus
-          field="project"
-          host={state.host.key}
-          value={state.project}
-          completion={props.completion}
-          complete={send.completion}
-          change={value => start({type: 'project', value})}
-          disabled={!editing}
-          offers={state.projects}
-          placeholder="Project directory, e.g. /home/me/src/queue-rs"
-          onKeyDown={event => {
+        {projectField({
+          autoFocus: true,
+          host: state.host.key,
+          value: state.project,
+          change: value => start({type: 'project', value}),
+          disabled: !editing,
+          offers: state.projects,
+          placeholder: 'Project directory, e.g. /home/me/src/queue-rs',
+          onKeyDown: event => {
             if (event.key === 'Enter') start({type: 'list-tasks'});
-          }}
-          onBlur={() => {
+          },
+          onBlur: () => {
             if (tasks.kind === 'idle') start({type: 'list-tasks'});
-          }}
-        />
+          },
+        })}
         <Button disabled={!editing} onClick={() => start({type: 'list-tasks'})}>
           List tasks
         </Button>
@@ -127,13 +138,12 @@ function StartForm(props: {
 
 export function StartSheet(props: {
   readonly state: StartState;
-  readonly completion: CompletionState;
   /** False while a run fills the window: the sheet waits behind it. */
   readonly visible: boolean;
-  readonly send: WelcomeSenders;
+  readonly projectField: ProjectField;
+  readonly start: (action: StartAction) => void;
 }): JSX.Element {
-  const {state, send} = props;
-  const start = send.start;
+  const {state, start} = props;
   let body: ReactNode = null;
   if (state.kind === 'cancelling') {
     body = (
@@ -145,7 +155,7 @@ export function StartSheet(props: {
       </>
     );
   } else if (state.kind !== 'closed') {
-    body = <StartForm state={state} completion={props.completion} send={send} />;
+    body = <StartForm state={state} projectField={props.projectField} start={start} />;
   }
   return (
     <Dialog
