@@ -16,7 +16,6 @@ from pydantic import (
     Field,
     JsonValue,
     RootModel,
-    create_model,
     field_validator,
 )
 
@@ -184,11 +183,12 @@ class JudgeReplyModel(RootModel[Waitable[IssueJudgeResult]]):
 @cache
 def perf_result_model(cap: int) -> type[IssuePerfEvalResult]:
     """The evaluator's result type, whose ``new_issues`` holds at most ``cap`` issues."""
-    return create_model(  # type: ignore[call-overload,no-any-return]
-        f"IssuePerfEvalResultCap{cap}",
-        __base__=IssuePerfEvalResult,
-        new_issues=(tuple[NewIssue, ...], Field(default=(), max_length=cap)),
-    )
+
+    class CappedIssuePerfEvalResult(IssuePerfEvalResult):
+        model_config = ConfigDict(extra="forbid", strict=True, title=f"IssuePerfEvalResultCap{cap}")
+        new_issues: tuple[NewIssue, ...] = Field(default=(), max_length=cap)
+
+    return CappedIssuePerfEvalResult
 
 
 __all__ = [

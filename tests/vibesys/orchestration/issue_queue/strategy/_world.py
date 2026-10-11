@@ -52,9 +52,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.testing import Script
 
 
-class Crash(
-    BaseException
-):  # lint-waiver: LW-771102 [N818]; a BaseException subclass models a process kill that no shell code may catch.
+class Crash(BaseException):
     """The process died here."""
 
 

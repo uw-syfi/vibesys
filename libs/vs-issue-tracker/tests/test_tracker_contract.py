@@ -61,7 +61,7 @@ class Create:
 
 
 @dataclass(frozen=True)
-class Attempt:
+class AttemptStep:
     """Record an attempt on the nth created issue."""
 
     target: int
@@ -77,11 +77,11 @@ class Move:
     keyed: bool
 
 
-type Operation = Create | Attempt | Move
+type Operation = Create | AttemptStep | Move
 
 operations = st.one_of(
     st.builds(Create, st.sampled_from(IssueType), st.booleans()),
-    st.builds(Attempt, st.integers(0, 4), st.booleans()),
+    st.builds(AttemptStep, st.integers(0, 4), st.booleans()),
     st.builds(Move, st.integers(0, 4), st.sampled_from(IssueStatus), st.booleans()),
 )
 _RANK = {IssueType.BUG: 0, IssueType.FEATURE: 1, IssueType.PERF: 2}
@@ -122,7 +122,7 @@ def _apply(tracker: IssueTracker, model: Model, steps: list[Operation]) -> None:
                 model.attempts[issue.id] = 0
                 if step.keyed:
                     model.keys.add(key)
-            case Attempt() if model.ids:
+            case AttemptStep() if model.ids:
                 issue_id = model.ids[step.target % len(model.ids)]
                 tracker.increment_attempts(
                     issue_id, actor="tester", iteration=1, key=key if step.keyed else None

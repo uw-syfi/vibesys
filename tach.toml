@@ -1248,22 +1248,33 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.issue_queue.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vs_prompts", "vs_issue_tracker", "vibesys.orchestration.issue_queue.models", "vibesys.orchestration.issue_queue.strategy", "vibesys.run.contracts"]
+depends_on = ["vs_core", "vs_issue_tracker", "vibesys.orchestration.issue_queue.models", "vibesys.orchestration.issue_queue.strategy", "vibesys.run.contracts"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.issue_queue.core_policy"]
 expose = ["api", "api\\..*"]
 
+[[modules]]
+# The issue board of a core run: opens the tracker the run selected, mirrors the board as
+# Markdown for a person and renders the texts the board owner needs.
+path = "vibesys.issue_queue_board"
+layer = "loops"
+depends_on = ["vs_issue_tracker", "vs_prompts", "vs_runtime", "vibesys.orchestration.issue_queue.models"]
+
+[[interfaces]]
+from = ["vibesys.issue_queue_board"]
+expose = ["IssueQueueTexts", "board_entries", "render_all", "render_issue"]
+
 [[interfaces]]
 from = ["vibesys.issue_queue_core"]
-expose = ["CORE_ROLES", "IMPLEMENTER", "JUDGE", "PERF_EVALUATOR", "board_entries", "issue_queue_core_registration", "issue_queue_operation_catalog", "issue_queue_projector", "resolve_core_policy"]
+expose = ["CORE_ROLES", "IMPLEMENTER", "JUDGE", "PERF_EVALUATOR", "issue_queue_core_registration", "issue_queue_operation_catalog", "issue_queue_projector", "resolve_core_policy"]
 
 [[modules]]
 # Assembles the issue-queue core policy from the run's resolved resources: the one place that
 # stores the recipe, opens the tracker, builds the operation catalog and declares the roles.
 path = "vibesys.issue_queue_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_issue_tracker", "vs_project", "vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.core_wiring", "vibesys.orchestration.issue_queue.core_policy", "vibesys.orchestration.issue_queue.models", "vibesys.orchestration.issue_queue.strategy", "vibesys.plugin_registration"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.core_wiring", "vibesys.issue_queue_board", "vibesys.orchestration.issue_queue.core_policy", "vibesys.orchestration.issue_queue.models", "vibesys.orchestration.issue_queue.strategy", "vibesys.plugin_registration"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic.parents"

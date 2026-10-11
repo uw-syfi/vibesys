@@ -14,11 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.vibesys.golden.helpers import assert_exact_text
 
-from vibesys.orchestration.issue_queue.core_policy.api import (
-    IssueQueueTexts,
-    render_all,
-    render_issue,
-)
+from vibesys.issue_queue_board import IssueQueueTexts, render_all, render_issue
 from vs_issue_tracker.api import (
     FileProgressLog,
     Issue,

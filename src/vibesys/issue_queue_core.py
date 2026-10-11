@@ -25,15 +25,14 @@ from vibesys.core_wiring import (
     operation_catalog,
     require_candidate_sandboxes,
 )
+from vibesys.issue_queue_board import board_entries
 from vibesys.orchestration.issue_queue.core_policy.api import (
     IssueQueueCorePolicy,
-    IssueQueueTexts,
     PolicyInputs,
     RunBounds,
     build_core_policy,
     project_strategy_state,
     prompts,
-    render_all,
 )
 from vibesys.orchestration.issue_queue.models import IssueQueueOptions
 from vibesys.orchestration.issue_queue.strategy.api import (
@@ -46,7 +45,6 @@ from vibesys.orchestration.issue_queue.strategy.api import (
     role_id,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
-from vs_issue_tracker.api import board_operation_registrations, open_issue_tracker_session
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
     AgentRole,
@@ -54,10 +52,8 @@ from vs_runtime.api import (
     CorePlan,
     CorePolicy,
     OrchestrationPlugin,
-    OwnedOperationResources,
 )
 from vs_runtime.api.core import (
-    IssueBoardOwner,
     OperationCatalog,
     OperationEntry,
     OperationPorts,
@@ -75,7 +71,6 @@ _PLUGIN_ID = STATE_SCHEMA.name.removesuffix(".strategy-state")
 RETENTION_LABEL = "verified"
 # The workspace directory an evaluation turn may write its benchmark output to.
 PERF_DIRECTORY = "perf"
-_BOARD_DIRECTORY = "issue-board"
 _RENDERER = TemplateRenderer(Path(prompts.__file__).parent)
 
 
@@ -135,35 +130,6 @@ def issue_queue_projector() -> RuntimeRecordProjector[IssueQueueStrategyState]:
         record_type=RuntimeRecord[IssueQueueStrategyState],
         operations=plain_operation_registry(),
         project=lambda state, revision: project_strategy_state(state, experiment_revision=revision),
-    )
-
-
-def board_entries(resources: OwnedOperationResources) -> tuple[OperationEntry, ...]:
-    """The board operations, owned by an owner over the tracker the run selected.
-
-    The local tracker keeps its board and progress log in the run's portable state, beside the
-    Markdown mirror of the board a person can read; the GitHub tracker keeps them in the
-    repository the options name.
-    """
-    options = IssueQueueOptions.model_validate(resources.options)
-    namespace = resources.project.state.portable_namespace(resources.run_id, _BOARD_DIRECTORY)
-    directory = namespace.external_directory("board")
-    session = open_issue_tracker_session(
-        options.tracker,
-        local_store_path=directory / "issues.json",
-        local_progress_path=directory / "progress.md",
-        run_id=resources.run_id,
-        view_sink=lambda issues: render_all(directory / "issues", issues),
-    )
-    owner = IssueBoardOwner(
-        session.tracker,
-        session.progress,
-        IssueQueueTexts(resources.variables),
-        publish=lambda issues: render_all(directory / "issues", issues),
-    )
-    return tuple(
-        OperationEntry.owned(registration, owner)
-        for registration in board_operation_registrations()
     )
 
 

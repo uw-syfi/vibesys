@@ -12,8 +12,9 @@ from pathlib import Path
 import pytest
 from tests.vibesys.golden.helpers import assert_exact_text
 
+from vibesys.issue_queue_board import IssueQueueTexts
 from vibesys.issue_queue_core import CORE_ROLES
-from vibesys.orchestration.issue_queue.core_policy import prompts
+from vibesys.orchestration.issue_queue.core_policy.api import prompts
 from vibesys.orchestration.issue_queue.strategy.api import (
     BOOTSTRAP_TEMPLATE,
     ImplementPrompt,
@@ -28,6 +29,7 @@ from vibesys.orchestration.issue_queue.strategy.api import (
     WaitUnrecordedPrompt,
 )
 from vs_core.api import EvidenceId, RevisionId, RevisionRef
+from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import AgentRole, ProfileExecution, RunFacts
 
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompts"
@@ -137,10 +139,12 @@ def _render(context: PromptContext | str, facts: RunFacts) -> str:
         "agent_evaluation": True,
     }
     if isinstance(context, str):
-        return prompts.issue_body(context, **variables)
+        return IssueQueueTexts(variables).issue_body(context)
     fields = {name: getattr(context, name) for name in type(context).model_fields}
     template = str(fields.pop("template"))
-    return prompts.RENDERER.render_template(f"{template}.j2", **variables, **fields)
+    return TemplateRenderer(Path(prompts.__file__).parent).render_template(
+        f"{template}.j2", **variables, **fields
+    )
 
 
 @pytest.mark.parametrize("name", sorted(_CASES))
