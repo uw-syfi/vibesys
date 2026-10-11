@@ -62,9 +62,12 @@ export interface ChannelOptions {
   readonly appVersion: string;
   readonly deadlineMs: number;
   readonly scheduleTimeout: ScheduleTimeout;
+  /** Ends the channel when it aborts, already aborted included: the channel's lifetime. */
   readonly signal: AbortSignal;
   /** Why the process ended, when it ended other than by the helper's own report. */
   readonly explain: ExitExplanation;
+  /** Hear each line the bootstrap printed before the helper answered `hello`. */
+  readonly heard: (line: string) => void;
 }
 
 /** The request bodies the app sends; the channel adds `request_id` and `deadline_ms`. */
@@ -77,8 +80,12 @@ const FEATURES: readonly HelperFeature[] = ['instances_watch', 'paths_complete']
 /** How long past its own deadline a request may take before this side gives up on it. */
 const DEADLINE_SLACK_MS = 2_000;
 const STDERR_TAIL = 8192;
+/** How many of the bootstrap's lines a channel keeps; it prints one or two. */
+const BOOTSTRAP_LINES = 16;
 
 interface Pending {
+  /** The only successful reply discriminator this request accepts. */
+  readonly responseType: string;
   readonly resolve: (message: HelperMessage) => void;
   readonly reject: (error: Error) => void;
   readonly cancel: () => void;
@@ -91,7 +98,8 @@ export class HelperChannel implements AsyncDisposable {
   readonly #pushes = new Set<(push: InstancesChanged) => void>();
   #buffer = Buffer.alloc(0);
   #stderr = '';
-  #stdout = '';
+  /** The lines the bootstrap printed before `hello` was answered (the last few). */
+  readonly #bootstrap: string[] = [];
   #nextId = 1;
   #relay: RunStream | null = null;
   #failure: ConnectionError | null = null;
@@ -108,7 +116,7 @@ export class HelperChannel implements AsyncDisposable {
     process.stderr.on('data', (chunk: string) => {
       this.#stderr = `${this.#stderr}${chunk}`.slice(-STDERR_TAIL);
     });
-    const abort = (): void => this.#fail(new ConnectionError('link', 'the channel was closed'));
+    const abort = (): void => this.#close();
     options.signal.addEventListener('abort', abort, {once: true});
     this.ended = process.exit.then(code => {
       options.signal.removeEventListener('abort', abort);
@@ -116,11 +124,22 @@ export class HelperChannel implements AsyncDisposable {
       this.#rejectAll(failure ?? new ConnectionError('link', 'the helper ended'));
       return failure;
     });
+    if (options.signal.aborted) abort();
   }
 
-  /** Start a channel on `process`: `hello`, then the negotiated channel. */
-  static async open(process: SpawnedProcess, options: ChannelOptions): Promise<HelperChannel> {
+  /**
+   * Start a channel on `process`: `hello`, then the negotiated channel. Aborting `opening` before
+   * the helper answered ends the channel too: whoever waited for it no longer does.
+   */
+  static async open(
+    process: SpawnedProcess,
+    options: ChannelOptions,
+    opening?: AbortSignal,
+  ): Promise<HelperChannel> {
     const channel = new HelperChannel(process, options);
+    const abandon = (): void => channel.#close();
+    opening?.addEventListener('abort', abandon, {once: true});
+    if (opening?.aborted === true) abandon();
     try {
       channel.hello = await channel.request({
         type: 'hello',
@@ -132,6 +151,8 @@ export class HelperChannel implements AsyncDisposable {
     } catch (error) {
       channel.#process.kill('SIGTERM');
       throw await channel.#explained(error);
+    } finally {
+      opening?.removeEventListener('abort', abandon);
     }
   }
 
@@ -146,6 +167,7 @@ export class HelperChannel implements AsyncDisposable {
         reject(new ConnectionError('link', `the helper did not answer ${body.type} in time`));
       }, deadlineMs + DEADLINE_SLACK_MS);
       this.#pending.set(requestId, {
+        responseType: body.type,
         resolve: message => resolve(message as ReplyOf<T>),
         reject,
         cancel,
@@ -179,8 +201,12 @@ export class HelperChannel implements AsyncDisposable {
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
-    this.#fail(new ConnectionError('link', 'the channel was closed'));
+    this.#close();
     await this.ended;
+  }
+
+  #close(): void {
+    this.#fail(new ConnectionError('link', 'the channel was closed'));
   }
 
   #write(message: Record<string, unknown>): void {
@@ -188,13 +214,14 @@ export class HelperChannel implements AsyncDisposable {
   }
 
   #data(chunk: Buffer): void {
+    if (this.#failure !== null) return;
     if (this.#relay !== null) {
       this.#relay.deliver(chunk);
       return;
     }
     this.#buffer = Buffer.concat([this.#buffer, chunk]);
     let newline = this.#buffer.indexOf(0x0a);
-    while (newline >= 0 && this.#relay === null) {
+    while (newline >= 0 && this.#relay === null && this.#failure === null) {
       const line = this.#buffer.subarray(0, newline).toString('utf8');
       this.#buffer = this.#buffer.subarray(newline + 1);
       this.#line(line);
@@ -203,14 +230,19 @@ export class HelperChannel implements AsyncDisposable {
   }
 
   #line(line: string): void {
-    this.#stdout = `${this.#stdout}${line}\n`.slice(-STDERR_TAIL);
     let message: HelperMessage;
     try {
       message = parseHelperMessage(line);
     } catch (error) {
-      // Before `hello` answers, a line is the bootstrap's own report (its exit status says what
-      // it means); after, an unreadable line breaks the contract.
-      if (this.hello === null) return;
+      // Before `hello` answers, a line is the bootstrap's own report (with its exit status, it says
+      // what went wrong; `uv PATH` says what it found); after, an unreadable line breaks the
+      // contract.
+      if (this.hello === null) {
+        this.#bootstrap.push(line);
+        this.#bootstrap.splice(0, this.#bootstrap.length - BOOTSTRAP_LINES);
+        this.#options.heard(line);
+        return;
+      }
       this.#fail(
         new ConnectionError(
           'incompatible',
@@ -226,6 +258,15 @@ export class HelperChannel implements AsyncDisposable {
     const requestId = message.request_id;
     const pending = requestId === null ? undefined : this.#pending.get(requestId);
     if (pending === undefined) return;
+    if (message.type !== 'error' && message.type !== pending.responseType) {
+      this.#fail(
+        new ConnectionError(
+          'incompatible',
+          `the host helper answered ${pending.responseType} with ${message.type}`,
+        ),
+      );
+      return;
+    }
     this.#pending.delete(requestId as string);
     pending.cancel();
     if (message.type === 'error') pending.reject(new HelperRequestError(message));
@@ -235,6 +276,7 @@ export class HelperChannel implements AsyncDisposable {
   #fail(error: ConnectionError): void {
     if (this.#failure !== null) return;
     this.#failure = error;
+    this.#buffer = Buffer.alloc(0);
     this.#rejectAll(error);
     this.#process.stdin.destroy();
     this.#process.kill('SIGTERM');
@@ -248,10 +290,14 @@ export class HelperChannel implements AsyncDisposable {
     this.#pending.clear();
   }
 
-  /** Why the process ended on its own: the bootstrap's report, or the link's explanation. */
+  /**
+   * Why the process ended on its own: the bootstrap's report, while the helper has not answered
+   * `hello` yet; otherwise the link's explanation.
+   */
   #exitFailure(code: number | null): ConnectionError | null {
     if (code === 0 && this.#relay === null) return null;
-    const problem = bootstrapProblem(code, this.#stdout, this.#options.where);
+    const problem =
+      this.hello === null ? bootstrapProblem(code, this.#bootstrap, this.#options.where) : null;
     if (problem !== null) return new ConnectionError('incompatible', problem);
     return this.#options.explain(code, this.#stderr);
   }

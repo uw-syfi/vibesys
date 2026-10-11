@@ -407,8 +407,11 @@ class CliGitRepository:
     def reset_index(self) -> None:
         self._run_checked(["reset", "--mixed", "HEAD"])
 
-    def clean_untracked(self, *, include_ignored: bool, protect: Pathspec) -> bool:
-        args = ["clean", "-fdx" if include_ignored else "-fd", "-e", protect, "--", "."]
+    def clean_untracked(
+        self, *, include_ignored: bool, protect: Pathspec, keep: Sequence[Pathspec] = ()
+    ) -> bool:
+        excludes = [arg for pattern in (protect, *keep) for arg in ("-e", pattern)]
+        args = ["clean", "-fdx" if include_ignored else "-fd", *excludes, "--", "."]
         return self._run(args).returncode == 0
 
     def restore_worktree(self, revision: Revision, exclude: Sequence[Pathspec] = ()) -> None:

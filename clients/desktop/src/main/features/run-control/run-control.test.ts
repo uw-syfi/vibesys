@@ -2,7 +2,11 @@ import {describe, expect, test} from 'bun:test';
 import {FakeClock} from '@vibesys/backend-client/testing';
 import type {ConnectionStatus} from '../../../common/connection-status.js';
 import {exactResumeRunId} from '../../../common/resume-run.js';
-import {DEFAULT_CONNECTION_CONFIG, HostConnection} from '../../platform/connection/index.js';
+import {
+  ConnectionManager,
+  DEFAULT_CONNECTION_CONFIG,
+  HostConnection,
+} from '../../platform/connection/index.js';
 import {FakeLink, record} from '../../platform/connection/testing/fake-helper.js';
 import type {RecentRun} from '../../platform/settings/index.js';
 import {RunControl} from './run-control.js';
@@ -96,6 +100,7 @@ function world(
   link.helper.host.projects.set('/p', ['spsc']);
   const connection = new HostConnection({
     link,
+    checkout: '/src/vibesys',
     appVersion: 'test',
     config: DEFAULT_CONNECTION_CONFIG,
     scheduleTimeout: new FakeClock().scheduleTimeout,
@@ -454,6 +459,7 @@ describe('RunControl over the FakeHelper', () => {
 
     const attaching = w.runs.attach(HOST, RUN_A);
     await delayed.received;
+    expect(w.connection.held).toBe(true);
     w.runs.detach();
     delayed.release();
     await attaching;
@@ -461,6 +467,7 @@ describe('RunControl over the FakeHelper', () => {
     expect(w.runs.attached()).toBeNull();
     expect(w.remembered).toEqual([]);
     expect(w.pages.opened).toBe(0);
+    expect(w.connection.held).toBe(false);
     await w.connection[Symbol.asyncDispose]();
   });
 
@@ -482,5 +489,51 @@ describe('RunControl over the FakeHelper', () => {
     );
     expect(w.pages).toMatchObject({opened: 1, closed: 0});
     await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('an attached run holds its connection open until it is detached', async () => {
+    const w = world();
+    w.link.helper.publish(record('00000000000c', 'run-c', '/p'));
+    await w.runs.attach({kind: 'local'}, '00000000000c');
+    expect(w.connection.held).toBe(true);
+    w.runs.detach();
+    expect(w.connection.held).toBe(false);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('regression: an attach leases its checkout connection while recent persistence waits', async () => {
+    const link = new FakeLink();
+    link.helper.publish(record(RUN_A, 'run-a', '/p'));
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      config: DEFAULT_CONNECTION_CONFIG,
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      log: () => {},
+    });
+    const first = manager.connection(HOST, '/a');
+    const recents = new FakeRecentRuns();
+    const delayed = recents.deferNext();
+    const runs = new RunControl({
+      connection: async () => first,
+      openPage: () => ({wake: () => {}, close: () => {}}),
+      confirm: async () => true,
+      remember: (run, current) => recents.remember(run, current),
+      changed: () => {},
+      log: () => {},
+      now: () => 7,
+    });
+
+    const attaching = runs.attach(HOST, RUN_A);
+    await delayed.received;
+    manager.connection(HOST, '/b');
+    expect(first.phase.kind).toBe('ready');
+
+    delayed.release();
+    await attaching;
+    expect(runs.attached()).toMatchObject({instanceId: RUN_A, connection: {kind: 'connected'}});
+    expect(first.held).toBe(true);
+    runs.detach();
+    expect(first.phase.kind).toBe('closed');
   });
 });

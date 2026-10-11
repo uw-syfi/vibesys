@@ -843,7 +843,9 @@ class FakeGitRepository:
                 self._refuse(command, "fatal: ambiguous argument 'HEAD': unknown revision")
             scope.co.index = dict(scope.head_snapshot)
 
-    def clean_untracked(self, *, include_ignored: bool, protect: Pathspec) -> bool:
+    def clean_untracked(
+        self, *, include_ignored: bool, protect: Pathspec, keep: Sequence[Pathspec] = ()
+    ) -> bool:
         with self._operation("clean_untracked"):
             found = self._find()
             if found is None:
@@ -857,7 +859,7 @@ class FakeGitRepository:
             request = WalkRequest(
                 root=scope.root,
                 tracked=frozenset(scope.co.index),
-                layers=self._layers(scope, [protect], standard=not include_ignored),
+                layers=self._layers(scope, [protect, *keep], standard=not include_ignored),
                 use_ignore_files=not include_ignored,
                 skip=self._skip(scope),
             )

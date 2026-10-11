@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import deque
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
@@ -19,7 +20,20 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
 )
 from tests.vibesys.orchestration.dynamic.strategy._run import kinds, run_shell
 
-from vs_core.api import Operation, ProposeWinner, RequestTurn, StartAttempt, Stop
+from vs_core.api import (
+    AdoptRevision,
+    Operation,
+    ProposeWinner,
+    RequestTurn,
+    StartAttempt,
+    Stop,
+    VerifyAdoption,
+)
+from vs_core.testing.drive import Failed
+
+if TYPE_CHECKING:
+    from vs_core.api import CoreState, Request
+    from vs_core.testing.drive import Answer
 
 
 def _one_hypothesis() -> Executors:
@@ -127,3 +141,23 @@ def test_a_wait_the_run_never_recorded_ends_its_turn_whichever_wait_it_names(
     getattr(executors, role).appendleft(_wait_on(kind))
     trace = run_shell(executors)
     assert isinstance(trace.decisions[-1], Stop)
+
+
+def test_an_adoption_core_gives_up_on_ends_the_run_without_a_winner() -> None:
+    """Regression: `AdoptionFailed` was ignored, so the run waited in ADOPTING for ever.
+
+    Core publishes `AdoptionFailed` (not `AdoptionResult`) when the restore of the winner
+    fails for good. The strategy must stop the run as a failure with no selection.
+    """
+    executors = _one_hypothesis()
+
+    def script(request: Request, core: CoreState) -> Answer:
+        if isinstance(request, AdoptRevision | VerifyAdoption):
+            return Failed()
+        return executors(request, core)
+
+    trace = run_shell(script)
+    final = trace.decisions[-1]
+    assert isinstance(final, Stop)
+    assert final.result.outcome == "failure"
+    assert final.result.selection is None

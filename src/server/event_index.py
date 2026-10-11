@@ -17,10 +17,8 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
 _FORMAT = "vibesys-event-index"
-_VERSION = 3
-_FINGERPRINT_BYTES = 64 * 1024
-_SAMPLE_COUNT = 8
-_SAMPLE_BYTES = 4 * 1024
+_VERSION = 4
+_HASH_CHUNK_BYTES = 64 * 1024
 _RECORD_FIELDS = 8
 _SHA256_HEX_LENGTH = 64
 
@@ -73,9 +71,7 @@ class _SourceIdentity:
     size: int
     mtime_ns: int
     ctime_ns: int
-    head_sha256: str
-    boundary_sha256: str
-    samples_sha256: str
+    prefix_sha256: str
 
 
 def event_index_path(source: Path) -> Path:
@@ -87,11 +83,10 @@ def load_event_index(source: Path) -> LoadedEventIndex | None:
     """Load a sidecar only when its indexed prefix is provably unchanged.
 
     The journal is append-only, so a source that has grown since indexing is
-    accepted when the same file (device and inode) still holds the indexed
-    prefix: the head, sampled interior windows, and the window ending at the
-    indexed boundary must hash as recorded. A source of the recorded size must
-    also have identical mtime and ctime. A shrunken source, a different file, or
-    any fingerprint mismatch is a miss. Callers scan only from ``boundary``.
+    accepted when the same file (device and inode) still holds the complete
+    indexed prefix. A source of the recorded size must also have identical
+    mtime and ctime. A shrunken source, a different file, or any fingerprint
+    mismatch is a miss. Callers scan only from ``boundary``.
     """
     path = event_index_path(source)
     try:
@@ -127,11 +122,7 @@ def _prefix_unchanged(current: _SourceIdentity, expected: _SourceIdentity) -> bo
         (current.mtime_ns, current.ctime_ns) != (expected.mtime_ns, expected.ctime_ns)
     ):
         return False
-    return (
-        current.head_sha256 == expected.head_sha256
-        and current.samples_sha256 == expected.samples_sha256
-        and current.boundary_sha256 == expected.boundary_sha256
-    )
+    return current.prefix_sha256 == expected.prefix_sha256
 
 
 def _decode_header(line: bytes) -> tuple[int, int, _SourceIdentity] | None:
@@ -271,21 +262,15 @@ def source_stat(source: Path) -> SourceStat | None:
 
 
 def _source_identity(source: Path, boundary: int) -> _SourceIdentity | None:
-    """Capture stable stat fields plus bounded source-content fingerprints."""
+    """Capture stable stat fields plus a bounded-memory indexed-prefix digest."""
     try:
         with source.open("rb") as stream:
             before = os.fstat(stream.fileno())
             if boundary < 0 or boundary > before.st_size:
                 return None
-            head = stream.read(min(_FINGERPRINT_BYTES, boundary))
-            samples = hashlib.sha256(usedforsecurity=False)
-            for index in range(1, _SAMPLE_COUNT):
-                sample_start = boundary * index // _SAMPLE_COUNT
-                stream.seek(sample_start)
-                samples.update(stream.read(min(_SAMPLE_BYTES, boundary - sample_start)))
-            boundary_start = max(0, boundary - _FINGERPRINT_BYTES)
-            stream.seek(boundary_start)
-            boundary_bytes = stream.read(boundary - boundary_start)
+            prefix_sha256 = _prefix_digest(stream, boundary)
+            if prefix_sha256 is None:
+                return None
             after = os.fstat(stream.fileno())
         path_stat = source.stat()
     except OSError:
@@ -299,10 +284,21 @@ def _source_identity(source: Path, boundary: int) -> _SourceIdentity | None:
         size=before.st_size,
         mtime_ns=before.st_mtime_ns,
         ctime_ns=before.st_ctime_ns,
-        head_sha256=_content_digest(head),
-        boundary_sha256=_content_digest(boundary_bytes),
-        samples_sha256=samples.hexdigest(),
+        prefix_sha256=prefix_sha256,
     )
+
+
+def _prefix_digest(stream: BinaryIO, boundary: int) -> str | None:
+    """Hash exactly ``boundary`` bytes without materializing the prefix."""
+    digest = hashlib.sha256(usedforsecurity=False)
+    remaining = boundary
+    while remaining:
+        content = stream.read(min(remaining, _HASH_CHUNK_BYTES))
+        if not content:
+            return None
+        digest.update(content)
+        remaining -= len(content)
+    return digest.hexdigest()
 
 
 def _stat_fields(value: os.stat_result) -> tuple[int, int, int, int, int]:
@@ -317,10 +313,6 @@ def _identity_stat(identity: _SourceIdentity) -> SourceStat:
         mtime_ns=identity.mtime_ns,
         ctime_ns=identity.ctime_ns,
     )
-
-
-def _content_digest(content: bytes) -> str:
-    return hashlib.sha256(content, usedforsecurity=False).hexdigest()
 
 
 def _encode(value: object) -> bytes:
@@ -342,18 +334,14 @@ def _decode_source_identity(value: object) -> _SourceIdentity | None:
         "size",
         "mtime_ns",
         "ctime_ns",
-        "head_sha256",
-        "boundary_sha256",
-        "samples_sha256",
+        "prefix_sha256",
     }:
         return None
     integers = [value[name] for name in ("device", "inode", "size", "mtime_ns", "ctime_ns")]
     if any(_plain_nonnegative_int(item) is None for item in integers):
         return None
-    head = value["head_sha256"]
-    boundary = value["boundary_sha256"]
-    samples = value["samples_sha256"]
-    if not _is_sha256(head) or not _is_sha256(boundary) or not _is_sha256(samples):
+    prefix = value["prefix_sha256"]
+    if not _is_sha256(prefix):
         return None
     return _SourceIdentity(
         device=integers[0],
@@ -361,9 +349,7 @@ def _decode_source_identity(value: object) -> _SourceIdentity | None:
         size=integers[2],
         mtime_ns=integers[3],
         ctime_ns=integers[4],
-        head_sha256=head,
-        boundary_sha256=boundary,
-        samples_sha256=samples,
+        prefix_sha256=prefix,
     )
 
 

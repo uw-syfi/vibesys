@@ -11,6 +11,12 @@
  * - 65 `nodir` | `nopyproject` | `notvibesys`: the path is not a VibeSys checkout.
  * - 66 `missing`: `uv` is on no PATH this account has, nor in the usual places.
  *
+ * A status means that only together with its line, and only before the helper answered `hello`
+ * (`bootstrapProblem`): a helper that later exits 65 is not a bootstrap report. Finding `uv` can
+ * start a login shell, which is slow, so a link remembers the `uv` a bootstrap found (it prints
+ * `uv PATH` before `exec`, `bootstrapUv`) and passes it to the next one, which then skips the probe
+ * while that path still runs.
+ *
  * It must mean the same under any login shell (sh, bash, zsh, tcsh, fish), since ssh hands the
  * command line to that shell. It is `sh -c '<fixed one-line script>' <role> <data>...`: the script
  * contains no single quote, `!`, newline, or backslash pair, so every one of those shells passes it
@@ -44,7 +50,13 @@ const DECODE = [
 
 const {predates, notCheckout, noUv} = BOOTSTRAP_STATUS;
 
-/** Check checkout `$1` (`~` and `~/` mean the home directory), find `uv`, and start the helper. */
+/** The line a bootstrap prints, before `exec`, with the `uv` it found by probing. */
+const UV_LINE = 'uv ';
+
+/**
+ * Check checkout `$1` (`~` and `~/` mean the home directory), find `uv` (`$2` when it is one a
+ * bootstrap found before and it still runs), and start the helper.
+ */
 const BOOTSTRAP_SCRIPT = [
   DECODE,
   `p=$1; case $p in "~") p=$HOME ;; "~/"*) p="$HOME/\${p#??}" ;; esac;`,
@@ -54,10 +66,12 @@ const BOOTSTRAP_SCRIPT = [
   `printf "%s" "$s" | grep -q "^name *= *.vibesys.[ ]*$" || { echo notvibesys; exit ${notCheckout}; };`,
   'v=$(printf "%s" "$s" | sed -n "s/^version *= *.\\([^\\"]*\\).*/\\1/p" | head -n 1);',
   `if [ ! -f "$p/src/entrypoints/host_helper.py" ]; then printf "predates %s" "$v"; echo; exit ${predates}; fi;`,
-  'u=$(command -v uv 2>/dev/null) || u=;',
+  'u=$2; [ -x "$u" ] || u=;',
+  'if [ -z "$u" ]; then u=$(command -v uv 2>/dev/null) || u=; fi;',
   `if [ -z "$u" ]; then u=$("\${SHELL:-/bin/sh}" -l -c "command -v uv" </dev/null 2>/dev/null | tail -n 1); [ -x "$u" ] || u=; fi;`,
   `if [ -z "$u" ]; then for x in ${PROBED_DIRECTORIES.map(d => `"${d}"`).join(' ')}; do if [ -x "$x/uv" ]; then u=$x/uv; break; fi; done; fi;`,
   `if [ -z "$u" ]; then echo missing; exit ${noUv}; fi;`,
+  `if [ "$u" = "$2" ]; then :; else printf "${UV_LINE}%s" "$u"; echo; fi;`,
   'exec "$u" run --no-sync --project "$p" python -I -m entrypoints.host_helper',
 ].join(' ');
 
@@ -68,46 +82,68 @@ function hex(word: string): string {
   return `x${Buffer.from(word, 'utf8').toString('hex')}`;
 }
 
-/** Refuse a checkout that cannot cross a command line intact (validated settings never do). */
-function datum(checkout: string): string {
-  if (/[\n\r\0]/.test(checkout)) {
-    throw new Error(`a checkout path contains a line break: ${JSON.stringify(checkout)}`);
+/** Refuse a path that cannot cross a command line intact (validated settings never hold one). */
+function datum(path: string): string {
+  if (/[\n\r\0]/.test(path)) {
+    throw new Error(`a path contains a line break: ${JSON.stringify(path)}`);
   }
-  return hex(checkout);
-}
-
-/** The remote command line of an ssh exec channel that starts the helper from `checkout`. */
-export function remoteBootstrap(checkout: string): string {
-  return ['sh', '-c', `'${BOOTSTRAP_SCRIPT}'`, ROLE, datum(checkout)].join(' ');
-}
-
-/** The local argument vector (for `/bin/sh`) that starts the helper from `checkout`. */
-export function localBootstrap(checkout: string): readonly string[] {
-  return ['-c', BOOTSTRAP_SCRIPT, ROLE, datum(checkout)];
+  return hex(path);
 }
 
 /**
- * What a bootstrap that exited before the helper answered means, for the user: the checkout at
- * `where` (`PATH on HOST`) and the line the bootstrap printed. Null for a status it does not reserve.
+ * The remote command line of an ssh exec channel that starts the helper from `checkout`, with the
+ * `uv` an earlier bootstrap on the host found (null: probe for it).
+ */
+export function remoteBootstrap(checkout: string, uv: string | null): string {
+  return ['sh', '-c', `'${BOOTSTRAP_SCRIPT}'`, ROLE, datum(checkout), datum(uv ?? '')].join(' ');
+}
+
+/** The local argument vector (for `/bin/sh`) that starts the helper from `checkout`. */
+export function localBootstrap(checkout: string, uv: string | null): readonly string[] {
+  return ['-c', BOOTSTRAP_SCRIPT, ROLE, datum(checkout), datum(uv ?? '')];
+}
+
+/** The `uv` a bootstrap reported finding in `line`, or null when the line is not that report. */
+export function bootstrapUv(line: string): string | null {
+  return line.startsWith(UV_LINE) && line.length > UV_LINE.length
+    ? line.slice(UV_LINE.length)
+    : null;
+}
+
+/** The checkout problems a status 65 reports, by its line. */
+const NOT_CHECKOUT: Readonly<Record<string, (where: string) => string>> = {
+  nodir: where => `${where} is not a directory.`,
+  nopyproject: where =>
+    `${where} has no pyproject.toml; pick the directory you cloned VibeSys into.`,
+  notvibesys: where =>
+    `${where} has a pyproject.toml, but it does not declare the vibesys project.`,
+};
+
+/**
+ * What a bootstrap that exited before its helper answered `hello` means, for the user: the checkout
+ * at `where` (`PATH on HOST`), from its exit `status` and the `lines` it printed. Null unless the
+ * status is a reserved one and its own line is among `lines`: another program that happens to
+ * exit with a reserved status is not a bootstrap report.
  */
 export function bootstrapProblem(
   status: number | null,
-  stdout: string,
+  lines: readonly string[],
   where: string,
 ): string | null {
-  const line = stdout.split('\n')[0]?.trim() ?? '';
+  const said = lines.map(line => line.trim());
   switch (status) {
     case predates: {
-      const version = line.slice('predates '.length).trim() || 'unknown';
+      const line = said.find(text => text === 'predates' || text.startsWith('predates '));
+      if (line === undefined) return null;
+      const version = line.slice('predates'.length).trim() || 'unknown';
       return `The VibeSys checkout ${where} predates the desktop helper (version ${version}). Update it, then try again.`;
     }
-    case notCheckout:
-      if (line === 'nodir') return `${where} is not a directory.`;
-      if (line === 'nopyproject') {
-        return `${where} has no pyproject.toml; pick the directory you cloned VibeSys into.`;
-      }
-      return `${where} has a pyproject.toml, but it does not declare the vibesys project.`;
+    case notCheckout: {
+      const line = said.find(text => Object.hasOwn(NOT_CHECKOUT, text));
+      return line === undefined ? null : (NOT_CHECKOUT[line]?.(where) ?? null);
+    }
     case noUv:
+      if (!said.includes('missing')) return null;
       return (
         `uv was not found ${where.slice(where.indexOf(' on ') + 1)}; tried the PATH of a ` +
         `non-interactive shell, the login shell's PATH, and ${PROBED_DIRECTORIES.map(d => `${d}/uv`).join(', ')}. ` +

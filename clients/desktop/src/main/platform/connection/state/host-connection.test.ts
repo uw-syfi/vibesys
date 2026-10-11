@@ -9,12 +9,14 @@ import {
   INITIAL,
   invariants,
   isStuck,
+  phaseOf,
   type Step,
   step,
 } from './host-connection.js';
 
+const FIRST_DELAY = 500;
 const CONFIG: ConnectionConfig = {
-  delaysMs: [500, 1_000, 2_000],
+  delaysMs: [FIRST_DELAY, 1_000, 2_000],
   deadlineMs: 20_000,
   heartbeatMs: 15_000,
 };
@@ -27,6 +29,7 @@ const CAUSES: readonly Cause[] = [
   'run-gone',
   'denied',
 ];
+const RUN = 'abcdefabcdef';
 
 /** Fold `events` from `state`, returning the end state and every request. */
 function fold(events: readonly ConnectionEvent[], state = INITIAL) {
@@ -42,6 +45,15 @@ function fold(events: readonly ConnectionEvent[], state = INITIAL) {
 function opOf(state: ConnectionState): number {
   if (state.op === null) throw new Error('no operation in flight');
   return state.op.id;
+}
+
+function timerOf(state: ConnectionState): number {
+  if (state.timer === null) throw new Error('no timer pending');
+  return state.timer.id;
+}
+
+function scheduledDelays(requests: readonly ConnectionRequest[]): number[] {
+  return requests.flatMap(request => (request.type === 'schedule' ? [request.delayMs] : []));
 }
 
 /** One random event; ids are drawn from every id issued so far, so stale ones are frequent. */
@@ -68,42 +80,92 @@ function randomEvent(random: Seeded, state: ConnectionState): ConnectionEvent {
     case 7:
       return {type: 'control-ended', cause: random.pick(CAUSES), detail: 'ended'};
     case 8:
-      return {
-        type: 'run-ended',
-        instanceId: 'abcdefabcdef',
-        cause: random.pick(CAUSES),
-        detail: 'x',
-      };
+      return {type: 'run-ended', instanceId: RUN, cause: random.pick(CAUSES), detail: 'x'};
     default:
       return {type: 'user-retry'};
   }
 }
 
-/** The properties of one step, from `before` through `event`; `scheduled` holds every timer issued. */
+/**
+ * The shell's view of what is in flight: every operation performed and not yet settled or aborted,
+ * and every timer scheduled and not yet fired or cancelled. Nothing leaks when, after every step,
+ * these are exactly what the state holds.
+ */
+class Ledger {
+  readonly ops = new Set<number>();
+  readonly timers = new Set<number>();
+
+  /** Apply `event` (which the shell delivers) and `requests` (which it performs); the violations. */
+  apply(before: ConnectionState, event: ConnectionEvent, requests: readonly ConnectionRequest[]) {
+    const problems: string[] = [];
+    // An outcome or a firing the machine accepted ends that operation or timer.
+    if ((event.type === 'succeeded' || event.type === 'failed') && event.op === before.op?.id) {
+      this.ops.delete(event.op);
+    }
+    if (event.type === 'timer-fired' && event.timer === before.timer?.id) {
+      this.timers.delete(event.timer);
+    }
+    for (const request of requests) {
+      switch (request.type) {
+        case 'perform':
+          this.ops.add(request.op);
+          break;
+        case 'abort':
+          if (!this.ops.delete(request.op))
+            problems.push(`abort of op ${request.op} not in flight`);
+          break;
+        case 'schedule':
+          this.timers.add(request.timer);
+          break;
+        case 'cancel':
+          if (!this.timers.delete(request.timer)) {
+            problems.push(`cancel of timer ${request.timer} not pending`);
+          }
+          break;
+        default:
+          break;
+      }
+    }
+    return problems;
+  }
+
+  /** What leaked: anything in flight that `state` no longer holds. */
+  leaks(state: ConnectionState): {ops: number[]; timers: number[]} {
+    return {
+      ops: [...this.ops].filter(id => id !== state.op?.id),
+      timers: [...this.timers].filter(id => id !== state.timer?.id),
+    };
+  }
+}
+
+/** The properties of one step from `before` through `event`. */
 function checkStep(
   where: object,
   before: ConnectionState,
   event: ConnectionEvent,
   next: Step,
-  scheduled: Set<number>,
+  ledger: Ledger,
 ): void {
   const {state, requests} = next;
   expect({...where, problems: invariants(state, CONFIG)}).toEqual({...where, problems: []});
-  // At most one operation starts per step, and a cancel names a timer that was scheduled.
+  // At most one operation starts per step.
   expect(requests.filter(request => request.type === 'perform').length).toBeLessThanOrEqual(1);
-  for (const request of requests) {
-    if (request.type === 'schedule') scheduled.add(request.timer);
-  }
-  const unknown = requests.filter(
-    request => request.type === 'cancel' && !scheduled.has(request.timer),
-  );
-  expect({...where, unknown}).toEqual({...where, unknown: []});
+  expect({...where, ledger: ledger.apply(before, event, requests)}).toEqual({...where, ledger: []});
+  expect({...where, leaks: ledger.leaks(state)}).toEqual({...where, leaks: {ops: [], timers: []}});
+  // The state holds nothing the shell is not running.
+  if (state.op !== null) expect(ledger.ops.has(state.op.id)).toBe(true);
+  if (state.timer !== null) expect(ledger.timers.has(state.timer.id)).toBe(true);
   const absorbed = state === before && requests.length === 0;
-  if (before.phase.kind === 'closed')
+  if (before.phase.kind === 'closed') {
     expect({...where, absorbed}).toEqual({...where, absorbed: true});
+  }
   const retried = event.type === 'user-retry' || event.type === 'close';
   if (isStuck(before.phase) && !retried) {
     expect({...where, phase: state.phase}).toEqual({...where, phase: before.phase});
+  }
+  // A run channel lost to the link leaves the host not ready, so the next ready wakes its dial.
+  if (event.type === 'run-ended' && event.cause === 'link') {
+    expect({...where, phase: state.phase.kind}).not.toEqual({...where, phase: 'ready'});
   }
 }
 
@@ -117,35 +179,46 @@ function unanswered(random: Seeded, state: ConnectionState): ConnectionEvent {
 }
 
 describe('HostConnection machine (model-based)', () => {
-  test('invariants hold, terminal phases absorb, and waits are never orphaned', () => {
+  test('invariants hold, terminal phases absorb, and nothing in flight leaks', () => {
     for (const seed of SEEDS) {
       const random = new Seeded(seed);
-      const opened = step(INITIAL, {type: 'open'}, CONFIG);
-      let state = opened.state;
-      const scheduled = new Set<number>(
-        opened.requests.flatMap(request => (request.type === 'schedule' ? [request.timer] : [])),
-      );
-      for (let index = 0; index < 60; index += 1) {
-        const event = randomEvent(random, state);
+      const ledger = new Ledger();
+      let state = INITIAL;
+      for (let index = 0; index < 80; index += 1) {
+        const event = index === 0 ? ({type: 'open'} as const) : randomEvent(random, state);
         const next = step(state, event, CONFIG);
-        checkStep({seed, index, event: event.type}, state, event, next, scheduled);
+        checkStep({seed, index, event: event.type}, state, event, next, ledger);
         state = next.state;
       }
+      // Closing ends everything still in flight.
+      const closed = step(state, {type: 'close'}, CONFIG);
+      checkStep({seed, event: 'close'}, state, {type: 'close'}, closed, ledger);
+      expect({seed, ops: [...ledger.ops], timers: [...ledger.timers]}).toEqual({
+        seed,
+        ops: [],
+        timers: [],
+      });
     }
   });
 
-  test('a run of link failures is bounded by the schedule, then the host is offline', () => {
+  test('a run of link failures walks the whole schedule in order, then the host is offline', () => {
     for (const seed of SEEDS.slice(0, 50)) {
       const random = new Seeded(seed);
       let state = fold([{type: 'open'}]).state;
-      let checks = 0;
+      let attempts = 1;
+      const backoffs: number[] = [];
       for (let index = 0; index < 100 && state.phase.kind !== 'offline'; index += 1) {
+        const before = state;
         const next = step(state, unanswered(random, state), CONFIG);
-        checks += next.requests.filter(request => request.type === 'perform').length;
+        attempts += next.requests.filter(request => request.type === 'perform').length;
+        if (next.state.timer?.purpose === 'backoff' && next.state.timer !== before.timer) {
+          backoffs.push(...scheduledDelays(next.requests));
+        }
         state = next.state;
       }
       expect({seed, phase: state.phase.kind}).toEqual({seed, phase: 'offline'});
-      expect(checks).toBeLessThanOrEqual(CONFIG.delaysMs.length + 1);
+      expect({seed, backoffs}).toEqual({seed, backoffs: [...CONFIG.delaysMs]});
+      expect(attempts).toBe(CONFIG.delaysMs.length + 1);
     }
   });
 });
@@ -161,28 +234,99 @@ describe('HostConnection machine (scenarios)', () => {
     const state = readyState();
     expect(state.phase.kind).toBe('ready');
     expect(state.timer?.purpose).toBe('heartbeat');
+    expect(state.attempt).toBe(0);
   });
 
   test('a run channel lost to the link is checked with a fresh run.connect to that run', () => {
     const {state, requests} = fold(
-      [{type: 'run-ended', instanceId: 'abcdefabcdef', cause: 'link', detail: 'reset'}],
+      [{type: 'run-ended', instanceId: RUN, cause: 'link', detail: 'reset'}],
       readyState(),
     );
-    expect(state.phase).toEqual({
+    expect(phaseOf(state)).toEqual({
       kind: 'reconnecting',
       attempt: 1,
-      target: {kind: 'run', instanceId: 'abcdefabcdef'},
+      target: {kind: 'run', instanceId: RUN},
     });
     expect(requests).toContainEqual({
       type: 'perform',
       op: opOf(state),
-      operation: {kind: 'check', target: {kind: 'run', instanceId: 'abcdefabcdef'}},
+      operation: {kind: 'check', target: {kind: 'run', instanceId: RUN}},
     });
+  });
+
+  test('regression: the first failed check after a drop or a wake waits the first slot', () => {
+    const drops: ConnectionEvent[] = [
+      {type: 'control-ended', cause: 'link', detail: 'reset'},
+      {type: 'run-ended', instanceId: RUN, cause: 'link', detail: 'reset'},
+    ];
+    for (const drop of drops) {
+      const checking = fold([drop], readyState()).state;
+      const {requests} = fold(
+        [{type: 'failed', op: opOf(checking), cause: 'link', detail: 'down'}],
+        checking,
+      );
+      expect({drop: drop.type, delays: scheduledDelays(requests)}).toEqual({
+        drop: drop.type,
+        delays: [FIRST_DELAY],
+      });
+    }
+    // Offline, then a wake: its check failing waits the first slot too.
+    let state = fold([drops[0] as ConnectionEvent], readyState()).state;
+    for (let index = 0; state.phase.kind !== 'offline' && index < 20; index += 1) {
+      state = fold([unanswered(new Seeded(index), state)], state).state;
+    }
+    expect(state.phase.kind).toBe('offline');
+    const woken = fold([{type: 'wake'}], state).state;
+    expect(phaseOf(woken)).toMatchObject({kind: 'reconnecting', attempt: 1});
+    const {requests} = fold(
+      [{type: 'failed', op: opOf(woken), cause: 'link', detail: 'down'}],
+      woken,
+    );
+    expect(scheduledDelays(requests)).toEqual([FIRST_DELAY]);
+  });
+
+  test('a recovery that did not hold backs off instead of checking at once', () => {
+    let state = fold([{type: 'control-ended', cause: 'link', detail: 'x'}], readyState()).state;
+    state = fold([{type: 'succeeded', op: opOf(state)}], state).state;
+    expect(state.phase.kind).toBe('ready');
+    const {state: lost, requests} = fold(
+      [{type: 'control-ended', cause: 'link', detail: 'again'}],
+      state,
+    );
+    expect(lost.op).toBeNull();
+    expect(scheduledDelays(requests)).toEqual([FIRST_DELAY]);
+    // A heartbeat that answers proves the connection: the next loss checks at once.
+    let held = fold([{type: 'timer-fired', timer: timerOf(lost)}], lost).state;
+    held = fold([{type: 'succeeded', op: opOf(held)}], held).state;
+    held = fold([{type: 'timer-fired', timer: timerOf(held)}], held).state;
+    held = fold([{type: 'succeeded', op: opOf(held)}], held).state;
+    expect(held.attempt).toBe(0);
+    const next = fold([{type: 'control-ended', cause: 'link', detail: 'x'}], held).state;
+    expect(next.op?.operation.kind).toBe('check');
+  });
+
+  test('an operation past its deadline is aborted, and its late outcome is ignored', () => {
+    const opened = fold([{type: 'open'}]).state;
+    const op = opOf(opened);
+    const {state, requests} = fold([{type: 'timer-fired', timer: timerOf(opened)}], opened);
+    expect(requests).toContainEqual({type: 'abort', op});
+    expect(fold([{type: 'succeeded', op}], state).state).toBe(state);
+    expect(fold([{type: 'failed', op, cause: 'auth', detail: 'late'}], state).state).toBe(state);
+  });
+
+  test('a channel lost under a ping, and closing, abort the operation in flight', () => {
+    const ready = readyState();
+    const pinging = fold([{type: 'timer-fired', timer: timerOf(ready)}], ready).state;
+    const ping = opOf(pinging);
+    const lost = fold([{type: 'control-ended', cause: 'link', detail: 'x'}], pinging);
+    expect(lost.requests).toContainEqual({type: 'abort', op: ping});
+    const closed = fold([{type: 'close'}], lost.state);
+    expect(closed.requests).toContainEqual({type: 'abort', op: opOf(lost.state)});
   });
 
   test('the control channel is checked with a ping on a heartbeat', () => {
     const ready = readyState();
-    const {requests} = fold([{type: 'timer-fired', timer: ready.timer?.id ?? -1}], ready);
+    const {requests} = fold([{type: 'timer-fired', timer: timerOf(ready)}], ready);
     expect(
       requests.some(request => request.type === 'perform' && request.operation.kind === 'ping'),
     ).toBe(true);
@@ -190,7 +334,7 @@ describe('HostConnection machine (scenarios)', () => {
 
   test('a run found gone by its check leaves the host ready and reports the run', () => {
     const lost = fold(
-      [{type: 'run-ended', instanceId: 'abcdefabcdef', cause: 'link', detail: 'x'}],
+      [{type: 'run-ended', instanceId: RUN, cause: 'link', detail: 'x'}],
       readyState(),
     ).state;
     const {state, requests} = fold(
@@ -198,11 +342,20 @@ describe('HostConnection machine (scenarios)', () => {
       lost,
     );
     expect(state.phase.kind).toBe('ready');
-    expect(requests).toContainEqual({
-      type: 'run-unreachable',
-      instanceId: 'abcdefabcdef',
-      detail: 'gone',
-    });
+    expect(requests).toContainEqual({type: 'run-unreachable', instanceId: RUN, detail: 'gone'});
+  });
+
+  test('a run dial lost while a recovery is under way is left to that recovery', () => {
+    const checking = fold(
+      [{type: 'control-ended', cause: 'link', detail: 'x'}],
+      readyState(),
+    ).state;
+    const {state, requests} = fold(
+      [{type: 'run-ended', instanceId: RUN, cause: 'link', detail: 'dial'}],
+      checking,
+    );
+    expect(state).toBe(checking);
+    expect(requests).toEqual([]);
   });
 
   test('auth stops the loop until the user retries, which links interactively', () => {

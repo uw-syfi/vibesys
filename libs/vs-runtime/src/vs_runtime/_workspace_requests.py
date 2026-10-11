@@ -73,6 +73,7 @@ from vs_runtime._workspace_lookup import candidate_member_id, find_attempt_works
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
     RootGrant,
+    RootRelease,
     StoreWorkspaceReceipts,
     WorkspaceReceipts,
     attempt_key,
@@ -394,14 +395,18 @@ class RuntimeWorkspaceRequests:
 
     @staticmethod
     async def _materialize(
-        workspace: RuntimeWorkspace, commit: str, *, resource_id: ResourceId | None = None
+        workspace: RuntimeWorkspace,
+        commit: str,
+        *,
+        resource_id: ResourceId | None = None,
+        exact: bool = False,
     ) -> _Facts | None:
         """Make the tree exactly *commit* and prove it; ``None`` means success."""
         try:
-            await workspace.restore(commit)
+            await workspace.restore(commit, exact=exact)
         except WorkspaceRestoreError as error:
             return _retryable(f"restore failed: {error}", resource_id)
-        if not await workspace.matches_revision(commit):
+        if not await workspace.matches_revision(commit, exact=exact):
             return _retryable("tree does not match the revision after restore", resource_id)
         return None
 
@@ -446,8 +451,10 @@ class RuntimeWorkspaceRequests:
                 pass
         if self._receipts.load_binding(attempt) is None:
             root = self._workspaces.root
-            if not await root.matches_revision(base):
-                failure = await self._materialize(root, base, resource_id=resource_id)
+            # An exclusive-root attempt owns whatever it leaves in the root, ignored files
+            # included, so the grant is exactly base plus the preserved artifact dirs.
+            if not await root.matches_revision(base, exact=True):
+                failure = await self._materialize(root, base, resource_id=resource_id, exact=True)
                 if failure is not None:
                     return failure
             self._bind(attempt, request, resource_id, None)
@@ -605,13 +612,24 @@ class RuntimeWorkspaceRequests:
         if binding.workspace_id is None:
             # The root is run-owned and stays; ending the attempt ends only its hold. A
             # stale generation is not the holder, so its discard changes nothing.
-            self._receipts.release_root(request.attempt)
+            match self._receipts.release_root(request.attempt):
+                case RootRelease.NOT_HOLDER:
+                    return _rejected(
+                        "this attempt generation never ended its hold and a newer generation"
+                        " holds the exclusive root; nothing was released",
+                        resource_id=binding.resource_id,
+                    )
+                case RootRelease.ALREADY_RELEASED:
+                    diagnostic = "the exclusive root hold had already ended; nothing released now"
+                case RootRelease.RELEASED:
+                    diagnostic = ""
             return _Facts(
                 ObservationStatus.SUCCEEDED,
                 accepted=True,
                 released=True,
                 children_complete=True,
                 resource_id=binding.resource_id,
+                diagnostic=diagnostic,
             )
         member = candidate_member_id(request.attempt)
         candidate = self._workspaces.live_candidate(member)

@@ -644,8 +644,9 @@ def test_unrevertable_unauthorized_change_fails_the_turn(implementation: str) ->
             clean: bool,
             preserve_paths: tuple[str, ...] = (),
             preserve_memory: bool = True,
+            exact: bool = False,
         ) -> bool:
-            del clean, preserve_memory
+            del clean, preserve_memory, exact
             self.agent_restores.append((revision, preserve_paths))
             self.revision = revision
             return True
@@ -1502,6 +1503,7 @@ def test_cancelled_resume_drains_workspace_access_enforcement(
             clean: bool,
             preserve_paths: tuple[str, ...] = (),
             preserve_memory: bool = True,
+            exact: bool = False,
         ) -> bool:
             resume_loops[0].call_soon_threadsafe(entered.set)
             wait_or_fail(release, "the held resume release")
@@ -1510,6 +1512,7 @@ def test_cancelled_resume_drains_workspace_access_enforcement(
                 clean=clean,
                 preserve_paths=preserve_paths,
                 preserve_memory=preserve_memory,
+                exact=exact,
             )
 
     workspace = (

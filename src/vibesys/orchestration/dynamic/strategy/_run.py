@@ -12,7 +12,7 @@ from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._draft import Draft
 from vibesys.orchestration.dynamic.strategy._ids import IDS
 from vibesys.orchestration.dynamic.strategy._state import DynamicStrategyState, RunPhase, Winner
-from vs_core.api import AdoptionResult, RevisionRef
+from vs_core.api import AdoptionFailed, AdoptionResult, RevisionRef
 
 
 def search_over(state: DynamicStrategyState, config: DynamicConfig) -> bool:
@@ -98,6 +98,15 @@ def _no_winner_reason(state: DynamicStrategyState) -> str:
 def on_adoption(state: DynamicStrategyState, event: AdoptionResult) -> DynamicStrategyState:
     """Stop after a successful adoption; a failed one stops without a winner."""
     phase, winner = candidates.after_adoption(state.phase, state.winner, event)
+    if phase is state.phase and winner is state.winner:
+        return state
+    return state.model_copy(update={"phase": phase, "winner": winner})
+
+
+def on_adoption_failed(state: DynamicStrategyState, event: AdoptionFailed) -> DynamicStrategyState:
+    """Stop without a winner when core gave up on the adoption."""
+    del event
+    phase, winner = candidates.after_failed_adoption(state.phase, state.winner)
     if phase is state.phase and winner is state.winner:
         return state
     return state.model_copy(update={"phase": phase, "winner": winner})

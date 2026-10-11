@@ -149,3 +149,15 @@ def after_adoption(
     if event.observation.status is ObservationStatus.SUCCEEDED:
         return RunPhase.STOPPING, winner
     return RunPhase.STOPPING, None
+
+
+def after_failed_adoption(phase: RunPhase, winner: Winner | None) -> tuple[RunPhase, Winner | None]:
+    """Stop without a winner when core reports that the adoption ended for good.
+
+    Core publishes `AdoptionFailed` (not `AdoptionResult`) when the restore or its
+    verification failed and its retries are spent. Without this the run would stay in
+    ``ADOPTING`` with nothing in flight and never reach a result.
+    """
+    if phase is not RunPhase.ADOPTING:
+        return phase, winner
+    return RunPhase.STOPPING, None
