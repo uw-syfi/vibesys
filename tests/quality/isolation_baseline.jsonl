@@ -58,14 +58,12 @@
 {"path": "tests/server/test_experiments.py", "rule": "patch", "count": 2}
 {"path": "tests/server/test_lazy_event_store.py", "rule": "patch", "count": 1}
 {"path": "tests/server/test_transport_subscription.py", "rule": "patch", "count": 3}
-{"path": "tests/support/__init__.py", "rule": "mock", "count": 2}
 {"path": "tests/vibesys/agents/test_agent_client.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/agents/test_agent_runners.py", "rule": "mock", "count": 11}
 {"path": "tests/vibesys/agents/test_agent_selection.py", "rule": "mock", "count": 4}
 {"path": "tests/vibesys/agents/test_callbacks.py", "rule": "mock", "count": 3}
 {"path": "tests/vibesys/agents/test_cli_common.py", "rule": "patch", "count": 2}
-{"path": "tests/vibesys/backends/test_cpu_backend.py", "rule": "mock", "count": 2}
-{"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "mock", "count": 6}
+{"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "mock", "count": 5}
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "patch", "count": 5}
 {"path": "tests/vibesys/inputs/test_synthesis.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/loops/test_rocprof_compute.py", "rule": "timeout_verdict", "count": 1}

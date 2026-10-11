@@ -47,6 +47,7 @@ from vs_sandbox.compute_backends import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from vs_sandbox.docker_cli import DockerCli
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
@@ -89,11 +90,13 @@ class RocmBackend:
         log: Callable[[str], None] | None = None,
         image: str | None = None,
         accelerator_discovery: AcceleratorDiscovery | None = None,
+        docker: DockerCli | None = None,
     ) -> None:
         """Configure ROCm execution with its log directory and image override."""
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image or _DEFAULT_IMAGE
+        self._docker = docker
         # No per-device auto-selection yet; pinning is via HIP_VISIBLE_DEVICES.
         # Kept for ComputeBackendImpl parity.
         self.selected_device = None
@@ -172,6 +175,7 @@ class RocmBackend:
                 log_path=log_path,
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
+                docker=self._docker,
                 docker_in_docker=docker_in_docker,
                 same_path_workspace=same_path_workspace,
                 run_id=run_id,

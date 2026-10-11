@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support import capture_docker_start_argv
+from tests.support.docker import capture_docker_start_argv, recording_docker_cli
 
 from entrypoints.cli import _add_common_args
 from vibesys.prompts import PROMPTS_DIR, RocmComputeBackendFragment
@@ -15,6 +15,7 @@ from vibesys.prompts.renderer import _FRAGMENT_IMPLS, ComputeBackendFragment
 from vs_sandbox.api import (
     AcceleratorInventory,
     ComputeBackend,
+    DockerCli,
     DockerSandbox,
     HostResource,
     HostResourceAccess,
@@ -36,13 +37,17 @@ _DEVICE_NODES = st.sampled_from(["/dev/kfd", "/dev/dri/renderD128", "/dev/dri/re
 
 
 def _make_backend(
-    tmp_path: Path, devices: Iterable[str] = ("/dev/kfd", "/dev/dri/renderD128")
+    tmp_path: Path,
+    devices: Iterable[str] = ("/dev/kfd", "/dev/dri/renderD128"),
+    *,
+    docker: DockerCli | None = None,
 ) -> RocmBackend:
     return RocmBackend(
         tmp_path / "logs",
         accelerator_discovery=FakeAcceleratorDiscovery(
             rocm=AcceleratorInventory(tuple(devices), reported_device_count=1)
         ),
+        docker=docker,
     )
 
 
@@ -71,7 +76,12 @@ class TestRocmSandbox:
 
     def test_docker_forwards_kfd_and_dri_without_gpus_flag(self, tmp_path: Path) -> None:
         """AMD GPUs come in via --device, not the NVIDIA-only --gpus."""
-        impl = _make_backend(tmp_path, devices=["/dev/kfd", "/dev/dri/renderD128"])
+        docker = recording_docker_cli()
+        impl = _make_backend(
+            tmp_path,
+            devices=["/dev/kfd", "/dev/dri/renderD128"],
+            docker=docker,
+        )
         workspace = tmp_path / "ws"
         workspace.mkdir()
         sb = impl.make_sandbox(
@@ -80,13 +90,14 @@ class TestRocmSandbox:
             log_path=None,
         )
         assert isinstance(sb, DockerSandbox)
-        argv = capture_docker_start_argv(sb)
+        argv = capture_docker_start_argv(sb, docker)
         devices = [argv[index + 1] for index, item in enumerate(argv[:-1]) if item == "--device"]
         assert devices == ["/dev/kfd", "/dev/dri/renderD128"]
         assert "--gpus" not in argv
 
     def test_docker_forwards_resources_to_the_sandbox(self, tmp_path: Path) -> None:
-        impl = _make_backend(tmp_path)
+        docker = recording_docker_cli()
+        impl = _make_backend(tmp_path, docker=docker)
         workspace = tmp_path / "ws"
         workspace.mkdir()
         resource = HostResource(tmp_path / "history", HostResourceAccess.READ_ONLY, "history")
@@ -99,14 +110,15 @@ class TestRocmSandbox:
         )
 
         assert isinstance(sb, DockerSandbox)
-        argv = capture_docker_start_argv(sb)
+        argv = capture_docker_start_argv(sb, docker)
         mounts = [argv[index + 1] for index, item in enumerate(argv[:-1]) if item == "-v"]
         assert any(
             mount.startswith(f"{resource.path}:") and mount.endswith(":ro") for mount in mounts
         )
 
     def test_docker_can_skip_accelerator_for_control_plane(self, tmp_path: Path) -> None:
-        impl = _make_backend(tmp_path)
+        docker = recording_docker_cli()
+        impl = _make_backend(tmp_path, docker=docker)
         workspace = tmp_path / "ws"
         workspace.mkdir()
 
@@ -118,13 +130,14 @@ class TestRocmSandbox:
         )
 
         assert isinstance(sb, DockerSandbox)
-        argv = capture_docker_start_argv(sb)
+        argv = capture_docker_start_argv(sb, docker)
         assert "--device" not in argv
 
     def test_docker_adds_device_groups(self, tmp_path: Path) -> None:
         """/dev/kfd and /dev/dri/* are group-owned; without these the container
         user cannot open them and every HIP call fails at runtime."""
-        impl = _make_backend(tmp_path)
+        docker = recording_docker_cli()
+        impl = _make_backend(tmp_path, docker=docker)
         workspace = tmp_path / "ws"
         workspace.mkdir()
         sb = impl.make_sandbox(
@@ -133,7 +146,7 @@ class TestRocmSandbox:
             log_path=None,
         )
         assert isinstance(sb, DockerSandbox)
-        argv = capture_docker_start_argv(sb)
+        argv = capture_docker_start_argv(sb, docker)
         groups = [argv[index + 1] for index, item in enumerate(argv[:-1]) if item == "--group-add"]
         assert groups == ["video", "render"]
 
@@ -146,7 +159,8 @@ class TestRocmSandbox:
     ) -> None:
         """Docker rejects ``--group-add render`` when the image has no such group,
         so a container that gets no device nodes must not name the groups."""
-        impl = _make_backend(tmp_path, devices=devices)
+        docker = recording_docker_cli()
+        impl = _make_backend(tmp_path, devices=devices, docker=docker)
         workspace = tmp_path / "ws"
         workspace.mkdir(exist_ok=True)
         sb = impl.make_sandbox(
@@ -156,7 +170,7 @@ class TestRocmSandbox:
             attach_accelerator=attach,
         )
         assert isinstance(sb, DockerSandbox)
-        argv = capture_docker_start_argv(sb)
+        argv = capture_docker_start_argv(sb, docker)
         groups = [argv[i + 1] for i, item in enumerate(argv[:-1]) if item == "--group-add"]
         forwarded = [argv[i + 1] for i, item in enumerate(argv[:-1]) if item == "--device"]
         assert forwarded == (devices if attach else [])
@@ -165,7 +179,8 @@ class TestRocmSandbox:
     def test_torch_wheel_index_targets_rocm(self, tmp_path: Path) -> None:
         """Without this, `uv add torch` in the agent's fresh venv resolves the
         default PyPI (CUDA) wheel and the run silently falls back to CPU."""
-        impl = _make_backend(tmp_path)
+        docker = recording_docker_cli()
+        impl = _make_backend(tmp_path, docker=docker)
         workspace = tmp_path / "ws"
         workspace.mkdir()
         sb = impl.make_sandbox(
@@ -174,7 +189,7 @@ class TestRocmSandbox:
             log_path=None,
         )
         assert isinstance(sb, DockerSandbox)
-        argv = capture_docker_start_argv(sb)
+        argv = capture_docker_start_argv(sb, docker)
         env = [argv[index + 1] for index, item in enumerate(argv[:-1]) if item == "-e"]
         assert any(value.startswith("UV_EXTRA_INDEX_URL=") and "rocm" in value for value in env)
 
@@ -187,7 +202,8 @@ class TestRocmSandbox:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("HIP_VISIBLE_DEVICES", "2")
-        impl = _make_backend(tmp_path)
+        docker = recording_docker_cli()
+        impl = _make_backend(tmp_path, docker=docker)
         workspace = tmp_path / "ws"
         workspace.mkdir()
         sb = impl.make_sandbox(
@@ -196,7 +212,7 @@ class TestRocmSandbox:
             log_path=None,
         )
         assert isinstance(sb, DockerSandbox)
-        argv = capture_docker_start_argv(sb)
+        argv = capture_docker_start_argv(sb, docker)
         env = [argv[index + 1] for index, item in enumerate(argv[:-1]) if item == "-e"]
         assert "HIP_VISIBLE_DEVICES=2" in env
 
@@ -204,7 +220,8 @@ class TestRocmSandbox:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("HIP_VISIBLE_DEVICES", "2")
-        impl = _make_backend(tmp_path)
+        docker = recording_docker_cli()
+        impl = _make_backend(tmp_path, docker=docker)
         workspace = tmp_path / "ws"
         workspace.mkdir()
         sb = impl.make_sandbox(
@@ -214,7 +231,7 @@ class TestRocmSandbox:
             extra_env={"HIP_VISIBLE_DEVICES": "0"},
         )
         assert isinstance(sb, DockerSandbox)
-        argv = capture_docker_start_argv(sb)
+        argv = capture_docker_start_argv(sb, docker)
         env = [argv[index + 1] for index, item in enumerate(argv[:-1]) if item == "-e"]
         assert "HIP_VISIBLE_DEVICES=0" in env
 

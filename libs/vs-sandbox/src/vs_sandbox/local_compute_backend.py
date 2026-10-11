@@ -29,6 +29,7 @@ from vs_sandbox.compute_backends import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from vs_sandbox.docker_cli import DockerCli
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
@@ -49,6 +50,7 @@ class LocalBackend:
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
+        docker: DockerCli | None = None,
     ) -> None:
         """Configure the Metal or CPU backend from its platform identity."""
         self.name = name
@@ -63,6 +65,7 @@ class LocalBackend:
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image
+        self._docker = docker
         # No accelerator to pick — kept for protocol parity with other backends
         # (e.g. run resources read ``selected_device``).
         self.selected_device = None
@@ -124,6 +127,7 @@ class LocalBackend:
                 log_path=log_path,
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
+                docker=self._docker,
                 docker_in_docker=docker_in_docker,
                 same_path_workspace=same_path_workspace,
                 run_id=run_id,
@@ -156,6 +160,7 @@ def metal_backend(
     *,
     log: Callable[[str], None] | None = None,
     image: str | None = None,
+    docker: DockerCli | None = None,
 ) -> LocalBackend:
     """Apple Silicon / Metal backend (local execution only)."""
     return LocalBackend(
@@ -163,6 +168,7 @@ def metal_backend(
         log_dir,
         log=log,
         image=image,
+        docker=docker,
     )
 
 
@@ -171,6 +177,7 @@ def cpu_backend(
     *,
     log: Callable[[str], None] | None = None,
     image: str | None = None,
+    docker: DockerCli | None = None,
 ) -> LocalBackend:
     """CPU-only backend (no GPU; CPU-bound targets like KV stores / servers)."""
     return LocalBackend(
@@ -178,4 +185,5 @@ def cpu_backend(
         log_dir,
         log=log,
         image=image or _DEFAULT_CPU_IMAGE,
+        docker=docker,
     )

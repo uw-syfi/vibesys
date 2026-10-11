@@ -1,8 +1,8 @@
-import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
+from tests.support.docker import capture_docker_start_argv, recording_docker_cli
 
 from vs_sandbox.api import (
     CudaBackend,
@@ -14,24 +14,12 @@ from vs_sandbox.api import (
 )
 
 
-def _docker_run_command(sandbox: DockerSandbox) -> list[str]:
-    result = subprocess.CompletedProcess(
-        args=[], returncode=0, stdout="test-container\n", stderr=""
-    )
-    with patch("subprocess.run", return_value=result) as run:
-        sandbox.start()
-        command = next(
-            call.args[0] for call in run.call_args_list if call.args[0][:2] == ["docker", "run"]
-        )
-        sandbox.stop()
-    return command
-
-
 def test_cpu_only_control_plane_docker_skips_gpu_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    backend = CudaBackend(tmp_path)
+    docker = recording_docker_cli()
+    backend = CudaBackend(tmp_path, docker=docker)
     pick_device = MagicMock()
     monkeypatch.setattr("vs_sandbox.cuda_backend.pick_gpu", pick_device)
 
@@ -45,7 +33,7 @@ def test_cpu_only_control_plane_docker_skips_gpu_runtime(
     pick_device.assert_not_called()
     assert isinstance(sandbox, DockerSandbox)
     assert backend.selected_device is None
-    assert "--gpus" not in _docker_run_command(sandbox)
+    assert "--gpus" not in capture_docker_start_argv(sandbox, docker)
 
 
 def test_ephemeral_setup_sandbox_is_not_restarted_on_reselection(
@@ -79,7 +67,8 @@ def test_ephemeral_setup_sandbox_is_not_restarted_on_reselection(
 
 
 def test_docker_forwards_resources_to_the_sandbox(tmp_path: Path) -> None:
-    backend = CudaBackend(tmp_path)
+    docker = recording_docker_cli()
+    backend = CudaBackend(tmp_path, docker=docker)
     resource = HostResource(tmp_path / "history", HostResourceAccess.READ_ONLY, "history")
 
     sandbox = backend.make_sandbox(
@@ -91,5 +80,5 @@ def test_docker_forwards_resources_to_the_sandbox(tmp_path: Path) -> None:
     )
 
     assert isinstance(sandbox, DockerSandbox)
-    command = _docker_run_command(sandbox)
+    command = capture_docker_start_argv(sandbox, docker)
     assert f"{resource.path}:{resource.agent_path or resource.path}:ro" in command

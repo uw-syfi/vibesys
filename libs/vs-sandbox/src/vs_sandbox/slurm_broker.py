@@ -7,13 +7,17 @@ import os
 import secrets
 import shlex
 import socketserver
-import subprocess
 import threading
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vs_sandbox.process_execution import (
+    CapturedProcessRequest,
+    CapturedProcessRunner,
+    OwnedProcessRunner,
+)
 from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
 if TYPE_CHECKING:
@@ -117,6 +121,7 @@ class SlurmProcessBroker:
         socket_path: Path,
         *,
         local_roots: Sequence[Path],
+        processes: CapturedProcessRunner | None = None,
     ) -> None:
         """Bind the operator config, private socket, and allowed local roots."""
         transport = config.transport
@@ -128,6 +133,7 @@ class SlurmProcessBroker:
         self.socket_path = socket_path
         self.token = secrets.token_urlsafe(32)
         self._local_roots = tuple(path.resolve() for path in local_roots)
+        self._processes = processes or OwnedProcessRunner()
         self._server: _BrokerServer | None = None
         self._thread: threading.Thread | None = None
         self._socket_identity: tuple[int, int] | None = None
@@ -177,18 +183,16 @@ class SlurmProcessBroker:
         if not secrets.compare_digest(call.token, self.token):
             raise SlurmProcessBrokerError.invalid_capability()
         self._validate_argv(call.argv)
-        completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-092714 [S603]; the broker validates argv against the operator-configured executables, exact destination, remote namespace, and local roots before invocation.
-            call.argv,
-            input=call.stdin,
-            capture_output=True,
-            text=True,
-            timeout=min(call.timeout, float(self._config.transport_timeout_seconds)),
-            check=False,
-            env=os.environ.copy(),
-            # As in vs_slurm's own transport: in its own process group, Ctrl-C
-            # aimed at the run's terminal cannot kill an in-flight sbatch (its
-            # job id would be lost) or the scancel a stopping gate requests.
-            process_group=0,
+        completed = self._processes.run(
+            CapturedProcessRequest(
+                argv=call.argv,
+                stdin=call.stdin,
+                timeout=min(call.timeout, float(self._config.transport_timeout_seconds)),
+                env=os.environ.copy(),
+                # As in vs_slurm's own transport: in its own process group, Ctrl-C
+                # aimed at the run's terminal cannot kill an in-flight sbatch (its
+                # job id would be lost) or the scancel a stopping gate requests.
+            )
         )
         return _ProcessReply(
             returncode=completed.returncode,

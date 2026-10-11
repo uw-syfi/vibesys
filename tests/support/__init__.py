@@ -5,8 +5,7 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Mapping, Sequence
 from os import PathLike
-from typing import TYPE_CHECKING, Literal, Protocol, cast, overload
-from unittest.mock import patch
+from typing import TYPE_CHECKING, Literal, cast, overload
 
 if TYPE_CHECKING:
     from vibesys.hypothesis import OrchestratorPlan
@@ -25,31 +24,6 @@ def make_orchestrator_plan(*, criteria: str, **fields: object) -> OrchestratorPl
 
 
 _Command = Sequence[str | PathLike[str]]
-
-
-class _StartableSandbox(Protocol):
-    def start(self) -> None: ...
-    def stop(self) -> None: ...
-
-
-def capture_docker_start_argv(sandbox: _StartableSandbox) -> list[str]:
-    """Return the Docker argv issued by a sandbox's public start operation."""
-    commands: list[list[str]] = []
-
-    def fake_run(
-        argv: Sequence[str | PathLike[str]], **_options: object
-    ) -> subprocess.CompletedProcess[str]:
-        command = [str(argument) for argument in argv]
-        commands.append(command)
-        container_id = "test-container-id" if command[1:2] == ["run"] else ""
-        return subprocess.CompletedProcess(command, 0, stdout=container_id, stderr="")
-
-    with patch("vs_sandbox.docker_sandbox.subprocess.run", side_effect=fake_run):
-        try:
-            sandbox.start()
-        finally:
-            sandbox.stop()
-    return next(command for command in commands if command[1:2] == ["run"])
 
 
 @overload

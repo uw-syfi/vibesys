@@ -5,7 +5,12 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING, Protocol
 
-from vs_sandbox.process_execution import start_process_group
+from vs_sandbox.process_execution import (
+    CapturedProcessRequest,
+    CapturedProcessRunner,
+    OwnedProcessRunner,
+    start_process_group,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -47,23 +52,36 @@ class DockerCli(Protocol):
 class SubprocessDockerCli:
     """The real ``docker`` binary on ``PATH``."""
 
+    def __init__(self, *, processes: CapturedProcessRunner | None = None) -> None:
+        """Own synchronous Docker commands through *processes*."""
+        self._processes = processes or OwnedProcessRunner()
+
     def run(
         self, argv: Sequence[str], *, timeout_seconds: float
     ) -> subprocess.CompletedProcess[str]:
-        """Run *argv* with ``subprocess.run``, in a session of its own.
+        """Run *argv* with captured output, in a session of its own.
 
         Ctrl-C signals the terminal's whole foreground process group. A
         lifecycle command (``run``, ``stop``, ``rm``) that shared it would die
         mid-flight and leave its container running or half-created, so the
-        run's own teardown, not the terminal, decides when these end.
+        run's own teardown, not the terminal, decides when these end. A
+        timeout kills and reaps the entire local session's process group before
+        :class:`subprocess.TimeoutExpired` reaches the caller.
         """
-        return subprocess.run(  # noqa: S603  # lint-waiver: LW-731011 [S603]; internally assembled docker argv runs without a shell.
-            list(argv),
-            start_new_session=True,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout_seconds,
+        arguments = list(argv)
+        result = self._processes.run(
+            CapturedProcessRequest(
+                argv=arguments,
+                stdin=None,
+                timeout=timeout_seconds,
+                start_new_session=True,
+            )
+        )
+        return subprocess.CompletedProcess(
+            arguments,
+            result.returncode,
+            result.stdout,
+            result.stderr,
         )
 
     def spawn(self, argv: Sequence[str]) -> subprocess.Popen[str]:

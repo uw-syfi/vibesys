@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
+    from vs_sandbox.docker_cli import DockerCli
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
@@ -199,13 +200,19 @@ def create_compute_backend(
     *,
     log: Callable[[str], None] | None = None,
     image: str | None = None,
+    docker: DockerCli | None = None,
 ) -> ComputeBackendImpl:
-    """Construct the registered implementation for one compute stack."""
+    """Construct the registered implementation for one compute stack.
+
+    A supplied *docker* replaces the built-in Docker CLI for built-in backends.
+    """
     _ensure_defaults()
     if backend not in _REGISTRY:
         message = f"No backend impl registered for {backend!r}"
         raise ValueError(message)
-    return _REGISTRY[backend](log_dir=log_dir, log=log, image=image)
+    if docker is None:
+        return _REGISTRY[backend](log_dir=log_dir, log=log, image=image)
+    return _REGISTRY[backend](log_dir=log_dir, log=log, image=image, docker=docker)
 
 
 def _register_defaults() -> None:

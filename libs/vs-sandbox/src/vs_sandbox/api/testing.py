@@ -6,6 +6,10 @@ internal modules directly.
 
 from __future__ import annotations
 
+from vs_sandbox.fake_captured_process import (
+    CapturedProcessFaults,
+    FakeCapturedProcessRunner,
+)
 from vs_sandbox.fake_command_runner import (
     DEFAULT_RESULT,
     FakeCommandRunner,
@@ -40,11 +44,13 @@ from vs_sandbox.signal_relay_contracts import RelayUnderTest, SignalRelayContrac
 
 __all__ = [
     "DEFAULT_RESULT",
+    "CapturedProcessFaults",
     "DockerCliCall",
     "DockerCliOutcome",
     "DockerCommandCall",
     "DockerCommandOutcome",
     "FakeAcceleratorDiscovery",
+    "FakeCapturedProcessRunner",
     "FakeCommandRunner",
     "FakeComputeBackend",
     "FakeContainer",

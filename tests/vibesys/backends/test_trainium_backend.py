@@ -5,12 +5,13 @@ from __future__ import annotations
 import argparse
 from typing import TYPE_CHECKING
 
-from tests.support import capture_docker_start_argv
+from tests.support.docker import capture_docker_start_argv, recording_docker_cli
 
 from entrypoints.cli import _add_common_args
 from vs_sandbox.api import (
     AcceleratorInventory,
     ComputeBackend,
+    DockerCli,
     DockerSandbox,
     HostResource,
     HostResourceAccess,
@@ -26,12 +27,18 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _make_backend(tmp_path: Path, devices: Iterable[str] = ("/dev/neuron0",)) -> TrainiumBackend:
+def _make_backend(
+    tmp_path: Path,
+    devices: Iterable[str] = ("/dev/neuron0",),
+    *,
+    docker: DockerCli | None = None,
+) -> TrainiumBackend:
     return TrainiumBackend(
         tmp_path / "logs",
         accelerator_discovery=FakeAcceleratorDiscovery(
             trainium=AcceleratorInventory(tuple(devices))
         ),
+        docker=docker,
     )
 
 
@@ -56,7 +63,12 @@ class TestTrainiumSandbox:
         assert isinstance(sb, LocalShellRunner)
 
     def test_docker_forwards_neuron_devices_and_no_gpus(self, tmp_path: Path) -> None:
-        impl = _make_backend(tmp_path, devices=["/dev/neuron0", "/dev/neuron1"])
+        docker = recording_docker_cli()
+        impl = _make_backend(
+            tmp_path,
+            devices=["/dev/neuron0", "/dev/neuron1"],
+            docker=docker,
+        )
         workspace = tmp_path / "ws"
         workspace.mkdir()
         sb = impl.make_sandbox(
@@ -66,7 +78,7 @@ class TestTrainiumSandbox:
         )
         assert isinstance(sb, DockerSandbox)
 
-        argv = capture_docker_start_argv(sb)
+        argv = capture_docker_start_argv(sb, docker)
         device_args = [
             argv[index + 1] for index, item in enumerate(argv[:-1]) if item == "--device"
         ]
@@ -83,7 +95,8 @@ class TestTrainiumSandbox:
         assert "TMPDIR=/opt/neuron-tmp" in env
 
     def test_docker_forwards_resources_to_the_sandbox(self, tmp_path: Path) -> None:
-        impl = _make_backend(tmp_path)
+        docker = recording_docker_cli()
+        impl = _make_backend(tmp_path, docker=docker)
         workspace = tmp_path / "ws"
         workspace.mkdir()
         resource = HostResource(tmp_path / "history", HostResourceAccess.READ_ONLY, "history")
@@ -96,7 +109,7 @@ class TestTrainiumSandbox:
         )
 
         assert isinstance(sb, DockerSandbox)
-        argv = capture_docker_start_argv(sb)
+        argv = capture_docker_start_argv(sb, docker)
         mounts = [argv[index + 1] for index, item in enumerate(argv[:-1]) if item == "-v"]
         assert any(
             mount.startswith(f"{resource.path}:") and mount.endswith(":ro") for mount in mounts

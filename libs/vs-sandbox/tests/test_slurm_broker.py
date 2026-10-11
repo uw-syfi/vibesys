@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_sandbox.api.slurm import SlurmProcessBroker, run_brokered_process
+from vs_sandbox.api.testing import FakeCapturedProcessRunner, StoppableScript
+from vs_sim.api.testing import SimThreads
 from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
 if TYPE_CHECKING:
@@ -109,3 +111,37 @@ def test_a_brokered_process_is_outside_the_callers_process_group(tmp_path: Path)
     group, pid = (int(value) for value in result.stdout.split())
     assert group == pid
     assert group != os.getpgid(0)
+
+
+def test_a_broker_timeout_settles_the_transport_group_before_replying(tmp_path: Path) -> None:
+    processes = FakeCapturedProcessRunner(
+        StoppableScript(stdout="partial-out", stderr="partial-err", runs_for=None),
+        threads=SimThreads(),
+    )
+    broker = SlurmProcessBroker(
+        _config(),
+        tmp_path / "broker.sock",
+        local_roots=(tmp_path,),
+        processes=processes,
+    )
+    broker.start()
+    try:
+        with pytest.raises(PermissionError, match=r"timed out after 5(?:\.0)? seconds"):
+            run_brokered_process(
+                broker.socket_path,
+                broker.token,
+                ("/usr/bin/printf", "--", "cluster", "hostname"),
+                stdin="transport input",
+                timeout=5,
+            )
+    finally:
+        broker.close()
+
+    process = processes.processes[0]
+    request = processes.calls[0]
+    assert [number.name for number, _at in process.signals] == ["SIGKILL"]
+    assert process.closed
+    assert request.stdin == "transport input"
+    assert request.env == os.environ
+    assert request.cwd is None
+    assert not request.start_new_session
