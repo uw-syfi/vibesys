@@ -18,7 +18,7 @@ const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
 const TRANSPORT_TEST_ONLY =
   '^(?:transport|transport-node|contracts)/src/(?:test-support/|testing/)';
 const STORE_TEST_ONLY = '^store/src/testing/';
-// A package's own test-support directory (`desktop/src/testing/`): Fakes that only tests import.
+// A package's own test-support directory (`connection/src/testing/`): Fakes that only tests import.
 const PACKAGE_TEST_SUPPORT = '^[^/]+/src/testing/';
 // Any package's test support, at any depth of its sources: the `testing/` entries that ship Fakes
 // to other packages' tests, and the `test-support/` helpers.
@@ -131,38 +131,32 @@ function webAppRules() {
   ];
 }
 
-// The desktop app is split by process, then sliced by feature, so each slice can move into its
-// own package (`docs/contributing/desktop-connection.md`; roadmap #1878):
-//
-// - `src/main/` is the Electron main process, in layers that point down only: `app/`
-//   (composition) -> `features/<name>/` -> `entities/` (pure projections) -> `platform/<name>/`
-//   (system services: the connection manager, the settings) -> `shared/`. A stateful platform
-//   slice is a pure `state/` core and a `shell/` that owns its processes, sockets, and timers.
-// - `src/renderer/preload/` holds the sandboxed preloads, the renderers' only way to the main
-//   process. The renderers themselves are `apps/desktop-renderer` (the welcome view) and
-//   `apps/web` (the run page).
-// - The two processes share only workspace packages: the models in `@vibesys/hosts` and `@vibesys/runs` and the
-//   typed messages in `@vibesys/ipc`, whose `neutral` runtime the package-graph checker holds.
-const DESKTOP = '^desktop/src/';
-const DESKTOP_MAIN = `${DESKTOP}main/`;
-const DESKTOP_MAIN_LAYERS = ['app', 'features', 'entities', 'platform', 'shared'];
+// The desktop app's Electron main process is composed from packages, as its renderer is
+// (`docs/contributing/clients-architecture.md`): `@vibesys/connection` (the connection manager, a
+// pure `state/` machine and a `shell/` that owns its processes, channels, and timers),
+// `@vibesys/settings`, the features' `./main` controllers, and `apps/desktop-main`, which composes
+// them in `src/main/` and holds the sandboxed preloads in `src/preload/`. Which package may reach
+// which is the package-graph checker's (a preload is its own runtime there); these rules hold the
+// modules inside those packages.
+const DESKTOP_MAIN = '^apps/desktop-main/src/main/';
+const DESKTOP_PRELOAD = '^apps/desktop-main/src/preload/';
+const CONNECTION_STATE = '^connection/src/state/';
+const CONNECTION_SHELL = '^connection/src/shell/';
+// Every module of the main process: the app, the packages only it runs, the features' `./main`.
+const MAIN_PROCESS = [
+  '^apps/desktop-main/src/',
+  '^connection/src/',
+  '^settings/src/',
+  '^features/[^/]+/src/main/',
+];
 // The desktop renderer app (`apps/desktop-renderer/src`) is composition only: `main.tsx` (the
 // entry) over `wiring/` (the feature stores over the welcome bridge) and `ui/` (the view composed
 // from the features' views), which never reach each other.
 const DESKTOP_RENDERER = '^apps/desktop-renderer/src/';
-const DESKTOP_SLICE = '(?:features|platform)/[^/]+';
-const DESKTOP_SLICE_SUPPORT = [TEST_FILE, `${DESKTOP}.*/testing/`];
 const UI_RUNTIME = '(?:^|/)node_modules/(?:react|react-dom|electron)/';
 
 function desktopRules() {
-  const layerRules = DESKTOP_MAIN_LAYERS.slice(1).map((layer, index) => ({
-    name: `desktop-${layer}-does-not-import-layers-above`,
-    severity: 'error',
-    from: {path: `${DESKTOP_MAIN}${layer}/`, pathNot: TEST_FILE},
-    to: {path: `${DESKTOP_MAIN}(?:${DESKTOP_MAIN_LAYERS.slice(0, index + 1).join('|')})/`},
-  }));
   return [
-    ...layerRules,
     {
       // A preload is the sandboxed page's only way to the main process, and runs before the page
       // with Electron's renderer APIs: it binds `@vibesys/ipc`'s typed messages to Electron and
@@ -170,65 +164,39 @@ function desktopRules() {
       // the payload types it carries are reached through `@vibesys/ipc`'s bridge interfaces.
       name: 'desktop-preloads-import-only-ipc-and-electron',
       severity: 'error',
-      from: {path: `${DESKTOP}renderer/preload/`, pathNot: TEST_FILE},
+      from: {path: DESKTOP_PRELOAD, pathNot: TEST_FILE},
       to: {pathNot: ['^ipc/src/', '(?:^|/)node_modules/electron/']},
     },
     {
-      name: 'desktop-renderer-does-not-import-main',
-      severity: 'error',
-      from: {path: `${DESKTOP}renderer/`},
-      to: {path: DESKTOP_MAIN},
-    },
-    {
-      name: 'desktop-main-does-not-import-renderer',
+      // The main process loads a preload by path into a page; it never runs one itself.
+      name: 'desktop-main-does-not-import-preloads',
       severity: 'error',
       from: {path: DESKTOP_MAIN},
-      to: {path: `${DESKTOP}renderer/`},
+      to: {path: DESKTOP_PRELOAD},
     },
     {
-      // A platform slice's functional core folds events into state and requests: no Node or
+      // The connection manager's functional core folds events into state and requests: no Node or
       // Electron, no shell, no view.
-      name: 'desktop-state-is-pure',
+      name: 'connection-state-is-pure',
       severity: 'error',
-      from: {path: `${DESKTOP_MAIN}.+/state/`, pathNot: TEST_FILE},
+      from: {path: CONNECTION_STATE, pathNot: TEST_FILE},
       to: {
-        path: [`${DESKTOP_MAIN}.+/shell/`, UI_RUNTIME, ...TRANSPORT, ...CONTRACTS],
+        path: [CONNECTION_SHELL, UI_RUNTIME, ...TRANSPORT, ...CONTRACTS],
         dependencyTypesNot: ['type-only'],
       },
     },
     {
-      name: 'desktop-state-has-no-node-runtime',
+      name: 'connection-state-has-no-node-runtime',
       severity: 'error',
-      from: {path: `${DESKTOP_MAIN}.+/state/`, pathNot: TEST_FILE},
+      from: {path: CONNECTION_STATE, pathNot: TEST_FILE},
       to: {dependencyTypes: ['core']},
     },
     {
-      // Only a platform slice's shell starts processes or opens sockets.
-      name: 'desktop-only-shells-open-processes-and-sockets',
+      // Only the connection manager's shell starts processes or opens sockets in the main process.
+      name: 'desktop-only-connection-shell-opens-processes-and-sockets',
       severity: 'error',
-      from: {path: DESKTOP, pathNot: [TEST_FILE, `${DESKTOP_MAIN}platform/[^/]+/shell/`]},
+      from: {path: MAIN_PROCESS, pathNot: [TEST_FILE, CONNECTION_SHELL]},
       to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
-    },
-    {
-      // A feature never reaches another feature; cross-feature flows are wired in `app/`.
-      name: 'desktop-features-are-isolated',
-      severity: 'error',
-      from: {path: `${DESKTOP_MAIN}features/([^/]+)/`},
-      to: {path: `${DESKTOP_MAIN}features/`, pathNot: `${DESKTOP_MAIN}features/$1/`},
-    },
-    {
-      // A slice's `index.ts` is its only public surface (its test support aside). Group 1 is the
-      // importer's own slice, which may reach all of itself.
-      name: 'desktop-slices-are-entered-through-their-index',
-      severity: 'error',
-      from: {path: `${DESKTOP_MAIN}(${DESKTOP_SLICE})/`, pathNot: DESKTOP_SLICE_SUPPORT},
-      to: {path: `${DESKTOP_MAIN}${DESKTOP_SLICE}/(?!index\\.ts$)`, pathNot: `${DESKTOP_MAIN}$1/`},
-    },
-    {
-      name: 'desktop-composition-enters-slices-through-their-index',
-      severity: 'error',
-      from: {path: `${DESKTOP_MAIN}(?:app|entities|shared)/`, pathNot: DESKTOP_SLICE_SUPPORT},
-      to: {path: `${DESKTOP_MAIN}${DESKTOP_SLICE}/(?!index\\.ts$)`},
     },
   ];
 }

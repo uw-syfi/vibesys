@@ -26,13 +26,14 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
     }
 
     assert set(pins) == {
+        "clients/connection/package.json",
         "clients/contracts/package.json",
-        "clients/desktop/package.json",
         "clients/hosts/package.json",
         "clients/ipc/package.json",
         "clients/run-session/package.json",
         "clients/run-state/package.json",
         "clients/runs/package.json",
+        "clients/settings/package.json",
         "clients/store/package.json",
         "clients/transport/package.json",
         "clients/transport-node/package.json",
@@ -45,6 +46,7 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
         "clients/features/run-control/package.json",
         "clients/features/run-view/package.json",
         "clients/features/start-run/package.json",
+        "clients/apps/desktop-main/package.json",
         "clients/apps/desktop-renderer/package.json",
         "clients/apps/web/package.json",
     }

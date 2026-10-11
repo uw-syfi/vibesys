@@ -1,0 +1,55 @@
+{
+  "name": "@vibesys/app-desktop-main",
+  "productName": "VibeSys",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "vibesys": {
+    "layer": "app",
+    "entries": {
+      ".": "node",
+      "./preload-run": "preload",
+      "./preload-welcome": "preload"
+    }
+  },
+  "main": "dist/main/index.js",
+  "exports": {
+    ".": {
+      "@vibesys/source": "./src/main/index.ts",
+      "default": "./dist/main/index.js"
+    },
+    "./preload-run": {
+      "@vibesys/source": "./src/preload/run.cts",
+      "default": "./dist/preload/run.cjs"
+    },
+    "./preload-welcome": {
+      "@vibesys/source": "./src/preload/welcome.cts",
+      "default": "./dist/preload/welcome.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.lib.json tsconfig.preload-run.json tsconfig.preload-welcome.json && node scripts/copy-ui.mjs",
+    "check": "tsc -b",
+    "test": "node ../../scripts/run_bun_tests.mjs ./src",
+    "start": "pnpm build && electron ."
+  },
+  "dependencies": {
+    "@vibesys/connection": "workspace:*",
+    "@vibesys/feature-hosts": "workspace:*",
+    "@vibesys/feature-run-control": "workspace:*",
+    "@vibesys/feature-start-run": "workspace:*",
+    "@vibesys/hosts": "workspace:*",
+    "@vibesys/ipc": "workspace:*",
+    "@vibesys/runs": "workspace:*",
+    "@vibesys/settings": "workspace:*",
+    "@vibesys/transport": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/node": "^24.0.0",
+    "@vibesys/store": "workspace:*",
+    "electron": "44.6.0",
+    "typescript": "^5.8.3"
+  }
+}

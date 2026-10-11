@@ -383,7 +383,7 @@ The connection design (one host helper, one connection manager, explicit run ide
 lifecycle phases, per-screen stores) is in [desktop-connection.md](desktop-connection.md); this
 section says how the code is laid out and how to run it.
 
-The desktop app (`clients/desktop`) ships its own copy of the web UI and
+The desktop app (`clients/apps/desktop-main`) ships its own copy of the web UI and
 reaches servers through its main process, without the web gateway. A server is
 a detached run (`vibesys --detach`, see `tui-architecture.md`) on this machine
 or on an SSH host. The main process reaches every host the same way: it runs the
@@ -393,13 +393,13 @@ the page cannot tell them apart.
 
 ```bash
 # The welcome view: recent runs, This Mac, and Connect to host
-pnpm --dir clients --filter @vibesys/desktop start
+pnpm --dir clients --filter @vibesys/app-desktop-main start
 
 # The welcome view on one SSH host, or straight into one of its detached runs
-pnpm --dir clients --filter @vibesys/desktop start -- --host HOST [--instance ID]
+pnpm --dir clients --filter @vibesys/app-desktop-main start -- --host HOST [--instance ID]
 
 # Start a detached run for a local project and open the window on it
-pnpm --dir clients --filter @vibesys/desktop start -- --project ~/proj [-- RUN_ARGS...]
+pnpm --dir clients --filter @vibesys/app-desktop-main start -- --project ~/proj [-- RUN_ARGS...]
 ```
 
 `start` builds the app, including the two page bundles the window loads from the
@@ -413,20 +413,22 @@ binds the run view to one run.
 
 ### Layout
 
-`clients/desktop/src` holds the main process and the preloads, sliced by feature so each slice
-can become its own package; the renderers are apps of their own. `clients/.dependency-cruiser.mjs`
-enforces the layout:
+The Electron main process is composed from packages, as the renderer is; the package-graph
+checker holds the boundaries between them, and `clients/.dependency-cruiser.mjs` the modules
+inside them:
 
-- `main/` is the Electron main process, in layers that point down: `app/` (the composition root,
-  the window, the lifecycle, page confinement, launch arguments, the welcome IPC boundary) ->
-  `features/` (`hosts`: checkouts, tasks, path completion, pushed listings; `run-control`: attach,
-  start, resume, stop, retry, and the run page's relay) -> `entities/` (pure projections of what a
-  helper reports) -> `platform/` (`connection`: the connection manager; `settings`: `hosts.json`
-  and `recent.json` with `SettingsStore` as their one writer). A slice is entered through its
-  `index.ts`, features never import each other, and a stateful platform slice is a pure `state/`
-  core and a `shell/`; only a shell starts processes or opens sockets.
-- `renderer/preload/` holds the two sandboxed preloads, each a single file. It never imports
-  `main/`.
+- `clients/apps/desktop-main` (`@vibesys/app-desktop-main`) is composition only: `src/main/` is
+  the composition root, the window, the lifecycle, page confinement, launch arguments, and the
+  welcome IPC boundary, which routes each request `@vibesys/ipc` parsed to the feature that owns
+  it. `src/preload/` holds the two sandboxed preloads, each a single file, which the main process
+  loads by path and never imports.
+- The features' `./main` entries are their main-process controllers: `@vibesys/feature-hosts`
+  (`Hosts`: checkouts, tasks, path completion, pushed listings) and
+  `@vibesys/feature-run-control` (`RunControl`: attach, start, resume, stop, retry, and the run
+  page's relay).
+- `@vibesys/connection` is the connection manager, a pure `state/` machine and a `shell/`; only
+  its shell starts processes or opens sockets. `@vibesys/settings` is `hosts.json` and
+  `recent.json` with `SettingsStore` as their one writer.
 - The welcome view is `clients/apps/desktop-renderer` (`@vibesys/app-desktop-renderer`),
   composition only: `main.tsx` (the entry) over `wiring/` (each feature's store over the welcome
   bridge, and the main process's events fanned out to them) and `ui/` (the view, composed from the
@@ -438,16 +440,19 @@ enforces the layout:
   welcome bridge its `./state` declares (`HostsBridge`, `StartRunBridge`, `RunControlBridge`).
 - The processes share only workspace packages: `@vibesys/hosts` (host naming, a host's listed
   runs), `@vibesys/runs` (ids, recent runs, the stop and resume decisions), and `@vibesys/ipc`
-  (the run page's bridge and the typed welcome IPC). The welcome view draws its dialogs, path fields, status chip,
-  and buttons with `@vibesys/ui`.
+  (the run page's bridge and the typed welcome IPC, each feature's requests with the parser the
+  main process runs on them). The welcome view draws its dialogs, path fields, status chip, and
+  buttons with `@vibesys/ui`.
 
-The desktop package declares one entry per process: `.` (`node`, `src/main/index.ts`, the
-Electron main) and `./preload/run` and `./preload/welcome` (`node`, the two preload files), so the
-package-graph checker holds each side to its runtime and its third-party imports.
+`apps/desktop-main` declares one entry per process: `.` (`node`, `src/main/index.ts`, the Electron
+main) and `./preload-run` and `./preload-welcome` (`preload`, the two preload files), so the
+package-graph checker holds each side to its runtime and its third-party imports, and a preload to
+loading only Electron. `src/preload/welcome.test.ts` drives the welcome preload's bridge into
+`@vibesys/ipc`'s parser, so the renderer and the main process agree on every channel's arguments.
 
 ### Connections
 
-`platform/connection` is the only code that creates links and channels
+`@vibesys/connection` is the only code that creates links and channels
 (`docs/contributing/desktop-connection.md`, "Connection manager"):
 
 - A `Link` reaches one host. `LocalLink` starts each helper as a child of `/bin/sh`; `SshLink`

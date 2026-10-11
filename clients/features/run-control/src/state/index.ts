@@ -5,13 +5,10 @@
  * `RunControlBridge`, which the app implements with the welcome bridge.
  */
 
-import type {WelcomeBridge} from '@vibesys/ipc';
+import type {RunControlWelcomeBridge} from '@vibesys/ipc';
 
 /** The welcome bridge's requests the run-control feature makes. */
-export type RunControlBridge = Pick<
-  WelcomeBridge,
-  'attach' | 'resume' | 'stop' | 'retry' | 'showRun' | 'showWelcome'
->;
+export type RunControlBridge = RunControlWelcomeBridge;
 
 export {
   type RunCommand,

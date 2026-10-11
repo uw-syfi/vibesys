@@ -1,0 +1,12 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      // The HostConnection suite reads the shared corpus in ../tests/conformance and, with
+      // VIBESYS_REAL_CONTRACTS=1, runs the Python host helper: inputs outside the workspace that
+      // Turborepo does not hash, so a cached result could replay a stale pass.
+      "cache": false
+    }
+  }
+}

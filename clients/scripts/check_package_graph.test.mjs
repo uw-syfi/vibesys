@@ -43,6 +43,44 @@ function source(entry) {
   };
 }
 
+/** An Electron app: a `node` main process and a sandboxed preload, its own runtime. */
+function desktopMainPackage() {
+  return {
+    manifest: {
+      name: '@vibesys/app-desktop-main',
+      vibesys: {layer: 'app', entries: {'.': 'node', './preload-run': 'preload'}},
+      exports: {
+        '.': source('main/index'),
+        './preload-run': {
+          '@vibesys/source': './src/preload/run.cts',
+          default: './dist/preload/run.cjs',
+        },
+      },
+      dependencies: {'@vibesys/connection': 'workspace:*', '@vibesys/contracts': 'workspace:*'},
+    },
+    files: {
+      'src/main/index.ts':
+        "import 'electron';\nimport 'node:path';\nexport type {E} from '@vibesys/connection';\n",
+      // A sandboxed preload loads only Electron; the workspace types it names are erased.
+      'src/preload/run.cts':
+        "import electron = require('electron');\nimport type {RunEvent} from '@vibesys/contracts';\n" +
+        "type Contracts = typeof import('@vibesys/contracts');\n" +
+        'export type P = [RunEvent, Contracts, typeof electron];\n',
+      'tsconfig.lib.json': project({
+        types: ['node'],
+        include: ['src/main'],
+        references: ['../connection/tsconfig.lib.json'],
+      }),
+      'tsconfig.preload-run.json': project({
+        lib: ['ES2022', 'DOM'],
+        types: ['node'],
+        include: ['src/preload/run.cts'],
+        references: ['../contracts/tsconfig.lib.json'],
+      }),
+    },
+  };
+}
+
 /** The valid workspace: one package per layer shape the design uses. */
 function validWorkspace() {
   return {
@@ -131,6 +169,7 @@ function validWorkspace() {
         }),
       },
     },
+    'desktop-main': desktopMainPackage(),
     'web-app': {
       manifest: {
         name: '@vibesys/app-web',
@@ -206,6 +245,11 @@ const RULE_CASES = {
   'imports-use-exports': workspace => {
     workspace['web-app'].files['src/index.ts'] += "import '@vibesys/feature-stop-run/src/main';\n";
   },
+  'preload-sandbox': workspace => {
+    // A value import: the sandbox's require cannot load a workspace package.
+    workspace['desktop-main'].files['src/preload/run.cts'] =
+      "import {RunEvent} from '@vibesys/contracts';\nexport type P = RunEvent;\n";
+  },
   'external-dependencies': workspace => {
     // The pure state entry reaching a Node builtin.
     workspace['stop-run'].files['src/state/index.ts'] += "import 'node:fs';\n";
@@ -258,7 +302,7 @@ test('legacy packages skip only the per-entry project rules', async t => {
   const workspace = validWorkspace();
   workspace.legacy = {
     manifest: {
-      name: '@vibesys/desktop',
+      name: '@vibesys/tui',
       vibesys: {layer: 'app', entries: {'.': 'dom'}},
       dependencies: {'@vibesys/connection': 'workspace:*'},
     },
@@ -269,6 +313,19 @@ test('legacy packages skip only the per-entry project rules', async t => {
     errors.map(error => error.split(':')[0]),
     ['runtime-reachability'],
   );
+});
+
+test('a preload reaches neither a Node entry nor a Node builtin', async t => {
+  const workspace = validWorkspace();
+  workspace['desktop-main'].files['src/preload/run.cts'] =
+    "import type {E} from '@vibesys/connection';\nimport fs = require('node:fs');\n" +
+    'export type P = [E, typeof fs];\n';
+  const errors = packageGraphErrors(await materialize(t, workspace));
+  assert.deepEqual(errors.map(error => error.split(':')[0]).sort(), [
+    'external-dependencies',
+    'preload-sandbox',
+    'runtime-reachability',
+  ]);
 });
 
 test('test code may import a dev dependency of any runtime', async t => {
