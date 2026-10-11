@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Literal
+from typing import Literal
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_core.api import CaptureCommandBase, HostFence, HostId, RevisionId, RevisionRef
-from vs_runtime.api import CommandResult
+from vs_runtime.api import CommandResult, Workspace
 from vs_runtime.api.core import CaptureCommandOwner, ExecutionContext, NotApplied
 from vs_runtime.api.testing import FakeCommands, FakeWorkspace, FakeWorkspaces
 from vs_sim.api.testing import arrival
@@ -104,8 +104,15 @@ class _HangingCommands(FakeCommands):
         super().__init__()
         self.started = asyncio.Event()
 
-    async def capture_output(self, argv: tuple[str, ...], **_kwargs: Any) -> CommandResult:
-        del argv
+    async def capture_output(
+        self,
+        argv: tuple[str, ...],
+        *,
+        workspace: Workspace,
+        output_argument: str,
+        timeout_seconds: int | None = None,
+    ) -> CommandResult:
+        del argv, workspace, output_argument, timeout_seconds
         self.started.set()
         await asyncio.Event().wait()
         raise AssertionError
