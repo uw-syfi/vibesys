@@ -317,7 +317,7 @@ are tracked in #1969.
 
 | Control state | Form | Status |
 | --- | --- | --- |
-| `run-session`'s session lifecycle (`sessionMachine`, `WebSession`) | machine | migrated (#PRNUM) |
+| `run-session`'s session lifecycle (`sessionMachine`, `WebSession`) | machine | migrated (#2071) |
 | `feature-run-control`'s commands and banner | machine | migrated (#1950) |
 | `@vibesys/connection`'s connection manager (`connection/src/state`) | pure `state + event -> state + requests` core | one change; `connection` joins `MACHINE_PACKAGES` with it |
 | `feature-start-run`, `feature-hosts`, `feature-gateway-connect`, `feature-replay` screen stores | reducer with reply tokens | one feature per change |
