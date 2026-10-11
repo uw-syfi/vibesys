@@ -16,7 +16,7 @@ import {
   hostListing,
   validHostPath,
 } from '@vibesys/entities';
-import type {PathCompletion} from '../../../common/welcome-protocol.js';
+import type {PathCompletion} from '@vibesys/ipc';
 import {connectionStatus} from '../../entities/connection.js';
 import {
   type ConnectionManager,

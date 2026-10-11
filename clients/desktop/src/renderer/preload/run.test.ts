@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {createRequire} from 'node:module';
-import type {MainToPage, PageToMain} from '../../common/bridge-protocol.js';
+import type {MainToPage, PageToMain} from '@vibesys/ipc';
 
 const createRunPreload = createRequire(import.meta.url)('./run.cjs') as typeof import('./run.cjs');
 

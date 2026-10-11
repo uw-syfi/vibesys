@@ -24,7 +24,7 @@ import {
   type ResumeRunId,
   type StopView,
 } from '@vibesys/entities';
-import type {ChromeState, StartOutcome} from '../../../common/welcome-protocol.js';
+import type {ChromeState, StartOutcome} from '@vibesys/ipc';
 import {connectionStatus} from '../../entities/connection.js';
 import type {HostConnection, Phase} from '../../platform/connection/index.js';
 import type {RecentRun} from '../../platform/settings/index.js';

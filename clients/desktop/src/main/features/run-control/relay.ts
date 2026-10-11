@@ -14,12 +14,8 @@
  * receiver has accepted and returned them. Invalid framing or credit ends the connection.
  */
 import type {Duplex} from 'node:stream';
+import {BRIDGE_CREDIT_WINDOW_BYTES, type MainToPage, parsePageMessage} from '@vibesys/ipc';
 import {NewlineFramer} from '@vibesys/transport';
-import {
-  BRIDGE_CREDIT_WINDOW_BYTES,
-  type MainToPage,
-  parsePageMessage,
-} from '../../../common/bridge-protocol.js';
 
 /** The page side of one connection: a started message port. */
 export interface RelayPort {

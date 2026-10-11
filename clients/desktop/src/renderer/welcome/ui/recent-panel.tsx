@@ -1,8 +1,8 @@
 /** Recent: the runs this user opened, each with its status on its host and what it allows. */
 
 import {type RecentRun, type RecentStatus, resumeDecision, stopKey} from '@vibesys/entities';
+import type {ChromeState} from '@vibesys/ipc';
 import type {JSX, ReactNode} from 'react';
-import type {ChromeState} from '../../../common/welcome-protocol.js';
 import {type ListsState, statusOf} from '../state/lists.js';
 import {commands, StopControls, type WelcomeSenders} from './common.js';
 

@@ -3,7 +3,7 @@
  * needed for an authoritative bootstrap snapshot are retained beside that sequence.
  */
 import type {HostKey, HostListing, RecentRun} from '@vibesys/entities';
-import type {ChromeState, WelcomeEvent, WelcomeOverview} from '../../common/welcome-protocol.js';
+import type {ChromeState, WelcomeEvent, WelcomeOverview} from '@vibesys/ipc';
 
 export interface WelcomeSnapshotValues {
   readonly settingsProblem: string | null;

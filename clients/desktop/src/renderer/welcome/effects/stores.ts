@@ -13,7 +13,7 @@ import type {
   WelcomeEvent,
   WelcomeOverview,
   WelcomeResult,
-} from '../../../common/welcome-protocol.js';
+} from '@vibesys/ipc';
 import {
   COMPLETION_EMPTY,
   type CompletionAction,

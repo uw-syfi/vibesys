@@ -16,7 +16,7 @@ import {
   shellWords,
   validHostPath,
 } from '@vibesys/entities';
-import {WELCOME_CHANNELS, type WelcomeResult} from '../../common/welcome-protocol.js';
+import {WELCOME_CHANNELS, type WelcomeResult} from '@vibesys/ipc';
 import {ConnectionError} from '../platform/connection/index.js';
 
 /** The narrow IPC boundary needed by the welcome request binder. */

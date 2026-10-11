@@ -16,6 +16,7 @@
     {"path": "../contracts/tsconfig.lib.json"},
     {"path": "../transport/tsconfig.lib.json"},
     {"path": "../transport/tsconfig.websocket.json"},
-    {"path": "../core-state/tsconfig.lib.json"}
+    {"path": "../core-state/tsconfig.lib.json"},
+    {"path": "../ipc/tsconfig.lib.json"}
   ]
 }

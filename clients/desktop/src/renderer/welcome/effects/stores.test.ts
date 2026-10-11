@@ -9,7 +9,7 @@ import type {
   WelcomeEvent,
   WelcomeOverview,
   WelcomeResult,
-} from '../../../common/welcome-protocol.js';
+} from '@vibesys/ipc';
 import type {HostAction, HostState} from '../state/host.js';
 import {loadWelcomeStores} from './stores.js';
 

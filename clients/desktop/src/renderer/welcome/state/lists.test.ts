@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {checkModel, type Seeded} from '@vibesys/core-state/testing';
 import {exactResumeRunId, type HostListing, type RecentRun} from '@vibesys/entities';
-import type {PathCompletion, WelcomeResult} from '../../../common/welcome-protocol.js';
+import type {PathCompletion, WelcomeResult} from '@vibesys/ipc';
 import {randomChrome} from '../../../testing/fake-chrome.js';
 import {
   COMPLETION_EMPTY,

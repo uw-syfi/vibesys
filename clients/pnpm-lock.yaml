@@ -70,6 +70,9 @@ importers:
       '@vibesys/entities':
         specifier: workspace:*
         version: link:../entities
+      '@vibesys/ipc':
+        specifier: workspace:*
+        version: link:../ipc
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../transport
@@ -119,10 +122,17 @@ importers:
         version: 5.9.3
 
   ipc:
+    dependencies:
+      '@vibesys/entities':
+        specifier: workspace:*
+        version: link:../entities
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      '@vibesys/core-state':
+        specifier: workspace:*
+        version: link:../core-state
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -219,6 +229,9 @@ importers:
       '@vibesys/core-state':
         specifier: workspace:*
         version: link:../core-state
+      '@vibesys/ipc':
+        specifier: workspace:*
+        version: link:../ipc
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../transport

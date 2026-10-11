@@ -1,7 +1,7 @@
 /**
  * Sandboxed preload of the welcome view: the page's only way out of its sandbox.
  *
- * It exposes one function per welcome request (`welcome-protocol.ts`'s `WelcomeBridge`); each is an
+ * It exposes one function per welcome request (`@vibesys/ipc`'s `WelcomeBridge`); each is an
  * `invoke` the main process answers only for the welcome view's own web contents, and validates.
  * Four events come back: the window's state (`onChrome`), the recent runs (`onRecent`), a host to
  * show (`onShowHost`), and a host's runs as its helper pushed them (`onListing`). Sandboxed
@@ -18,10 +18,10 @@ import type {
   WelcomeEvent,
   WelcomeOverview,
   WelcomeResult,
-} from '../../common/welcome-protocol.js';
+} from '@vibesys/ipc';
 
-type Channels = typeof import('../../common/welcome-protocol.js').WELCOME_CHANNELS;
-type Events = typeof import('../../common/welcome-protocol.js').WELCOME_EVENTS;
+type Channels = typeof import('@vibesys/ipc').WELCOME_CHANNELS;
+type Events = typeof import('@vibesys/ipc').WELCOME_EVENTS;
 
 const CHANNELS: Channels = {
   overview: 'vibesys:welcome:overview',
