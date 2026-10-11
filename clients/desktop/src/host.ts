@@ -74,11 +74,18 @@ export type HostErrorKind =
 
 export class HostError extends Error {
   readonly kind: HostErrorKind;
+  /** What a command that exited unsuccessfully printed on stderr, trimmed; null otherwise. */
+  readonly stderr: string | null;
 
-  constructor(kind: HostErrorKind, message: string, options?: ErrorOptions) {
+  constructor(
+    kind: HostErrorKind,
+    message: string,
+    options?: ErrorOptions & {readonly stderr?: string},
+  ) {
     super(message, options);
     this.name = 'HostError';
     this.kind = kind;
+    this.stderr = options?.stderr ?? null;
   }
 }
 

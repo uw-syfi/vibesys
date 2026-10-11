@@ -27,9 +27,9 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       'src/**/*.test.ts',
       'src/preload.cts',
       'src/welcome-preload.cts',
-      'src/welcome-page.ts',
+      'src/welcome/main.tsx',
     ],
-    project: ['src/**/*.ts', 'src/**/*.cts'],
+    project: ['src/**/*.ts', 'src/**/*.tsx', 'src/**/*.cts'],
   },
   tui: {
     entry: [
@@ -50,7 +50,7 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       // end-to-end specs import; `vite.config.ts` and `index.html` supply the app entries.
       'src/index.ts',
       // The desktop app's page, built by `vite.desktop.config.ts` from `desktop.html`.
-      'src/desktop-main.tsx',
+      'src/app/desktop-main.tsx',
       'src/**/*.test.ts',
       'src/**/*.test.tsx',
       // Playwright specs, run by `pnpm --filter @vibesys/web test:e2e`.

@@ -65,6 +65,16 @@
     },
     {
       "includes": [
+        "web/src/**/*.ts",
+        "web/src/**/*.tsx",
+        "!web/src/platform/backend.ts",
+        "!**/*.test.ts",
+        "!**/*.test.tsx"
+      ],
+      "plugins": ["./lint-rules/web-fetch-only-in-backend.grit"]
+    },
+    {
+      "includes": [
         "**/ui/**/*.ts",
         "**/ui/**/*.tsx",
         "!**/*.test.ts",

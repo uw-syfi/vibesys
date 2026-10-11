@@ -110,6 +110,7 @@ export class FakeHost implements Host {
       throw new HostError(
         'failed',
         `vibesys ${argv.join(' ')} exited with ${result.code}: ${result.stderr.trim()}`,
+        {stderr: result.stderr.trim()},
       );
     }
     try {

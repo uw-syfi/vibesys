@@ -174,7 +174,7 @@ function shellQuote(word: string): string {
 }
 
 /** A checkout path as one `sh` word: quoted, with a leading `~` meaning `$HOME`. */
-export function shellPath(path: string): string {
+function shellPath(path: string): string {
   if (path === '~') return '"$HOME"';
   if (path.startsWith('~/')) return `"$HOME"/${shellQuote(path.slice(2))}`;
   return shellQuote(path);

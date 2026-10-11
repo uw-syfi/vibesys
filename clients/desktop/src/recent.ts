@@ -4,7 +4,13 @@
  * its host's live registry, never stored: a run is live only while a registry record proves it.
  */
 import {type HostKey, hostFromKey, validHostPath} from './host-settings.js';
-import type {InstanceRecord} from './instances.js';
+import {INSTANCE_ID, RUN_ID, TASK_NAME} from './ids.js';
+import {
+  type InstanceListing,
+  type InstanceRecord,
+  instanceObservation,
+  versionSkewMessage,
+} from './instances.js';
 import type {ResumeRunId} from './resume-run.js';
 
 /** One run the user attached to. */
@@ -29,15 +35,12 @@ export interface RecentFile {
 
 export const EMPTY_RECENT: RecentFile = {version: 1, runs: []};
 /** How many runs the list keeps. */
-export const RECENT_LIMIT = 20;
+const RECENT_LIMIT = 20;
 
 class RecentError extends Error {
   override name = 'RecentError';
 }
 
-const INSTANCE_ID = /^[0-9a-f]{12}$/;
-const RUN_ID = /^[A-Za-z0-9._-]+$/;
-const TASK = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const KEYS = ['host', 'project', 'task', 'instanceId', 'runId', 'attachedAt'] as const;
 
 function nullable(value: unknown, pattern: RegExp, path: string): string | null {
@@ -82,7 +85,7 @@ function parseRun(value: unknown, path: string): RecentRun {
   return {
     host: host as HostKey,
     project,
-    task: nullable(record['task'], TASK, `${path}.task`),
+    task: nullable(record['task'], TASK_NAME, `${path}.task`),
     instanceId,
     runId: nullable(record['runId'], RUN_ID, `${path}.runId`),
     attachedAt,
@@ -172,16 +175,23 @@ export type RecentStatus =
   /** The host could not be asked (`detail` says why). */
   | {readonly kind: 'unknown'; readonly detail: string};
 
+/** Host-specific words needed only when a recent server speaks an incompatible protocol. */
+export interface RecentStatusContext {
+  readonly hostName: string;
+  readonly vibesysCommand: string;
+}
+
 /**
  * `run`'s status from its host's live records (or why they could not be read): live when a
  * record is its server, or drives the same run id in the same project (a resumed run).
  */
 export function recentStatus(
   run: RecentRun,
-  records: readonly InstanceRecord[] | {readonly error: string},
+  listing: InstanceListing | {readonly error: string},
+  context: RecentStatusContext,
 ): RecentStatus {
-  if (!Array.isArray(records)) return {kind: 'unknown', detail: (records as {error: string}).error};
-  for (const record of records as readonly InstanceRecord[]) {
+  if ('error' in listing) return {kind: 'unknown', detail: listing.error};
+  for (const record of listing.records) {
     if (record.kind !== 'compatible') continue;
     const {instance} = record;
     const sameServer = instance.id === run.instanceId;
@@ -190,6 +200,23 @@ export function recentStatus(
     if (sameServer || resumed) {
       return {kind: 'live', instanceId: instance.id, status: instance.status};
     }
+  }
+  const observation = instanceObservation(listing, run.instanceId);
+  if (observation.kind === 'unverified') {
+    return {
+      kind: 'unknown',
+      detail: 'the host could not confirm whether this run is still running',
+    };
+  }
+  if (observation.kind === 'incompatible') {
+    return {
+      kind: 'unknown',
+      detail: versionSkewMessage({
+        ...context,
+        protocolVersion: observation.protocolVersion,
+        vibesysVersion: observation.vibesysVersion,
+      }),
+    };
   }
   return {kind: 'ended'};
 }

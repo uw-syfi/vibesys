@@ -452,6 +452,8 @@ Deleted when the corresponding phase lands:
   (phase 2).
 - The bounded wait for a first client after an early failure (phase 3, superseded by tombstones).
 - Imperative welcome DOM and hand-rolled focus code (phase 6).
+- The legacy gateway window: `VIBESYS_DESKTOP_URL`, `launch-url.ts`, and `scripts/run-desktop.sh`
+  with its `--demo` (phase 6; the bundled app covers every use, and `--demo` has no replacement).
 
 ### Phases
 
@@ -482,7 +484,7 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Control envelope split (phase 4, step one) | built (`server.control_envelope`) |
 | Host helper and its contract (phase 4) | not built |
 | Connection manager (phase 5) | not built |
-| Screen stores and app lifecycle (phase 6) | not built |
+| Screen stores and app lifecycle (phase 6) | built (#1832) |
 
 ## Decisions and alternatives
 

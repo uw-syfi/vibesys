@@ -1,29 +1,22 @@
 #!/usr/bin/env node
-// Copy the web UI's desktop bundle (`@vibesys/web`'s `build:desktop` output) into `dist/ui`, where
-// the main process serves it from `app://vibesys`. The app consumes the web package only as these
-// built files, never as an import. The app's own welcome page is served from the same origin, so it is
-// copied in beside them.
-import {copyFileSync, cpSync, existsSync} from 'node:fs';
+// Copy the two page bundles into `dist/ui`, where the main process serves them from
+// `app://vibesys`: the run view (`@vibesys/web`'s `build:desktop` output, `desktop.html`) and the
+// app's own welcome view (`vite.welcome.config.ts`'s output, `welcome.html` and `welcome-assets/`).
+// The app consumes the web package only as these built files, never as an import.
+import {cpSync, existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const source = fileURLToPath(new URL('../../web/.desktop-dist/', import.meta.url));
+const bundles = [
+  {source: fileURLToPath(new URL('../../web/.desktop-dist/', import.meta.url)), page: 'desktop.html', build: 'pnpm --filter @vibesys/web build:desktop'},
+  {source: fileURLToPath(new URL('../.welcome-dist/', import.meta.url)), page: 'welcome.html', build: 'vite build --config vite.welcome.config.ts'},
+];
 const target = fileURLToPath(new URL('../dist/ui/', import.meta.url));
 
-if (!existsSync(join(source, 'desktop.html'))) {
-  console.error(`copy-ui: ${source} has no desktop.html; run pnpm --filter @vibesys/web build:desktop`);
-  process.exit(1);
-}
-cpSync(source, target, {recursive: true});
-copyFileSync(fileURLToPath(new URL('../src/welcome.html', import.meta.url)), join(target, 'welcome.html'));
-// The welcome page's script and the pure modules it imports.
-for (const file of [
-  'welcome-page.js',
-  'welcome-model.js',
-  'host-settings.js',
-  'resume-run.js',
-  'stop-run.js',
-  'welcome-banner.js',
-]) {
-  copyFileSync(fileURLToPath(new URL(`../dist/${file}`, import.meta.url)), join(target, file));
+for (const {source, page, build} of bundles) {
+  if (!existsSync(join(source, page))) {
+    console.error(`copy-ui: ${source} has no ${page}; run ${build}`);
+    process.exit(1);
+  }
+  cpSync(source, target, {recursive: true});
 }

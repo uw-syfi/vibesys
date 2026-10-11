@@ -4,6 +4,7 @@
  * A control for one historical run must carry that run's identity. Missing or malformed identity
  * is unavailable, never an implicit request for the project's latest run.
  */
+import {RUN_ID} from './ids.js';
 
 declare const RESUME_RUN_ID: unique symbol;
 
@@ -15,8 +16,6 @@ export type ResumeDecision =
   | {readonly kind: 'unavailable'; readonly reason: string};
 
 export const RUN_ID_UNAVAILABLE = 'Run ID unavailable; this run cannot be resumed safely.';
-
-const RUN_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 
 export class ResumeRequestError extends Error {
   override name = 'ResumeRequestError';

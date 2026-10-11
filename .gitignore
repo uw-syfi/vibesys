@@ -39,6 +39,7 @@ clients/web/artifacts/
 clients/web/test-results/
 clients/web/.browser-dist/
 clients/web/.desktop-dist/
+clients/desktop/.welcome-dist/
 downloads/
 eggs/
 .eggs/

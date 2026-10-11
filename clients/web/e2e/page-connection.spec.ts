@@ -4,7 +4,7 @@ import {
   CONTROLS_BANNER_COPY,
   LIVE_SESSION_HEADER_COPY,
   PAGE_CONNECTION_BANNER_COPY,
-} from '../src/banners.js';
+} from '../src/features/run-view/index.js';
 
 test('identifies a live page whose gateway is unreachable on cold start', async ({page}) => {
   const gateway = await rejectingLoopbackGateway();

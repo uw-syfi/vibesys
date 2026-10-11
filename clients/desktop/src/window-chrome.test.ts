@@ -1,11 +1,13 @@
 import {describe, expect, test} from 'bun:test';
-import {PAGE_BACKGROUND, TITLEBAR_HEIGHT, windowChrome} from './window-chrome.js';
+import {TITLEBAR_HEIGHT, windowChrome} from './window-chrome.js';
 
 describe('windowChrome', () => {
-  test('every platform paints the page background so nothing flashes before load', () => {
-    for (const platform of ['darwin', 'win32', 'linux', 'freebsd']) {
-      expect(windowChrome(platform).backgroundColor).toBe(PAGE_BACKGROUND);
-    }
+  test('every platform paints the same page background so nothing flashes before load', () => {
+    const colors = ['darwin', 'win32', 'linux', 'freebsd'].map(
+      platform => windowChrome(platform).backgroundColor,
+    );
+    expect(new Set(colors).size).toBe(1);
+    expect(colors[0]).toMatch(/^#[0-9a-f]{6}$/);
   });
 
   test('macOS keeps the traffic lights vertically centered in the strip', () => {
@@ -19,7 +21,7 @@ describe('windowChrome', () => {
     for (const platform of ['win32', 'linux']) {
       const chrome = windowChrome(platform);
       expect(chrome.titleBarStyle).toBe('hidden');
-      expect(chrome.titleBarOverlay?.color).toBe(PAGE_BACKGROUND);
+      expect(chrome.titleBarOverlay?.color).toBe(chrome.backgroundColor);
       expect(chrome.titleBarOverlay?.height).toBe(TITLEBAR_HEIGHT);
       expect(chrome.trafficLightPosition).toBeUndefined();
     }

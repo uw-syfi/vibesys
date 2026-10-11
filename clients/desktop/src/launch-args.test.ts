@@ -5,12 +5,12 @@ const CWD = '/home/me';
 
 describe('parseLaunch', () => {
   test('starts a server for a project, passing run arguments through', () => {
-    expect(parseLaunch(['--project', 'proj', '--', '--task', 'a b'], undefined, CWD)).toEqual({
+    expect(parseLaunch(['--project', 'proj', '--', '--task', 'a b'], CWD)).toEqual({
       kind: 'start',
       project: '/home/me/proj',
       runArgs: ['--task', 'a b'],
     });
-    expect(parseLaunch(['--project=/abs/p'], undefined, CWD)).toEqual({
+    expect(parseLaunch(['--project=/abs/p'], CWD)).toEqual({
       kind: 'start',
       project: '/abs/p',
       runArgs: [],
@@ -18,7 +18,7 @@ describe('parseLaunch', () => {
   });
 
   test('drops the separator pnpm passes before the arguments', () => {
-    expect(parseLaunch(['--', '--project', 'p', '--', 'x'], undefined, CWD)).toEqual({
+    expect(parseLaunch(['--', '--project', 'p', '--', 'x'], CWD)).toEqual({
       kind: 'start',
       project: '/home/me/p',
       runArgs: ['x'],
@@ -26,37 +26,32 @@ describe('parseLaunch', () => {
   });
 
   test('attaches to a running server by socket', () => {
-    expect(parseLaunch(['--socket', 's.sock'], '', CWD)).toEqual({
+    expect(parseLaunch(['--socket', 's.sock'], CWD)).toEqual({
       kind: 'attach',
       socketPath: '/home/me/s.sock',
     });
   });
 
   test('opens the welcome view, on a host when one is named', () => {
-    expect(parseLaunch([], undefined, CWD)).toEqual({kind: 'welcome', host: null});
-    expect(parseLaunch(['--'], undefined, CWD)).toEqual({kind: 'welcome', host: null});
-    expect(parseLaunch(['--host', 'gpu-box'], undefined, CWD)).toEqual({
+    expect(parseLaunch([], CWD)).toEqual({kind: 'welcome', host: null});
+    expect(parseLaunch(['--'], CWD)).toEqual({kind: 'welcome', host: null});
+    expect(parseLaunch(['--host', 'gpu-box'], CWD)).toEqual({
       kind: 'welcome',
       host: {kind: 'ssh', alias: 'gpu-box'},
     });
   });
 
   test('attaches to a detached run on a host, or on this machine', () => {
-    expect(parseLaunch(['--host=gpu-box', '--instance', '0123456789ab'], undefined, CWD)).toEqual({
+    expect(parseLaunch(['--host=gpu-box', '--instance', '0123456789ab'], CWD)).toEqual({
       kind: 'instance',
       host: {kind: 'ssh', alias: 'gpu-box'},
       instanceId: '0123456789ab',
     });
-    expect(parseLaunch(['--instance', '0123456789ab'], undefined, CWD)).toEqual({
+    expect(parseLaunch(['--instance', '0123456789ab'], CWD)).toEqual({
       kind: 'instance',
       host: {kind: 'local'},
       instanceId: '0123456789ab',
     });
-  });
-
-  test('keeps the gateway window for run-desktop.sh', () => {
-    const plan = parseLaunch([], 'http://127.0.0.1:8765/?token=abc', CWD);
-    expect(plan.kind).toBe('gateway');
   });
 
   test('rejects every malformed command line, naming the problem', () => {
@@ -76,11 +71,8 @@ describe('parseLaunch', () => {
       [['proj'], 'unknown argument proj'],
     ];
     for (const [argv, message] of cases) {
-      expect(() => parseLaunch(argv, undefined, CWD)).toThrow(message);
-      expect(() => parseLaunch(argv, undefined, CWD)).toThrow(LaunchError);
+      expect(() => parseLaunch(argv, CWD)).toThrow(message);
+      expect(() => parseLaunch(argv, CWD)).toThrow(LaunchError);
     }
-    expect(() => parseLaunch(['--project', 'p'], 'http://127.0.0.1:1/?token=t', CWD)).toThrow(
-      'does not take arguments',
-    );
   });
 });

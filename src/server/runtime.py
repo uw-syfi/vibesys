@@ -78,6 +78,13 @@ if TYPE_CHECKING:
 _RunValueT = TypeVar("_RunValueT")
 DETACHED_DRAIN_TIMEOUT_SECONDS = 2.0
 """How long a detached server that is exiting waits for clients to read its last events."""
+UNWATCHED_FAILURE_GRACE_SECONDS = 20.0
+"""How long a detached server whose run failed before any client attached waits for one.
+
+The client that started the run (the desktop app over ssh) attaches several seconds
+after the launch returns; without the wait a run that fails sooner, such as a container
+that cannot start, exits before anyone can read why.
+"""
 _TERMINAL_EVENT_TYPES = frozenset(
     {EventType.RUN_FINISHED, EventType.RUN_FAILED, EventType.RUN_INTERRUPTED}
 )
@@ -121,6 +128,7 @@ class ServerRuntime:
         read_only_log: Path | None = None,
         observer: ServerLifecycleObserver | None = None,
         threads: Threads | None = None,
+        unwatched_failure_grace: float = UNWATCHED_FAILURE_GRACE_SECONDS,
     ) -> None:
         """Compose all server components around one shared condition.
 
@@ -138,6 +146,8 @@ class ServerRuntime:
         self.instance_path = instance_path
         self.detach = detach
         self.read_only_log = read_only_log
+        self.unwatched_failure_grace = unwatched_failure_grace
+        self._run_failed = False
         self.observer = observer
         self._shutdown = self.threads.event()
         # Set once the Unix socket accepts connections: how a same-process
@@ -302,9 +312,11 @@ class ServerRuntime:
         A detached server exits with its run, so without this a client could
         see the connection close before the terminal status that explains it.
         The wait is bounded: a client that stopped reading cannot hold the
-        server open.
+        server open. A run that failed first waits, also bounded, for a first
+        client when none has attached yet (``UNWATCHED_FAILURE_GRACE_SECONDS``).
         """
-        transport.wait_until_delivered(self.api.latest_sequence, DETACHED_DRAIN_TIMEOUT_SECONDS)
+        grace = self.unwatched_failure_grace if self._run_failed else 0.0
+        transport.wait_for_a_reader(self.api.latest_sequence, grace, DETACHED_DRAIN_TIMEOUT_SECONDS)
 
     def shutdown(self) -> None:
         """Request a clean shutdown of a detached or read-only server."""
@@ -350,6 +362,7 @@ class ServerRuntime:
             self._wait_for_detached_shutdown(transport)
             return None
         except ConfigurationError as exc:
+            self._run_failed = True
             configuration_diagnostic = exc.diagnostic
             event_diagnostic = Diagnostic(
                 code=configuration_diagnostic.code,
@@ -383,6 +396,7 @@ class ServerRuntime:
             )
             raise
         except BaseException as exc:
+            self._run_failed = True
             self.controller.finish(
                 exc,
                 record_event=not self._terminal_recorded_after(terminal_cursor),

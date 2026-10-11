@@ -2,8 +2,9 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "types": ["node", "bun"],
-    "noEmit": true
+    "noEmit": true,
+    "rootDir": "."
   },
-  "include": ["src/**/*.ts", "src/**/*.cts"],
-  "exclude": []
+  "include": ["src/**/*.ts", "src/**/*.cts", "vite.welcome.config.ts"],
+  "exclude": ["src/welcome/**/*.tsx"]
 }

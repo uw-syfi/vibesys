@@ -117,6 +117,9 @@ def test_detached_runtime_unwinds_callback_failures_without_shutdown(
         runs=default_runs(),
         socket_path=tmp_path / "control.sock",
         detach=True,
+        # No client attaches here, so a failure's grace for its first reader
+        # would only delay the unwinding this test is about.
+        unwatched_failure_grace=0.0,
     )
     failure = failure_factory()
     completed = threading.Event()
