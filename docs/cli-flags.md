@@ -311,8 +311,9 @@ multi-file project.
 | `--openevolve-migration-interval` | `50` | Per-island admitted generations between migrations. |
 | `--openevolve-migration-rate` | `0.1` | Fraction of island elites copied during migration. |
 
-OpenEvolve state is stored under
-`.vibesys/state/runs/<run-id>/evolve/openevolve/` and loaded on resume. See
+OpenEvolve state is part of the run's committed strategy state (the database's programs, with
+each passing child's patch text, so that state grows with the patches the database keeps) and is
+loaded on resume. See
 [`docs/contributing/openevolve.md`](contributing/openevolve.md) for the adapter boundary and metric
 semantics. On resume the policy and saved settings are restored when these
 flags are omitted; partial explicit settings are merged with the saved values,

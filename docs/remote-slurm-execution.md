@@ -25,8 +25,7 @@ tool (`offers_evaluation_tool` in `src/vibesys/run/host.py`, passed as
   `vibesys-gate`, no `vibesys-gpu --gate` (the broker refuses the `gate` operation),
   no accuracy or benchmark command in their paths, and no gate text in their prompts.
   Without agent GPU commands the container reaches no host broker at all.
-- **Every older loop** (agent single and multi, profile-guided, plain/issue queue,
-  evolve) has no evaluation tool. Its mid-turn gate and its framework's post-round
+- **Every older loop** (agent single and multi, profile-guided, plain/issue queue) has no evaluation tool. Its mid-turn gate and its framework's post-round
   trusted evaluation keep the path below, unchanged. Each is deleted as its loop is
   ported to the core path (roadmap #1952, tracked by #1649), and finally in phase 6.
 
