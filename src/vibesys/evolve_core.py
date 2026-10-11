@@ -166,7 +166,7 @@ def evolve_core_registration(plugin_id: str) -> OrchestrationRegistration:
     return OrchestrationRegistration(
         plugin=plugin,
         projector=evolve_projector(plugin_id),
-        project_max_rounds=lambda options: EvolveOptions.model_validate(
-            options.model_dump()
-        ).max_generations,
+        project_max_rounds=lambda options: (
+            EvolveOptions.model_validate(options.model_dump()).max_generations
+        ),
     )

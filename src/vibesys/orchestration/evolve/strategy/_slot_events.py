@@ -18,6 +18,7 @@ from vibesys.orchestration.evolve.strategy._record import awaiting, fail, put, s
 from vibesys.orchestration.evolve.strategy._state import (
     EvolveStrategyState,
     SettledSlot,
+    SlotState,
     WorkPhase,
 )
 from vs_core.api import (
@@ -51,7 +52,9 @@ def on_ready(state: EvolveStrategyState, event: AttemptReady) -> EvolveStrategyS
             update={"phase": WorkPhase.SETTLE, "step": Step.NEEDED, "failure": STOPPED}
         )
     else:
-        slot = slot.model_copy(update={"phase": WorkPhase.MUTATE, "step": Step.NEEDED, "turn": None})
+        slot = slot.model_copy(
+            update={"phase": WorkPhase.MUTATE, "step": Step.NEEDED, "turn": None}
+        )
     return put(state, slot)
 
 
@@ -64,12 +67,7 @@ def on_operation(
         return state
     outcome = event.outcome
     if isinstance(outcome, RenderedArtifacts):
-        if outcome.status != "succeeded" or not outcome.prompts or slot.turn is None:
-            return fail(state, slot, f"prompt render {outcome.status}")
-        turn = slot.turn.with_prompts(outcome.prompts, outcome.tool_policy)
-        return put(
-            state, slot.model_copy(update={"turn": turn, "step": Step.RENDERED, "awaiting": None})
-        )
+        return _rendered(state, slot, outcome)
     if isinstance(outcome, EvidenceReadings):
         return gates.on_interpreted(state, config, slot, outcome, view)
     if isinstance(outcome, PatchExport):
@@ -77,6 +75,18 @@ def on_operation(
             return fail(state, slot, f"patch export {outcome.status}: {outcome.detail}")
         return put(state, to_settle(slot, patch=outcome.patch))
     return state
+
+
+def _rendered(
+    state: EvolveStrategyState, slot: SlotState, outcome: RenderedArtifacts
+) -> EvolveStrategyState:
+    """The prompt is stored: the slot's turn may be asked."""
+    if outcome.status != "succeeded" or not outcome.prompts or slot.turn is None:
+        return fail(state, slot, f"prompt render {outcome.status}")
+    turn = slot.turn.with_prompts(outcome.prompts, outcome.tool_policy)
+    return put(
+        state, slot.model_copy(update={"turn": turn, "step": Step.RENDERED, "awaiting": None})
+    )
 
 
 def on_exhausted(state: EvolveStrategyState, event: AttemptExhausted) -> EvolveStrategyState:

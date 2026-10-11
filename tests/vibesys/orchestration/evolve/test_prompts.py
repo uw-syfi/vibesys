@@ -43,14 +43,14 @@ _INDIVIDUALS = st.builds(
     perf_metric=st.none() | st.floats(0, 1e6),
     perf_unit=st.none() | _TEXT,
     metrics=st.lists(st.tuples(_TEXT, st.floats(0, 1e6)), max_size=2).map(tuple),
-    passed=st.just(True),
+    passed=st.booleans().filter(bool),
     summary=_TEXT,
     feedback=st.text(max_size=12),
 )
 _COLD = st.builds(
     MutatePrompt,
     base_revision=_REVISIONS,
-    is_cold_start=st.just(True),
+    is_cold_start=st.booleans().filter(bool),
     repair_seed=st.booleans(),
     failed_lessons=st.lists(_TEXT, max_size=3).map(tuple),
     num_failed_attempts=st.integers(0, 4),
@@ -60,7 +60,7 @@ _COLD = st.builds(
 _CHILD = st.builds(
     MutatePrompt,
     base_revision=_REVISIONS,
-    is_cold_start=st.just(False),
+    is_cold_start=st.booleans().filter(lambda value: not value),
     parent=_INDIVIDUALS,
     inspirations=st.lists(_INDIVIDUALS, max_size=2).map(tuple),
     modality=_MODALITIES,
@@ -132,4 +132,6 @@ def test_the_evaluation_tool_is_explained_when_the_run_offers_it() -> None:
         is_cold_start=True,
     )
     assert "submit_evaluation" in _render(PromptTemplate.MUTATE, context)
-    assert "submit_evaluation" not in _render(PromptTemplate.MUTATE, context, agent_evaluation=False)
+    assert "submit_evaluation" not in _render(
+        PromptTemplate.MUTATE, context, agent_evaluation=False
+    )

@@ -31,9 +31,9 @@ def _state(trace: object) -> EvolveStrategyState:
     return state
 
 
-def _passing_world(children: int, *, passes: tuple[bool, ...]) -> Executors:
+def _passing_world(*, passes: tuple[bool, ...]) -> Executors:
     return Executors(
-        replies=lambda role, key, serial: (
+        replies=lambda role, key, _serial: (
             mutated(f"change of {key}")
             if role == "mutator"
             else reviewed(passed=passes[sum(map(ord, key)) % len(passes)])
@@ -54,7 +54,7 @@ def test_e4_individual_ids_are_unique_and_dense(
     passes: tuple[bool, ...], parallelism: int, children: int
 ) -> None:
     trace = run_shell(
-        _passing_world(children, passes=(True, *passes)),
+        _passing_world(passes=(True, *passes)),
         max_parallelism=parallelism,
         children_per_generation=children,
         bootstrap_max_attempts=3,
@@ -71,7 +71,10 @@ def test_e6_a_cold_start_builds_on_the_previous_attempts_work_in_progress() -> N
     executors = Executors(
         mutator=deque(mutated(f"seed {n}") for n in range(3)),
         # The first two cold starts are rejected, the third passes.
-        judge=deque([reviewed(passed=False), reviewed(passed=False), reviewed(passed=True)] + [reviewed()] * 8),
+        judge=deque(
+            [reviewed(passed=False), reviewed(passed=False), reviewed(passed=True)]
+            + [reviewed()] * 8
+        ),
     )
     trace = run_shell(
         executors, bootstrap_max_attempts=3, max_generations=1, children_per_generation=1
@@ -89,7 +92,8 @@ def test_e6_a_cold_start_builds_on_the_previous_attempts_work_in_progress() -> N
 
 def test_e6_a_cold_start_that_never_passes_ends_without_a_selection() -> None:
     executors = Executors(
-        mutator=deque(mutated() for _ in range(2)), judge=deque(reviewed(passed=False) for _ in range(2))
+        mutator=deque(mutated() for _ in range(2)),
+        judge=deque(reviewed(passed=False) for _ in range(2)),
     )
     trace = run_shell(executors, bootstrap_max_attempts=2)
     final = trace.decisions[-1]
@@ -100,7 +104,7 @@ def test_e6_a_cold_start_that_never_passes_ends_without_a_selection() -> None:
 
 
 def test_a_run_without_a_profiler_asks_no_profiler_turn() -> None:
-    trace = run_shell(_passing_world(2, passes=(True,)), max_generations=1)
+    trace = run_shell(_passing_world(passes=(True,)), max_generations=1)
     roles = {
         item.turn.session.role_id.root for item in trace.decisions if isinstance(item, RequestTurn)
     }
@@ -109,7 +113,7 @@ def test_a_run_without_a_profiler_asks_no_profiler_turn() -> None:
 
 def test_a_profiler_turn_is_asked_once_per_passing_child_when_the_run_has_one() -> None:
     trace = run_shell(
-        _passing_world(2, passes=(True,)),
+        _passing_world(passes=(True,)),
         max_generations=1,
         children_per_generation=2,
         profiler_id="linux_cpu",
@@ -185,20 +189,22 @@ def test_the_state_grows_linearly_in_individuals() -> None:
     sizes = []
     for generations in (1, 2, 3):
         trace = run_shell(
-            _passing_world(2, passes=(True,)),
+            _passing_world(passes=(True,)),
             max_generations=generations,
             children_per_generation=2,
         )
         population = _state(trace).population
         assert population is not None
-        sizes.append((len(population.individuals), len(json.dumps(population.model_dump(mode="json")))))
+        sizes.append(
+            (len(population.individuals), len(json.dumps(population.model_dump(mode="json"))))
+        )
     (n1, s1), (n2, s2), (n3, s3) = sizes
     per_individual = (s2 - s1) / (n2 - n1)
     assert abs((s3 - s2) / (n3 - n2) - per_individual) < 0.2 * per_individual
 
 
 def test_a_dispatch_is_never_repeated_for_one_invocation() -> None:
-    trace = run_shell(_passing_world(2, passes=(True,)), max_generations=2)
+    trace = run_shell(_passing_world(passes=(True,)), max_generations=2)
     dispatched = [
         item.turn.invocation_id.root for item in trace.decisions if isinstance(item, RequestTurn)
     ]

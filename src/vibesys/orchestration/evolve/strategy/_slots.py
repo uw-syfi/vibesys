@@ -257,7 +257,8 @@ def _interpret(draft: Draft, slot: SlotState) -> SlotState:
                 "step": Step.NEEDED,
                 "awaiting": None,
                 "failure": slot.failure or "the evidence is missing from core's ledger",
-                "feedback": slot.feedback or "framework: the evidence is missing from core's ledger",
+                "feedback": slot.feedback
+                or "framework: the evidence is missing from core's ledger",
             }
         )
     identifier = ids.decision_id("interpret", slot.key)

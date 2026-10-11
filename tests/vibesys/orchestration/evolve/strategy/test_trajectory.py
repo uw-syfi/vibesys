@@ -45,9 +45,7 @@ def _names() -> list[str]:
 
 def _commits(seed: int) -> dict[str, world.Child]:
     """The world's children by the commit the scripted workspace retains for them."""
-    return {
-        commit_of(f"attempt:{component(name)}:1"): world.child(seed, name) for name in _names()
-    }
+    return {commit_of(f"attempt:{component(name)}:1"): world.child(seed, name) for name in _names()}
 
 
 def scripted(seed: int, *, delays: tuple[int, ...] = (0,)) -> Executors:
@@ -60,7 +58,9 @@ def scripted(seed: int, *, delays: tuple[int, ...] = (0,)) -> Executors:
         if role == "mutator":
             return mutated(child.summary)
         if role == "judge":
-            return reviewed(passed=child.judge_passes, feedback="" if child.judge_passes else f"fails {key}")
+            return reviewed(
+                passed=child.judge_passes, feedback="" if child.judge_passes else f"fails {key}"
+            )
         return profiled(metrics={"cache_hit": child.cache_hit})
 
     return Executors(
@@ -214,7 +214,9 @@ def _reference_population(seed_world: int, seed_rng: int, space: MetricSpace, se
             proposals.append(proposal)
         for slot, proposal in enumerate(proposals, start=1):
             if proposal is not None:
-                _, state = search.admit(state, outcome(world.child_name(generation, slot), proposal))
+                _, state = search.admit(
+                    state, outcome(world.child_name(generation, slot), proposal)
+                )
     return state
 
 

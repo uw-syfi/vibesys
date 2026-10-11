@@ -56,7 +56,12 @@ def finish(config: EvolveConfig, slot: SlotState) -> SlotState:
     """A candidate that passed everything: export its patch when the selector ranks by code."""
     if config.needs_code and slot.candidate is not None:
         return slot.model_copy(
-            update={"phase": WorkPhase.EXPORT, "step": Step.NEEDED, "awaiting": None, "passed": True}
+            update={
+                "phase": WorkPhase.EXPORT,
+                "step": Step.NEEDED,
+                "awaiting": None,
+                "passed": True,
+            }
         )
     return to_settle(slot, passed=True)
 
@@ -85,9 +90,7 @@ def on_measurement(
         limit=config.max_input_measurement_attempts,
     ):
         return put(state, slot.model_copy(update={"step": Step.NEEDED, "awaiting": None}))
-    evidence = trusted_keys(
-        event, scope=event.scope, candidate=slot.candidate, purpose="official"
-    )
+    evidence = trusted_keys(event, scope=event.scope, candidate=slot.candidate, purpose="official")
     if not evidence:
         # The machinery could not measure it: the child earns no individual.
         reason = f"the candidate could not be measured ({event.status.value})"

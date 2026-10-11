@@ -26,12 +26,16 @@ def _peers(state: EvolveStrategyState, identifiers: tuple[int, ...]) -> tuple[In
     return tuple(item for item in found if item is not None)
 
 
-def mutate_prompt(state: EvolveStrategyState, slot: SlotState, config: EvolveConfig) -> MutatePrompt:
+def mutate_prompt(
+    state: EvolveStrategyState, slot: SlotState, config: EvolveConfig
+) -> MutatePrompt:
     """The brief of the slot's mutation: a cold start, or a child of a parent."""
     proposal = slot.proposal
     if proposal is None or state.population is None:
         current = state.population
-        lessons = () if current is None else tuple(population.search_of(config).failure_lessons(current))
+        lessons = (
+            () if current is None else tuple(population.search_of(config).failure_lessons(current))
+        )
         failed = 0 if current is None else sum(not item.passed for item in current.individuals)
         return MutatePrompt(
             base_revision=slot.base,

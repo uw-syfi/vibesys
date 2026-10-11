@@ -19,10 +19,10 @@ from vibesys.orchestration.evolve.strategy.api import (
     EvidenceReadings,
     ExportPatch,
     InterpretEvidence,
-    PatchExport,
     MetricRow,
     ParentVerification,
     PartialRow,
+    PatchExport,
     RenderedArtifacts,
     RenderRoleArtifacts,
     VerifyParentRevision,
@@ -216,9 +216,7 @@ class Executors:
             )
             stages.append(EvaluationStageResult(stage_id=stage.stage_id, outcome=outcome))
         accuracy = all(
-            item.passed
-            for item in self.readings.values()
-            if item.kind is EvidenceKind.CORRECTNESS
+            item.passed for item in self.readings.values() if item.kind is EvidenceKind.CORRECTNESS
         )
         return Succeeded(
             resource_id=request.resource_id,

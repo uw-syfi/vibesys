@@ -33,7 +33,9 @@ class _Finished:
 def settle_for(slot: SlotState, config: EvolveConfig) -> Settle:
     """The assessments, eligibility and retention to propose for a finished slot."""
     settled = candidates.settle_for(
-        _Finished(slot.readings, slot.candidate, slot.judge_pass, slot.failure, slot.judge_invocation),
+        _Finished(
+            slot.readings, slot.candidate, slot.judge_pass, slot.failure, slot.judge_invocation
+        ),
         BaselineState(),
         config,
     )

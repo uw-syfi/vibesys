@@ -36,9 +36,7 @@ def individual(population: PopulationState, identifier: int) -> Individual | Non
     return next((item for item in population.individuals if item.id == identifier), None)
 
 
-def proposals(
-    config: EvolveConfig, start: PopulationState
-) -> tuple[SlotProposal | None, ...]:
+def proposals(config: EvolveConfig, start: PopulationState) -> tuple[SlotProposal | None, ...]:
     """The selector's choices for every slot of a generation that began at ``start``.
 
     The generator state is threaded through the slots in order and the result is discarded, as
@@ -115,9 +113,7 @@ def outcome_of(slot: SlotState) -> CandidateOutcome | None:
     benchmark = reading_of(slot.readings, EvidenceKind.BENCHMARK)
     retained = settled.retained
     commit = retained.revision_id.root if retained is not None and keeps_commit(slot) else None
-    metric, unit, metrics = (
-        fitness(slot.profile, benchmark) if slot.passed else (None, None, ())
-    )
+    metric, unit, metrics = fitness(slot.profile, benchmark) if slot.passed else (None, None, ())
     return CandidateOutcome(
         passed=slot.passed,
         parent_id=None if proposal is None else proposal.parent_id,
@@ -134,9 +130,7 @@ def outcome_of(slot: SlotState) -> CandidateOutcome | None:
     )
 
 
-def admit(
-    state: EvolveStrategyState, config: EvolveConfig, slot: SlotState
-) -> EvolveStrategyState:
+def admit(state: EvolveStrategyState, config: EvolveConfig, slot: SlotState) -> EvolveStrategyState:
     """Admit one slot's outcome into the population, recording the settlement it rests on."""
     population = state.population
     outcome = outcome_of(slot)
@@ -148,7 +142,9 @@ def admit(
     if settled is not None and settled.retained is not None and member.commit:
         retained = (
             *retained,
-            Retained(individual=member.id, settlement=settled.settlement, revision=settled.retained),
+            Retained(
+                individual=member.id, settlement=settled.settlement, revision=settled.retained
+            ),
         )
     return state.model_copy(update={"population": grown, "retained": retained})
 

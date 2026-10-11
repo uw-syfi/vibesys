@@ -426,7 +426,9 @@ def test_evolve_plugin_resumes_with_its_exact_options() -> None:
     assert registration.resume_policy is None
     assert registration.project_max_rounds is not None
     assert (
-        registration.project_max_rounds(registration.plugin.options.model_validate(recorded.options))
+        registration.project_max_rounds(
+            registration.plugin.options.model_validate(recorded.options)
+        )
         == 2
     )
 

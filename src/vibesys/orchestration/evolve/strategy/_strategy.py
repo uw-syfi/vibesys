@@ -106,14 +106,33 @@ class EvolveStrategy:
         if isinstance(event, MeasurementResult):
             return gates.on_measurement(state, event, self.config)
         if isinstance(event, TurnResult):
-            slot = turn_events.turn_slot(state, event)
-            if slot is None:
-                return state
-            return turn_events.on_turn(state, view, self.config, slot, event)
+            return self._turn(state, view, event)
         return self._lifecycle(state, event)
+
+    def _turn(
+        self, state: EvolveStrategyState, view: RunView, event: TurnResult
+    ) -> EvolveStrategyState:
+        """Fold a reply into the slot that asked, if any."""
+        slot = turn_events.turn_slot(state, event)
+        if slot is None:
+            return state
+        return turn_events.on_turn(state, view, self.config, slot, event)
 
     def _lifecycle(self, state: EvolveStrategyState, event: StrategyEvent) -> EvolveStrategyState:
         """Fold lifecycle feedback; other feedback needs no state change here."""
+        if isinstance(event, AttemptReady | AttemptSettled | TurnSuspended | ResumeAuthorized):
+            return self._attempt_feedback(state, event)
+        if isinstance(event, AttemptExhausted):
+            return slot_events.on_exhausted(state, event)
+        if isinstance(event, IntentBlocked):
+            return slot_events.on_blocked(state, event)
+        return self._run_feedback(state, event)
+
+    def _attempt_feedback(
+        self,
+        state: EvolveStrategyState,
+        event: AttemptReady | AttemptSettled | TurnSuspended | ResumeAuthorized,
+    ) -> EvolveStrategyState:
         if isinstance(event, AttemptReady):
             return slot_events.on_ready(state, event)
         if isinstance(event, AttemptSettled):
@@ -121,13 +140,7 @@ class EvolveStrategy:
             return generation.admit_ready(settled, self.config)
         if isinstance(event, TurnSuspended):
             return turn_events.on_suspended(state, event)
-        if isinstance(event, ResumeAuthorized):
-            return turn_events.on_resume(state, event)
-        if isinstance(event, AttemptExhausted):
-            return slot_events.on_exhausted(state, event)
-        if isinstance(event, IntentBlocked):
-            return slot_events.on_blocked(state, event)
-        return self._run_feedback(state, event)
+        return turn_events.on_resume(state, event)
 
     @staticmethod
     def _run_feedback(state: EvolveStrategyState, event: StrategyEvent) -> EvolveStrategyState:

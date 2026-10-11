@@ -16,31 +16,22 @@ from vibesys.orchestration.evolve.strategy._config import EvolveConfig
 from vibesys.orchestration.evolve.strategy._draft import Draft
 from vibesys.orchestration.evolve.strategy._state import (
     EvolveStrategyState,
-    SlotProposal,
     SlotState,
     Stage,
     WorkPhase,
 )
-from vs_core.api import RevisionRef
 
 
-def _new_slot(
-    key: str,
-    slot: int,
-    *,
-    generation: int,
-    proposal: SlotProposal | None,
-    base: RevisionRef,
-    repair_seed: bool = False,
-) -> SlotState:
-    return SlotState(
-        attempt=ids.attempt_id(key, 1),
-        key=key,
-        slot=slot,
-        search_generation=generation,
-        proposal=proposal,
-        base=base,
-        repair_seed=repair_seed,
+def _new_slot(key: str, slot: int, generation: int, **plan: object) -> SlotState:
+    """A slot at its start; ``plan`` is the proposal, base revision and repair flag."""
+    return SlotState.model_validate(
+        {
+            "attempt": ids.attempt_id(key, 1),
+            "key": key,
+            "slot": slot,
+            "search_generation": generation,
+            **plan,
+        }
     )
 
 
@@ -60,8 +51,7 @@ def open_bootstrap(state: EvolveStrategyState, draft: Draft) -> SlotState:
     return _new_slot(
         f"bootstrap.{number}",
         number,
-        generation=0,
-        proposal=None,
+        0,
         base=seeded or draft.view.facts.baseline,
         repair_seed=seeded is not None,
     )
@@ -82,13 +72,11 @@ def open_generation(state: EvolveStrategyState, draft: Draft) -> EvolveStrategyS
         parent = None if proposal is None else population.individual(started, proposal.parent_id)
         base = None if parent is None else population.revision_of(state, parent)
         slot = _new_slot(
-            key,
-            index,
-            generation=number,
-            proposal=proposal,
-            base=base or draft.view.facts.baseline,
+            key, index, number, proposal=proposal, base=base or draft.view.facts.baseline
         )
-        slots.append(slot if base is not None else _skipped(slot, "the proposal names no retained parent"))
+        slots.append(
+            slot if base is not None else _skipped(slot, "the proposal names no retained parent")
+        )
     return state.model_copy(
         update={"population": started, "generation_start": started, "slots": tuple(slots)}
     )
@@ -102,10 +90,7 @@ def search_over(state: EvolveStrategyState, config: EvolveConfig) -> bool:
         return True
     if state.stage is Stage.BOOTSTRAP:
         return state.bootstrap_spent >= config.bootstrap_max_attempts
-    return (
-        state.generation_start is None
-        and state.population.generation >= config.max_generations
-    )
+    return state.generation_start is None and state.population.generation >= config.max_generations
 
 
 def decide(draft: Draft) -> None:
@@ -142,15 +127,13 @@ def admit_ready(state: EvolveStrategyState, config: EvolveConfig) -> EvolveStrat
         slots[index] = slot.model_copy(update={"recorded": True})
         state = state.model_copy(update={"slots": tuple(slots)})
         if slot.search_generation == 0:
-            state = _after_cold_start(state, config, slot)
+            state = _after_cold_start(state, config)
     if slots and all(item.recorded for item in slots):
         return state.model_copy(update={"slots": (), "generation_start": None})
     return state
 
 
-def _after_cold_start(
-    state: EvolveStrategyState, config: EvolveConfig, slot: SlotState
-) -> EvolveStrategyState:
+def _after_cold_start(state: EvolveStrategyState, config: EvolveConfig) -> EvolveStrategyState:
     """Count the finished cold-start attempt; a passing one starts the generations."""
     current = state.population
     seeded = current is not None and not population.search_of(config).needs_bootstrap(current)

@@ -131,9 +131,20 @@ def _answered(
         return _judged(state, config, judged, reply)
     if isinstance(reply, ProfilerSummary):
         return _profiled(state, config, slot, reply)
+    return _mutator_replied(state, view, slot, event, reply)
+
+
+def _mutator_replied(
+    state: EvolveStrategyState,
+    view: RunView,
+    slot: SlotState,
+    event: TurnResult,
+    reply: MutatorResponse,
+) -> EvolveStrategyState:
+    """A mutation: judge its candidate, or hold the reply until core reads the checkpoint."""
     candidate = candidate_of(view, slot, event.invocation)
     if candidate is None:
-        return put(state, slot.holding(payload, event.invocation))
+        return put(state, slot.holding(event.output_json or "", event.invocation))
     return _mutated(state, slot, reply, candidate)
 
 
@@ -196,7 +207,9 @@ def _waiting(
         return _corrected(state, config, slot, event, WaitUnrecordedPrompt())
     if "suspend" not in view.capabilities.lifecycle:
         failed = fail(state, slot, "the run offers no suspend capability")
-        missing = Unreachable(reason=UnreachableReason.RESUME_CAPABILITY_NOT_OFFERED, subject=slot.key)
+        missing = Unreachable(
+            reason=UnreachableReason.RESUME_CAPABILITY_NOT_OFFERED, subject=slot.key
+        )
         return failed.model_copy(update={"unreachable": (*failed.unreachable, missing)})
     turn = slot.turn
     if turn is None:
@@ -223,7 +236,9 @@ def _unfinished(
             backoff=config.drop_backoff(turn.drops),
         )
         if again is None:
-            return _no_answer(state, config, slot, f"the turn was lost ({event.detail or 'transport'})")
+            return _no_answer(
+                state, config, slot, f"the turn was lost ({event.detail or 'transport'})"
+            )
         return put(
             state, slot.model_copy(update={"turn": again, "step": Step.NEEDED, "awaiting": None})
         )
