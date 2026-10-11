@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import subprocess
+from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,13 +22,19 @@ from vs_sandbox.api.skypilot import (
     SkyPilotJobStateError,
     SkyPilotOutputError,
     SkyPilotTimeoutError,
+    SubprocessCommandRunner,
     build_task_document,
     stable_cluster_name,
 )
-from vs_sim.api.testing import SimThreads
+from vs_sim.api import ProcessTimeoutError, Threads
+from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+
+    from vs_sim.api import Condition, Event, Lock, Worker
+
+_GROUP_PERMISSION_ERROR = "process group is not signalable"
 
 
 def _resources(**overrides: object) -> ResolvedSkyPilotResources:
@@ -82,8 +88,379 @@ class FakeCommandRunner:
         return ProcessResult(normalized, result.returncode, result.stdout, result.stderr)
 
 
+class _StuckDrainWorker:
+    """A drain that consumes its finite join budget but never completes."""
+
+    def __init__(self, threads: _StuckDrainThreads, name: str) -> None:
+        self._threads = threads
+        self.name = name
+        self.join_timeouts: list[float | None] = []
+
+    def is_alive(self) -> bool:
+        return not self._threads.drains_released
+
+    def join(self, timeout: float | None = None) -> None:
+        self.join_timeouts.append(timeout)
+        if self.is_alive() and timeout is not None:
+            self._threads.advance_to(self._threads.now() + timeout)
+
+
+class _StuckDrainThreads:
+    """A virtual clock whose output workers stay blocked forever."""
+
+    def __init__(self) -> None:
+        self._threads = SimThreads()
+        self.workers: list[_StuckDrainWorker] = []
+        self.drains_released = False
+
+    def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
+        del target, daemon
+        worker = _StuckDrainWorker(self, name)
+        self.workers.append(worker)
+        return worker
+
+    def lock(self) -> Lock:
+        return self._threads.lock()
+
+    def rlock(self) -> Lock:
+        return self._threads.rlock()
+
+    def condition(self, lock: Lock | None = None) -> Condition:
+        return self._threads.condition(lock)
+
+    def event(self) -> Event:
+        return self._threads.event()
+
+    def sleep(self, seconds: float) -> None:
+        self.advance_to(self.now() + seconds)
+
+    def now(self) -> float:
+        return self._threads.now()
+
+    def advance_to(self, instant: float) -> None:
+        self._threads.advance_to(instant)
+
+    def release_drains(self) -> None:
+        self.drains_released = True
+
+
+class _StuckSkyPilotProcess:
+    """A process whose leader and inherited output pipes never report completion."""
+
+    def __init__(self, threads: _StuckDrainThreads) -> None:
+        self._threads = threads
+        self.stdout = StringIO()
+        self.stderr = StringIO()
+        self.wait_timeouts: list[float | None] = []
+        self.group_kills = 0
+
+    def wait(self, timeout: float | None) -> int:
+        self.wait_timeouts.append(timeout)
+        if timeout is None:
+            raise AssertionError
+        if len(self.wait_timeouts) > 1:
+            self._threads.advance_to(self._threads.now() + timeout)
+        raise ProcessTimeoutError(("sky",), timeout)
+
+    def kill_group(self) -> None:
+        self.group_kills += 1
+
+    def cancel_output(self) -> None:
+        self._threads.release_drains()
+
+
+class _NormalSkyPilotProcess(_StuckSkyPilotProcess):
+    """A leader that exits normally while descendants retain both pipes."""
+
+    def wait(self, timeout: float | None) -> int:
+        self.wait_timeouts.append(timeout)
+        return 0
+
+    def kill_group(self) -> None:
+        super().kill_group()
+        self._threads.release_drains()
+
+
+class _RecordingThreads:
+    """Deterministic synchronization with observable worker ownership."""
+
+    def __init__(self) -> None:
+        self._threads = SimThreads()
+        self.workers: list[Worker] = []
+
+    def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
+        worker = self._threads.spawn(target, name=name, daemon=daemon)
+        self.workers.append(worker)
+        return worker
+
+    def lock(self) -> Lock:
+        return self._threads.lock()
+
+    def rlock(self) -> Lock:
+        return self._threads.rlock()
+
+    def condition(self, lock: Lock | None = None) -> Condition:
+        return self._threads.condition(lock)
+
+    def event(self) -> Event:
+        return self._threads.event()
+
+    def sleep(self, seconds: float) -> None:
+        self._threads.sleep(seconds)
+
+    def now(self) -> float:
+        return self._threads.now()
+
+    def run[T](self, main: Callable[[], T]) -> T:
+        return self._threads.run(main)
+
+
+class _BlockingCancellableSink:
+    """A bridge-shaped sink whose active transport write ends on cancellation."""
+
+    def __init__(self, threads: Threads) -> None:
+        self.started = threads.event()
+        self.cancelled = threads.event()
+        self.returned = threads.event()
+
+    def __call__(self, _: str) -> None:
+        self.started.set()
+        assert self.cancelled.wait(timeout=1)
+        self.returned.set()
+
+    def cancel(self) -> None:
+        self.cancelled.set()
+
+
+class _BlockingOrdinarySink:
+    """A finite ordinary callback controlled entirely by synchronization events."""
+
+    def __init__(self, threads: Threads) -> None:
+        self.started = threads.event()
+        self.release = threads.event()
+        self.returned = threads.event()
+
+    def __call__(self, _: str) -> None:
+        self.started.set()
+        assert self.release.wait(timeout=1)
+        self.returned.set()
+
+
+class _ExitedSkyPilotProcess:
+    """A completed command with one captured stdout segment."""
+
+    def __init__(self) -> None:
+        self.stdout = StringIO("output\n")
+        self.stderr = StringIO()
+        self.group_kills = 0
+
+    def wait(self, timeout: float | None) -> int:
+        del timeout
+        return 0
+
+    def kill_group(self) -> None:
+        self.group_kills += 1
+
+    def cancel_output(self) -> None:
+        pass
+
+
+class _TimeoutAfterSinkStartsProcess:
+    """A command that times out only after delivery is blocked in its sink."""
+
+    def __init__(self, sink: _BlockingCancellableSink) -> None:
+        self._sink = sink
+        self.stdout = StringIO("output\n")
+        self.stderr = StringIO()
+        self.waits = 0
+        self.group_kills = 0
+
+    def wait(self, timeout: float | None) -> int:
+        self.waits += 1
+        if self.waits == 1:
+            assert self._sink.started.wait(timeout=1)
+            assert timeout is not None
+            raise ProcessTimeoutError(("sky",), timeout)
+        return -9
+
+    def kill_group(self) -> None:
+        self.group_kills += 1
+
+    def cancel_output(self) -> None:
+        pass
+
+
+class _HeldPipe(StringIO):
+    """A text pipe that reaches EOF only when process cleanup cancels it."""
+
+    def __init__(self, threads: Threads) -> None:
+        super().__init__()
+        self.read_started = threads.event()
+        self._cancelled = threads.event()
+
+    def readline(self, size: int = -1, /) -> str:
+        del size
+        self.read_started.set()
+        assert self._cancelled.wait(timeout=1)
+        return ""
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+
+
+class _PermissionDeniedSkyPilotProcess:
+    """A timed-out process whose group cannot be signalled by the caller."""
+
+    def __init__(self, threads: Threads) -> None:
+        self._threads = threads
+        self.stdout = _HeldPipe(threads)
+        self.stderr = _HeldPipe(threads)
+        self.wait_timeouts: list[float | None] = []
+        self.group_kills = 0
+        self.output_cancellations = 0
+
+    def wait(self, timeout: float | None) -> int:
+        self.wait_timeouts.append(timeout)
+        if len(self.wait_timeouts) == 1:
+            assert self.stdout.read_started.wait(timeout=1)
+            assert self.stderr.read_started.wait(timeout=1)
+            assert timeout is not None
+            raise ProcessTimeoutError(("sky",), timeout)
+        assert timeout is not None
+        self._threads.sleep(timeout)
+        raise ProcessTimeoutError(("sky",), timeout)
+
+    def kill_group(self) -> None:
+        self.group_kills += 1
+        raise PermissionError(_GROUP_PERMISSION_ERROR)
+
+    def cancel_output(self) -> None:
+        self.output_cancellations += 1
+        self.stdout.cancel()
+        self.stderr.cancel()
+
+
 def _result(returncode: int = 0, stdout: str = "", stderr: str = "") -> ProcessResult:
     return ProcessResult(("sky",), returncode, stdout, stderr)
+
+
+def test_subprocess_timeout_kills_the_group_and_bounds_all_cleanup_waits() -> None:
+    threads = _StuckDrainThreads()
+    process = _StuckSkyPilotProcess(threads)
+    runner = SubprocessCommandRunner(
+        threads,
+        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        cleanup_timeout=7,
+    )
+
+    with pytest.raises(ProcessTimeoutError) as caught:
+        runner.run(("sky", "status"), timeout=3)
+
+    assert caught.value.timeout == 3
+    assert process.group_kills == 1
+    assert process.wait_timeouts == [3, 7]
+    assert [worker.join_timeouts for worker in threads.workers] == [[0], [0]]
+    assert threads.now() == 8
+
+
+def test_normal_exit_with_stuck_drains_reaps_workers_and_closes_pipes_after_group_kill() -> None:
+    threads = _StuckDrainThreads()
+    process = _NormalSkyPilotProcess(threads)
+    runner = SubprocessCommandRunner(
+        threads,
+        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        cleanup_timeout=7,
+    )
+
+    with pytest.raises(SkyPilotCLIError, match="process group was killed"):
+        runner.run(("sky", "status"))
+
+    assert process.group_kills == 1
+    assert process.wait_timeouts == [None, 7]
+    assert [worker.join_timeouts for worker in threads.workers] == [[7, 7], [0, 7]]
+    assert all(not worker.is_alive() for worker in threads.workers)
+    assert process.stdout.closed
+    assert process.stderr.closed
+    assert threads.now() == 8
+
+
+def test_timeout_cancels_blocked_bridge_sink_without_retaining_drain_workers_or_pipes() -> None:
+    threads = _RecordingThreads()
+    sink = _BlockingCancellableSink(threads)
+    process = _TimeoutAfterSinkStartsProcess(sink)
+    runner = SubprocessCommandRunner(
+        threads,
+        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        cleanup_timeout=1,
+    )
+
+    def exercise() -> None:
+        with pytest.raises(ProcessTimeoutError):
+            runner.run(("sky", "status"), timeout=0, stdout_sink=sink)
+
+    threads.run(exercise)
+
+    assert sink.cancelled.is_set()
+    assert sink.returned.is_set()
+    assert process.group_kills == 1
+    assert process.stdout.closed
+    assert process.stderr.closed
+    assert all(not worker.is_alive() for worker in threads.workers)
+
+
+def test_timeout_surfaces_group_kill_permission_error_after_settling_owned_resources() -> None:
+    threads = _RecordingThreads()
+    process = _PermissionDeniedSkyPilotProcess(threads)
+    runner = SubprocessCommandRunner(
+        threads,
+        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        cleanup_timeout=1,
+    )
+
+    def exercise() -> None:
+        with pytest.raises(PermissionError, match="not signalable") as caught:
+            runner.run(("sky", "status"), timeout=0)
+        assert isinstance(caught.value.__cause__, ProcessTimeoutError)
+
+    threads.run(exercise)
+
+    assert process.group_kills == 1
+    assert process.output_cancellations == 1
+    assert process.wait_timeouts == [0, 1]
+    assert process.stdout.closed
+    assert process.stderr.closed
+    assert all(not worker.is_alive() for worker in threads.workers)
+
+
+def test_success_waits_for_slow_ordinary_sink_without_abandoning_a_delivery_worker() -> None:
+    threads = _RecordingThreads()
+    sink = _BlockingOrdinarySink(threads)
+    process = _ExitedSkyPilotProcess()
+    runner = SubprocessCommandRunner(
+        threads,
+        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        cleanup_timeout=0,
+    )
+    drains_finished: list[bool] = []
+
+    def release_sink() -> None:
+        assert sink.started.wait(timeout=1)
+        sky_workers = [worker for worker in threads.workers if worker.name.startswith("sky-")]
+        drains_finished.append(
+            len(sky_workers) == 2 and all(not worker.is_alive() for worker in sky_workers)
+        )
+        sink.release.set()
+
+    def exercise() -> ProcessResult:
+        threads.spawn(release_sink, name="release-sink", daemon=False)
+        return runner.run(("sky", "status"), stdout_sink=sink)
+
+    result = threads.run(exercise)
+
+    assert drains_finished == [True]
+    assert sink.returned.is_set()
+    assert process.group_kills == 0
+    assert result == ProcessResult(("sky", "status"), 0, "output\n", "")
 
 
 def test_stable_name_uses_effective_resources_not_profile_alias() -> None:
@@ -283,7 +660,7 @@ def test_run_timeout_preserves_discovered_job_for_recovery(tmp_path: Path) -> No
         [
             _result(),
             _result(stdout=json.dumps({"lease": [{"job_name": "job-token", "job_id": 7}]})),
-            subprocess.TimeoutExpired(("sky", "logs"), 10),
+            ProcessTimeoutError(("sky", "logs"), 10),
             _result(),
         ]
     )
@@ -355,7 +732,7 @@ def test_control_failure_does_not_expose_process_output() -> None:
     ("failure", "error"),
     [
         (FileNotFoundError("sky"), SkyPilotCLIError),
-        (subprocess.TimeoutExpired(("sky", "status"), 1), SkyPilotTimeoutError),
+        (ProcessTimeoutError(("sky", "status"), 1), SkyPilotTimeoutError),
     ],
 )
 def test_process_boundary_failures_are_typed(
@@ -379,7 +756,7 @@ def test_missing_executable_error_names_the_executable() -> None:
 
 
 def test_command_timeout_error_reports_the_timeout() -> None:
-    runner = SkyPilotJobRunner(FakeCommandRunner([subprocess.TimeoutExpired(("sky", "down"), 5)]))
+    runner = SkyPilotJobRunner(FakeCommandRunner([ProcessTimeoutError(("sky", "down"), 5)]))
 
     with pytest.raises(SkyPilotTimeoutError, match="timed out after 5 seconds"):
         runner.release("lease", timeout=5)

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
 from server.events import EventStatus, EventType, RunStatusChangedData
 from server.execution import AgentExecutionRequest
-from server.run_lifecycle import RunStatus, RunTrigger, transition
+from server.run_lifecycle import RunState, RunStatus, RunTrigger, transition
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,7 +31,7 @@ class RunController:
         self._condition = condition
         self._journal = journal
         self._executions = executions
-        self._status: RunStatus = RunStatus.STARTING
+        self._state = RunState(RunStatus.STARTING)
         self._attached_run: RunRecord | None = None
 
     @property
@@ -83,7 +83,7 @@ class RunController:
                     status = RunStatus.FAILED
             if not status.has_ended:
                 raise ValueError("Read-only serving requires a finished run")  # noqa: TRY003  # lint-waiver: LW-101044 [TRY003]; reject reopening an unfinished run with a clear API error
-            self._status = status
+            self._state = RunState(status)
 
     def is_read_only(self) -> bool:
         """Return whether this controller is serving a finished run."""
@@ -103,14 +103,15 @@ class RunController:
         The caller must already hold ``self._condition``. Mutating the status
         and recording its event under the same lock is what keeps event order
         and state order the same: a snapshot taken at any sequence agrees with
-        the fold of the events up to that sequence. A trigger the current
-        status absorbs changes nothing and publishes nothing.
+        the fold of the events up to that sequence. A trigger that leaves the
+        status unchanged publishes nothing, including a pause or stop that a
+        starting run only holds until it is ready.
         """
-        previous = self._status
-        current = transition(previous, trigger)
+        previous = self._state.status
+        self._state = transition(self._state, trigger)
+        current = self._state.status
         if current is previous:
             return current
-        self._status = current
         self._journal.record(
             EventType.RUN_STATUS_CHANGED,
             data=RunStatusChangedData(status=current, previous=previous),
@@ -273,7 +274,7 @@ class RunController:
         earlier entry landing) already applied it.
         """
         with self._condition:
-            if self._status is not RunStatus.PAUSING:
+            if not self._state.pause_pending:
                 return
             self._apply_locked(RunTrigger.INVOCATION_FINISHED)
             self._journal.record(EventType.CONTROL, "/pause", status=EventStatus.CONSUMED)
@@ -285,7 +286,7 @@ class RunController:
         earlier entry landing, already reached `STOPPED`.
         """
         with self._condition:
-            if self._status is not RunStatus.STOPPING:
+            if not self._state.stop_pending:
                 return
             self._apply_locked(RunTrigger.INVOCATION_FINISHED)
             self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.CONSUMED)
@@ -327,12 +328,12 @@ class RunController:
 
     def status_locked(self) -> RunStatus:
         """Return run status while the caller holds the shared condition."""
-        return self._status
+        return self._state.status
 
     def run_status(self) -> RunStatus:
         """Return the run status token, including whether the run has ended."""
         with self._condition:
-            return self._status
+            return self._state.status
 
     def settle(self, trigger: RunTrigger) -> bool:
         """End the run without a terminal event, reporting whether it did.
@@ -347,7 +348,7 @@ class RunController:
 
     def _settle_locked(self, trigger: RunTrigger) -> bool:
         """End the run exactly once, interrupting controlled work first."""
-        if self._status.has_ended:
+        if self._state.status.has_ended:
             return False
         self._executions.interrupt_controlled_locked()
         # An ended status is not PAUSED, so ending a paused run releases the

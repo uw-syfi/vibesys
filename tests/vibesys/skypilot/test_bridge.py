@@ -6,6 +6,7 @@ import re
 import socket
 import tempfile
 import threading
+from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -18,6 +19,7 @@ from vs_sandbox.api.skypilot import (
     AckRequest,
     ArtifactFrame,
     AttemptResourcesRecord,
+    CancellableOutputSink,
     ClusterInfo,
     ClusterStatus,
     ErrorFrame,
@@ -33,16 +35,18 @@ from vs_sandbox.api.skypilot import (
     ResponseFrame,
     SkyPilotBridge,
     SkyPilotJobRunner,
+    SubprocessCommandRunner,
     decode_response,
     encode_message,
 )
-from vs_sim.api.testing import HANG_GUARD_S
+from vs_sim.api import ProcessTimeoutError, Threads
+from vs_sim.api.testing import HANG_GUARD_S, FakePipedProcessLauncher, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_sandbox.api.skypilot import RemoteJobInfo
-    from vs_sim.api import Connection, Listener
+    from vs_sim.api import Condition, Connection, Event, Listener, Lock, Worker
 
 
 def _resources() -> ResolvedSkyPilotResources:
@@ -133,6 +137,8 @@ class FakeRunner(SkyPilotJobRunner):
         del resources, timeout, log_tail
         assert stdout_sink is not None
         assert stderr_sink is not None
+        assert isinstance(stdout_sink, CancellableOutputSink)
+        assert isinstance(stderr_sink, CancellableOutputSink)
         assert job_started is not None
         self.workdirs.append(workdir)
         self.commands.append(tuple(command))
@@ -181,10 +187,222 @@ class FakeRunner(SkyPilotJobRunner):
         self.release_names.append(cluster_name)
 
 
+class _RecordingThreads:
+    def __init__(self) -> None:
+        self._threads = SimThreads()
+        self.workers: list[Worker] = []
+
+    def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
+        worker = self._threads.spawn(target, name=name, daemon=daemon)
+        self.workers.append(worker)
+        return worker
+
+    def lock(self) -> Lock:
+        return self._threads.lock()
+
+    def rlock(self) -> Lock:
+        return self._threads.rlock()
+
+    def condition(self, lock: Lock | None = None) -> Condition:
+        return self._threads.condition(lock)
+
+    def event(self) -> Event:
+        return self._threads.event()
+
+    def sleep(self, seconds: float) -> None:
+        self._threads.sleep(seconds)
+
+    def now(self) -> float:
+        return self._threads.now()
+
+    def run[T](self, main: Callable[[], T]) -> T:
+        return self._threads.run(main)
+
+
+class _BlockedBridgeConnection:
+    """A request whose output transport remains blocked until the server closes it."""
+
+    def __init__(self, request: bytes, threads: Threads) -> None:
+        self._request = bytearray(request)
+        self.send_started = threads.event()
+        self.closed = threads.event()
+
+    def send(self, data: bytes) -> None:
+        del data
+        self.send_started.set()
+        if not self.closed.wait(timeout=1):
+            raise AssertionError
+        raise BrokenPipeError
+
+    def recv(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        del timeout
+        if self.closed.is_set():
+            raise OSError
+        chunk = bytes(self._request[:max_bytes])
+        del self._request[:max_bytes]
+        return chunk
+
+    def peer_closed(self) -> bool:
+        return self.closed.is_set()
+
+    def close(self) -> None:
+        self.closed.set()
+
+
+class _SingleConnectionListener:
+    def __init__(self, connection: _BlockedBridgeConnection, threads: Threads) -> None:
+        self._connection = connection
+        self._closed = threads.event()
+        self._accepted = False
+
+    def accept(self, timeout: float | None = None) -> Connection:
+        del timeout
+        if not self._accepted:
+            self._accepted = True
+            return self._connection
+        if not self._closed.wait(timeout=1):
+            raise AssertionError
+        raise OSError
+
+    def close(self) -> None:
+        self._closed.set()
+
+
+class _SingleConnectionNetwork:
+    def __init__(self, connection: _BlockedBridgeConnection, threads: Threads) -> None:
+        self._listener = _SingleConnectionListener(connection, threads)
+
+    def listen(self, address: str) -> Listener:
+        del address
+        return self._listener
+
+    def connect(self, address: str, timeout: float | None = None) -> Connection:
+        del address, timeout
+        raise AssertionError
+
+
+class _TimeoutAfterBridgeWriteProcess:
+    def __init__(self, connection: _BlockedBridgeConnection) -> None:
+        self._connection = connection
+        self.stdout = StringIO("output\n")
+        self.stderr = StringIO()
+        self.waits = 0
+        self.group_kills = 0
+
+    def wait(self, timeout: float | None) -> int:
+        self.waits += 1
+        if self.waits == 1:
+            if not self._connection.send_started.wait(timeout=1):
+                raise AssertionError
+            assert timeout is not None
+            raise ProcessTimeoutError(("sky",), timeout)
+        return -9
+
+    def kill_group(self) -> None:
+        self.group_kills += 1
+
+    def cancel_output(self) -> None:
+        pass
+
+
+class _BlockingBridgeRunner(FakeRunner):
+    def __init__(
+        self,
+        process: _TimeoutAfterBridgeWriteProcess,
+        threads: _RecordingThreads,
+    ) -> None:
+        super().__init__()
+        self.process = process
+        self.threads = threads
+        self.finished = threads.event()
+        self._command = SubprocessCommandRunner(
+            threads,
+            processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+            cleanup_timeout=1,
+        )
+
+    def run(  # noqa: PLR0913  # lint-waiver: LW-010052 [PLR0913]; this integration fake preserves the runner callback surface while driving the real subprocess/bridge cancellation boundary.
+        self,
+        cluster_name: str,
+        resources: ResolvedSkyPilotResources,
+        *,
+        workdir: Path,
+        command: Sequence[str],
+        timeout: float | None = None,
+        stdout_sink: Callable[[str], None] | None = None,
+        stderr_sink: Callable[[str], None] | None = None,
+        job_started: Callable[[int], None] | None = None,
+        job_name: str | None = None,
+        existing_job_id: int | None = None,
+        log_tail: int = 0,
+    ) -> JobResult:
+        del cluster_name, resources, workdir, command, timeout, job_name, existing_job_id, log_tail
+        assert job_started is not None
+        job_started(9)
+        try:
+            self._command.run(
+                ("sky", "logs"),
+                timeout=0,
+                stdout_sink=stdout_sink,
+                stderr_sink=stderr_sink,
+            )
+        finally:
+            self.finished.set()
+        raise AssertionError
+
+
 def _namespace(tmp_path: Path) -> StateNamespace:
     root = tmp_path / ".vibesys" / "state" / "skypilot"
     root.mkdir(parents=True, exist_ok=True)
     return StateNamespace(project_root=tmp_path, root=root, portable=False)
+
+
+def test_timeout_cancels_blocked_bridge_transport_and_releases_subprocess_workers(
+    tmp_path: Path,
+) -> None:
+    threads = _RecordingThreads()
+    request = encode_message(EvaluationRequest(kind="accuracy", invocation_id="a" * 32))
+    connection = _BlockedBridgeConnection(request, threads)
+    process = _TimeoutAfterBridgeWriteProcess(connection)
+    runner = _BlockingBridgeRunner(process, threads)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "candidate.py").write_text("candidate")
+    bridge = SkyPilotBridge(
+        runner=runner,
+        cluster_name="lease",
+        resources=_resources(),
+        workspace=workspace,
+        evaluator_package_root=None,
+        hidden_paths=(),
+        commands={"accuracy": ("true",)},
+        benchmark_output_argument=None,
+        state_namespace=_namespace(tmp_path),
+        socket_path=tmp_path / "bridge.sock",
+        log=lambda _: None,
+        network=_SingleConnectionNetwork(connection, threads),
+        threads=threads,
+    )
+
+    def exercise() -> None:
+        try:
+            bridge.start()
+            if not runner.finished.wait(timeout=1):
+                raise AssertionError
+        finally:
+            connection.close()
+            bridge.close()
+
+    threads.run(exercise)
+
+    assert connection.send_started.is_set()
+    assert connection.closed.is_set()
+    assert process.group_kills == 1
+    assert process.stdout.closed
+    assert process.stderr.closed
+    assert all(
+        not worker.is_alive() for worker in threads.workers if worker.name.startswith("sky-")
+    )
 
 
 def test_decoded_log_spool_resumes_from_durable_character_offset(tmp_path: Path) -> None:
