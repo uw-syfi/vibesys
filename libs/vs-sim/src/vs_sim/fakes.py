@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from vs_sim.gate import arrival
 from vs_sim.processes import (
     ForegroundChild,
+    MergedOutputProcess,
     PipedProcess,
     ProcessOutcome,
     ProcessSpec,
@@ -247,6 +248,28 @@ class FakePipedProcessLauncher:
     def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> PipedProcess:
         """Record the normalized start request and return its scripted process."""
         request = (tuple(argv), cwd)
+        self.started.append(request)
+        return self.factory(*request)
+
+
+@dataclass
+class FakeMergedOutputProcessLauncher:
+    """Record merged-output starts and create each process through a Fake factory."""
+
+    factory: Callable[[tuple[str, ...], Path | str | None, Mapping[str, str]], MergedOutputProcess]
+    started: list[tuple[tuple[str, ...], Path | str | None, Mapping[str, str]]] = field(
+        default_factory=list
+    )
+
+    def start(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path | str | None,
+        env: Mapping[str, str],
+    ) -> MergedOutputProcess:
+        """Record a normalized start request and return its scripted process."""
+        request = (tuple(argv), cwd, dict(env))
         self.started.append(request)
         return self.factory(*request)
 

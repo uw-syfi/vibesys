@@ -12,18 +12,22 @@ Cancelling a gate cancels its Slurm job.
 
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
-import threading
 from typing import TYPE_CHECKING
+
+from vs_sim.api import (
+    MergedOutputProcess,
+    MergedOutputProcessLauncher,
+    OsThreads,
+    SubprocessMergedOutputProcessLauncher,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
     from vs_sandbox.host_command_broker import GateKind
-    from vs_sim.api import Event
+    from vs_sim.api import Event, Threads
 
 #: The program that runs one planned gate against a Slurm cluster.
 DEFAULT_WRAPPER = (sys.executable, "-m", "vs_sandbox.slurm_command")
@@ -47,11 +51,15 @@ class SlurmCommandGateRunner:
         *,
         env: Mapping[str, str],
         wrapper: Sequence[str] = DEFAULT_WRAPPER,
+        processes: MergedOutputProcessLauncher | None = None,
+        threads: Threads | None = None,
     ) -> None:
         """Bind the evaluation plan, the host environment, and the wrapper program."""
         self._plan_path = plan_path
         self._env = dict(env)
         self._wrapper = tuple(wrapper)
+        self._processes = processes or SubprocessMergedOutputProcessLauncher()
+        self._threads = threads or OsThreads()
 
     def run(
         self,
@@ -64,51 +72,37 @@ class SlurmCommandGateRunner:
     ) -> int:
         """Run the gate from *cwd*; setting *cancel* sends the wrapper ``SIGTERM``."""
         argv = (*self._wrapper, "--plan", str(self._plan_path), kind.value, *arguments)
-        process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-610010 [S603]; run the fixed wrapper argv with validated gate arguments, without a shell.
-            # > The argv is the wrapper this module names plus arguments the broker
-            # > validated against the plan; a shell would only add quoting risk.
+        process = self._processes.start(
             argv,
             cwd=cwd,
             env=self._env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            # Keep terminal signals aimed at the caller away from the wrapper,
-            # which cancels its job when this runner asks it to.
-            process_group=0,
         )
-        finished = threading.Event()
-        watcher = threading.Thread(
-            target=_stop_when_asked,
-            args=(process, cancel, finished),
+        finished = self._threads.event()
+        watcher = self._threads.spawn(
+            lambda: _stop_when_asked(process, cancel, finished),
             name="vibesys-gate-cancel",
             daemon=True,
         )
-        watcher.start()
         try:
-            stdout = process.stdout
-            if stdout is not None:
-                while chunk := os.read(stdout.fileno(), _READ_BYTES):
-                    write(chunk)
+            while chunk := process.read(_READ_BYTES):
+                write(chunk)
             return process.wait()
         finally:
             finished.set()
             watcher.join()
 
 
-def _stop_when_asked(
-    process: subprocess.Popen[bytes], cancel: Event, finished: threading.Event
-) -> None:
+def _stop_when_asked(process: MergedOutputProcess, cancel: Event, finished: Event) -> None:
     while not finished.is_set():
         if cancel.wait(0.2):
             break
     else:
         return
-    process.terminate()
-    try:
-        process.wait(_CANCEL_GRACE_SECONDS)
-    except subprocess.TimeoutExpired:
-        process.kill()
+    if finished.is_set():
+        return
+    process.terminate_group()
+    if not finished.wait(_CANCEL_GRACE_SECONDS):
+        process.kill_group()
 
 
 __all__ = ["DEFAULT_WRAPPER", "SlurmCommandGateRunner"]

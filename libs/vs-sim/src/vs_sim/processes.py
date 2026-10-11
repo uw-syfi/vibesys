@@ -9,12 +9,14 @@ import os
 import selectors
 import signal
 import subprocess
+import threading
+from collections.abc import Callable
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
     from typing import IO
 
@@ -22,6 +24,7 @@ if TYPE_CHECKING:
 # Preserve the established stdlib exception type while keeping the concrete
 # subprocess dependency behind the public process boundary.
 ProcessTimeoutError = subprocess.TimeoutExpired
+type PopenFactory = Callable[..., subprocess.Popen[bytes]]
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,40 @@ class ProcessLauncher(Protocol):
 
     async def start(self, spec: ProcessSpec) -> RunningProcess:
         """Start ``spec``; raises ``OSError`` when the program cannot be started."""
+        ...
+
+
+class MergedOutputProcess(Protocol):
+    """A process-group leader whose stdout and stderr share one binary pipe."""
+
+    def read(self, max_bytes: int) -> bytes:
+        """Read at most *max_bytes* from the merged output, or empty bytes at EOF."""
+        ...
+
+    def wait(self) -> int:
+        """Wait for the group leader and return its ``subprocess`` status."""
+        ...
+
+    def terminate_group(self) -> None:
+        """Send SIGTERM to every process remaining in the owned group."""
+        ...
+
+    def kill_group(self) -> None:
+        """Send SIGKILL to every process remaining in the owned group."""
+        ...
+
+
+class MergedOutputProcessLauncher(Protocol):
+    """Start merged-binary-output commands as leaders of owned POSIX process groups."""
+
+    def start(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path | str | None,
+        env: Mapping[str, str],
+    ) -> MergedOutputProcess:
+        """Start *argv* with no input and one merged binary output pipe."""
         ...
 
 
@@ -267,10 +304,89 @@ class _SubprocessGroup:
         return self._process.wait(timeout=timeout)
 
     def kill_group(self) -> None:
+        _signal_process_group(self._process.pid, signal.SIGKILL)
+
+
+def _signal_process_group(pid: int, number: signal.Signals) -> None:
+    """Signal a group that may already have finished between policy and delivery."""
+    try:
+        os.killpg(pid, number)
+    except ProcessLookupError:
+        return
+
+
+class _SubprocessMergedOutputProcess:
+    """The real merged-output process-group handle."""
+
+    def __init__(self, process: subprocess.Popen[bytes]) -> None:
+        self._process = process
+        self._reap_lock = threading.Lock()
+        self._returncode: int | None = None
+
+    def read(self, max_bytes: int) -> bytes:
+        stdout = self._process.stdout
+        if stdout is None:
+            message = "merged-output subprocess has no stdout stream"
+            raise RuntimeError(message)
+        return os.read(stdout.fileno(), max_bytes)
+
+    def wait(self) -> int:
+        with self._reap_lock:
+            if self._returncode is not None:
+                return self._returncode
+        self._wait_until_exited_without_reaping()
+        with self._reap_lock:
+            if self._returncode is None:
+                self._returncode = self._process.wait()
+            return self._returncode
+
+    def terminate_group(self) -> None:
+        self._signal_group(signal.SIGTERM)
+
+    def kill_group(self) -> None:
+        self._signal_group(signal.SIGKILL)
+
+    def _signal_group(self, number: signal.Signals) -> None:
+        with self._reap_lock:
+            if self._returncode is None:
+                _signal_process_group(self._process.pid, number)
+
+    def _wait_until_exited_without_reaping(self) -> None:
+        """Keep the leader PID reserved until reaping and group signals serialize."""
         try:
-            os.killpg(self._process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            return
+            os.waitid(os.P_PID, self._process.pid, os.WEXITED | os.WNOWAIT)
+        except ChildProcessError:
+            with self._reap_lock:
+                if self._returncode is not None:
+                    return
+            raise
+
+
+class SubprocessMergedOutputProcessLauncher:
+    """Launch real merged-output commands in process groups owned by the caller."""
+
+    def __init__(self, popen: PopenFactory | None = None) -> None:
+        """Use *popen* when supplied, preserving legacy process-factory injection."""
+        self._popen = popen or subprocess.Popen
+
+    def start(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path | str | None,
+        env: Mapping[str, str],
+    ) -> MergedOutputProcess:
+        """Start *argv* without a shell, isolated from the caller's terminal group."""
+        process = self._popen(
+            tuple(argv),
+            cwd=cwd,
+            env=dict(env),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            process_group=0,
+        )
+        return _SubprocessMergedOutputProcess(process)
 
 
 class _SubprocessPipedProcess:

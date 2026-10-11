@@ -9,24 +9,27 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import secrets
 import shlex
 import shutil
-import subprocess
-import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Protocol, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from vs_sim.api import SubprocessProbe
+from vs_sim.api import (
+    MergedOutputProcess,
+    MergedOutputProcessLauncher,
+    OsThreads,
+    SubprocessMergedOutputProcessLauncher,
+    SubprocessProbe,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
-    from vs_sim.api import CommandProbe, Event
+    from vs_sim.api import CommandProbe, Event, PopenFactory, Threads
 
 _UNLIMITED = "unlimited"
 _WINDOWS_TIMEOUT_SECONDS = 30
@@ -288,24 +291,33 @@ class AgentGpuLauncher:
 
     ``srun`` and ``scancel`` run through *shell_command*, the local transport's
     shell (a login-container wrapper may precede ``bash -c``), so the operator
-    names how to reach the Slurm binaries in one place. *popen* starts processes
-    and *probe* runs the scheduler report and ``scancel``; tests inject both to
-    drive the lifecycle with a fake shell.
+    names how to reach the Slurm binaries in one place. *processes* owns the
+    local process group and *probe* runs the scheduler report and ``scancel``;
+    tests inject both to drive the lifecycle without a cluster or OS process.
+    The legacy *popen* seam remains accepted and is adapted to *processes*.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-189701 [PLR0913]; preserve the published popen and probe parameters while exposing the process and thread interfaces needed for deterministic lifecycle tests.
+        # > Hiding popen in kwargs would silently weaken the constructor contract;
+        # > bundling independent process and thread effects would couple their Fakes.
         self,
         config: AgentGpuConfig,
         shell_command: Sequence[str],
         *,
-        popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+        popen: PopenFactory | None = None,
         probe: CommandProbe | None = None,
+        processes: MergedOutputProcessLauncher | None = None,
+        threads: Threads | None = None,
     ) -> None:
         """Bind the operator configuration and the process boundary."""
         self._config = config
         self._shell = tuple(shell_command)
-        self._popen = popen
         self._probe: CommandProbe = probe or SubprocessProbe()
+        if popen is not None and processes is not None:
+            message = "popen and processes are alternative process-launcher seams"
+            raise ValueError(message)
+        self._processes = processes or SubprocessMergedOutputProcessLauncher(popen)
+        self._threads = threads or OsThreads()
 
     def run(
         self,
@@ -330,30 +342,20 @@ class AgentGpuLauncher:
             f"[vibesys-gpu] srun partition={partition} gpus={request.gpus} "
             f"time={request.time_minutes}m job-name={job_name}\n".encode()
         )
-        process = self._popen(
+        process = self._processes.start(
             (*self._shell, shlex.join(argv)),
             cwd=command.cwd,
             env=dict(command.env),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            # Keep terminal signals aimed at the caller away from srun, whose
-            # job this launcher cancels explicitly.
-            process_group=0,
         )
-        finished = threading.Event()
-        watcher = threading.Thread(
-            target=self._cancel_when_asked,
-            args=(process, job_name, cancel, finished),
+        finished = self._threads.event()
+        watcher = self._threads.spawn(
+            lambda: self._cancel_when_asked(process, job_name, cancel, finished),
             name="vibesys-gpu-cancel",
             daemon=True,
         )
-        watcher.start()
         try:
-            stdout = process.stdout
-            if stdout is not None:
-                while chunk := os.read(stdout.fileno(), _READ_BYTES):
-                    write(chunk)
+            while chunk := process.read(_READ_BYTES):
+                write(chunk)
             return process.wait()
         finally:
             finished.set()
@@ -361,22 +363,24 @@ class AgentGpuLauncher:
 
     def _cancel_when_asked(
         self,
-        process: subprocess.Popen[bytes],
+        process: MergedOutputProcess,
         job_name: str,
         cancel: Event,
-        finished: threading.Event,
+        finished: Event,
     ) -> None:
         while not finished.is_set():
             if cancel.wait(0.2):
                 break
         else:
             return
+        if finished.is_set():
+            return
         self.cancel(job_name)
-        process.terminate()
-        try:
-            process.wait(_CANCEL_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        if finished.is_set():
+            return
+        process.terminate_group()
+        if not finished.wait(_CANCEL_GRACE_SECONDS):
+            process.kill_group()
 
     def cancel(self, job_name: str) -> None:
         """Cancel this user's job named *job_name*, pending or running."""
