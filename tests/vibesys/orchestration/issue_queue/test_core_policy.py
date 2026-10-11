@@ -109,4 +109,4 @@ def test_a_non_positive_budget_is_refused_naming_the_option(field: str) -> None:
     values = {"max_rounds": 1, "max_attempts_per_issue": 1, "max_issues_per_perf_eval": 1}
     values[field] = 0
     with pytest.raises(ValidationError, match=field):
-        IssueQueueOptions(**values)
+        IssueQueueOptions.model_validate(values)
