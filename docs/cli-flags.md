@@ -521,6 +521,11 @@ supported by this CLI.
 | `macos_cpu` | Instruments Time Profiler with a supported `/usr/bin/sample` fallback. |
 | `linux_cpu` | Linux `perf` profiler for native and mixed-language CPU workloads. |
 
+When `auto` selects a host-native profiler that fails its local capability
+preflight, VibeSys logs the diagnostic and continues with `none`. An explicit
+`macos_cpu` or `linux_cpu` request remains a configuration error when its
+preflight fails.
+
 `--modal --profiler nsys` is rejected by the CLI because Modal runs must use the
 torch profiler path.
 

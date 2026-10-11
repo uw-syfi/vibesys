@@ -39,7 +39,7 @@ if TYPE_CHECKING:
         RunStore,
     )
     from vibesys.api.contracts import EventSink
-    from vibesys.api.wiring import SessionAgents
+    from vibesys.api.wiring import ProfilerPreflight, SessionAgents
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSessionKey
     from vs_project.api import GitRepositoryFactory, Project, StateStoreFactory
     from vs_runtime.api.infrastructure import RunState, StopTimer
@@ -66,6 +66,8 @@ class LaunchSettings:
     """Replaces the Slurm transport's process boundary; ``None`` runs the configured programs."""
     state_stores: StateStoreFactory | None = None
     """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
+    profiler_preflight: ProfilerPreflight | None = None
+    """Checks native profiler availability; ``None`` uses the host implementation."""
 
 
 def create_session(
@@ -101,6 +103,7 @@ def create_session(
         implementations=SessionImplementations(
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
+            profiler_preflight=selected.profiler_preflight,
             agents=agents,
             stop_timer=selected.stop_timer,
             timing=RunTiming.production() if selected.timing is None else selected.timing,

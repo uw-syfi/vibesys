@@ -47,7 +47,12 @@ from vibesys.run.evaluation_socket import evaluation_socket_mount
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
-from vibesys.run.profilers import resolve_run_profiler, validate_run_request
+from vibesys.run.profilers import (
+    ProfilerPreflight,
+    native_profiler_preflight,
+    resolve_run_profiler,
+    validate_run_request,
+)
 from vibesys.run.project import (
     ProjectProvisioningSpec,
     exact_resume_descriptor,
@@ -160,6 +165,7 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
     ) = None,
     state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    profiler_preflight: ProfilerPreflight | None = None,
     evaluation_tool: bool = False,
 ) -> "_PreparedRun":
     """Open one project context and register its resources with ``ownership``.
@@ -181,6 +187,7 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
         resume_policy=resume_policy,
         state_binding=state_binding,
         backend_factory=backend_factory,
+        profiler_preflight=profiler_preflight,
         evaluation_tool=evaluation_tool,
     )
 
@@ -197,6 +204,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     ) = None,
     state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    profiler_preflight: ProfilerPreflight | None = None,
     evaluation_tool: bool = False,
 ) -> "_PreparedRun":
     validate_run_request(request)
@@ -301,7 +309,14 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 validate_agent_role_catalog(recorded_run.execution.agent_roles, agent_specs)
 
         with boot_trace.span("profiler_preflight"):
-            resolved_profiler_kind = resolve_run_profiler(request, environment)
+            resolved_profiler_kind = resolve_run_profiler(
+                request,
+                environment,
+                native_preflight=(
+                    native_profiler_preflight if profiler_preflight is None else profiler_preflight
+                ),
+                log=buffered_logs.append,
+            )
 
         with boot_trace.span("backend_and_model"):
             backend_get = create_compute_backend if backend_factory is None else backend_factory

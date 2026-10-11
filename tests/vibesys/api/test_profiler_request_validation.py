@@ -2,27 +2,119 @@
 
 from __future__ import annotations
 
+import asyncio
+import shutil
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.docker_environment import host_container_backend
+from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.task_project import write_task
+from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from launch import LaunchSettings, create_session
 from vibesys.api import (
+    AgentOutputChunkData,
     ComputeBackend,
     Config,
     ConfigurationError,
     CoreEvent,
     OrchestrationDescriptor,
+    OrchestrationRegistry,
     ProfilerKind,
     ResumeRef,
     RunRequest,
 )
+from vibesys.api.profilers import ProfilerPreflightResult
 from vibesys.api.request import RunEnvironmentSpec, load_task
+from vs_project.api import Project
+from vs_project.api.testing import FakeGitRepositories
+from vs_runtime.api import OrchestrationPlugin, RunStatus
+from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from pydantic import BaseModel
+
+
+_PREFLIGHT_WARNING = (
+    "[profiler] Resolved profiler 'linux_cpu' is not usable on this host: "
+    "perf_event_paranoid_restrictive, perf_stat_unavailable. "
+    "--profiler auto is falling back to 'none'."
+)
+
+
+class _UnavailableNativeProfiler:
+    """Deterministic Fake for the application-wired native preflight effect."""
+
+    def __init__(self) -> None:
+        self.calls: list[ProfilerKind] = []
+
+    def __call__(self, kind: ProfilerKind) -> ProfilerPreflightResult:
+        self.calls.append(kind)
+        return ProfilerPreflightResult(
+            kind,
+            usable=False,
+            diagnostics=("perf_event_paranoid_restrictive", "perf_stat_unavailable"),
+        )
+
+
+class _RecordingBackendFactory:
+    """Fake backend factory that exposes whether resource assembly reached it."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, *_args: object, **_kwargs: object) -> FakeComputeBackend:
+        self.calls += 1
+        return FakeComputeBackend()
+
+
+async def _finish(_run: object, _options: BaseModel) -> RunStatus:
+    return RunStatus.SUCCEEDED
+
+
+def _profiler_registry() -> OrchestrationRegistry:
+    registry = OrchestrationRegistry()
+    registry.register_plugin(
+        OrchestrationPlugin(
+            id="profiler-preflight-test", agents=(), options=EmptyOptions, orchestrate=_finish
+        )
+    )
+    return registry
+
+
+def _native_profiler_request(root: Path, requested: ProfilerKind) -> RunRequest:
+    project = root / "native-project"
+    project.mkdir()
+    write_task(
+        project,
+        'version = 1\n[agent]\ndomain = "generic"\n'
+        '[accuracy]\ncommand = ["true"]\n'
+        '[benchmark]\ncommand = ["true"]\n'
+        '[profile]\ncommand = ["true"]\n',
+        objective="Improve the program.\n",
+    )
+    return RunRequest(
+        project_root=project,
+        run_id="profiler-preflight-run",
+        orchestration=OrchestrationDescriptor(
+            id="profiler-preflight-test", config_version=1, options={}
+        ),
+        config=Config.model_validate({"model": {"name": "gpt-test"}}),
+        input_bundle=load_task(project),
+        exp_name="profiler-preflight",
+        run_environment=fake_docker_environment(),
+        profiler_kind=requested,
+        backend=ComputeBackend.CPU,
+    )
+
+
+def _tree(root: Path) -> dict[str, bytes | None]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes() if path.is_file() else None
+        for path in root.rglob("*")
+    }
 
 
 def _request(root: Path, *, service: bool, profile: bool, requested: ProfilerKind) -> RunRequest:
@@ -131,3 +223,122 @@ def test_incompatible_profiler_is_a_typed_early_configuration_failure(
     assert error.value.diagnostic.code == "profiler_incompatible"
     assert error.value.diagnostic.stage == "profiler_validation"
     assert set(tmp_path.rglob("*")) == before
+
+
+def test_auto_native_preflight_failure_records_none_without_profiler_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    request = _native_profiler_request(tmp_path, ProfilerKind.AUTO)
+    preflight = _UnavailableNativeProfiler()
+    backend = _RecordingBackendFactory()
+    git = FakeGitRepositories()
+    events: list[CoreEvent] = []
+
+    def record(event: CoreEvent) -> None:
+        events.append(event)
+
+    session = create_session(
+        request,
+        sink=record,
+        settings=LaunchSettings(
+            registry=_profiler_registry(),
+            backend_factory=backend,
+            git_repository=git.repository,
+            profiler_preflight=preflight,
+        ),
+    )
+    session.start()
+
+    result = asyncio.run(session.await_result())
+
+    assert result.succeeded
+    assert preflight.calls == [ProfilerKind.LINUX_CPU]
+    assert backend.calls == 1
+    manifest = Project.open(request.project_root).state.load_run(request.resolved_run_id)
+    assert manifest.execution.requested_profiler == ProfilerKind.AUTO.value
+    assert manifest.execution.resolved_profiler == ProfilerKind.NONE.value
+    assert not (request.project_root / "linux_cpu_profiler").exists()
+    emitted_diagnostics = [
+        event.data.content.removesuffix("\n")
+        for event in events
+        if isinstance(event.data, AgentOutputChunkData) and event.data.channel == "diagnostic"
+    ]
+    assert emitted_diagnostics.count(_PREFLIGHT_WARNING) == 1
+    persisted_logs = "".join(
+        path.read_text(encoding="utf-8")
+        for path in Project.log_directory_for(request.project_root, request.resolved_run_id).glob(
+            "run-*.log"
+        )
+    )
+    assert persisted_logs.count(_PREFLIGHT_WARNING) == 1
+
+
+def test_auto_native_preflight_failure_through_default_launch_wiring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = _native_profiler_request(tmp_path, ProfilerKind.AUTO)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    git_executable = shutil.which("git")
+    assert git_executable is not None
+    executable_dir = tmp_path / "executables"
+    executable_dir.mkdir()
+    (executable_dir / "git").symlink_to(git_executable)
+    monkeypatch.setenv("PATH", str(executable_dir))
+
+    def discard(event: CoreEvent) -> None:
+        del event
+
+    session = create_session(
+        request,
+        sink=discard,
+        settings=LaunchSettings(
+            registry=_profiler_registry(),
+            backend_factory=_RecordingBackendFactory(),
+            git_repository=FakeGitRepositories().repository,
+        ),
+    )
+
+    result = asyncio.run(session.await_result())
+
+    assert result.succeeded
+    manifest = Project.open(request.project_root).state.load_run(request.resolved_run_id)
+    assert manifest.execution.resolved_profiler == ProfilerKind.NONE.value
+
+
+def test_explicit_native_preflight_failure_precedes_backend_and_project_effects(
+    tmp_path: Path,
+) -> None:
+    request = _native_profiler_request(tmp_path, ProfilerKind.LINUX_CPU)
+    preflight = _UnavailableNativeProfiler()
+    backend = _RecordingBackendFactory()
+    events: list[CoreEvent] = []
+
+    def record(event: CoreEvent) -> None:
+        events.append(event)
+
+    session = create_session(
+        request,
+        sink=record,
+        settings=LaunchSettings(
+            registry=_profiler_registry(),
+            backend_factory=backend,
+            profiler_preflight=preflight,
+        ),
+    )
+    session.start()
+    before = _tree(tmp_path)
+
+    with pytest.raises(ConfigurationError) as error:
+        asyncio.run(session.await_result())
+
+    assert error.value.diagnostic.code == "profiler_preflight_failed"
+    assert error.value.diagnostic.stage == "profiler_preflight"
+    assert preflight.calls == [ProfilerKind.LINUX_CPU]
+    assert backend.calls == 0
+    assert _tree(tmp_path) == before
+    assert all(
+        not isinstance(event.data, AgentOutputChunkData)
+        or _PREFLIGHT_WARNING not in event.data.content
+        for event in events
+    )

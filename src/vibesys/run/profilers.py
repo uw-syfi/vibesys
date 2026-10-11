@@ -1,5 +1,9 @@
 """Bind pure profiler policy to product configuration and host preflight."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Protocol
+
 from vibesys.composition import agent_spec_from_config
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration.profilers import (
@@ -10,7 +14,6 @@ from vibesys.orchestration.profilers import (
     profiler_definition,
     resolve_profiler_kind,
 )
-from vibesys.run.contracts import RunRequest
 from vs_agent.api import agent_supports_tool_servers
 from vs_project.api import Project, ProjectLayoutError
 from vs_runtime.api.infrastructure import (
@@ -21,6 +24,19 @@ from vs_runtime.api.infrastructure import (
     preflight_native_cpu_profiler,
     validate_run_environment_profile,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vibesys.run.contracts import RunRequest
+
+
+class ProfilerPreflight(Protocol):
+    """Check whether one resolved native profiler is usable on this host."""
+
+    def __call__(self, kind: ProfilerKind, /) -> ProfilerPreflightResult:
+        """Return structured capability evidence without opening run resources."""
+        ...
 
 
 def native_profiler_preflight(kind: ProfilerKind) -> ProfilerPreflightResult:
@@ -39,7 +55,12 @@ def native_profiler_preflight(kind: ProfilerKind) -> ProfilerPreflightResult:
 
 
 def resolve_run_profiler(
-    request: RunRequest, environment: RunEnvironment, *, preflight: bool = True
+    request: RunRequest,
+    environment: RunEnvironment,
+    *,
+    preflight: bool = True,
+    native_preflight: ProfilerPreflight = native_profiler_preflight,
+    log: Callable[[str], None] | None = None,
 ) -> ProfilerKind:
     """Resolve and validate the profiler selected for one product run."""
     config = request.config
@@ -63,6 +84,23 @@ def resolve_run_profiler(
                 message=f"--profiler: {exc}",
             )
         ) from exc
+    if preflight and environment.requires_local_profiler_preflight:
+        result = preflight_profiler_kind(resolved, native_preflight=native_preflight)
+        if not result.usable:
+            if request.profiler_kind is not ProfilerKind.AUTO:
+                raise ConfigurationError(
+                    ConfigurationDiagnostic(
+                        code="profiler_preflight_failed",
+                        stage="profiler_preflight",
+                        message=result.error_message(),
+                    )
+                )
+            if log is not None:
+                log(
+                    f"[profiler] {result.error_message()} "
+                    "--profiler auto is falling back to 'none'."
+                )
+            resolved = ProfilerKind.NONE
     if resolved in ACTIVE_PROFILER_KINDS:
         try:
             validate_run_environment_profile(environment, request.input_bundle.profile_command)
@@ -95,17 +133,6 @@ def resolve_run_profiler(
                     ),
                 )
             )
-    if not preflight or not environment.requires_local_profiler_preflight:
-        return resolved
-    result = preflight_profiler_kind(resolved, native_preflight=native_profiler_preflight)
-    if not result.usable:
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="profiler_preflight_failed",
-                stage="profiler_preflight",
-                message=result.error_message(),
-            )
-        )
     return resolved
 
 

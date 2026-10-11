@@ -377,7 +377,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp"]
+depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp"]
 
 [[modules]]
 path = "vibesys.run.evaluation_socket"
@@ -930,7 +930,7 @@ expose = ["MetricComparison", "MetricSpace", "Objective"]
 from = ["vibesys.api.metrics"]
 
 [[interfaces]]
-expose = ["CLI_PROFILER_CHOICES", "ProfilerKind", "coerce_profiler_kind"]
+expose = ["CLI_PROFILER_CHOICES", "ProfilerKind", "ProfilerPreflightResult", "coerce_profiler_kind"]
 from = ["vibesys.api.profilers"]
 
 [[interfaces]]
@@ -982,7 +982,7 @@ expose = ["create_evaluation", "trusted_evaluation_plan"]
 from = ["vibesys.run.evaluation"]
 
 [[interfaces]]
-expose = ["native_profiler_preflight", "resolve_run_profiler", "validate_run_request"]
+expose = ["ProfilerPreflight", "native_profiler_preflight", "resolve_run_profiler", "validate_run_request"]
 from = ["vibesys.run.profilers"]
 
 [[interfaces]]
@@ -1102,7 +1102,7 @@ expose = ["RunHandle", "Runs"]
 
 [[interfaces]]
 from = ["vibesys.api.wiring"]
-expose = ["AgentToolContext", "RunResources", "SessionAgents", "SessionImplementations", "create_session", "platform_skill_selection"]
+expose = ["AgentToolContext", "ProfilerPreflight", "RunResources", "SessionAgents", "SessionImplementations", "create_session", "platform_skill_selection"]
 
 [[interfaces]]
 from = ["vibesys.api.catalog"]
@@ -1118,11 +1118,11 @@ expose = ["InProcessRuns", "TaskRunHandle"]
 
 [[modules]]
 path = "vibesys.api.assembly"
-depends_on = ["vibesys.api.auxiliary", "vibesys.run", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
+depends_on = ["vibesys.api.auxiliary", "vibesys.run", "vibesys.run.profilers", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
 
 [[interfaces]]
 from = ["vibesys.api.assembly"]
-expose = ["SessionAgents", "SessionImplementations"]
+expose = ["ProfilerPreflight", "SessionAgents", "SessionImplementations"]
 
 [[modules]]
 path = "vs_evaluation.settlements"

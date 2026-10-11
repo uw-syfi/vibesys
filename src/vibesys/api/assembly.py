@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from vibesys.run.profilers import ProfilerPreflight
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
@@ -85,6 +87,8 @@ class SessionImplementations:
     """Replaces the Slurm transport's process boundary; ``None`` runs the configured programs."""
     state_stores: StateStoreFactory | None = None
     """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
+    profiler_preflight: ProfilerPreflight | None = None
+    """Checks native profiler availability; ``None`` uses the host implementation."""
 
 
-__all__ = ["SessionAgents", "SessionImplementations"]
+__all__ = ["ProfilerPreflight", "SessionAgents", "SessionImplementations"]
