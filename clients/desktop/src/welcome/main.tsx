@@ -3,10 +3,11 @@
  * bridge (`effects/`), subscribes React to them, and renders the presentational view (`ui/`) with
  * each store's state and dispatcher.
  */
+
+import type {Store} from '@vibesys/core-state';
 import {type JSX, StrictMode, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
 import type {WelcomeBridge} from '../welcome-protocol.js';
-import type {Store} from './effects/store.js';
 import {type WelcomeStores, welcomeStores} from './effects/stores.js';
 import {WelcomeView} from './ui/welcome-view.js';
 import './ui/welcome.css';

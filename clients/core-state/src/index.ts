@@ -63,3 +63,4 @@ export {
   type RoundState,
   roundAgentElapsedMs,
 } from './run-map.js';
+export {createStore, only, type Reducer, type Step, type Store} from './store.js';

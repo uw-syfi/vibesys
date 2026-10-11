@@ -58,6 +58,9 @@ importers:
       '@vibesys/backend-client':
         specifier: workspace:*
         version: link:../backend-client
+      '@vibesys/core-state':
+        specifier: workspace:*
+        version: link:../core-state
       react:
         specifier: 19.1.1
         version: 19.1.1

@@ -1,4 +1,5 @@
 import {describe, expect, test} from 'bun:test';
+import {Seeded} from '@vibesys/core-state/testing';
 import {
   exactResumeRunId,
   ResumeRequestError,
@@ -6,7 +7,6 @@ import {
   resumeArguments,
   resumeDecision,
 } from './resume-run.js';
-import {Seeded} from './testing/seeded.js';
 
 function generatedRunId(random: Seeded): string {
   const first = 'abcdefghijklmnopqrstuvwxyz0123456789';

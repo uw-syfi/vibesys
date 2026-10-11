@@ -7,6 +7,8 @@
  * asked again whenever the list changes, the window comes back from a run, a stop changes, or a stop
  * is ending (`tick`).
  */
+
+import {only, type Step} from '@vibesys/core-state';
 import type {HostKey} from '../../host-settings.js';
 import type {
   ChromeState,
@@ -14,7 +16,6 @@ import type {
   WelcomeRecentStatus,
   WelcomeResult,
 } from '../../welcome-protocol.js';
-import {only, type Step} from './step.js';
 
 interface HostStatuses {
   /** The status request awaited, or null. */
@@ -69,11 +70,8 @@ export function statusOf(state: RecentState, run: WelcomeRecent): WelcomeRecentS
 
 export function recentInvariants(state: RecentState): string[] {
   const problems: string[] = [];
-  for (const [host, statuses] of Object.entries(state.hosts)) {
+  for (const host of Object.keys(state.hosts)) {
     if (!state.runs.some(run => run.host === host)) problems.push(`statuses for unlisted ${host}`);
-    if (statuses.awaiting !== null && statuses.awaiting >= state.next) {
-      problems.push(`token ${statuses.awaiting} not issued`);
-    }
   }
   return problems;
 }

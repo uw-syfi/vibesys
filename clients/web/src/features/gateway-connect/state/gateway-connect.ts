@@ -5,12 +5,13 @@
  * (`connected`), which remembers it and goes live. A second submit while one exchange is pending is
  * ignored, so one capability is never exchanged twice.
  */
+
+import {only, type Step} from '@vibesys/core-state';
 import {
   type GatewayConnection,
   type GatewayTarget,
   targetFromCapability,
 } from '../../../entities/gateway.js';
-import {only, type Step} from '../../../shared/step.js';
 
 export type GatewayConnectState =
   | {
@@ -111,9 +112,8 @@ export function gatewayConnectStep(
 
 export function gatewayConnectInvariants(state: GatewayConnectState): string[] {
   const problems: string[] = [];
-  if (state.kind === 'connecting') {
-    if (state.token >= state.next) problems.push('token not issued');
-    if (state.target.bootstrapUrl === null) problems.push('connecting without a capability');
+  if (state.kind === 'connecting' && state.target.bootstrapUrl === null) {
+    problems.push('connecting without a capability');
   }
   if (state.kind !== 'editing' && 'error' in state) problems.push('error outside editing');
   return problems;

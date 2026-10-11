@@ -3,10 +3,11 @@
  * destination typed, with a keyboard selection that always names a listed row (or none when the
  * list is empty). Choosing a row asks the shell to show that host's panel (`show-host`).
  */
+
+import {only, type Step} from '@vibesys/core-state';
 import type {HostKey} from '../../host-settings.js';
 import {validAlias} from '../../host-settings.js';
 import type {WelcomeResult} from '../../welcome-protocol.js';
-import {only, type Step} from './step.js';
 
 /** One row of the host list: an alias from `~/.ssh/config`, or the destination the user typed. */
 export interface HostChoice {
@@ -91,14 +92,10 @@ export function pickerChoices(state: PickerState): HostChoice[] {
 export function pickerInvariants(state: PickerState): string[] {
   if (state.kind !== 'open') return [];
   const count = pickerChoices(state).length;
-  const problems: string[] = [];
   if (count === 0 ? state.selected !== -1 : state.selected < 0 || state.selected >= count) {
-    problems.push(`selection ${state.selected} of ${count} rows`);
+    return [`selection ${state.selected} of ${count} rows`];
   }
-  if (state.aliases.kind === 'loading' && state.aliases.token >= state.next) {
-    problems.push('token not issued');
-  }
-  return problems;
+  return [];
 }
 
 /** `state` with its selection clamped onto the rows it lists. */

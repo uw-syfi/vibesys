@@ -3,10 +3,18 @@
  * and the control channel report, and the single-flight recovery that a browser wake or an
  * explicit Reattach starts. Pure: the shell (`effects/session.ts`) performs each request through
  * the transport and dispatches the reply with the request's token.
+ *
+ * A loaded snapshot reaches the run fold only through this core: the reply carries it, and the core
+ * asks the shell to apply it only for an awaited token newer than the last snapshot applied, so a
+ * slow start-up snapshot cannot overwrite a newer refresh's.
  */
-import type {ControlChannelState, StreamConnectionState} from '@vibesys/backend-client';
+import type {
+  ControlChannelState,
+  RunSnapshot,
+  StreamConnectionState,
+} from '@vibesys/backend-client';
+import {only, type Step} from '@vibesys/core-state';
 import type {WebSessionState, WebSessionStatus} from '../../../entities/connection.js';
-import {only, type Step} from '../../../shared/step.js';
 
 /** How a recovery restarts the event stream: resume where it was, or a fresh bootstrap. */
 type StreamRecovery = 'retry' | 'rebootstrap';
@@ -37,19 +45,26 @@ export type SessionState =
       readonly view: WebSessionState;
       readonly startup: Startup;
       readonly recovery: Recovery;
+      /** The token of the newest snapshot applied to the run fold; 0 before the first. */
+      readonly applied: number;
       readonly next: number;
     }
   /** Closed: every later report and reply is dropped. */
   | {readonly kind: 'closed'; readonly view: WebSessionState; readonly next: number};
 
+/** A snapshot load's result: the snapshot, or why it could not be loaded. */
+export type SnapshotResult =
+  | {readonly ok: true; readonly snapshot: RunSnapshot}
+  | {readonly ok: false; readonly error: Error};
+
 /** A refresh redials the control channel, then reloads the snapshot. */
 type RefreshOutcome =
   | {readonly kind: 'redial-failed'; readonly error: Error}
-  | {readonly kind: 'snapshot'; readonly error: Error | null};
+  | {readonly kind: 'snapshot'; readonly result: SnapshotResult};
 
 export type SessionAction =
   | {readonly type: 'start'}
-  | {readonly type: 'snapshot-reply'; readonly token: number; readonly error: Error | null}
+  | {readonly type: 'snapshot-reply'; readonly token: number; readonly result: SnapshotResult}
   | {readonly type: 'subscribe-reply'; readonly token: number; readonly error: Error | null}
   | {readonly type: 'refresh-reply'; readonly token: number; readonly outcome: RefreshOutcome}
   /** The event stream changed state. */
@@ -69,6 +84,8 @@ export type SessionAction =
 
 export type SessionRequest =
   | {readonly kind: 'load-snapshot'; readonly token: number}
+  /** Fold this snapshot into the run. */
+  | {readonly kind: 'apply-snapshot'; readonly snapshot: RunSnapshot}
   | {readonly kind: 'subscribe'; readonly token: number}
   /** Redial the control channel (inert when healthy), then reload the snapshot. */
   | {readonly kind: 'refresh'; readonly token: number}
@@ -84,6 +101,7 @@ export const SESSION_INITIAL: SessionState = {
   view: {hasSnapshot: false, status: 'connecting', error: null, controls: {status: 'connected'}},
   startup: {kind: 'idle'},
   recovery: {kind: 'none'},
+  applied: 0,
   next: 1,
 };
 
@@ -93,8 +111,24 @@ function withStatus(state: Open, status: WebSessionStatus, error: Error | null):
   return {...state, view: {...state.view, status, error}};
 }
 
-function withSnapshot(state: Open): Open {
-  return state.view.hasSnapshot ? state : {...state, view: {...state.view, hasSnapshot: true}};
+/**
+ * The awaited snapshot reply `token` settled: on success the snapshot is applied unless a newer one
+ * already was; on failure the page goes stale.
+ */
+function snapshotSettled(
+  state: Open,
+  token: number,
+  result: SnapshotResult,
+): Step<Open, SessionRequest> {
+  if (!result.ok) return only(withStatus(state, 'stale', result.error));
+  const shown = state.view.hasSnapshot
+    ? state
+    : {...state, view: {...state.view, hasSnapshot: true}};
+  if (token <= state.applied) return only(shown);
+  return {
+    state: {...shown, applied: token},
+    requests: [{kind: 'apply-snapshot', snapshot: result.snapshot}],
+  };
 }
 
 function recover(state: Open, mode: StreamRecovery, reach: Reachability): SessionStep {
@@ -127,16 +161,15 @@ function startupStep(state: Open, action: StartupAction): SessionStep {
   }
   if (action.type === 'snapshot-reply') {
     if (startup.kind !== 'snapshot' || startup.token !== action.token) return only(state);
-    const loaded =
-      action.error === null ? withSnapshot(state) : withStatus(state, 'stale', action.error);
-    const token = state.next;
+    const loaded = snapshotSettled(state, action.token, action.result);
+    const token = loaded.state.next;
     return {
       state: {
-        ...loaded,
+        ...loaded.state,
         next: token + 1,
-        startup: {kind: 'subscribing', token, snapshotFailed: action.error !== null},
+        startup: {kind: 'subscribing', token, snapshotFailed: !action.result.ok},
       },
-      requests: [{kind: 'subscribe', token}],
+      requests: [...loaded.requests, {kind: 'subscribe', token}],
     };
   }
   if (startup.kind !== 'subscribing' || startup.token !== action.token) return only(state);
@@ -153,11 +186,13 @@ function refreshSettled(state: Open, token: number, outcome: RefreshOutcome): Se
   if (state.recovery.kind !== 'refreshing' || state.recovery.token !== token) return only(state);
   const settled: Open = {...state, recovery: {kind: 'none'}};
   if (outcome.kind === 'redial-failed') return only(withStatus(settled, 'stale', outcome.error));
-  const refreshed =
-    outcome.error === null ? withSnapshot(settled) : withStatus(settled, 'stale', outcome.error);
+  const refreshed = snapshotSettled(settled, token, outcome.result);
   // The flight is released in the same step that hands recovery to the stream, so an intent
   // arriving after it starts a new flight instead of being folded into a dispatched one.
-  return {state: refreshed, requests: [{kind: 'recover-stream', mode: state.recovery.intent}]};
+  return {
+    state: refreshed.state,
+    requests: [...refreshed.requests, {kind: 'recover-stream', mode: state.recovery.intent}],
+  };
 }
 
 type Report = Extract<SessionAction, {type: 'stream' | 'fault' | 'controls' | 'offline'}>;
@@ -215,29 +250,23 @@ export function sessionStep(state: SessionState, action: SessionAction): Session
   }
 }
 
-/** The token each slot awaits; closed awaits nothing. */
-function awaitedTokens(state: SessionState): {
-  readonly startup: number | null;
-  readonly recovery: number | null;
+/** The token each reply slot awaits, by the reply that answers it; closed awaits nothing. */
+export function sessionAwaited(state: SessionState): {
+  readonly snapshot: number | null;
+  readonly subscribe: number | null;
+  readonly refresh: number | null;
 } {
-  if (state.kind === 'closed') return {startup: null, recovery: null};
-  const startup =
-    state.startup.kind === 'snapshot' || state.startup.kind === 'subscribing'
-      ? state.startup.token
-      : null;
-  return {startup, recovery: state.recovery.kind === 'refreshing' ? state.recovery.token : null};
+  if (state.kind === 'closed') return {snapshot: null, subscribe: null, refresh: null};
+  const {startup, recovery} = state;
+  return {
+    snapshot: startup.kind === 'snapshot' ? startup.token : null,
+    subscribe: startup.kind === 'subscribing' ? startup.token : null,
+    refresh: recovery.kind === 'refreshing' ? recovery.token : null,
+  };
 }
 
 export function sessionInvariants(state: SessionState): string[] {
-  const problems: string[] = [];
   const {status, error} = state.view;
-  if ((status === 'stale') !== (error !== null)) {
-    problems.push(`status ${status} with error ${error === null ? 'null' : 'set'}`);
-  }
-  const {startup, recovery} = awaitedTokens(state);
-  for (const token of [startup, recovery]) {
-    if (token !== null && token >= state.next) problems.push(`token ${token} not issued`);
-  }
-  if (startup !== null && startup === recovery) problems.push('two slots await one token');
-  return problems;
+  if ((status === 'stale') === (error !== null)) return [];
+  return [`status ${status} with error ${error === null ? 'null' : 'set'}`];
 }

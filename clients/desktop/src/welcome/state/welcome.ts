@@ -6,10 +6,11 @@
  * The banner answers the latest action only: each action's request carries a token, and a reply
  * to an earlier action is dropped, so a slow attach cannot overwrite what a later resume says.
  */
+
+import {only, type Step} from '@vibesys/core-state';
 import type {HostKey} from '../../host-settings.js';
 import type {ResumeRunId} from '../../resume-run.js';
 import type {ChromeState, WelcomeResult} from '../../welcome-protocol.js';
-import {only, type Step} from './step.js';
 
 interface Banner {
   readonly text: string;
@@ -68,10 +69,6 @@ function progress(command: RunCommand): string | null {
     default:
       return null;
   }
-}
-
-export function welcomeInvariants(state: WelcomeState): string[] {
-  return state.awaiting !== null && state.awaiting >= state.next ? ['token not issued'] : [];
 }
 
 export function welcomeStep(

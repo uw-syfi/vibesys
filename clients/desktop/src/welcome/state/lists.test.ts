@@ -1,8 +1,8 @@
 import {describe, expect, test} from 'bun:test';
+import type {Seeded} from '@vibesys/core-state/testing';
+import {checkModel} from '@vibesys/core-state/testing';
 import {exactResumeRunId} from '../../resume-run.js';
 import {randomChrome} from '../../testing/fake-chrome.js';
-import {checkModel} from '../../testing/model.js';
-import type {Seeded} from '../../testing/seeded.js';
 import type {WelcomeRecent, WelcomeRecentStatus, WelcomeResult} from '../../welcome-protocol.js';
 import {
   PICKER_CLOSED,
@@ -20,13 +20,7 @@ import {
   recentStep,
   statusOf,
 } from './recent.js';
-import {
-  type RunCommand,
-  WELCOME_INITIAL,
-  type WelcomeAction,
-  welcomeInvariants,
-  welcomeStep,
-} from './welcome.js';
+import {type RunCommand, WELCOME_INITIAL, type WelcomeAction, welcomeStep} from './welcome.js';
 
 function run(host: string, instanceId: string): WelcomeRecent {
   return {
@@ -88,10 +82,12 @@ describe('recent', () => {
       step: recentStep,
       action: randomRecentAction,
       issues: request => request.token,
-      reply: (state, action) =>
-        action.type === 'status-reply'
-          ? {token: action.token, awaited: state.hosts[action.host]?.awaiting ?? null}
-          : null,
+      awaited: state =>
+        Object.fromEntries(
+          Object.entries(state.hosts).map(([host, statuses]) => [host, statuses.awaiting]),
+        ),
+      reply: action =>
+        action.type === 'status-reply' ? {slot: action.host, token: action.token} : null,
       invariants: recentInvariants,
       also: (before, action, after, requests) => {
         const hosts = requests.map(request => request.host);
@@ -127,16 +123,12 @@ describe('host picker', () => {
       step: pickerStep,
       action: randomPickerAction,
       issues: request => (request.kind === 'aliases' ? request.token : null),
-      reply: (state: PickerState, action) =>
-        action.type === 'aliases-reply'
-          ? {
-              token: action.token,
-              awaited:
-                state.kind === 'open' && state.aliases.kind === 'loading'
-                  ? state.aliases.token
-                  : null,
-            }
-          : null,
+      awaited: (state: PickerState) => ({
+        aliases:
+          state.kind === 'open' && state.aliases.kind === 'loading' ? state.aliases.token : null,
+      }),
+      reply: action =>
+        action.type === 'aliases-reply' ? {slot: 'aliases', token: action.token} : null,
       invariants: pickerInvariants,
       also: (before, _action, after, requests) => {
         for (const request of requests) {
@@ -173,9 +165,8 @@ describe('welcome banner', () => {
           },
         ]),
       issues: request => request.token,
-      reply: (state, action) =>
-        action.type === 'reply' ? {token: action.token, awaited: state.awaiting} : null,
-      invariants: welcomeInvariants,
+      awaited: state => ({banner: state.awaiting}),
+      reply: action => (action.type === 'reply' ? {slot: 'banner', token: action.token} : null),
     });
   });
 });
