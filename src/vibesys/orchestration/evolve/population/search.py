@@ -11,7 +11,7 @@ deterministic.
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 from vibesys.orchestration.evolve.population import openevolve_selector, vibesys_selector
 from vibesys.orchestration.evolve.population.models import (
@@ -25,52 +25,7 @@ from vibesys.orchestration.evolve.population.models import (
     RandomState,
 )
 
-if TYPE_CHECKING:
-    from vibesys.metrics import FrameworkBenchmarkOutcome
-    from vibesys.orchestration.profilers import ProfilerSummary
-
-__all__ = ["PopulationSearch", "candidate_fitness"]
-
-
-def candidate_fitness(
-    summary: ProfilerSummary | None,
-    benchmark: FrameworkBenchmarkOutcome | None,
-) -> tuple[float | None, str | None, dict[str, float]]:
-    """Resolve a candidate's recorded fitness: trusted benchmark over profiler.
-
-    A declared benchmark result contract owns the axes it measures; the
-    profiler's self-report owns the rest. The trusted row is merged *over*
-    the profiler's row rather than replacing it: the scalar contract reports
-    one number, so on a two-axis task replacing the row would leave every
-    individual incomplete on the second axis, and ``frontier`` (which keeps
-    only individuals carrying a value for every configured axis) would return
-    nothing.
-
-    The unit comes from the evaluator's own declaration when the result
-    protocol supplies one; ``objectives.toml`` names axes but does not say
-    what they are measured in, so the profiler's unit is the fallback.
-    """
-    metrics = dict(summary.metrics) if summary and summary.metrics else {}
-    if (
-        benchmark is not None
-        and benchmark.metric_name is not None
-        and benchmark.metric_value is not None
-    ):
-        trusted = (
-            dict(benchmark.row)
-            if benchmark.row
-            else {benchmark.metric_name: benchmark.metric_value}
-        )
-        return (
-            benchmark.metric_value,
-            benchmark.metric_unit or (summary.perf_unit if summary else None),
-            metrics | trusted,
-        )
-    return (
-        summary.perf_metric if summary else None,
-        summary.perf_unit if summary else None,
-        metrics,
-    )
+__all__ = ["PopulationSearch"]
 
 
 class PopulationSearch:
@@ -155,7 +110,7 @@ class PopulationSearch:
             commit=outcome.commit,
             perf_metric=outcome.perf_metric,
             perf_unit=outcome.perf_unit,
-            metrics=dict(outcome.metrics),
+            metrics=outcome.metrics,
             passed=outcome.passed,
             summary=outcome.summary,
             feedback=outcome.feedback or "",

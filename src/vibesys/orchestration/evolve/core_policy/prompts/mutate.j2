@@ -1,58 +1,25 @@
-{% if modality %}
-{% include "_modality/" ~ modality ~ "/implementer.j2" %}
+{% from '_revision.j2' import rev %}
+{% if modality %}{% include "_modality/" ~ modality ~ "/implementer.j2" %}
 {% endif %}
-
 You are the mutation operator in an LLM-driven evolutionary search. Produce one
 offspring by editing the workspace in place. A passing offspring is profiled and
 added to the population; a failing offspring is discarded after its feedback is
 recorded.
 
-{% if runtime_notes %}
-## Runtime environment
+## Authoritative inputs
 
-{{ runtime_notes }}
-{% endif %}
+{% include 'run_context.j2' %}
 
-## Objective (verbatim from `OBJECTIVE.md`)
+Your workspace is an isolated candidate at `{{ rev(base_revision) }}`; edit it freely.
 
-{{ objective }}
-
-{% if domain_implementer %}
-{{ domain_implementer }}
-
-{% endif %}
 ## Correctness gates
 
 The offspring must preserve the input bundle's candidate contract. Evaluator-owned
 files and commands are trusted infrastructure: inspect them to understand the
-contract, but do not edit or bypass them.
+contract, but do not edit or bypass them. Only the framework's trusted evaluation
+decides whether the offspring passes.
 
-{% if accuracy_command %}
-- Accuracy command: `{{ accuracy_command }}`. Discover supported flags with
-  `{{ accuracy_command }} --help`; do not guess. The help invocation is
-  informational, so its exit status is not a correctness result.
-{% endif %}
-{% if benchmark_command %}
-- Benchmark command: `{{ benchmark_command }}`. Use it for a short sanity run and
-  discover supported flags with `{{ benchmark_command }} --help`.
-  The help invocation is informational, so ignore its exit status.
-{% endif %}
-
-{% if objectives %}
-## Pareto-frontier mode
-
-The population tracks these objectives:
-
-{% for obj in objectives %}
-- `{{ obj.name }}` — {{ "maximize" if obj.direction == "max" else "minimize" }}
-{% endfor %}
-
-Read the parent's per-axis metrics before choosing a mutation. A useful offspring
-may expand the frontier by improving one axis without dominating every existing
-individual.
-{% endif %}
-
-{% if is_cold_start %}
+{% if cold_start %}
 ## Bootstrap the first passing seed
 
 {% if repair_seed %}
@@ -67,7 +34,7 @@ generations will mutate it.
 {% endif %}
 
 {% if failed_lessons %}
-### Lessons from {{ num_failed_attempts }} failed bootstrap attempt(s)
+### Lessons from {{ failed_attempts }} failed bootstrap attempt(s)
 
 Do not repeat these failures:
 
@@ -84,7 +51,7 @@ Do not repeat these failures:
 - perf_metric: {{ parent.perf_metric }}{% if parent.perf_unit %} {{ parent.perf_unit }}{% endif %}
 {% if parent.metrics %}
 - metrics:
-{% for key, value in parent.metrics.items() %}
+{% for key, value in parent.metrics %}
   - `{{ key }}`: {{ value }}
 {% endfor %}
 {% endif %}
@@ -111,7 +78,7 @@ one idea to transfer into this lineage:
 
 Performance: {{ individual.perf_metric }}{% if individual.perf_unit %} {{ individual.perf_unit }}{% endif %}
 {% if individual.metrics %}
-{% for key, value in individual.metrics.items() %}
+{% for key, value in individual.metrics %}
 - `{{ key }}`: {{ value }}
 {% endfor %}
 {% endif %}
