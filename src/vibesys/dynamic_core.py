@@ -195,6 +195,7 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         deadline_seconds=policy.deadline_at,
         prompt_variables={
             "objective": policy.facts.objective,
+            "environment_notes": context.facts.environment_notes,
             "agent_evaluation": True,
             "plan_example": planner_reply_example(),
         },

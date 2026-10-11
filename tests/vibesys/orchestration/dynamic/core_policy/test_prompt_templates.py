@@ -133,6 +133,7 @@ def _variables(context: BaseModel, *, agent_evaluation: bool = False) -> dict[st
     variables.pop("template")
     return {
         "objective": _OBJECTIVE,
+        "environment_notes": "",
         "agent_evaluation": agent_evaluation,
         "plan_example": planner_reply_example(),
         **variables,
