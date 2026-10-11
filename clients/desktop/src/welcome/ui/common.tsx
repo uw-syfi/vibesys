@@ -37,15 +37,24 @@ export function Sheet(props: {
   readonly children: ReactNode;
 }): JSX.Element {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  // `open` follows the store: run after every render, so a dialog the browser closed on its own
+  // (Chromium closes it on a second Esc without user activation in between, `cancel` or not)
+  // opens again while the store still holds the sheet open.
+  const sync = (): void => {
     const dialog = ref.current;
     if (dialog === null) return;
     if (props.open && !dialog.open) dialog.showModal();
     if (!props.open && dialog.open) dialog.close();
-  }, [props.open]);
+  };
+  useEffect(sync);
   const onCancel = (event: {preventDefault(): void}): void => {
     event.preventDefault();
     props.close();
+  };
+  const onClose = (): void => {
+    if (!props.open) return;
+    props.close();
+    sync();
   };
   const onMouseDown = (event: MouseEvent<HTMLDialogElement>): void => {
     if (event.target === ref.current) props.close();
@@ -56,6 +65,7 @@ export function Sheet(props: {
       className="sheet"
       aria-label={props.label}
       onCancel={onCancel}
+      onClose={onClose}
       onMouseDown={onMouseDown}
     >
       <div className="card">{props.open ? props.children : null}</div>

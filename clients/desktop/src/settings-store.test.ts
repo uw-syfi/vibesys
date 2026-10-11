@@ -2,11 +2,11 @@ import {describe, expect, test} from 'bun:test';
 import {mkdtempSync, readdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {withHostSettings} from './host-settings.js';
 import type {RecentFile} from './recent.js';
 import {remember} from './recent.js';
 import {SettingsStore} from './settings-store.js';
 import {Seeded} from './testing/seeded.js';
-import {withHostSettings} from './host-settings.js';
 
 function store() {
   const directory = mkdtempSync(join(tmpdir(), 'vsd-settings-'));
@@ -57,7 +57,9 @@ describe('SettingsStore', () => {
           hosts.push(alias);
           const id = {kind: 'ssh', alias} as const;
           updates.push(
-            settings.updateHosts(current => withHostSettings(current, id, {checkout: `/c${index}`})),
+            settings.updateHosts(current =>
+              withHostSettings(current, id, {checkout: `/c${index}`}),
+            ),
           );
         }
         if (random.bool()) updates.push(settings.recent().then(() => undefined));
