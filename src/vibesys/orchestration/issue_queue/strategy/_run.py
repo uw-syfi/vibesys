@@ -17,6 +17,7 @@ from vibesys.orchestration.issue_queue.strategy._state import (
     Verification,
 )
 from vs_core.api import (
+    AdoptionFailed,
     AdoptionResult,
     Measure,
     MeasurementResult,
@@ -123,6 +124,21 @@ def on_rejected(state: IssueQueueStrategyState, event: Rejected) -> IssueQueueSt
             "phase": candidates.RunPhase.STOPPING,
             "winner": None,
             "adoption_error": event.detail,
+        }
+    )
+
+
+def on_adoption_failed(
+    state: IssueQueueStrategyState, event: AdoptionFailed
+) -> IssueQueueStrategyState:
+    """Core gave up on the adoption for good: stop without a winner."""
+    if state.phase is not candidates.RunPhase.ADOPTING:
+        return state
+    return state.model_copy(
+        update={
+            "phase": candidates.RunPhase.STOPPING,
+            "winner": None,
+            "adoption_error": f"core gave up adopting it ({event.reason.value})",
         }
     )
 

@@ -785,6 +785,26 @@ def _build_plain_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-attempts-per-issue", type=int, default=3)
     parser.add_argument("--max-issues-per-perf-eval", type=int, default=3)
     parser.add_argument(
+        "--max-issues-per-round",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Issues worked in one round before the performance evaluation; the rest wait for "
+            "the next round (default: twice --max-issues-per-perf-eval plus two)."
+        ),
+    )
+    parser.add_argument(
+        "--turn-drop-backoff-seconds",
+        type=float,
+        default=5.0,
+        metavar="SECONDS",
+        help=(
+            "Wait this long before asking an agent again after the provider dropped its turn; "
+            "doubles with each further drop of the same turn (default: 5)."
+        ),
+    )
+    parser.add_argument(
         "--tracker-backend",
         choices=("local", "github"),
         default="local",
