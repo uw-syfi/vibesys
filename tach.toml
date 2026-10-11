@@ -97,7 +97,7 @@ depends_on = ["vibesys.api", "vs_prompts", "server", "server.controller", "serve
 
 [[modules]]
 path = "server.transport"
-depends_on = ["server.api", "server.registry", "vs_sim.api"]
+depends_on = ["server.api", "server.registry", "vs_async_ops.api", "vs_sim.api"]
 
 [[modules]]
 path = "server.controller"
