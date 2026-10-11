@@ -1,6 +1,6 @@
-import {type FormEvent, type JSX, useEffect, useState, useSyncExternalStore} from 'react';
+import {type FormEvent, type JSX, useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {connectionBanners, emptyTranscriptCopy, pageHeader} from './banners.js';
-import {bootstrapGateway, GatewaySessionStore, targetFromCapability} from './gateway-session.js';
+import {bootstrapGateway, targetFromCapability} from './gateway-session.js';
 import {DEFAULT_REPLAY_FIXTURE_URL, loadReplayFixture} from './replay.js';
 import type {WebSession} from './session.js';
 import {type CoreStateStore, createCoreStateStore} from './store.js';
@@ -173,10 +173,27 @@ function toError(reason: unknown): Error {
   return reason instanceof Error ? reason : new Error(String(reason));
 }
 
-export function createDemoApp(initialGatewayError: string | null = null): JSX.Element {
+export interface DemoAppOptions {
+  /** Report an authenticated target while its credential still exists in this document. */
+  readonly onGatewayConnected: (connection: GatewayConnection) => void;
+  readonly initialGatewayError?: string | null;
+}
+
+/** A capability-free gateway target paired with its freshly exchanged credential. */
+export interface GatewayConnection {
+  readonly gatewayUrl: string;
+  readonly cleanPageUrl: string;
+  readonly webSocketUrl: string;
+  readonly browserSession: string;
+}
+
+export function createDemoApp({
+  onGatewayConnected,
+  initialGatewayError = null,
+}: DemoAppOptions): JSX.Element {
   return (
     <>
-      <GatewayConnect initialError={initialGatewayError} />
+      <GatewayConnect initialError={initialGatewayError} onConnected={onGatewayConnected} />
       <App store={createCoreStateStore()} />
     </>
   );
@@ -186,28 +203,46 @@ export function createLiveApp(session: WebSession): JSX.Element {
   return <App store={session.store} session={session} />;
 }
 
-function GatewayConnect({initialError}: {readonly initialError: string | null}): JSX.Element {
+function GatewayConnect({
+  initialError,
+  onConnected,
+}: {
+  readonly initialError: string | null;
+  readonly onConnected: (connection: GatewayConnection) => void;
+}): JSX.Element {
   const [gatewayUrl, setGatewayUrl] = useState('');
   const [error, setError] = useState<string | null>(initialError);
   const [connecting, setConnecting] = useState(false);
+  const connectionPending = useRef(false);
 
   const connect = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
+    // State does not update until React renders again. The ref closes the gap
+    // where two submit events could exchange the same capability twice and
+    // hand two live sessions to the page owner.
+    if (connectionPending.current) return;
+    connectionPending.current = true;
     setConnecting(true);
     setError(null);
     void connectToGateway(gatewayUrl)
-      .catch(reason => setError(reason instanceof Error ? reason.message : String(reason)))
-      .finally(() => setConnecting(false));
+      .then(onConnected)
+      .catch(reason => {
+        connectionPending.current = false;
+        setConnecting(false);
+        setError(reason instanceof Error ? reason.message : String(reason));
+      });
   };
 
-  const connectToGateway = async (capabilityUrl: string): Promise<void> => {
+  const connectToGateway = async (capabilityUrl: string): Promise<GatewayConnection> => {
     const target = targetFromCapability(window.location.href, capabilityUrl);
     if (target.bootstrapUrl === null) throw new Error('The gateway URL has no capability token');
     const browserSession = await bootstrapGateway(target.bootstrapUrl);
-    const storedSessions = new GatewaySessionStore(() => window.sessionStorage);
-    storedSessions.rememberGateway(target.gatewayUrl);
-    storedSessions.rememberBrowserSession(target.gatewayUrl, browserSession);
-    window.location.assign(target.cleanPageUrl);
+    return {
+      gatewayUrl: target.gatewayUrl,
+      cleanPageUrl: target.cleanPageUrl,
+      webSocketUrl: target.webSocketUrl,
+      browserSession,
+    };
   };
 
   return (

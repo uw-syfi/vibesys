@@ -52,7 +52,7 @@ const repositoryRoot = fileURLToPath(new URL('../../..', import.meta.url));
  */
 const webAssets = join(repositoryRoot, 'clients/web/dist');
 
-export function startLiveGateway(): LiveGateway {
+export function startLiveGateway(browserOrigins: readonly string[] = []): LiveGateway {
   const runtimeDirectory = mkdtempSync(join(tmpdir(), 'vibesys-web-e2e-'));
   const replayLog = join(runtimeDirectory, 'run-events.jsonl');
   const instancePath = join(runtimeDirectory, 'web-gateway.json');
@@ -70,7 +70,7 @@ export function startLiveGateway(): LiveGateway {
     return result;
   };
   try {
-    execFileSync('uv', startArguments(instancePath, replayLog), {
+    execFileSync('uv', startArguments(instancePath, replayLog, browserOrigins), {
       cwd: repositoryRoot,
       encoding: 'utf8',
       env: {...process.env, BROWSER: 'true'},
@@ -117,8 +117,12 @@ function stopAndClean(instancePath: string, runtimeDirectory: string): GatewaySt
   return {status, errors};
 }
 
-function startArguments(instancePath: string, replayLog: string): string[] {
-  return [
+function startArguments(
+  instancePath: string,
+  replayLog: string,
+  browserOrigins: readonly string[],
+): string[] {
+  const arguments_ = [
     'run',
     'python',
     '-m',
@@ -134,6 +138,8 @@ function startArguments(instancePath: string, replayLog: string): string[] {
     '--web-reopen',
     replayLog,
   ];
+  for (const origin of browserOrigins) arguments_.push('--web-origin', origin);
+  return arguments_;
 }
 
 /**
@@ -153,8 +159,9 @@ function startArguments(instancePath: string, replayLog: string): string[] {
  */
 export async function withGateway(
   run: (gateway: {readonly url: string}) => Promise<void>,
+  browserOrigins: readonly string[] = [],
 ): Promise<void> {
-  const gateway = startLiveGateway();
+  const gateway = startLiveGateway(browserOrigins);
   try {
     await run(gateway);
   } finally {

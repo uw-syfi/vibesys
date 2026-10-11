@@ -74,3 +74,52 @@ test('uses the direct gateway cookie when session storage is denied', async ({pa
     expect(page.url()).not.toContain('token=');
   });
 });
+
+test('keeps a manually exchanged session when storage is denied across loopback sites', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'sessionStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('Denied by browser policy', 'SecurityError');
+      },
+    });
+  });
+
+  await withGateway(
+    async gateway => {
+      const sockets: string[] = [];
+      const capabilityRequests: string[] = [];
+      page.on('websocket', socket => sockets.push(socket.url()));
+      page.on('request', request => {
+        if (new URL(request.url()).searchParams.has('token')) {
+          capabilityRequests.push(request.url());
+        }
+      });
+      const capability = new URL(gateway.url);
+      capability.hostname = 'localhost';
+
+      await page.goto('/');
+      await page.getByLabel('Live gateway URL').fill(capability.toString());
+      await page.locator('form.gateway-connect').evaluate(form => {
+        form.dispatchEvent(new SubmitEvent('submit', {bubbles: true, cancelable: true}));
+        form.dispatchEvent(new SubmitEvent('submit', {bubbles: true, cancelable: true}));
+      });
+
+      await expect(page.getByLabel('Live gateway URL')).toHaveCount(0);
+      await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
+      await expect.poll(() => sockets.length).toBe(2);
+      expect(capabilityRequests).toEqual([capability.toString()]);
+      expect(page.url()).not.toContain('token=');
+      expect(page.url()).not.toContain('session=');
+      expect(
+        sockets.every(url => {
+          const socket = new URL(url);
+          return socket.hostname === 'localhost' && socket.searchParams.has('session');
+        }),
+      ).toBe(true);
+    },
+    ['http://127.0.0.1:5173'],
+  );
+});

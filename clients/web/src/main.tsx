@@ -1,6 +1,6 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {createDemoApp, createLiveApp} from './App.js';
+import {createDemoApp, createLiveApp, type GatewayConnection} from './App.js';
 import {markDesktopShell} from './desktop-shell.js';
 import {
   bootstrapGateway,
@@ -24,18 +24,18 @@ markDesktopShell(document.documentElement, window.vibesysDesktop);
 const root = document.querySelector('#root');
 if (root === null) throw new Error('Web viewer root is missing');
 const reactRoot = createRoot(root);
+const storedSessions = new GatewaySessionStore(() => window.sessionStorage);
 
 async function start(): Promise<void> {
-  const storedSessions = new GatewaySessionStore(() => window.sessionStorage);
   let target: GatewayTarget | null;
   try {
     target = resolveGatewayTarget(launchUrl, storedSessions.rememberedGateway());
   } catch (reason) {
-    reactRoot.render(<StrictMode>{createDemoApp(errorMessage(reason))}</StrictMode>);
+    renderDemo(errorMessage(reason));
     return;
   }
   if (target === null) {
-    reactRoot.render(<StrictMode>{createDemoApp()}</StrictMode>);
+    renderDemo();
     return;
   }
 
@@ -47,11 +47,33 @@ async function start(): Promise<void> {
       storedSessions.rememberBrowserSession(target.gatewayUrl, browserSession);
     }
   } catch (reason) {
-    reactRoot.render(<StrictMode>{createDemoApp(errorMessage(reason))}</StrictMode>);
+    renderDemo(errorMessage(reason));
     return;
   }
+  renderLive(target.webSocketUrl, browserSession);
+}
+
+function gatewayConnected(connection: GatewayConnection): void {
+  storedSessions.rememberGateway(connection.gatewayUrl);
+  storedSessions.rememberBrowserSession(connection.gatewayUrl, connection.browserSession);
+  // This document already owns the freshly exchanged credential. Replacing
+  // history removes the launch capability without throwing that credential
+  // away on a reload when storage is unavailable.
+  window.history.replaceState(null, '', connection.cleanPageUrl);
+  renderLive(connection.webSocketUrl, connection.browserSession);
+}
+
+function renderDemo(initialGatewayError: string | null = null): void {
+  reactRoot.render(
+    <StrictMode>
+      {createDemoApp({initialGatewayError, onGatewayConnected: gatewayConnected})}
+    </StrictMode>,
+  );
+}
+
+function renderLive(webSocketUrl: string, browserSession: string | null): void {
   const session = new WebSession({
-    webSocketUrl: webSocketUrlWithSession(target.webSocketUrl, browserSession),
+    webSocketUrl: webSocketUrlWithSession(webSocketUrl, browserSession),
   });
   reactRoot.render(<StrictMode>{createLiveApp(session)}</StrictMode>);
 }

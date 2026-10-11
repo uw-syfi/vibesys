@@ -1,4 +1,10 @@
-export {App, createDemoApp, createLiveApp} from './App.js';
+export {
+  App,
+  createDemoApp,
+  createLiveApp,
+  type DemoAppOptions,
+  type GatewayConnection,
+} from './App.js';
 export {loadReplayFixture} from './replay.js';
 export {
   type BrowserLifecycle,
