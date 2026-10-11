@@ -1,28 +1,32 @@
 /**
- * The run-control store: the window state the main process pushes (`chrome`, which the title
- * strip renders), the banner line, and the run actions that do not belong to one sheet:
- * attach, resume, stop, retry, and switching between the run and the welcome view.
+ * The run-control machine: the window state the main process pushes (`chrome`, which the title
+ * strip renders), the banner line, and the run commands that do not belong to one sheet: attach,
+ * resume, stop, retry, and switching between the run and the welcome view.
  *
- * The banner answers the latest action only: each action's request carries a token, and a reply
- * to an earlier action is dropped, so a slow attach cannot overwrite what a later resume says.
+ * Control state, so a machine (docs/contributing/clients-architecture.md, "State"): `commanding`
+ * invokes the latest command, and a new command re-enters it, which stops the earlier one. A stopped
+ * command never reports, so the banner answers the latest command only and a slow attach cannot
+ * overwrite what a later resume says. The command itself is the `command` operation the shell
+ * provides (`renderer/effects`).
  */
 
 import type {HostKey} from '@vibesys/hosts';
 import type {ChromeState, WelcomeResult} from '@vibesys/ipc';
+import {unprovided} from '@vibesys/machine';
 import type {ResumeRunId} from '@vibesys/runs';
-import {only, type Step} from '@vibesys/store';
+import {assign, type SnapshotFrom, setup} from 'xstate';
 
 interface Banner {
   readonly text: string;
   readonly error: boolean;
 }
 
+/** What the title strip and the banner render. */
 export interface WelcomeState {
-  readonly next: number;
   readonly chrome: ChromeState;
   readonly banner: Banner | null;
-  /** The action whose reply the banner awaits. */
-  readonly awaiting: number | null;
+  /** Whether a command is in flight. */
+  readonly busy: boolean;
 }
 
 /** A request to the main process that changes what runs or what the window shows. */
@@ -47,16 +51,18 @@ export type RunCommand =
 export type WelcomeAction =
   | {readonly type: 'chrome'; readonly chrome: ChromeState}
   | {readonly type: 'problem'; readonly text: string}
-  | {readonly type: 'command'; readonly command: RunCommand}
-  | {readonly type: 'reply'; readonly token: number; readonly result: WelcomeResult<null>};
+  | {readonly type: 'command'; readonly command: RunCommand};
 
-export type WelcomeRequest = {readonly token: number; readonly command: RunCommand};
+interface Context {
+  readonly view: WelcomeState;
+  /** The command `commanding` performs. */
+  readonly command: RunCommand | null;
+}
 
-export const WELCOME_INITIAL: WelcomeState = {
-  next: 1,
+const INITIAL_VIEW: WelcomeState = {
   chrome: {mode: 'welcome', attached: null, stops: {}},
   banner: null,
-  awaiting: null,
+  busy: false,
 };
 
 /** What the banner says while `command` runs; null for commands too quick to mention. */
@@ -71,32 +77,74 @@ function progress(command: RunCommand): string | null {
   }
 }
 
-export function welcomeStep(
-  state: WelcomeState,
-  action: WelcomeAction,
-): Step<WelcomeState, WelcomeRequest> {
-  switch (action.type) {
-    case 'chrome':
-      return only({...state, chrome: action.chrome});
-    case 'problem':
-      return only({...state, banner: {text: action.text, error: true}, awaiting: null});
-    case 'command': {
-      const token = state.next;
-      const text = progress(action.command);
-      return {
-        state: {
-          ...state,
-          next: token + 1,
-          awaiting: token,
-          banner: text === null ? state.banner : {text, error: false},
+function settledBanner(result: WelcomeResult<null>): Banner | null {
+  return result.ok ? null : {text: result.error, error: true};
+}
+
+export const runControlMachine = setup({
+  types: {context: {} as Context, events: {} as WelcomeAction},
+  actors: {command: unprovided<WelcomeResult<null>, RunCommand>('command')},
+}).createMachine({
+  id: 'runControl',
+  context: {view: INITIAL_VIEW, command: null},
+  initial: 'idle',
+  on: {
+    chrome: {
+      actions: assign(({context, event}) => ({view: {...context.view, chrome: event.chrome}})),
+    },
+    problem: {
+      target: '.idle',
+      actions: assign(({context, event}) => ({
+        view: {...context.view, banner: {text: event.text, error: true}},
+      })),
+    },
+    command: {
+      target: '.commanding',
+      reenter: true,
+      actions: assign(({context, event}) => {
+        const text = progress(event.command);
+        return {
+          command: event.command,
+          view: {
+            ...context.view,
+            banner: text === null ? context.view.banner : {text, error: false},
+          },
+        };
+      }),
+    },
+  },
+  states: {
+    idle: {
+      entry: assign(({context}) =>
+        context.view.busy ? {view: {...context.view, busy: false}, command: null} : {},
+      ),
+    },
+    commanding: {
+      entry: assign(({context}) =>
+        context.view.busy ? {} : {view: {...context.view, busy: true}},
+      ),
+      invoke: {
+        id: 'command',
+        src: 'command',
+        input: ({context}) => context.command as RunCommand,
+        onDone: {
+          target: 'idle',
+          actions: assign(({context, event}) => ({
+            view: {...context.view, banner: settledBanner(event.output)},
+          })),
         },
-        requests: [{token, command: action.command}],
-      };
-    }
-    case 'reply': {
-      if (state.awaiting !== action.token) return only(state);
-      const banner = action.result.ok ? null : {text: action.result.error, error: true};
-      return only({...state, awaiting: null, banner});
-    }
-  }
+        onError: {
+          target: 'idle',
+          actions: assign(({context, event}) => ({
+            view: {...context.view, banner: {text: String(event.error), error: true}},
+          })),
+        },
+      },
+    },
+  },
+});
+
+/** What the view renders of a run-control snapshot. */
+export function welcomeView(snapshot: SnapshotFrom<typeof runControlMachine>): WelcomeState {
+  return snapshot.context.view;
 }

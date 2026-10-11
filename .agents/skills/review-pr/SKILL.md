@@ -77,6 +77,9 @@ repository's contracts, architecture, tests, and affected callers.
      Flag lifecycle decisions in the shell or implementations, transitions
      without durable intent and replay, and implementations missing their
      interface's shared contract tests.
+   - For TypeScript clients, control state is an XState machine and data folds
+     are plain reducers; flag hand-rolled timers or cancellation in a feature
+     ([clients-architecture.md](../../../docs/contributing/clients-architecture.md), "State").
    - Then read across files, as an LLM reviewer, for problems linters cannot
      see: one concept duplicated in several files, shallow wrappers that add a
      layer without a new abstraction, callers reaching into a module's

@@ -119,6 +119,8 @@ describe('WebSession', () => {
     const failure = new Error('control reconnect failed');
     transport.reconnectFailures.push(failure);
     lifecycle.emit('online');
+    // The refresh is an operation of the session machine, so its outcome lands a step later.
+    await waitForSession(session, () => session.getState().status === 'stale');
     expect(session.getState()).toMatchObject({status: 'stale', error: failure});
 
     const recovered = transport.nextSubscription();

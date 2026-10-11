@@ -1,22 +1,21 @@
 /**
- * The live session's shell: it runs the connection core (`state/session.ts`) and the run fold
- * (`state/run.ts`) as stores, performs each request through the run connection the composition
- * injects, and turns the browser's lifecycle (visibility, network) into actions. Decisions live in
- * the core; this module only does what the core asks and reports what happened.
+ * The live session's shell: it runs the session machine (`session.ts`) and the run fold
+ * (`run.ts`), provides the machine's operations and actions through the run connection the
+ * composition injects, and turns the browser's lifecycle (visibility, network) into events.
+ * Decisions live in the machine; this module only does what the machine asks and reports what
+ * happened.
  */
-import {type CoreState, hasRunEnded, initialCoreState} from '@vibesys/run-state';
-import {createStore, type Store} from '@vibesys/store';
+import {hasRunEnded} from '@vibesys/run-state';
+import {type Actor, createActor, fromPromise} from 'xstate';
 import type {WebSessionState} from './connection.js';
 import type {BrowserLifecycle, RunConnection, TransportHooks} from './ports.js';
-import {type RunAction, runStep} from './run.js';
+import {createRunStore, type RunStore} from './run.js';
 import {
   type Reachability,
-  SESSION_INITIAL,
-  type SessionAction,
-  type SessionRequest,
-  type SessionState,
+  type RefreshOutcome,
+  type SessionEvent,
   type SnapshotResult,
-  sessionStep,
+  sessionMachine,
 } from './session.js';
 
 /** What the composition injects: the run's connection and the page's lifecycle. */
@@ -30,40 +29,48 @@ export interface WebSessionOptions {
   readonly lifecycle: BrowserLifecycle;
 }
 
-/** The run fold's store: what the run page renders as the run. */
-export type RunStore = Store<CoreState, RunAction>;
-
-export function createRunStore(): RunStore {
-  return createStore(runStep, initialCoreState(), () => undefined);
-}
-
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
 export class WebSession {
   readonly store: RunStore = createRunStore();
-  readonly #core: Store<SessionState, SessionAction>;
+  readonly #actor: Actor<typeof sessionMachine>;
   readonly #connection: RunConnection;
   readonly #lifecycle: BrowserLifecycle;
+  readonly #listeners = new Set<() => void>();
+  #view: WebSessionState;
   #started: Promise<void> | null = null;
   #startupSettled: () => void = () => undefined;
   #closed: Promise<void> | null = null;
 
   constructor({connect, lifecycle}: WebSessionOptions) {
-    this.#core = createStore(sessionStep, SESSION_INITIAL, request => this.#perform(request));
     this.#connection = connect({
-      onConnectionState: state => this.#core.dispatch({type: 'controls', state}),
+      onConnectionState: state => this.#send({type: 'controls', state}),
     });
     this.#lifecycle = lifecycle;
+    this.#actor = createActor(this.#provided());
+    this.#view = this.#actor.getSnapshot().context.view;
+    this.#actor.subscribe(snapshot => {
+      if (snapshot.status === 'done' || snapshot.matches({open: {startup: 'done'}})) {
+        this.#startupSettled();
+      }
+      if (snapshot.context.view === this.#view) return;
+      this.#view = snapshot.context.view;
+      for (const listener of this.#listeners) listener();
+    });
+    this.#actor.start();
     this.#lifecycle.addEventListener('visibilitychange', this.#wake);
     this.#lifecycle.addEventListener('online', this.#wake);
     this.#lifecycle.addEventListener('offline', this.#offline);
   }
 
-  getState = (): WebSessionState => this.#core.getState().view;
+  getState = (): WebSessionState => this.#view;
 
-  subscribe = (listener: () => void): (() => void) => this.#core.subscribe(listener);
+  subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  };
 
   /** Load the snapshot, then subscribe to the stream; settles once the first subscription does. */
   start(): Promise<void> {
@@ -71,24 +78,29 @@ export class WebSession {
       this.#started = new Promise(resolve => {
         this.#startupSettled = resolve;
       });
-      this.#core.dispatch({type: 'start'});
+      this.#send({type: 'start'});
     }
     return this.#started;
   }
 
   close(): Promise<void> {
-    if (this.#closed === null) this.#core.dispatch({type: 'close'});
+    if (this.#closed === null) this.#send({type: 'close'});
     return this.#closed ?? Promise.resolve();
   }
 
   /** Reload the run and restart the stream from a fresh bootstrap (the Reattach button). */
   reattach(): void {
-    this.#core.dispatch({type: 'reattach', reach: this.#reach(), runEnded: this.#runEnded()});
+    this.#send({type: 'reattach', reach: this.#reach(), runEnded: this.#runEnded()});
   }
 
   /** Redial the control channel now (the Reconnect button); the event stream is untouched. */
   reconnectControls(): void {
-    this.#core.dispatch({type: 'reconnect-controls'});
+    this.#send({type: 'reconnect-controls'});
+  }
+
+  /** Send to the machine while it runs; a closed session drops every later report. */
+  #send(event: SessionEvent): void {
+    if (this.#actor.getSnapshot().status === 'active') this.#actor.send(event);
   }
 
   #reach(): Reachability {
@@ -99,85 +111,74 @@ export class WebSession {
     return hasRunEnded(this.store.getState());
   }
 
-  #wake = (): void => this.#core.dispatch({type: 'wake', reach: this.#reach()});
+  #wake = (): void => this.#send({type: 'wake', reach: this.#reach()});
 
-  #offline = (): void => this.#core.dispatch({type: 'offline', runEnded: this.#runEnded()});
+  #offline = (): void => this.#send({type: 'offline', runEnded: this.#runEnded()});
 
-  #perform(request: SessionRequest): void {
-    const dispatch = this.#core.dispatch;
-    switch (request.kind) {
-      case 'load-snapshot': {
-        const {token} = request;
-        void this.#loadSnapshot().then(result => dispatch({type: 'snapshot-reply', token, result}));
-        return;
-      }
-      case 'apply-snapshot': {
-        this.store.dispatch({type: 'snapshot', snapshot: request.snapshot});
-        return;
-      }
-      case 'subscribe': {
-        const {token} = request;
-        void this.#connection
-          .subscribe({
-            cursor: () => this.store.getState().sequence,
-            shouldReconnect: () => !this.#runEnded(),
-            onBatch: (message, reconciliation) =>
-              this.store.dispatch({type: 'batch', message, reconciliation}),
-            onFault: error => dispatch({type: 'fault', error}),
-            onConnectionState: state => dispatch({type: 'stream', state}),
-          })
-          .then(
-            () => null,
-            (error: unknown) => toError(error),
-          )
-          .then(error => {
-            dispatch({type: 'subscribe-reply', token, error});
-            this.#startupSettled();
-          });
-        return;
-      }
-      case 'refresh': {
-        const {token} = request;
-        // A browser wake is stronger evidence than either reconnect timer: a background tab may
-        // have had both coalesced indefinitely. The redial is inert on a healthy or dialing
-        // channel, and otherwise dials before the snapshot request is queued.
-        try {
-          this.#connection.redialControls();
-        } catch (error) {
-          dispatch({
-            type: 'refresh-reply',
-            token,
-            outcome: {kind: 'redial-failed', error: toError(error)},
-          });
-          return;
-        }
-        void this.#loadSnapshot().then(result =>
-          dispatch({type: 'refresh-reply', token, outcome: {kind: 'snapshot', result}}),
-        );
-        return;
-      }
-      case 'recover-stream':
-        try {
-          if (request.mode === 'rebootstrap') this.#connection.rebootstrap();
-          else this.#connection.retry();
-        } catch (error) {
-          dispatch({type: 'fault', error: toError(error)});
-        }
-        return;
-      case 'redial-controls':
-        this.#connection.redialControls();
-        return;
-      case 'close':
-        this.#lifecycle.removeEventListener('visibilitychange', this.#wake);
-        this.#lifecycle.removeEventListener('online', this.#wake);
-        this.#lifecycle.removeEventListener('offline', this.#offline);
-        this.#closed = this.#connection.close();
-        this.#startupSettled();
-        return;
+  /** The machine with its operations and actions performed through the run connection. */
+  #provided() {
+    return sessionMachine.provide({
+      actors: {
+        loadSnapshot: fromPromise<SnapshotResult, void>(() => this.#loadSnapshot()),
+        subscribe: fromPromise<Error | null, void>(() => this.#subscribe()),
+        refresh: fromPromise<RefreshOutcome, void>(() => this.#refresh()),
+      },
+      actions: {
+        applySnapshot: (_, {snapshot}) => {
+          if (snapshot !== null) this.store.dispatch({type: 'snapshot', snapshot});
+        },
+        recoverStream: (_, {mode}) => {
+          try {
+            if (mode === 'rebootstrap') this.#connection.rebootstrap();
+            else this.#connection.retry();
+          } catch (error) {
+            // Sent to the machine's own mailbox: it is handled after the current step.
+            this.#send({type: 'fault', error: toError(error)});
+          }
+        },
+        redialControls: () => this.#connection.redialControls(),
+        closeShell: () => {
+          this.#lifecycle.removeEventListener('visibilitychange', this.#wake);
+          this.#lifecycle.removeEventListener('online', this.#wake);
+          this.#lifecycle.removeEventListener('offline', this.#offline);
+          this.#closed = this.#connection.close();
+        },
+      },
+    });
+  }
+
+  /** Subscribe to the run's event stream; resolves to why it failed, or null. */
+  async #subscribe(): Promise<Error | null> {
+    try {
+      await this.#connection.subscribe({
+        cursor: () => this.store.getState().sequence,
+        shouldReconnect: () => !this.#runEnded(),
+        onBatch: (message, reconciliation) =>
+          this.store.dispatch({type: 'batch', message, reconciliation}),
+        onFault: error => this.#send({type: 'fault', error}),
+        onConnectionState: state => this.#send({type: 'stream', state}),
+      });
+      return null;
+    } catch (error) {
+      return toError(error);
     }
   }
 
-  /** Load the snapshot; the core decides whether the run fold applies it. */
+  /**
+   * A browser wake is stronger evidence than either reconnect timer: a background tab may have had
+   * both coalesced indefinitely. The redial is inert on a healthy or dialing channel, and otherwise
+   * dials before the snapshot request is queued.
+   */
+  async #refresh(): Promise<RefreshOutcome> {
+    try {
+      this.#connection.redialControls();
+    } catch (error) {
+      return {kind: 'redial-failed', error: toError(error)};
+    }
+    return {kind: 'snapshot', result: await this.#loadSnapshot()};
+  }
+
+  /** Load the snapshot; the machine decides whether the run fold applies it. */
   async #loadSnapshot(): Promise<SnapshotResult> {
     try {
       return {ok: true, snapshot: await this.#connection.loadSnapshot()};

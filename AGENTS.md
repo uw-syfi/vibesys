@@ -32,6 +32,9 @@ Architecture:
   never branches on a concrete sandbox or backend name outside the wiring code.
   Backends emit semantic event data; formatting, colors, and layout belong to
   frontends.
+- TypeScript clients: control state is an XState machine, data folds are plain
+  reducers; see "State" in
+  [`docs/contributing/clients-architecture.md`](docs/contributing/clients-architecture.md).
 - Follow the package layout and placement rule in [architecture.md](docs/contributing/architecture.md).
 - Design stateful systems with a pure core and a thin shell. Follow
   [Functional core, interfaces and implementations](.agents/skills/software-design/references/functional-core.md)

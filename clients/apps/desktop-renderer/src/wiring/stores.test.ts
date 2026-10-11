@@ -149,6 +149,6 @@ describe('welcome stores', () => {
     await settle();
     expect(questions).toHaveLength(1);
     expect(bridge.asked).not.toContain('resume');
-    expect(stores.welcome.getState().awaiting).toBeNull();
+    expect(stores.welcome.getState().busy).toBe(false);
   });
 });

@@ -1,21 +1,25 @@
 /**
- * The live session's connection core: start-up (snapshot, then the event stream), what the stream
- * and the control channel report, and the single-flight recovery that a browser wake or an
- * explicit Reattach starts. Pure: the shell (`effects/session.ts`) performs each request through
- * the transport and dispatches the reply with the request's token.
+ * The live session's lifecycle as a machine: start-up (the snapshot, then the event stream), what
+ * the stream and the control channel report, and the single-flight recovery that a browser wake or
+ * an explicit Reattach starts. Control state, so a machine (docs/contributing/clients-architecture.md,
+ * "State"); the shell (`web-session.ts`) provides its operations and actions.
  *
- * A loaded snapshot reaches the run fold only through this core: the reply carries it, and the core
- * asks the shell to apply it only for an awaited token newer than the last snapshot applied, so a
- * slow start-up snapshot cannot overwrite a newer refresh's.
+ * Start-up and recovery are two parallel regions of `open`, and each flight is an invoked
+ * operation, so a reply can only come from the flight its region is in: leaving the region stops
+ * the operation, and a stopped operation never reports. One ordering fact the regions share
+ * remains: a snapshot is applied only when it was issued after the last one applied, so a slow
+ * start-up snapshot cannot overwrite a newer refresh's. Snapshot loads carry an issue sequence for
+ * that, which orders loads and is not a staleness token.
  */
 
 import type {RunSnapshot} from '@vibesys/contracts';
-import {only, type Step} from '@vibesys/store';
+import {unprovided} from '@vibesys/machine';
 import type {ControlChannelState, StreamConnectionState} from '@vibesys/transport';
+import {assign, type SnapshotFrom, setup} from 'xstate';
 import type {WebSessionState, WebSessionStatus} from './connection.js';
 
 /** How a recovery restarts the event stream: resume where it was, or a fresh bootstrap. */
-type StreamRecovery = 'retry' | 'rebootstrap';
+export type StreamRecovery = 'retry' | 'rebootstrap';
 
 /** Whether the page could reach anything now: a hidden tab or an offline browser waits. */
 export interface Reachability {
@@ -23,48 +27,18 @@ export interface Reachability {
   readonly online: boolean;
 }
 
-type Startup =
-  | {readonly kind: 'idle'}
-  | {readonly kind: 'snapshot'; readonly token: number}
-  | {readonly kind: 'subscribing'; readonly token: number; readonly snapshotFailed: boolean}
-  | {readonly kind: 'done'};
-
-/**
- * Recovery is single-flight, but its intent is monotone while that flight owns the control redial
- * and the snapshot: a lifecycle retry cannot weaken a fresh bootstrap the user asked for.
- */
-type Recovery =
-  | {readonly kind: 'none'}
-  | {readonly kind: 'refreshing'; readonly token: number; readonly intent: StreamRecovery};
-
-export type SessionState =
-  | {
-      readonly kind: 'open';
-      readonly view: WebSessionState;
-      readonly startup: Startup;
-      readonly recovery: Recovery;
-      /** The token of the newest snapshot applied to the run fold; 0 before the first. */
-      readonly applied: number;
-      readonly next: number;
-    }
-  /** Closed: every later report and reply is dropped. */
-  | {readonly kind: 'closed'; readonly view: WebSessionState; readonly next: number};
-
 /** A snapshot load's result: the snapshot, or why it could not be loaded. */
 export type SnapshotResult =
   | {readonly ok: true; readonly snapshot: RunSnapshot}
   | {readonly ok: false; readonly error: Error};
 
 /** A refresh redials the control channel, then reloads the snapshot. */
-type RefreshOutcome =
+export type RefreshOutcome =
   | {readonly kind: 'redial-failed'; readonly error: Error}
   | {readonly kind: 'snapshot'; readonly result: SnapshotResult};
 
-export type SessionAction =
+export type SessionEvent =
   | {readonly type: 'start'}
-  | {readonly type: 'snapshot-reply'; readonly token: number; readonly result: SnapshotResult}
-  | {readonly type: 'subscribe-reply'; readonly token: number; readonly error: Error | null}
-  | {readonly type: 'refresh-reply'; readonly token: number; readonly outcome: RefreshOutcome}
   /** The event stream changed state. */
   | {readonly type: 'stream'; readonly state: StreamConnectionState}
   /** The stream reported a fault in band (a protocol error), or could not be recovered. */
@@ -80,191 +54,257 @@ export type SessionAction =
   | {readonly type: 'reconnect-controls'}
   | {readonly type: 'close'};
 
-export type SessionRequest =
-  | {readonly kind: 'load-snapshot'; readonly token: number}
-  /** Fold this snapshot into the run. */
-  | {readonly kind: 'apply-snapshot'; readonly snapshot: RunSnapshot}
-  | {readonly kind: 'subscribe'; readonly token: number}
-  /** Redial the control channel (inert when healthy), then reload the snapshot. */
-  | {readonly kind: 'refresh'; readonly token: number}
-  | {readonly kind: 'recover-stream'; readonly mode: StreamRecovery}
-  | {readonly kind: 'redial-controls'}
-  | {readonly kind: 'close'};
+export interface SessionContext {
+  readonly view: WebSessionState;
+  /** The issue sequence of the latest snapshot load; `applied` is the newest one applied. */
+  readonly issued: number;
+  readonly applied: number;
+  /** The issue sequence of start-up's load and of the refresh in flight. */
+  readonly startupLoad: number;
+  readonly refreshLoad: number;
+  readonly snapshotFailed: boolean;
+  /** The refresh in flight's intent: monotone, so a retry cannot weaken a Reattach. */
+  readonly intent: StreamRecovery;
+}
 
-type Open = Extract<SessionState, {kind: 'open'}>;
-type SessionStep = Step<SessionState, SessionRequest>;
+interface Settled {
+  readonly load: number;
+  readonly result: SnapshotResult;
+}
 
-export const SESSION_INITIAL: SessionState = {
-  kind: 'open',
+const INITIAL_CONTEXT: SessionContext = {
   view: {hasSnapshot: false, status: 'connecting', error: null, controls: {status: 'connected'}},
-  startup: {kind: 'idle'},
-  recovery: {kind: 'none'},
+  issued: 0,
   applied: 0,
-  next: 1,
+  startupLoad: 0,
+  refreshLoad: 0,
+  snapshotFailed: false,
+  intent: 'retry',
 };
 
-/** The state with the stream's status (and its error) set; the same state when unchanged. */
-function withStatus(state: Open, status: WebSessionStatus, error: Error | null): Open {
-  if (state.view.status === status && state.view.error === error) return state;
-  return {...state, view: {...state.view, status, error}};
+/** The view with the stream's status (and its error) set; the same view when unchanged. */
+function withStatus(
+  context: SessionContext,
+  status: WebSessionStatus,
+  error: Error | null,
+): Partial<SessionContext> {
+  if (context.view.status === status && context.view.error === error) return {};
+  return {view: {...context.view, status, error}};
 }
 
-/**
- * The awaited snapshot reply `token` settled: on success the snapshot is applied unless a newer one
- * already was; on failure the page goes stale.
- */
-function snapshotSettled(
-  state: Open,
-  token: number,
-  result: SnapshotResult,
-): Step<Open, SessionRequest> {
-  if (!result.ok) return only(withStatus(state, 'stale', result.error));
-  const shown = state.view.hasSnapshot
-    ? state
-    : {...state, view: {...state.view, hasSnapshot: true}};
-  if (token <= state.applied) return only(shown);
-  return {
-    state: {...shown, applied: token},
-    requests: [{kind: 'apply-snapshot', snapshot: result.snapshot}],
-  };
+/** The snapshot to apply: a loaded one issued after the last one applied, else null. */
+function newer(context: SessionContext, {load, result}: Settled): {snapshot: RunSnapshot | null} {
+  return {snapshot: result.ok && load > context.applied ? result.snapshot : null};
 }
 
-function recover(state: Open, mode: StreamRecovery, reach: Reachability): SessionStep {
-  if (!reach.visible || !reach.online) return only(state);
-  if (state.recovery.kind === 'refreshing') {
-    if (mode === 'rebootstrap' && state.recovery.intent !== 'rebootstrap') {
-      return only({...state, recovery: {...state.recovery, intent: mode}});
-    }
-    return only(state);
-  }
-  const token = state.next;
-  return {
-    state: {...state, next: token + 1, recovery: {kind: 'refreshing', token, intent: mode}},
-    requests: [{kind: 'refresh', token}],
-  };
+/** A refresh that reached its snapshot load, as a settled load. */
+function refreshed(context: SessionContext, outcome: RefreshOutcome): Settled {
+  const result: SnapshotResult =
+    outcome.kind === 'snapshot' ? outcome.result : {ok: false, error: outcome.error};
+  return {load: context.refreshLoad, result};
 }
 
-type StartupAction = Extract<SessionAction, {type: 'start' | 'snapshot-reply' | 'subscribe-reply'}>;
+const reachable = (reach: Reachability): boolean => reach.visible && reach.online;
 
-/** Start-up: the snapshot first, then the event stream. */
-function startupStep(state: Open, action: StartupAction): SessionStep {
-  const {startup} = state;
-  if (action.type === 'start') {
-    if (startup.kind !== 'idle') return only(state);
-    const token = state.next;
-    return {
-      state: {...state, next: token + 1, startup: {kind: 'snapshot', token}},
-      requests: [{kind: 'load-snapshot', token}],
-    };
-  }
-  if (action.type === 'snapshot-reply') {
-    if (startup.kind !== 'snapshot' || startup.token !== action.token) return only(state);
-    const loaded = snapshotSettled(state, action.token, action.result);
-    const token = loaded.state.next;
-    return {
-      state: {
-        ...loaded.state,
-        next: token + 1,
-        startup: {kind: 'subscribing', token, snapshotFailed: !action.result.ok},
+/** A healthy ended stream stays inert; a stale one can always ask for a fresh bootstrap. */
+function mayReattach(context: SessionContext, event: SessionEvent): boolean {
+  if (event.type !== 'reattach' || !reachable(event.reach)) return false;
+  return context.view.status === 'stale' || !event.runEnded;
+}
+
+function issueRefresh(context: SessionContext, intent: StreamRecovery): Partial<SessionContext> {
+  return {intent, issued: context.issued + 1, refreshLoad: context.issued + 1};
+}
+
+export const sessionMachine = setup({
+  types: {context: {} as SessionContext, events: {} as SessionEvent},
+  actors: {
+    loadSnapshot: unprovided<SnapshotResult>('loadSnapshot'),
+    subscribe: unprovided<Error | null>('subscribe'),
+    refresh: unprovided<RefreshOutcome>('refresh'),
+  },
+  actions: {
+    /** Fold `snapshot` into the run; null (an older or a failed load) does nothing. */
+    applySnapshot: (_, _params: {readonly snapshot: RunSnapshot | null}) => undefined,
+    recoverStream: (_, _params: {readonly mode: StreamRecovery}) => undefined,
+    redialControls: () => undefined,
+    closeShell: () => undefined,
+    /** A load settled: the view, and the newest load applied (after `applySnapshot` read it). */
+    snapshotSettled: assign(({context}, {load, result}: Settled): Partial<SessionContext> => {
+      if (!result.ok) return withStatus(context, 'stale', result.error);
+      const view = context.view.hasSnapshot ? context.view : {...context.view, hasSnapshot: true};
+      return {view, applied: Math.max(load, context.applied)};
+    }),
+  },
+}).createMachine({
+  id: 'session',
+  context: INITIAL_CONTEXT,
+  initial: 'open',
+  states: {
+    open: {
+      type: 'parallel',
+      on: {
+        close: {target: 'closed', actions: 'closeShell'},
+        stream: {
+          // Every drop is reported, on an ended run too: `connectionBanners` decides what to show,
+          // and suppressing it here left an ended run's empty transcript unexplained (#1044).
+          actions: assign(({context, event}) =>
+            event.state.status === 'connected'
+              ? withStatus(context, 'connected', null)
+              : withStatus(context, 'stale', event.state.error),
+          ),
+        },
+        fault: {actions: assign(({context, event}) => withStatus(context, 'stale', event.error))},
+        controls: {
+          actions: assign(({context, event}) => ({view: {...context.view, controls: event.state}})),
+        },
+        offline: {
+          // Offline is this browser's reachability: it cannot make an ended run's complete
+          // transcript incomplete.
+          guard: ({event}) => !event.runEnded,
+          actions: assign(({context}) =>
+            withStatus(context, 'stale', new Error('Network is offline')),
+          ),
+        },
+        // Not a refresh: a channel that reported a drop has a redial armed already, and only the
+        // transport's `reconnect` cancels that backoff and dials now.
+        'reconnect-controls': {actions: 'redialControls'},
       },
-      requests: [...loaded.requests, {kind: 'subscribe', token}],
-    };
-  }
-  if (startup.kind !== 'subscribing' || startup.token !== action.token) return only(state);
-  const done: Open = {...state, startup: {kind: 'done'}};
-  if (action.error !== null) return only(withStatus(done, 'stale', action.error));
-  if (state.view.status === 'connecting' && !startup.snapshotFailed) {
-    return only(withStatus(done, 'connected', null));
-  }
-  return only(done);
-}
+      states: {
+        startup: {
+          initial: 'idle',
+          states: {
+            idle: {
+              on: {
+                start: {
+                  target: 'snapshot',
+                  actions: assign(({context}) => ({
+                    issued: context.issued + 1,
+                    startupLoad: context.issued + 1,
+                  })),
+                },
+              },
+            },
+            snapshot: {
+              invoke: {
+                id: 'loadSnapshot',
+                src: 'loadSnapshot',
+                onDone: {
+                  target: 'subscribing',
+                  actions: [
+                    {
+                      type: 'applySnapshot',
+                      params: ({context, event}) =>
+                        newer(context, {load: context.startupLoad, result: event.output}),
+                    },
+                    {
+                      type: 'snapshotSettled',
+                      params: ({context, event}) => ({
+                        load: context.startupLoad,
+                        result: event.output,
+                      }),
+                    },
+                    assign({snapshotFailed: ({event}) => !event.output.ok}),
+                  ],
+                },
+              },
+            },
+            subscribing: {
+              invoke: {
+                id: 'subscribe',
+                src: 'subscribe',
+                onDone: [
+                  {
+                    guard: ({event}) => event.output !== null,
+                    target: 'done',
+                    actions: assign(({context, event}) =>
+                      withStatus(context, 'stale', event.output),
+                    ),
+                  },
+                  {
+                    guard: ({context}) =>
+                      context.view.status === 'connecting' && !context.snapshotFailed,
+                    target: 'done',
+                    actions: assign(({context}) => withStatus(context, 'connected', null)),
+                  },
+                  {target: 'done'},
+                ],
+              },
+            },
+            done: {},
+          },
+        },
+        recovery: {
+          initial: 'none',
+          states: {
+            none: {
+              on: {
+                wake: {
+                  guard: ({event}) => reachable(event.reach),
+                  target: 'refreshing',
+                  actions: assign(({context}) => issueRefresh(context, 'retry')),
+                },
+                reattach: {
+                  guard: ({context, event}) => mayReattach(context, event),
+                  target: 'refreshing',
+                  actions: assign(({context}) => issueRefresh(context, 'rebootstrap')),
+                },
+              },
+            },
+            refreshing: {
+              on: {
+                // Single flight, monotone intent: a Reattach upgrades the flight in progress.
+                reattach: {
+                  guard: ({context, event}) => mayReattach(context, event),
+                  actions: assign({intent: 'rebootstrap'}),
+                },
+              },
+              invoke: {
+                id: 'refresh',
+                src: 'refresh',
+                onDone: [
+                  {
+                    guard: ({event}) => event.output.kind === 'redial-failed',
+                    target: 'none',
+                    actions: {
+                      type: 'snapshotSettled',
+                      params: ({context, event}) => refreshed(context, event.output),
+                    },
+                  },
+                  {
+                    // The flight is released in the same step that hands recovery to the stream,
+                    // so an intent arriving after it starts a new flight instead.
+                    target: 'none',
+                    actions: [
+                      {
+                        type: 'applySnapshot',
+                        params: ({context, event}) =>
+                          newer(context, refreshed(context, event.output)),
+                      },
+                      {
+                        type: 'snapshotSettled',
+                        params: ({context, event}) => refreshed(context, event.output),
+                      },
+                      {type: 'recoverStream', params: ({context}) => ({mode: context.intent})},
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+    /** Closed: every later report and reply is dropped. */
+    closed: {type: 'final'},
+  },
+});
 
-/** A refresh settled: release the flight and hand recovery to the stream. */
-function refreshSettled(state: Open, token: number, outcome: RefreshOutcome): SessionStep {
-  if (state.recovery.kind !== 'refreshing' || state.recovery.token !== token) return only(state);
-  const settled: Open = {...state, recovery: {kind: 'none'}};
-  if (outcome.kind === 'redial-failed') return only(withStatus(settled, 'stale', outcome.error));
-  const refreshed = snapshotSettled(settled, token, outcome.result);
-  // The flight is released in the same step that hands recovery to the stream, so an intent
-  // arriving after it starts a new flight instead of being folded into a dispatched one.
-  return {
-    state: refreshed.state,
-    requests: [...refreshed.requests, {kind: 'recover-stream', mode: state.recovery.intent}],
-  };
-}
+export type SessionSnapshot = SnapshotFrom<typeof sessionMachine>;
 
-type Report = Extract<SessionAction, {type: 'stream' | 'fault' | 'controls' | 'offline'}>;
-
-/** What the stream, the control channel, or the browser reported. */
-function reported(state: Open, action: Report): Open {
-  switch (action.type) {
-    case 'stream':
-      // Every drop is reported, on an ended run too: `connectionBanners` decides what to show,
-      // and suppressing it here left an ended run's empty transcript unexplained (#1044).
-      return action.state.status === 'connected'
-        ? withStatus(state, 'connected', null)
-        : withStatus(state, 'stale', action.state.error);
-    case 'fault':
-      return withStatus(state, 'stale', action.error);
-    case 'controls':
-      return {...state, view: {...state.view, controls: action.state}};
-    case 'offline':
-      // Offline is this browser's reachability: it cannot make an ended run's complete
-      // transcript incomplete.
-      return action.runEnded ? state : withStatus(state, 'stale', new Error('Network is offline'));
-  }
-}
-
-export function sessionStep(state: SessionState, action: SessionAction): SessionStep {
-  if (state.kind === 'closed') return only(state);
-  switch (action.type) {
-    case 'start':
-    case 'snapshot-reply':
-    case 'subscribe-reply':
-      return startupStep(state, action);
-    case 'refresh-reply':
-      return refreshSettled(state, action.token, action.outcome);
-    case 'stream':
-    case 'fault':
-    case 'controls':
-    case 'offline':
-      return only(reported(state, action));
-    case 'wake':
-      return recover(state, 'retry', action.reach);
-    case 'reattach':
-      // A healthy ended stream stays inert; a stale one can always ask for a fresh bootstrap,
-      // because the fault is evidence the transcript is incomplete.
-      if (state.view.status !== 'stale' && action.runEnded) return only(state);
-      return recover(state, 'rebootstrap', action.reach);
-    case 'reconnect-controls':
-      // Not a refresh: a channel that reported a drop has a redial armed already, and only the
-      // transport's `reconnect` cancels that backoff and dials now.
-      return {state, requests: [{kind: 'redial-controls'}]};
-    case 'close':
-      return {
-        state: {kind: 'closed', view: state.view, next: state.next},
-        requests: [{kind: 'close'}],
-      };
-  }
-}
-
-/** The token each reply slot awaits, by the reply that answers it; closed awaits nothing. */
-export function sessionAwaited(state: SessionState): {
-  readonly snapshot: number | null;
-  readonly subscribe: number | null;
-  readonly refresh: number | null;
-} {
-  if (state.kind === 'closed') return {snapshot: null, subscribe: null, refresh: null};
-  const {startup, recovery} = state;
-  return {
-    snapshot: startup.kind === 'snapshot' ? startup.token : null,
-    subscribe: startup.kind === 'subscribing' ? startup.token : null,
-    refresh: recovery.kind === 'refreshing' ? recovery.token : null,
-  };
-}
-
-export function sessionInvariants(state: SessionState): string[] {
-  const {status, error} = state.view;
+/** The stream's status and its error agree: stale exactly when there is an error. */
+export function sessionInvariants(snapshot: SessionSnapshot): string[] {
+  const {status, error} = snapshot.context.view;
   if ((status === 'stale') === (error !== null)) return [];
   return [`status ${status} with error ${error === null ? 'null' : 'set'}`];
 }
