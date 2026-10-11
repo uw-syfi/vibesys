@@ -13,8 +13,9 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 import pytest
 from pydantic import ValidationError
 
-from vibesys.api.contracts import RunStatus
+from vibesys.api.contracts import IterationTree, RunStatus
 from vibesys.api.hypothesis import CandidateDisposition, RoundRecord
+from vibesys.api.metrics import MetricSpace, Objective
 from vibesys.hypothesis import OrchestratorPlan, derive_hypothesis_title
 from vibesys.hypothesis.readmodel import (
     AgentRunProjection,
@@ -321,6 +322,34 @@ def test_run_view_rounds_are_run_wide_and_chronological() -> None:
     assert (
         agent_projection(type(envelope).model_validate_json(envelope.model_dump_json())) == run_view
     )
+
+
+def test_iteration_metrics_preserve_colons_and_direction_in_metric_identity() -> None:
+    state = HypothesisState(
+        metrics=MetricSpace(objectives=(Objective(name="latency:p99", direction="min"),)),
+        hypotheses=[
+            _hypothesis(
+                "H-01",
+                1,
+                rounds=[
+                    _round(
+                        1,
+                        hypothesis_id="H-01",
+                        perf_metric=12.5,
+                        perf_unit="ms",
+                    )
+                ],
+            )
+        ],
+    )
+
+    envelope = _project_run_view(
+        state, run_id="run-1", status=RunStatus.UNKNOWN, experiment_revision=1, loop="multi-agent"
+    )
+
+    assert isinstance(envelope.iterations, IterationTree)
+    assert envelope.iterations.nodes[0].headline_metrics[0].id == "latency:p99"
+    assert envelope.iterations.nodes[0].headline_metrics[0].direction == "min"
 
 
 def test_run_view_current_round_counts_every_completed_round() -> None:

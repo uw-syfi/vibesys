@@ -22,7 +22,12 @@ import {resolveStartupTrace} from './boot-trace.js';
 import {fuzzyMatchCommands} from './commands.js';
 import {readNote, writeNote} from './notes-store.js';
 import {SocketSessionController} from './session-controller.js';
-import {chatPaneFocused, chatPaneVisible, experimentLogVisible} from './session-model.js';
+import {
+  chatPaneFocused,
+  chatPaneVisible,
+  experimentLogVisible,
+  iterationRailRounds,
+} from './session-model.js';
 import {rightPaneContent, rightPaneTitle} from './ui/right-pane.js';
 
 const NOTE_PROJECT_SCOPE = 'a'.repeat(64);
@@ -239,7 +244,12 @@ describe('session controller', () => {
 
     // The event replay is the long pole; nothing waits behind it, and nothing
     // waits behind the two independent queries either.
-    expect([...started].sort()).toEqual(['query.experiments', 'query.snapshot', 'subscribe']);
+    expect([...started].sort()).toEqual([
+      'query.experiments',
+      'query.iterations',
+      'query.snapshot',
+      'subscribe',
+    ]);
     for (const resolve of pending.splice(0)) resolve();
 
     // The design log deliberately rides behind the experiments answer rather
@@ -248,6 +258,222 @@ describe('session controller', () => {
     expect(started).toContain('query.design');
     for (const resolve of pending.splice(0)) resolve();
     await boot;
+  });
+
+  it('uses queried evolve generations as the rail navigation roots', async () => {
+    const transport = new FakeTransport();
+    transport.iterationsReady = true;
+    transport.iterations = {
+      kind: 'page',
+      schema_version: 1,
+      run_id: 'run',
+      projection_revision: 'evolve-1',
+      parent_id: null,
+      from_cursor: null,
+      items: [
+        {
+          id: 'generation:4',
+          parent_id: null,
+          kind: 'generation',
+          label: 'Generation 4',
+          ordinal: 4,
+          status: 'active',
+          child_count: 3,
+          headline_metrics: [],
+        },
+      ],
+      next_cursor: null,
+    };
+    const controller = new SocketSessionController(transport);
+
+    await controller.start();
+
+    expect(transport.requests).toContainEqual({type: 'query.iterations'});
+    expect(iterationRailRounds(controller.state)).toMatchObject([
+      {iterationLabel: 'Generation 4', number: null, status: 'active'},
+    ]);
+  });
+
+  it('keeps legacy round navigation when policy iterations are explicitly unavailable', async () => {
+    const transport = new FakeTransport();
+    transport.iterationsReady = true;
+    transport.iterations = {
+      kind: 'unavailable',
+      schema_version: 1,
+      reason: 'external_state_unavailable',
+    };
+    const controller = new SocketSessionController(transport);
+
+    await controller.start();
+    transport.emit({type: 'event', event: roundFinished(13, 1)});
+
+    expect(controller.state.iterations.unavailable?.reason).toBe('external_state_unavailable');
+    expect(iterationRailRounds(controller.state).map(round => round.number)).toEqual([1]);
+  });
+
+  it('refreshes policy navigation on a semantic iteration invalidation', async () => {
+    const transport = new FakeTransport();
+    transport.iterationsReady = true;
+    transport.iterations = iterationPage('evolve-1', 1);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.iterations = iterationPage('evolve-2', 2);
+
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'evolve-2'},
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      2,
+    );
+    expect(iterationRailRounds(controller.state)).toMatchObject([
+      {iterationLabel: 'Generation 2', status: 'completed'},
+    ]);
+  });
+
+  it('publishes more than one hundred iteration roots only after the last page', async () => {
+    const transport = new FakeTransport();
+    const lastPage = deferred<ProtocolResponse>();
+    transport.iterationResponses.push(
+      iterationPageResponse('bulk', null, 0, 100, 'page-2'),
+      lastPage.promise,
+    );
+    const controller = new SocketSessionController(transport);
+
+    const started = controller.start();
+    await settleMicrotasks();
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(iterationRailRounds(controller.state)).toEqual([]);
+
+    lastPage.resolve(iterationPageResponse('bulk', 'page-2', 100, 25, null));
+    await started;
+
+    expect(controller.state.iterations.revision).toBe('bulk');
+    expect(iterationRailRounds(controller.state)).toHaveLength(125);
+  });
+
+  it('reports an initial second-page rejection without rejecting bootstrap or publishing a partial tree', async () => {
+    const transport = new FakeTransport();
+    transport.iterationResponses.push(
+      iterationPageResponse('initial', null, 0, 100, 'page-2'),
+      new ServerError('initial second iteration page failed'),
+    );
+    const controller = new SocketSessionController(transport);
+
+    await expect(controller.start()).resolves.toBeUndefined();
+
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(iterationRailRounds(controller.state)).toEqual([]);
+    expect(controller.state.errorBanner).toMatchObject({
+      scope: 'request',
+      message: 'initial second iteration page failed',
+    });
+  });
+
+  it('reports an initial repeated cursor without rejecting bootstrap or publishing a partial tree', async () => {
+    const transport = new FakeTransport();
+    transport.iterationResponses.push(
+      iterationPageResponse('initial', null, 0, 100, 'page-2'),
+      iterationPageResponse('initial', 'page-2', 100, 1, 'page-2'),
+    );
+    const controller = new SocketSessionController(transport);
+
+    await expect(controller.start()).resolves.toBeUndefined();
+
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(iterationRailRounds(controller.state)).toEqual([]);
+    expect(controller.state.errorBanner).toMatchObject({
+      scope: 'request',
+      message: 'iteration query repeated a paging cursor',
+    });
+  });
+
+  it('retains the last complete iteration tree when a later page fails', async () => {
+    const transport = new FakeTransport();
+    transport.iterationsReady = true;
+    transport.iterations = iterationPage('complete', 0);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.iterationResponses.push(
+      iterationPageResponse('replacement', null, 0, 100, 'page-2'),
+      new ServerError('second iteration page failed'),
+    );
+    const failed = waitForController(
+      controller,
+      state => state.errorBanner?.message === 'second iteration page failed',
+    );
+
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'replacement'},
+      },
+    });
+    await failed;
+
+    expect(controller.state.iterations.revision).toBe('complete');
+    expect(iterationRailRounds(controller.state).map(row => row.iterationId)).toEqual([
+      'generation:0',
+    ]);
+  });
+
+  it('retains the last complete iteration tree when paging repeats a cursor', async () => {
+    const transport = new FakeTransport();
+    transport.iterationsReady = true;
+    transport.iterations = iterationPage('complete', 0);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.iterationResponses.push(
+      iterationPageResponse('replacement', null, 0, 100, 'page-2'),
+      iterationPageResponse('replacement', 'page-2', 100, 1, 'page-2'),
+    );
+    const failed = waitForController(
+      controller,
+      state => state.errorBanner?.message === 'iteration query repeated a paging cursor',
+    );
+
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'replacement'},
+      },
+    });
+    await failed;
+
+    expect(controller.state.iterations.revision).toBe('complete');
+    expect(iterationRailRounds(controller.state).map(row => row.iterationId)).toEqual([
+      'generation:0',
+    ]);
+  });
+
+  it('falls back only when the initial iteration capability probe is rejected', async () => {
+    const transport = new FakeTransport();
+    transport.iterationResponses.push(new ServerError('Unsupported protocol request'));
+    const controller = new SocketSessionController(transport);
+
+    await controller.start();
+    expect(controller.state.errorBanner).toBeNull();
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'ignored'},
+      },
+    });
+    await settleMicrotasks();
+
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      1,
+    );
+    expect(controller.state.errorBanner).toBeNull();
   });
 
   it('applies a replay batch before reconciling its active execution checkpoint', async () => {
@@ -1127,6 +1353,7 @@ describe('session controller', () => {
 
     expect(transport.requests).toEqual([
       {type: 'query.snapshot'},
+      {type: 'query.iterations'},
       {type: 'query.experiments'},
       {type: 'query.design'},
     ]);
@@ -3678,6 +3905,104 @@ describe('stream reconnect', () => {
   });
 });
 
+function iterationPage(
+  revision: string,
+  generation: number,
+): Exclude<ProtocolResponse['iterations'], undefined | null> {
+  return {
+    kind: 'page',
+    schema_version: 1,
+    run_id: 'run',
+    projection_revision: revision,
+    parent_id: null,
+    from_cursor: null,
+    items: [
+      {
+        id: `generation:${generation}`,
+        parent_id: null,
+        kind: 'generation',
+        label: `Generation ${generation}`,
+        ordinal: generation,
+        status: 'completed',
+        child_count: 0,
+        headline_metrics: [],
+      },
+    ],
+    next_cursor: null,
+  };
+}
+
+function iterationPageResponse(
+  revision: string,
+  fromCursor: string | null,
+  start: number,
+  count: number,
+  nextCursor: string | null,
+): ProtocolResponse {
+  return {
+    protocol_version: 1,
+    request_id: `iterations-${revision}-${fromCursor ?? 'first'}`,
+    timestamp: '2026-01-01T00:00:00Z',
+    ok: true,
+    iterations_ready: true,
+    iterations: {
+      kind: 'page',
+      schema_version: 1,
+      run_id: 'run',
+      projection_revision: revision,
+      parent_id: null,
+      from_cursor: fromCursor,
+      items: Array.from({length: count}, (_, offset) => {
+        const generation = start + offset;
+        return {
+          id: `generation:${generation}`,
+          parent_id: null,
+          kind: 'generation' as const,
+          label: `Generation ${generation}`,
+          ordinal: generation,
+          status: 'completed' as const,
+          child_count: 0,
+          headline_metrics: [],
+        };
+      }),
+      next_cursor: nextCursor,
+    },
+  };
+}
+
+function deferred<T>(): {promise: Promise<T>; resolve(value: T): void} {
+  let resolvePromise: ((value: T) => void) | undefined;
+  const promise = new Promise<T>(resolve => {
+    resolvePromise = resolve;
+  });
+  return {
+    promise,
+    resolve(value) {
+      if (resolvePromise === undefined) throw new Error('deferred promise is not initialized');
+      resolvePromise(value);
+    },
+  };
+}
+
+async function settleMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function waitForController(
+  controller: SocketSessionController,
+  predicate: (state: typeof controller.state) => boolean,
+): Promise<void> {
+  if (predicate(controller.state)) return Promise.resolve();
+  return new Promise(resolve => {
+    const unsubscribe = controller.subscribe(state => {
+      if (!predicate(state)) return;
+      unsubscribe();
+      resolve();
+    });
+  });
+}
+
 class FakeTransport implements ServerTransport {
   closed = false;
   closeCalls = 0;
@@ -3688,6 +4013,9 @@ class FakeTransport implements ServerTransport {
   experimentsReady = true;
   design: NonNullable<ProtocolResponse['design']> = [];
   designReady = true;
+  iterations: Exclude<ProtocolResponse['iterations'], undefined> = null;
+  iterationsReady = false;
+  readonly iterationResponses: Array<ProtocolResponse | Error | Promise<ProtocolResponse>> = [];
   /** Patch text `query.design_patch` echoes back; null omits the field. */
   designPatchText: string | null = null;
   designPatchTruncated = false;
@@ -3707,11 +4035,16 @@ class FakeTransport implements ServerTransport {
     private readonly responseError?: Error,
   ) {}
 
-  request(input: RequestInput): Promise<ProtocolResponse> {
+  async request(input: RequestInput): Promise<ProtocolResponse> {
     this.requests.push(input);
-    if (this.responseError) return Promise.reject(this.responseError);
+    if (this.responseError) throw this.responseError;
     if (input.type === 'query.design_patch' && this.designPatchError) {
-      return Promise.reject(this.designPatchError);
+      throw this.designPatchError;
+    }
+    if (input.type === 'query.iterations' && this.iterationResponses.length > 0) {
+      const response = this.iterationResponses.shift();
+      if (response instanceof Error) throw response;
+      if (response !== undefined) return await response;
     }
     const response: ProtocolResponse = {
       protocol_version: 1,
@@ -3724,6 +4057,9 @@ class FakeTransport implements ServerTransport {
       experiments_ready: this.experimentsReady,
       design: this.design,
       design_ready: this.designReady,
+      ...(input.type === 'query.iterations'
+        ? {iterations: this.iterations, iterations_ready: this.iterationsReady}
+        : {}),
       ...(input.type === 'query.chat'
         ? {
             chat: this.responseChat ?? {

@@ -18,10 +18,19 @@ from vibesys.hypothesis.readmodel import (
     HypothesisView,
     RoundView,
 )
-from vibesys.run.contracts import PluginProjection, RoundSummary
+from vibesys.run.contracts import (
+    IterationKind,
+    IterationMetric,
+    IterationStatus,
+    IterationSummary,
+    IterationTree,
+    PluginProjection,
+    RoundSummary,
+)
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.strategy.api import (
+        AttemptRecord,
         DynamicStrategyState,
         HypothesisRecord,
         MetricRow,
@@ -59,10 +68,92 @@ def project_strategy_state(
     )
     return PluginProjection(
         payload=projection.model_dump(mode="json"),
+        iterations=_workstream_iterations(state),
         rounds=tuple(
             _summary(view, record) for view, record in zip(projection.rounds, rounds, strict=True)
         ),
         experiment_revision=experiment_revision,
+    )
+
+
+def _workstream_iterations(state: DynamicStrategyState) -> IterationTree:
+    """Expose workstreams and attempts in scheduler order, independent of completion order."""
+    workstreams: dict[str, list[AttemptRecord]] = {}
+    for record in sorted(state.attempts, key=lambda item: item.sequence):
+        workstreams.setdefault(record.plan.work_id, []).append(record)
+    nodes: list[IterationSummary] = []
+    for work_id, attempts in workstreams.items():
+        root_id = f"workstream:{work_id}"
+        latest = attempts[-1]
+        root_headline = _attempt_headline(latest)
+        nodes.append(
+            IterationSummary(
+                id=root_id,
+                kind=IterationKind.WORKSTREAM,
+                label=latest.plan.title or work_id,
+                ordinal=attempts[0].sequence,
+                status=_workstream_status(attempts),
+                child_count=len(attempts),
+                headline_metrics=_headline_metrics(root_headline),
+            )
+        )
+        nodes.extend(
+            IterationSummary(
+                id=record.attempt.root,
+                parent_id=root_id,
+                kind=IterationKind.ATTEMPT,
+                label=f"Attempt {record.sequence}",
+                ordinal=record.sequence,
+                status=_attempt_status(record),
+                headline_metrics=_headline_metrics(_attempt_headline(record)),
+            )
+            for record in attempts
+        )
+    return IterationTree.from_nodes(tuple(nodes))
+
+
+def _attempt_status(record: AttemptRecord) -> IterationStatus:
+    if record.withdrawn:
+        return IterationStatus.CANCELLED
+    if record.phase.value != "done":
+        return IterationStatus.ACTIVE
+    if record.failure is not None or record.review_passed is False:
+        return IterationStatus.FAILED
+    return IterationStatus.COMPLETED
+
+
+def _workstream_status(attempts: list[AttemptRecord]) -> IterationStatus:
+    statuses = tuple(_attempt_status(record) for record in attempts)
+    if IterationStatus.ACTIVE in statuses:
+        return IterationStatus.ACTIVE
+    if IterationStatus.COMPLETED in statuses:
+        return IterationStatus.COMPLETED
+    if statuses and all(status is IterationStatus.CANCELLED for status in statuses):
+        return IterationStatus.CANCELLED
+    return IterationStatus.FAILED
+
+
+def _attempt_headline(record: AttemptRecord) -> MetricRow | None:
+    return next(
+        (
+            reading.headline()
+            for reading in reversed(record.readings)
+            if reading.headline() is not None
+        ),
+        None,
+    )
+
+
+def _headline_metrics(headline: MetricRow | None) -> tuple[IterationMetric, ...]:
+    if headline is None:
+        return ()
+    return (
+        IterationMetric(
+            id=headline.name,
+            value=headline.value,
+            unit=headline.unit,
+            direction=headline.direction,
+        ),
     )
 
 

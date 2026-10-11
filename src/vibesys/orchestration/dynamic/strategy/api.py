@@ -60,11 +60,15 @@ from vibesys.orchestration.dynamic.strategy._schemas import (
 )
 from vibesys.orchestration.dynamic.strategy._state import (
     STATE_SCHEMA,
+    AttemptRecord,
     DynamicStrategyState,
     HypothesisRecord,
     Role,
     RoundRecord,
     Winner,
+    WorkKind,
+    WorkPhase,
+    WorkPlan,
 )
 from vibesys.orchestration.dynamic.strategy._strategy import DynamicStrategy
 from vs_core.api import ledger_refs, trusted_keys, turn_candidate
@@ -81,6 +85,7 @@ __all__ = [
     "STATE_SCHEMA",
     "VERIFY_KIND",
     "AcceptedReading",
+    "AttemptRecord",
     "DynamicConfig",
     "DynamicStrategy",
     "DynamicStrategyState",
@@ -118,6 +123,9 @@ __all__ = [
     "VerifyParentRevision",
     "WaitUnrecordedPrompt",
     "Winner",
+    "WorkKind",
+    "WorkPhase",
+    "WorkPlan",
     "accept_readings",
     "decision_id",
     "dynamic_operation_registrations",

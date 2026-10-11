@@ -2,9 +2,8 @@ import {describe, expect, test} from 'bun:test';
 import {rgbToHex, type TextRenderable} from '@opentui/core';
 import {createTestRenderer} from '@opentui/core/testing';
 import type {HypothesisRound} from '@vibesys/contracts';
-import type {RoundState} from '@vibesys/run-state/rounds';
 import type {SessionController} from '../session-controller.js';
-import {initialSessionState, type SessionState} from '../session-model.js';
+import {type IterationRailRow, initialSessionState, type SessionState} from '../session-model.js';
 import {resolveTheme} from '../theme.js';
 import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {
@@ -40,8 +39,9 @@ function textOf(text: TextRenderable): string {
   const content = (text.content as {chunks?: {text?: string}[]} | undefined)?.chunks ?? [];
   return content.map(chunk => chunk.text ?? '').join('');
 }
-function rounds(count: number): RoundState[] {
+function rounds(count: number): IterationRailRow[] {
   return Array.from({length: count}, (_, index) => ({
+    iterationId: `round:${index + 1}`,
     key: {kind: 'number' as const, number: index + 1},
     number: index + 1,
     status: 'completed' as const,
@@ -79,7 +79,7 @@ async function renderedRows(
 
 describe('railWindow', () => {
   test('shows every round when they all fit', () => {
-    const view = railWindow(rounds(5), 1, 20);
+    const view = railWindow(rounds(5), 'round:1', 20);
     expect(view.rounds).toHaveLength(5);
     expect(view.hiddenBefore).toBe(0);
     expect(view.hiddenAfter).toBe(0);
@@ -87,13 +87,13 @@ describe('railWindow', () => {
 
   test('keeps the selected round visible however far into the run it is', () => {
     for (const selected of [1, 2, 37, 99, 100]) {
-      const view = railWindow(rounds(100), selected, 10);
+      const view = railWindow(rounds(100), `round:${selected}`, 10);
       expect(view.rounds.some(round => round.number === selected)).toBe(true);
     }
   });
 
   test('reports what it had to hide on each side', () => {
-    const view = railWindow(rounds(100), 50, 10);
+    const view = railWindow(rounds(100), 'round:50', 10);
     expect(view.hiddenBefore).toBeGreaterThan(0);
     expect(view.hiddenAfter).toBeGreaterThan(0);
     expect(view.hiddenBefore + view.rounds.length + view.hiddenAfter).toBe(100);
@@ -101,7 +101,7 @@ describe('railWindow', () => {
 
   test('reserves two rows for the overflow counts when the run does not fit', () => {
     const rows = 10;
-    const view = railWindow(rounds(100), 50, rows);
+    const view = railWindow(rounds(100), 'round:50', rows);
     // Both indicators show, so the rounds take the rows the counts do not.
     expect(view.hiddenBefore).toBeGreaterThan(0);
     expect(view.hiddenAfter).toBeGreaterThan(0);
@@ -111,14 +111,14 @@ describe('railWindow', () => {
   test('never exceeds the rows it was given', () => {
     for (const selected of [1, 8, 44, 100]) {
       const rows = 10;
-      const view = railWindow(rounds(100), selected, rows);
+      const view = railWindow(rounds(100), `round:${selected}`, rows);
       expect(view.rounds.length).toBeLessThanOrEqual(rows);
     }
   });
 
   test('fills the rail when the selection sits at either end', () => {
-    const atStart = railWindow(rounds(100), 1, 10);
-    const atEnd = railWindow(rounds(100), 100, 10);
+    const atStart = railWindow(rounds(100), 'round:1', 10);
+    const atEnd = railWindow(rounds(100), 'round:100', 10);
     expect(atStart.rounds.length).toBeGreaterThan(3);
     expect(atEnd.rounds.length).toBeGreaterThan(3);
     expect(atStart.hiddenBefore).toBe(0);
@@ -127,9 +127,9 @@ describe('railWindow', () => {
 
   test('slides by one as the selection steps, so the run scrolls rather than pages', () => {
     const all = rounds(100);
-    let previous = railWindow(all, 20, 10);
+    let previous = railWindow(all, 'round:20', 10);
     for (let selected = 21; selected < 30; selected += 1) {
-      const next = railWindow(all, selected, 10);
+      const next = railWindow(all, `round:${selected}`, 10);
       expect(next.rounds.some(round => round.number === selected)).toBe(true);
       // The window moves at most one round per step: no jumping.
       expect(Math.abs(next.hiddenBefore - previous.hiddenBefore)).toBeLessThanOrEqual(1);
@@ -138,30 +138,30 @@ describe('railWindow', () => {
   });
 
   test('keeps round order stable, top to bottom', () => {
-    const view = railWindow(rounds(100), 50, 10);
+    const view = railWindow(rounds(100), 'round:50', 10);
     const numbers = view.rounds.flatMap(round => (round.number === null ? [] : [round.number]));
     expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
   });
 
   test('handles an empty run and a one-round run', () => {
     expect(railWindow([], null, 10).rounds).toEqual([]);
-    expect(railWindow(rounds(1), 1, 10).rounds).toHaveLength(1);
+    expect(railWindow(rounds(1), 'round:1', 10).rounds).toHaveLength(1);
   });
 
   test('has nothing to show when it is given no rows', () => {
-    const view = railWindow(rounds(10), 5, 0);
+    const view = railWindow(rounds(10), 'round:5', 0);
     expect(view.rounds).toEqual([]);
     expect(view.hiddenAfter).toBe(10);
   });
 
   test('still shows the selection in a very short rail', () => {
-    const view = railWindow(rounds(100), 60, 3);
+    const view = railWindow(rounds(100), 'round:60', 3);
     expect(view.rounds.some(round => round.number === 60)).toBe(true);
   });
 
   test('never returns more rounds than a one or two row rail can hold', () => {
     for (const rows of [1, 2]) {
-      const view = railWindow(rounds(100), 50, rows);
+      const view = railWindow(rounds(100), 'round:50', rows);
       expect(view.rounds.length).toBeLessThanOrEqual(rows);
       expect(view.rounds.length).toBeGreaterThanOrEqual(1);
       expect(view.rounds.some(round => round.number === 50)).toBe(true);
@@ -434,7 +434,7 @@ describe('RoundRailView profile-skipped rounds', () => {
 });
 
 describe('RoundRailView unnumbered rounds', () => {
-  test('shows the fallback label without treating null as a selected round number', async () => {
+  test('shows and selects the fallback label by stable identity', async () => {
     const base = railState(0);
     const state: SessionState = {
       ...base,
@@ -448,7 +448,7 @@ describe('RoundRailView unnumbered rounds', () => {
 
     expect(rows[0]?.text).toContain('future-loop');
     expect(rows[0]?.text).not.toContain('rnull');
-    expect(rows[0]?.text).not.toStartWith('▸');
+    expect(rows[0]?.text).toStartWith('▸');
   });
 
   test('styles and schedules the latest active fallback key without changing numeric selection', async () => {
@@ -503,8 +503,8 @@ describe('RoundRailView unnumbered rounds', () => {
   });
 
   test.each([
-    [RAIL_COMPACT_WIDTH, ' gen-1-…·'],
-    [RAIL_FULL_WIDTH, ' gen-1-cand-0-mu… · plan'],
+    [RAIL_COMPACT_WIDTH, '▸gen-1-…·'],
+    [RAIL_FULL_WIDTH, '▸gen-1-cand-0-mu… · plan'],
   ] as const)('keeps a long fallback label on one row at rail width %i', async (width, expectedRow) => {
     const base = railState(0);
     const state: SessionState = {

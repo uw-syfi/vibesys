@@ -12,6 +12,7 @@ from server.api.experiments import (
     ExperimentQueryResult,
     build_experiment_log,
 )
+from server.api.iterations import page_iterations
 from server.api.performance import (
     build_performance_context,
     summarize_objective,
@@ -30,6 +31,7 @@ from server.api.protocol import (
     ExperimentQuery,
     HistoryQuery,
     HypothesisEntry,
+    IterationQuery,
     PauseCommand,
     PerformanceContext,
     PerformanceQuery,
@@ -274,8 +276,8 @@ class RunApi:
         """Execute a request and reflect the issuing client on its response."""
         return self._execute(request).model_copy(update={"client_id": request.client_id})
 
-    # lint-waiver: LW-009027 [C901, PLR0911]; exhaustive protocol dispatch keeps each request variant routed to its owning handler.
-    def _execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
+    # lint-waiver: LW-009027 [C901, PLR0911, PLR0912]; exhaustive protocol dispatch keeps each request variant routed to its owning handler.
+    def _execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911, PLR0912
         """Route one typed request to its owning service."""
         if isinstance(request, (PauseCommand, ResumeCommand, SteerCommand, StopCommand)):
             return self._execute_command(request)
@@ -309,6 +311,23 @@ class RunApi:
                 experiments=result.entries if result is not None else [],
                 experiment_update=result.update if result is not None else None,
                 experiments_ready=ready,
+            )
+        if isinstance(request, IterationQuery):
+            self._journal.record(EventType.STATUS_QUERY, "/iterations")
+            attached_run = self._controller.attached_run
+            return Response(
+                request_id=request.request_id,
+                iterations=(
+                    page_iterations(
+                        attached_run.view(),
+                        parent_id=request.parent_id,
+                        cursor=request.cursor,
+                        limit=request.limit,
+                    )
+                    if attached_run is not None
+                    else None
+                ),
+                iterations_ready=attached_run is not None,
             )
         if isinstance(request, DesignQuery):
             self._journal.record(EventType.STATUS_QUERY, "/design")

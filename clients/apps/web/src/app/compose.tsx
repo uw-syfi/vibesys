@@ -86,11 +86,13 @@ function Demo({
   readonly replay: Store<ReplayState, ReplayAction>;
   readonly gateway: Store<GatewayConnectState, GatewayConnectAction>;
 }): JSX.Element {
+  const iterations = useSyncExternalStore(run.subscribe, run.getIterations, run.getIterations);
   return (
     <>
       <GatewayForm state={useStore(gateway)} send={gateway.dispatch} />
       <RunPage
         run={useStore(run)}
+        iterations={iterations}
         session={null}
         replayFailure={replayFailure(useStore(replay))}
         onReattach={NOTHING}
@@ -108,9 +110,11 @@ export function createLiveApp(session: WebSession): JSX.Element {
 }
 
 function Live({session, run}: {readonly session: WebSession; readonly run: RunStore}): JSX.Element {
+  const iterations = useSyncExternalStore(run.subscribe, run.getIterations, run.getIterations);
   return (
     <RunPage
       run={useStore(run)}
+      iterations={iterations}
       session={useStore(session)}
       replayFailure={null}
       onReattach={() => session.reattach()}

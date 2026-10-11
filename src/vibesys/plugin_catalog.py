@@ -52,6 +52,10 @@ class OrchestrationRegistry:
             message = f"orchestration {kind!r} is not registered"
             raise ValueError(message) from exc
 
+    def registrations(self) -> tuple[OrchestrationRegistration, ...]:
+        """Return registrations in deterministic catalog insertion order."""
+        return tuple(self._registrations.values())
+
 
 __all__ = [
     "OrchestrationProjector",

@@ -75,6 +75,7 @@ _BOOTSTRAP_SPINE_TYPES = frozenset(
         EventType.CONFIGURATION_FAILED,
         EventType.ROUND_FINISHED,
         EventType.EXPERIMENTS_CHANGED,
+        EventType.ITERATIONS_CHANGED,
         EventType.CHAT_THREAD_CREATED,
     }
 )

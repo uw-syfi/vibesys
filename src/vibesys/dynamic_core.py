@@ -37,8 +37,14 @@ from vibesys.orchestration.dynamic.strategy.api import (
     dynamic_operation_registry,
     measurement_recipe,
 )
-from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
+from vibesys.plugin_registration import (
+    IterationSupport,
+    OrchestrationRegistration,
+    RuntimeRecordProjector,
+)
 from vibesys.prompts import CORE_PROTOCOL_DIR
+from vibesys.run.evaluation_backend import semantic_evaluation_identity
+from vs_core.api import ArtifactId, ArtifactRef
 from vs_runtime.api import (
     CoreOperation,
     CorePlan,
@@ -185,5 +191,8 @@ def dynamic_core_registration() -> OrchestrationRegistration:
         core=dynamic_core_policy(),
     )
     return OrchestrationRegistration(
-        plugin=plugin, projector=dynamic_projector(), project_max_rounds=_project_max_rounds
+        plugin=plugin,
+        projector=dynamic_projector(),
+        project_max_rounds=_project_max_rounds,
+        iteration_support=IterationSupport.PROJECTED,
     )

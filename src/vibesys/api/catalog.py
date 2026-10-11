@@ -15,7 +15,18 @@ from vibesys.orchestration.single import (
 )
 from vibesys.orchestration.single import REGISTRATION as SINGLE
 
+BUILT_INS = (
+    SINGLE,
+    DYNAMIC,
+    PROFILE_GUIDED_SINGLE,
+    MULTI,
+    PROFILE_GUIDED_MULTI,
+    ISSUE_QUEUE,
+    EVOLVE,
+)
+
 __all__ = [
+    "BUILT_INS",
     "DYNAMIC",
     "EVOLVE",
     "ISSUE_QUEUE",

@@ -17,6 +17,7 @@ from vibesys.events import (
     FrameworkWarningData,
     InvocationFinishedData,
     InvocationStartedData,
+    IterationsChangedData,
     PhaseData,
     RoundFinishedData,
     WinnerSelectedData,
@@ -143,6 +144,9 @@ class _RunProjection(Protocol):
     def experiment_revision(self) -> int | None: ...
 
     @property
+    def iterations(self) -> object: ...
+
+    @property
     def projection(self) -> Mapping[str, object] | None: ...
 
 
@@ -210,6 +214,7 @@ def _emit_commit_events(
     new_round_numbers = sorted(number for number in after_rounds if number not in before_rounds)
     for number in new_round_numbers:
         _emit_round_finished(events, after_rounds[number])
+    _emit_iterations_changed(events, before, after)
     if before is None:
         return
     before_revision = before.experiment_revision
@@ -246,6 +251,7 @@ def _emit_core_commit_events(
     new_round_numbers = sorted(number for number in after_rounds if number not in before_rounds)
     for number in new_round_numbers:
         _emit_round_finished(events, after_rounds[number])
+    _emit_iterations_changed(events, before, after)
     if before is None or _experiments_view(before) == _experiments_view(after):
         return
     events.emit(
@@ -254,6 +260,21 @@ def _emit_core_commit_events(
             reason="round_persisted" if new_round_numbers else "active_hypothesis_changed",
             revision=after.experiment_revision,
         ),
+    )
+
+
+def _emit_iterations_changed(
+    events: EventJournal,
+    before: _RunProjection | None,
+    after: _RunProjection,
+) -> None:
+    """Publish exactly when a durable iteration projection becomes different."""
+    if before is not None and before.iterations == after.iterations:
+        return
+    revision = getattr(after.iterations, "revision", None)
+    events.emit(
+        CoreEventType.ITERATIONS_CHANGED,
+        data=IterationsChangedData(revision=revision),
     )
 
 

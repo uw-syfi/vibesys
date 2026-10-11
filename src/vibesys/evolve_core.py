@@ -35,7 +35,11 @@ from vibesys.orchestration.evolve.strategy.api import (
     evolve_operation_registry,
     measurement_recipe,
 )
-from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
+from vibesys.plugin_registration import (
+    IterationSupport,
+    OrchestrationRegistration,
+    RuntimeRecordProjector,
+)
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
 from vs_runtime.api import CoreOperation, CorePlan, CorePolicy, OrchestrationPlugin
 from vs_runtime.api.core import (
@@ -170,6 +174,7 @@ def evolve_core_registration(plugin_id: str) -> OrchestrationRegistration:
     return OrchestrationRegistration(
         plugin=plugin,
         projector=evolve_projector(plugin_id),
+        iteration_support=IterationSupport.PROJECTED,
         project_max_rounds=lambda options: (
             EvolveOptions.model_validate(options.model_dump()).max_generations
         ),

@@ -967,6 +967,257 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "InteractiveSetupDefaults",
       "type": "object"
     },
+    "IterationKind": {
+      "description": "Policy-neutral kinds a client may use to label navigation rows.",
+      "enum": [
+        "round",
+        "workstream",
+        "attempt",
+        "generation",
+        "candidate"
+      ],
+      "title": "IterationKind",
+      "type": "string"
+    },
+    "IterationMetric": {
+      "additionalProperties": false,
+      "description": "One bounded headline measurement attached to an iteration row.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "max",
+                "min"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direction"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "IterationMetric",
+      "type": "object"
+    },
+    "IterationSlice": {
+      "additionalProperties": false,
+      "description": "One bounded page, with enough identity to reject stale merges.",
+      "properties": {
+        "kind": {
+          "const": "page",
+          "default": "page",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "projection_revision": {
+          "title": "Projection Revision",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parent Id"
+        },
+        "from_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Cursor"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/IterationSummary"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Cursor"
+        }
+      },
+      "required": [
+        "run_id",
+        "projection_revision",
+        "parent_id",
+        "items"
+      ],
+      "title": "IterationSlice",
+      "type": "object"
+    },
+    "IterationStatus": {
+      "description": "Lifecycle shared by every policy's iteration projection.",
+      "enum": [
+        "pending",
+        "active",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "title": "IterationStatus",
+      "type": "string"
+    },
+    "IterationSummary": {
+      "additionalProperties": false,
+      "description": "One stable node in a policy's iteration hierarchy.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "kind": {
+          "$ref": "#/$defs/IterationKind"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "ordinal": {
+          "minimum": 0,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/IterationStatus"
+        },
+        "child_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Child Count",
+          "type": "integer"
+        },
+        "headline_metrics": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/IterationMetric"
+          },
+          "title": "Headline Metrics",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "ordinal",
+        "status"
+      ],
+      "title": "IterationSummary",
+      "type": "object"
+    },
+    "IterationUnavailable": {
+      "additionalProperties": false,
+      "description": "Typed absence, kept distinct from a supported empty tree.",
+      "properties": {
+        "kind": {
+          "const": "unavailable",
+          "default": "unavailable",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "reason": {
+          "$ref": "#/$defs/IterationUnavailableReason"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "IterationUnavailable",
+      "type": "object"
+    },
+    "IterationUnavailableReason": {
+      "description": "Closed reasons why a policy cannot expose iteration navigation.",
+      "enum": [
+        "external_state_unavailable",
+        "policy_not_mapped",
+        "state_unavailable"
+      ],
+      "title": "IterationUnavailableReason",
+      "type": "string"
+    },
     "PerfDeltaReason": {
       "description": "Why a headline measurement carries no causal delta.\n\nAlways re-derived from round evidence (``perf_provenance`` and the\nbaseline fields), never stored on the round record, so it cannot drift\nfrom them. Absent entirely for records that predate provenance tracking:\na legacy absolute number keeps reading as a deliberate absolute rather\nthan being relabelled as unresolved.",
       "enum": [
@@ -1341,6 +1592,33 @@ const responsePayloadSchema: Record<string, unknown> = {
       ],
       "default": null,
       "title": "Experiments Ready"
+    },
+    "iterations": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/IterationSlice"
+        },
+        {
+          "$ref": "#/$defs/IterationUnavailable"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Iterations"
+    },
+    "iterations_ready": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Iterations Ready"
     },
     "design": {
       "items": {

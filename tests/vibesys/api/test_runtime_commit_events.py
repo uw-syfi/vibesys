@@ -24,8 +24,22 @@ from tests.support.docker_environment import (
 from tests.support.task_project import write_task
 
 from launch import LaunchSettings, create_session
-from vibesys.api import ComputeBackend, Config, OrchestrationRegistry, PluginProjection
-from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData
+from vibesys.api import (
+    ComputeBackend,
+    Config,
+    IterationKind,
+    IterationStatus,
+    IterationSummary,
+    IterationTree,
+    OrchestrationRegistry,
+    PluginProjection,
+)
+from vibesys.events import (
+    CoreEvent,
+    CoreEventType,
+    ExperimentsChangedData,
+    IterationsChangedData,
+)
 from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_catalog import OrchestrationRegistration
@@ -71,6 +85,7 @@ def _project_state(state: BaseModel) -> PluginProjection:
     typed = _FakeAgentState.model_validate(state)
     return PluginProjection(
         payload=None,
+        iterations=_iterations(typed.round_numbers),
         rounds=tuple(
             RoundSummary(
                 number=number,
@@ -82,6 +97,21 @@ def _project_state(state: BaseModel) -> PluginProjection:
             for number in typed.round_numbers
         ),
         experiment_revision=typed.experiment_revision,
+    )
+
+
+def _iterations(round_numbers: Sequence[int]) -> IterationTree:
+    return IterationTree.from_nodes(
+        tuple(
+            IterationSummary(
+                id=f"round:{number}",
+                kind=IterationKind.ROUND,
+                label=f"Round {number}",
+                ordinal=number,
+                status=IterationStatus.COMPLETED,
+            )
+            for number in round_numbers
+        )
     )
 
 
@@ -194,6 +224,15 @@ def test_commit_derives_round_finished_and_experiments_changed(tmp_path: Path) -
     assert len(experiments_changed) == 2  # revision 1->2, then 2->3
     assert experiments_changed[0].reason == "active_hypothesis_changed"
     assert experiments_changed[1].reason == "round_persisted"
+    iterations_changed = [
+        data
+        for kind, data in captured
+        if kind is CoreEventType.ITERATIONS_CHANGED and isinstance(data, IterationsChangedData)
+    ]
+    assert [item.revision for item in iterations_changed] == [
+        _iterations((1,)).revision,
+        _iterations((1, 2)).revision,
+    ]
 
 
 def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None:
@@ -252,6 +291,7 @@ def _agent_view(
         run_id=run_id,
         loop="commit-probe",
         status=RunStatus.ACTIVE,
+        iterations=_iterations(round_numbers),
         rounds=tuple(
             RoundSummary(
                 number=number,
@@ -335,6 +375,15 @@ def test_commit_events_property_no_double_emission_and_revision_iff_changed(
         if states[index - 1].experiment_revision != states[index].experiment_revision
     )
     assert changed_count == expected_changes
+    iteration_changes = sum(
+        1 for event in captured if event.type is CoreEventType.ITERATIONS_CHANGED
+    )
+    expected_iteration_changes = sum(
+        1
+        for index in range(1, len(states))
+        if states[index - 1].round_numbers != states[index].round_numbers
+    )
+    assert iteration_changes == expected_iteration_changes
 
 
 def test_commit_projection_preserves_profile_skip_and_publication_order() -> None:

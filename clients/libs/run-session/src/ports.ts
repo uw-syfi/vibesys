@@ -4,7 +4,7 @@
  * the page's lifecycle. Types only; the session's shell calls them and never names an
  * implementation.
  */
-import type {EventBatchMessage, RunSnapshot} from '@vibesys/contracts';
+import type {EventBatchMessage, IterationResult, RunSnapshot} from '@vibesys/contracts';
 import type {
   BatchReconciliation,
   ControlChannelState,
@@ -38,6 +38,8 @@ export interface RunStreamHandlers {
 export interface RunConnection {
   /** Load an unfenced snapshot, or require the event store established by a stream batch. */
   loadSnapshot(storeId?: string): Promise<RunSnapshot>;
+  /** Load one page of the policy-owned iteration tree. */
+  loadIterations(cursor: string | null): Promise<IterationLoad>;
   /** Subscribe once; settles when the first subscription does. */
   subscribe(handlers: RunStreamHandlers): Promise<void>;
   /** Resume the stream where it was. */
@@ -50,6 +52,11 @@ export interface RunConnection {
   redialControls(): void;
   close(): Promise<void>;
 }
+
+export type IterationLoad =
+  | {readonly kind: 'result'; readonly result: IterationResult}
+  | {readonly kind: 'not-ready'}
+  | {readonly kind: 'unsupported'};
 
 /** The page's visibility, as the browser reports it. */
 export type PageVisibility = 'visible' | 'hidden';

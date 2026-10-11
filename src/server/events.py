@@ -78,6 +78,7 @@ class EventType(StrEnum):
     RUN_STARTED = "run_started"
     RUN_STARTUP_PROGRESS = "run_startup_progress"
     EXPERIMENTS_CHANGED = "experiments_changed"
+    ITERATIONS_CHANGED = "iterations_changed"
     RUN_INTERRUPTED = "run_interrupted"
     RUN_STATUS_CHANGED = "run_status_changed"
     CHAT = "chat"
@@ -370,6 +371,13 @@ class ExperimentsChangedData(EventPayload):
     revision: int | None = Field(default=None, ge=0)
 
 
+class IterationsChangedData(EventPayload):
+    """Semantic revision of the policy-owned iteration projection."""
+
+    kind: Literal["iterations_changed"] = "iterations_changed"
+    revision: str | None = None
+
+
 class ConfigurationFailedData(EventPayload):
     """Diagnostic details for configuration-stage failure."""
 
@@ -660,6 +668,7 @@ EventData = Annotated[
     | RunInterruptedData
     | RunStatusChangedData
     | ExperimentsChangedData
+    | IterationsChangedData
     | ConfigurationFailedData
     | PhaseData
     | AgentOutputChunkData

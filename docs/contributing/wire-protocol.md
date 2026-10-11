@@ -35,13 +35,22 @@ The authoritative message taxonomy is three unions in `src/server/api/protocol.p
 
 | Direction | Union | Members |
 | --- | --- | --- |
-| client to server | `ProtocolRequest` | `command.*`, `query.*`, `subscribe` (16 types) |
+| client to server | `ProtocolRequest` | `command.*`, `query.*`, `subscribe` (17 types) |
 | server to client, control | `Response` | one per request, correlated by `request_id` |
 | server to client, stream | `ServerMessage` | `subscribed`, `event`, `event_batch`, `protocol_error` |
 
 `PROTOCOL_VERSION` is `1`. Every model sets `extra="forbid"`, which is load bearing: a client probes
 for an optional field by sending it and treating rejection as "this server does not have the field"
 (see `WP-CAPABILITY-PROBE`).
+
+`query.iterations` is an additive control request in that generated payload
+schema. A response returns one bounded page of roots or direct children, or a
+typed unavailable result. Its opaque cursor binds projection revision, parent,
+and offset; clients must replay an identical page idempotently and reject a
+different page at an already applied cursor. Transports do not decode the cursor
+or interpret iteration kinds. Older servers reject the request under the same
+strict request parsing, and clients retain event-derived round navigation as the
+compatibility path.
 
 ## Framing and connection decisions
 

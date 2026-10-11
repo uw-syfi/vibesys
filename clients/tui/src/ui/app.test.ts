@@ -62,12 +62,14 @@ import {
 import {
   clearAgentSelection,
   selectAgent,
+  selectIteration,
   selectNextRound,
   selectPreviousRound,
 } from '../round-agent-selection.js';
 import type {SessionController} from '../session-controller.js';
 import {
   activeChatThreadSettings,
+  applyIterationResult,
   type ChatThreadSettings,
   chatPaneVisible,
   clearEntrySelection,
@@ -1697,6 +1699,68 @@ describe('OpenTUI presentation', () => {
     // The rail is visible, so Down steps the round selection rather than an agent.
     expect(controller.state.selectedRound).toBe(2);
     expect(controller.state.selectedAgentKind).toBeNull();
+  });
+
+  it('clicks and keys through non-round policy roots by stable identity', async () => {
+    const testRenderer = await createTestRenderer({width: 120, height: 24});
+    const page: NonNullable<ProtocolResponse['iterations']> = {
+      kind: 'page',
+      schema_version: 1,
+      run_id: 'run',
+      projection_revision: 'evolve',
+      parent_id: null,
+      from_cursor: null,
+      items: [0, 1, 2].map(generation => ({
+        id: `generation:${generation}`,
+        parent_id: null,
+        kind: 'generation' as const,
+        label: `Generation ${generation}`,
+        ordinal: generation,
+        status: generation === 2 ? ('active' as const) : ('completed' as const),
+        child_count: 0,
+        headline_metrics: [],
+      })),
+      next_cursor: null,
+    };
+    const initial = applyIterationResult(
+      {
+        ...initialSessionState(),
+        selectedIterationId: 'generation:0',
+        roundFocus: 'rounds',
+        core: {
+          ...initialSessionState().core,
+          transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
+        },
+      },
+      page,
+    );
+    const controller = new FakeController(initial);
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    let frame = await testRenderer.waitForFrame(value => value.includes('▸Generation 0'));
+
+    testRenderer.mockInput.pressKey('ARROW_DOWN');
+    frame = await frameAfter(testRenderer);
+    expect(controller.state).toMatchObject({
+      selectedIterationId: 'generation:1',
+      selectedRound: null,
+    });
+    expect(frame).toContain('▸Generation 1');
+
+    testRenderer.mockInput.pressKey('[');
+    frame = await frameAfter(testRenderer);
+    expect(controller.state.selectedIterationId).toBe('generation:0');
+
+    const lines = frame.split('\n');
+    const row = lines.findIndex(line => line.includes('Generation 2'));
+    const column = (lines[row]?.indexOf('Generation 2') ?? 0) + 2;
+    await testRenderer.mockMouse.click(column, row);
+    await frameAfter(testRenderer);
+    expect(controller.state).toMatchObject({
+      selectedIterationId: 'generation:2',
+      selectedRound: null,
+      roundFocus: 'rounds',
+    });
   });
 
   it('resizes the rail from the todo strip’s current height, not the last frame’s', async () => {
@@ -8883,7 +8947,13 @@ class FakeController implements SessionController {
   }
   live(): void {
     this.liveCalls += 1;
-    this.state = {...this.state, overlay: null, selectedRound: null, selectedAgentKind: null};
+    this.state = {
+      ...this.state,
+      overlay: null,
+      selectedIterationId: null,
+      selectedRound: null,
+      selectedAgentKind: null,
+    };
     for (const listener of this.#listeners) listener(this.state);
   }
   selectNextAgent(): void {
@@ -8907,6 +8977,9 @@ class FakeController implements SessionController {
   selectPreviousRound(): void {
     this.publish(selectPreviousRound(this.state));
   }
+  selectIteration(iterationId: string): void {
+    this.publish(selectIteration(this.state, iterationId));
+  }
   selectAgent(kind: string): void {
     this.publish(selectAgent(this.state, kind));
   }
@@ -8926,7 +8999,12 @@ class FakeController implements SessionController {
     this.publish(selectNextTodo(this.state, delta));
   }
   selectRound(roundNumber: number): void {
-    this.state = {...this.state, selectedRound: roundNumber, selectedAgentKind: null};
+    this.state = {
+      ...this.state,
+      selectedIterationId: `round:${roundNumber}`,
+      selectedRound: roundNumber,
+      selectedAgentKind: null,
+    };
     for (const listener of this.#listeners) listener(this.state);
   }
   #promptToggle: (() => void) | null = null;

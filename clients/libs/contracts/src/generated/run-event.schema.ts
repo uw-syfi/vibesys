@@ -648,6 +648,7 @@ const runEventSchema: Record<string, unknown> = {
         "run_started",
         "run_startup_progress",
         "experiments_changed",
+        "iterations_changed",
         "run_interrupted",
         "run_status_changed",
         "chat",
@@ -1017,6 +1018,34 @@ const runEventSchema: Record<string, unknown> = {
       ],
       "title": "InvocationStartedData",
       "type": "object"
+    },
+    "IterationsChangedData": {
+      "description": "Semantic revision of the policy-owned iteration projection.",
+      "properties": {
+        "kind": {
+          "const": "iterations_changed",
+          "default": "iterations_changed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        }
+      },
+      "title": "IterationsChangedData",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
     },
     "JsonResultPayload": {
       "description": "A tool result that is a JSON object or array, already parsed.",
@@ -2356,6 +2385,7 @@ const runEventSchema: Record<string, unknown> = {
               "gate_started": "#/$defs/GateStartedData",
               "invocation_finished": "#/$defs/InvocationFinishedData",
               "invocation_started": "#/$defs/InvocationStartedData",
+              "iterations_changed": "#/$defs/IterationsChangedData",
               "judge_result": "#/$defs/JudgeResultData",
               "output": "#/$defs/OutputData",
               "phase": "#/$defs/PhaseData",
@@ -2427,6 +2457,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/ExperimentsChangedData"
+            },
+            {
+              "$ref": "#/$defs/IterationsChangedData"
             },
             {
               "$ref": "#/$defs/ConfigurationFailedData"

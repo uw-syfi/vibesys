@@ -1213,6 +1213,10 @@ describe('wire payload validation', () => {
     expect(parseProtocolResponse(response)).toMatchObject({
       snapshot: {status: 'running'},
       experiments: [{rounds: [{round: 1}]}],
+      iterations: {
+        kind: 'page',
+        items: [{id: 'round:1', headline_metrics: [{id: 'latency:p99'}]}],
+      },
     });
   });
 
@@ -1230,6 +1234,8 @@ describe('wire payload validation', () => {
       'experiments',
       'experiment_update',
       'experiments_ready',
+      'iterations',
+      'iterations_ready',
       'design',
       'design_ready',
       'design_patch',

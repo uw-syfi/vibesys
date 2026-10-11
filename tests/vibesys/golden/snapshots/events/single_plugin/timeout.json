@@ -115,6 +115,17 @@
   {
     "agent_kind": null,
     "data": {
+      "kind": "iterations_changed",
+      "revision": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "iterations_changed"
+  },
+  {
+    "agent_kind": null,
+    "data": {
       "baseline": null,
       "commit": null,
       "excluded_paths": [],
@@ -453,6 +464,17 @@
     "status": "completed",
     "text": "",
     "type": "round_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "kind": "iterations_changed",
+      "revision": "151c42fcc51c0210813ac2e2d229872403816996df5bf1bc79551774c9e8315f"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "iterations_changed"
   },
   {
     "agent_kind": null,

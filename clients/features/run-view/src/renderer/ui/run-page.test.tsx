@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test';
 import {event} from '@vibesys/contracts/testing';
 import {runStep} from '@vibesys/run-session';
-import {initialCoreState} from '@vibesys/run-state';
+import {initialCoreState, initialIterationNavigation} from '@vibesys/run-state';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {RunPage} from './run-page.js';
 
@@ -19,6 +19,7 @@ test('surfaces a server-truncated event beside its retained payload', () => {
   const html = renderToStaticMarkup(
     <RunPage
       run={run}
+      iterations={initialIterationNavigation()}
       session={null}
       replayFailure={null}
       onReattach={() => undefined}
@@ -45,6 +46,7 @@ ${'A'.repeat(256)}
   const html = renderToStaticMarkup(
     <RunPage
       run={run}
+      iterations={initialIterationNavigation()}
       session={null}
       replayFailure={null}
       onReattach={() => undefined}

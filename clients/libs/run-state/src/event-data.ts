@@ -112,6 +112,7 @@ const EVENT_DATA_HANDLERS = {
     composeEventDataHandlers(applyTerminalExecutionStatus, applyRunStatusData),
   ),
   experiments_changed: runEventData(applyExperimentsChangedData),
+  iterations_changed: ignoredEventData,
   configuration_failed: runEventData(applyTerminalExecutionStatus),
   phase: ignoredEventData,
   agent_output_chunk: runEventData(applyAgentStatusData),

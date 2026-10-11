@@ -922,7 +922,7 @@ expose = ["api", "api\\..*"]
 from = ["vs_dst"]
 
 [[interfaces]]
-expose = ["PluginProjection", "ProfilerKind", "ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
+expose = ["IterationKind", "IterationMetric", "IterationProjection", "IterationStatus", "IterationSummary", "IterationSupport", "IterationTree", "IterationUnavailable", "IterationUnavailableReason", "PluginProjection", "ProfilerKind", "ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
 from = ["vibesys.run.contracts"]
 
 [[interfaces]]
@@ -1002,7 +1002,7 @@ expose = ["resolve_skill_source_dirs", "validate_skill_tree"]
 from = ["vibesys.run.skill_sources"]
 
 [[interfaces]]
-expose = ["OrchestrationProjector", "OrchestrationRegistration", "RuntimeRecordProjector", "project_run"]
+expose = ["IterationSupport", "OrchestrationProjector", "OrchestrationRegistration", "RuntimeRecordProjector", "project_run"]
 from = ["vibesys.plugin_registration"]
 
 [[interfaces]]
@@ -1118,7 +1118,7 @@ expose = ["AgentToolContext", "ProfilerPreflight", "RunResources", "SessionAgent
 
 [[interfaces]]
 from = ["vibesys.api.catalog"]
-expose = ["DYNAMIC", "EVOLVE", "ISSUE_QUEUE", "SINGLE", "MULTI", "PROFILE_GUIDED_SINGLE", "PROFILE_GUIDED_MULTI"]
+expose = ["BUILT_INS", "DYNAMIC", "EVOLVE", "ISSUE_QUEUE", "SINGLE", "MULTI", "PROFILE_GUIDED_SINGLE", "PROFILE_GUIDED_MULTI"]
 
 [[interfaces]]
 from = ["vs_runtime._runs"]

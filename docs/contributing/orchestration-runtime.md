@@ -108,8 +108,14 @@ Plugin declarations may also name their typed state model and memory paths.
 VibeSys-specific projection, resume compatibility, and maximum-round display
 policy live in the plugin's product `OrchestrationRegistration`, not in the
 reusable runtime contract. Projection callbacks return the strict
-`vibesys.api.PluginProjection` contract, which reuses `RoundSummary`; the
-product catalog validates that exact result type before exposing a view.
+`vibesys.api.PluginProjection` contract. Its `iterations` field is the
+policy-owned, typed navigation tree; `RoundSummary` remains the compatibility
+projection for older consumers. Every built-in registration declares an
+`IterationSupport` disposition. Catalog construction rejects `UNMAPPED`, so a
+new built-in cannot silently publish empty navigation. A policy whose required
+state is held outside its durable model returns typed unavailability instead of
+reconstructing or duplicating that external state. The product catalog validates
+the exact projection result type before exposing a view.
 Product configuration is validated against `plugin.agents`, so an unknown role
 override fails before any run resource opens.
 
@@ -266,7 +272,9 @@ registries, builders, or callback bundles merely to shorten orchestration code.
    message routing, and response interpretation in the plugin.
 4. Export its product registration and add it to
    `launch.built_in_orchestrations` through the individual registration facade
-   `vibesys.api.catalog`.
+   `vibesys.api.catalog`. Declare its iteration disposition and, when projected,
+   map durable policy state to stable typed IDs, parent links, sibling ordinals,
+   status, and bounded headline metrics.
 5. Add policy tests through `FakeRun`, prompt or state-transition tests as
    appropriate, and integration coverage for product composition only when the
    boundary itself changes.

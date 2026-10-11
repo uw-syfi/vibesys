@@ -20,7 +20,17 @@ from vibesys.hypothesis import (
     PerfDeltaReason,
     derive_hypothesis_title,
 )
-from vibesys.run.contracts import PluginProjection, RoundSummary, RunStatus, RunView
+from vibesys.run.contracts import (
+    IterationKind,
+    IterationMetric,
+    IterationStatus,
+    IterationSummary,
+    IterationTree,
+    PluginProjection,
+    RoundSummary,
+    RunStatus,
+    RunView,
+)
 
 if TYPE_CHECKING:
     from vibesys.hypothesis import JudgeVerdict, RoundRecord
@@ -176,6 +186,13 @@ def project_run_view(
         loop=loop,
         status=status,
         projection=projection.model_dump(mode="json"),
+        iterations=iteration_tree_from_agent_projection(
+            projection,
+            metric_id=(state.metrics.primary.name if state.metrics.primary is not None else None),
+            metric_direction=(
+                state.metrics.primary.direction if state.metrics.primary is not None else None
+            ),
+        ),
         rounds=tuple(_round_summary(record) for record in projection.rounds),
         experiment_revision=experiment_revision,
     )
@@ -193,9 +210,48 @@ def project_hypothesis_state(state: HypothesisState) -> PluginProjection:
     )
     return PluginProjection(
         payload=projection.model_dump(mode="json"),
+        iterations=iteration_tree_from_agent_projection(
+            projection,
+            metric_id=(state.metrics.primary.name if state.metrics.primary is not None else None),
+            metric_direction=(
+                state.metrics.primary.direction if state.metrics.primary is not None else None
+            ),
+        ),
         rounds=tuple(_round_summary(record) for record in projection.rounds),
         experiment_revision=state.experiment_revision,
     )
+
+
+def iteration_tree_from_agent_projection(
+    projection: AgentRunProjection,
+    *,
+    metric_id: str | None,
+    metric_direction: Literal["max", "min"] | None,
+) -> IterationTree:
+    """Map a hypothesis projection to stable round navigation."""
+    nodes = tuple(
+        IterationSummary(
+            id=f"round:{record.round_number}",
+            kind=IterationKind.ROUND,
+            label=f"Round {record.round_number}",
+            ordinal=record.round_number,
+            status=(IterationStatus.COMPLETED if record.passed else IterationStatus.FAILED),
+            headline_metrics=(
+                (
+                    IterationMetric(
+                        id=metric_id or record.perf_unit or "performance",
+                        value=record.perf_metric,
+                        unit=record.perf_unit,
+                        direction=metric_direction,
+                    ),
+                )
+                if record.perf_metric is not None
+                else ()
+            ),
+        )
+        for record in projection.rounds
+    )
+    return IterationTree.from_nodes(nodes)
 
 
 def _agent_run_projection(

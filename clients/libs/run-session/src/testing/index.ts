@@ -83,6 +83,7 @@ export class FakeTransport implements ControlTransport {
   readonly requests: RequestInput[] = [];
   readonly subscriptions: SubscriptionRecord[] = [];
   readonly snapshots: Array<ProtocolResponse | Error | Promise<ProtocolResponse>> = [];
+  readonly iterations: Array<ProtocolResponse | Error | Promise<ProtocolResponse>> = [];
   readonly #subscriptionWaiters: Array<(subscription: SubscriptionRecord) => void> = [];
   readonly #subscriptionCloseWaiters: Array<(subscription: SubscriptionRecord) => void> = [];
   #deferNextSubscription = false;
@@ -148,9 +149,20 @@ export class FakeTransport implements ControlTransport {
 
   async request(input: RequestInput): Promise<ProtocolResponse> {
     this.requests.push(input);
-    const response = this.snapshots.shift();
+    const response =
+      input.type === 'query.iterations' ? this.iterations.shift() : this.snapshots.shift();
     if (response instanceof Error) throw response;
-    return (await response) ?? snapshotResponse();
+    if (response !== undefined) return await response;
+    if (input.type === 'query.iterations') {
+      return {
+        protocol_version: 1,
+        request_id: 'iterations',
+        timestamp: '2026-01-01T00:00:00Z',
+        ok: true,
+        iterations_ready: false,
+      };
+    }
+    return snapshotResponse();
   }
 
   async subscribe(

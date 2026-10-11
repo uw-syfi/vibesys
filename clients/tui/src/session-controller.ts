@@ -1,11 +1,12 @@
 import {
   type ExperimentCursor,
+  isServerRejection,
   type RunEvent,
   type RunSnapshot,
   ServerError,
   type ServerMessage,
 } from '@vibesys/contracts';
-import {hasRunEnded} from '@vibesys/run-state';
+import {hasRunEnded, initialIterationNavigation, reduceIterationResult} from '@vibesys/run-state';
 import {recordsBenchmark} from '@vibesys/run-state/performance';
 import {DEFAULT_CHAT_THREAD_ID} from '@vibesys/run-state/transcript';
 import {
@@ -83,6 +84,7 @@ import {
   selectNextRound,
   selectPreviousAgent,
   selectPreviousRound,
+  selectIteration,
   selectRound,
 } from './round-agent-selection.js';
 import {
@@ -172,6 +174,7 @@ export interface SessionController {
   selectPreviousAgent(): void;
   selectNextRound(): void;
   selectPreviousRound(): void;
+  selectIteration(iterationId: string): void;
   selectRound(roundNumber: number): void;
   selectAgent(kind: string): void;
   selectNextEntry(delta: number, id?: string): void;
@@ -304,6 +307,12 @@ export class SocketSessionController implements SessionController {
       this.#setState(reportCaughtError(failPane(this.#state, 'design', message), error, 'request'));
     },
   });
+  /** Optional policy-navigation capability probe and refresh. */
+  #iterationFetch: Promise<void> | null = null;
+  #iterationRefreshPending = false;
+  /** Stop is terminal for iteration queries too. */
+  #iterationRefreshAllowed = true;
+  #iterationCapability: 'unknown' | 'supported' | 'unsupported' = 'unknown';
   readonly #reconciler = new StreamReconciler({backfillChunk: BACKFILL_CHUNK});
   /** Serializes the consumer effect of applying one shared backfill outcome. */
   #historyFetch: Promise<boolean> | null = null;
@@ -365,6 +374,7 @@ export class SocketSessionController implements SessionController {
   async start(): Promise<void> {
     await Promise.all([
       this.#loadSnapshot(),
+      this.#loadIterations().catch(error => this.#reportIterationError(error)),
       // The log is the landing view, so it is populated before the first frame
       // rather than on demand.
       this.#loadExperiments(),
@@ -413,6 +423,7 @@ export class SocketSessionController implements SessionController {
         this.#experimentForceRefresh = true;
         if (this.#experimentFetch !== null) this.#experimentRefreshPending = true;
         void this.#loadExperiments();
+        void this.#loadIterations().catch(error => this.#reportIterationError(error));
       }
     } else if (!this.#streamProtocolError) {
       this.#setState(
@@ -480,6 +491,65 @@ export class SocketSessionController implements SessionController {
     }
   }
 
+  #loadIterations(): Promise<void> {
+    if (!this.#iterationRefreshAllowed) return Promise.resolve();
+    if (this.#iterationCapability === 'unsupported') return Promise.resolve();
+    if (this.#iterationFetch !== null) {
+      this.#iterationRefreshPending = true;
+      return this.#iterationFetch;
+    }
+    const fetch = this.#requestIterations().finally(() => {
+      this.#iterationFetch = null;
+      if (this.#iterationRefreshAllowed && this.#iterationRefreshPending) {
+        this.#iterationRefreshPending = false;
+        void this.#loadIterations().catch(error => this.#reportIterationError(error));
+      }
+    });
+    this.#iterationFetch = fetch;
+    return fetch;
+  }
+
+  async #requestIterations(): Promise<void> {
+    try {
+      await this.#collectIterationPages();
+    } catch (error) {
+      if (this.#iterationCapability === 'unknown' && isServerRejection(error)) {
+        this.#iterationCapability = 'unsupported';
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async #collectIterationPages(): Promise<void> {
+    let cursor: string | null = null;
+    const seen = new Set<string>();
+    let staged = initialIterationNavigation();
+    do {
+      const response = await this.client.request({
+        type: 'query.iterations',
+        ...(cursor === null ? {} : {cursor}),
+      });
+      this.#iterationCapability = 'supported';
+      if (response.iterations_ready === false || response.iterations == null) return;
+      staged = reduceIterationResult(staged, response.iterations);
+      if (!('items' in response.iterations)) {
+        this.#setState({...this.#state, iterations: staged});
+        return;
+      }
+      cursor = response.iterations.next_cursor ?? null;
+      if (cursor !== null && seen.has(cursor)) {
+        throw new Error('iteration query repeated a paging cursor');
+      }
+      if (cursor !== null) seen.add(cursor);
+    } while (cursor !== null);
+    this.#setState({...this.#state, iterations: staged});
+  }
+
+  #reportIterationError(error: unknown): void {
+    this.#setState(reportCaughtError(this.#state, error, 'request'));
+  }
+
   /** Loads the chunk of history just older than what is folded. */
   loadOlderHistory(): Promise<boolean> {
     if (this.#historyFetch !== null) return this.#historyFetch;
@@ -514,6 +584,8 @@ export class SocketSessionController implements SessionController {
   stop(): Promise<void> {
     if (this.#closing !== null) return this.#closing;
     this.#designQuery.stop();
+    this.#iterationRefreshAllowed = false;
+    this.#iterationRefreshPending = false;
     this.#chatThreadCreateGeneration += 1;
     const closing = closeStreamAndTransport(this.#stream, this.client);
     this.#closing = closing;
@@ -568,6 +640,10 @@ export class SocketSessionController implements SessionController {
 
   selectPreviousRound(): void {
     this.#setState(selectPreviousRound(this.#state));
+  }
+
+  selectIteration(iterationId: string): void {
+    this.#setState(selectIteration(this.#state, iterationId));
   }
 
   selectRound(roundNumber: number): void {
@@ -1467,6 +1543,9 @@ export class SocketSessionController implements SessionController {
     const events = this.#dispatchMessage(message, resumed);
     if (events === null) return;
     this.#refreshExperimentsFor(events);
+    if (events.some(event => event.type === 'iterations_changed')) {
+      void this.#loadIterations().catch(error => this.#reportIterationError(error));
+    }
     this.#refreshPaneFor(events);
   }
 

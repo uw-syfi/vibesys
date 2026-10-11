@@ -110,6 +110,14 @@ class FakeShell {
         protocol_version: 1,
         request_id: request['request_id'],
       });
+    } else if (request['type'] === 'query.iterations') {
+      reply({
+        protocol_version: 1,
+        request_id: request['request_id'],
+        timestamp: '2026-01-01T00:00:00Z',
+        ok: true,
+        iterations_ready: false,
+      });
     } else if (request['type'] === 'subscribe') {
       const after = Number(request['after_sequence']);
       reply({

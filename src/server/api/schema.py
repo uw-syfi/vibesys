@@ -16,9 +16,11 @@ from typing import TYPE_CHECKING, Any, Never
 
 from pydantic import BaseModel
 
+from server.api.iterations import IterationSlice
 from server.api.protocol import ProtocolRequest, Response, RunSnapshot, ServerMessage
 from server.events import RunEvent
 from server.host_api import ChannelEnd, HelperMessage, HelperRequest
+from vibesys.api import IterationKind, IterationMetric, IterationStatus, IterationSummary
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -953,6 +955,29 @@ def fully_populated_response() -> Response:
                 "removed_hypothesis_ids": ["removed"],
             },
             "experiments_ready": True,
+            "iterations": IterationSlice(
+                run_id="run",
+                projection_revision="iteration-revision",
+                parent_id=None,
+                items=(
+                    IterationSummary(
+                        id="round:1",
+                        kind=IterationKind.ROUND,
+                        label="Round 1",
+                        ordinal=1,
+                        status=IterationStatus.COMPLETED,
+                        headline_metrics=(
+                            IterationMetric(
+                                id="latency:p99",
+                                value=1.0,
+                                unit="s",
+                                direction="min",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            "iterations_ready": True,
             "design": [
                 {
                     "round": 1,

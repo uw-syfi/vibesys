@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.run.contracts import PluginProjection, RunStatus, RunView
+from vibesys.run.contracts import IterationSupport, PluginProjection, RunStatus, RunView
 from vs_core.api import ContractError, OperationRegistration
 from vs_project.api import StoredEnvelope
 from vs_runtime.api.core import OperationRole, RuntimeRecord
@@ -93,6 +93,7 @@ def _plugin_run_view(
         loop=plugin_id,
         status=status,
         projection=projection.payload,
+        iterations=projection.iterations,
         rounds=projection.rounds,
         experiment_revision=projection.experiment_revision,
     )
@@ -154,6 +155,7 @@ class OrchestrationRegistration:
     ) = None
     project_max_rounds: Callable[[BaseModel], int | None] | None = None
     projector: OrchestrationProjector | None = None
+    iteration_support: IterationSupport = IterationSupport.UNMAPPED
 
     def __post_init__(self) -> None:
         """Bind exactly one read source: a projection of the declared state or a projector.
@@ -261,6 +263,7 @@ def project_run(
 
 
 __all__ = [
+    "IterationSupport",
     "OrchestrationProjector",
     "OrchestrationRegistration",
     "RuntimeRecordProjector",

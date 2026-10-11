@@ -4,7 +4,7 @@
  */
 
 import type {WebSessionState} from '@vibesys/run-session';
-import type {CoreState} from '@vibesys/run-state';
+import type {CoreState, IterationNavigationState} from '@vibesys/run-state';
 import type {JSX} from 'react';
 import {
   connectionBanners,
@@ -17,6 +17,7 @@ import {Activity, RunSummary} from './run-summary.js';
 
 export interface RunPageProps {
   readonly run: CoreState;
+  readonly iterations: IterationNavigationState;
   /** The live session's state; null on the replay page. */
   readonly session: WebSessionState | null;
   readonly replayFailure: string | null;
@@ -25,7 +26,13 @@ export interface RunPageProps {
   readonly onRetryReplay: () => void;
 }
 
-export function RunPage({run, session, replayFailure, ...events}: RunPageProps): JSX.Element {
+export function RunPage({
+  run,
+  iterations,
+  session,
+  replayFailure,
+  ...events
+}: RunPageProps): JSX.Element {
   const banners = connectionBanners(run, session ?? REPLAY_SESSION);
   const header = pageHeader(run, session);
   return (
@@ -38,7 +45,7 @@ export function RunPage({run, session, replayFailure, ...events}: RunPageProps):
         <span className={`status ${header.status.className}`}>{header.status.label}</span>
       </header>
       <Banners banners={banners} replayFailure={replayFailure} {...events} />
-      <RunSummary run={run} />
+      <RunSummary run={run} iterations={iterations} />
       <Activity run={run} emptyCopy={emptyTranscriptCopy(run, banners)} />
     </main>
   );

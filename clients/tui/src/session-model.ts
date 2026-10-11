@@ -3,6 +3,8 @@ import type {
   DesignRound,
   Diagnostic,
   HypothesisEntry,
+  IterationResult,
+  IterationSummary,
   ProtocolResponse,
   RunEvent,
   RunSnapshot,
@@ -14,12 +16,16 @@ import {
   type CoreState,
   type ExecutionTodos,
   hasRunEnded,
+  type IterationNavigationState,
   initialCoreState,
+  initialIterationNavigation,
+  iterationRoots,
   latestDiagnosticChange,
   reduceEvent,
   reduceEventBatch,
   reduceEventPrefix,
   reduceEventRebootstrap,
+  reduceIterationResult,
   reduceResponseEvents,
   reduceSnapshot,
   type TodoItem,
@@ -40,8 +46,13 @@ import {DEFAULT_THEME_NAME, type ThemeName} from './theme.js';
 export interface SessionState {
   /** Pure projection of backend snapshots, events, and execution checkpoints. */
   readonly core: CoreState;
+  /** Query-derived policy navigation, separate from the event-derived core fold. */
+  readonly iterations: IterationNavigationState;
   /** False after the frontend loses a trustworthy backend event stream. */
   eventStreamAvailable: boolean;
+  /** Stable policy iteration identity selected in the navigation rail. */
+  selectedIterationId: string | null;
+  /** Numeric compatibility boundary for round-scoped transcript and agent projections. */
   selectedRound: number | null;
   selectedAgentKind: string | null;
   /** Transcript entry the arrow keys are on, so a trace is readable without a mouse. */
@@ -399,7 +410,9 @@ export interface ConversationEntry {
 export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): SessionState {
   return {
     core: initialCoreState(),
+    iterations: initialIterationNavigation(),
     eventStreamAvailable: true,
+    selectedIterationId: null,
     selectedRound: null,
     selectedAgentKind: null,
     selectedEntryId: null,
@@ -439,6 +452,70 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     errorBanner: null,
     inputError: null,
   };
+}
+
+export function applyIterationResult(state: SessionState, result: IterationResult): SessionState {
+  const iterations = reduceIterationResult(state.iterations, result);
+  return iterations === state.iterations ? state : {...state, iterations};
+}
+
+export interface IterationRailRow extends RoundState {
+  /** Stable policy-owned identity used by rail selection and paging-independent navigation. */
+  readonly iterationId: string;
+}
+
+/** Rows the rail renders, preferring policy navigation over round compatibility state. */
+export function iterationRailRounds(state: SessionState): readonly IterationRailRow[] {
+  if (state.iterations.revision === null) {
+    return stripRounds(state).map(round => ({...round, iterationId: iterationIdForRound(round)}));
+  }
+  const compatibility = stripRounds(state);
+  return iterationRoots(state.iterations, state.core).map(node => {
+    const roundNumber = node.kind === 'round' ? roundNumberFromIterationId(node.id) : null;
+    const liveRound = compatibility.find(round => round.number === roundNumber);
+    if (liveRound !== undefined) {
+      return {...liveRound, iterationId: node.id, iterationLabel: node.label};
+    }
+    return {
+      iterationId: node.id,
+      key:
+        roundNumber === null
+          ? {kind: 'label' as const, label: node.id}
+          : {kind: 'number' as const, number: roundNumber},
+      number: roundNumber,
+      status: roundStatusForIteration(node.status),
+      iterationLabel: node.label,
+      agentIntervals: [],
+      activeAgentStarts: {},
+    };
+  });
+}
+
+function iterationIdForRound(round: RoundState): string {
+  return round.key.kind === 'number'
+    ? `round:${round.key.number}`
+    : `round-label:${round.key.label}`;
+}
+
+function roundStatusForIteration(status: IterationSummary['status']): RoundState['status'] {
+  switch (status) {
+    case 'pending':
+      return 'planned';
+    case 'active':
+      return 'active';
+    case 'failed':
+    case 'cancelled':
+      return 'failed';
+    default:
+      return 'completed';
+  }
+}
+
+function roundNumberFromIterationId(id: string): number | null {
+  const match = /^round:(\d+)$/.exec(id);
+  if (match === null) return null;
+  const number = Number(match[1]);
+  return Number.isSafeInteger(number) && number > 0 ? number : null;
 }
 
 /**
@@ -1454,6 +1531,7 @@ export function showLive(state: SessionState): SessionState {
     chatOpen: false,
     hypothesisDetail: null,
     hypothesisScope: null,
+    selectedIterationId: null,
     selectedRound: null,
     selectedAgentKind: null,
     experimentLog: state.experimentLog ?? {
@@ -1534,6 +1612,12 @@ export function visibleTodos(state: SessionState): readonly TodoItem[] {
 }
 
 export function visibleRoundNumber(state: SessionState): number | null {
+  if (state.selectedIterationId !== null) {
+    const selected = iterationRailRounds(state).find(
+      row => row.iterationId === state.selectedIterationId,
+    );
+    if (selected !== undefined) return selected.number;
+  }
   const scope = state.hypothesisScope;
   if (scope !== null && state.selectedRound === null) {
     // Opening a hypothesis lands on one of its rounds rather than on nothing.
@@ -1550,6 +1634,24 @@ export function visibleRoundNumber(state: SessionState): number | null {
   const rounds = stripRounds(state).filter(round => round.number !== null);
   const active = [...rounds].reverse().find(round => round.status === 'active');
   return active?.number ?? rounds.at(-1)?.number ?? null;
+}
+
+/** Stable identity currently represented by the rail cursor. */
+export function visibleIterationId(state: SessionState): string | null {
+  const rows = iterationRailRounds(state);
+  if (
+    state.selectedIterationId !== null &&
+    rows.some(row => row.iterationId === state.selectedIterationId)
+  ) {
+    return state.selectedIterationId;
+  }
+  const roundNumber = visibleRoundNumber(state);
+  if (roundNumber !== null) {
+    const round = rows.find(row => row.number === roundNumber);
+    if (round !== undefined) return round.iterationId;
+  }
+  const active = [...rows].reverse().find(row => row.status === 'active');
+  return active?.iterationId ?? rows.at(-1)?.iterationId ?? null;
 }
 
 /** The rounds owned by the hypothesis on screen, or every round outside one. */

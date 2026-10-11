@@ -9,6 +9,7 @@ export {connectRun, type RunConnectionOptions} from './connect.js';
 export type {WebSessionState, WebSessionStatus} from './connection.js';
 export type {
   BrowserLifecycle,
+  IterationLoad,
   PageVisibility,
   RunConnection,
   RunStreamHandlers,

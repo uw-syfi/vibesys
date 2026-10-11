@@ -11,8 +11,8 @@ import {
 } from '@vibesys/run-state/rounds';
 import {hypothesisRoundFor} from '../experiments.js';
 import type {SessionController} from '../session-controller.js';
-import type {SessionState} from '../session-model.js';
-import {experimentLogVisible, stripRounds, visibleRoundNumber} from '../session-model.js';
+import type {IterationRailRow, SessionState} from '../session-model.js';
+import {experimentLogVisible, iterationRailRounds, visibleIterationId} from '../session-model.js';
 import type {Theme} from '../theme.js';
 import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {STACKED_WIDTH, TRANSCRIPT_MIN} from './agent-map.js';
@@ -88,7 +88,7 @@ export function roundRailVisible(state: SessionState, terminalWidth: number): bo
   if (state.layout.right !== null && splitFits(terminalWidth)) return false;
   // Before the run has any rounds there is nothing to rail; the agents graph and
   // transcript keep the whole width rather than losing a column to an empty box.
-  if (stripRounds(state).length === 0) return false;
+  if (iterationRailRounds(state).length === 0) return false;
   return roundRailWidth(terminalWidth) > 0;
 }
 
@@ -104,7 +104,7 @@ export function roundRailColumns(state: SessionState, terminalWidth: number): nu
 }
 
 export interface RailWindow {
-  rounds: readonly RoundState[];
+  rounds: readonly IterationRailRow[];
   hiddenBefore: number;
   hiddenAfter: number;
 }
@@ -131,8 +131,8 @@ const SYSTEM_ROUND_RAIL_SCHEDULER: RoundRailScheduler = {
  * `↑ n` / `↓ n` indicators so the counts never overlap a round.
  */
 export function railWindow(
-  rounds: readonly RoundState[],
-  selected: number | null,
+  rounds: readonly IterationRailRow[],
+  selected: string | null,
   availableRows: number,
   rowHeight = 1,
 ): RailWindow {
@@ -143,7 +143,7 @@ export function railWindow(
   const capacity = rounds.length <= rows ? rows : Math.max(1, rows - 2);
   const index = Math.max(
     0,
-    selected === null ? -1 : rounds.findIndex(round => round.number === selected),
+    selected === null ? -1 : rounds.findIndex(round => round.iterationId === selected),
   );
   let first = index;
   let last = index;
@@ -179,7 +179,7 @@ export class RoundRailView {
   #cancelElapsedTimer: (() => void) | null = null;
   #spinnerFrame = 0;
   #runningRound: {
-    round: RoundState;
+    round: IterationRailRow;
     state: SessionState;
     text: TextRenderable;
     compact: boolean;
@@ -234,9 +234,10 @@ export class RoundRailView {
     this.output.width = width;
     const focused = state.roundFocus === 'rounds';
     this.output.borderColor = focused ? this.#theme.borderFocus : this.#theme.borderStrong;
-    this.output.title = focused ? ' ▸ Rounds ' : ' Rounds ';
+    const title = state.iterations.revision === null ? 'Rounds' : 'Iterations';
+    this.output.title = focused ? ` ▸ ${title} ` : ` ${title} `;
     this.#clear();
-    const rounds = stripRounds(state);
+    const rounds = iterationRailRounds(state);
     if (rounds.length === 0) {
       this.output.add(
         new TextRenderable(this.renderer, {
@@ -250,7 +251,7 @@ export class RoundRailView {
     const compact = width <= RAIL_COMPACT_WIDTH;
     // Border and horizontal padding consume two columns each.
     const labelWidth = Math.max(0, width - 4);
-    const selected = visibleRoundNumber(state);
+    const selected = visibleIterationId(state);
     const runningRoundKey = latestActiveRoundKey(rounds);
     const available = Math.max(0, rows - RAIL_VCHROME);
     if (available <= 0) {
@@ -298,20 +299,17 @@ export class RoundRailView {
   }
 
   #renderRound(
-    round: RoundState,
+    round: IterationRailRow,
     viewState: {
       state: SessionState;
-      selected: number | null;
+      selected: string | null;
       runningRoundKey: RoundKey | null;
       compact: boolean;
       labelWidth: number;
     },
   ): TextRenderable {
     const {state, selected, runningRoundKey, compact, labelWidth} = viewState;
-    // Selection and navigation remain numeric until the protocol supplies an
-    // explicit identity. A fallback row is visible, but `null === null` must
-    // not make every unnumbered row look selected or currently navigated.
-    const isSelected = round.number !== null && round.number === selected;
+    const isSelected = round.iterationId === selected;
     const isRunning = runningRoundKey !== null && sameRoundKey(round.key, runningRoundKey);
     const text = new TextRenderable(this.renderer, {
       content: this.#roundLabel(round, state, isSelected, compact, labelWidth),
@@ -321,7 +319,7 @@ export class RoundRailView {
       truncate: true,
       onMouseUp: () => {
         this.controller.focusRound('rounds');
-        if (round.number !== null) this.controller.selectRound(round.number);
+        this.controller.selectIteration(round.iterationId);
       },
     });
     if (isRunning && hasActiveAgentTiming(round)) {
@@ -361,7 +359,9 @@ export class RoundRailView {
     const marker = isSelected ? '▸' : ' ';
     const outcome = roundOutcome(round, hypothesisRoundFor(state, round.number));
     const glyph = outcome === 'live' ? this.#spinnerGlyph() : OUTCOME_GLYPH[outcome];
-    const identity = round.key.kind === 'number' ? `r${round.key.number}` : round.key.label;
+    const identity =
+      round.iterationLabel ??
+      (round.key.kind === 'number' ? `r${round.key.number}` : round.key.label);
     if (compact) return fittedRoundLabel(marker, identity, glyph, '', '', labelWidth);
     const metric = roundMetric(round, state, new Date());
     return fittedRoundLabel(marker, identity, glyph, OUTCOME_WORD[outcome], metric, labelWidth);
@@ -391,7 +391,7 @@ export class RoundRailView {
       text.content = this.#roundLabel(
         round,
         state,
-        round.number !== null && round.number === visibleRoundNumber(state),
+        round.iterationId === visibleIterationId(state),
         compact,
         labelWidth,
       );

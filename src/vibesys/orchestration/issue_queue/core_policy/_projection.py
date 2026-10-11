@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from vibesys.run.contracts import PluginProjection
+from vibesys.run.contracts import (
+    IterationUnavailable,
+    IterationUnavailableReason,
+    PluginProjection,
+)
 
 if TYPE_CHECKING:
     from vibesys.orchestration.issue_queue.strategy.api import IssueQueueStrategyState
@@ -44,4 +48,10 @@ def project_strategy_state(
             for record in state.performance
         ],
     }
-    return PluginProjection(payload=payload, experiment_revision=experiment_revision)
+    return PluginProjection(
+        payload=payload,
+        experiment_revision=experiment_revision,
+        iterations=IterationUnavailable(
+            reason=IterationUnavailableReason.EXTERNAL_STATE_UNAVAILABLE
+        ),
+    )

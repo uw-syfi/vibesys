@@ -34,6 +34,8 @@ export interface RoundState extends RoundTimingState {
   /** Numeric display and protocol join identity; null for label fallback rounds. */
   readonly number: number | null;
   readonly status: RoundStatus;
+  /** Policy-projected label when this compatibility row represents a non-round iteration. */
+  readonly iterationLabel?: string;
   readonly startedAt?: string;
   readonly finishedAt?: string;
   /** Internal provenance for a terminal endpoint inferred at a run boundary. */

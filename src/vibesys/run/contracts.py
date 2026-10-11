@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
@@ -15,6 +25,12 @@ from vibesys.inputs import InputBundle
 from vibesys.repository import RepositoryVisibility
 from vs_project.api import OrchestrationDescriptor, ProjectStateError, validate_run_id
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
+
+_EMPTY_ID = "id must not be empty"
+_EMPTY_TEXT = "must not be empty"
+_EMPTY_REVISION = "revision must not be empty"
+_MAX_HEADLINE_METRICS = 4
+_TOO_MANY_HEADLINE_METRICS = "headline_metrics must contain at most 4 items"
 
 
 def _validate_identity_value(value: str, *, field: str) -> str:
@@ -183,12 +199,203 @@ class RoundSummary(BaseModel):
     profile_skipped: bool = False
 
 
+class IterationKind(StrEnum):
+    """Policy-neutral kinds a client may use to label navigation rows."""
+
+    ROUND = "round"
+    WORKSTREAM = "workstream"
+    ATTEMPT = "attempt"
+    GENERATION = "generation"
+    CANDIDATE = "candidate"
+
+
+class IterationStatus(StrEnum):
+    """Lifecycle shared by every policy's iteration projection."""
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class IterationSupport(StrEnum):
+    """Declared iteration-navigation disposition of one policy registration."""
+
+    UNMAPPED = "unmapped"
+    PROJECTED = "projected"
+    EXTERNAL_STATE_UNAVAILABLE = "external_state_unavailable"
+
+
+class IterationMetric(BaseModel):
+    """One bounded headline measurement attached to an iteration row."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    id: str
+    value: FiniteFloat | None = None
+    unit: str | None = None
+    direction: Literal["max", "min"] | None = None
+
+    @field_validator("id")
+    @classmethod
+    def _nonempty_id(cls, value: str) -> str:
+        if not value:
+            raise ValueError(_EMPTY_ID)
+        return value
+
+
+class IterationSummary(BaseModel):
+    """One stable node in a policy's iteration hierarchy."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    id: str
+    parent_id: str | None = None
+    kind: IterationKind
+    label: str
+    ordinal: Annotated[int, Field(ge=0)]
+    status: IterationStatus
+    child_count: Annotated[int, Field(ge=0)] = 0
+    headline_metrics: tuple[IterationMetric, ...] = ()
+
+    @field_validator("id", "label")
+    @classmethod
+    def _nonempty_text(cls, value: str) -> str:
+        if not value:
+            raise ValueError(_EMPTY_TEXT)
+        return value
+
+    @field_validator("headline_metrics")
+    @classmethod
+    def _bounded_metrics(cls, value: tuple[IterationMetric, ...]) -> tuple[IterationMetric, ...]:
+        if len(value) > _MAX_HEADLINE_METRICS:
+            raise ValueError(_TOO_MANY_HEADLINE_METRICS)
+        return value
+
+
+def _index_iteration_nodes(
+    nodes: tuple[IterationSummary, ...],
+) -> tuple[dict[str, IterationSummary], dict[str, int]]:
+    by_id: dict[str, IterationSummary] = {}
+    sibling_ordinals: dict[str | None, set[int]] = {}
+    child_counts: dict[str, int] = {}
+    for index, node in enumerate(nodes):
+        if node.id in by_id:
+            message = f"nodes[{index}].id duplicates {node.id!r}"
+            raise ValueError(message)
+        by_id[node.id] = node
+        ordinals = sibling_ordinals.setdefault(node.parent_id, set())
+        if node.ordinal in ordinals:
+            message = (
+                f"nodes[{index}].ordinal duplicates {node.ordinal} under parent {node.parent_id!r}"
+            )
+            raise ValueError(message)
+        ordinals.add(node.ordinal)
+        if node.parent_id is not None:
+            child_counts[node.parent_id] = child_counts.get(node.parent_id, 0) + 1
+    return by_id, child_counts
+
+
+def _validate_iteration_links(
+    nodes: tuple[IterationSummary, ...],
+    by_id: dict[str, IterationSummary],
+    child_counts: dict[str, int],
+) -> None:
+    for index, node in enumerate(nodes):
+        if node.parent_id is not None and node.parent_id not in by_id:
+            message = f"nodes[{index}].parent_id references unknown id {node.parent_id!r}"
+            raise ValueError(message)
+        if node.child_count != child_counts.get(node.id, 0):
+            message = (
+                f"nodes[{index}].child_count is {node.child_count}, "
+                f"expected {child_counts.get(node.id, 0)}"
+            )
+            raise ValueError(message)
+    for index, node in enumerate(nodes):
+        visited = {node.id}
+        parent_id = node.parent_id
+        while parent_id is not None:
+            if parent_id in visited:
+                message = f"nodes[{index}].parent_id creates a cycle at {parent_id!r}"
+                raise ValueError(message)
+            visited.add(parent_id)
+            parent_id = by_id[parent_id].parent_id
+
+
+class IterationTree(BaseModel):
+    """A complete, validated policy projection before bounded transport paging."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    kind: Literal["tree"] = "tree"
+    schema_version: Literal[1] = 1
+    revision: str
+    nodes: tuple[IterationSummary, ...] = ()
+
+    @field_validator("revision")
+    @classmethod
+    def _nonempty_revision(cls, value: str) -> str:
+        if not value:
+            raise ValueError(_EMPTY_REVISION)
+        return value
+
+    @model_validator(mode="after")
+    def _validate_tree(self) -> Self:
+        by_id, child_counts = _index_iteration_nodes(self.nodes)
+        _validate_iteration_links(self.nodes, by_id, child_counts)
+        return self
+
+    @classmethod
+    def from_nodes(cls, nodes: tuple[IterationSummary, ...]) -> IterationTree:
+        """Build a projection whose revision is stable for identical typed content."""
+        ordered = tuple(
+            sorted(
+                nodes,
+                key=lambda node: (
+                    node.parent_id is not None,
+                    node.parent_id or "",
+                    node.ordinal,
+                    node.id,
+                ),
+            )
+        )
+        content = [node.model_dump(mode="json") for node in ordered]
+        encoded = json.dumps(content, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        revision = hashlib.sha256(encoded.encode()).hexdigest()
+        return cls(revision=revision, nodes=ordered)
+
+
+class IterationUnavailableReason(StrEnum):
+    """Closed reasons why a policy cannot expose iteration navigation."""
+
+    EXTERNAL_STATE_UNAVAILABLE = "external_state_unavailable"
+    POLICY_NOT_MAPPED = "policy_not_mapped"
+    STATE_UNAVAILABLE = "state_unavailable"
+
+
+class IterationUnavailable(BaseModel):
+    """Typed absence, kept distinct from a supported empty tree."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    kind: Literal["unavailable"] = "unavailable"
+    schema_version: Literal[1] = 1
+    reason: IterationUnavailableReason
+
+
+IterationProjection = Annotated[IterationTree | IterationUnavailable, Field(discriminator="kind")]
+
+
 class PluginProjection(BaseModel):
     """Policy-owned JSON plus product-generic facts exposed by VibeSys."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     payload: dict[str, JsonValue] | None
+    iterations: IterationProjection = IterationUnavailable(
+        reason=IterationUnavailableReason.POLICY_NOT_MAPPED
+    )
     rounds: tuple[RoundSummary, ...] = ()
     experiment_revision: int | None = None
 
@@ -202,11 +409,23 @@ class RunView(BaseModel):
     loop: str
     status: RunStatus
     projection: dict[str, JsonValue] | None = None
+    iterations: IterationProjection = IterationUnavailable(
+        reason=IterationUnavailableReason.STATE_UNAVAILABLE
+    )
     rounds: tuple[RoundSummary, ...] = ()
     experiment_revision: int | None = None
 
 
 __all__ = [
+    "IterationKind",
+    "IterationMetric",
+    "IterationProjection",
+    "IterationStatus",
+    "IterationSummary",
+    "IterationSupport",
+    "IterationTree",
+    "IterationUnavailable",
+    "IterationUnavailableReason",
     "PluginProjection",
     "ProfilerKind",
     "ResumeRef",

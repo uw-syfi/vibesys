@@ -9,6 +9,14 @@ export {latestDiagnosticChange} from './diagnostics.js';
 export {type ExecutionStatus, executionStatusFor} from './execution-status.js';
 export {reconcileActiveExecutions} from './executions.js';
 export {
+  type IterationNavigationState,
+  initialIterationNavigation,
+  iterationChildren,
+  iterationRoots,
+  iterationRootsForCore,
+  reduceIterationResult,
+} from './iteration-navigation.js';
+export {
   reduceEvent,
   reduceEventBatch,
   reduceEventPrefix,

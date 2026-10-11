@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import type {ProtocolResponse, RunSnapshot, RunStatus} from '@vibesys/contracts';
+import {type ProtocolResponse, type RunSnapshot, type RunStatus, ServerError} from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import type {BatchReconciliation, StreamMessageContext} from '@vibesys/transport';
@@ -31,6 +31,10 @@ class PendingHandleConnection implements RunConnection {
     return this.#snapshot === 1
       ? Promise.reject(this.failure)
       : Promise.resolve({run_id: 'run-1', sequence: 1, status: 'running'});
+  }
+
+  loadIterations(): Promise<{readonly kind: 'not-ready'}> {
+    return Promise.resolve({kind: 'not-ready'});
   }
 
   subscribe(handlers: RunStreamHandlers): Promise<void> {
@@ -87,6 +91,10 @@ class FaultBeforeSnapshotConnection implements RunConnection {
     return new Promise(resolve => {
       this.#resolveSnapshot = resolve;
     });
+  }
+
+  loadIterations(): Promise<{readonly kind: 'not-ready'}> {
+    return Promise.resolve({kind: 'not-ready'});
   }
 
   subscribe(handlers: RunStreamHandlers): Promise<void> {
@@ -331,6 +339,196 @@ describe('WebSession robustness', () => {
 });
 
 describe('WebSession', () => {
+  test('loads policy iteration navigation into the shared store', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.iterations.push(iterationResponse('dynamic-1', 'Generation 1'));
+
+    await session.start();
+
+    expect(transport.requests).toContainEqual({type: 'query.iterations'});
+    expect(session.store.getIterations().byId['generation:1']).toMatchObject({
+      kind: 'generation',
+      label: 'Generation 1',
+    });
+    await session.close();
+  });
+
+  test('refreshes policy navigation on a semantic iteration invalidation', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.iterations.push(iterationResponse('evolve-0', 'Generation 0'));
+    await session.start();
+    transport.iterations.push(iterationResponse('evolve-1', 'Generation 1'));
+    const refreshed = waitForSession(
+      session,
+      () => session.store.getIterations().revision === 'evolve-1',
+    );
+
+    transport.subscriptions[0]?.onMessage(
+      eventBatch(
+        [
+          event(2, 'iterations_changed', {
+            data: {kind: 'iterations_changed', revision: 'evolve-1'},
+          }),
+        ],
+        {through_sequence: 2, store_id: 'store-1', history_after_sequence: 0},
+      ),
+    );
+
+    await refreshed;
+    expect(session.store.getIterations().byId['generation:1']?.label).toBe('Generation 1');
+    await session.close();
+  });
+
+  test('does not miss an iteration change that races the initial query', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    const initial = deferred<ProtocolResponse>();
+    transport.iterations.push(initial.promise, iterationResponse('evolve-1', 'Generation 1'));
+    transport.deferNextSubscribe();
+
+    const started = session.start();
+    await settle();
+    const subscription = transport.subscriptions[0];
+    expect(subscription).toBeDefined();
+    subscription?.onMessage(
+      eventBatch(
+        [
+          event(2, 'iterations_changed', {
+            data: {kind: 'iterations_changed', revision: 'evolve-1'},
+          }),
+        ],
+        {through_sequence: 2, store_id: 'store-1', history_after_sequence: 0},
+      ),
+    );
+    const refreshed = waitForSession(
+      session,
+      () => session.store.getIterations().revision === 'evolve-1',
+    );
+
+    initial.resolve(iterationResponse('evolve-0', 'Generation 0'));
+    transport.releasePendingSubscribe();
+    await started;
+    await refreshed;
+
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      2,
+    );
+    expect(session.store.getIterations().byId['generation:1']?.label).toBe('Generation 1');
+    await session.close();
+  });
+
+  test('publishes more than one hundred iteration roots only after the last page', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    const lastPage = deferred<ProtocolResponse>();
+    transport.iterations.push(
+      iterationPageResponse('bulk', null, 0, 100, 'page-2'),
+      lastPage.promise,
+    );
+
+    const started = session.start();
+    await settle();
+    expect(session.store.getIterations().revision).toBeNull();
+    expect(Object.keys(session.store.getIterations().byId)).toHaveLength(0);
+
+    lastPage.resolve(iterationPageResponse('bulk', 'page-2', 100, 25, null));
+    await started;
+
+    expect(session.store.getIterations().revision).toBe('bulk');
+    expect(Object.keys(session.store.getIterations().byId)).toHaveLength(125);
+    await session.close();
+  });
+
+  test('retains the last complete iteration tree when a later page fails', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.iterations.push(iterationResponse('complete', 'Generation 0'));
+    await session.start();
+    transport.iterations.push(
+      iterationPageResponse('replacement', null, 0, 100, 'page-2'),
+      new ServerError('second iteration page failed'),
+    );
+    const failed = waitForSession(
+      session,
+      () => session.getState().error?.message === 'second iteration page failed',
+    );
+
+    transport.subscriptions[0]?.onMessage(
+      eventBatch(
+        [
+          event(2, 'iterations_changed', {
+            data: {kind: 'iterations_changed', revision: 'replacement'},
+          }),
+        ],
+        {through_sequence: 2, store_id: 'store-1', history_after_sequence: 0},
+      ),
+    );
+    await failed;
+
+    expect(session.store.getIterations().revision).toBe('complete');
+    expect(Object.keys(session.store.getIterations().byId)).toEqual(['generation:0']);
+    await session.close();
+  });
+
+  test('retains the last complete iteration tree when paging repeats a cursor', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.iterations.push(iterationResponse('complete', 'Generation 0'));
+    await session.start();
+    transport.iterations.push(
+      iterationPageResponse('replacement', null, 0, 100, 'page-2'),
+      iterationPageResponse('replacement', 'page-2', 100, 1, 'page-2'),
+    );
+    const failed = waitForSession(
+      session,
+      () => session.getState().error?.message === 'iteration query repeated a paging cursor',
+    );
+
+    transport.subscriptions[0]?.onMessage(
+      eventBatch(
+        [
+          event(2, 'iterations_changed', {
+            data: {kind: 'iterations_changed', revision: 'replacement'},
+          }),
+        ],
+        {through_sequence: 2, store_id: 'store-1', history_after_sequence: 0},
+      ),
+    );
+    await failed;
+
+    expect(session.store.getIterations().revision).toBe('complete');
+    expect(Object.keys(session.store.getIterations().byId)).toEqual(['generation:0']);
+    await session.close();
+  });
+
+  test('falls back only when the initial iteration capability probe is rejected', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.iterations.push(new ServerError('Unsupported protocol request'));
+
+    await session.start();
+    expect(session.getState()).toEqual(healthy());
+    transport.subscriptions[0]?.onMessage(
+      eventBatch(
+        [
+          event(2, 'iterations_changed', {
+            data: {kind: 'iterations_changed', revision: 'ignored'},
+          }),
+        ],
+        {through_sequence: 2, store_id: 'store-1', history_after_sequence: 0},
+      ),
+    );
+    await settle();
+
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      1,
+    );
+    expect(session.getState()).toEqual(healthy());
+    await session.close();
+  });
+
   test('keeps a foreign fenced snapshot from proving the streamed run healthy', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
@@ -552,7 +750,7 @@ describe('WebSession', () => {
     const connected = waitForSession(session, () => session.getState().status === 'connected');
     session.reattach();
     const replacement = await replacementDial;
-    expect(transport.requests).toHaveLength(1);
+    expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(1);
     replacement.onMessage(
       eventBatch([event(1, 'run_finished', {run_id: 'run-1'})], {
         store_id: 'replacement-store',
@@ -599,7 +797,7 @@ describe('WebSession', () => {
     const connected = waitForSession(session, () => session.getState().status === 'connected');
     session.reattach();
     const replacement = await replacementDial;
-    expect(transport.requests).toHaveLength(1);
+    expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(1);
     replacement.onMessage(
       eventBatch([event(1, 'run_finished', {run_id: 'run-1'})], {
         store_id: 'replacement-store',
@@ -724,7 +922,7 @@ describe('WebSession', () => {
     await accepted;
     expect(b.closed).toBe(true);
     expect(session.store.getState()).toMatchObject({sequence: 1, status: 'completed'});
-    expect(transport.requests).toHaveLength(3);
+    expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(3);
     await waitForSession(session, () => session.getState().status === 'connected');
     await session.close();
   });
@@ -809,7 +1007,7 @@ describe('WebSession', () => {
     session.reattach();
     session.reattach();
     expect(transport.subscriptions).toHaveLength(2);
-    expect(transport.requests).toHaveLength(2);
+    expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(2);
 
     const replacementValidated = nextSessionChange(session);
     replacementSnapshot.resolve(snapshotResponse({sequence: 1, status: 'completed'}));
@@ -1146,7 +1344,9 @@ describe('WebSession', () => {
       transport.snapshots.push(startup.promise, refresh.promise);
       const started = session.start();
       lifecycle.emit('online');
-      expect(transport.requests).toHaveLength(2);
+      expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(
+        2,
+      );
 
       const status = () => session.store.getState().status;
       const answerStartup = async () => {
@@ -1186,7 +1386,7 @@ describe('WebSession', () => {
     const snapshot = deferred<ProtocolResponse>();
     transport.snapshots.push(snapshot.promise);
     lifecycle.emit('online');
-    expect(transport.requests).toHaveLength(2);
+    expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(2);
     expect(transport.reconnectCalls).toBe(1);
 
     // The lifecycle retry owns the one control redial and snapshot request,
@@ -1195,7 +1395,7 @@ describe('WebSession', () => {
     session.reattach();
     session.reattach();
     lifecycle.emit('online');
-    expect(transport.requests).toHaveLength(2);
+    expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(2);
     expect(transport.reconnectCalls).toBe(1);
     expect(transport.subscriptions).toHaveLength(1);
 
@@ -1235,7 +1435,7 @@ describe('WebSession', () => {
     );
     session.reattach();
     session.reattach();
-    expect(transport.requests).toHaveLength(2);
+    expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(2);
 
     const resumed = await retrying;
     expect(resumed).toMatchObject({afterSequence: 1, options: {storeId: 'store-1'}});
@@ -1403,7 +1603,7 @@ describe('WebSession', () => {
     transport.snapshots.push(retrySnapshot.promise);
     session.reattach();
     await settle();
-    expect(transport.requests).toHaveLength(2);
+    expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(2);
     expect(transport.requests.at(-1)).toMatchObject({
       type: 'query.snapshot',
       expected_store_id: 'replacement-store',
@@ -1580,7 +1780,7 @@ describe('WebSession', () => {
     await settle();
     expect(transport.subscriptions).toHaveLength(2);
     expect(session.getState()).toEqual(healthy());
-    expect(transport.requests).toHaveLength(2);
+    expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(2);
 
     await session.close();
   });
@@ -1711,6 +1911,76 @@ describe('WebSession', () => {
     expect(session.getState()).toEqual(healthy());
   });
 });
+
+function iterationResponse(revision: string, label: string): ProtocolResponse {
+  const ordinal = Number(label.split(' ').at(-1));
+  return {
+    protocol_version: 1,
+    request_id: `iterations-${revision}`,
+    timestamp: '2026-01-01T00:00:00Z',
+    ok: true,
+    iterations_ready: true,
+    iterations: {
+      kind: 'page',
+      schema_version: 1,
+      run_id: 'run-1',
+      projection_revision: revision,
+      parent_id: null,
+      from_cursor: null,
+      items: [
+        {
+          id: `generation:${ordinal}`,
+          parent_id: null,
+          kind: 'generation',
+          label,
+          ordinal,
+          status: 'completed',
+          child_count: 0,
+          headline_metrics: [],
+        },
+      ],
+      next_cursor: null,
+    },
+  };
+}
+
+function iterationPageResponse(
+  revision: string,
+  fromCursor: string | null,
+  start: number,
+  count: number,
+  nextCursor: string | null,
+): ProtocolResponse {
+  return {
+    protocol_version: 1,
+    request_id: `iterations-${revision}-${fromCursor ?? 'first'}`,
+    timestamp: '2026-01-01T00:00:00Z',
+    ok: true,
+    iterations_ready: true,
+    iterations: {
+      kind: 'page',
+      schema_version: 1,
+      run_id: 'run-1',
+      projection_revision: revision,
+      parent_id: null,
+      from_cursor: fromCursor,
+      items: Array.from({length: count}, (_, offset) => {
+        const ordinal = start + offset;
+        return {
+          id: `generation:${ordinal}`,
+          parent_id: null,
+          kind: 'generation' as const,
+          label: `Generation ${ordinal}`,
+          ordinal,
+          status: 'completed' as const,
+          child_count: 0,
+          headline_metrics: [],
+        };
+      }),
+      next_cursor: nextCursor,
+    },
+  };
+}
 
 /** The typed server refusal for an expected-store snapshot fence. */
 function storeReplacedResponse(): ProtocolResponse {

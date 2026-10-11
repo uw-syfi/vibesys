@@ -45,7 +45,11 @@ from vibesys.orchestration.issue_queue.strategy.api import (
     plain_operation_registry,
     role_id,
 )
-from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
+from vibesys.plugin_registration import (
+    IterationSupport,
+    OrchestrationRegistration,
+    RuntimeRecordProjector,
+)
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
@@ -224,5 +228,8 @@ def issue_queue_core_registration() -> OrchestrationRegistration:
         core=issue_queue_core_policy(),
     )
     return OrchestrationRegistration(
-        plugin=plugin, projector=issue_queue_projector(), project_max_rounds=_project_max_rounds
+        plugin=plugin,
+        projector=issue_queue_projector(),
+        project_max_rounds=_project_max_rounds,
+        iteration_support=IterationSupport.EXTERNAL_STATE_UNAVAILABLE,
     )

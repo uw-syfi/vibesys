@@ -1,5 +1,5 @@
 import {describe, expect, it, test} from 'bun:test';
-import type {RunEvent, RunSnapshot, RunStatus} from '@vibesys/contracts';
+import type {IterationPage, RunEvent, RunSnapshot, RunStatus} from '@vibesys/contracts';
 import {chatEvent as fixtureChatEvent, event as fixtureEvent} from '@vibesys/contracts/testing';
 import {hasRunEnded} from '@vibesys/run-state';
 import {
@@ -16,13 +16,20 @@ import {
   setExperiments,
   unownedExperimentRounds,
 } from './experiments.js';
-import {selectNextAgent, selectNextRound, selectRound} from './round-agent-selection.js';
+import {
+  selectIteration,
+  selectNextAgent,
+  selectNextRound,
+  selectPreviousRound,
+  selectRound,
+} from './round-agent-selection.js';
 import type {SessionState} from './session-model.js';
 import {
   applyEvent,
   applyEventBatch,
   applyEventPrefix,
   applyEventRebootstrap,
+  applyIterationResult,
   applySnapshot,
   chatDocked,
   chatPaneVisible,
@@ -38,6 +45,7 @@ import {
   focusRound,
   hydrateNotepad,
   initialSessionState,
+  iterationRailRounds,
   markEventStreamUnavailable,
   markNotepadConflict,
   notepadPromotionText,
@@ -56,6 +64,7 @@ import {
   updateChatConversation,
   visibleActiveExecutions,
   visibleConversation,
+  visibleIterationId,
   visiblePhases,
   visibleRoundNumber,
   visibleTodos,
@@ -997,6 +1006,91 @@ describe('quota pause banner', () => {
 });
 
 describe('session event model', () => {
+  it('navigates policy roots by stable identity without inventing round numbers', () => {
+    const page: IterationPage = {
+      kind: 'page',
+      schema_version: 1,
+      run_id: 'run',
+      projection_revision: 'evolve',
+      parent_id: null,
+      from_cursor: null,
+      items: [0, 1, 2].map(generation => ({
+        id: `generation:${generation}`,
+        parent_id: null,
+        kind: 'generation',
+        label: `Generation ${generation}`,
+        ordinal: generation,
+        status: generation === 2 ? ('active' as const) : ('completed' as const),
+        child_count: 0,
+        headline_metrics: [],
+      })),
+      next_cursor: null,
+    };
+    let state = applyIterationResult(initialSessionState(), page);
+
+    state = selectIteration(state, 'generation:0');
+    expect(state).toMatchObject({selectedIterationId: 'generation:0', selectedRound: null});
+    state = selectNextRound(state);
+    expect(visibleIterationId(state)).toBe('generation:1');
+    state = selectNextRound(state);
+    expect(visibleIterationId(state)).toBe('generation:2');
+    state = selectPreviousRound(state);
+    expect(visibleIterationId(state)).toBe('generation:1');
+  });
+
+  it('retains live round timing when queried navigation supplies persisted rounds', () => {
+    const started = {
+      ...executionEvent(
+        1,
+        'agent_execution_started',
+        'impl-2',
+        {
+          kind: 'agent_execution_started',
+          stage: 'implementation',
+          attempt: 1,
+          system_prompt: '',
+          user_prompt: 'Implement round two',
+          activity: {
+            kind: 'agent_execution_activity_changed',
+            mode: 'thinking',
+            summary: 'Working',
+            tool: null,
+          },
+        },
+        'implementer',
+      ),
+      round_label: 'round-2',
+    };
+    const active = applyEvent(initialSessionState(), started);
+    const result: IterationPage = {
+      kind: 'page',
+      schema_version: 1,
+      run_id: 'run',
+      projection_revision: 'revision',
+      parent_id: null,
+      from_cursor: null,
+      items: [
+        {
+          id: 'round:1',
+          parent_id: null,
+          kind: 'round',
+          label: 'Round 1',
+          ordinal: 1,
+          status: 'completed',
+          child_count: 0,
+          headline_metrics: [],
+        },
+      ],
+      next_cursor: null,
+    };
+
+    const rows = iterationRailRounds(applyIterationResult(active, result));
+
+    expect(rows.map(round => round.number)).toEqual([1, 2]);
+    expect(rows[1]).toMatchObject({status: 'active', iterationLabel: 'Round 2'});
+    expect(Object.keys(rows[1]?.activeAgentStarts ?? {})).toEqual(['implementer:impl-2']);
+  });
+
   it('tracks concurrent agent executions independently through activity and finish events', () => {
     let state = initialSessionState();
     state = applyEvent(
@@ -2060,6 +2154,7 @@ describe('session event model', () => {
     expect(visibleConversation(state).map(entry => entry.content)).toEqual(['judge output']);
 
     state = selectRound(state, 2);
+    expect(state.selectedIterationId).toBe('round:2');
     expect(visibleConversation(state).map(entry => entry.content)).toEqual([
       'round two judge output',
     ]);

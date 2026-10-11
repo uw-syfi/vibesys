@@ -33,6 +33,7 @@ class CoreEventType(StrEnum):
     RUN_STARTED = "run_started"
     RUN_STARTUP_PROGRESS = "run_startup_progress"
     EXPERIMENTS_CHANGED = "experiments_changed"
+    ITERATIONS_CHANGED = "iterations_changed"
     RUN_FINISHED = "run_finished"
     RUN_FAILED = "run_failed"
     INVOCATION_STARTED = "invocation_started"
@@ -277,6 +278,13 @@ class ExperimentsChangedData(EventPayload):
     # Persisted experiment projection revision. None preserves events recorded
     # before revisioned experiment queries existed.
     revision: int | None = Field(default=None, ge=0)
+
+
+class IterationsChangedData(EventPayload):
+    """Semantic revision of the policy-owned iteration projection."""
+
+    kind: Literal["iterations_changed"] = "iterations_changed"
+    revision: str | None = None
 
 
 class PhaseData(EventPayload):
@@ -568,6 +576,7 @@ CoreEventData = Annotated[
     | RunStartupProgressData
     | RunFailedData
     | ExperimentsChangedData
+    | IterationsChangedData
     | PhaseData
     | AgentOutputChunkData
     | SubprocessOutputData

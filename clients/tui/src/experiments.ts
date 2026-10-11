@@ -30,6 +30,7 @@ export function openExperimentLog(state: SessionState): SessionState {
     chatOpen: false,
     hypothesisDetail: null,
     hypothesisScope: null,
+    selectedIterationId: null,
     selectedRound: null,
     selectedAgentKind: null,
     experimentLog: existing ?? {entries: [], selectedId: null, pending: true, error: null},
@@ -301,7 +302,13 @@ function selectedPlanningActivityRound(state: SessionState): number | undefined 
 export function leaveExperimentDrilldown(state: SessionState): SessionState {
   return state.hypothesisScope === null
     ? state
-    : {...state, hypothesisScope: null, selectedRound: null, selectedAgentKind: null};
+    : {
+        ...state,
+        hypothesisScope: null,
+        selectedIterationId: null,
+        selectedRound: null,
+        selectedAgentKind: null,
+      };
 }
 export function scopeStateForRound(
   state: SessionState,
@@ -372,6 +379,7 @@ function enterRound(state: SessionState, roundNumber: number): SessionState {
     chatOpen: false,
     layout: {right: null, focus: 'left', zoomedPane: null},
     ...scopeStateForRound(state, roundNumber),
+    selectedIterationId: `round:${roundNumber}`,
     selectedRound: roundNumber,
     selectedAgentKind: null,
     selectedEntryId: null,

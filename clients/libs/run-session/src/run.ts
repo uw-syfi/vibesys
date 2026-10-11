@@ -9,6 +9,8 @@ import type {EventBatchMessage, RunEvent, RunSnapshot} from '@vibesys/contracts'
 import {
   type CoreState,
   initialCoreState,
+  type IterationNavigationState,
+  initialIterationNavigation,
   reduceEventBatch,
   reduceEventRebootstrap,
   reduceSnapshot,
@@ -50,9 +52,39 @@ export function runStep(state: CoreState, action: RunAction): Step<CoreState, ne
   }
 }
 
-/** The run fold's store: what the run page renders as the run. */
-export type RunStore = Store<CoreState, RunAction>;
+/** The run fold and policy-navigation stores exposed as one render subscription. */
+export interface RunStore extends Store<CoreState, RunAction> {
+  getIterations(): IterationNavigationState;
+  publishIterations(navigation: IterationNavigationState): void;
+}
+
+interface RunViewState {
+  readonly run: CoreState;
+  readonly iterations: IterationNavigationState;
+}
+
+type RunViewAction =
+  | {readonly type: 'run'; readonly action: RunAction}
+  | {readonly type: 'iterations'; readonly navigation: IterationNavigationState};
 
 export function createRunStore(): RunStore {
-  return createStore(runStep, initialCoreState(), () => undefined);
+  const store = createStore(
+    (state: RunViewState, action: RunViewAction) => {
+      if (action.type === 'iterations') {
+        if (state.iterations === action.navigation) return only(state);
+        return only({...state, iterations: action.navigation});
+      }
+      const next = runStep(state.run, action.action).state;
+      return only(next === state.run ? state : {...state, run: next});
+    },
+    {run: initialCoreState(), iterations: initialIterationNavigation()},
+    () => undefined,
+  );
+  return {
+    getState: () => store.getState().run,
+    getIterations: () => store.getState().iterations,
+    subscribe: store.subscribe,
+    dispatch: action => store.dispatch({type: 'run', action}),
+    publishIterations: navigation => store.dispatch({type: 'iterations', navigation}),
+  };
 }

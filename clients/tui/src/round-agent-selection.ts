@@ -1,9 +1,9 @@
 import {scopeStateForRound} from './experiments.js';
 import {
+  iterationRailRounds,
   type SessionState,
-  stripRounds,
+  visibleIterationId,
   visiblePhases,
-  visibleRoundNumber,
 } from './session-model.js';
 
 /** Pure navigation transitions for the selected round and agent. */
@@ -38,15 +38,13 @@ export function selectPreviousAgent(state: SessionState): SessionState {
 }
 
 function moveRound(state: SessionState, delta: number): SessionState {
-  const rounds = stripRounds(state);
-  const visible = visibleRoundNumber(state);
-  if (rounds.length === 0) return state;
+  const rows = iterationRailRounds(state);
+  const visible = visibleIterationId(state);
+  if (rows.length === 0) return state;
   const index =
-    visible === null ? (delta > 0 ? -1 : 0) : rounds.findIndex(round => round.number === visible);
-  return withSelectedRound(
-    state,
-    rounds[(index + delta + rounds.length) % rounds.length]?.number ?? null,
-  );
+    visible === null ? (delta > 0 ? -1 : 0) : rows.findIndex(row => row.iterationId === visible);
+  const selected = rows[(index + delta + rows.length) % rows.length];
+  return selected === undefined ? state : withSelectedIteration(state, selected);
 }
 
 export function selectNextRound(state: SessionState): SessionState {
@@ -58,10 +56,13 @@ export function selectPreviousRound(state: SessionState): SessionState {
 }
 
 export function selectRound(state: SessionState, roundNumber: number): SessionState {
-  const rounds = stripRounds(state);
-  return rounds.some(round => round.number === roundNumber)
-    ? withSelectedRound(state, roundNumber)
-    : state;
+  const selected = iterationRailRounds(state).find(row => row.number === roundNumber);
+  return selected === undefined ? state : withSelectedIteration(state, selected);
+}
+
+export function selectIteration(state: SessionState, iterationId: string): SessionState {
+  const selected = iterationRailRounds(state).find(row => row.iterationId === iterationId);
+  return selected === undefined ? state : withSelectedIteration(state, selected);
 }
 
 export function clearAgentSelection(state: SessionState): SessionState {
@@ -84,12 +85,17 @@ export function selectAgent(state: SessionState, kind: string): SessionState {
   };
 }
 
-function withSelectedRound(state: SessionState, roundNumber: number | null): SessionState {
+function withSelectedIteration(
+  state: SessionState,
+  selected: ReturnType<typeof iterationRailRounds>[number],
+): SessionState {
+  const roundNumber = selected.number;
   return {
     ...state,
     ...(state.hypothesisScope !== null && roundNumber !== null
       ? scopeStateForRound(state, roundNumber)
       : {}),
+    selectedIterationId: selected.iterationId,
     selectedRound: roundNumber,
     selectedAgentKind: null,
     selectedEntryId: null,
