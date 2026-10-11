@@ -449,6 +449,24 @@ test('a bucket name is allowed above the domain layer and as part of a longer wo
   assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
 });
 
+test('a feature may publish its views stylesheet, as a dom asset only', async t => {
+  const workspace = validWorkspace();
+  const feature = workspace['stop-run'];
+  feature.manifest.vibesys.entries['./styles.css'] = 'dom';
+  feature.manifest.exports['./styles.css'] = {
+    '@vibesys/source': './src/renderer/styles.css',
+    default: './src/renderer/styles.css',
+  };
+  feature.files['src/renderer/styles.css'] = '.stop-button { color: red; }\n';
+  assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
+  feature.manifest.vibesys.entries['./styles.css'] = 'neutral';
+  const errors = packageGraphErrors(await materialize(t, workspace));
+  assert.deepEqual(
+    errors.map(error => error.split(':')[0]),
+    ['feature-entries'],
+  );
+});
+
 test('a stylesheet entry is a dom asset with no project', async t => {
   const workspace = validWorkspace();
   workspace.ui.manifest.vibesys.entries['./tokens.css'] = 'neutral';

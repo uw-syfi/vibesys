@@ -7,7 +7,8 @@
     "layer": "feature",
     "entries": {
       "./state": "neutral",
-      "./renderer": "dom"
+      "./renderer": "dom",
+      "./styles.css": "dom"
     }
   },
   "exports": {
@@ -20,6 +21,10 @@
       "@vibesys/source": "./src/renderer/index.ts",
       "types": "./dist/renderer/index.d.ts",
       "default": "./dist/renderer/index.js"
+    },
+    "./styles.css": {
+      "@vibesys/source": "./src/renderer/styles.css",
+      "default": "./src/renderer/styles.css"
     }
   },
   "files": [

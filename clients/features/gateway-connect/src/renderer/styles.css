@@ -1,0 +1,8 @@
+/* The browser's gateway connect form. */
+.gateway-connect { display: grid; gap: 9px; margin: 16px auto 0; max-width: 1120px; padding: 0 24px; }
+.gateway-connect label { color: #8190a8; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+.gateway-connect-row { display: flex; gap: 10px; }
+.gateway-connect input { background: #111a2d; border: 1px solid #34425f; border-radius: 7px; color: #f1f5ff; flex: 1; font: inherit; min-width: 0; padding: 11px 13px; }
+.gateway-connect button { background: #79a8ff; border: 0; border-radius: 7px; color: #07101f; cursor: pointer; font: inherit; font-weight: 700; padding: 11px 16px; }
+.gateway-connect-status { color: #a9b8d0; margin: 0; }
+.gateway-connect-error { color: #ff9c9c; margin: 0; }

@@ -18,7 +18,7 @@
  * - `exports-name-source`: each export lists the `@vibesys/source` condition first, naming a source
  *   file that exists, so dev, tests, and type checks never need a built `dist`.
  * - `feature-entries`: a feature publishes only `./state` (neutral), `./renderer` (dom), and
- *   `./main` (node).
+ *   `./main` (node), and optionally `./styles.css`, its views' stylesheet (a dom asset).
  * - `layer-direction`: a workspace dependency, in any section, is in a strictly lower layer. Peers
  *   share a layer, so this forbids feature-to-feature and app-to-app edges, and cycles.
  * - `workspace-protocol`: a workspace dependency is declared as `workspace:*`.
@@ -108,6 +108,8 @@ export const RUNTIMES = {
 
 /** A feature's possible entries and their fixed runtimes. */
 export const FEATURE_ENTRIES = {'./state': 'neutral', './renderer': 'dom', './main': 'node'};
+/** A feature may also publish its views' stylesheet, a `dom` asset its apps import. */
+const FEATURE_STYLESHEET = {'./styles.css': 'dom'};
 
 /**
  * The packages that own effects and run control-state machines outside a feature
@@ -353,10 +355,11 @@ function exportErrors(root, where, directory, manifest) {
 
 function featureEntryErrors(where, entries) {
   const errors = [];
+  const allowedEntries = {...FEATURE_ENTRIES, ...FEATURE_STYLESHEET};
   for (const [subpath, runtime] of Object.entries(entries)) {
-    const expected = FEATURE_ENTRIES[subpath];
+    const expected = allowedEntries[subpath];
     if (expected === undefined) {
-      const allowed = Object.keys(FEATURE_ENTRIES).join(', ');
+      const allowed = Object.keys(allowedEntries).join(', ');
       errors.push(
         violation('feature-entries', where, `a feature exports only ${allowed}, not "${subpath}"`),
       );

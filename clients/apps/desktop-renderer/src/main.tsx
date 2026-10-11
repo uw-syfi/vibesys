@@ -11,6 +11,10 @@ import {createRoot} from 'react-dom/client';
 import {WelcomeView} from './ui/welcome-view.js';
 import {loadWelcomeStores, type WelcomeStores} from './wiring/stores.js';
 import '@vibesys/ui/tokens.css';
+// Each feature styles its own views; the view's layout is `welcome.css`.
+import '@vibesys/feature-hosts/styles.css';
+import '@vibesys/feature-run-control/styles.css';
+import '@vibesys/feature-start-run/styles.css';
 import './welcome.css';
 
 declare global {

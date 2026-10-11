@@ -21,6 +21,9 @@ import type {Store} from '@vibesys/store';
 import type {JSX} from 'react';
 import {useSyncExternalStore} from 'react';
 import {bootstrapGateway, fetchReplayFixture} from '../platform/backend.js';
+// Each feature styles its own views; the page frame is the entry's `styles.css`.
+import '@vibesys/feature-gateway-connect/styles.css';
+import '@vibesys/feature-run-view/styles.css';
 
 function useStore<S>(store: Pick<Store<S, unknown>, 'getState' | 'subscribe'>): S {
   return useSyncExternalStore(store.subscribe, store.getState, store.getState);
