@@ -23,9 +23,12 @@ from agentshim.testing import (
 from vs_agent import fake_profiles
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.fake_docker_build_runner import (
+    DockerBuildResult,
     DockerResult,
     FakeDockerBuildRunner,
+    docker_build_result,
     docker_result,
+    docker_result_without_output,
     docker_timed_out,
 )
 from vs_agent.fault_injection import (
@@ -85,6 +88,7 @@ __all__ = [
     "CommandExecutor",
     "CommandRequest",
     "ConversationFaultKind",
+    "DockerBuildResult",
     "DockerResult",
     "DurableAgentClient",
     "FakeAgentClient",
@@ -110,7 +114,9 @@ __all__ = [
     "Transport",
     "answering_with",
     "assistant_text",
+    "docker_build_result",
     "docker_result",
+    "docker_result_without_output",
     "docker_timed_out",
     "fake_agentshim_launcher",
     "fake_profiles",

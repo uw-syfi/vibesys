@@ -20,8 +20,13 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_agent.api.images import AGENT_FEATURES_PROJECT, TaskImageBuildError, agent_image
-from vs_agent.api.testing import DockerResult, docker_result
+from vs_agent.api.images import (
+    AGENT_FEATURES_PROJECT,
+    DockerCommandResult,
+    TaskImageBuildError,
+    agent_image,
+)
+from vs_agent.api.testing import DockerBuildResult, docker_build_result
 from vs_sandbox.api import LocalFeature
 
 if TYPE_CHECKING:
@@ -54,10 +59,12 @@ class _FakeRunner:
         *,
         task_image_id: str = _TASK_IMAGE_ID,
         agent_image_id: str = _AGENT_IMAGE_ID,
+        agent_inspect_omitted_characters: int = 0,
         build_returncode: int = 0,
     ) -> None:
         self.task_image_id = task_image_id
         self.agent_image_id = agent_image_id
+        self.agent_inspect_omitted_characters = agent_inspect_omitted_characters
         self.build_returncode = build_returncode
         self.calls: list[tuple[tuple[str, ...], Path, float]] = []
         self.workspaces: list[_Workspace] = []
@@ -69,22 +76,33 @@ class _FakeRunner:
         cwd: Path,
         timeout: float,
         on_stderr_line: Callable[[str], None] | None = None,
-    ) -> DockerResult:
+    ) -> DockerBuildResult:
         del on_stderr_line
         normalized = tuple(argv)
         self.calls.append((normalized, cwd, timeout))
         if normalized[1] == "build" and any(a.startswith("vibesys-agent-build:") for a in argv):
             self._read_workspace(normalized)
-            return docker_result(("docker",), self.build_returncode, "", "build failed")
+            return docker_build_result(("docker",), self.build_returncode, "", "build failed")
         if normalized[1] in {"build", "image"} and normalized[2] != "inspect":
-            return docker_result(("docker",), 0, "", "")
+            return docker_build_result(("docker",), 0, "", "")
         if normalized[1] == "image":
             tag = normalized[-1]
             image_id = (
                 self.task_image_id if tag.startswith("vibesys-task-build:") else self.agent_image_id
             )
-            return docker_result(("docker",), 0, image_id, "")
-        return docker_result(("docker",), 0, "", "")
+            omitted = (
+                self.agent_inspect_omitted_characters
+                if tag.startswith("vibesys-agent-build:")
+                else 0
+            )
+            return DockerCommandResult(
+                args=("docker",),
+                returncode=0,
+                stdout=image_id,
+                stderr="",
+                stdout_omitted_characters=omitted,
+            )
+        return docker_build_result(("docker",), 0, "", "")
 
     def _read_workspace(self, argv: tuple[str, ...]) -> None:
         root = Path(argv[-1])
@@ -210,6 +228,13 @@ def test_a_failed_feature_image_build_is_a_task_image_build_error_and_cleans_up(
 
     assert runner.verbs() == [("image", "inspect"), ("build",)]
     assert not runner.workspaces[0].root.exists()
+
+
+def test_agent_image_rejects_a_truncated_inspect_id() -> None:
+    runner = _FakeRunner(agent_inspect_omitted_characters=2048)
+
+    with pytest.raises(TaskImageBuildError, match="characters truncated"):
+        agent_image("python:3.12-bookworm", command_runner=runner)
 
 
 def test_agent_feature_ships_as_package_data() -> None:
