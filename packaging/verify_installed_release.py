@@ -329,10 +329,11 @@ def _verify_tui() -> None:
 
 
 def _write_smoke_input(input_root: Path) -> None:
-    input_root.mkdir()
-    (input_root / "OBJECTIVE.md").write_text("Verify the installed release.\n")
+    task = input_root / ".vibesys" / "tasks" / "default"
+    task.mkdir(parents=True)
+    (task / "OBJECTIVE.md").write_text("Verify the installed release.\n")
     (input_root / "candidate.py").write_text("VALUE = 1\n")
-    (input_root / "vibesys.input.toml").write_text(
+    (task / "vibesys.input.toml").write_text(
         "version = 1\n"
         "\n"
         "[agent]\n"

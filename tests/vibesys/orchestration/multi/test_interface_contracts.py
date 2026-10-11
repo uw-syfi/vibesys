@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from tests.support.task_project import write_task
 
 import vibesys.domains.base as domain
 from entrypoints.cli import parse_cli_invocation
@@ -73,11 +74,11 @@ def test_no_language_pack_directory() -> None:
 
 
 def _write_input_project(root: Path) -> Path:
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n'
-        '[benchmark]\ncommand = ["true"]\n'
+        '[benchmark]\ncommand = ["true"]\n',
     )
     return root
 

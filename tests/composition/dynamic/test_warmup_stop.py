@@ -21,6 +21,7 @@ from tests.composition.dynamic._harness import (
     run_request,
     workstream,
 )
+from tests.support.task_project import task_path
 
 from vibesys.dynamic_roles import ORCHESTRATOR
 
@@ -68,7 +69,7 @@ def test_a_stopped_warmup_reaches_the_planner_as_its_rate(tmp_path: Path) -> Non
     engine = tmp_path / "recorded-session-runner"
     engine.write_text(f"#!/bin/sh\nexec cat {_WARMUP_STOP_STDERR} >&2\n", encoding="utf-8")
     engine.chmod(0o755)
-    benchmark = loop_input.root / "benchmark.py"
+    benchmark = task_path(loop_input.root) / "benchmark.py"
     benchmark.write_text(
         _REPLAY.format(bundle=str(_BUNDLE_BENCHMARK), engine=str(engine))
         + benchmark.read_text(encoding="utf-8"),

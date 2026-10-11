@@ -7,15 +7,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.task_project import task_path, write_task
 
-from vibesys.inputs import InputManifest, WorkspaceSource, load_input_bundle
+from vibesys.inputs import InputManifest, WorkspaceSource, load_task
 from vibesys.run import (
     ProjectProvisioningError,
     ProjectProvisioningSpec,
     provision_project,
 )
 from vibesys.run.workspace_policy import create_project_materializer
-from vs_project.api import Project
+from vs_project.api import InvalidTaskDefinitionError, Project, ProjectLayoutError
 from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api.testing import FakeComputeBackend
 
@@ -34,11 +35,15 @@ def _materializer(destination: Path) -> ProjectMaterializer:
     )
 
 
+_TASK = "default"
+
+
 def _write_input(root: Path, extra_manifest: str = "") -> Path:
+    """Write a one-task project whose candidate source is ``candidate.py``."""
     root.mkdir(parents=True)
-    (root / "OBJECTIVE.md").write_text("Make the candidate faster.\n")
     (root / "candidate.py").write_text("VALUE = 1\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         """\
 version = 1
 
@@ -57,9 +62,16 @@ timeout_seconds = 20
 json_argument = "--output-json"
 metric = "throughput"
 """
-        + extra_manifest
+        + extra_manifest,
+        objective="Make the candidate faster.\n",
     )
     return root
+
+
+def _destination_manifest(destination: Path) -> InputManifest:
+    return InputManifest.model_validate(
+        tomllib.loads((task_path(destination) / "vibesys.input.toml").read_text())
+    )
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -88,6 +100,7 @@ def test_provision_project_places_source_at_root_and_removes_private_files(
         destination,
         spec=ProjectProvisioningSpec(
             materializer=_materializer(destination),
+            task_name=_TASK,
         ),
     )
 
@@ -99,10 +112,8 @@ def test_provision_project_places_source_at_root_and_removes_private_files(
     assert not Project.is_state_initialized(result)
     assert not (result / "agent.toml").exists()
     assert not list(result.rglob(".env*"))
-    normalized = InputManifest.model_validate(
-        tomllib.loads((result / "vibesys.input.toml").read_text())
-    )
-    assert normalized.workspace is None
+    normalized = _destination_manifest(result)
+    assert not (result / "vibesys.input.toml").exists()
     assert normalized.accuracy.timeout_seconds == 10
     assert normalized.benchmark.timeout_seconds == 20
     assert normalized.benchmark.result is not None
@@ -114,9 +125,8 @@ def test_provision_project_places_source_at_root_and_removes_private_files(
 def test_provision_project_preserves_benchmark_result_protocol(tmp_path: Path) -> None:
     input_root = tmp_path / "input"
     input_root.mkdir()
-    (input_root / "OBJECTIVE.md").write_text("Make the candidate faster.\n")
-    (input_root / "candidate.py").write_text("VALUE = 1\n")
-    (input_root / "vibesys.input.toml").write_text(
+    write_task(
+        input_root,
         """\
 version = 1
 
@@ -129,16 +139,12 @@ command = ["python", "check.py"]
 [benchmark]
 command = ["python", "benchmark.py"]
 result_protocol = 2
-"""
+""",
     )
     destination = tmp_path / "runs" / "copy"
 
-    provision_project(
-        input_root,
-        destination,
-        spec=ProjectProvisioningSpec(materializer=_materializer(destination)),
-    )
-    bundle = load_input_bundle(destination)
+    _provision(input_root, destination)
+    bundle = load_task(destination)
 
     assert bundle.benchmark_result_protocol == 2
     assert bundle.benchmark_output_argument == "--vs-output"
@@ -159,54 +165,42 @@ def test_provision_project_preserves_modal_entrypoint(tmp_path: Path) -> None:
         destination,
         spec=ProjectProvisioningSpec(
             materializer=_materializer(destination),
+            task_name=_TASK,
         ),
     )
 
-    manifest = InputManifest.model_validate(
-        tomllib.loads((destination / "vibesys.input.toml").read_text())
-    )
+    manifest = _destination_manifest(destination)
     assert manifest.environment is not None
     assert manifest.environment.modal is not None
     assert manifest.environment.modal.entrypoint == "deploy/service.py"
-    assert load_input_bundle(destination).modal_entrypoint == "deploy/service.py"
+    assert load_task(destination).modal_entrypoint == "deploy/service.py"
 
 
-def test_provision_project_copies_and_rewrites_external_evaluator(tmp_path: Path) -> None:
+def test_provision_project_keeps_task_local_evaluator_in_its_task(tmp_path: Path) -> None:
     input_root = _write_input(
         tmp_path / "input",
-        '\n[evaluator]\nsource = "../../evaluators/queue"\n',
+        '\n[evaluator]\nsource = "queue"\n',
     )
-    evaluator = tmp_path / "evaluators" / "queue"
-    evaluator.mkdir(parents=True)
+    evaluator = task_path(input_root) / "queue"
+    evaluator.mkdir()
     (evaluator / "check.py").write_text("print('ok')\n")
     (evaluator / ".env.evaluator").write_text("TOKEN=secret\n")
     destination = tmp_path / "runs" / "copy"
 
-    provision_project(
-        input_root,
-        destination,
-        spec=ProjectProvisioningSpec(
-            materializer=_materializer(destination),
-            evaluator_source=evaluator,
-        ),
-    )
+    _provision(input_root, destination)
 
-    assert (destination / "_evaluator" / "queue" / "check.py").is_file()
-    assert not (destination / "_evaluator" / "queue" / ".env.evaluator").exists()
-    manifest = InputManifest.model_validate(
-        tomllib.loads((destination / "vibesys.input.toml").read_text())
-    )
-    assert manifest.evaluator is not None
-    assert manifest.evaluator.source == "_evaluator/queue"
-    loaded = load_input_bundle(destination)
-    assert loaded.evaluator_path == (destination / "_evaluator" / "queue").resolve()
+    copied = task_path(destination) / "queue"
+    assert (copied / "check.py").is_file()
+    assert not (copied / ".env.evaluator").exists()
+    assert not (destination / "_evaluator").exists()
+    assert load_task(destination).evaluator_path == copied.resolve()
 
 
 def test_provision_project_keeps_a_packaged_evaluator_declaration(tmp_path: Path) -> None:
     input_root = tmp_path / "input"
     input_root.mkdir()
-    (input_root / "OBJECTIVE.md").write_text("Make the candidate faster.\n")
-    (input_root / "vibesys.input.toml").write_text(
+    write_task(
+        input_root,
         """\
 version = 1
 
@@ -229,42 +223,17 @@ timeout_seconds = 20
 [benchmark.result]
 json_argument = "--output-json"
 metric = "throughput"
-"""
+""",
     )
     destination = tmp_path / "runs" / "copy"
 
     _provision(input_root, destination)
 
     # Resume re-reads this manifest; it must still validate.
-    manifest = InputManifest.model_validate(
-        tomllib.loads((destination / "vibesys.input.toml").read_text())
-    )
+    manifest = _destination_manifest(destination)
     assert manifest.evaluator is not None
     assert manifest.evaluator.name == "vibesys-evaluator-request-factory"
     assert manifest.evaluator.version == "0.1.0"
-
-
-def test_provision_project_relocates_bundle_local_evaluator(tmp_path: Path) -> None:
-    input_root = _write_input(
-        tmp_path / "input",
-        '\n[evaluator]\nsource = "checks/trusted"\n',
-    )
-    evaluator = input_root / "checks" / "trusted"
-    evaluator.mkdir(parents=True)
-    (evaluator / "check.py").write_text("print('ok')\n")
-    destination = tmp_path / "runs" / "copy"
-
-    provision_project(
-        input_root,
-        destination,
-        spec=ProjectProvisioningSpec(
-            materializer=_materializer(destination),
-            evaluator_source=evaluator,
-        ),
-    )
-
-    assert not (destination / "checks" / "trusted").exists()
-    assert (destination / "_evaluator" / "trusted" / "check.py").is_file()
 
 
 def test_provision_project_materializes_git_source_without_nested_metadata(
@@ -311,6 +280,7 @@ def test_provision_project_materializes_git_source_without_nested_metadata(
         destination,
         spec=ProjectProvisioningSpec(
             materializer=_materializer(destination),
+            task_name=_TASK,
             workspace_sources=(source,),
         ),
     )
@@ -318,10 +288,6 @@ def test_provision_project_materializes_git_source_without_nested_metadata(
     assert (destination / "library" / "library.py").is_file()
     assert not (destination / "library" / ".git").exists()
     assert not Project.is_state_initialized(destination / "library")
-    manifest = InputManifest.model_validate(
-        tomllib.loads((destination / "vibesys.input.toml").read_text())
-    )
-    assert manifest.workspace is None
 
 
 @pytest.mark.parametrize("destination_kind", ["same", "child"])
@@ -336,7 +302,7 @@ def test_provision_project_rejects_destination_in_source(
         provision_project(
             input_root,
             destination,
-            spec=ProjectProvisioningSpec(materializer=_materializer(destination)),
+            spec=ProjectProvisioningSpec(materializer=_materializer(destination), task_name=_TASK),
         )
 
     assert (input_root / "candidate.py").read_text() == "VALUE = 1\n"
@@ -354,7 +320,7 @@ def test_provision_project_preserves_existing_destination(tmp_path: Path) -> Non
         provision_project(
             input_root,
             destination,
-            spec=ProjectProvisioningSpec(materializer=_materializer(destination)),
+            spec=ProjectProvisioningSpec(materializer=_materializer(destination), task_name=_TASK),
         )
 
     assert marker.read_text() == "keep\n"
@@ -403,6 +369,7 @@ def test_provision_project_cleans_partial_destination_after_collision(tmp_path: 
             destination,
             spec=ProjectProvisioningSpec(
                 materializer=_materializer(destination),
+                task_name=_TASK,
                 workspace_sources=(source,),
             ),
         )
@@ -427,7 +394,7 @@ dest = "library"
         provision_project(
             input_root,
             destination,
-            spec=ProjectProvisioningSpec(materializer=_materializer(destination)),
+            spec=ProjectProvisioningSpec(materializer=_materializer(destination), task_name=_TASK),
         )
 
     assert not destination.exists()
@@ -445,6 +412,7 @@ def test_provision_project_applies_input_overlay_excludes(tmp_path: Path) -> Non
         destination,
         spec=ProjectProvisioningSpec(
             materializer=_materializer(destination),
+            task_name=_TASK,
             input_excludes=frozenset({"model"}),
         ),
     )
@@ -505,15 +473,14 @@ def _provision(
     destination: Path,
     *,
     workspace_sources: tuple[WorkspaceSource, ...] = (),
-    evaluator_source: Path | None = None,
 ) -> Path:
     return provision_project(
         input_root,
         destination,
         spec=ProjectProvisioningSpec(
             materializer=_materializer(destination),
+            task_name=_TASK,
             workspace_sources=workspace_sources,
-            evaluator_source=evaluator_source,
         ),
     )
 
@@ -535,14 +502,15 @@ def test_provision_project_rejects_input_that_is_a_file(tmp_path: Path) -> None:
         _provision(input_file, tmp_path / "copy")
 
 
-def test_provision_project_requires_objective_for_legacy_inputs(tmp_path: Path) -> None:
-    input_root = _write_input(tmp_path / "input")
-    (input_root / "OBJECTIVE.md").unlink()
+def test_provision_project_rejects_a_root_manifest_project_without_tasks(tmp_path: Path) -> None:
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    (input_root / "OBJECTIVE.md").write_text("Make the candidate faster.\n")
+    (input_root / "vibesys.input.toml").write_text("version = 1\n")
 
-    with pytest.raises(ProjectProvisioningError, match=r"OBJECTIVE\.md not found") as info:
+    with pytest.raises(ProjectLayoutError):
         _provision(input_root, tmp_path / "copy")
 
-    assert str(input_root.resolve() / "OBJECTIVE.md") in str(info.value)
     assert not (tmp_path / "copy").exists()
 
 
@@ -555,27 +523,26 @@ def test_provision_project_rejects_workspace_rooted_elsewhere(tmp_path: Path) ->
         provision_project(
             input_root,
             destination,
-            spec=ProjectProvisioningSpec(materializer=_materializer(other_root)),
+            spec=ProjectProvisioningSpec(materializer=_materializer(other_root), task_name=_TASK),
         )
 
     assert f"{other_root.resolve()} != {destination.resolve()}" in str(info.value)
 
 
-def test_provision_project_requires_manifest(tmp_path: Path) -> None:
+def test_provision_project_requires_task_manifest(tmp_path: Path) -> None:
     input_root = _write_input(tmp_path / "input")
-    (input_root / "vibesys.input.toml").unlink()
+    (task_path(input_root) / "vibesys.input.toml").unlink()
 
-    with pytest.raises(ProjectProvisioningError, match="input manifest not found") as info:
+    with pytest.raises(InvalidTaskDefinitionError, match=r"vibesys\.input\.toml"):
         _provision(input_root, tmp_path / "copy")
 
-    assert "vibesys.input.toml" in str(info.value)
     assert not (tmp_path / "copy").exists()
 
 
 @pytest.mark.parametrize("contents", ["not = [valid", 'version = 99\nunknown_key = "x"\n'])
 def test_provision_project_reports_invalid_manifest(tmp_path: Path, contents: str) -> None:
     input_root = _write_input(tmp_path / "input")
-    (input_root / "vibesys.input.toml").write_text(contents)
+    (task_path(input_root) / "vibesys.input.toml").write_text(contents)
 
     with pytest.raises(ProjectProvisioningError, match="invalid input manifest"):
         _provision(input_root, tmp_path / "copy")
@@ -607,38 +574,3 @@ strip_git = false
         _provision(input_root, tmp_path / "copy", workspace_sources=(source,))
 
     assert not (tmp_path / "copy").exists()
-
-
-@pytest.mark.parametrize("declared", [True, False])
-def test_provision_project_requires_evaluator_declaration_to_match_source(
-    tmp_path: Path, *, declared: bool
-) -> None:
-    evaluator = tmp_path / "evaluator"
-    evaluator.mkdir()
-    input_root = _write_input(
-        tmp_path / "input",
-        '\n[evaluator]\nsource = "../evaluator"\n' if declared else "",
-    )
-
-    with pytest.raises(ProjectProvisioningError, match="evaluator declaration and resolved"):
-        _provision(
-            input_root,
-            tmp_path / "copy",
-            evaluator_source=None if declared else evaluator,
-        )
-
-    assert not (tmp_path / "copy").exists()
-
-
-def test_provision_project_rejects_evaluator_source_that_is_not_a_directory(
-    tmp_path: Path,
-) -> None:
-    evaluator = tmp_path / "evaluator.py"
-    evaluator.write_text("pass\n")
-    input_root = _write_input(tmp_path / "input", '\n[evaluator]\nsource = "../evaluator.py"\n')
-    destination = tmp_path / "copy"
-
-    with pytest.raises(ProjectProvisioningError, match="evaluator source is not a directory"):
-        _provision(input_root, destination, evaluator_source=evaluator)
-
-    assert not destination.exists()

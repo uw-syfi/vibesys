@@ -7,6 +7,7 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.task_project import write_task
 
 from launch.testing import create_session
 from vibesys.api import (
@@ -17,7 +18,7 @@ from vibesys.api import (
     ResumeRef,
     RunRequest,
 )
-from vibesys.inputs import load_input_bundle
+from vibesys.inputs import load_task
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.models import MultiState
 from vibesys.orchestration.profilers import ProfilerKind
@@ -57,12 +58,12 @@ def options(**changes: object) -> BaseModel:
 def write_input(root: Path) -> Path:
     """Create a self-contained project that the production host can resume."""
     root.mkdir(parents=True)
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n", encoding="utf-8")
     (root / "queue.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
-        encoding="utf-8",
+        objective="Improve the queue.\n",
     )
     return root
 
@@ -90,7 +91,7 @@ def execute(
     resume_run_id: str | None = None,
 ) -> tuple[RunStatus, str, Path]:
     """Run the explicit multi plugin through the public product session."""
-    bundle = load_input_bundle(project_root)
+    bundle = load_task(project_root)
     selected = configured or options()
     request = RunRequest(
         run_environment=fake_docker_environment(),

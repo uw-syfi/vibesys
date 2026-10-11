@@ -21,8 +21,8 @@ from vibesys.inputs._manifest import (
     WorkspaceInput,
     WorkspaceSource,
     benchmark_output_argument,
-    load_input_bundle,
     load_project_task,
+    load_task,
     render_input_manifest,
 )
 from vibesys.inputs._objective import with_operator_constraints
@@ -63,9 +63,9 @@ __all__ = [
     "WorkspaceInput",
     "WorkspaceSource",
     "benchmark_output_argument",
-    "load_input_bundle",
     "load_objectives",
     "load_project_task",
+    "load_task",
     "render_input_manifest",
     "synthesize_input_bundle",
     "with_operator_constraints",

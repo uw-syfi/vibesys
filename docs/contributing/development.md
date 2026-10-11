@@ -57,7 +57,7 @@ The main framework boundaries are:
   compute isolation, and project persistence belong in `libs/vs-agent/`,
   `libs/vs-sandbox/`, and `libs/vs-project/`, respectively.
 - Candidate repositories own target-specific tasks and candidate contracts
-  below `.vibesys/tasks/`. Input bundles remain under `examples/`.
+  below `.vibesys/tasks/`. Example projects live under `examples/<category>/`.
 - `resources/evaluators/` owns reusable versioned evaluator packages.
 
 ## Local development

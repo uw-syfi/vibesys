@@ -28,13 +28,6 @@ REGISTRY_RELATIVE = PurePosixPath("examples/registry.toml")
 EXAMPLES_DIRNAME = "examples"
 
 
-class Layout(StrEnum):
-    """How an example carries its task definitions."""
-
-    TASK = "task"  # `.vibesys/tasks/<task>/` inside the example directory
-    LEGACY = "legacy"  # root `vibesys.input.toml` and `OBJECTIVE.md`
-
-
 class Check(StrEnum):
     """Static checks the registry tests run for every example and every task."""
 
@@ -68,8 +61,7 @@ class ExampleEntry(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     path: str  # repo-relative POSIX path
-    layout: Layout
-    tasks: Literal["all"] | tuple[str, ...] = "all"  # legacy examples have no tasks
+    tasks: Literal["all"] | tuple[str, ...] = "all"
     # True when the task files and app source come from another repository that
     # the checkout pins as a submodule under examples/<category>/repositories/.
     external_repo: bool = False
@@ -79,8 +71,6 @@ class ExampleEntry(BaseModel):
     @model_validator(mode="after")
     def _consistent(self) -> Self:
         problems: list[str] = []
-        if self.layout is Layout.LEGACY and self.tasks != "all":
-            problems.append("legacy examples have no tasks; omit `tasks`")
         declared = [item.check for item in (*self.known_failing, *self.skips)]
         if len(declared) != len(set(declared)):
             problems.append("a check may be declared known_failing or skipped once")

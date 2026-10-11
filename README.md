@@ -125,7 +125,7 @@ vibesys --task my-task --max-rounds 4
 The directory must be its Git repository root, or outside Git so VibeSys can
 initialize a repository. An existing repository needs a baseline commit and a
 clean worktree. See [Running VibeSys](docs/running-vibesys.md) for copied
-projects, legacy input bundles, Docker, Modal, remote repositories, resume, and
+projects, examples, Docker, Modal, remote repositories, resume, and
 alternate search loops. The [CLI reference](docs/cli-flags.md) documents every
 flag. Contributor setup belongs in [`docs/contributing/development.md`](docs/contributing/development.md).
 

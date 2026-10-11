@@ -12,6 +12,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.host_environment import unconfined_host_spec
+from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 import vibesys
@@ -25,7 +26,7 @@ from launch.composition import AGENT_TOOL_BINDINGS
 from vibesys.api import CoreEvent, OrchestrationRegistry
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.inputs import load_input_bundle
+from vibesys.inputs import load_task
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.orchestration.single import PLUGIN
@@ -116,14 +117,15 @@ class _RecordingClient(FakeAgentClient):
 
 def _write_project(root: Path, *, domain: str = "generic") -> None:
     root.mkdir(parents=True)
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
     (root / "memory").mkdir()
     (root / "memory" / "allowed.txt").write_text("before\n")
     (root / "memory" / "seed.txt").write_text("seed\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         f'version = 1\n[agent]\ndomain = "{domain}"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Improve the queue.\n",
     )
 
 
@@ -145,7 +147,7 @@ def _request(
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id=orchestration_id, config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "explicit-sessions"}}),
-        input_bundle=load_input_bundle(project_root),
+        input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name="explicit-sessions",
         agent_backend=agent_backend,

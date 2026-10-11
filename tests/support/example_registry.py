@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from scripts.example_repositories import is_example_repository_path
 
-from entrypoints.example_catalog import ExampleEntry, Layout, Registry
+from entrypoints.example_catalog import ExampleEntry, Registry
 from entrypoints.example_catalog import load_registry as load_catalog_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -105,6 +105,5 @@ def unregistered_examples(registered: set[str]) -> list[str]:
 
 def suggested_entry(path: str) -> str:
     """Return the registry entry to paste for an unregistered example."""
-    layout = Layout.TASK if (REPO_ROOT / path / ".vibesys" / "tasks").is_dir() else Layout.LEGACY
-    entry = f'[[example]]\npath = "{path}"\nlayout = "{layout}"'
+    entry = f'[[example]]\npath = "{path}"'
     return f"{entry}\nexternal_repo = true" if path in submodule_example_paths() else entry

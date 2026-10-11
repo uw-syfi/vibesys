@@ -39,8 +39,8 @@ def _catalog(checkout: Path, examples: dict[str, tuple[str, ...]]) -> None:
         (root / "src.txt").write_text(f"candidate {name}\n", encoding="utf-8")
         for task in tasks:
             _task(root, task)
-        entries.append(f'[[example]]\npath = "examples/{name}"\nlayout = "task"\n')
-    entries.append(f'[[example]]\npath = "{EXTERNAL}"\nlayout = "task"\nexternal_repo = true\n')
+        entries.append(f'[[example]]\npath = "examples/{name}"\n')
+    entries.append(f'[[example]]\npath = "{EXTERNAL}"\nexternal_repo = true\n')
     (checkout / "examples" / "registry.toml").write_text(
         "version = 1\n\n" + "\n".join(entries), encoding="utf-8"
     )

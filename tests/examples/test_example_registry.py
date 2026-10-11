@@ -4,8 +4,8 @@ What this covers, per registered example:
 
 - the registry is complete (fail-closed discovery) and current;
 - every task validates through the same entry point as ``vibesys validate``;
-- every ``${PROJECT_ROOT}/...`` path a task command reads exists, and, for the
-  task layout, is read-only under the real agent sandbox policy;
+- every ``${PROJECT_ROOT}/...`` path a task command reads exists and is
+  read-only under the real agent sandbox policy;
 - no reference into ``examples/`` from workflows, scripts, or docs is stale.
 
 What it does not cover: running an evaluator, docker, Kubernetes, GPUs, or
@@ -35,7 +35,7 @@ from tests.support.example_registry import (
 )
 
 from entrypoints.cli import _run_validate
-from entrypoints.example_catalog import REGISTRY_RELATIVE, Check, ExampleEntry, Layout
+from entrypoints.example_catalog import REGISTRY_RELATIVE, Check, ExampleEntry
 from vibesys.errors import ConfigurationError
 from vibesys.run.project_policy import build_project_path_policy, trusted_project_input_paths
 from vs_project.api import Project
@@ -68,8 +68,6 @@ def _require_present(entry: ExampleEntry) -> None:
 
 
 def _tasks(entry: ExampleEntry) -> tuple[str, ...]:
-    if entry.layout is Layout.LEGACY:
-        return ()
     return tuple(task.name.value for task in Project.open(example_root(entry)).discover_tasks())
 
 
@@ -90,23 +88,20 @@ def test_every_example_directory_is_registered() -> None:
 
 
 @pytest.mark.parametrize("entry", [pytest.param(e, id=e.path) for e in ENTRIES])
-def test_registered_layout_and_tasks_match_disk(entry: ExampleEntry) -> None:
+def test_registered_tasks_match_disk(entry: ExampleEntry) -> None:
     _require_present(entry)
-    has_tasks = (example_root(entry) / ".vibesys" / "tasks").is_dir()
-    has_manifest = (example_root(entry) / "vibesys.input.toml").is_file()
-    if entry.layout is Layout.TASK:
-        assert has_tasks, f"{entry.path}: registered as layout=task but has no .vibesys/tasks"
-        on_disk = set(_tasks(entry))
-        assert on_disk, f"{entry.path}: .vibesys/tasks defines no task"
-        if entry.tasks != "all":
-            assert set(entry.tasks) == on_disk, (
-                f"{entry.path}: registered tasks {sorted(entry.tasks)} differ from disk "
-                f'{sorted(on_disk)}; edit {REGISTRY_RELATIVE} (or use tasks = "all")'
-            )
-    else:
-        assert not has_tasks, f"{entry.path}: registered as layout=legacy but has .vibesys/tasks"
-        assert has_manifest, (
-            f"{entry.path}: registered as layout=legacy but has no vibesys.input.toml"
+    root = example_root(entry)
+    assert not (root / "vibesys.input.toml").exists(), (
+        f"{entry.path}: a root vibesys.input.toml is not supported; "
+        "move it to .vibesys/tasks/<task>/"
+    )
+    assert (root / ".vibesys" / "tasks").is_dir(), f"{entry.path}: has no .vibesys/tasks"
+    on_disk = set(_tasks(entry))
+    assert on_disk, f"{entry.path}: .vibesys/tasks defines no task"
+    if entry.tasks != "all":
+        assert set(entry.tasks) == on_disk, (
+            f"{entry.path}: registered tasks {sorted(entry.tasks)} differ from disk "
+            f'{sorted(on_disk)}; edit {REGISTRY_RELATIVE} (or use tasks = "all")'
         )
 
 
@@ -160,7 +155,7 @@ def test_ci_shards_the_cpu_check_and_requires_every_shard() -> None:
 def test_example_validates(entry: ExampleEntry, capsys: pytest.CaptureFixture[str]) -> None:
     _require_present(entry)
     failures: list[str] = []
-    for task in _tasks(entry) or (None,):
+    for task in _tasks(entry):
         argv = [str(example_root(entry)), *(("--task", task) if task else ())]
         try:
             _run_validate(argv)
@@ -174,9 +169,7 @@ def test_example_validates(entry: ExampleEntry, capsys: pytest.CaptureFixture[st
 @pytest.mark.parametrize("entry", [_param(e, Check.PATH_REFS) for e in ENTRIES])
 def test_command_path_references_exist(entry: ExampleEntry) -> None:
     _require_present(entry)
-    failures = [
-        message for task in _tasks(entry) or (None,) for message in _missing_references(entry, task)
-    ]
+    failures = [message for task in _tasks(entry) for message in _missing_references(entry, task)]
     skip = entry.skip(Check.PATH_REFS)
     if skip:
         assert failures, (
@@ -188,7 +181,7 @@ def test_command_path_references_exist(entry: ExampleEntry) -> None:
 
 _ROOT_REF = re.compile(r"\$\{PROJECT_ROOT\}((?:/[^\s\"'\\,\[\]=;&|]+)*)")
 #: Paths the run creates, or fills from a workspace source, so absence is fine.
-_RUNTIME_DIRS = (".vibesys/state", "_evaluator", "_input_libs")
+_RUNTIME_DIRS = (".vibesys/state", "_input_libs")
 
 
 def _command_strings(manifest: Path) -> list[str]:
@@ -200,13 +193,11 @@ def _command_strings(manifest: Path) -> list[str]:
     return strings
 
 
-def _manifest(entry: ExampleEntry, task: str | None) -> Path:
-    if task is None:
-        return example_root(entry) / "vibesys.input.toml"
+def _manifest(entry: ExampleEntry, task: str) -> Path:
     return Project.open(example_root(entry)).select_task(task).manifest_path
 
 
-def _referenced_paths(entry: ExampleEntry, task: str | None) -> set[str]:
+def _referenced_paths(entry: ExampleEntry, task: str) -> set[str]:
     """Return project-relative paths that the task's commands read via PROJECT_ROOT."""
     manifest = _manifest(entry, task)
     found = set()
@@ -227,14 +218,14 @@ def _referenced_paths(entry: ExampleEntry, task: str | None) -> set[str]:
     return found
 
 
-def _workspace_destinations(entry: ExampleEntry, task: str | None) -> set[str]:
+def _workspace_destinations(entry: ExampleEntry, task: str) -> set[str]:
     sources = (
         tomllib.loads(_manifest(entry, task).read_text()).get("workspace", {}).get("sources", [])
     )
     return {source["dest"] for source in sources}
 
 
-def _missing_references(entry: ExampleEntry, task: str | None) -> list[str]:
+def _missing_references(entry: ExampleEntry, task: str) -> list[str]:
     destinations = _workspace_destinations(entry, task)
     missing = []
     for relative in sorted(_referenced_paths(entry, task)):
@@ -284,7 +275,7 @@ def test_task_inputs_are_read_only_for_the_agent(entry: ExampleEntry, tmp_path: 
     )
 
     writable: list[str] = []
-    for task in _tasks(entry) or (None,):
+    for task in _tasks(entry):
         writable.extend(
             f"{relative} (task {task})"
             for relative in sorted(_referenced_paths(entry, task))
@@ -377,7 +368,8 @@ def test_stale_reference_exclusions_are_current() -> None:
 @pytest.mark.parametrize(
     "fields",
     [
-        {"layout": "legacy", "tasks": ["a"]},
+        {"layout": "task"},  # the retired layout field must fail loudly
+        {"path": "elsewhere/x"},
         {"surprise": 1},
         {"live": "none"},  # stale fields must fail loudly
         {"requires": ["docker"]},
@@ -389,6 +381,8 @@ def test_stale_reference_exclusions_are_current() -> None:
     ],
 )
 def test_registry_entry_model_rejects_inconsistent_entries(fields: dict[str, object]) -> None:
-    base = {"path": "examples/x", "layout": "task"}
-    with pytest.raises(ValueError, match=r"examples/x|surprise|Extra|live|tracking|forbidden"):
+    base = {"path": "examples/x"}
+    with pytest.raises(
+        ValueError, match=r"examples/x|surprise|Extra|live|tracking|forbidden|under"
+    ):
         ExampleEntry.model_validate({**base, **fields})

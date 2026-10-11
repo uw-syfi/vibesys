@@ -2,6 +2,7 @@
 # tests/examples/test_example_registry.py iterates this file and fails if a directory
 # that looks like an example is missing from it. See docs/contributing/examples.md.
 #
+# Every example is a project root with its tasks under .vibesys/tasks/<task>/.
 # Static checks run for every entry and every task, always: validate (vibesys validate),
 # path-refs (${PROJECT_ROOT} paths in commands exist), trust-policy (files the commands
 # read are read-only for the agent). Stale examples/ references are checked repo-wide.
@@ -9,8 +10,7 @@
 # not track whether any real run exercises an example.
 #
 #   path        repo-relative example root
-#   layout      "task" (.vibesys/tasks/<task>/) or "legacy" (root vibesys.input.toml)
-#   tasks       "all" (default) or the exact task names on disk; legacy: omit
+#   tasks       "all" (default) or the exact task names on disk
 #   external_repo  true (default false) when the task files and app source come from another
 #               repository that scripts/example_repositories.py checks out. Only this changes
 #               behavior: its checks run in CI (checkout required) and skip locally if absent
@@ -23,135 +23,103 @@ version = 1
 
 [[example]]
 path = "examples/data-structures/kvstore-default"
-layout = "task"
 
 [[example]]
 path = "examples/data-structures/ordered-map"
-layout = "task"
 
 [[example]]
 path = "examples/data-structures/prioqueue"
-layout = "task"
 
 [[example]]
 path = "examples/data-structures/repositories/queue-rs"
-layout = "task"
 
 [[example]]
 path = "examples/data-structures/stack"
-layout = "task"
 
 [[example]]
 path = "examples/data-structures/unordered-map"
-layout = "task"
 
 [[example]]
 path = "examples/database/differential-dataflow"
-layout = "task"
 
 [[example]]
 path = "examples/database/kv-store"
-layout = "task"
 
 [[example]]
 path = "examples/microservices/hotel-correctness"
-layout = "task"
 
 [[example]]
 path = "examples/microservices/repositories/deathstarbench"
-layout = "task"
 external_repo = true
 skips = [{ check = "path-refs", reason = "external repo checkout has no candidate source for ${PROJECT_ROOT} paths to point at" }]
 
 [[example]]
 path = "examples/microservices/repositories/masa"
-layout = "task"
 external_repo = true
 
 [[example]]
 path = "examples/microservices/repositories/train-ticket"
-layout = "task"
 external_repo = true
 
 [[example]]
 path = "examples/microservices/social-network-kubernetes"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/Llama-3-8B"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/Llama-3-8B-trn2"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/deepseek-v3.2-8xb200"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/glm-5.2-8xb200"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/kimi-k3-8xb200"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/llama-70b-2xh100"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/moonshine-streaming"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/olmo-hybrid-prefix-caching"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/qwen3-32b-code-edit"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/qwen3.5-397b-a17b-4xb200"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/qwen3.5-9b-mi210"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/qwen3.6-35b-a3b-2xh100"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/repositories/sglang"
-layout = "task"
 external_repo = true
 
 [[example]]
 path = "examples/model-serving/repositories/vllm"
-layout = "task"
 external_repo = true
 
 [[example]]
 path = "examples/model-serving/repositories/vllm-omni"
-layout = "task"
 external_repo = true
 
 [[example]]
 path = "examples/model-serving/show-o2-1.5B-HQ"
-layout = "task"
 
 [[example]]
 path = "examples/model-serving/whisper-large-v3"
-layout = "task"

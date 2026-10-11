@@ -129,7 +129,7 @@ Several flags look independent, but they combine into one execution contract:
 | Skills | `--skills-dir`, `--extra-skills`, `--no-skills` | Override the preset skill roots, stack extra skills on top of the presets, or disable skill loading. |
 | Target project | `--project` (`--input` alias) | Candidate repository. Defaults to the current directory. |
 | Task | `--task NAME` | Task below `.vibesys/tasks`; optional when exactly one exists. |
-| Project provisioning | `--runs-dir PATH` | Copy a legacy bundle or a repository-shaped example nested below another Git root. Standalone repository-native projects run in place. |
+| Project provisioning | `--runs-dir PATH` | Copy a repository-shaped example nested below another Git root, or a project synthesized from `--input-*` flags. Standalone repository-native projects run in place. |
 | Project repository | `--repo`, `--repo-visibility`, `--local`, `--resume` | Fresh copied projects use GitHub by default. Resume also accepts local project paths or GitHub repositories. |
 | Client theme | `--theme` | Presentation only. Which semantic theme the interactive client renders with. |
 
@@ -174,8 +174,7 @@ baseline commit automatically.
 All outer loops, runtime environments, profilers, and agent backends use the
 same project layout. A repository-shaped example
 nested below another Git root may use `--runs-dir` to materialize an isolated
-project. Legacy bundles and standalone `--input-*` synthesis also use this
-compatibility path.
+project. Standalone `--input-*` synthesis also uses this path.
 
 The native sandbox requires `bwrap` on Linux or `sandbox-exec` on macOS. A
 missing confinement tool or an unsupported operating system stops the run
@@ -183,8 +182,8 @@ rather than launching the agent without isolation. On Linux `bwrap` must also
 be able to create a user namespace; a present but blocked binary is treated as
 missing and reported at startup rather than failing once per round. Evaluator,
 checker, and benchmark paths are visible to agents but enforced read-only and
-protected by integrity checks. The agent also cannot write `.git`, `.vibesys`,
-legacy root-level task inputs, or `_evaluator/`, and cannot read
+protected by integrity checks. The agent also cannot write `.git` or
+`.vibesys`, and cannot read
 root `.env*` files or root `agent.toml`. Machine-local VibeSys state is stored
 outside the project. A run is
 rejected when a root `.env*` file or `agent.toml` is recoverable from Git refs
@@ -428,8 +427,9 @@ validates the task objective and manifest, accuracy and benchmark command
 paths or package entry points, and the optional benchmark-result contract. A
 valid task exits with status 0; an invalid task prints the failing contract
 and exits with status 1. Command-line usage errors exit with status 2.
-Validation does not execute the checker or benchmark.
-Legacy root input bundles remain valid positional arguments without `--task`.
+Validation does not execute the checker or benchmark. A project with a root
+`vibesys.input.toml` fails validation, naming the file and its place under
+`.vibesys/tasks/<task>/`.
 
 ## Interface
 
@@ -485,8 +485,8 @@ below) automatically selects the
 Docker environment, builds with the task directory as its complete context,
 and uses the resulting immutable image ID. No manifest field or pre-build step
 is required. Explicit alternative environments and `--docker-image` conflict
-with this convention. Root Dockerfiles in
-legacy bundles remain candidate files and are not auto-detected.
+with this convention. A root Dockerfile is a candidate file and is not
+auto-detected.
 
 `--docker-image` overrides the backend's default agent container image, including
 the local CPU editor image for Modal and SkyPilot.
@@ -797,26 +797,21 @@ The entrypoint is relative to the candidate repository root, must remain inside
 that repository, and defaults to `main.py` when omitted. The manifest supplies
 task-owned deployment wiring; the operator still selects Modal with `--modal`.
 
-### Legacy bundles
+### Task-local evaluator source
 
-Unmigrated examples may still use root-level `OBJECTIVE.md` and
-`vibesys.input.toml`, `workspace.sources`, and `evaluator.source`. These require
-`--runs-dir` when materialization is needed. They are a compatibility path, not
-the format for new repository adoption.
-
-The optional `evaluator.source` path is relative to the input manifest and must
-resolve to a directory. On a fresh run, VibeSys copies it to
-`_evaluator/<source-name>`. This is a separate, evaluator-owned input:
-Git-backed integrity checks reject accuracy and benchmark gates after it is
-modified. Resumed runs use the evaluator snapshot committed in the canonical
-project.
+The optional `evaluator.source` path is relative to the task directory and must
+resolve to a directory inside it. It is copied with its task and stays under
+`.vibesys/tasks/`, so it is read-only for the agent, and Git-backed integrity
+checks reject accuracy and benchmark gates after it is modified. Resumed runs
+use the evaluator snapshot committed in the canonical project.
 
 ### Providing inputs without a bundle (`--input-*`)
 
-For external usage where no `examples/` bundle is on disk, pass the bundle's
-contents as separate `--input-*` flags instead of `--input`. VibeSys synthesizes
-a bundle under `<runs-dir>/_inputs/<exp-name>/` and then loads it through the
-same path as `--input`, so every loop, resume, and evaluator behaves identically.
+For external usage without a project on disk, pass a task's contents as
+separate `--input-*` flags instead of `--input`. VibeSys synthesizes a one-task
+project under `<runs-dir>/_inputs/<exp-name>/` (task `default`) and then loads
+it through the same path as `--input`, so every loop, resume, and evaluator
+behaves identically.
 The two forms are mutually exclusive: combining `--input` with any `--input-*`
 flag is rejected.
 
@@ -824,7 +819,7 @@ Required flags:
 
 | Flag | Maps to |
 | --- | --- |
-| `--input-objective TEXT` or `--input-objective-file PATH` | `OBJECTIVE.md` |
+| `--input-objective TEXT` or `--input-objective-file PATH` | `.vibesys/tasks/default/OBJECTIVE.md` |
 | `--input-domain {llm-serving,generic,microservices}` | `[agent].domain` |
 | `--input-accuracy-command CMD` | `[accuracy].command` (shell-quoted argv) |
 | `--input-benchmark-command CMD` | `[benchmark].command` (shell-quoted argv) |
@@ -835,11 +830,11 @@ Optional flags:
 | --- | --- |
 | `--input-accuracy-timeout SECONDS` / `--input-benchmark-timeout SECONDS` | command `timeout_seconds` |
 | `--input-benchmark-metric NAME` + `--input-benchmark-result-arg OPT` | `[benchmark.result]` (both required together) |
-| `--input-reference DIR` | copied to `reference/` |
-| `--input-evaluator-dir DIR` | contents copied into the bundle root (evaluator scripts the commands invoke) |
-| `--input-evaluator-source DIR` | `[evaluator].source` (staged inside the bundle) |
+| `--input-reference DIR` | copied to `.vibesys/tasks/default/reference/` |
+| `--input-evaluator-dir DIR` | contents copied into the project root, where the commands run |
+| `--input-evaluator-source DIR` | `[evaluator].source` (staged inside the task) |
 
-The synthesized bundle stages `--input-evaluator-source` inside itself before
+The synthesized project stages `--input-evaluator-source` inside its task before
 loading the manifest, so the supplied local directory does not need to share a
 parent repository with the generated bundle. Git-pinned
 `[[workspace.sources]]` entries are not exposed as flags; use `--input` for

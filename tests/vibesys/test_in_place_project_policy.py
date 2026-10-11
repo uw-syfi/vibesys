@@ -1,21 +1,16 @@
 from pathlib import Path
 
-from vibesys.run.project_policy import (
-    LEGACY_TRUSTED_PROJECT_INPUT_PATHS,
-    build_project_path_policy,
-)
+from vibesys.run.project_policy import build_project_path_policy
 from vs_project.api import Project
 
 
-def test_legacy_project_policy_protects_trusted_inputs_without_project_local_state(
-    tmp_path: Path,
-) -> None:
+def test_uninitialized_project_policy_protects_no_authored_inputs(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
-    for relative in LEGACY_TRUSTED_PROJECT_INPUT_PATHS:
-        path = project / relative
+    for name in ("OBJECTIVE.md", "vibesys.input.toml", "reference", "benchmark", "_evaluator"):
+        path = project / name
         if path.suffix:
-            path.write_text("trusted\n")
+            path.write_text("candidate\n")
         else:
             path.mkdir()
     (project / ".git").mkdir()
@@ -31,11 +26,7 @@ def test_legacy_project_policy_protects_trusted_inputs_without_project_local_sta
     )
     state_paths = store.sandbox_paths()
 
-    assert set(policy.read_only_paths) == {
-        Path(".git"),
-        state_paths.read_only_path,
-        *(Path(relative) for relative in LEGACY_TRUSTED_PROJECT_INPUT_PATHS),
-    }
+    assert set(policy.read_only_paths) == {Path(".git"), state_paths.read_only_path}
     assert state_paths.hidden_path is None
     assert set(policy.hidden_paths) == {Path(".env.local"), Path("agent.toml")}
 

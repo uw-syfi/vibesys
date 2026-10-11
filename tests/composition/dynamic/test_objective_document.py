@@ -20,6 +20,7 @@ from tests.composition.dynamic._harness import (
     run_request,
     workstream,
 )
+from tests.support.task_project import task_path
 
 from vibesys.api import RunStatus
 from vibesys.dynamic_roles import IMPLEMENTER
@@ -42,7 +43,7 @@ def test_dynamic_workstream_and_framework_baseline_verify_committed_objective(
     )
     (skill / "floor.md").write_text("Preserve accuracy.\n", encoding="utf-8")
     objective = "Raise queue throughput. Follow resources/skills/objective-policy/floor.md.\n"
-    (loop_input.root / "OBJECTIVE.md").write_text(objective, encoding="utf-8")
+    (task_path(loop_input.root) / "OBJECTIVE.md").write_text(objective, encoding="utf-8")
     seen: dict[str, bool] = {}
 
     def edit_and_read_the_skill(agent: Turn) -> dict[str, object]:
@@ -79,6 +80,6 @@ def test_dynamic_workstream_and_framework_baseline_verify_committed_objective(
     assert document.read_text(encoding="utf-8") == objective.replace(
         "resources/skills/", ".agents/skills/"
     )
-    assert (loop_input.root / "OBJECTIVE.md").read_text(encoding="utf-8") == objective
+    assert (task_path(loop_input.root) / "OBJECTIVE.md").read_text(encoding="utf-8") == objective
     # One framework baseline plus the candidate's accuracy and benchmark jobs.
     assert loop_input.sbatch_count() == 2
