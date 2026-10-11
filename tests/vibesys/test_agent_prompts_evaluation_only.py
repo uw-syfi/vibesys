@@ -1,9 +1,10 @@
 """What the agent is told about trusted evaluation depends on its loop (#1649).
 
-The loops on the core path (dynamic, single, multi and evolve) give their agents the evaluation tool, so their prompts describe
-evaluation only through that tool: no ``vibesys-gate``, no ``--gate``, and ``vibesys-gpu`` only as
-``-- COMMAND`` where the agent's own GPU commands are on. Every older loop (plain/issue queue) has no evaluation tool and keeps the shell
-gate until it is ported to the core path (roadmap #1952), so its notes are unchanged.
+Every loop is on the core path (dynamic, single, multi, plain/issue queue and evolve) and gives
+its agents the evaluation tool, so their prompts describe evaluation only through that tool: no
+``vibesys-gate``, no ``--gate``, and ``vibesys-gpu`` only as ``-- COMMAND`` where the agent's own
+GPU commands are on. The shell gate remains only until the legacy runtime is deleted (roadmap
+#1952, phase 6), so the older loops' notes are unchanged.
 """
 
 from __future__ import annotations
@@ -87,6 +88,7 @@ def test_only_the_core_loops_have_the_evaluation_tool(loop: str) -> None:
         loop
         in {
             "dynamic",
+            "plain",
             "agent-single",
             "profile-guided-single",
             "agent-multi",

@@ -1,30 +1,36 @@
-"""Byte-exact goldens for the messages the issue queue sends to its agents.
+"""Byte-exact goldens for what the issue queue sends to its agents.
 
-Regenerate with ``UPDATE_PROMPT_SNAPSHOTS=1`` and review every fixture diff as
-a prompt diff.
+Each prompt is rendered the way the render operation renders it: the template named by its
+typed context, with the context's fields and the plan's run-level variables. Regenerate with
+``UPDATE_PROMPT_SNAPSHOTS=1`` and review every fixture diff as a prompt diff.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
+from tests.vibesys.golden.helpers import assert_exact_text
 
-from vibesys.orchestration.issue_queue import IssueQueueOptions, IssueQueueState
-from vibesys.orchestration.issue_queue.agents import (
-    IMPLEMENTER_SYSTEM_PROMPT,
-    JUDGE_SYSTEM_PROMPT,
-    PERFORMANCE_SYSTEM_PROMPT,
+from vibesys.issue_queue_board import IssueQueueTexts
+from vibesys.issue_queue_core import CORE_ROLES
+from vibesys.orchestration.issue_queue.core_policy.api import prompts
+from vibesys.orchestration.issue_queue.strategy.api import (
+    BOOTSTRAP_TEMPLATE,
+    ImplementPrompt,
+    IssueBrief,
+    IssueDetail,
+    PerformancePrompt,
+    PriorPerformance,
+    PromptContext,
+    ReplyCorrectionPrompt,
+    ResumePrompt,
+    ReviewPrompt,
+    WaitUnrecordedPrompt,
 )
-from vibesys.orchestration.issue_queue.prompts import (
-    bootstrap_description,
-    implementer_message,
-    judge_message,
-    performance_message,
-)
-from vs_issue_tracker.api import Issue, IssueType
-from vs_runtime.api import ProfileExecution, RunFacts
+from vs_core.api import EvidenceId, RevisionId, RevisionRef
+from vs_prompts.api import TemplateRenderer
+from vs_runtime.api import AgentRole, ProfileExecution, RunFacts
 
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompts"
 
@@ -35,100 +41,118 @@ _CONFIGURED = RunFacts(
     accuracy_command="uv run check-accuracy",
     benchmark_command="uv run benchmark",
     profiler_id="torch",
+    profile_execution=ProfileExecution.LOCAL,
     environment_notes="Use CUDA with bfloat16.",
 )
 _BARE = RunFacts(domain_id="generic", objective="Build the candidate.")
-_REMOTE = _CONFIGURED.model_copy(update={"profile_execution": ProfileExecution.REMOTE})
-_NO_PROFILER = _CONFIGURED.model_copy(update={"profiler_id": "none"})
 
-_ISSUE = Issue(
+_ISSUE = IssueDetail(
     id=7,
-    type=IssueType.FEATURE,
+    type="feature",
+    status="in_progress",
     title="Implement streaming",
+    attempts=1,
     description="## Acceptance criteria\n- stream non-empty token deltas",
-    created_by="test",
-    created_iter=1,
-    created_at="2026-01-01T00:00:00Z",
-    updated_at="2026-01-01T00:00:00Z",
 )
-_REVIEW: dict[str, object] = {
-    "feedback": "Add and test the health route.",
-    "analysis": "The health route is missing.",
+_BOARD = (
+    IssueBrief(id=7, type="feature", status="in_progress", title="Implement streaming", attempts=1),
+    IssueBrief(id=8, type="bug", status="open", title="Health route 500s", attempts=0),
+    IssueBrief(id=9, type="perf", status="closed", title="Batch prefill", attempts=2),
+)
+_REVISION = RevisionRef(revision_id=RevisionId(root="a1b2c3"), digest="git-commit:a1b2c3")
+_PRIOR = (
+    PriorPerformance(
+        iteration=1,
+        throughput_trend="improved",
+        latency_trend="mixed",
+        metrics_json='{"load_levels": []}',
+        new_issues=2,
+    ),
+)
+_LOADS = '[{"duration": 20, "max_tokens": 64, "rate": 4}]'
+
+_CASES: dict[str, tuple[PromptContext | str, RunFacts]] = {
+    "implement_first_attempt": (ImplementPrompt(issue=_ISSUE, board=_BOARD), _CONFIGURED),
+    "implement_after_review": (
+        ImplementPrompt(
+            issue=_ISSUE,
+            board=_BOARD,
+            feedback="Add and test the health route.",
+            analysis="The health route is missing.",
+        ),
+        _CONFIGURED,
+    ),
+    "implement_bare": (ImplementPrompt(issue=_ISSUE), _BARE),
+    "review_configured": (
+        ReviewPrompt(
+            issue=_ISSUE,
+            board=_BOARD,
+            summary="Streams tokens.",
+            files_touched=("server.py", "tests/test_server.py"),
+            self_check="pytest passes",
+        ),
+        _CONFIGURED,
+    ),
+    "review_bare": (ReviewPrompt(issue=_ISSUE, summary="Done.", self_check=""), _BARE),
+    "performance_discovered_loads": (
+        PerformancePrompt(iteration=1, max_new_issues=3, board=_BOARD),
+        _CONFIGURED,
+    ),
+    "performance_configured_loads_prior": (
+        PerformancePrompt(
+            iteration=2,
+            max_new_issues=2,
+            board=_BOARD,
+            prior=_PRIOR,
+            load_levels_json=_LOADS,
+        ),
+        _CONFIGURED,
+    ),
+    "resume": (
+        ResumePrompt(
+            role="implementer",
+            retained_revision=_REVISION,
+            timed_out=False,
+            evidence=(EvidenceId(root="e1"),),
+            repeated_failure="same error three times",
+        ),
+        _CONFIGURED,
+    ),
+    "resume_timed_out": (
+        ResumePrompt(role="judge", retained_revision=None, timed_out=True),
+        _CONFIGURED,
+    ),
+    "reply_correction": (
+        ReplyCorrectionPrompt(role="judge", error="verdict: Input should be 'pass' or 'fail'"),
+        _CONFIGURED,
+    ),
+    "wait_unrecorded": (WaitUnrecordedPrompt(), _CONFIGURED),
+    "bootstrap_configured": (BOOTSTRAP_TEMPLATE, _CONFIGURED),
+    "bootstrap_bare": (BOOTSTRAP_TEMPLATE, _BARE),
 }
-_LOADS = (
-    {"rate": 1, "duration": 20, "max_tokens": 128},
-    {"rate": 4, "duration": 20, "max_tokens": 64},
-)
-_PRIOR = IssueQueueState.model_validate(
-    {
-        "performance": (
-            {
-                "iteration": 1,
-                "throughput_trend": "improved",
-                "latency_trend": "mixed",
-                "metrics": {"load_levels": [{"target_rate": 1.0}], "extra": {}},
-                "new_issue_ids": (2, 3),
-            },
-        )
+
+
+def _render(context: PromptContext | str, facts: RunFacts) -> str:
+    variables: dict[str, object] = {
+        "facts": facts,
+        "objective": facts.objective,
+        "agent_evaluation": True,
     }
-)
-
-
-def _options(loads: object) -> IssueQueueOptions:
-    return IssueQueueOptions.model_validate(
-        {
-            "max_rounds": 2,
-            "max_attempts_per_issue": 2,
-            "max_issues_per_perf_eval": 3,
-            "load_levels": loads,
-        }
+    if isinstance(context, str):
+        return IssueQueueTexts(variables).issue_body(context)
+    fields = {name: getattr(context, name) for name in type(context).model_fields}
+    template = str(fields.pop("template"))
+    return TemplateRenderer(Path(prompts.__file__).parent).render_template(
+        f"{template}.j2", **variables, **fields
     )
 
 
-def _case(name: str, text: str) -> tuple[str, str]:
-    return name, text
+@pytest.mark.parametrize("name", sorted(_CASES))
+def test_issue_queue_prompt_matches_its_golden(name: str) -> None:
+    context, facts = _CASES[name]
+    assert_exact_text(_SNAPSHOT_DIR / f"{name}.txt", _render(context, facts))
 
 
-def _rendered() -> list[tuple[str, str]]:
-    empty = IssueQueueState()
-    return [
-        _case("system_implementer", IMPLEMENTER_SYSTEM_PROMPT),
-        _case("system_judge", JUDGE_SYSTEM_PROMPT),
-        _case("system_performance", PERFORMANCE_SYSTEM_PROMPT),
-        _case("bootstrap_configured", bootstrap_description(_CONFIGURED)),
-        _case("bootstrap_bare", bootstrap_description(_BARE)),
-        _case("implementer_first_attempt", implementer_message(_ISSUE, _CONFIGURED, None)),
-        _case("implementer_after_review", implementer_message(_ISSUE, _CONFIGURED, _REVIEW)),
-        _case("implementer_after_empty_review", implementer_message(_ISSUE, _BARE, {})),
-        _case("judge_configured", judge_message(_ISSUE, _CONFIGURED)),
-        _case("judge_bare", judge_message(_ISSUE, _BARE)),
-        _case(
-            "performance_local_profiler_loads_prior",
-            performance_message(
-                iteration=2, facts=_CONFIGURED, options=_options(_LOADS), state=_PRIOR
-            ),
-        ),
-        _case(
-            "performance_remote_profiler",
-            performance_message(iteration=1, facts=_REMOTE, options=_options(_LOADS), state=empty),
-        ),
-        _case(
-            "performance_no_profiler_discovered_loads",
-            performance_message(
-                iteration=1, facts=_NO_PROFILER, options=_options(None), state=empty
-            ),
-        ),
-        _case(
-            "performance_bare_facts",
-            performance_message(iteration=3, facts=_BARE, options=_options(None), state=_PRIOR),
-        ),
-    ]
-
-
-@pytest.mark.parametrize(("name", "text"), _rendered(), ids=lambda value: str(value)[:40])
-def test_issue_queue_message_matches_golden(name: str, text: str) -> None:
-    snapshot = _SNAPSHOT_DIR / f"{name}.txt"
-    if os.environ.get("UPDATE_PROMPT_SNAPSHOTS") == "1":
-        snapshot.write_text(text, encoding="utf-8")
-        return
-    assert text == snapshot.read_text(encoding="utf-8")
+@pytest.mark.parametrize("role", CORE_ROLES, ids=lambda role: role.id)
+def test_issue_queue_system_prompt_matches_its_golden(role: AgentRole) -> None:
+    assert_exact_text(_SNAPSHOT_DIR / f"system_{role.id}.txt", role.system_prompt)

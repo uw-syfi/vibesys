@@ -276,6 +276,8 @@ def _plain_policy_descriptor(args: argparse.Namespace) -> OrchestrationDescripto
         "max_rounds": args.max_rounds,
         "max_attempts_per_issue": args.max_attempts_per_issue,
         "max_issues_per_perf_eval": args.max_issues_per_perf_eval,
+        "max_issues_per_round": args.max_issues_per_round,
+        "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
         "tracker": IssueTrackerConfig.from_backend(
             args.tracker_backend,
             repository=args.tracker_repository,

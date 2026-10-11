@@ -135,7 +135,7 @@ uv run pytest
 For a focused test, use for example:
 
 ```bash
-uv run pytest tests/vibesys/orchestration/issue_queue/test_plugin.py
+uv run pytest tests/vibesys/orchestration/issue_queue/strategy/test_scenarios.py
 uv run pytest -k orchestrator
 ```
 

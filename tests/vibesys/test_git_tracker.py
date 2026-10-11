@@ -618,8 +618,10 @@ def test_events_report_unreadable_path_exclusions(tmp_path: Path) -> None:
     assert any("/system_profile.json" in paths for paths in events.excluded)
 
 
-def test_events_report_failed_tree_restore_as_warning(tmp_path: Path) -> None:
+def test_unknown_revision_reports_failed_tree_restore_as_warning(tmp_path: Path) -> None:
     tracker, events = _recording_tracker(tmp_path)
+    unknown = "f" * 40
 
-    assert tracker.checkout_tree("f" * 40) is False
+    assert tracker.has_revision(unknown) is False
+    assert tracker.checkout_tree(unknown) is False
     assert any(warning.startswith("git tree restore") for warning in events.warnings)

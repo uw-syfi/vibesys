@@ -1,0 +1,34 @@
+Work only on issue #7: [feature] Implement streaming
+
+## Acceptance criteria
+- stream non-empty token deltas
+
+Reference: reference/model.py
+Objective: Maximize measured token throughput without losing correctness.
+Accuracy command: uv run check-accuracy
+Benchmark command: uv run benchmark
+Runtime notes: Use CUDA with bfloat16.
+
+Your previous attempt at this issue failed review.
+Feedback: Add and test the health route.
+Analysis: The health route is missing.
+
+Every issue on the board, for context (do not work on any other):
+- #7 [feature] [in_progress] Implement streaming
+- #8 [bug] [open] Health route 500s
+- #9 [perf] [closed] Batch prefill
+
+
+You work in your own checkout of the accumulated candidate; earlier closed issues are
+already in it. Inspect the accuracy checker and benchmark interface before changing their
+integration points. Make the minimum sufficient change, then run the relevant pytest,
+accuracy, benchmark, and streaming checks. Return exactly one JSON object matching:
+{"summary": "...", "files_touched": ["..."], "self_check": "..."}
+
+You may measure your own workspace before you reply: call `submit_evaluation` on the
+`evaluation` tool. The framework decides whether the submission is admitted and counts it
+against the run's budget; a refusal names the reason, so change the workspace or stop
+submitting. A successful call returns a handle. To wait for the result, call
+`validate_evaluation_wait` with every handle you need, then finish the turn with only
+`{"kind":"waiting_for_evaluation","handles":["<handle>"]}`. Do not poll: the host resumes this
+same session once every listed measurement is terminal. A waiting turn uses no new attempt.

@@ -9,9 +9,9 @@ The loop is picked by ``--outer-loop {agent, profile-guided, plain, evolve}``:
 
   "agent" / "profile-guided": orchestrated hypothesis loops. Their policy
              memory lives below ``roadmap/`` and ``progress/``.
-  "plain": deterministic outer loop. Its issue board is a structured
-             :class:`IssueBoard` (issues.json) that perf_eval files into
-             and the implementer drains one issue at a time.
+  "plain": issue-driven outer loop on the core lifecycle. Its issue board (a local
+             issues.json, or GitHub issues) is filled by the performance evaluator
+             and the judge, and the implementer works one issue at a time.
   "evolve": population-based evolutionary search.
 
 The module is split into submodules by concern (``args`` for argparse wiring,

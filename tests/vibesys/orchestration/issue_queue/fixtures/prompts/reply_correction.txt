@@ -1,0 +1,4 @@
+Your previous judge reply violated its output schema:
+verdict: Input should be 'pass' or 'fail'
+
+Reply again with only schema-valid JSON.

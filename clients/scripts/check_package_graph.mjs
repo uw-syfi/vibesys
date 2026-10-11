@@ -29,14 +29,17 @@
  * - `runtime-reachability`: production code in an entry imports another package's entry only when
  *   that entry is `neutral` or of the same runtime, so a Node-only package is unreachable from a
  *   `dom` or `neutral` entry.
- * - `external-dependencies`: React only in `dom` entries, Electron only in `node` entries of
- *   features and apps, Node builtins only in `node` entries (`EXTERNAL_DEPENDENCIES`); a package
- *   that declares one of them in `dependencies` has an entry that may use it.
+ * - `external-dependencies`: React only in `dom` entries, Electron only in `node` and `preload`
+ *   entries of features and apps, Node builtins only in `node` entries (`EXTERNAL_DEPENDENCIES`); a
+ *   package that declares one of them in `dependencies` has an entry that may use it.
+ * - `preload-sandbox`: a `preload` entry's emitted code loads only Electron. Electron's sandbox
+ *   gives a preload a `require` that reaches `electron` and nothing else, so a workspace package is
+ *   imported as a type (`import type`, `typeof import(...)`), never as a value.
  * - `entry-projects`: each entry of a package on the per-entry layout is compiled by its own
  *   composite `tsconfig.<entry>.json` (`tsconfig.lib.json` for `.`).
  * - `entry-capability`: that project's `lib` and `types` are its runtime's: no DOM and no Node
- *   types for `neutral`, DOM without Node types for `dom`, Node types without DOM for `node`. The
- *   compiler then rejects a Node import in a renderer entry.
+ *   types for `neutral`, DOM without Node types for `dom`, Node types without DOM for `node`, both
+ *   for `preload`. The compiler then rejects a Node import in a renderer entry.
  * - `references-match-dependencies`: the package's tsconfig projects reference a project of every
  *   workspace dependency and of no other workspace package. A missing reference is not a compiler
  *   error (the import resolves to the dependency's source), so this is where it is caught.
@@ -77,6 +80,7 @@ export const RULES = [
   'imports-use-exports',
   'runtime-reachability',
   'external-dependencies',
+  'preload-sandbox',
   'entry-projects',
   'entry-capability',
   'references-match-dependencies',
@@ -87,11 +91,17 @@ export const RULES = [
 /** Layer ranks. A package may depend only on a strictly lower rank. */
 export const LAYERS = {foundation: 0, core: 1, domain: 2, service: 3, feature: 4, app: 5};
 
-/** What each runtime's compiler program may see. */
+/**
+ * What each runtime's compiler program may see. A `preload` is an Electron sandboxed preload: it
+ * runs in the page's renderer process before the page, with the DOM and Electron's renderer APIs
+ * (whose types need Node's), but its `require` reaches only `electron` (`preload-sandbox`), and it
+ * may import no Node builtin and no `node` entry.
+ */
 export const RUNTIMES = {
   neutral: {dom: false, node: false},
   dom: {dom: true, node: false},
   node: {dom: false, node: true},
+  preload: {dom: true, node: true},
 };
 
 /** A feature's possible entries and their fixed runtimes. */
@@ -105,10 +115,12 @@ export const FEATURE_ENTRIES = {'./state': 'neutral', './renderer': 'dom', './ma
  */
 export const EXTERNAL_DEPENDENCIES = [
   {packages: ['react', 'react-dom'], runtimes: ['dom']},
-  {packages: ['electron'], runtimes: ['node'], layers: ['feature', 'app']},
+  {packages: ['electron'], runtimes: ['node', 'preload'], layers: ['feature', 'app']},
   {packages: ['@opentui/core'], runtimes: ['node'], layers: ['app']},
 ];
 const NODE_BUILTINS = {runtimes: ['node']};
+/** What a sandboxed preload's `require` reaches. */
+const PRELOAD_MODULES = new Set(['electron']);
 
 /**
  * Packages that predate the per-entry layout, with the rules they skip until the item named in
@@ -117,7 +129,6 @@ const NODE_BUILTINS = {runtimes: ['node']};
  * only shrinks.
  */
 export const LEGACY_EXEMPTIONS = {
-  '@vibesys/desktop': new Set(['entry-projects']),
   '@vibesys/tui': new Set(['entry-projects']),
 };
 
@@ -493,8 +504,39 @@ function importErrors(root, workspacePackage, byName) {
         : externalError(workspacePackage, path, specifier);
       if (error !== undefined) errors.push(error);
     }
+    errors.push(...preloadErrors(workspacePackage, path, text));
   }
   return errors;
+}
+
+/**
+ * The modules a source text loads at run time: the specifiers its emitted CommonJS still requires,
+ * so `import type` and `typeof import(...)`, which the compiler erases, are not loads.
+ */
+export function loadedSpecifiers(text, fileName) {
+  const {outputText} = ts.transpileModule(text, {
+    fileName,
+    compilerOptions: {module: ts.ModuleKind.CommonJS, verbatimModuleSyntax: true},
+    reportDiagnostics: false,
+  });
+  return importedSpecifiers(outputText);
+}
+
+function preloadErrors(workspacePackage, path, text) {
+  if (isTestCode(path)) return [];
+  const importer = owningEntry(packageEntries(workspacePackage), path);
+  if (importer?.runtime !== 'preload') return [];
+  return loadedSpecifiers(text, path)
+    .filter(specifier => !PRELOAD_MODULES.has(specifier))
+    .map(specifier =>
+      violation(
+        'preload-sandbox',
+        `${workspacePackage.directory}/${path}`,
+        `the preload ${workspacePackage.name} ${importer.subpath} loads ${specifier} at run time, ` +
+          `but a sandboxed preload's require reaches only ${[...PRELOAD_MODULES].join(', ')}; ` +
+          'import it as a type',
+      ),
+    );
 }
 
 function externalError(workspacePackage, path, specifier) {

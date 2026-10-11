@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from vs_evaluation.api import EvaluationAgentRole, evaluation_principal
 from vs_evaluation.api.tools import evaluation_mcp_descriptor
-from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor, expose_as_tools
+from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor
 from vs_runtime.api import AgentCapability
 
 if TYPE_CHECKING:
@@ -42,23 +42,6 @@ def _profiler_tool(
     return () if server is None else (server,)
 
 
-def _issue_board_tool(
-    _host: object, _binding: AgentToolBindingContext
-) -> tuple[ToolServerDescriptor, ...]:
-    """Bind the fixed issue-board server to workspace-relative policy artifacts."""
-    return (
-        expose_as_tools(
-            name="vibesys-issue-board",
-            entrypoint_module="entrypoints.issue_board_tools_server",
-            entrypoint_args=(
-                "issues.json",
-                ".vibesys/issue-tool-policy.json",
-                ".vibesys/issue-tracker.json",
-            ),
-        ),
-    )
-
-
 def _evaluation_tool(
     context: object, binding: AgentToolBindingContext
 ) -> tuple[ToolServerDescriptor, ...]:
@@ -91,7 +74,6 @@ AGENT_TOOL_BINDINGS: Mapping[
     str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]
 ] = {
     "evaluation": _evaluation_tool,
-    "issue-board": _issue_board_tool,
     "profiler": _profiler_tool,
 }
 """Built-in agent tools bound by product composition, not orchestration policy."""

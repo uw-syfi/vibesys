@@ -14,7 +14,6 @@ from launch import LaunchSettings, built_in_orchestrations, create_session, open
 from vibesys.api import (
     ComputeBackend,
     Config,
-    ConfigurationError,
     OrchestrationRegistry,
     PluginProjection,
     ProfilerKind,
@@ -285,7 +284,8 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
     assert registration.project_max_rounds is not None
     assert registration.project_max_rounds(plain_options) == 5
     assert registration.plugin.memory_paths == ()
-    assert registration.resume_policy is not None
+    # A core run's limits are fixed in its committed state, so it resumes with exact options.
+    assert registration.resume_policy is None
 
 
 @pytest.mark.parametrize(
@@ -363,6 +363,8 @@ def test_builtin_plugin_parsing_preserves_strict_tuples_from_persisted_json(
         assert isinstance(parsed, EvolveOptions)
         observed = tuple(item.name for item in parsed.metric_space.objectives)
     assert observed == expected_tuple
+    if plugin_id == "plain":
+        return
     compare = registration.resume_policy
     if plugin_id in {"multi-agent", "evolve"}:
         assert compare is None  # a core strategy resumes with exact options
@@ -371,40 +373,9 @@ def test_builtin_plugin_parsing_preserves_strict_tuples_from_persisted_json(
     assert compare(descriptor, descriptor).descriptor is None
 
 
-def test_builtin_plugins_allow_only_increased_total_budget_on_resume() -> None:
-    registry = built_in_orchestrations()
-    recorded = OrchestrationDescriptor(
-        id="plain",
-        config_version=1,
-        options={
-            "max_rounds": 2,
-            "max_attempts_per_issue": 2,
-            "max_issues_per_perf_eval": 3,
-            "load_levels": [{"rate": 4, "duration": 20, "max_tokens": 64}],
-        },
-    )
-    compare = registry.resolve(recorded.id).resume_policy
-    assert compare is not None
-
-    increased = recorded.model_copy(update={"options": {**recorded.options, "max_rounds": 3}})
-    decision = compare(recorded, increased)
-    assert decision.descriptor == increased
-    assert decision.requires_clean_workspace
-
-    changed_levels = recorded.model_copy(
-        update={
-            "options": {
-                **recorded.options,
-                "load_levels": [{"rate": 8, "duration": 20, "max_tokens": 64}],
-            }
-        }
-    )
-    with pytest.raises(ConfigurationError, match="load_levels"):
-        compare(recorded, changed_levels)
-    with pytest.raises(ConfigurationError, match="cannot decrease"):
-        compare(
-            recorded, recorded.model_copy(update={"options": {**recorded.options, "max_rounds": 1}})
-        )
+def test_the_issue_queue_resumes_with_exact_options_until_core_can_extend_its_limits() -> None:
+    """A core run's limits are fixed when it starts, so a larger round budget cannot resume it."""
+    assert built_in_orchestrations().resolve("plain").resume_policy is None
 
 
 def test_evolve_plugin_resumes_with_its_exact_options() -> None:

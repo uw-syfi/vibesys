@@ -94,7 +94,7 @@ const VALID_FILES = {
   'store/src/testing/index.ts': "import './model.js';\n",
   'store/src/testing/model.ts': "import '../index.js';\n",
   // A feature's Node entry (`src/main/`) is not held to its browser parts' rules.
-  'features/replay/src/main/index.ts': "import 'net';\nimport '@vibesys/transport';\n",
+  'features/replay/src/main/index.ts': "import 'node:fs';\nimport '@vibesys/transport';\n",
   // A package's test support may build on another's, and its tests may use another's Fakes.
   'hosts/src/index.ts': '',
   'ipc/src/index.ts': "import type {} from '@vibesys/hosts';\n",
@@ -135,22 +135,16 @@ const VALID_FILES = {
     "import '@vibesys/run-state';\nimport '@vibesys/transport';\nimport 'declared-package';\n",
   'tui/benchmarks/bench.ts': "import '../src/session-model.js';\n",
   'scripts/check.mjs': "import 'node:fs';\nimport 'declared-package';\n",
-  // The desktop app's processes and slices, each reaching only down: the composition enters each
-  // slice through its index, a slice's shell owns its processes and drives its pure state, and the
-  // renderer and main share only workspace packages (`@vibesys/hosts`, `@vibesys/runs`, `@vibesys/ipc`).
-  'desktop/src/main/app/main.ts':
-    "import '../features/runs/index.js';\nimport '../platform/link/index.js';\n",
-  'desktop/src/main/features/runs/index.ts':
-    "import './runs.js';\nimport '../../entities/listing.js';\n",
-  'desktop/src/main/features/runs/runs.ts': "import '../../platform/link/index.js';\n",
-  'desktop/src/main/entities/listing.ts': "import type {} from '../platform/link/index.js';\n",
-  'desktop/src/main/platform/link/index.ts': "import './shell/link.js';\n",
-  'desktop/src/main/platform/link/shell/link.ts':
-    "import 'node:child_process';\nimport '../state/machine.js';\n",
-  'desktop/src/main/platform/link/state/machine.ts': "import type {} from '@vibesys/transport';\n",
-  'desktop/src/main/platform/link/testing/fake.ts': "import '../state/machine.js';\n",
-  // A preload binds `@vibesys/ipc`'s messages to Electron, and imports nothing else.
-  'desktop/src/renderer/preload/bridge.ts':
+  // The desktop main process: the app composes the packages, the connection manager's shell owns
+  // its processes and drives its pure state, and a preload binds `@vibesys/ipc`'s messages to
+  // Electron and imports nothing else.
+  'apps/desktop-main/src/main/index.ts':
+    "import '@vibesys/connection';\nimport '@vibesys/feature-replay/main';\nimport 'node:path';\n",
+  'connection/src/index.ts': "import './shell/link.js';\n",
+  'connection/src/shell/link.ts': "import 'node:child_process';\nimport '../state/machine.js';\n",
+  'connection/src/state/machine.ts': "import type {} from '@vibesys/transport';\n",
+  'connection/src/testing/index.ts': "import '../state/machine.js';\n",
+  'apps/desktop-main/src/preload/bridge.cts':
     "import 'electron';\nimport type {} from '@vibesys/ipc';\n",
   // The desktop renderer app: its entry composes the wiring and the view, each entering the
   // features through their entries.
@@ -162,86 +156,53 @@ const VALID_FILES = {
 
 const RULE_CASES = [
   {
-    rule: 'desktop-features-does-not-import-layers-above',
-    files: {'desktop/src/main/features/runs/runs.ts': "import '../../app/main.js';\n"},
-  },
-  {
-    rule: 'desktop-entities-does-not-import-layers-above',
-    files: {'desktop/src/main/entities/listing.ts': "import '../features/runs/index.js';\n"},
-  },
-  {
-    rule: 'desktop-platform-does-not-import-layers-above',
-    files: {
-      'desktop/src/main/platform/link/shell/link.ts': "import '../../../entities/listing.js';\n",
-    },
-  },
-  {
-    rule: 'desktop-shared-does-not-import-layers-above',
-    files: {'desktop/src/main/shared/log.ts': "import '../platform/link/index.js';\n"},
-  },
-  {
-    rule: 'desktop-renderer-does-not-import-main',
-    files: {
-      'desktop/src/renderer/preload/bridge.ts': "import '../../main/entities/listing.js';\n",
-    },
+    rule: 'desktop-preloads-import-only-ipc-and-electron',
+    files: {'apps/desktop-main/src/preload/bridge.cts': "import '../main/index.js';\n"},
   },
   {
     rule: 'desktop-preloads-import-only-ipc-and-electron',
-    files: {'desktop/src/renderer/preload/bridge.ts': "import type {} from '@vibesys/hosts';\n"},
+    files: {'apps/desktop-main/src/preload/bridge.cts': "import type {} from '@vibesys/hosts';\n"},
   },
   {
     rule: 'desktop-preloads-import-only-ipc-and-electron',
     files: {
-      'desktop/src/renderer/preload/bridge.ts': "import '@vibesys/feature-replay/renderer';\n",
+      'apps/desktop-main/src/preload/bridge.cts': "import '@vibesys/feature-replay/renderer';\n",
     },
   },
   {
     rule: 'desktop-preloads-import-only-ipc-and-electron',
-    files: {'desktop/src/renderer/preload/bridge.ts': "import 'node:fs';\n"},
+    files: {'apps/desktop-main/src/preload/bridge.cts': "import 'node:fs';\n"},
   },
   {
     rule: 'production-code-does-not-import-other-packages-test-support',
     files: {'features/replay/src/renderer/effects/replay.ts': "import '@vibesys/ipc/testing';\n"},
   },
   {
-    // Test support nested in a slice (`desktop/src/main/<slice>/testing/`) is test support too.
+    // Test support nested below a package's sources is test support too.
     rule: 'production-code-does-not-import-other-packages-test-support',
     files: {
-      'apps/web/src/platform/backend.ts':
-        "import '../../../../desktop/src/main/platform/link/testing/fake.js';\n",
+      'apps/web/src/platform/backend.ts': "import '../../../../connection/src/testing/index.js';\n",
     },
   },
   {
-    rule: 'desktop-main-does-not-import-renderer',
-    files: {'desktop/src/main/app/main.ts': "import '../../renderer/preload/bridge.js';\n"},
+    rule: 'desktop-main-does-not-import-preloads',
+    files: {'apps/desktop-main/src/main/index.ts': "import '../preload/bridge.cjs';\n"},
   },
   {
-    rule: 'desktop-state-is-pure',
-    files: {'desktop/src/main/platform/link/state/machine.ts': "import '../shell/link.js';\n"},
+    rule: 'connection-state-is-pure',
+    files: {'connection/src/state/machine.ts': "import '../shell/link.js';\n"},
   },
   {
-    rule: 'desktop-state-has-no-node-runtime',
-    files: {'desktop/src/main/platform/link/state/machine.ts': "import 'node:fs';\n"},
+    rule: 'connection-state-has-no-node-runtime',
+    files: {'connection/src/state/machine.ts': "import 'node:fs';\n"},
   },
   {
-    rule: 'desktop-only-shells-open-processes-and-sockets',
-    files: {'desktop/src/main/features/runs/runs.ts': "import 'node:net';\n"},
+    rule: 'desktop-only-connection-shell-opens-processes-and-sockets',
+    files: {'features/replay/src/main/index.ts': "import 'node:net';\n"},
   },
   {
-    rule: 'desktop-features-are-isolated',
-    files: {
-      'desktop/src/main/features/other/index.ts': "import '../runs/index.js';\n",
-    },
-  },
-  {
-    rule: 'desktop-slices-are-entered-through-their-index',
-    files: {
-      'desktop/src/main/features/runs/runs.ts': "import '../../platform/link/shell/link.js';\n",
-    },
-  },
-  {
-    rule: 'desktop-composition-enters-slices-through-their-index',
-    files: {'desktop/src/main/app/main.ts': "import '../features/runs/runs.js';\n"},
+    rule: 'desktop-only-connection-shell-opens-processes-and-sockets',
+    files: {'apps/desktop-main/src/main/index.ts': "import 'node:child_process';\n"},
   },
   {
     rule: 'desktop-renderer-ui-does-not-import-wiring',
@@ -461,6 +422,8 @@ async function violatedRules(t, files) {
           '@vibesys/store/testing': ['store/src/testing/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
           '@vibesys/feature-replay/renderer': ['features/replay/src/renderer/index.ts'],
+          '@vibesys/feature-replay/main': ['features/replay/src/main/index.ts'],
+          '@vibesys/connection': ['connection/src/index.ts'],
           '@vibesys/hosts': ['hosts/src/index.ts'],
           '@vibesys/ipc': ['ipc/src/index.ts'],
           '@vibesys/ipc/testing': ['ipc/src/testing/index.ts'],

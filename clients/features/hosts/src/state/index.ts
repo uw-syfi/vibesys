@@ -4,13 +4,10 @@
  * the main process only through `HostsBridge`, which the app implements with the welcome bridge.
  */
 
-import type {WelcomeBridge} from '@vibesys/ipc';
+import type {HostsWelcomeBridge} from '@vibesys/ipc';
 
 /** The welcome bridge's requests the hosts feature makes. */
-export type HostsBridge = Pick<
-  WelcomeBridge,
-  'host' | 'setCheckout' | 'cancelCheckout' | 'signIn' | 'hosts' | 'complete'
->;
+export type HostsBridge = HostsWelcomeBridge;
 
 export {
   COMPLETION_EMPTY,

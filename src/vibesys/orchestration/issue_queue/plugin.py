@@ -1,40 +1,12 @@
-"""Explicit declaration of the issue-queue orchestration."""
+"""Plugin registration for the issue queue: the core path.
 
-from functools import partial
+Every entrypoint resolves `plain` to this registration. The run is a vs-core step function
+driven by the vs-runtime shell; `issue_queue_core` composes it.
+"""
 
-from pydantic import BaseModel
+from vibesys.issue_queue_core import issue_queue_core_registration
 
-from vibesys.orchestration.issue_queue.agents import AGENTS
-from vibesys.orchestration.issue_queue.models import IssueQueueOptions, IssueQueueState
-from vibesys.orchestration.issue_queue.orchestration import orchestrate
-from vibesys.orchestration.resume import compare_round_budget, project_round_budget
-from vibesys.plugin_registration import OrchestrationRegistration
-from vibesys.run.contracts import PluginProjection
-from vs_runtime.api import OrchestrationPlugin
-
-
-def _project(raw_state: BaseModel) -> PluginProjection:
-    """Expose the strict aggregate without reconstructing policy state."""
-    state = IssueQueueState.model_validate(raw_state)
-    return PluginProjection(payload=state.model_dump(mode="json"))
-
-
-PLUGIN = OrchestrationPlugin(
-    id="plain",
-    agents=AGENTS,
-    options=IssueQueueOptions,
-    state=IssueQueueState,
-    orchestrate=orchestrate,
-)
-REGISTRATION = OrchestrationRegistration(
-    plugin=PLUGIN,
-    project=_project,
-    resume_policy=partial(
-        compare_round_budget,
-        plugin_id="plain",
-        options_type=IssueQueueOptions,
-    ),
-    project_max_rounds=partial(project_round_budget, options_type=IssueQueueOptions),
-)
+REGISTRATION = issue_queue_core_registration()
+PLUGIN = REGISTRATION.plugin
 
 __all__ = ["PLUGIN", "REGISTRATION"]

@@ -1,0 +1,4 @@
+Reference: {{ facts.reference_location }}
+Objective: {{ facts.objective or "<not specified>" }}
+{% include "_commands.j2" +%}
+Runtime notes: {{ facts.environment_notes or "<none>" }}

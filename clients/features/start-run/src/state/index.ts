@@ -6,10 +6,10 @@
  * the welcome bridge.
  */
 
-import type {WelcomeBridge} from '@vibesys/ipc';
+import type {StartRunWelcomeBridge} from '@vibesys/ipc';
 
 /** The welcome bridge's requests the start-run feature makes. */
-export type StartRunBridge = Pick<WelcomeBridge, 'tasks' | 'start' | 'cancelStart'>;
+export type StartRunBridge = StartRunWelcomeBridge;
 
 export {ShellWordsError, shellWords} from './shell-words.js';
 export {

@@ -1,0 +1,38 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022",
+      "esnext.disposable"
+    ],
+    "types": [
+      "node"
+    ],
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.main.tsbuildinfo"
+  },
+  "include": [
+    "src/main/**/*.ts"
+  ],
+  "exclude": [
+    "src/main/**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../../connection/tsconfig.lib.json"
+    },
+    {
+      "path": "../../contracts/tsconfig.host-helper.json"
+    },
+    {
+      "path": "../../hosts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../ipc/tsconfig.lib.json"
+    },
+    {
+      "path": "../../settings/tsconfig.lib.json"
+    }
+  ]
+}

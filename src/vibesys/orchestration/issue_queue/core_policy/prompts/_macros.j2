@@ -1,0 +1,13 @@
+{#- Shared renderings of typed context values. -#}
+{% macro rev(ref) -%}
+{{ ref.revision_id.root }}
+{%- endmacro %}
+{% macro board_list(items) -%}
+{% if items %}
+{% for item in items %}
+- #{{ item.id }} [{{ item.type }}] [{{ item.status }}] {{ item.title }}
+{% endfor %}
+{% else %}
+none yet
+{% endif %}
+{%- endmacro %}

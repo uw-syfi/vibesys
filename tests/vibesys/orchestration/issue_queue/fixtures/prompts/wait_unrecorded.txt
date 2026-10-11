@@ -1,0 +1,3 @@
+Your previous reply said you are waiting for your evaluation, but the run did not record a wait, so it will not resume you. Nothing you submitted is lost: its result is reported to the run.
+
+Reply now with your final schema-valid JSON for this task, without asking to wait.

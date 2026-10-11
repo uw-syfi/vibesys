@@ -1,10 +1,10 @@
 # Desktop connection architecture
 
-This document owns how the desktop app (`clients/desktop`) reaches VibeSys on a host: the one
-program it runs there, the one way it connects, how a run is identified and how its lifecycle is
-reported, and how the app's screens hold state. It is written as the design. Parts not yet built
-are marked in the [status table](#status); the [migration plan](#migration-plan) says what each
-phase replaces.
+This document owns how the desktop app (`clients/apps/desktop-main`) reaches VibeSys on a host:
+the one program it runs there, the one way it connects, how a run is identified and how its
+lifecycle is reported, and how the app's screens hold state. It is written as the design. Parts
+not yet built are marked in the [status table](#status); the [migration plan](#migration-plan)
+says what each phase replaces.
 
 It builds on, and does not restate:
 
@@ -55,7 +55,7 @@ imports only `pydantic`, `vs_project.api`, and `vs_sim.api` starts in about 250 
 ## Components and ownership
 
 ```text
-desktop main process (clients/desktop)                host (local or ssh)
+desktop main process (apps/desktop-main)              host (local or ssh)
 +-------------------------------------------+        +-------------------------------------+
 | AppLifecycle: single-instance lock, quit, |        | host helper (one process per        |
 |   settings store (sole writer)            |        |   channel; stateless)               |
@@ -81,9 +81,9 @@ desktop main process (clients/desktop)                host (local or ssh)
 | Relay core | `server.relay` (kept) | Byte relay between stdio and a run's Unix socket, with its deadlines and typed outcomes. Used by `run.connect`. |
 | Detached run server | `entrypoints.server` (changed) | Takes the lock and publishes its record (with `run_id` and phase `starting/resolving`) before importing the engine; owns its phases. |
 | Generated helper types | `clients/contracts/src/generated/`, read through `@vibesys/contracts/host-helper` | `host-helper.schema.json` (committed, language neutral), the TypeScript types and descriptor generated from it, and the strict parse every helper line goes through. |
-| Connection manager | `clients/desktop` (`src/main/platform/connection`: a pure `state/` machine and a `shell/`) | The only code that creates links and channels. One `HostConnection` per host; its machine is the one retry loop. |
-| Screen stores | `clients/desktop` and `clients/apps/web` | One store per screen; pure reducer; React renders state. |
-| App lifecycle | `clients/desktop` (`src/main/app/app-lifecycle.ts`, `src/main/platform/settings`) | Single-instance lock, the quit sequence, the settings store. |
+| Connection manager | `@vibesys/connection` (`clients/connection`: a pure `state/` machine and a `shell/`) | The only code that creates links and channels. One `HostConnection` per host; its machine is the one retry loop. |
+| Screen stores | the desktop features (`clients/features/*`) and `clients/apps/web` | One store per screen; pure reducer; React renders state. |
+| App lifecycle | `clients/apps/desktop-main` (`src/main/app-lifecycle.ts`) and `@vibesys/settings` | Single-instance lock, the quit sequence, the settings store. |
 
 Placement follows [architecture.md](architecture.md): the registry and relay are generic mechanisms
 under `server`, with no VibeSys policy; the helper's request handling is product wiring over them;

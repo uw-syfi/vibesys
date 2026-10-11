@@ -35,6 +35,7 @@ from vibesys.hypothesis import (
 from vibesys.metrics import Objective
 from vibesys.orchestration.dynamic.strategy.api import PlannerPrompt, ReviewEvaluation
 from vibesys.orchestration.evolve.population import Individual
+from vibesys.orchestration.issue_queue.strategy.api import IssueBrief, PriorPerformance
 from vibesys.orchestration.multi.models import (
     ImplementerResponse,
     JudgeResponse,
@@ -541,6 +542,23 @@ def core_policy_context() -> dict[str, object]:
         "blocker": "tests/test_engine.py::test_decode fails to import",
         "narrowed_step": "Make the import resolve first.",
         "turns_without_candidate": 2,
+        # The issue queue's typed contexts.
+        "board": (
+            IssueBrief(id=1, type="feature", status="open", title="Add streaming", attempts=0),
+        ),
+        "analysis": "The health route is missing.",
+        "max_new_issues": 2,
+        "prior": (
+            PriorPerformance(
+                iteration=1,
+                throughput_trend="improved",
+                latency_trend="mixed",
+                metrics_json="{}",
+                new_issues=1,
+            ),
+        ),
+        "files_touched": ("a.py",),
+        "self_check": "Ran the tests.",
         # The multi strategy's prompt fields (`ImplementPrompt`, `JudgePrompt`, `ProfilerPrompt`).
         "framework": GateFacts(),
         "claims": ImplementerClaims(

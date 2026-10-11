@@ -33,7 +33,7 @@ from vs_sandbox.api.slurm import (
     SlurmStagePayload,
     SlurmTargetLifecycle,
 )
-from vs_sim.api.testing import ManualClock, wait_until_started
+from vs_sim.api.testing import Gate, ManualClock, wait_until_started
 from vs_slurm.api import (
     ClusterCancelOutcome,
     ClusterCancelRequested,
@@ -59,6 +59,7 @@ from vs_slurm.api import (
     SlurmJobRequest,
     SlurmJobRunner,
     SlurmJobStatus,
+    SlurmPhase,
     SlurmSshTransport,
     validate_cluster_operation_id,
 )
@@ -433,6 +434,51 @@ def _request() -> EvaluationRequest:
             for name, timeout in (("accuracy", 17), ("benchmark", 41))
         ),
     )
+
+
+def _drop_before_scheduler_acceptance() -> None:
+    message = "SSH transport dropped before scheduler acceptance"
+    raise OSError(message)
+
+
+class _TombstonedSubmissionCluster(FakeCluster):
+    """A lost dispatch whose tombstone lookup follows an exact public schedule."""
+
+    def __init__(self, schedule: tuple[str | None | ClusterUnknown, ...]) -> None:
+        super().__init__()
+        self._schedule = schedule
+        self.cancelled_job_ids: list[str | None] = []
+        self.schedule_consumed = Gate()
+        self._index = 0
+        self._late_job_id: str | None = None
+
+    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+        assert isinstance(target, str)
+        assert not by_job_id
+        reading = self._schedule[min(self._index, len(self._schedule) - 1)]
+        self._index += 1
+        if isinstance(reading, ClusterUnknown):
+            self.cancelled_job_ids.append(reading.job_id)
+            outcome: ClusterCancelOutcome = reading
+        else:
+            self.cancelled_job_ids.append(reading)
+            self._late_job_id = reading or self._late_job_id
+            outcome = ClusterCancelRequested(operation_id=target, job_id=reading)
+        if self._index >= len(self._schedule):
+            self.schedule_consumed.open()
+        return outcome
+
+    def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
+        assert isinstance(target, str)
+        assert not by_job_id
+        if self._late_job_id is not None:
+            return ClusterObservation(
+                operation_id=target,
+                job_id=self._late_job_id,
+                status=SlurmJobStatus.CANCELLED,
+                phase=SlurmPhase.ENDED,
+            )
+        return ClusterUnknown(operation_id=target, reason="submission acceptance unresolved")
 
 
 async def _terminal(executor: SlurmEvaluationExecutor, handle_id: str) -> ExecutorObservation:
@@ -925,10 +971,10 @@ async def test_executor_enforces_one_persisted_wait_deadline(tmp_path: Path) -> 
         deadline_clock=runner.deadline_clock,
     )
     recovered = await resumed.inspect("eval-timeout")
-    assert recovered is not None
-    assert (await _terminal(resumed, "eval-timeout")).state is EvaluationState.FAILED
+    assert recovered == observed
+    assert (await _terminal(resumed, "eval-timeout")) == observed
     assert runner.wait_timeouts == [6.0]
-    assert runner.cancellations == 2
+    assert runner.cancellations == 1
 
 
 @pytest.mark.asyncio
@@ -1192,6 +1238,213 @@ class _LostSubmissionAcknowledgementCluster(_ScenarioCluster):
         return ClusterUnknown(
             operation_id=observed.operation_id, reason="scheduler identity unknown"
         )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_lost_before_scheduler_acceptance_ends_as_durable_failure(
+    tmp_path: Path,
+) -> None:
+    """Stable no-job evidence closes an ambiguous dispatch instead of polling forever."""
+    config = _config()
+    runner = FakeCluster()
+    clock = _DeadlineClock(1_000)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=runner,
+        pause=clock.advance,
+        deadline_clock=clock,
+    )
+    coordinator = EvaluationCoordinator(
+        executor, FilesystemEvaluationStore(tmp_path / "coordinator"), ManualClock()
+    )
+    request = _request()
+    prepared = await coordinator.prepare(request)
+    runner.script(prepared.id, on_dispatch=_drop_before_scheduler_acceptance)
+    try:
+        handle = await coordinator.submit(request)
+        terminal = await _terminal(executor, handle.id)
+        durable = await coordinator.snapshot(handle.id)
+
+        assert terminal.state is EvaluationState.FAILED
+        assert terminal.failure is not None
+        assert "SlurmOutcomeUnknownError" in terminal.failure
+        assert durable.status is EvaluationState.FAILED
+        assert durable.failure == terminal.failure
+        assert clock.value == pytest.approx(1_000 + 2 * config.poll_interval_seconds)
+
+        observer = SlurmEvaluationExecutor(
+            config,
+            workspace=_workspace(tmp_path),
+            setup_script=None,
+            service=None,
+            support_trees={},
+            handle_root=tmp_path / "handles",
+            cluster=runner,
+        )
+        polled = await observer.poll(handle.id)
+        assert polled.phase is PollPhase.ENDED
+        assert polled.terminal == terminal
+    finally:
+        await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_late_job_identity_switches_ambiguous_cleanup_to_job_confirmation(
+    tmp_path: Path,
+) -> None:
+    """A job published during the absence window is cancelled, never declared absent."""
+    config = _config()
+    runner = _TombstonedSubmissionCluster((None, None, "late-job"))
+    runner.script("eval-late-job", on_dispatch=_drop_before_scheduler_acceptance)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=runner,
+        pause=lambda _seconds: None,
+    )
+    terminal_wait = asyncio.create_task(_terminal(executor, "eval-late-job"))
+    try:
+        await executor.submit(_request(), handle_id="eval-late-job")
+        await runner.schedule_consumed.wait(terminal_wait)
+        terminal = await terminal_wait
+
+        assert runner.cancelled_job_ids == [None, None, "late-job"]
+        assert terminal.state is EvaluationState.FAILED
+        assert terminal.failure is not None
+        assert "SlurmOutcomeUnknownError" in terminal.failure
+
+        observer = SlurmEvaluationExecutor(
+            config,
+            workspace=_workspace(tmp_path),
+            setup_script=None,
+            service=None,
+            support_trees={},
+            handle_root=tmp_path / "handles",
+            cluster=runner,
+        )
+        polled = await observer.poll("eval-late-job")
+        assert polled.phase is PollPhase.ENDED
+        assert polled.terminal == terminal
+    finally:
+        if not terminal_wait.done():
+            terminal_wait.cancel()
+            await asyncio.gather(terminal_wait, return_exceptions=True)
+        await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_unknown_during_absence_confirmation_keeps_ambiguous_submission_owned(
+    tmp_path: Path,
+) -> None:
+    """Transport uncertainty cannot publish failure from incomplete absence evidence."""
+    config = _config()
+    unknown = ClusterUnknown(operation_id="eval-unknown", reason="scheduler lookup failed")
+    runner = _TombstonedSubmissionCluster((None, unknown))
+    runner.script("eval-unknown", on_dispatch=_drop_before_scheduler_acceptance)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=runner,
+        pause=lambda _seconds: None,
+    )
+    terminal_wait = asyncio.create_task(_terminal(executor, "eval-unknown"))
+    try:
+        await executor.submit(_request(), handle_id="eval-unknown")
+        await runner.schedule_consumed.wait(terminal_wait)
+
+        observed = await executor.inspect("eval-unknown")
+        assert observed is not None
+        assert observed.state in {
+            EvaluationState.STARTING,
+            EvaluationState.RUNNING,
+            EvaluationState.CANCELING,
+        }
+        assert observed.failure is None
+        assert not terminal_wait.done()
+        assert runner.cancelled_job_ids[:2] == [None, None]
+
+        polled = await executor.poll("eval-unknown")
+        assert polled.phase is PollPhase.UNKNOWN
+        assert polled.terminal is None
+    finally:
+        terminal_wait.cancel()
+        await asyncio.gather(terminal_wait, return_exceptions=True)
+        await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_remote_claim_lost_before_publication_ends_as_durable_failure(
+    tmp_path: Path,
+) -> None:
+    """The production cluster boundary reaches the same terminal result as its Fake."""
+    connector = FakeConnector(tmp_path / "connector")
+    config = _config().model_copy(
+        update={
+            "remote_workspace_root": str(tmp_path / "remote"),
+            "transport": SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+        }
+    )
+    cluster = SlurmCluster(
+        SlurmJobRunner(config, process=connector),
+        state_root=tmp_path / "cluster-state",
+    )
+    clock = _DeadlineClock(1_000)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=cluster,
+        pause=clock.advance,
+        deadline_clock=clock,
+    )
+    coordinator = EvaluationCoordinator(
+        executor, FilesystemEvaluationStore(tmp_path / "coordinator"), ManualClock()
+    )
+    request = _request()
+    prepared = await coordinator.prepare(request)
+    connector.script(prepared.id, lost_claim_reply=True)
+    try:
+        handle = await coordinator.submit(request)
+        terminal = await _terminal(executor, handle.id)
+        durable = await coordinator.snapshot(handle.id)
+
+        assert terminal.state is EvaluationState.FAILED
+        assert terminal.failure is not None
+        assert "SlurmOutcomeUnknownError" in terminal.failure
+        assert durable.status is EvaluationState.FAILED
+        assert durable.failure == terminal.failure
+        assert clock.value == pytest.approx(1_000 + 2 * config.poll_interval_seconds)
+
+        observer = SlurmEvaluationExecutor(
+            config,
+            workspace=_workspace(tmp_path),
+            setup_script=None,
+            service=None,
+            support_trees={},
+            handle_root=tmp_path / "handles",
+            cluster=cluster,
+        )
+        polled = await observer.poll(handle.id)
+        assert polled.phase is PollPhase.ENDED
+        assert polled.terminal == terminal
+    finally:
+        await executor.close()
 
 
 @pytest.mark.asyncio

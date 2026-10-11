@@ -27,7 +27,6 @@ from vibesys.api import CoreEvent, OrchestrationRegistry
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_task
-from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
 from vibesys.run.host import open_product_run_host
@@ -734,71 +733,6 @@ def test_tool_resolver_receives_selected_workspace_once(tmp_path: Path) -> None:
     )
     assert resolved_workspaces
     assert client.closed
-
-
-def test_issue_board_binding_uses_fixed_workspace_relative_spec(tmp_path: Path) -> None:
-    client = FakeAgentClient(
-        capabilities=AgentCapabilities(session_reuse=True, tool_servers=True)
-    ).enqueue_text("judge", "reviewed")
-    role = AgentRole(
-        id="judge",
-        system_prompt="Review the issue.",
-        extra_tools=(AgentTool(id="issue-board"),),
-    )
-
-    async def body(ctx: Run) -> None:
-        session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
-        assert await session.turn("review") == "reviewed"
-
-    _run_with_clients(
-        tmp_path,
-        [client],
-        body,
-        declaration=(role,),
-        configuration=_RunConfiguration(tool_bindings=AGENT_TOOL_BINDINGS),
-    )
-    assert client.calls[0].tool_servers == [
-        StdioServerDescriptor(
-            name="vibesys-issue-board",
-            command="python",
-            args=(
-                "-m",
-                "entrypoints.issue_board_tools_server",
-                "issues.json",
-                ".vibesys/issue-tool-policy.json",
-                ".vibesys/issue-tracker.json",
-            ),
-        )
-    ]
-
-
-def test_issue_queue_plugin_can_create_all_declared_sessions(tmp_path: Path) -> None:
-    capabilities = AgentCapabilities(
-        session_reuse=True,
-        provider_session_resume=True,
-        tool_servers=True,
-    )
-    clients = [FakeAgentClient(capabilities=capabilities) for _role in ISSUE_QUEUE_PLUGIN.agents]
-
-    async def body(ctx: Run) -> None:
-        sessions = [
-            await ctx.agents.create_session(
-                role,
-                workspace=ctx.workspaces.root,
-                member_id=f"issue-queue-{role.id}",
-            )
-            for role in ISSUE_QUEUE_PLUGIN.agents
-        ]
-        assert [session.role for session in sessions] == list(ISSUE_QUEUE_PLUGIN.agents)
-
-    _run_with_clients(
-        tmp_path,
-        clients,
-        body,
-        declaration=ISSUE_QUEUE_PLUGIN,
-        configuration=_RunConfiguration(tool_bindings=AGENT_TOOL_BINDINGS),
-    )
-    assert all(client.closed for client in clients)
 
 
 def test_role_without_extra_tools_does_not_bind_an_mcp_server(tmp_path: Path) -> None:

@@ -28,12 +28,6 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     ],
     project: ['src/**/*.ts', 'bench/**/*.ts'],
   },
-  desktop: {
-    // The Electron main process and the two sandboxed preloads (loaded by path from
-    // `main/app/app-security.ts`) are the package's exports, entries by default.
-    entry: ['src/**/*.test.ts'],
-    project: ['src/**/*.ts', 'src/**/*.tsx', 'src/**/*.cts'],
-  },
   tui: {
     entry: [
       // The frontend process: the launcher (the `bin`, an entry by default) spawns `dist/index.js`.
@@ -62,6 +56,13 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       'e2e/gateway-form-harness.ts',
     ],
     project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.ts'],
+  },
+  'apps/desktop-main': {
+    // The Electron main process and the two sandboxed preloads (`.cts`, loaded by path from
+    // `src/main/app-security.ts`) are the package's exports, entries by default; the build's copy
+    // step (`scripts/copy-ui.mjs`) is found from the `build` script.
+    entry: ['src/**/*.test.ts'],
+    project: ['src/**/*.ts', 'src/**/*.cts', 'scripts/*.mjs'],
   },
   'apps/desktop-renderer': {
     // The welcome page's entry (`welcome.html`, built by `vite.config.ts`).

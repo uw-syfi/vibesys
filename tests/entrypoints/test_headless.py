@@ -307,6 +307,8 @@ def _plain_configuration(*, max_rounds: int = 6) -> _RecordedRun:
         max_rounds=max_rounds,
         max_attempts_per_issue=4,
         max_issues_per_perf_eval=2,
+        max_issues_per_round=3,
+        turn_drop_backoff_seconds=7.0,
     )
     return _RecordedRun(
         OrchestrationDescriptor(
@@ -1568,6 +1570,8 @@ def test_plain_resume_restores_its_configuration(
     assert args.max_rounds == 6
     assert args.max_attempts_per_issue == 4
     assert args.max_issues_per_perf_eval == 2
+    assert args.max_issues_per_round == 3
+    assert args.turn_drop_backoff_seconds == 7.0
     assert args.agent_backend == "cli"
     assert args.cli_provider == "claude"
     assert args.backend is ComputeBackend.CPU

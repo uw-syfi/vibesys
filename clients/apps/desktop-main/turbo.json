@@ -1,0 +1,16 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      // The main process serves the two page bundles from `dist/ui` (`scripts/copy-ui.mjs`); it
+      // consumes the renderer apps only as built files, never as an import.
+      "dependsOn": [
+        "^build",
+        "@vibesys/app-web#build:desktop",
+        "@vibesys/app-desktop-renderer#build"
+      ],
+      "outputs": ["dist/**"]
+    }
+  }
+}

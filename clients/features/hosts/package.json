@@ -7,7 +7,8 @@
     "layer": "feature",
     "entries": {
       "./state": "neutral",
-      "./renderer": "dom"
+      "./renderer": "dom",
+      "./main": "node"
     }
   },
   "exports": {
@@ -20,6 +21,11 @@
       "@vibesys/source": "./src/renderer/index.ts",
       "types": "./dist/renderer/index.d.ts",
       "default": "./dist/renderer/index.js"
+    },
+    "./main": {
+      "@vibesys/source": "./src/main/index.ts",
+      "types": "./dist/main/index.d.ts",
+      "default": "./dist/main/index.js"
     }
   },
   "files": [
@@ -27,18 +33,23 @@
     "!dist/.*.tsbuildinfo"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.state.json tsconfig.renderer.json",
+    "build": "tsc -b tsconfig.state.json tsconfig.renderer.json tsconfig.main.json",
     "check": "tsc -b",
     "test": "node ../../scripts/run_bun_tests.mjs ./src"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
+    "@types/node": "^24.0.0",
     "@types/react": "19.1.13",
+    "@vibesys/transport": "workspace:*",
     "typescript": "^5.8.3"
   },
   "dependencies": {
+    "@vibesys/connection": "workspace:*",
+    "@vibesys/contracts": "workspace:*",
     "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
+    "@vibesys/settings": "workspace:*",
     "@vibesys/store": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1"

@@ -1,8 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "lib": [
+      "ES2022",
+      "esnext.disposable"
+    ],
     "types": [
-      "bun"
+      "bun",
+      "node"
     ],
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
@@ -19,6 +24,9 @@
       "path": "./tsconfig.renderer.json"
     },
     {
+      "path": "./tsconfig.main.json"
+    },
+    {
       "path": "../../ipc/tsconfig.lib.json"
     },
     {
@@ -29,6 +37,21 @@
     },
     {
       "path": "../../store/tsconfig.testing.json"
+    },
+    {
+      "path": "../../connection/tsconfig.lib.json"
+    },
+    {
+      "path": "../../connection/tsconfig.testing.json"
+    },
+    {
+      "path": "../../settings/tsconfig.lib.json"
+    },
+    {
+      "path": "../../transport/tsconfig.testing.json"
+    },
+    {
+      "path": "../../hosts/tsconfig.lib.json"
     }
   ]
 }

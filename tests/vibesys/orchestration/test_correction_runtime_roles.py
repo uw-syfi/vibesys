@@ -15,13 +15,6 @@ from vibesys.orchestration.dynamic.models import (
     PortfolioPlan,
     WaitingForEvaluation,
 )
-from vibesys.orchestration.issue_queue import agents as issue_queue
-from vibesys.orchestration.issue_queue.models import (
-    IssueImplementerResponse,
-    IssueJudgeResponse,
-    IssuePerfEvalResponse,
-    PerfMetrics,
-)
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_agent.api import AgentClient, AgentOutputSchemaError, DurableSessionStore
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider, FakeTurnScript
@@ -108,27 +101,6 @@ CASES = (
             ),
         ),
         id="dynamic-planner",
-    ),
-    pytest.param(
-        issue_queue.IMPLEMENTER,
-        IssueImplementerResponse(issue_id=1, summary="Implemented", self_check="Passed"),
-        id="issue-implementer",
-    ),
-    pytest.param(
-        issue_queue.JUDGE,
-        IssueJudgeResponse(issue_id=1, analysis="Reviewed", feedback="", verdict="pass"),
-        id="issue-judge",
-    ),
-    pytest.param(
-        issue_queue.PERF_EVALUATOR,
-        IssuePerfEvalResponse(
-            analysis="Measured",
-            metrics=PerfMetrics(load_levels=()),
-            evaluator_feedback=(),
-            throughput_trend="improved",
-            latency_trend="mixed",
-        ),
-        id="issue-performance",
     ),
 )
 

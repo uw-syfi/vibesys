@@ -35,8 +35,9 @@ const LIBS = {
   neutral: ['ES2022'],
   dom: ['ES2022', 'DOM', 'DOM.Iterable'],
   node: ['ES2022'],
+  preload: ['ES2022', 'DOM'],
 };
-const TYPES = {neutral: [], dom: [], node: ['node']};
+const TYPES = {neutral: [], dom: [], node: ['node'], preload: ['node']};
 
 /**
  * Parse `argv` (without the program name) into a package plan, or throw naming the problem.
@@ -149,7 +150,7 @@ export function packageFiles(plan, workspaceRoot) {
   const packageRoot = join(workspaceRoot, plan.directory);
   const base = relative(packageRoot, join(workspaceRoot, 'tsconfig.base.json'));
   const runner = relative(packageRoot, join(workspaceRoot, 'scripts/run_bun_tests.mjs'));
-  const usesNode = Object.values(plan.entries).includes('node');
+  const usesNode = Object.values(plan.entries).some(runtime => TYPES[runtime].includes('node'));
   const entries = Object.keys(plan.entries).map(subpath => [
     subpath,
     entryFiles(plan, subpath, base),

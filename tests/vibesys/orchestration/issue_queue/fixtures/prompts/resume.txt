@@ -1,0 +1,14 @@
+Continue your suspended implementer turn in this same provider session.
+The retained workspace revision is `a1b2c3`. Check the tree before
+relying on prior uncommitted or untracked files.
+Your original task remains in force; this continuation does not start another attempt.
+
+Every evaluation you awaited is terminal.
+Accepted evidence for the original submitted candidate, not a measurement of later
+workspace edits: e1
+
+Repeated failure: same error three times
+
+A failed or cancelled evaluation is an ordinary terminal outcome. Do not duplicate a
+trusted measurement for an unchanged candidate. Continue the original stage and return its
+schema-valid JSON.

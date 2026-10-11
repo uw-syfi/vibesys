@@ -1,0 +1,62 @@
+{% from '_macros.j2' import board_list %}
+Run performance evaluation {{ iteration }}.
+
+{% include '_run_context.j2' %}
+{% if facts.profiler_id == "none" %}
+No profiler is configured; do not attempt a profile.
+{% else %}
+Profiler `{{ facts.profiler_id }}` is available through the fixed `profiler` tool and executes on the {{ facts.profile_execution.value }} path.
+{% endif %}
+Configured load levels: {% if load_levels_json is none %}"discover a low, medium, high, and saturation workload"{% else %}{{ load_levels_json }}{% endif +%}
+Prior performance records:
+{% if prior %}
+{% for record in prior %}
+- iteration {{ record.iteration }}: throughput {{ record.throughput_trend }}, latency {{ record.latency_trend }}, {{ record.new_issues }} issues filed; metrics {{ record.metrics_json }}
+{% endfor %}
+{% else %}
+none yet
+{% endif %}
+
+Use the configured loads as a starting ladder. If they do not expose saturation,
+increase request rate until throughput plateaus, latency rises sharply, or
+requests fail. Add one or two prompt-length or output-length workloads when the
+shape could change the ceiling. Save and read structured benchmark output for
+every run. You work in your own checkout of the accumulated candidate, which is discarded when
+this evaluation ends, so scratch files and logs can go anywhere in it. Diagnose the limiting
+resource separately at low, medium, and saturation load. Compare with both the
+immediately prior result and the best recorded result.
+
+Profiling is optional, limited to one run, and must answer a specific unresolved
+bottleneck question. Do not attempt profiling when profiler is `none`. Always stop any server process
+that this turn started, including after benchmark or profiling failure.
+
+The board below lists every issue. Before filing, check it for the same work. File at
+most {{ max_new_issues }} non-duplicate issues in `new_issues`, ranked by impact over effort.
+Each issue background must cite code_evidence, metric_evidence, or profile_evidence and name expected_impact,
+effort, and scope. Each description must contain `## Background`, `## Acceptance criteria`,
+and `## Notes`.
+
+Board:
+{{ board_list(board) }}
+
+Return exactly one JSON object with this schema:
+{
+  "analysis": "trend comparison, saturation, resource diagnosis",
+  "metrics": {
+    "load_levels": [{
+      "target_rate": 1.0, "actual_rate": 1.0,
+      "num_requests": 1, "num_completed": 1, "num_failed": 0,
+      "duration": 1.0,
+      "throughput": {"request_throughput": 1.0, "token_throughput": 1.0},
+      "ttft": {"mean_ms": 1.0, "p50_ms": 1.0, "p90_ms": 1.0,
+                 "p95_ms": 1.0, "p99_ms": 1.0},
+      "tpot": null, "total_latency": null
+    }],
+    "extra": {}
+  },
+  "evaluator_feedback": ["measurement guidance for the next evaluator"],
+  "new_issues": [{"type": "bug" | "feature" | "perf", "title": "...", "description": "..."}],
+  "throughput_trend": "improved" | "regressed" | "mixed",
+  "latency_trend": "improved" | "regressed" | "mixed"
+}
+Populate every metric from actual output. Do not fabricate measurements.
