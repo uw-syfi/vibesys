@@ -1,5 +1,29 @@
 {
   "experiment_revision": 2,
+  "iterations": {
+    "kind": "tree",
+    "nodes": [
+      {
+        "child_count": 0,
+        "headline_metrics": [
+          {
+            "direction": "max",
+            "id": "throughput",
+            "unit": "throughput",
+            "value": 120.0
+          }
+        ],
+        "id": "round:1",
+        "kind": "round",
+        "label": "Round 1",
+        "ordinal": 1,
+        "parent_id": null,
+        "status": "completed"
+      }
+    ],
+    "revision": "f347c2a913fcc473930b5a483e2e75dbb7f48eabb77059f69f81b337d6e73877",
+    "schema_version": 1
+  },
   "payload": {
     "active_hypothesis_id": null,
     "current_round": 1,

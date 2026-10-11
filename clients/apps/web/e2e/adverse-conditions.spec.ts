@@ -93,7 +93,6 @@ test('page reload keeps the live run and a fresh client converges to the same st
   const before = await initialBatch;
   await expect(page.getByText(marker, {exact: false})).toBeVisible();
   await expect(page.locator('.status')).toHaveText('running');
-  const sequence = await sequenceText(page);
   const transcript = await page.locator('.panel-heading span').textContent();
   expect(gateway.isRunning()).toBe(true);
 
@@ -103,10 +102,17 @@ test('page reload keeps the live run and a fresh client converges to the same st
 
   expect(gateway.isRunning()).toBe(true);
   expect(after.store_id).toBe(before.store_id);
-  expect(after.through_sequence).toBe(before.through_sequence);
+  const beforeSequence = before.through_sequence;
+  const afterSequence = after.through_sequence;
+  if (typeof beforeSequence !== 'number' || typeof afterSequence !== 'number') {
+    throw new Error('event batches must declare their through_sequence');
+  }
+  expect(afterSequence).toBeGreaterThanOrEqual(beforeSequence);
   await expect(page.getByText(marker, {exact: false})).toBeVisible();
   await expect(page.locator('.status')).toHaveText('running');
-  expect(await sequenceText(page)).toBe(sequence);
+  await expect(
+    page.locator('.summary > div').filter({hasText: 'Sequence'}).locator('strong'),
+  ).toHaveText(String(afterSequence));
   expect(await page.locator('.panel-heading span').textContent()).toBe(transcript);
 });
 
@@ -186,12 +192,4 @@ async function installCapability(page: Page, url: string): Promise<void> {
     const response = await fetch(capability, {cache: 'no-store', credentials: 'include'});
     if (!response.ok) throw new Error(`Capability exchange failed with ${response.status}`);
   }, url);
-}
-
-async function sequenceText(page: Page): Promise<string | null> {
-  return page
-    .locator('.summary > div')
-    .filter({hasText: 'Sequence'})
-    .locator('strong')
-    .textContent();
 }

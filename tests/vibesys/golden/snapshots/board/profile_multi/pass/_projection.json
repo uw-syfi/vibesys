@@ -1,5 +1,22 @@
 {
   "experiment_revision": 2,
+  "iterations": {
+    "kind": "tree",
+    "nodes": [
+      {
+        "child_count": 0,
+        "headline_metrics": [],
+        "id": "round:1",
+        "kind": "round",
+        "label": "Round 1",
+        "ordinal": 1,
+        "parent_id": null,
+        "status": "completed"
+      }
+    ],
+    "revision": "ec46b97b856a4fd3474a94a17fc37ede9c19c6ee3a3e50a3831990ff38af5dfc",
+    "schema_version": 1
+  },
   "payload": {
     "active_hypothesis_id": null,
     "current_round": 1,

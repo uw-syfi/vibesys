@@ -14,6 +14,8 @@ from launch import LaunchSettings, built_in_orchestrations, create_session, open
 from vibesys.api import (
     ComputeBackend,
     Config,
+    IterationUnavailable,
+    IterationUnavailableReason,
     OrchestrationRegistry,
     PluginProjection,
     ProfilerKind,
@@ -634,6 +636,7 @@ def test_public_session_applies_registered_plugin_metadata(tmp_path: Path) -> No
         loop=_SETUP_PLUGIN.id,
         status=RunStatus.ACTIVE,
         projection={"completed_rounds": 3},
+        iterations=IterationUnavailable(reason=IterationUnavailableReason.POLICY_NOT_MAPPED),
         rounds=tuple(
             {
                 "number": number,
