@@ -13,7 +13,8 @@ verifier in the speculative decoding playground.
 
 The reference folder keeps model weights out of git. On first real use,
 `reference/reference.py` downloads the pinned Hugging Face snapshot into the
-repo `.hf_cache` and links it as `reference/model`.
+project-root `.hf_cache` and links it as
+`.vibesys/tasks/default/reference/model`.
 
 The server contract matches the JSON-generation text bundles:
 - `/health` returns 200 when the server is ready.

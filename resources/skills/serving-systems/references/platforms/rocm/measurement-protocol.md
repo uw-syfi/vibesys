@@ -32,7 +32,7 @@ capture command and need to turn its output into a trustworthy number.
   compute-limited), while isolated bursts reach **~150 TFLOP/s**. A single
   short timed run can land anywhere in that 115–150 range depending on how
   long the clock has been under load; see
-  `examples/model-serving/qwen3.5-9b-mi210/config/platforms/mi210.toml`.
+  `examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/config/platforms/mi210.toml`.
 - **Chiplet variance is architecture-dependent.** MI300-family parts (gfx942)
   are multi-die: several XCDs behind Infinity Fabric, each with its own clock
   domain, so repeat-to-repeat spread partly reflects *which* XCD a launch

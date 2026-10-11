@@ -24,9 +24,9 @@ strip_git = true   (both)
 ```
 
 Both are the trimmed single-member differential-dataflow 0.25.1 cargo workspace.
-The bundle's own scripts (`reference/`, `accuracy_checker/`, `benchmark/`,
-`profiler/`) are copied into the same workspace root, so they reference `engine/`
-and `_ref_engine/` as siblings.
+The task's trusted scripts (`reference/`, `accuracy_checker/`, `benchmark/`,
+`profiler/`) live under `.vibesys/tasks/default/` and run from the project root,
+which holds `engine/` and `_ref_engine/`.
 
 ## Prerequisites
 
@@ -74,8 +74,8 @@ toolchain) and none failed. The manifest uses `--strict`, so an official VibeSys
 evaluation accepts a round only when every configured gate ran and passed.
 
 ```bash
-uv run python accuracy_checker/checker.py --strict
-uv run python accuracy_checker/checker.py --gates equivalence,determinism
+uv run python .vibesys/tasks/default/accuracy_checker/checker.py --strict
+uv run python .vibesys/tasks/default/accuracy_checker/checker.py --gates equivalence,determinism
 ```
 
 ## Benchmark (the metric)
@@ -90,10 +90,10 @@ uv run python accuracy_checker/checker.py --gates equivalence,determinism
 `cpu_reduction_ratio = baseline / candidate`.
 
 ```bash
-uv run python benchmark/benchmark.py \
+uv run python .vibesys/tasks/default/benchmark/benchmark.py \
     --engine-cmd 'engine/target/release/examples/bfs' --output-json /tmp/perf.json
 # regenerate the round-0 baseline for this box:
-uv run python benchmark/capture_baseline.py
+uv run python .vibesys/tasks/default/benchmark/capture_baseline.py
 ```
 
 ## Profiler
@@ -107,7 +107,7 @@ this task-owned command to the `profile-guided` outer loop, which invokes it whe
 selecting a new component focus:
 
 ```bash
-uv run python profiler/attribute_cpu.py \
+uv run python .vibesys/tasks/default/profiler/attribute_cpu.py \
   --engine-cmd engine/target/release/examples/bfs \
   --vs-output /tmp/attribution.json
 ```
@@ -131,8 +131,8 @@ before starting the loop. Replace
 `/work/vibesys-runs` with any writable absolute path.
 
 The agent may edit only the paths listed in `OBJECTIVE.md`. In particular,
-`_ref_engine/`, `reference/`, `accuracy_checker/`, `benchmark/`, and `profiler/`
-are evaluator-owned. The checker enforces behavioral equivalence; the independent
+`_ref_engine/` and everything under `.vibesys/tasks/` (`reference/`,
+`accuracy_checker/`, `benchmark/`, and `profiler/`) are evaluator-owned. The checker enforces behavioral equivalence; the independent
 judge reviews the Git diff for this path discipline and the no-rearchitecture
 contract.
 
@@ -140,32 +140,33 @@ After materialization, validate the unmodified seed and the benchmark result
 contract from the copied project root:
 
 ```bash
-./run_test.sh
+bash .vibesys/tasks/default/run_test.sh
 ```
 
 ## Files
 
 ```
 examples/database/differential-dataflow/
-├── vibesys.input.toml               # manifest: database domain, checker/benchmark/profile commands, 2 workspace sources
-├── objectives.toml                  # metric direction (cpu_seconds, min) + pareto noise
-├── OBJECTIVE.md                     # target spec (read by the orchestrator)
 ├── README.md
 ├── requirements.txt
-├── run_test.sh                       # strict accuracy + benchmark contract smoke test
-├── reference/
-│   └── workload.py                  # single source of truth: workloads, normalize(), build_cmd()
-├── accuracy_checker/
-│   ├── checker.py                   # wrapper: builds engine/, runs the 5 gates, aggregates
-│   ├── equivalence_gate.py
-│   ├── differential_fuzz_gate.py
-│   ├── determinism_gate.py
-│   ├── crash_recovery_gate.py
-│   └── sanitizer_gate.py
-├── benchmark/
-│   ├── benchmark.py                 # getrusage CPU; emits top-level cpu_seconds JSON
-│   ├── capture_baseline.py          # regenerates baseline.json from pristine _ref_engine/
-│   └── baseline.json
-└── profiler/
-    └── attribute_cpu.py             # callgrind attribution → profile-guided protocol v1
+└── .vibesys/tasks/default/
+    ├── vibesys.input.toml               # manifest: database domain, checker/benchmark/profile commands, 2 workspace sources
+    ├── objectives.toml                  # metric direction (cpu_seconds, min) + pareto noise
+    ├── OBJECTIVE.md                     # target spec (read by the orchestrator)
+    ├── run_test.sh                      # strict accuracy + benchmark contract smoke test
+    ├── reference/
+    │   └── workload.py                  # single source of truth: workloads, normalize(), build_cmd()
+    ├── accuracy_checker/
+    │   ├── checker.py                   # wrapper: builds engine/, runs the 5 gates, aggregates
+    │   ├── equivalence_gate.py
+    │   ├── differential_fuzz_gate.py
+    │   ├── determinism_gate.py
+    │   ├── crash_recovery_gate.py
+    │   └── sanitizer_gate.py
+    ├── benchmark/
+    │   ├── benchmark.py                 # getrusage CPU; emits top-level cpu_seconds JSON
+    │   ├── capture_baseline.py          # regenerates baseline.json from pristine _ref_engine/
+    │   └── baseline.json
+    └── profiler/
+        └── attribute_cpu.py             # callgrind attribution → profile-guided protocol v1
 ```

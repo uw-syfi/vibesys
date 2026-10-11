@@ -400,7 +400,7 @@ jobs:
   # The qwen3.5-9b-mi210 tiny-model CPU check starts a candidate server per
   # test (~250 s serially, issue #1675), so it is split by test across the
   # runners in `matrix.shard` (`CPU_CHECK_SHARD`, see
-  # examples/model-serving/qwen3.5-9b-mi210/cpu_check/shard.py), balanced by
+  # examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/cpu_check/shard.py), balanced by
   # recorded seconds. Each leg runs its tests serially: starting servers in
   # parallel on one runner would compete for its two cores. The shard count is
   # the length of the list (`strategy.job-total`). It needs no Go, root
@@ -428,7 +428,7 @@ jobs:
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
-          cache-dependency-glob: examples/model-serving/qwen3.5-9b-mi210/cpu_check/uv.lock
+          cache-dependency-glob: examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/cpu_check/uv.lock
 
       - name: Set up Python
         run: uv python install 3.12

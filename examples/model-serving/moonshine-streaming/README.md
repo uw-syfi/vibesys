@@ -1,14 +1,23 @@
-moonshine-streaming-medium input bundle.
+# moonshine-streaming
 
-Use:
+Streaming ASR serving with `moonshine-streaming-medium`: clients send 16 kHz mono PCM audio
+in chunks, and the server emits partial transcripts per chunk and a final transcript on
+finalize. The benchmark drives concurrent clients in real-time pacing and measures TTFT,
+TPOT, and audio-seconds-per-wall-second.
+
+One project, two tasks under `.vibesys/tasks/`. They share the evaluator (accuracy checker,
+benchmark, reference, test audio) and differ only in the objective and the starting point:
+
+| Task | Starting point |
+| --- | --- |
+| `from-scratch` | The agent writes the serving system itself. |
+| `vllm` | The workspace holds a pinned vLLM checkout (`vllm/`) to start from. |
+
+Run one task from this directory (each task has its own README):
 
 ```bash
-vibesys --runs-dir /work/vibesys-runs --local \
-  --input examples/model-serving/moonshine-streaming
+vibesys --runs-dir /work/vibesys-runs --local --task from-scratch
+vibesys --runs-dir /work/vibesys-runs --local --task vllm
 ```
 
-Each folder contains scripts plus a short README.
-
-Streaming ASR: clients send 16 kHz mono PCM audio in chunks; server emits partial transcripts per chunk and a final transcript on finalize.  The benchmark drives concurrent clients each pushing audio every N seconds in real-time pacing and measures TTFT, TPOT, and audio-seconds-per-wall-second.
-
-Audio samples are 16 kHz mono.  See `test_audio/manifest.json` for ground truth transcripts.
+`reference_inference.py` is a copy of the HF reference model code kept at the project root.

@@ -10,20 +10,21 @@ interface contract.
 
 ```
 qwen3.5-9b-mi210/
-├── vibesys.input.toml        # manifest: request-factory-adapter entrypoint, headline metric
-├── OBJECTIVE.md              # what to optimize, hardware facts, interface contract
 ├── pyproject.toml            # uv environment for the checker and reference engine
-├── config/platforms/mi210.toml  # accelerator facts and capacity budget
-├── reference/                # minimal PyTorch engine + OpenAI-compatible server
-├── accuracy_checker/         # HF-golden gate (golden.json checked in)
-├── cpu_check/                # 10-20 s tiny-model engine check on CPU: cpu_check/run.sh
-└── benchmark/
-    ├── run.py                # --mode {smoke,quick,full,holdout}, wraps session_runner
-    ├── test_run.py           # unit tests: mode/trace resolution, digest + disjointness checks
-    ├── traces/               # checked-in session slices + full-trace manifest
-    ├── slice_trace.py        # cuts traces/ out of the full tracegen output
-    ├── fetch_corpus.py       # downloads and verifies the token corpus
-    └── vllm_baseline.sh      # tuned vLLM launch (external comparison point)
+└── .vibesys/tasks/default/   # trusted task files; read-only for the agent
+    ├── vibesys.input.toml    # manifest: request-factory-adapter entrypoint, headline metric
+    ├── OBJECTIVE.md          # what to optimize, hardware facts, interface contract
+    ├── config/platforms/mi210.toml  # accelerator facts and capacity budget
+    ├── reference/            # minimal PyTorch engine + OpenAI-compatible server
+    ├── accuracy_checker/     # HF-golden gate (golden.json checked in)
+    ├── cpu_check/            # 10-20 s tiny-model engine check on CPU: cpu_check/run.sh
+    └── benchmark/
+        ├── run.py            # --mode {smoke,quick,full,holdout}, wraps session_runner
+        ├── test_run.py       # unit tests: mode/trace resolution, digest + disjointness checks
+        ├── traces/           # checked-in session slices + full-trace manifest
+        ├── slice_trace.py    # cuts traces/ out of the full tracegen output
+        ├── fetch_corpus.py   # downloads and verifies the token corpus
+        └── vllm_baseline.sh  # tuned vLLM launch (external comparison point)
 ```
 
 ## Run it
@@ -38,7 +39,8 @@ vibesys --runs-dir /work/vibesys-runs --local \
   --input examples/model-serving/qwen3.5-9b-mi210
 ```
 
-Each piece by hand, from the bundle root on a node with the MI210:
+Each piece by hand, from the task directory (`.vibesys/tasks/default/`) on a node
+with the MI210:
 
 ```bash
 # reference server (reads weights from the local HF cache)

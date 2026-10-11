@@ -47,7 +47,7 @@ layout = "task"
 
 [[example]]
 path = "examples/database/differential-dataflow"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/kv-store"
@@ -79,67 +79,59 @@ layout = "task"
 
 [[example]]
 path = "examples/model-serving/Llama-3-8B"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/Llama-3-8B-trn2"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/deepseek-v3.2-8xb200"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/glm-5.2-8xb200"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/kimi-k3-8xb200"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/llama-70b-2xh100"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/moonshine-streaming"
-layout = "legacy"
-
-[[example]]
-path = "examples/model-serving/moonshine-streaming-vllm"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/olmo-hybrid-prefix-caching"
-layout = "legacy"
-
-[[example]]
-path = "examples/model-serving/olmo-hybrid-prefix-caching-vllm"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/qwen3-32b-code-edit"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/qwen3.5-397b-a17b-4xb200"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/qwen3.5-9b-mi210"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/qwen3.6-35b-a3b-2xh100"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/repositories/sglang"
@@ -158,16 +150,8 @@ external_repo = true
 
 [[example]]
 path = "examples/model-serving/show-o2-1.5B-HQ"
-layout = "legacy"
-
-[[example]]
-path = "examples/model-serving/show-o2-1.5B-HQ-h100"
-layout = "legacy"
-
-[[example]]
-path = "examples/model-serving/show-o2-1.5B-HQ-macbook"
-layout = "legacy"
+layout = "task"
 
 [[example]]
 path = "examples/model-serving/whisper-large-v3"
-layout = "legacy"
+layout = "task"

@@ -29,7 +29,9 @@ if TYPE_CHECKING:
 
 _REPO = Path(__file__).resolve().parents[3]
 # The real benchmark harness of the bundle whose warmup stops r19 recorded.
-_BUNDLE_BENCHMARK = _REPO / "examples/model-serving/qwen3.5-9b-mi210/benchmark/run.py"
+_BUNDLE_BENCHMARK = (
+    _REPO / "examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/benchmark/run.py"
+)
 _WARMUP_STOP_STDERR = Path(__file__).with_name("golden") / "warmup_stop.stderr"
 
 _REPLAY = """\
