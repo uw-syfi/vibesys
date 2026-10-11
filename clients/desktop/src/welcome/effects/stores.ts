@@ -54,8 +54,7 @@ function command(
       return bridge.attach(run.host, run.instance);
     case 'resume': {
       // A resume continues the run's agents, which costs tokens: ask first.
-      const name = run.run === '' ? '(latest)' : run.run;
-      if (!confirm(`Resume run ${name} in ${run.project}? It continues the run's agents.`)) {
+      if (!confirm(`Resume run ${run.run} in ${run.project}? It continues the run's agents.`)) {
         return Promise.resolve({ok: true, value: null});
       }
       return bridge.resume(run.host, run.project, run.run);

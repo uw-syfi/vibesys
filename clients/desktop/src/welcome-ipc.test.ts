@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {isInstanceId, isRunId, isTaskName} from './ids.js';
+import {isInstanceId, isTaskName, RUN_ID} from './ids.js';
 import {Seeded} from './testing/seeded.js';
 import {parseWelcomeRequest, type WelcomeRequest} from './welcome-ipc.js';
 import {WELCOME_CHANNELS} from './welcome-protocol.js';
@@ -37,7 +37,7 @@ function checkAccepted(request: WelcomeRequest): void {
     expect(isTaskName(request.task)).toBe(true);
     expect(Number.isSafeInteger(request.start) && request.start > 0).toBe(true);
   }
-  if (request.kind === 'resume') expect(request.run === '' || isRunId(request.run)).toBe(true);
+  if (request.kind === 'resume') expect(RUN_ID.test(request.run)).toBe(true);
   if ('project' in request) expect(request.project.startsWith('/')).toBe(true);
   if ('host' in request) expect(['local', 'ssh']).toContain(request.host.kind);
 }
@@ -74,6 +74,6 @@ describe('parseWelcomeRequest', () => {
     });
     expect(() =>
       parseWelcomeRequest(WELCOME_CHANNELS.resume, ['local', '/p', '-oProxyCommand']),
-    ).toThrow('not starting with "-"');
+    ).toThrow('a run id is 1-128 lowercase');
   });
 });

@@ -1,5 +1,6 @@
 /** Recent: the runs this user opened, each with its status on its host and what it allows. */
 import type {JSX, ReactNode} from 'react';
+import {resumeDecision} from '../../resume-run.js';
 import {stopKey} from '../../stop-run.js';
 import type {ChromeState, WelcomeRecent, WelcomeRecentStatus} from '../../welcome-protocol.js';
 import {type RecentState, statusOf} from '../state/recent.js';
@@ -40,7 +41,9 @@ function RowActions(props: {
       );
     }
     case 'ended': {
-      const resume = {host: run.host, project: run.project, run: run.runId ?? ''};
+      const decision = resumeDecision(run.runId);
+      if (decision.kind === 'unavailable') return <span className="muted">{decision.reason}</span>;
+      const resume = {host: run.host, project: run.project, run: decision.runId};
       return (
         <button type="button" onClick={() => dispatch({kind: 'resume', ...resume})}>
           Resume…

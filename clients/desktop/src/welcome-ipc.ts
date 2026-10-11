@@ -9,7 +9,8 @@
 import type {IpcMain, IpcMainInvokeEvent} from 'electron';
 import {HostError} from './host.js';
 import {type HostId, hostFromKey, validHostPath} from './host-settings.js';
-import {isInstanceId, isRunId, isTaskName} from './ids.js';
+import {isInstanceId, isTaskName} from './ids.js';
+import {exactResumeRunId, type ResumeRunId} from './resume-run.js';
 import {shellWords} from './shell-words.js';
 import {WELCOME_CHANNELS, type WelcomeResult} from './welcome-protocol.js';
 
@@ -35,8 +36,8 @@ export type WelcomeRequest =
       readonly kind: 'resume';
       readonly host: HostId;
       readonly project: string;
-      /** The run to resume; empty for the project's latest. */
-      readonly run: string;
+      /** The exact run to resume. */
+      readonly run: ResumeRunId;
     }
   | {
       readonly kind: 'stop';
@@ -64,14 +65,6 @@ function startToken(value: unknown): number {
     throw new Error('a start is named by a positive integer');
   }
   return value;
-}
-
-function runToResume(value: unknown): string {
-  const run = typeof value === 'string' ? value.trim() : '';
-  if (run !== '' && !isRunId(run)) {
-    throw new Error('a run id is letters, digits, ".", "_", and "-", not starting with "-"');
-  }
-  return run;
 }
 
 function start(args: readonly unknown[]): WelcomeRequest {
@@ -116,7 +109,7 @@ export function parseWelcomeRequest(channel: Channel, args: readonly unknown[]):
         kind: 'resume',
         host: hostFromKey(first),
         project: project(second),
-        run: runToResume(third),
+        run: exactResumeRunId(third),
       };
     case WELCOME_CHANNELS.stop:
       return {

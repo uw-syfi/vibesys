@@ -7,6 +7,7 @@
  * to an earlier action is dropped, so a slow attach cannot overwrite what a later resume says.
  */
 import type {HostKey} from '../../host-settings.js';
+import type {ResumeRunId} from '../../resume-run.js';
 import type {ChromeState, WelcomeResult} from '../../welcome-protocol.js';
 import {only, type Step} from './step.js';
 
@@ -30,7 +31,7 @@ export type RunCommand =
       readonly kind: 'resume';
       readonly host: HostKey;
       readonly project: string;
-      readonly run: string;
+      readonly run: ResumeRunId;
     }
   | {
       readonly kind: 'stop';
@@ -63,7 +64,7 @@ function progress(command: RunCommand): string | null {
     case 'attach':
       return `Attaching to ${command.instance}…`;
     case 'resume':
-      return `Resuming ${command.run === '' ? 'the latest run' : command.run}…`;
+      return `Resuming ${command.run}…`;
     default:
       return null;
   }

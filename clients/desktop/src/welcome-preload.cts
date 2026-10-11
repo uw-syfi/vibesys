@@ -19,6 +19,7 @@ import type {
   WelcomeResult,
 } from './welcome-protocol.js';
 import type {HostKey} from './host-settings.js';
+import type {ResumeRunId} from './resume-run.js';
 
 type Channels = typeof import('./welcome-protocol.js').WELCOME_CHANNELS;
 type Events = typeof import('./welcome-protocol.js').WELCOME_EVENTS;
@@ -68,7 +69,7 @@ const bridge: WelcomeBridge = {
   start: (host: HostKey, project: string, task: string, args: string, start: number) =>
     call<StartOutcome>(CHANNELS.start, host, project, task, args, start),
   cancelStart: (start: number) => call<null>(CHANNELS.cancelStart, start),
-  resume: (host: HostKey, project: string, run: string) =>
+  resume: (host: HostKey, project: string, run: ResumeRunId) =>
     call<null>(CHANNELS.resume, host, project, run),
   showRun: () => call<null>(CHANNELS.showRun),
   showWelcome: () => call<null>(CHANNELS.showWelcome),

@@ -37,6 +37,7 @@ import {
   recentStatus,
 } from './recent.js';
 import {type RelayPort, relay} from './relay.js';
+import {type ResumeRunId, resumeArguments} from './resume-run.js';
 import {StopController} from './stop-controller.js';
 import {suggestCheckout, suggestProjects} from './suggestions.js';
 import {type ConnectionStatus, ConnectionSupervisor, type StreamEnd} from './supervisor.js';
@@ -366,10 +367,9 @@ export class DesktopApp {
     return this.#launch(id, project, task, {kind: 'start'}, [...taskArgs, ...args], cancel);
   }
 
-  /** Resume stopped run `run` (the latest when empty) of `project` on `id`, detached, and attach. */
-  async #resumeRun(id: HostId, project: string, run: string): Promise<void> {
-    const runArgs = run === '' ? [] : [run];
-    await this.#launch(id, project, null, {kind: 'resume', run}, ['--resume', ...runArgs], {
+  /** Resume stopped run `run` of `project` on `id`, detached, and attach. */
+  async #resumeRun(id: HostId, project: string, run: ResumeRunId): Promise<void> {
+    await this.#launch(id, project, null, {kind: 'resume', run}, resumeArguments(run), {
       cancelled: false,
     });
   }

@@ -3,6 +3,7 @@
  * (`stripControls`). While a run fills the window, only this strip of the welcome view shows.
  */
 import type {JSX} from 'react';
+import type {ResumeRunId} from '../../resume-run.js';
 import type {ChromeState} from '../../welcome-protocol.js';
 import {
   connectionText,
@@ -34,11 +35,11 @@ function RunButtons(props: {
   const stop = (force: boolean): void => {
     if (instance !== null) dispatch({kind: 'stop', host: attached.host, instance, force});
   };
-  const resume = (): void => {
+  const resume = (run: ResumeRunId): void => {
     dispatch({kind: 'show-welcome'});
-    const run = attached.runId ?? '';
     dispatch({kind: 'resume', host: attached.host, project: attached.project, run});
   };
+  const decision = controls.resume;
   return (
     <>
       {controls.stop ? (
@@ -51,10 +52,15 @@ function RunButtons(props: {
           Force stop
         </button>
       ) : null}
-      {controls.resume ? (
-        <button type="button" className="primary" onClick={resume}>
+      {decision?.kind === 'available' ? (
+        <button type="button" className="primary" onClick={() => resume(decision.runId)}>
           Resume…
         </button>
+      ) : null}
+      {decision?.kind === 'unavailable' ? (
+        <span id="strip-resume-state" className="muted" title={decision.reason}>
+          {decision.reason}
+        </span>
       ) : null}
       {controls.retry ? (
         <button type="button" onClick={() => dispatch({kind: 'retry'})}>

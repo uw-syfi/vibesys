@@ -1,4 +1,5 @@
 import {describe, expect, test} from 'bun:test';
+import {exactResumeRunId} from '../../resume-run.js';
 import {randomChrome} from '../../testing/fake-chrome.js';
 import {checkModel} from '../../testing/model.js';
 import type {Seeded} from '../../testing/seeded.js';
@@ -151,7 +152,7 @@ describe('host picker', () => {
 
 const COMMANDS: readonly RunCommand[] = [
   {kind: 'attach', host: 'local', instance: '0123456789ab'},
-  {kind: 'resume', host: 'local', project: '/p', run: ''},
+  {kind: 'resume', host: 'local', project: '/p', run: exactResumeRunId('run-1')},
   {kind: 'stop', host: 'local', instance: '0123456789ab', force: false},
   {kind: 'retry'},
 ];

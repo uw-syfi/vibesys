@@ -9,6 +9,7 @@
  * identity.
  */
 import type {HostKey} from './host-settings.js';
+import type {ResumeRunId} from './resume-run.js';
 import type {StopView} from './stop-run.js';
 import type {ConnectionStatus} from './supervisor.js';
 
@@ -139,7 +140,7 @@ export interface WelcomeBridge {
     start: number,
   ): Promise<WelcomeResult<StartOutcome>>;
   cancelStart(start: number): Promise<WelcomeResult<null>>;
-  resume(host: HostKey, project: string, run: string): Promise<WelcomeResult<null>>;
+  resume(host: HostKey, project: string, run: ResumeRunId): Promise<WelcomeResult<null>>;
   showRun(): Promise<WelcomeResult<null>>;
   showWelcome(): Promise<WelcomeResult<null>>;
   retry(): Promise<WelcomeResult<null>>;
