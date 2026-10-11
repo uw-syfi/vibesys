@@ -12,7 +12,6 @@ candidate's container.
 from __future__ import annotations
 
 import asyncio
-import sys
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,7 +38,7 @@ remote_workspace_root = "/shared/vibesys"
 
 [slurm.transport]
 kind = "local"
-shell_command = ["{python}", "{srun}"]
+shell_command = ["/bin/sh", "{srun}"]
 
 [vibesys.agent_gpu]
 partitions = ["main"]
@@ -48,9 +47,10 @@ max_time_minutes = 90
 """
 # Stands in for the Slurm shell: runs what follows ``--`` where it was started.
 _FAKE_SRUN = """\
-import os, shlex, sys
-args = shlex.split(sys.argv[1])
-os.execvp(args[args.index("--") + 1], args[args.index("--") + 1 :])
+eval "set -- $1"
+while [ "$1" != "--" ]; do shift; done
+shift
+exec "$@"
 """
 _LAUNCH = '"$VIBESYS_GPU" --gpus 1 -- '
 
@@ -79,10 +79,10 @@ rsync_command = ["/bin/true"]
 
 
 def _environment(tmp_path: Path, backend: DaemonBackend) -> SlurmEnvironment:
-    srun = tmp_path / "fake_srun.py"
+    srun = tmp_path / "fake_srun.sh"
     srun.write_text(_FAKE_SRUN, encoding="utf-8")
     config = tmp_path / "slurm.toml"
-    config.write_text(_CONFIG.format(python=sys.executable, srun=srun), encoding="utf-8")
+    config.write_text(_CONFIG.format(srun=srun), encoding="utf-8")
     return SlurmEnvironment(
         load_slurm_operator_settings(config),
         docker=daemon_docker_config(backend.engine),
