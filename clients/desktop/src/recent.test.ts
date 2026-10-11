@@ -102,6 +102,13 @@ describe('remember', () => {
     }
   });
 
+  test('regression: a run that learns its id merges with its earlier entry and keeps that task', () => {
+    const resumed = run({instanceId: 'ba9876543210', task: null, runId: null, attachedAt: 2});
+    let file = remember(remember(EMPTY_RECENT, run()), resumed);
+    file = remember(file, {...resumed, runId: 'run-1', attachedAt: 3});
+    expect(file.runs).toEqual([run({instanceId: 'ba9876543210', attachedAt: 3})]);
+  });
+
   test('keeps RECENT_LIMIT runs by default', () => {
     let file = EMPTY_RECENT;
     for (let index = 0; index < RECENT_LIMIT + 5; index += 1) {

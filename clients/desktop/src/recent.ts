@@ -116,10 +116,12 @@ function sameRun(a: RecentRun, b: RecentRun): boolean {
  * does not know one), and the list keeps the `limit` most recent runs.
  */
 export function remember(file: RecentFile, run: RecentRun, limit = RECENT_LIMIT): RecentFile {
-  const previous = file.runs.find(entry => sameRun(entry, run));
+  const same = file.runs.filter(entry => sameRun(entry, run));
+  const previous = same[0];
   const merged: RecentRun = {
     ...run,
-    task: run.task ?? previous?.task ?? null,
+    // A run can match two entries (its server's, and its run id's from an earlier server).
+    task: run.task ?? same.find(entry => entry.task !== null)?.task ?? null,
     runId: run.runId ?? (previous?.instanceId === run.instanceId ? previous.runId : null),
   };
   const rest = file.runs.filter(entry => !sameRun(entry, run));
