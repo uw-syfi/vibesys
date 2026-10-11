@@ -1,5 +1,5 @@
 import {describe, it} from 'node:test';
-import {BackendClientError} from './errors.js';
+import {BackendClientError} from '@vibesys/contracts';
 import {NewlineFramer} from './newline-framer.js';
 import {expect} from './test-support/expect.js';
 

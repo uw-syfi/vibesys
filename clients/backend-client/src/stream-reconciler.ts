@@ -1,5 +1,5 @@
-import {BackendClientError} from './errors.js';
-import type {EventBatchMessage, RunEvent} from './protocol.js';
+import type {EventBatchMessage, RunEvent} from '@vibesys/contracts';
+import {BackendClientError} from '@vibesys/contracts';
 
 /**
  * The one fact about a batch the reconciler cannot know by itself: how the

@@ -1,4 +1,4 @@
-import type {DesignFileChange, DesignPatch, DesignRound} from '@vibesys/backend-client';
+import type {DesignFileChange, DesignPatch, DesignRound} from '@vibesys/contracts';
 import {formatFileChange} from './design-log.js';
 import type {DiffPatchSlot, DiffViewerState, SessionState} from './session-model.js';
 

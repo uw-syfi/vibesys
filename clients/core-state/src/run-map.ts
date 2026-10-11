@@ -1,4 +1,4 @@
-import type {RunEvent} from '@vibesys/backend-client';
+import type {RunEvent} from '@vibesys/contracts';
 import {
   appendPersistentArrayEntry,
   materializePersistentArray,

@@ -1,10 +1,27 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["bun"],
+    "types": [
+      "bun"
+    ],
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
   },
-  "include": ["src/**/*.test.ts"],
-  "references": [{"path": "./tsconfig.lib.json"}, {"path": "./tsconfig.testing.json"}, {"path": "../backend-client/tsconfig.lib.json"}]
+  "include": [
+    "src/**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.testing.json"
+    },
+    {
+      "path": "../contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../contracts/tsconfig.testing.json"
+    }
+  ]
 }

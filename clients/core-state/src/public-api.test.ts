@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
+import type {RunEvent, RunSnapshot} from '@vibesys/contracts';
 import type {
   AgentPhase,
   CoreDiagnostic,

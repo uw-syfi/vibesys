@@ -1,6 +1,7 @@
 import {describe, it} from 'node:test';
-import {BackendClientError} from './errors.js';
-import type {EventBatchMessage, RunEvent} from './protocol.js';
+import type {EventBatchMessage, RunEvent} from '@vibesys/contracts';
+import {BackendClientError} from '@vibesys/contracts';
+import {event, eventBatch} from '@vibesys/contracts/testing';
 import {
   type BackfillFetch,
   type BackfillOutcome,
@@ -10,7 +11,6 @@ import {
   StreamReconciler,
 } from './stream-reconciler.js';
 import {expect} from './test-support/expect.js';
-import {event, eventBatch} from './testing/index.js';
 
 const SPINE_TYPE = 'round_finished';
 const TAIL_TYPE = 'agent_output_chunk';

@@ -10,7 +10,7 @@ import {
   timestamp,
 } from './index.js';
 
-describe('@vibesys/backend-client/testing', () => {
+describe('@vibesys/contracts/testing', () => {
   it('derives valid deterministic timestamps beyond one-digit sequences', () => {
     expect(timestamp()).toBe('2026-01-01T00:00:00Z');
     expect(timestamp(61)).toBe('2026-01-01T00:01:01Z');

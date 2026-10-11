@@ -8,5 +8,6 @@
     "tsBuildInfoFile": ".tsbuild/browser.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "src/node/**/*.ts", "src/test-support/**/*.ts"]
+  "exclude": ["src/**/*.test.ts", "src/node/**/*.ts", "src/test-support/**/*.ts"],
+  "references": [{"path": "../contracts/tsconfig.lib.json"}]
 }

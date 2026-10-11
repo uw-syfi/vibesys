@@ -1,16 +1,18 @@
 import {
   DEFAULT_RECONNECT_DELAYS_MS,
-  type ExperimentCursor,
   PersistentEventStream,
-  type RunEvent,
-  type RunSnapshot,
   type ScheduleTimeout,
-  ServerError,
-  type ServerMessage,
   type ServerTransport,
   type StreamConnectionState,
   StreamReconciler,
 } from '@vibesys/backend-client';
+import {
+  type ExperimentCursor,
+  type RunEvent,
+  type RunSnapshot,
+  ServerError,
+  type ServerMessage,
+} from '@vibesys/contracts';
 import {DEFAULT_CHAT_THREAD_ID, hasRunEnded, recordsBenchmark} from '@vibesys/core-state';
 import type {StartupTrace} from './boot-trace.js';
 import {

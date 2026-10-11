@@ -24,7 +24,7 @@ import {
   type InstancesChanged,
   parseChannelEnd,
   parseHelperMessage,
-} from '@vibesys/backend-client/host-helper';
+} from '@vibesys/contracts/host-helper';
 import type {Cause} from '../state/host-connection.js';
 import {bootstrapProblem} from './bootstrap.js';
 import type {SpawnedProcess} from './process.js';

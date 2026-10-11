@@ -10,6 +10,7 @@
   "include": ["src/**/*.ts", "src/**/*.cts"],
   "references": [
     {"path": "../backend-client/tsconfig.lib.json"},
+    {"path": "../contracts/tsconfig.lib.json"},
     {"path": "../core-state/tsconfig.lib.json"}
   ]
 }

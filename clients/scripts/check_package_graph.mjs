@@ -95,6 +95,7 @@ export const FEATURE_ENTRIES = {'./state': 'neutral', './renderer': 'dom', './ma
 export const EXTERNAL_DEPENDENCIES = [
   {packages: ['react', 'react-dom'], runtimes: ['dom']},
   {packages: ['electron'], runtimes: ['node'], layers: ['feature', 'app']},
+  {packages: ['@opentui/core'], runtimes: ['node'], layers: ['app']},
 ];
 const NODE_BUILTINS = {runtimes: ['node']};
 

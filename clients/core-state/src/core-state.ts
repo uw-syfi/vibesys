@@ -1,4 +1,4 @@
-import type {Diagnostic, RunEvent, RunSnapshot, RunStatus} from '@vibesys/backend-client';
+import type {Diagnostic, RunEvent, RunSnapshot, RunStatus} from '@vibesys/contracts';
 import {
   applyExecutionStatus,
   applyExecutionStatusUsage,

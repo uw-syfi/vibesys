@@ -289,7 +289,7 @@ pnpm build:clients
 `pnpm check:knip` (knip, configured in `clients/knip.config.ts`) fails on unused files, exports,
 dependencies, and unlisted or unresolved imports. Entry points are the package `bin` and `exports`
 plus the declared test, harness, and benchmark files; an export used nowhere in the workspace should
-lose its `export` or be deleted. `backend-client/src/generated/` is ignored because the generator
+lose its `export` or be deleted. `contracts/src/generated/` is ignored because the generator
 exports every schema type, and the `index.ts` of each library package is its public API. Add an
 entry point to `knip.config.ts` (with a comment saying who runs it) rather than suppressing a
 finding. The config keys its per-package policy off the derived workspace layout, so a package

@@ -38,7 +38,7 @@
 
 import {readFileSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
-import type {RunEvent} from '@vibesys/backend-client';
+import type {RunEvent} from '@vibesys/contracts';
 
 /**
  * One recorded journal line.

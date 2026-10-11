@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it} from 'bun:test';
 import {createTestRenderer} from '@opentui/core/testing';
-import type {HypothesisEntry} from '@vibesys/backend-client';
+import type {HypothesisEntry} from '@vibesys/contracts';
 import {
   entryKey,
   moveExperimentSelection,

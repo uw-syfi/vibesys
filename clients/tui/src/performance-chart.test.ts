@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import type {ProtocolResponse, RunEvent} from '@vibesys/backend-client';
+import type {ProtocolResponse, RunEvent} from '@vibesys/contracts';
 import {type PerformanceDirection, projectPerformance} from '@vibesys/core-state';
 import {PLOT_WIDTH, renderPerformanceCurve as renderProjection} from './performance-chart.js';
 

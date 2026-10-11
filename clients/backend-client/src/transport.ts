@@ -1,4 +1,4 @@
-import type {ProtocolResponse, RequestInput, ServerMessage} from './protocol.js';
+import type {ProtocolResponse, RequestInput, ServerMessage} from '@vibesys/contracts';
 import type {RequestOptions} from './request-policy.js';
 
 export interface EventSubscription {

@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import type {HypothesisEntry, ProtocolResponse, RunEvent} from '@vibesys/backend-client';
+import type {HypothesisEntry, ProtocolResponse, RunEvent} from '@vibesys/contracts';
 import {
   formatPerformanceDelta,
   initialCoreState,

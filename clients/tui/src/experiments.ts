@@ -3,7 +3,7 @@ import type {
   DesignRound,
   HypothesisEntry,
   HypothesisRound,
-} from '@vibesys/backend-client';
+} from '@vibesys/contracts';
 import {
   type AgentPhase,
   hypothesisRoundNumbers as coreHypothesisRoundNumbers,

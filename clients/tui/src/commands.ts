@@ -1,4 +1,4 @@
-import type {RequestInput} from '@vibesys/backend-client';
+import type {RequestInput} from '@vibesys/contracts';
 import {RESUME_FALLBACK_ARGUMENT} from './quota-projection.js';
 import type {PaneView} from './session-model.js';
 import {isThemeName, THEME_NAMES, type ThemeName} from './theme.js';

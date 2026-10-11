@@ -1,4 +1,4 @@
-import type {RunEvent} from '@vibesys/backend-client';
+import type {RunEvent} from '@vibesys/contracts';
 
 /** A round identity derived from a backend event's scope. */
 export type RoundKey =

@@ -1,4 +1,4 @@
-import type {RunEvent} from '@vibesys/backend-client';
+import type {RunEvent} from '@vibesys/contracts';
 import type {CoreState} from '../src/core-state.js';
 import type {RunMapState} from '../src/run-map.js';
 

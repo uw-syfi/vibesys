@@ -13,7 +13,7 @@ import type {
   DetachedLaunchFailure,
   InstanceList,
   LiveInstanceRecord,
-} from '@vibesys/backend-client/host-helper';
+} from '@vibesys/contracts/host-helper';
 import type {ConnectionStatus} from '../../../common/connection-status.js';
 import {type HostId, hostFromKey, hostKey, hostLabel} from '../../../common/hosts.js';
 import type {ResumeRunId} from '../../../common/resume-run.js';

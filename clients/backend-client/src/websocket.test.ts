@@ -2,13 +2,13 @@ import {readFileSync} from 'node:fs';
 import {describe, it} from 'node:test';
 import type {
   BackendClientError,
-  ControlChannelState,
   EventBatchMessage,
   ProtocolResponse,
   RequestInput,
-} from './index.js';
-import {REQUEST_POLICIES, ServerError} from './index.js';
-import {parseProtocolResponse} from './protocol-parse.js';
+} from '@vibesys/contracts';
+import {parseProtocolResponse, ServerError} from '@vibesys/contracts';
+import type {ControlChannelState} from './index.js';
+import {REQUEST_POLICIES} from './index.js';
 import {expect} from './test-support/expect.js';
 import {FakeClock} from './testing/index.js';
 import {type WebSocketLike, WebSocketTransport} from './websocket.js';
@@ -168,7 +168,7 @@ function tuiDefaults(): Record<string, unknown> {
 }
 
 function responsePayloadFixture(): string {
-  return readFileSync('src/generated/response-payload.fixture.json', 'utf8');
+  return readFileSync('../contracts/src/generated/response-payload.fixture.json', 'utf8');
 }
 
 describe('WebSocketTransport', () => {

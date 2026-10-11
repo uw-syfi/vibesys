@@ -8,5 +8,6 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test-helper.ts", "src/test-support/**/*.ts"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.test-helper.ts", "src/test-support/**/*.ts"],
+  "references": [{"path": "../contracts/tsconfig.lib.json"}]
 }

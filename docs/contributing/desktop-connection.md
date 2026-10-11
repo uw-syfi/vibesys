@@ -80,7 +80,7 @@ desktop main process (clients/desktop)                host (local or ssh)
 | Helper entrypoint | `entrypoints.host_helper` (console script `vibesys-host-helper`) | Wires real I/O, reads stdin, writes stdout. Replaced `entrypoints.stdio_bridge` (phase 5). |
 | Relay core | `server.relay` (kept) | Byte relay between stdio and a run's Unix socket, with its deadlines and typed outcomes. Used by `run.connect`. |
 | Detached run server | `entrypoints.server` (changed) | Takes the lock and publishes its record (with `run_id` and phase `starting/resolving`) before importing the engine; owns its phases. |
-| Generated helper types | `clients/backend-client/src/generated/` | `host-helper.schema.json` (committed, language neutral) and TypeScript types generated from it. |
+| Generated helper types | `clients/contracts/src/generated/`, read through `@vibesys/contracts/host-helper` | `host-helper.schema.json` (committed, language neutral), the TypeScript types and descriptor generated from it, and the strict parse every helper line goes through. |
 | Connection manager | `clients/desktop` (`src/main/platform/connection`: a pure `state/` machine and a `shell/`) | The only code that creates links and channels. One `HostConnection` per host; its machine is the one retry loop. |
 | Screen stores | `clients/desktop` and `clients/web` | One store per screen; pure reducer; React renders state. |
 | App lifecycle | `clients/desktop` (`src/main/app/app-lifecycle.ts`, `src/main/platform/settings`) | Single-instance lock, the quit sequence, the settings store. |
@@ -425,7 +425,7 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
 ## Contract pipeline and IDL
 
 Helper messages join the existing pipeline: Pydantic models in `server.host_api` produce
-`clients/backend-client/src/generated/host-helper.schema.json` (committed) through
+`clients/contracts/src/generated/host-helper.schema.json` (committed) through
 `server.api.schema`'s generator, and TypeScript types are generated from that schema, as for the
 run protocol (see the generated directory's README). CI fails when the committed schema is stale.
 The committed JSON Schema is the language-neutral contract; the conformance corpus is the

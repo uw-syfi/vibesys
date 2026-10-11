@@ -6,5 +6,11 @@
     "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts", "build-inputs.ts"],
-  "exclude": []
+  "exclude": [],
+  "references": [
+    {"path": "../backend-client/tsconfig.lib.json"},
+    {"path": "../contracts/tsconfig.lib.json"},
+    {"path": "../contracts/tsconfig.testing.json"},
+    {"path": "../core-state/tsconfig.lib.json"}
+  ]
 }

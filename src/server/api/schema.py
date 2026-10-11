@@ -142,7 +142,7 @@ _HOST_HELPER_DESCRIPTOR_KEYWORDS = frozenset(
         "type",
     }
 )
-"""What the TypeScript walker's strict mode enforces (``backend-client/src/schema-walker.ts``)."""
+"""What the TypeScript walker's strict mode enforces (``contracts/src/schema-walker.ts``)."""
 
 
 def host_helper_typescript() -> str:

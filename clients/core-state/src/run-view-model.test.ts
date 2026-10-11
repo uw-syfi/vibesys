@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'bun:test';
-import type {RunEvent} from '@vibesys/backend-client';
-import {event} from '@vibesys/backend-client/testing';
+import type {RunEvent} from '@vibesys/contracts';
+import {event} from '@vibesys/contracts/testing';
 import {
   type CoreState,
   hasRunEnded,

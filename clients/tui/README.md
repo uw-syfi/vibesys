@@ -364,7 +364,7 @@ From the repository root:
 ```bash
 cd clients
 pnpm install --frozen-lockfile
-pnpm --dir backend-client generate:protocol
+pnpm --dir contracts generate:protocol
 pnpm check:ts-architecture
 pnpm check:knip
 pnpm check:clients
@@ -375,6 +375,6 @@ uv run pytest tests/server tests/vibesys/agents/test_callbacks.py tests/vibesys/
 ```
 
 After changing Python protocol models, regenerate both files in
-`clients/backend-client/src/generated/` and review their diff. The test suite covers reducer behavior,
+`clients/contracts/src/generated/` and review their diff. The test suite covers reducer behavior,
 OpenTUI frames and navigation, launcher cleanup, socket fragmentation and
 timeouts, replay/live delivery, and the Python server.

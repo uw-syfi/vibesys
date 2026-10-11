@@ -1,4 +1,4 @@
-import type {HypothesisEntry, HypothesisRound} from '@vibesys/backend-client';
+import type {HypothesisEntry, HypothesisRound} from '@vibesys/contracts';
 import type {RoundState} from './run-map.js';
 
 export type RoundOutcome = 'done' | 'fail' | 'skipped' | 'live' | 'planned';

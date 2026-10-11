@@ -73,17 +73,17 @@ function runnerInventory(id, scenarios) {
 
 async function writeTree(spec) {
   const root = await mkdtemp(join(tmpdir(), 'vibesys-corpus-'));
-  await mkdir(join(root, 'clients', 'backend-client', 'src', 'generated'), {recursive: true});
+  await mkdir(join(root, 'clients', 'contracts', 'src', 'generated'), {recursive: true});
   await mkdir(join(root, 'docs', 'contributing'), {recursive: true});
   await mkdir(join(root, 'tests', 'conformance', 'events'), {recursive: true});
   await mkdir(join(root, 'tests', 'conformance', 'scenarios'), {recursive: true});
   await mkdir(join(root, 'tests', 'conformance', 'runners'), {recursive: true});
   await writeFile(
-    join(root, 'clients', 'backend-client', 'src', 'generated', 'protocol.schema.json'),
+    join(root, 'clients', 'contracts', 'src', 'generated', 'protocol.schema.json'),
     JSON.stringify(spec.schema ?? SCHEMA),
   );
   await writeFile(
-    join(root, 'clients', 'backend-client', 'src', 'generated', 'host-helper.schema.json'),
+    join(root, 'clients', 'contracts', 'src', 'generated', 'host-helper.schema.json'),
     JSON.stringify(spec.helperSchema ?? NO_HELPER_REQUESTS),
   );
   await writeFile(

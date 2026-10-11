@@ -1,4 +1,4 @@
-import type {HypothesisEntry, RunEvent} from '@vibesys/backend-client';
+import type {HypothesisEntry, RunEvent} from '@vibesys/contracts';
 import {projectPerformance} from '../src/performance-projection.js';
 
 const ROUNDS = 20_000;

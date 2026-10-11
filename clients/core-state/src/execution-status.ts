@@ -1,4 +1,4 @@
-import type {AgentStatusData, RunEvent} from '@vibesys/backend-client';
+import type {AgentStatusData, RunEvent} from '@vibesys/contracts';
 
 export interface ExecutionStatus {
   readonly executionId: string;

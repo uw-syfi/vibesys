@@ -1,4 +1,4 @@
-import type {HypothesisEntry} from '@vibesys/backend-client';
+import type {HypothesisEntry} from '@vibesys/contracts';
 import {
   initialSessionState,
   mergeExperimentEntries,

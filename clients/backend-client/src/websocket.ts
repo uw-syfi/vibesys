@@ -1,3 +1,12 @@
+import type {ProtocolResponse, RequestInput, ServerMessage} from '@vibesys/contracts';
+import {
+  BackendClientError,
+  parseProtocolResponse,
+  parseServerMessage,
+  responseError,
+  ServerError,
+  streamFailure,
+} from '@vibesys/contracts';
 import {
   ControlChannel,
   type ControlChannelState,
@@ -7,14 +16,6 @@ import {
   type IssuedRequest,
   type ScheduleTimeout,
 } from './control-channel.js';
-import {BackendClientError, ServerError} from './errors.js';
-import type {ProtocolResponse, RequestInput, ServerMessage} from './protocol.js';
-import {
-  parseProtocolResponse,
-  parseServerMessage,
-  responseError,
-  streamFailure,
-} from './protocol-parse.js';
 import {type AbortSignalLike, abortReason, type RequestOptions} from './request-policy.js';
 import {
   type ControlTransport,

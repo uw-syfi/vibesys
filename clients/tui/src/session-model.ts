@@ -6,7 +6,7 @@ import type {
   ProtocolResponse,
   RunEvent,
   RunSnapshot,
-} from '@vibesys/backend-client';
+} from '@vibesys/contracts';
 import {
   type ActiveAgentExecution,
   type ActiveExecutionCheckpoint,

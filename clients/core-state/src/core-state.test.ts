@@ -1,11 +1,11 @@
 import {describe, expect, it} from 'bun:test';
-import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
+import type {RunEvent, RunSnapshot} from '@vibesys/contracts';
 import {
   event as fixtureEvent,
   roundFinishedEvent as fixtureRoundFinishedEvent,
   statusEvent,
   timestamp,
-} from '@vibesys/backend-client/testing';
+} from '@vibesys/contracts/testing';
 import {
   type CoreRunStatus,
   type CoreState,

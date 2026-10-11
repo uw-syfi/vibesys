@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import type {RunEvent} from '@vibesys/backend-client';
+import type {RunEvent} from '@vibesys/contracts';
 import {hasActiveAgentTiming} from './round-timing.js';
 import {
   applyRunMapEvent,

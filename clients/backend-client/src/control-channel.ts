@@ -1,7 +1,11 @@
+import type {ProtocolRequest, ProtocolResponse, RequestInput} from '@vibesys/contracts';
+import {
+  BackendClientError,
+  parseProtocolResponse,
+  responseError,
+  streamFailure,
+} from '@vibesys/contracts';
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
-import {BackendClientError} from './errors.js';
-import type {ProtocolRequest, ProtocolResponse, RequestInput} from './protocol.js';
-import {parseProtocolResponse, responseError, streamFailure} from './protocol-parse.js';
 import {
   type AbortSignalLike,
   abortReason,

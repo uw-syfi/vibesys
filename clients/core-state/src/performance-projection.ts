@@ -1,4 +1,4 @@
-import type {HypothesisEntry, ProtocolResponse, RunEvent} from '@vibesys/backend-client';
+import type {HypothesisEntry, ProtocolResponse, RunEvent} from '@vibesys/contracts';
 import {type RoundKey, roundKeyFor, roundNumberFor} from './round-key.js';
 
 /** Improvement direction recorded with hypothesis measurements. */

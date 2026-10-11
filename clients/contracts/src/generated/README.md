@@ -6,5 +6,5 @@ must not be modified directly.
 Regenerate them from the repository root with:
 
 ```bash
-pnpm --dir clients/backend-client generate:protocol
+pnpm --dir clients/contracts generate:protocol
 ```
