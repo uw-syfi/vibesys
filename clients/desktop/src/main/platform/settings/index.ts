@@ -8,4 +8,4 @@ export {
   withHostSettings,
 } from './host-settings.js';
 export {type RecentFile, type RecentRun, remember} from './recent.js';
-export {SettingsStore} from './settings-store.js';
+export {SettingsStore, type SettingsUpdateOutcome} from './settings-store.js';

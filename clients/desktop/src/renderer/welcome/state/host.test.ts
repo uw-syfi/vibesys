@@ -114,6 +114,32 @@ describe('host panel', () => {
     const editing = hostStep(ready, {type: 'edit-checkout'}).state;
     expect(editing.panel.kind === 'ready' && editing.panel.checkout?.value).toBe('/src/vibesys');
     expect(hostStep(editing, {type: 'cancel-checkout'}).state).toEqual(ready);
+    const changed = hostStep(editing, {type: 'checkout-input', value: '/new'}).state;
+    const checking = hostStep(changed, {type: 'submit-checkout'});
+    const change = checking.requests[0]?.token ?? -1;
+    const cancelled = hostStep(checking.state, {type: 'cancel-checkout'});
+    expect(cancelled.requests).toEqual([{kind: 'cancel-checkout', token: change, host: 'local'}]);
+    expect(cancelled.state).toMatchObject({
+      next: checking.state.next,
+      abandonedCheckouts: {[change]: 'local'},
+    });
+    expect(cancelled.state.panel.kind === 'ready' && cancelled.state.panel.checkout).toBeNull();
+
+    // Cancellation can lose to an atomic replace already committed in the main process. Its
+    // successful original reply remains authoritative even though the edit form is gone.
+    const committed = hostStep(cancelled.state, {
+      type: 'checkout-reply',
+      token: change,
+      result: {ok: true, value: '/physical/new'},
+    });
+    expect(committed.requests).toEqual([{kind: 'host', token: checking.state.next, host: 'local'}]);
+    const reloaded = hostStep(committed.state, {
+      type: 'host-reply',
+      token: checking.state.next,
+      result: {ok: true, value: hostData('local', '/normalized/new')},
+    }).state;
+    expect(reloaded.panel.kind === 'ready' && reloaded.panel.data.checkout).toBe('/normalized/new');
+    expect(reloaded.abandonedCheckouts).toEqual({});
     const first = fold(hostInitial('ssh:gpu-box'), [{type: 'show', host: 'ssh:gpu-box'}]);
     const asks = hostStep(first.state, {
       type: 'host-reply',
@@ -123,22 +149,51 @@ describe('host panel', () => {
     expect(hostStep(asks, {type: 'cancel-checkout'}).state).toBe(asks);
   });
 
+  test('showing another host revokes the checkout operation before loading it', () => {
+    const loaded = fold(hostInitial('local'), [{type: 'show', host: 'local'}]);
+    const ready = hostStep(loaded.state, {
+      type: 'host-reply',
+      token: loaded.requests[0]?.token ?? -1,
+      result: {ok: true, value: hostData('local', '/existing')},
+    }).state;
+    const editing = hostStep(ready, {type: 'edit-checkout'}).state;
+    const checking = hostStep(editing, {type: 'submit-checkout'});
+    const change = checking.requests[0]?.token ?? -1;
+
+    expect(hostStep(checking.state, {type: 'show', host: 'ssh:gpu-box'}).requests).toEqual([
+      {kind: 'cancel-checkout', token: change, host: 'local'},
+      {kind: 'host', token: checking.state.next, host: 'ssh:gpu-box'},
+    ]);
+  });
+
   test('model: invariants hold and stale replies are dropped over random sequences', () => {
     checkModel({
       initial: hostInitial('local'),
       step: hostStep,
       action: randomHostAction,
-      issues: request => request.token,
+      issues: request => (request.kind === 'cancel-checkout' ? null : request.token),
       awaited: hostAwaited,
       reply: action => {
         if (action.type === 'host-reply') return {slot: 'host', token: action.token};
-        if (action.type === 'checkout-reply') return {slot: 'checkout', token: action.token};
+        // Checkout replies can also answer explicitly abandoned operations. The `also` property
+        // below checks both live and abandoned token ownership.
+        if (action.type === 'checkout-reply') return null;
         if (action.type === 'sign-in-reply') return {slot: 'signIn', token: action.token};
         return null;
       },
       invariants: hostInvariants,
-      also: (_before, _action, after, requests) => {
-        for (const request of requests) expect(request.host).toBe(after.host);
+      also: (before, _action, after, requests) => {
+        if (_action.type === 'checkout-reply') {
+          const awaited = hostAwaited(before).checkout === _action.token;
+          const abandoned = before.abandonedCheckouts[_action.token] !== undefined;
+          if (!awaited && !abandoned) {
+            expect(after).toBe(before);
+            expect(requests).toEqual([]);
+          }
+        }
+        for (const request of requests) {
+          expect(request.host).toBe(request.kind === 'cancel-checkout' ? before.host : after.host);
+        }
       },
     });
   });
