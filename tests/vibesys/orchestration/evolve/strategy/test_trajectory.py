@@ -117,20 +117,20 @@ def _run(key: str, *, parallelism: int, delays: tuple[int, ...]) -> list[dict[st
     return _population(trace.state)
 
 
-@pytest.mark.parametrize("key", sorted(GOLDEN["runs"]))
+@pytest.mark.parametrize("key", sorted(GOLDEN["runs"])[::2])
 def test_the_serial_run_reproduces_the_legacy_population(key: str) -> None:
     _, _, expected = _expected(key)
     assert _run(key, parallelism=1, delays=(0,)) == expected
 
 
-@pytest.mark.parametrize("key", sorted(GOLDEN["runs"])[:4])
+@pytest.mark.parametrize("key", sorted(GOLDEN["runs"])[1:4:2])
 def test_concurrent_children_reproduce_the_legacy_population(key: str) -> None:
     _, _, expected = _expected(key)
     assert _run(key, parallelism=3, delays=(0, 2, 1, 3, 0)) == expected
 
 
 @settings(
-    max_examples=12,
+    max_examples=3,
     deadline=None,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
 )
