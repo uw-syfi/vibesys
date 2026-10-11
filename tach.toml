@@ -758,7 +758,7 @@ depends_on = ["vs_sim.concurrency", "vs_sim.network", "vs_sim.randomness", "vs_s
 [[modules]]
 path = "vs_sim.contracts"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.child", "vs_sim.clock", "vs_sim.gate", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals"]
+depends_on = ["vs_sim.blocking", "vs_sim.child", "vs_sim.clock", "vs_sim.gate", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals", "vs_sim.streaming"]
 
 [[modules]]
 path = "vs_sim.crash"

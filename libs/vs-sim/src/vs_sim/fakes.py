@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
+import subprocess
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -336,3 +337,50 @@ class ScriptedProbe:
         command = tuple(argv)
         self.calls.append((command, timeout_seconds))
         return self.script(command)
+
+
+@dataclass(frozen=True)
+class StreamedRun:
+    """What one scripted streaming command does, start to finish."""
+
+    returncode: int = 0
+    stdout: str = ""
+    stderr_lines: tuple[str, ...] = ()
+    """Each line it writes to standard error, without its line ending, in order."""
+    blocks: bool = False
+    """It never ends by itself, so it outlives any timeout and is killed."""
+
+
+@dataclass
+class ScriptedStreamingCommand:
+    """A :class:`~vs_sim.streaming.StreamingCommand` whose commands come from a script.
+
+    ``script`` maps an argument vector and working directory to what that command does,
+    or to ``None`` for a program that does not exist. Like the real command, each stderr
+    line reaches the callback on the calling thread before :meth:`run` returns or raises.
+    """
+
+    script: Callable[[tuple[str, ...], Path], StreamedRun | None]
+    calls: list[tuple[tuple[str, ...], Path, float]] = field(default_factory=list)
+    """Each argument vector run, with its working directory and timeout."""
+
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path,
+        timeout_seconds: float,
+        on_stderr_line: Callable[[str], None],
+    ) -> subprocess.CompletedProcess[str]:
+        """Record the call and play the scripted command."""
+        command = tuple(argv)
+        self.calls.append((command, cwd, timeout_seconds))
+        scripted = self.script(command, cwd)
+        if scripted is None:
+            raise FileNotFoundError(2, "No such file or directory", command[0])
+        for line in scripted.stderr_lines:
+            on_stderr_line(line)
+        stderr = "".join(f"{line}\n" for line in scripted.stderr_lines)
+        if scripted.blocks:
+            raise subprocess.TimeoutExpired(command, timeout_seconds, scripted.stdout, stderr)
+        return subprocess.CompletedProcess(command, scripted.returncode, scripted.stdout, stderr)

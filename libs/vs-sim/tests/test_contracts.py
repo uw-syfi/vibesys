@@ -47,10 +47,14 @@ from vs_sim.api.testing import (
     ProcessUnderTest,
     RunnerUnderTest,
     ScriptedProbe,
+    ScriptedStreamingCommand,
     SignalSourceContract,
     SignalSourceUnderTest,
     SleeperContract,
     SleeperUnderTest,
+    StreamedRun,
+    StreamingCommandContract,
+    StreamingUnderTest,
     VirtualClock,
     run_virtual,
     stop_process,
@@ -356,3 +360,31 @@ def test_fake_foreground_launcher_records_how_a_child_was_started(tmp_path: Path
         {"K": "v"},
         tmp_path,
     )
+
+
+def _streaming_script(argv: tuple[str, ...], cwd: Path) -> StreamedRun | None:
+    match argv:
+        case ("exit", status, stdout, *lines):
+            return StreamedRun(int(status), stdout, tuple(lines))
+        case ("pwd",):
+            return StreamedRun(stdout=str(cwd))
+        case ("block",):
+            return StreamedRun(blocks=True)
+        case _:
+            return None
+
+
+class TestScriptedStreamingCommand(StreamingCommandContract):
+    @pytest.fixture(autouse=True)
+    def _directory(self, tmp_path: Path) -> None:
+        self._cwd = tmp_path
+
+    def streaming_under_test(self) -> StreamingUnderTest:
+        return StreamingUnderTest(
+            ScriptedStreamingCommand(_streaming_script),
+            cwd=self._cwd,
+            exits_with=lambda status, stdout, lines: ("exit", str(status), stdout, *lines),
+            prints_cwd=("pwd",),
+            blocks_forever=("block",),
+            missing_program=("no-such-program",),
+        )

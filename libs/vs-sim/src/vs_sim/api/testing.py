@@ -24,6 +24,8 @@ from vs_sim.contracts import (
     SignalSourceUnderTest,
     SleeperContract,
     SleeperUnderTest,
+    StreamingCommandContract,
+    StreamingUnderTest,
 )
 from vs_sim.crash import (
     Restarted,
@@ -44,6 +46,8 @@ from vs_sim.fakes import (
     InlineBlockingRunner,
     ProcessScript,
     ScriptedProbe,
+    ScriptedStreamingCommand,
+    StreamedRun,
 )
 from vs_sim.faults import CallCounter, ScheduledRule, fault_stream, match_rule
 from vs_sim.file_effects import file_size_limit
@@ -127,6 +131,7 @@ __all__ = [
     "RunnerUnderTest",
     "ScheduledRule",
     "ScriptedProbe",
+    "ScriptedStreamingCommand",
     "SignalSourceContract",
     "SignalSourceUnderTest",
     "Sim",
@@ -136,6 +141,9 @@ __all__ = [
     "SimThreads",
     "SleeperContract",
     "SleeperUnderTest",
+    "StreamedRun",
+    "StreamingCommandContract",
+    "StreamingUnderTest",
     "ThreadsContract",
     "ThreadsUnderTest",
     "TraceEvent",
