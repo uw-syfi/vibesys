@@ -62,6 +62,7 @@ implementation (they share the same contract suite):
 * ``diff_patch``, ``diff_name_status``: byte-exact CLI patch text and the
   ``--name-status -z`` rename format.
 * ``uncommitted_paths``, ``changed_since``: ``status --porcelain=v1`` output.
+* ``unversioned_paths``: ``ls-files --others`` with Git's full ignore rules.
 
 Everything else is *portable*.
 """
@@ -348,6 +349,16 @@ class GitRepository(Protocol):
 
         Ignored paths are not reported; untracked files are listed one by one,
         not as directories. Staged renames are out of contract (cli-only).
+        """
+        ...
+
+    def unversioned_paths(self, *, include_ignored: bool) -> tuple[str, ...]:
+        """Sorted files below the worktree root that the index does not track.
+
+        Untracked files are always listed; ignored ones only with ``include_ignored``.
+        Files are listed one by one (never as a directory), workspace-relative with
+        ``/`` separators, and the contents of nested repositories are not entered
+        (cli-only).
         """
         ...
 

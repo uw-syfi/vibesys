@@ -278,15 +278,16 @@ class RuntimeWorkspaceResource:
         clean: bool,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
-        exact: bool = False,
+        exact_keeping: tuple[str, ...] | None = None,
     ) -> bool:
         if preserve_memory:
             preserve_paths = tuple(dict.fromkeys((*preserve_paths, *self._memory_paths)))
         restored = self._project.git.checkout_tree(
             revision,
             clean=clean,
-            clean_ignored=self.owns_checkout or exact,
+            clean_ignored=self.owns_checkout or exact_keeping is not None,
             preserve_paths=preserve_paths,
+            keep_paths=exact_keeping or (),
         )
         if restored and self._id is not None:
             self._revision = revision
@@ -304,18 +305,25 @@ class RuntimeWorkspaceResource:
     def has_revision(self, revision: str) -> bool:
         return self._root_project.git.has_revision(revision)
 
-    def matches_revision(self, revision: str, *, exact: bool = False) -> bool:
+    def matches_revision(
+        self, revision: str, *, exact_keeping: tuple[str, ...] | None = None
+    ) -> bool:
         """Return whether the workspace tree equals the revision.
 
-        Ignored files count only in a workspace the runtime owns, or when *exact* asks
-        for the whole tree (an exclusive-root attempt owns everything it leaves behind).
+        Ignored files count only in a workspace the runtime owns, or when *exact_keeping*
+        is given: then the whole tree counts (an exclusive-root attempt owns what it
+        leaves behind) except the paths it lists, which were there before the run.
         Preserved memory paths are exempt.
         """
         return self._project.git.matches_tree(
             revision,
-            exempt_paths=self._memory_paths,
-            include_ignored=self.owns_checkout or exact,
+            exempt_paths=(*self._memory_paths, *(exact_keeping or ())),
+            include_ignored=self.owns_checkout or exact_keeping is not None,
         )
+
+    def unversioned_paths(self) -> tuple[str, ...]:
+        """The untracked and ignored paths present now (directories collapsed)."""
+        return self._project.git.unversioned_paths()
 
     def find_snapshot(self, label: str) -> str | None:
         """Return the newest commit whose subject is exactly *label*, if any."""

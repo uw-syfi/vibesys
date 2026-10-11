@@ -72,6 +72,7 @@ from vs_runtime._receipt_store import (
 from vs_runtime._workspace_lookup import candidate_member_id, find_attempt_workspace
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
+    RootBaseline,
     RootGrant,
     RootRelease,
     StoreWorkspaceReceipts,
@@ -399,14 +400,14 @@ class RuntimeWorkspaceRequests:
         commit: str,
         *,
         resource_id: ResourceId | None = None,
-        exact: bool = False,
+        exact_keeping: tuple[str, ...] | None = None,
     ) -> _Facts | None:
         """Make the tree exactly *commit* and prove it; ``None`` means success."""
         try:
-            await workspace.restore(commit, exact=exact)
+            await workspace.restore(commit, exact_keeping=exact_keeping)
         except WorkspaceRestoreError as error:
             return _retryable(f"restore failed: {error}", resource_id)
-        if not await workspace.matches_revision(commit, exact=exact):
+        if not await workspace.matches_revision(commit, exact_keeping=exact_keeping):
             return _retryable("tree does not match the revision after restore", resource_id)
         return None
 
@@ -452,9 +453,14 @@ class RuntimeWorkspaceRequests:
         if self._receipts.load_binding(attempt) is None:
             root = self._workspaces.root
             # An exclusive-root attempt owns whatever it leaves in the root, ignored files
-            # included, so the grant is exactly base plus the preserved artifact dirs.
-            if not await root.matches_revision(base, exact=True):
-                failure = await self._materialize(root, base, resource_id=resource_id, exact=True)
+            # included, so the grant is exactly base plus the preserved artifact dirs plus
+            # what the root held before the run, which is never touched. The baseline is
+            # recorded before the first restore and replayed afterwards, never re-scanned.
+            keeping = await self._root_baseline(root)
+            if not await root.matches_revision(base, exact_keeping=keeping):
+                failure = await self._materialize(
+                    root, base, resource_id=resource_id, exact_keeping=keeping
+                )
                 if failure is not None:
                     return failure
             self._bind(attempt, request, resource_id, None)
@@ -465,6 +471,15 @@ class RuntimeWorkspaceRequests:
             resource_id=resource_id,
             revision=request.plan.base,
         )
+
+    async def _root_baseline(self, root: RuntimeWorkspace) -> tuple[str, ...]:
+        """The paths the root held before the run, recorded on the first root grant."""
+        stored = self._receipts.root_baseline()
+        if stored is None:
+            stored = self._receipts.record_root_baseline(
+                RootBaseline(paths=await root.unversioned_paths())
+            )
+        return stored.paths
 
     async def _ensure_candidate(
         self,

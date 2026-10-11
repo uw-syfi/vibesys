@@ -64,9 +64,9 @@ class _Resource:
         clean: bool,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
-        exact: bool = False,
+        exact_keeping: tuple[str, ...] | None = None,
     ) -> bool:
-        del clean, preserve_paths, preserve_memory, exact
+        del clean, preserve_paths, preserve_memory, exact_keeping
         self.revision = revision
         return True
 
@@ -80,8 +80,13 @@ class _Resource:
         del revision
         return True
 
-    def matches_revision(self, revision: str, *, exact: bool = False) -> bool:
-        del revision, exact
+    def unversioned_paths(self) -> tuple[str, ...]:
+        return ()
+
+    def matches_revision(
+        self, revision: str, *, exact_keeping: tuple[str, ...] | None = None
+    ) -> bool:
+        del revision, exact_keeping
         return True
 
     def find_snapshot(self, label: str) -> str | None:

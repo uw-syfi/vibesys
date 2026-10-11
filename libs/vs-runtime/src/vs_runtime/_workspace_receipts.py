@@ -52,6 +52,17 @@ class RootRelease(StrEnum):
     """The generation never ended its hold and does not hold the root (a newer one took it)."""
 
 
+class RootBaseline(BaseModel):
+    """The untracked and ignored paths the root held before any attempt ran.
+
+    Directories without tracked files are listed once, with a trailing ``/``. These
+    belong to the user (a ``.venv``, data, notes), so no root grant removes them.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    paths: tuple[str, ...]
+
+
 class WorkspaceReceipts(Protocol):
     """Durable bindings, root holder, generations, revision ownership and release proofs."""
 
@@ -71,6 +82,18 @@ class WorkspaceReceipts(Protocol):
         Only the holder's own generation releases, so a stale or repeated release
         changes nothing and a later holder is never released by an earlier attempt.
         The result says which of those happened.
+        """
+        ...
+
+    def root_baseline(self) -> RootBaseline | None:
+        """The recorded pre-run baseline, or ``None`` before the first root grant."""
+        ...
+
+    def record_root_baseline(self, baseline: RootBaseline) -> RootBaseline:
+        """Store the baseline if none is stored; return the baseline that won.
+
+        The first scan wins and is never replaced, so a replay after attempts ran
+        keeps the pre-run answer instead of treating their files as the user's.
         """
         ...
 
@@ -96,6 +119,7 @@ def attempt_key(attempt: AttemptRef) -> str:
 
 _BINDINGS = "workspace-bindings"
 _ROOT = "workspace-root"
+_BASELINE = "workspace-root-baseline"
 _GENERATIONS = "workspace-generations"
 _REVISIONS = "workspace-revisions"
 _RELEASED = "workspace-released"
@@ -164,6 +188,15 @@ class StoreWorkspaceReceipts:
                 return RootRelease.NOT_HOLDER
             self.mark_released(attempt)
             return RootRelease.RELEASED
+
+    def root_baseline(self) -> RootBaseline | None:
+        return self._store.load(_BASELINE, "baseline", "root", RootBaseline)
+
+    def record_root_baseline(self, baseline: RootBaseline) -> RootBaseline:
+        def decide(stored: RootBaseline | None) -> tuple[RootBaseline | None, RootBaseline]:
+            return (baseline, baseline) if stored is None else (None, stored)
+
+        return self._store.modify(_BASELINE, "baseline", "root", RootBaseline, decide)
 
     def admit_generation(self, attempt: AttemptRef) -> bool:
         def decide(stored: AttemptRef | None) -> tuple[AttemptRef | None, bool]:

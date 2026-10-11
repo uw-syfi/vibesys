@@ -500,6 +500,7 @@ class GitTracker:
         clean: bool = False,
         clean_ignored: bool = False,
         preserve_paths: Iterable[str | Path] = (),
+        keep_paths: Iterable[str] = (),
     ) -> bool:
         """Materialize *sha*'s tree into the working directory.
 
@@ -515,9 +516,12 @@ class GitTracker:
         the tree is exact. Files below workspace-relative ``preserve_paths`` are
         captured before the restore and reapplied afterwards. This is intended for
         framework-owned memory that must survive a candidate-code rollback.
+        ``keep_paths`` (from :meth:`unversioned_paths`) are left exactly as they are:
+        the clean skips them and nothing is copied, so they are never rewritten.
         """
         preserved: dict[Path, bytes] = {}
         preserve_paths = tuple(preserve_paths)
+        kept = [_literal_anchor(path) for path in keep_paths]
         try:
             preserved = self._capture_preserved_paths(preserve_paths)
             self._git.reset_index()
@@ -529,7 +533,8 @@ class GitTracker:
                     protect=self._state_integration.metadata_clean_exclusion,
                     # Preserved files are held only in memory until the restore ends, so a
                     # crash between the clean and the reapply must not find them deleted.
-                    keep=[f"/{Path(path).as_posix().rstrip('/')}" for path in preserve_paths],
+                    keep=[f"/{Path(path).as_posix().rstrip('/')}" for path in preserve_paths]
+                    + kept,
                 )
             # The restore leaves preserved paths as they are, so they never pass through a
             # state a crash could leave behind; reapplying them below then changes nothing.
@@ -557,6 +562,32 @@ class GitTracker:
         else:
             return True
 
+    def unversioned_paths(self) -> tuple[str, ...]:
+        """The untracked and ignored files present now, as few paths as describe them.
+
+        A directory holding no tracked file is reported once, as ``dir/``, so a
+        ``.venv`` is one entry, not one per file. Pass the result as ``keep_paths`` to
+        :meth:`checkout_tree` and as ``exempt_paths`` to :meth:`matches_tree`.
+        """
+        files = self._git.unversioned_paths(include_ignored=True)
+        return tuple(self._collapse_untracked("", files))
+
+    def _collapse_untracked(self, directory: str, files: Iterable[str]) -> list[str]:
+        """Collapse *files* (all below *directory*, which ends in ``/`` or is empty)."""
+        children: dict[str, list[str]] = {}
+        for path in files:
+            head, separator, _ = path.removeprefix(directory).partition("/")
+            children.setdefault(head + separator, []).append(path)
+        collapsed: list[str] = []
+        for name, members in sorted(children.items()):
+            if not name.endswith("/"):
+                collapsed.extend(members)
+            elif not self._git.has_tracked_files(f":(literal){directory}{name}"):
+                collapsed.append(f"{directory}{name}")
+            else:
+                collapsed.extend(self._collapse_untracked(f"{directory}{name}", members))
+        return collapsed
+
     def matches_tree(
         self,
         sha: str,
@@ -571,7 +602,10 @@ class GitTracker:
         Trusted VibeSys files (which tree restores preserve) and files below
         workspace-relative ``exempt_paths`` are not compared.
         """
-        exempt = [f":(exclude){Path(path).as_posix().rstrip('/')}" for path in exempt_paths]
+        exempt = [
+            f":(exclude){_wildcard_safe(Path(path).as_posix().rstrip('/'))}"
+            for path in exempt_paths
+        ]
         return self._git.worktree_matches(
             sha,
             [".", *self._state_integration.metadata_restore_exclusions, *exempt],
@@ -943,3 +977,18 @@ class GitTracker:
 
     def _inside_work_tree(self) -> bool:
         return self._git.is_inside_work_tree()
+
+
+def _wildcard_safe(path: str) -> str:
+    """*path* as a pattern that matches it, and at worst a few more paths, never fewer.
+
+    Each wildcard character becomes ``?``, which matches itself, so a pattern built
+    from a file name can only over-match: a path kept or exempted this way is never
+    missed.
+    """
+    return "".join("?" if char in "*?[\\" else char for char in path)
+
+
+def _literal_anchor(path: str) -> str:
+    """The ``clean`` keep pattern anchored at the worktree root for *path*."""
+    return "/" + _wildcard_safe(path.rstrip("/"))
