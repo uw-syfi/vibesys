@@ -30,15 +30,16 @@ from vibesys.hypothesis.attempts import (
 )
 from vibesys.hypothesis.config import HypothesisConfig
 from vibesys.hypothesis.record import AgentAttribution, RecordInput, build_round_record
+from vibesys.hypothesis.results import Finished
 from vibesys.hypothesis.search import HypothesisSearch
 from vibesys.hypothesis.state import HypothesisState
 from vibesys.hypothesis.transitions import CarryOver
 
 if TYPE_CHECKING:
     from vibesys.hypothesis.history import RoundRecord
-    from vibesys.hypothesis.notices import ArchiveConflict
+    from vibesys.hypothesis.notices import ArchiveConflict, ParetoArchiveView
     from vibesys.hypothesis.plan import OrchestratorPlan
-    from vibesys.hypothesis.results import NextRoundDecision, StartedHypothesis
+    from vibesys.hypothesis.results import NextRoundDecision, PlanningContext, StartedHypothesis
     from vibesys.metrics import FrameworkBenchmarkOutcome, MetricSpace
 
 _CARRY = TypeAdapter(CarryOver)
@@ -65,15 +66,19 @@ class EncodedLedger:
     carry_json: str = ""
 
 
-def decode(encoded: EncodedLedger, space: MetricSpace) -> Ledger:
-    """The ledger of ``encoded`` projected onto the run's metric space (empty text is a new run)."""
+def decode(encoded: EncodedLedger, space: MetricSpace | None = None) -> Ledger:
+    """The ledger of ``encoded``, projected onto the run's metric space when one is given.
+
+    Empty text is a new run. A read-only view (the run's projection) passes no space and sees
+    the ledger exactly as it was saved.
+    """
     search = (
         HypothesisState.model_validate_json(encoded.search_json)
         if encoded.search_json
         else HypothesisState()
     )
-    machine = HypothesisSearch(HypothesisConfig(max_rounds=1))
-    search = machine.resume(search, space)
+    if space is not None:
+        search = HypothesisSearch(HypothesisConfig(max_rounds=1)).resume(search, space)
     carry = _CARRY.validate_json(encoded.carry_json) if encoded.carry_json else CarryOver()
     return Ledger(search, carry)
 
@@ -176,8 +181,6 @@ def close_round(config: HypothesisConfig, ledger: Ledger, facts: ClosingFacts) -
     official = facts.passed and facts.official_reason is not None
     metric = facts.benchmark_metric if official else None
     unit = facts.benchmark.metric_name if official else None
-    if reply is not None and metric is not None:
-        reply = reply.model_copy(update={"perf_metric": metric, "perf_unit": unit})  # type: ignore[attr-defined]
     attempt = AttemptState(
         agent_run_state=ledger.search,
         feedback=facts.feedback,
@@ -271,3 +274,17 @@ def note_attempt_failure(
         updated.gate_accuracy_passed = gate.accuracy_passed
     state = HypothesisSearch(config).update_active(ledger.search, updated)
     return Ledger(state, ledger.carry)
+
+
+def archive_view(config: HypothesisConfig, ledger: Ledger) -> ParetoArchiveView:
+    """The Pareto archive's trusted parents and pending claims over the ledger's rounds."""
+    return HypothesisSearch(config).archive_view(ledger.records, space=ledger.search.metrics)
+
+
+def planning(config: HypothesisConfig, ledger: Ledger, round_number: int) -> PlanningContext:
+    """The evidence a designer turn needs for ``round_number``: plateau, provisional count, carry."""
+    decision = next_round(config, ledger, round_number)
+    if isinstance(decision, Finished):
+        message = "no round to plan past the round budget"
+        raise TypeError(message)
+    return decision.context
