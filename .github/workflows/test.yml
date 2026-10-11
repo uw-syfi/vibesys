@@ -271,10 +271,10 @@ jobs:
             support/repoctl/go.sum
             resources/evaluators/queue/go.sum
             resources/evaluators/microservice/go.sum
-            examples/evaluators/ordered-map/go.sum
-            examples/evaluators/priority-queue/go.sum
-            examples/evaluators/stack/go.sum
-            examples/evaluators/unordered-map/go.sum
+            resources/evaluators/ordered-map/go.sum
+            resources/evaluators/priority-queue/go.sum
+            resources/evaluators/stack/go.sum
+            resources/evaluators/unordered-map/go.sum
 
       # Bounded because an apt mirror or a service-restart prompt makes this
       # hang rather than fail: three runs on this branch sat here for tens of

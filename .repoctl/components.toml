@@ -30,24 +30,24 @@ id_prefix = "native:"
 target = true
 ownership_group = "native_manifests"
 manifests = { "Cargo.toml" = "rust", "go.mod" = "go" }
-scope_roots = ["resources/evaluators", "examples/evaluators", "sdk/vs-evaluator"]
+scope_roots = ["resources/evaluators", "sdk/vs-evaluator"]
 selected_roots = [
+  "examples/data-structures/ordered-map",
+  "examples/data-structures/prioqueue",
+  "examples/data-structures/repositories/queue-rs",
+  "examples/data-structures/stack",
+  "examples/data-structures/unordered-map",
+  "resources/evaluators/microservice",
+  "resources/evaluators/ordered-map",
+  "resources/evaluators/ordered-map/native_runner",
+  "resources/evaluators/priority-queue",
+  "resources/evaluators/priority-queue/native_runner",
   "resources/evaluators/queue",
   "resources/evaluators/queue/native_runner",
-  "resources/evaluators/microservice",
-  "examples/data-structures/repositories/queue-rs",
-  "examples/evaluators/ordered-map",
-  "examples/evaluators/ordered-map/native_runner",
-  "examples/evaluators/priority-queue",
-  "examples/evaluators/priority-queue/native_runner",
-  "examples/evaluators/stack",
-  "examples/evaluators/stack/native_runner",
-  "examples/evaluators/unordered-map",
-  "examples/evaluators/unordered-map/native_runner",
-  "examples/starters/ordered-map-rs",
-  "examples/starters/priority-queue-rs",
-  "examples/starters/stack-rs",
-  "examples/starters/unordered-map-rs",
+  "resources/evaluators/stack",
+  "resources/evaluators/stack/native_runner",
+  "resources/evaluators/unordered-map",
+  "resources/evaluators/unordered-map/native_runner",
   "sdk/vs-evaluator/vseval",
 ]
 selected_jobs = ["evaluators"]
@@ -214,20 +214,20 @@ from = "native:resources/evaluators/queue/native_runner"
 to = "native:resources/evaluators/queue"
 
 [[edges]]
-from = "native:examples/evaluators/priority-queue/native_runner"
-to = "native:examples/evaluators/priority-queue"
+from = "native:resources/evaluators/priority-queue/native_runner"
+to = "native:resources/evaluators/priority-queue"
 
 [[edges]]
-from = "native:examples/evaluators/stack/native_runner"
-to = "native:examples/evaluators/stack"
+from = "native:resources/evaluators/stack/native_runner"
+to = "native:resources/evaluators/stack"
 
 [[edges]]
-from = "native:examples/evaluators/unordered-map/native_runner"
-to = "native:examples/evaluators/unordered-map"
+from = "native:resources/evaluators/unordered-map/native_runner"
+to = "native:resources/evaluators/unordered-map"
 
 [[edges]]
-from = "native:examples/evaluators/ordered-map/native_runner"
-to = "native:examples/evaluators/ordered-map"
+from = "native:resources/evaluators/ordered-map/native_runner"
+to = "native:resources/evaluators/ordered-map"
 
 [[edges]]
 from = "native:examples/data-structures/repositories/queue-rs/verus-mpmc"
