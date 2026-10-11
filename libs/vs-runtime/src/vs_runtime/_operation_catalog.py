@@ -87,6 +87,7 @@ class RefusalReason(StrEnum):
 
     NO_EVIDENCE_LOOKUP = "no_evidence_lookup"
     NO_ACCURACY_PROOF = "no_accuracy_proof"
+    NO_COMMAND_RUNNER = "no_command_runner"
 
 
 @dataclass(frozen=True)

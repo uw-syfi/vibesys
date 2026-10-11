@@ -16,6 +16,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from vs_core.api import ContractError, OperationRegistry
+from vs_runtime._capture_command_operation import CaptureCommandOwner
 from vs_runtime._core_loop import CoreRuntimeBindings
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
 from vs_runtime._observation_factory import ObservationFactory
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
     from vs_runtime._core_requests import RequestExecutors
     from vs_runtime._evidence_ledger import EvidenceLookup
     from vs_runtime._operation_catalog import OperationOwner
-    from vs_runtime.contracts import RevisionLedger, Workspaces
+    from vs_runtime.contracts import Commands, RevisionLedger, Workspaces
 
 
 class OperationRole(StrEnum):
@@ -51,6 +52,7 @@ class OperationRole(StrEnum):
     VERIFY_REVISION = "verify_revision"
     INTERPRET_EVIDENCE = "interpret_evidence"
     RETAIN_REVISION = "retain_revision"
+    CAPTURE_COMMAND = "capture_command"
 
 
 # A role whose owner is absent is declared but refused with the contract it lacks.
@@ -64,6 +66,10 @@ _REFUSALS: Mapping[OperationRole, tuple[RefusalReason, str]] = {
         RefusalReason.NO_ACCURACY_PROOF,
         "no workspace was wired to retain a revision its accuracy proof names",
     ),
+    OperationRole.CAPTURE_COMMAND: (
+        RefusalReason.NO_COMMAND_RUNNER,
+        "no command runner was wired to execute a captured command in a workspace",
+    ),
 }
 
 
@@ -73,13 +79,17 @@ def operation_roles(operations: StrategyOperations) -> dict[OperationRole, Opera
     The runtime performs an operation by role, independent of the strategy's kind names, so
     a strategy that declares its operations through `StrategyOperations` gets its owners.
     """
-    render, verify, interpret, retain = operations.registrations()
-    return {
-        OperationRole.RENDER_ARTIFACTS: render,
-        OperationRole.VERIFY_REVISION: verify,
-        OperationRole.INTERPRET_EVIDENCE: interpret,
-        OperationRole.RETAIN_REVISION: retain,
-    }
+    return dict(zip(_ROLE_ORDER, operations.registrations(), strict=False))
+
+
+# The order `StrategyOperations.registrations` lists its operations in; the optional capture is last.
+_ROLE_ORDER = (
+    OperationRole.RENDER_ARTIFACTS,
+    OperationRole.VERIFY_REVISION,
+    OperationRole.INTERPRET_EVIDENCE,
+    OperationRole.RETAIN_REVISION,
+    OperationRole.CAPTURE_COMMAND,
+)
 
 
 @dataclass(frozen=True)
@@ -94,6 +104,7 @@ class OperationPorts:
     commit_of: Callable[[RevisionRef], str | None]
     retention_label: str
     variables: Mapping[str, object] = field(default_factory=dict)
+    commands: Commands | None = None
 
 
 def production_owners(
@@ -115,6 +126,11 @@ def production_owners(
                 owners[role] = RetainRevisionOwner(
                     ports.workspaces, ports.ledger, ports.commit_of, ports.retention_label
                 )
+            case OperationRole.CAPTURE_COMMAND:
+                if ports.commands is not None:
+                    owners[role] = CaptureCommandOwner(
+                        ports.workspaces, ports.commands, ports.ledger, ports.commit_of
+                    )
     return owners
 
 

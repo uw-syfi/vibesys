@@ -1,0 +1,92 @@
+"""Owner of command capture, over the public ``Workspaces`` and ``Commands`` interfaces.
+
+A profile-guided strategy runs a configured profiler command against a retained revision and
+reads what it wrote. The command runs in a throwaway isolated candidate created from that
+revision, through the runtime's own output capture (it appends the output argument and a
+temporary path, bounds the output and removes the file), and the candidate is discarded on
+every path. Nothing durable changes, so the operation is a query: inspection answers by
+running again. A revision the run does not retain is refused as an outcome, not an error; a
+command that cannot run at all (the sandbox failed) propagates as an infrastructure failure.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Protocol, cast
+
+from vs_runtime._operation_catalog import Applied, Inspection
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    from vs_core.api import OperationRequest, RevisionRef
+    from vs_runtime._core_requests import ExecutionContext
+    from vs_runtime.contracts import Commands, RevisionLedger, Workspaces
+
+
+class CaptureRequest(Protocol):
+    """The request shape this owner serves, declared by the strategy that issues it."""
+
+    revision: RevisionRef
+    argv: tuple[str, ...]
+    output_argument: str
+    timeout_seconds: int
+
+
+class CaptureCommandOwner:
+    """Run a configured argv in an isolated workspace at a retained revision."""
+
+    def __init__(
+        self,
+        workspaces: Workspaces,
+        commands: Commands,
+        ledger: RevisionLedger,
+        commit_of: Callable[[RevisionRef], str | None],
+    ) -> None:
+        """Bind the workspaces, the command runner, the retention ledger and the encoding."""
+        self._workspaces = workspaces
+        self._commands = commands
+        self._ledger = ledger
+        self._commit_of = commit_of
+
+    async def execute(
+        self, request: OperationRequest, context: ExecutionContext
+    ) -> Mapping[str, object]:
+        """Capture the command's output at the revision; infrastructure errors raise."""
+        del context
+        return await self.capture(request)
+
+    async def inspect(self, request: OperationRequest, context: ExecutionContext) -> Inspection:
+        """A query has no effect to prove, so inspection answers by running again."""
+        del context
+        return Applied(await self.capture(request))
+
+    async def capture(self, request: OperationRequest) -> Mapping[str, object]:
+        """Run the command at the revision, or say why not; the shared body of execute and inspect."""
+        asked = cast("CaptureRequest", request)
+        commit = self._commit_of(asked.revision)
+        if commit is None:
+            return _refused("revision reference is not canonical")
+        if not await self._ledger.retains(commit):
+            return _refused("revision is not retained by the run workspace")
+        if not self._workspaces.supports_parallel_candidates:
+            return _refused("the run has no isolated candidate workspaces to run the command in")
+        candidate = await self._workspaces.create_candidate(commit)
+        try:
+            result = await self._commands.capture_output(
+                asked.argv,
+                workspace=candidate,
+                output_argument=asked.output_argument,
+                timeout_seconds=asked.timeout_seconds,
+            )
+        finally:
+            await candidate.discard()
+        return {
+            "status": "succeeded",
+            "exit_code": result.exit_code,
+            "output": result.output,
+            "truncated": result.truncated,
+        }
+
+
+def _refused(detail: str) -> Mapping[str, object]:
+    return {"status": "rejected", "detail": detail}

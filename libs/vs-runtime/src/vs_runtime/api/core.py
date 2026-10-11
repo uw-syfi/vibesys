@@ -20,6 +20,7 @@ from vs_runtime._agent_evaluation import (
     ScopeWorkspaces,
     SnapshotWorkspace,
 )
+from vs_runtime._capture_command_operation import CaptureCommandOwner
 from vs_runtime._core_loop import (
     AdmissionBusyError,
     CommitObserver,
@@ -242,6 +243,7 @@ __all__ = [
     "BlockDiagnostic",
     "CancellableOwner",
     "Cancelled",
+    "CaptureCommandOwner",
     "CombinedToolServers",
     "CommitObserver",
     "Conflict",

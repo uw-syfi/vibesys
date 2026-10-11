@@ -43,6 +43,7 @@ RENDER_SUFFIX = "render_role_artifacts"
 VERIFY_SUFFIX = "verify_parent_revision"
 INTERPRET_SUFFIX = "interpret_evidence"
 RETAIN_SUFFIX = "retain_verified_revision"
+CAPTURE_SUFFIX = "capture_command"
 
 
 class RenderedArtifacts(Value):
@@ -129,6 +130,33 @@ class RetainVerifiedRevisionBase(OperationRequest):
     accuracy_proof: EvidenceRef
 
 
+class CommandCapture(Value):
+    """What a captured command printed and how it ended."""
+
+    status: Status
+    exit_code: int | None = None
+    output: str = ""
+    truncated: bool = False
+    detail: str = ""
+
+
+class CaptureCommandBase(OperationRequest):
+    """Run a configured argv in an isolated workspace holding a retained revision.
+
+    The runtime appends ``output_argument`` and a temporary path, reads the file the command
+    wrote, bounds the output and removes the file; the strategy owns only the choice of command
+    and the protocol of its output. The workspace is discarded after the run, so the operation
+    changes nothing durable.
+    """
+
+    lifecycle: Literal[LifecycleClass.QUERY] = LifecycleClass.QUERY
+    outcome_model: ClassVar[type[BaseModel]] = CommandCapture
+    revision: RevisionRef
+    argv: tuple[str, ...] = Field(min_length=1)
+    output_argument: str = Field(min_length=1)
+    timeout_seconds: int = Field(gt=0)
+
+
 class OperationKindError(ValueError):
     """A strategy's operation does not carry the kind its namespace prescribes."""
 
@@ -146,6 +174,8 @@ class StrategyOperations:
     verify: type[VerifyParentRevisionBase]
     interpret: type[InterpretEvidenceBase]
     retain: type[RetainVerifiedRevisionBase]
+    capture: type[CaptureCommandBase] | None = None
+    """The optional command capture a profile-guided strategy declares."""
 
     def __post_init__(self) -> None:
         for suffix, model in self._by_suffix():
@@ -155,22 +185,27 @@ class StrategyOperations:
                 raise OperationKindError(expected, str(actual))
 
     def _by_suffix(self) -> tuple[tuple[str, type[OperationRequest]], ...]:
-        return (
+        required = (
             (RENDER_SUFFIX, self.render),
             (VERIFY_SUFFIX, self.verify),
             (INTERPRET_SUFFIX, self.interpret),
             (RETAIN_SUFFIX, self.retain),
         )
+        if self.capture is None:
+            return required
+        return (*required, (CAPTURE_SUFFIX, self.capture))
 
     def registrations(self) -> tuple[OperationRegistration, ...]:
         """Codec registrations the launch assembles beside other libraries' operations."""
-        return (
-            self._registration(RENDER_SUFFIX, self.render),
-            self._registration(VERIFY_SUFFIX, self.verify),
-            self._registration(INTERPRET_SUFFIX, self.interpret),
+        return tuple(
             self._registration(
-                RETAIN_SUFFIX, self.retain, revision_authority=RevisionAuthority.RETAIN
-            ),
+                suffix,
+                model,
+                revision_authority=(
+                    RevisionAuthority.RETAIN if suffix == RETAIN_SUFFIX else RevisionAuthority.NONE
+                ),
+            )
+            for suffix, model in self._by_suffix()
         )
 
     def registry(self) -> OperationRegistry:

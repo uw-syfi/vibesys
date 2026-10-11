@@ -64,6 +64,8 @@ from vs_core._step import (
     validate_terminal_inputs,
 )
 from vs_core._strategy_operations import (
+    CaptureCommandBase,
+    CommandCapture,
     EvidenceReadingsBase,
     InterpretEvidenceBase,
     OperationKindError,
@@ -569,6 +571,7 @@ __all__ = [
     "CancelOwnedResource",
     "CancelTurn",
     "Capabilities",
+    "CaptureCommandBase",
     "Charge",
     "ChargeId",
     "ChargeKind",
@@ -583,6 +586,7 @@ __all__ = [
     "CloseAttemptScope",
     "CloseSession",
     "CollectEvidence",
+    "CommandCapture",
     "CompletionStatus",
     "Continuation",
     "ContinuationId",
