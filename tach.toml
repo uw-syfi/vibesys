@@ -286,7 +286,7 @@ depends_on = ["vibesys.multi_core", "vibesys.orchestration.multi.models"]
 [[modules]]
 path = "vibesys.orchestration.dynamic"
 layer = "loops"
-depends_on = ["vibesys.run.endings", "vibesys.dynamic_core", "vibesys.orchestration.dynamic.parents", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_backend", "vs_prompts", "vs_runtime", "vs_evaluation.api", "vibesys.orchestration.dynamic.models", "vs_evaluator_protocol"]
+depends_on = ["vibesys.dynamic_core", "vibesys.orchestration.dynamic.parents", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_backend", "vs_prompts", "vs_runtime", "vs_evaluation.api", "vibesys.orchestration.dynamic.models", "vs_evaluator_protocol"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
@@ -351,11 +351,6 @@ depends_on = ["vibesys", "vs_agent"]
 path = "vibesys.orchestration.attempts"
 layer = "roles_search"
 depends_on = []
-
-[[modules]]
-path = "vibesys.run.endings"
-layer = "roles_search"
-depends_on = ["vibesys.hypothesis", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.review"
