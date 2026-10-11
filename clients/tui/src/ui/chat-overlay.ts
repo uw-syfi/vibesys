@@ -9,10 +9,11 @@ import {chatThreadHeading, type SessionState} from '../session-model.js';
 import type {Theme} from '../theme.js';
 import {ChatComposerView, type ChatDraft} from './chat-composer.js';
 import {ConversationView} from './conversation.js';
+import {fitModalRows, type ModalViewport} from './modal-geometry.js';
 
 /**
- * The centred modal's four edges as fractions of the terminal: 80% of the
- * columns, centred, and 76% of the rows starting a tenth of the way down.
+ * The centred modal's horizontal edges as fractions of the terminal and its
+ * vertical edges as fractions of the root-owned modal viewport.
  */
 const MODAL_LEFT = 0.1;
 const MODAL_RIGHT = 0.9;
@@ -63,6 +64,7 @@ export class ChatOverlayView {
    * long as no state change happened to ask again.
    */
   #contentWidth = 1;
+  #modalViewport: ModalViewport;
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -71,6 +73,7 @@ export class ChatOverlayView {
     theme: Theme,
     draft: ChatDraft,
   ) {
+    this.#modalViewport = {top: 0, height: renderer.terminalHeight};
     this.output = new BoxRenderable(renderer, {
       id: 'chat-overlay',
       position: 'absolute',
@@ -134,9 +137,11 @@ export class ChatOverlayView {
    * the operator can ask about what they are looking at without covering it.
    * ``null`` restores the centred modal geometry.
    */
-  setPaneBounds(bounds: PaneBounds | null): void {
-    // The modal measures itself against the terminal, so it is recomputed even
-    // when the bounds did not change: a resize changes the answer.
+  setPaneBounds(bounds: PaneBounds | null, modalViewport: ModalViewport): void {
+    this.#modalViewport = modalViewport;
+    // The modal measures itself against the root-owned viewport, so it is
+    // recomputed even when the bounds did not change: a resize or banner
+    // height change changes the answer.
     if (bounds === null) {
       this.#bounds = null;
       this.#applyModalGeometry();
@@ -169,14 +174,20 @@ export class ChatOverlayView {
    * 300. `pins the modal rectangle across a width sweep` holds this.
    */
   #applyModalGeometry(): void {
-    const {terminalWidth, terminalHeight} = this.renderer;
+    const {terminalWidth} = this.renderer;
     const left = Math.round(terminalWidth * MODAL_LEFT);
-    const top = Math.round(terminalHeight * MODAL_TOP);
+    const topOffset = Math.round(this.#modalViewport.height * MODAL_TOP);
+    const rows = fitModalRows(
+      this.#modalViewport,
+      topOffset,
+      Math.round(this.#modalViewport.height * MODAL_BOTTOM) - topOffset,
+      MIN_MODAL_HEIGHT,
+    );
     this.#applyGeometry(
       left,
-      top,
+      rows.top,
       Math.max(1, Math.round(terminalWidth * MODAL_RIGHT) - left),
-      Math.max(MIN_MODAL_HEIGHT, Math.round(terminalHeight * MODAL_BOTTOM) - top),
+      rows.height,
     );
   }
 

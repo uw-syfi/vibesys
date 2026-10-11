@@ -13,6 +13,7 @@ import {
 } from '../session-model.js';
 import {scrim, type Theme} from '../theme.js';
 import {applyPaneFocus} from './focus.js';
+import {fitModalRows, type ModalViewport} from './modal-geometry.js';
 import {rightPaneContent, rightPaneTitle} from './right-pane.js';
 
 type OverlayKind = NonNullable<SessionState['overlay']>['kind'];
@@ -43,10 +44,10 @@ function diffToneColor(theme: Theme, tone: DiffLineTone): string {
 }
 
 /**
- * The share of the screen the box takes. It is applied in whole rows and
- * columns rather than as a Yoga percentage: a fractional box edge rounds the
- * hint back onto the scroll viewport's last row, which hides the final line of
- * content.
+ * The share of the terminal width and root-owned modal rows the box takes. It
+ * is applied in whole rows and columns rather than as a Yoga percentage: a
+ * fractional box edge rounds the hint back onto the scroll viewport's last
+ * row, which hides the final line of content.
  */
 const WIDTH_SHARE = 0.7;
 const LEFT_SHARE = 0.15;
@@ -177,18 +178,18 @@ export class OverlayView {
    * asks `focusedPane` the same question rather than appearing as a `Command`
    * box with none of the focus treatment on the one thing taking keystrokes.
    */
-  render(state: SessionState, pane: RightPane | null = null): void {
+  render(state: SessionState, pane: RightPane | null, viewport: ModalViewport): void {
     // The diff viewer is the innermost layer this box can carry, so it wins
     // over both an ordinary overlay and the narrow-terminal pane fallback,
     // exactly as its keybinding block precedes theirs.
     if (state.diffViewer !== null) {
-      this.#renderDiff(state.diffViewer);
+      this.#renderDiff(state.diffViewer, viewport);
       return;
     }
     this.#renderedDiff = null;
     this.#hint.content = HINT;
     if (pane !== null) {
-      this.#renderPane(state, pane);
+      this.#renderPane(state, pane, viewport);
       return;
     }
     this.#renderedPane = null;
@@ -205,7 +206,7 @@ export class OverlayView {
       return;
     }
     this.output.visible = true;
-    this.#applyGeometry();
+    this.#applyGeometry(viewport);
     if (this.#renderedKind === overlay.kind && this.#renderedContent === overlay.content) return;
     this.#renderedKind = overlay.kind;
     this.#renderedContent = overlay.content;
@@ -218,9 +219,9 @@ export class OverlayView {
     );
   }
 
-  #renderPane(state: SessionState, pane: RightPane): void {
+  #renderPane(state: SessionState, pane: RightPane, viewport: ModalViewport): void {
     this.output.visible = true;
-    this.#applyGeometry();
+    this.#applyGeometry(viewport);
     // Outside the cache below: focus moves without the content changing.
     applyPaneFocus(
       this.output,
@@ -263,9 +264,9 @@ export class OverlayView {
    * header `diffHunkDisplayLine` names. Rebuilt only when the file on screen
    * or its patch slot changes; a hunk move reuses the rows and just scrolls.
    */
-  #renderDiff(viewer: DiffViewerState): void {
+  #renderDiff(viewer: DiffViewerState, viewport: ModalViewport): void {
     this.output.visible = true;
-    this.#applyGeometry();
+    this.#applyGeometry(viewport);
     const previous = this.#renderedDiff;
     if (previous === viewer) return;
     this.#renderedDiff = viewer;
@@ -318,17 +319,19 @@ export class OverlayView {
   }
 
   /** Whole-row, whole-column geometry, recomputed as the terminal resizes. */
-  #applyGeometry(): void {
+  #applyGeometry(viewport: ModalViewport): void {
     const columns = this.renderer.terminalWidth;
-    const rows = this.renderer.terminalHeight;
     this.output.width = Math.round(columns * WIDTH_SHARE);
     this.output.left = Math.round(columns * LEFT_SHARE);
-    const top = Math.round(rows * TOP_SHARE);
-    this.output.top = top;
-    this.output.height = Math.max(
+    const rows = fitModalRows(
+      viewport,
+      Math.round(viewport.height * TOP_SHARE),
+      Math.round(viewport.height * HEIGHT_SHARE),
       MIN_ROWS,
-      Math.min(Math.round(rows * HEIGHT_SHARE), rows - COMMAND_SURFACE_ROWS - top),
+      COMMAND_SURFACE_ROWS,
     );
+    this.output.top = rows.top;
+    this.output.height = rows.height;
   }
 
   #clear(): void {

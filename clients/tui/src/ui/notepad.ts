@@ -1,8 +1,13 @@
 import {BoxRenderable, type CliRenderer, TextareaRenderable, TextRenderable} from '@opentui/core';
 import type {SessionState} from '../session-model.js';
 import type {Theme} from '../theme.js';
+import {fitModalRows, type ModalViewport} from './modal-geometry.js';
 
 const HINT = 'F6: steer (unsent) · F7: chat (unsent) · Esc: close · / is inert';
+const HEIGHT_SHARE = 0.6;
+const TOP_SHARE = 0.18;
+/** Two borders, two metadata rows, the editor, and its hint. */
+const MIN_ROWS = 6;
 
 // `generate_run_id` (`vs_project/_state.py`) builds ids as
 // `{date}-{time}-{8-hex-suffix}-{slug}`: sortable and collision-safe, not
@@ -54,10 +59,8 @@ export class NotepadView {
     this.output = new BoxRenderable(renderer, {
       id: 'notepad',
       width: '70%',
-      height: '60%',
       position: 'absolute',
       left: '15%',
-      top: '18%',
       flexDirection: 'column',
       paddingLeft: 1,
       paddingRight: 1,
@@ -136,13 +139,21 @@ export class NotepadView {
     this.#editor.focusedTextColor = theme.textStrong;
   }
 
-  render(state: SessionState): void {
+  render(state: SessionState, viewport: ModalViewport): void {
     const notepad = state.notepad;
     if (!notepad.open) {
       this.output.visible = false;
       return;
     }
     this.output.visible = true;
+    const rows = fitModalRows(
+      viewport,
+      Math.round(viewport.height * TOP_SHARE),
+      Math.round(viewport.height * HEIGHT_SHARE),
+      MIN_ROWS,
+    );
+    this.output.top = rows.top;
+    this.output.height = rows.height;
     // Synced from state only when it differs from what this view last wrote,
     // so a render triggered by the operator's own typing (which already
     // updated the widget directly) never resets the cursor mid-edit; this

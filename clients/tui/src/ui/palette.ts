@@ -1,23 +1,31 @@
-import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
+import {
+  BoxRenderable,
+  CliRenderEvents,
+  type CliRenderer,
+  ScrollBoxRenderable,
+  TextRenderable,
+} from '@opentui/core';
 import {type CommandSection, fuzzyMatchCommands, type PaletteCommand} from '../commands.js';
 import {activeCommandSurface} from '../palette-model.js';
 import {chatPaneVisible, type SessionState} from '../session-model.js';
 import type {Theme} from '../theme.js';
+import {fitModalRows, type ModalViewport} from './modal-geometry.js';
 
 const NAME_WIDTH = 14;
 
 const HINT = '↑↓: select · Enter: run · Esc: close';
 
 /**
- * Whole-row, whole-column geometry, the same reasoning `overlay.ts` uses: a
- * fractional edge rounds the hint row back onto the scroll viewport's last
- * row, which hides the final match.
+ * Whole-row, whole-column geometry over the root-owned modal rows, the same
+ * reasoning `overlay.ts` uses: a fractional edge rounds the hint row back onto
+ * the scroll viewport's last row, which hides the final match.
  */
 const WIDTH_SHARE = 0.7;
 const LEFT_SHARE = 0.15;
 const HEIGHT_SHARE = 0.6;
 const TOP_SHARE = 0.18;
 const COMMAND_SURFACE_ROWS = 5;
+const PALETTE_CHROME_ROWS = 4;
 
 /** Two borders, the query row, the hint row, and one line of content worth opening for. */
 const MIN_ROWS = 5;
@@ -67,6 +75,19 @@ export class PaletteView {
   #renderedQuery: string | null = null;
   #renderedSelected = -1;
   #renderedSurface: 'command' | 'chat' | null = null;
+  #renderedSelectedRow = 0;
+  #renderedRowCount = 0;
+  #renderedViewportRows: number | null = null;
+  #pendingViewportRows: number | null = null;
+  #followScheduled = false;
+  readonly #followAfterLayout = (): void => {
+    this.#followScheduled = false;
+    const pending = this.#pendingViewportRows;
+    this.#pendingViewportRows = null;
+    if (!this.output.visible || pending === null) return;
+    this.#followSelection(this.#renderedSelectedRow, this.#renderedRowCount, pending);
+    this.renderer.requestRender();
+  };
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -122,6 +143,14 @@ export class PaletteView {
     this.output.add(this.#hint);
   }
 
+  /** Cancels post-layout work before the root destroys this view's renderables. */
+  destroy(): void {
+    this.#pendingViewportRows = null;
+    if (!this.#followScheduled) return;
+    this.renderer.off(CliRenderEvents.FRAME, this.#followAfterLayout);
+    this.#followScheduled = false;
+  }
+
   applyTheme(theme: Theme): void {
     this.#theme = theme;
     this.output.borderColor = theme.info;
@@ -130,25 +159,33 @@ export class PaletteView {
     this.#renderedQuery = null;
     this.#renderedSelected = -1;
     this.#renderedSurface = null;
+    this.#renderedSelectedRow = 0;
+    this.#renderedRowCount = 0;
   }
 
-  render(state: SessionState): void {
+  render(state: SessionState, viewport: ModalViewport): void {
     const palette = state.palette;
     if (palette === null) {
       this.output.visible = false;
       this.#renderedQuery = null;
       this.#renderedSelected = -1;
       this.#renderedSurface = null;
+      this.#renderedSelectedRow = 0;
+      this.#renderedRowCount = 0;
       return;
     }
     this.output.visible = true;
-    this.#applyGeometry();
+    const viewportRows = this.#applyGeometry(viewport);
+    const geometryChanged = viewportRows !== this.#renderedViewportRows;
+    this.#renderedViewportRows = viewportRows;
     const surface = activeCommandSurface(state);
     if (
       this.#renderedQuery === palette.query &&
       this.#renderedSelected === palette.selected &&
       this.#renderedSurface === surface
     ) {
+      this.#followSelection(this.#renderedSelectedRow, this.#renderedRowCount, viewportRows);
+      if (geometryChanged) this.#followSelectionAfterLayout(viewportRows);
       return;
     }
     this.#renderedQuery = palette.query;
@@ -160,10 +197,11 @@ export class PaletteView {
       surface,
       chatDocked: chatPaneVisible(state),
     });
-    this.#renderRows(matches, palette.selected);
+    this.#renderRows(matches, palette.selected, viewportRows);
+    if (geometryChanged) this.#followSelectionAfterLayout(viewportRows);
   }
 
-  #renderRows(matches: readonly PaletteCommand[], selected: number): void {
+  #renderRows(matches: readonly PaletteCommand[], selected: number, viewportRows: number): void {
     this.#clear();
     if (matches.length === 0) {
       this.#scroll.add(
@@ -173,6 +211,8 @@ export class PaletteView {
           width: '100%',
         }),
       );
+      this.#renderedSelectedRow = 0;
+      this.#renderedRowCount = 1;
       this.#scroll.scrollTo(0);
       return;
     }
@@ -204,7 +244,9 @@ export class PaletteView {
         }),
       );
     }
-    this.#followSelection(selectedRow, rowIndex);
+    this.#renderedSelectedRow = selectedRow;
+    this.#renderedRowCount = rowIndex;
+    this.#followSelection(selectedRow, rowIndex, viewportRows);
   }
 
   /**
@@ -212,19 +254,23 @@ export class PaletteView {
    * edge of the viewport, the same clamp `experiment-log.ts` uses for its own
    * keyboard selection.
    */
-  #followSelection(selected: number, total: number): void {
-    const viewport = this.#viewportRows();
+  #followSelection(selected: number, total: number, viewport: number): void {
     const top = Math.min(this.#scroll.scrollTop, Math.max(0, total - viewport));
     if (selected < top) this.#scroll.scrollTo(selected);
     else if (selected >= top + viewport) this.#scroll.scrollTo(selected - viewport + 1);
     else this.#scroll.scrollTo(top);
   }
 
-  #viewportRows(): number {
-    const height = this.#scroll.height;
-    if (typeof height === 'number' && height > 0) return height;
-    // Before the first layout pass, estimate from the terminal.
-    return Math.max(1, Math.round(this.renderer.terminalHeight * HEIGHT_SHARE) - MIN_ROWS);
+  /**
+   * Geometry assignments take effect in OpenTUI's next layout pass. A scroll
+   * requested before that pass is clamped against the old viewport, so repeat
+   * the selection anchor after the first frame drawn at the new size.
+   */
+  #followSelectionAfterLayout(viewport: number): void {
+    this.#pendingViewportRows = viewport;
+    if (this.#followScheduled) return;
+    this.#followScheduled = true;
+    this.renderer.once(CliRenderEvents.FRAME, this.#followAfterLayout);
   }
 
   #commandLine(command: PaletteCommand, selected: boolean): string {
@@ -234,17 +280,20 @@ export class PaletteView {
   }
 
   /** Whole-row, whole-column geometry, recomputed as the terminal resizes. */
-  #applyGeometry(): void {
+  #applyGeometry(viewport: ModalViewport): number {
     const columns = this.renderer.terminalWidth;
-    const rows = this.renderer.terminalHeight;
     this.output.width = Math.round(columns * WIDTH_SHARE);
     this.output.left = Math.round(columns * LEFT_SHARE);
-    const top = Math.round(rows * TOP_SHARE);
-    this.output.top = top;
-    this.output.height = Math.max(
+    const rows = fitModalRows(
+      viewport,
+      Math.round(viewport.height * TOP_SHARE),
+      Math.round(viewport.height * HEIGHT_SHARE),
       MIN_ROWS,
-      Math.min(Math.round(rows * HEIGHT_SHARE), rows - COMMAND_SURFACE_ROWS - top),
+      COMMAND_SURFACE_ROWS,
     );
+    this.output.top = rows.top;
+    this.output.height = rows.height;
+    return Math.max(1, rows.height - PALETTE_CHROME_ROWS);
   }
 
   #clear(): void {
