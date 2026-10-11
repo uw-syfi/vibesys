@@ -1,0 +1,206 @@
+/**
+ * The run page's one path to the backend. It is the only module of `clients/web` that imports
+ * backend-client's runtime values or calls `fetch` (`clients/.dependency-cruiser.mjs` and
+ * `clients/lint-rules/web-fetch-only-in-backend.grit` hold it to that): the control transport
+ * (a WebSocket, or the desktop shell's bridge shaped as one), the run's event stream and snapshot
+ * over it, the gateway's capability exchange, and the replay fixture. It is also the entry of the
+ * browser transport bundle that `check:web-browser-bundle` keeps free of Node builtins.
+ */
+import {
+  type BatchReconciliation,
+  type ControlChannelState,
+  type ControlTransport,
+  type EventBatchMessage,
+  PersistentEventStream,
+  type PersistentEventStreamOptions,
+  type RunEvent,
+  type RunSnapshot,
+  type ScheduleTimeout,
+  ServerError,
+  type StreamConnectionState,
+  StreamReconciler,
+  sameControlChannelState,
+  validateRunEvent,
+} from '@vibesys/backend-client';
+import {type WebSocketLike, WebSocketTransport} from '@vibesys/backend-client/websocket';
+
+export type {ControlTransport, WebSocketLike};
+
+/** Where a transport reports control-channel connectivity. */
+export interface TransportHooks {
+  readonly onConnectionState: (state: ControlChannelState) => void;
+}
+
+/** Timing seams; the defaults are the browser's. Tests supply a deterministic scheduler. */
+export interface TransportTiming {
+  readonly scheduleTimeout?: ScheduleTimeout;
+  readonly reconnectDelaysMs?: readonly number[];
+}
+
+/**
+ * The control transport over `url`, or over the sockets `webSocket` opens (the desktop bridge),
+ * redialing on `timing`'s cadence so the command path and the event stream back off on one
+ * schedule.
+ */
+export function openTransport(
+  url: string,
+  hooks: TransportHooks,
+  timing: TransportTiming = {},
+  webSocket?: () => WebSocketLike,
+): ControlTransport {
+  const {scheduleTimeout, reconnectDelaysMs} = timing;
+  return new WebSocketTransport(url, {
+    onConnectionState: hooks.onConnectionState,
+    ...(webSocket === undefined ? {} : {webSocket}),
+    ...(scheduleTimeout === undefined ? {} : {scheduleTimeout}),
+    ...(reconnectDelaysMs === undefined ? {} : {reconnectDelaysMs}),
+  });
+}
+
+/** What the run's event stream reports to the session. */
+export interface RunStreamHandlers {
+  /** The last sequence folded, where a resumed subscription continues. */
+  cursor(): number;
+  /** Whether a dropped stream is worth redialing (false once the run has ended). */
+  shouldReconnect(): boolean;
+  onBatch(message: EventBatchMessage, reconciliation: BatchReconciliation): void;
+  /** An in-band protocol error; the transport suppresses the close that follows it. */
+  onFault(error: Error): void;
+  onConnectionState(state: StreamConnectionState): void;
+}
+
+/** The run behind one control transport: its snapshot and its persistent event stream. */
+export interface RunConnection {
+  loadSnapshot(): Promise<RunSnapshot>;
+  /** Subscribe once; settles when the first subscription does. */
+  subscribe(handlers: RunStreamHandlers): Promise<void>;
+  /** Resume the stream where it was. */
+  retry(): void;
+  /** Restart the stream from a fresh bootstrap. */
+  rebootstrap(): void;
+  /** Cancel an armed control-channel redial and dial now (inert when healthy or dialing). */
+  redialControls(): void;
+  close(): Promise<void>;
+}
+
+export interface RunConnectionOptions extends TransportTiming {
+  readonly tail?: number;
+}
+
+/**
+ * How a session opens its run: the transport `open` builds (reporting to the session's hooks, with
+ * repeats of one control-channel state dropped), and the run connection over it.
+ */
+export function connectRun(
+  open: (hooks: TransportHooks) => ControlTransport,
+  options: RunConnectionOptions = {},
+): (hooks: TransportHooks) => RunConnection {
+  return hooks => {
+    let last: ControlChannelState = {status: 'connected'};
+    const transport = open({
+      onConnectionState: state => {
+        if (sameControlChannelState(last, state)) return;
+        last = state;
+        hooks.onConnectionState(state);
+      },
+    });
+    return openRunConnection(transport, options);
+  };
+}
+
+function openRunConnection(
+  transport: ControlTransport,
+  options: RunConnectionOptions = {},
+): RunConnection {
+  const {tail, reconnectDelaysMs, scheduleTimeout} = options;
+  const streamOptions: PersistentEventStreamOptions = {
+    ...(tail === undefined ? {} : {tail}),
+    ...(reconnectDelaysMs === undefined ? {} : {reconnectDelaysMs}),
+    ...(scheduleTimeout === undefined ? {} : {scheduleTimeout}),
+  };
+  const stream = new PersistentEventStream(transport, streamOptions);
+  // The browser replays the whole log and exposes no backfill action, so the positive chunk is
+  // dormant; it follows the configured tail so a future history action cannot drift from it.
+  const reconciler = new StreamReconciler({backfillChunk: tail ?? 1});
+  return {
+    async loadSnapshot() {
+      const response = await transport.request({type: 'query.snapshot'});
+      if (response.ok !== true || response.snapshot === null || response.snapshot === undefined) {
+        throw new Error(response.error ?? 'Server did not return a run snapshot');
+      }
+      return response.snapshot;
+    },
+    subscribe(handlers) {
+      return stream.subscribe({
+        cursor: handlers.cursor,
+        storeId: () => reconciler.storeId(),
+        shouldReconnect: handlers.shouldReconnect,
+        onMessage: (message, {resumed}) => {
+          if (message.type === 'event_batch') {
+            handlers.onBatch(message, reconciler.reconcileBatch(message, {resumed}));
+          } else if (message.type === 'protocol_error') {
+            handlers.onFault(new ServerError(message.message, message.diagnostic ?? null));
+          }
+        },
+        onConnectionState: handlers.onConnectionState,
+      });
+    },
+    retry: () => stream.retry(),
+    rebootstrap: () => stream.rebootstrap(),
+    redialControls: () => transport.reconnect(),
+    async close() {
+      await stream.close();
+      await transport.close();
+    },
+  };
+}
+
+const BROWSER_SESSION_HEADER = 'X-VibeSys-Browser-Session';
+
+export type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
+
+/** Exchange a gateway launch capability for this tab's browser-session credential. */
+export async function bootstrapGateway(
+  capabilityUrl: string,
+  fetcher: Fetch = fetch,
+): Promise<string> {
+  const response = await fetcher(capabilityUrl, {
+    cache: 'no-store',
+    credentials: 'include',
+    mode: 'cors',
+  });
+  if (!response.ok) throw new Error(`Gateway rejected the capability (HTTP ${response.status})`);
+  const browserSession = response.headers.get(BROWSER_SESSION_HEADER);
+  if (browserSession === null || browserSession === '') {
+    throw new Error('Gateway did not establish a browser session');
+  }
+  return browserSession;
+}
+
+/** Fetch a JSONL replay fixture and validate every event; any bad line rejects the whole file. */
+export async function fetchReplayFixture(url: string, fetcher: Fetch = fetch): Promise<RunEvent[]> {
+  const response = await fetcher(url);
+  if (!response.ok) throw new Error(`Replay fixture request failed with ${response.status}`);
+  const events: RunEvent[] = [];
+  for (const [index, line] of (await response.text()).split('\n').entries()) {
+    if (line.trim().length === 0) continue;
+    const lineNumber = index + 1;
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch (reason) {
+      throw new Error(`Replay fixture contains invalid JSON on line ${lineNumber}`, {
+        cause: reason,
+      });
+    }
+    try {
+      events.push(validateRunEvent(value));
+    } catch (reason) {
+      const detail = reason instanceof Error ? `: ${reason.message}` : '';
+      throw new Error(`Replay fixture contains invalid event on line ${lineNumber}${detail}`, {
+        cause: reason,
+      });
+    }
+  }
+  return events;
+}

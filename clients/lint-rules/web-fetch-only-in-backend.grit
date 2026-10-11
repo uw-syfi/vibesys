@@ -1,0 +1,16 @@
+// The web run page has one path to the backend: `web/src/platform/backend.ts`. It is the only
+// module that calls `fetch`; dependency-cruiser holds backend-client's runtime imports to it too.
+language js;
+
+or {
+  `fetch($args)`,
+  `globalThis.fetch`,
+  `window.fetch`,
+  `self.fetch`
+} as $call where {
+  register_diagnostic(
+    span = $call,
+    message = "Only web/src/platform/backend.ts calls fetch. Add the request there and inject it where it is needed.",
+    severity = "error"
+  )
+}
