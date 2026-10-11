@@ -708,6 +708,11 @@ build differs from it, and why.
   rendered by the board owner from the strategy's templates (`BoardTexts`), because Python must
   not build agent-bound text. The human-readable Markdown mirror of the board moved from the
   workspace root to the run's portable state.
+- **The evaluator writes in its own checkout.** 7.2 gave the evaluation `WRITE_ARTIFACTS`. A live
+  run showed that grant reverts every file written outside a directory that already exists in
+  the checkout, which failed the evaluator's turn when it saved its benchmark output. The
+  evaluator now has `WRITE_CANDIDATE` in an isolated child that its attempt settles discarded,
+  and its reply waits for the checkpoint like an implementer's.
 - **One workspace mode.** Jobs run in isolated child workspaces; an environment that cannot
   open them is refused with `require_candidate_sandboxes`, as `dynamic` does. The
   `EXCLUSIVE_ROOT` choice of 4.4 is the `single` port's to make.
