@@ -49,7 +49,7 @@ const NODE_SSH_CONFIG_FILESYSTEM: SshConfigFilesystem = {
 };
 
 /** One checkout change, unique across renderer-document lifetimes. */
-export interface CheckoutChangeId {
+interface CheckoutChangeId {
   readonly owner: string;
   readonly sequence: number;
 }

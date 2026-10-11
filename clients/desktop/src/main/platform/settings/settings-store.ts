@@ -42,7 +42,7 @@ interface ReadResult<T> {
 }
 
 /** Whether a conditional settings update crossed its atomic replace boundary. */
-export type SettingsUpdateOutcome = 'committed' | 'cancelled';
+type SettingsUpdateOutcome = 'committed' | 'cancelled';
 
 export class SettingsStore {
   readonly #options: SettingsStoreOptions;
