@@ -182,7 +182,10 @@ so `LEGACY_EXEMPTIONS` in the checker lets them skip the per-entry project rules
 applies to them. Desktop now holds only the Electron main process and its preloads, and declares
 an entry per process: `.` is the `node` main process, and `./preload/run` and `./preload/welcome`
 the `node` sandboxed preloads (each a single file), so runtime reachability and the third-party
-allowlist hold on each side. It keeps its exemption until `apps/desktop-main` replaces it: the
+allowlist hold on each side. A preload imports only `@vibesys/ipc` and Electron
+(`desktop-preloads-import-only-ipc-and-electron` in `.dependency-cruiser.mjs`), and no package's
+shipping code imports another package's `testing/` or `test-support/`
+(`production-code-does-not-import-other-packages-test-support`). It keeps its exemption until `apps/desktop-main` replaces it: the
 main process and both preloads compile in one project (`tsconfig.main.json`, emitting the
 `dist/` that Electron loads by path), and a preload subpath names no per-entry project file. The
 table only shrinks as the migration items move them.

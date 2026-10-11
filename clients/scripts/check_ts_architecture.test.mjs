@@ -94,10 +94,13 @@ const VALID_FILES = {
   'core-state/src/testing/model.ts': "import '../index.js';\n",
   // A feature's Node entry (`src/main/`) is not held to its browser parts' rules.
   'features/replay/src/main/index.ts': "import 'net';\nimport '@vibesys/transport';\n",
-  // A package's test support may build on core-state's.
+  // A package's test support may build on another's, and its tests may use another's Fakes.
+  'entities/src/index.ts': '',
+  'ipc/src/index.ts': "import type {} from '@vibesys/entities';\n",
+  'ipc/src/testing/index.ts': "import './chrome.js';\n",
   'ipc/src/testing/chrome.ts': "import type {} from '@vibesys/core-state/testing';\n",
   'apps/desktop-renderer/src/wiring/stores.test.ts':
-    "import '@vibesys/core-state/testing';\nimport '../ui/welcome-view.js';\nimport 'node:fs';\n",
+    "import '@vibesys/core-state/testing';\nimport '@vibesys/ipc/testing';\nimport '../ui/welcome-view.js';\nimport 'node:fs';\n",
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
   // The web app's composition enters a feature through its entries, and only the backend adapter
@@ -145,7 +148,9 @@ const VALID_FILES = {
     "import 'node:child_process';\nimport '../state/machine.js';\n",
   'desktop/src/main/platform/link/state/machine.ts': "import type {} from '@vibesys/transport';\n",
   'desktop/src/main/platform/link/testing/fake.ts': "import '../state/machine.js';\n",
-  'desktop/src/renderer/preload/bridge.ts': '',
+  // A preload binds `@vibesys/ipc`'s messages to Electron, and imports nothing else.
+  'desktop/src/renderer/preload/bridge.ts':
+    "import 'electron';\nimport type {} from '@vibesys/ipc';\n",
   // The desktop renderer app: its entry composes the wiring and the view, each entering the
   // features through their entries.
   'apps/desktop-renderer/src/main.tsx':
@@ -177,6 +182,32 @@ const RULE_CASES = [
     rule: 'desktop-renderer-does-not-import-main',
     files: {
       'desktop/src/renderer/preload/bridge.ts': "import '../../main/entities/listing.js';\n",
+    },
+  },
+  {
+    rule: 'desktop-preloads-import-only-ipc-and-electron',
+    files: {'desktop/src/renderer/preload/bridge.ts': "import type {} from '@vibesys/entities';\n"},
+  },
+  {
+    rule: 'desktop-preloads-import-only-ipc-and-electron',
+    files: {
+      'desktop/src/renderer/preload/bridge.ts': "import '@vibesys/feature-replay/renderer';\n",
+    },
+  },
+  {
+    rule: 'desktop-preloads-import-only-ipc-and-electron',
+    files: {'desktop/src/renderer/preload/bridge.ts': "import 'node:fs';\n"},
+  },
+  {
+    rule: 'production-code-does-not-import-other-packages-test-support',
+    files: {'features/replay/src/renderer/effects/replay.ts': "import '@vibesys/ipc/testing';\n"},
+  },
+  {
+    // Test support nested in a slice (`desktop/src/main/<slice>/testing/`) is test support too.
+    rule: 'production-code-does-not-import-other-packages-test-support',
+    files: {
+      'apps/web/src/platform/backend.ts':
+        "import '../../../../desktop/src/main/platform/link/testing/fake.js';\n",
     },
   },
   {
@@ -429,6 +460,9 @@ async function violatedRules(t, files) {
           '@vibesys/core-state/testing': ['core-state/src/testing/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
           '@vibesys/feature-replay/renderer': ['features/replay/src/renderer/index.ts'],
+          '@vibesys/entities': ['entities/src/index.ts'],
+          '@vibesys/ipc': ['ipc/src/index.ts'],
+          '@vibesys/ipc/testing': ['ipc/src/testing/index.ts'],
         },
       },
     }),

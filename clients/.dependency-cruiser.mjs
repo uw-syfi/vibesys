@@ -20,6 +20,14 @@ const TRANSPORT_TEST_ONLY =
 const CORE_STATE_TEST_ONLY = '^core-state/src/testing/';
 // A package's own test-support directory (`desktop/src/testing/`): Fakes that only tests import.
 const PACKAGE_TEST_SUPPORT = '^[^/]+/src/testing/';
+// Any package's test support, at any depth of its sources: the `testing/` entries that ship Fakes
+// to other packages' tests, and the `test-support/` helpers.
+// Two patterns, because the one-pattern `src/(?:.+/)?` nests quantifiers that dependency-cruiser's
+// regular-expression safety check rejects.
+const ANY_TEST_SUPPORT = [
+  `^(?:${PACKAGE_DIRECTORIES})/src/(?:testing|test-support)/`,
+  `^(?:${PACKAGE_DIRECTORIES})/src/.*/(?:testing|test-support)/`,
+];
 // The replay harness is tooling, but it has its own rule below, with the reason it exists; the
 // remaining tooling directories are plain leaf tools.
 const DEV_HARNESS = 'tui/dev';
@@ -155,6 +163,16 @@ function desktopRules() {
   }));
   return [
     ...layerRules,
+    {
+      // A preload is the sandboxed page's only way to the main process, and runs before the page
+      // with Electron's renderer APIs: it binds `@vibesys/ipc`'s typed messages to Electron and
+      // nothing else. A feature or domain package would put product code in the trusted bridge;
+      // the payload types it carries are reached through `@vibesys/ipc`'s bridge interfaces.
+      name: 'desktop-preloads-import-only-ipc-and-electron',
+      severity: 'error',
+      from: {path: `${DESKTOP}renderer/preload/`, pathNot: TEST_FILE},
+      to: {pathNot: ['^ipc/src/', '(?:^|/)node_modules/electron/']},
+    },
     {
       name: 'desktop-renderer-does-not-import-main',
       severity: 'error',
@@ -333,6 +351,16 @@ export default {
       severity: 'error',
       from: {path: SCANNED, pathNot: [TEST_FILE, PACKAGE_TEST_SUPPORT]},
       to: {path: CORE_STATE_TEST_ONLY},
+    },
+    {
+      // Another package's Fakes and test helpers are for tests: a package's shipping code that
+      // imports them ships them. Test support may build on other test support (an entry's Fakes
+      // over core-state's model checker). Group 1 is the importer's own package, whose test
+      // support the per-package rules above hold.
+      name: 'production-code-does-not-import-other-packages-test-support',
+      severity: 'error',
+      from: {path: OWN_PACKAGE, pathNot: [TEST_FILE, ...ANY_TEST_SUPPORT]},
+      to: {path: ANY_TEST_SUPPORT, pathNot: '^$1/'},
     },
     {
       name: 'workspace-packages-use-public-exports',
