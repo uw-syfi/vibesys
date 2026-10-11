@@ -39,16 +39,16 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     ],
     project: ['src/**/*.ts', 'dev/**/*.ts', 'benchmarks/**/*.ts'],
   },
-  web: {
+  'apps/web': {
     entry: [
-      // The package's public surface (`@vibesys/web`), which the browser bundle and the
-      // end-to-end specs import; `vite.config.ts` and `index.html` supply the app entries.
-      'src/index.ts',
-      // The desktop app's page, built by `vite.desktop.config.ts` from `desktop.html`.
+      // The desktop shell's run page (`desktop.html`, built by `vite.desktop.config.ts`); knip's
+      // Vite plugin finds the browser page (`index.html` -> `src/app/main.tsx`) itself.
       'src/app/desktop-main.tsx',
+      // The browser transport bundle's entry (`vite.browser.config.ts`).
+      'src/platform/backend.ts',
       'src/**/*.test.ts',
       'src/**/*.test.tsx',
-      // Playwright specs, run by `pnpm --filter @vibesys/web test:e2e`.
+      // Playwright specs, run by `pnpm --filter @vibesys/app-web test:e2e`.
       'e2e/**/*.spec.ts',
       // Loaded by gateway-form-harness.html rather than by a TypeScript import.
       'e2e/gateway-form-harness.ts',

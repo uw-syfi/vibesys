@@ -1,6 +1,6 @@
+import {WebSession} from '@vibesys/feature-run-view/renderer';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {WebSession} from '../features/run-view/index.js';
 import {desktopBridge, desktopSessionOptions, markDesktopShell} from '../platform/desktop-shell.js';
 import {browserLifecycle} from '../platform/lifecycle.js';
 import '../styles.css';

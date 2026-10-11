@@ -1,12 +1,5 @@
 /** The browser service a live session wakes on. */
-
-/** The page's visibility and network reachability, and their change events. */
-export interface BrowserLifecycle {
-  readonly visibilityState: DocumentVisibilityState;
-  readonly online: boolean;
-  addEventListener(type: 'visibilitychange' | 'online' | 'offline', listener: () => void): void;
-  removeEventListener(type: 'visibilitychange' | 'online' | 'offline', listener: () => void): void;
-}
+import type {BrowserLifecycle} from '@vibesys/feature-run-view/state';
 
 /** The page's own visibility and network reachability. */
 export const browserLifecycle: BrowserLifecycle = {

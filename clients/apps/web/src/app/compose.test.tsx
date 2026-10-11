@@ -1,6 +1,6 @@
 import {expect, test} from 'bun:test';
+import {targetFromCapability} from '@vibesys/feature-gateway-connect/renderer';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {targetFromCapability} from '../entities/gateway.js';
 import {createDemoApp} from './compose.js';
 
 test('renders an initial capability launch before its exchange settles', () => {

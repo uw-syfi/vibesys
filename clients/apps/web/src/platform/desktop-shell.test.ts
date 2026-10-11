@@ -1,16 +1,16 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent} from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
+import {WebSession} from '@vibesys/feature-run-view/renderer';
+import type {BrowserLifecycle} from '@vibesys/feature-run-view/state';
 import type {DesktopSocketHandlers} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/transport';
-import {WebSession} from '../features/run-view/index.js';
 import {
   desktopBridge,
   desktopSessionOptions,
   desktopShellAttributes,
   markDesktopShell,
 } from './desktop-shell.js';
-import type {BrowserLifecycle} from './lifecycle.js';
 
 describe('desktopShellAttributes', () => {
   test('describes every supported platform', () => {

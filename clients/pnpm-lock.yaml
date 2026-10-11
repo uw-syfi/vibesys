@@ -28,6 +28,58 @@ importers:
         specifier: 7.1.5
         version: 7.1.5(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.1)
 
+  apps/web:
+    dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
+      '@vibesys/core-state':
+        specifier: workspace:*
+        version: link:../../core-state
+      '@vibesys/feature-gateway-connect':
+        specifier: workspace:*
+        version: link:../../features/gateway-connect
+      '@vibesys/feature-replay':
+        specifier: workspace:*
+        version: link:../../features/replay
+      '@vibesys/feature-run-view':
+        specifier: workspace:*
+        version: link:../../features/run-view
+      '@vibesys/ipc':
+        specifier: workspace:*
+        version: link:../../ipc
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../../transport
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+      react-dom:
+        specifier: 19.1.1
+        version: 19.1.1(react@19.1.1)
+    devDependencies:
+      '@playwright/test':
+        specifier: 1.55.0
+        version: 1.55.0
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      '@types/react':
+        specifier: 19.1.13
+        version: 19.1.13
+      '@types/react-dom':
+        specifier: 19.1.9
+        version: 19.1.9(@types/react@19.1.13)
+      '@vitejs/plugin-react':
+        specifier: 5.0.4
+        version: 5.0.4(vite@7.1.5(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.1))
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   contracts:
     devDependencies:
       '@types/bun':
@@ -120,6 +172,84 @@ importers:
       '@vibesys/core-state':
         specifier: workspace:*
         version: link:../core-state
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  features/gateway-connect:
+    dependencies:
+      '@vibesys/core-state':
+        specifier: workspace:*
+        version: link:../../core-state
+      '@vibesys/ui':
+        specifier: workspace:*
+        version: link:../../ui
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/react':
+        specifier: 19.1.13
+        version: 19.1.13
+      '@types/react-dom':
+        specifier: 19.1.9
+        version: 19.1.9(@types/react@19.1.13)
+      react-dom:
+        specifier: 19.1.1
+        version: 19.1.1(react@19.1.1)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  features/replay:
+    dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
+      '@vibesys/core-state':
+        specifier: workspace:*
+        version: link:../../core-state
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  features/run-view:
+    dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
+      '@vibesys/core-state':
+        specifier: workspace:*
+        version: link:../../core-state
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../../transport
+      '@vibesys/ui':
+        specifier: workspace:*
+        version: link:../../ui
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/react':
+        specifier: 19.1.13
+        version: 19.1.13
+      '@types/react-dom':
+        specifier: 19.1.9
+        version: 19.1.9(@types/react@19.1.13)
+      react-dom:
+        specifier: 19.1.1
+        version: 19.1.1(react@19.1.1)
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -233,52 +363,6 @@ importers:
       react-dom:
         specifier: 19.1.1
         version: 19.1.1(react@19.1.1)
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
-  web:
-    dependencies:
-      '@vibesys/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@vibesys/core-state':
-        specifier: workspace:*
-        version: link:../core-state
-      '@vibesys/ipc':
-        specifier: workspace:*
-        version: link:../ipc
-      '@vibesys/transport':
-        specifier: workspace:*
-        version: link:../transport
-      '@vibesys/ui':
-        specifier: workspace:*
-        version: link:../ui
-      react:
-        specifier: 19.1.1
-        version: 19.1.1
-      react-dom:
-        specifier: 19.1.1
-        version: 19.1.1(react@19.1.1)
-    devDependencies:
-      '@playwright/test':
-        specifier: 1.55.0
-        version: 1.55.0
-      '@types/bun':
-        specifier: 1.4.2
-        version: 1.4.2
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.13.3
-      '@types/react':
-        specifier: 19.1.13
-        version: 19.1.13
-      '@types/react-dom':
-        specifier: 19.1.9
-        version: 19.1.9(@types/react@19.1.13)
-      '@vitejs/plugin-react':
-        specifier: 5.0.4
-        version: 5.0.4(vite@7.1.5(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.1))
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

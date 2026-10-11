@@ -8,6 +8,14 @@ import {
   type ServerMessage,
 } from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
+import {WebSession} from '@vibesys/feature-run-view/renderer';
+import {
+  type BrowserLifecycle,
+  connectionBanners,
+  type PageVisibility,
+  STREAM_BANNER_COPY,
+  type TransportHooks,
+} from '@vibesys/feature-run-view/state';
 import {
   type ControlChannelState,
   type ControlTransport,
@@ -15,15 +23,12 @@ import {
   sameControlChannelState,
 } from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
-import {connectRun, type TransportHooks, type TransportTiming} from '../../../platform/backend.js';
-import type {BrowserLifecycle} from '../../../platform/lifecycle.js';
-import {connectionBanners, STREAM_BANNER_COPY} from '../state/banners.js';
-import {WebSession} from './session.js';
+import {connectRun, type TransportTiming} from '../platform/backend.js';
 
 type LifecycleEvent = 'visibilitychange' | 'online' | 'offline';
 
 class FakeLifecycle implements BrowserLifecycle {
-  #visibilityState: DocumentVisibilityState = 'visible';
+  #visibilityState: PageVisibility = 'visible';
   #online = true;
   readonly #listeners: Record<LifecycleEvent, Set<() => void>> = {
     visibilitychange: new Set(),
@@ -31,7 +36,7 @@ class FakeLifecycle implements BrowserLifecycle {
     offline: new Set(),
   };
 
-  get visibilityState(): DocumentVisibilityState {
+  get visibilityState(): PageVisibility {
     return this.#visibilityState;
   }
 
@@ -47,7 +52,7 @@ class FakeLifecycle implements BrowserLifecycle {
     this.#listeners[type].delete(listener);
   }
 
-  setVisibility(state: DocumentVisibilityState): void {
+  setVisibility(state: PageVisibility): void {
     this.#visibilityState = state;
     this.emit('visibilitychange');
   }

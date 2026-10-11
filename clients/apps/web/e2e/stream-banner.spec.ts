@@ -1,5 +1,5 @@
 import {expect, test} from '@playwright/test';
-import {EMPTY_TRANSCRIPT_COPY, STREAM_BANNER_COPY} from '../src/features/run-view/index.js';
+import {EMPTY_TRANSCRIPT_COPY, STREAM_BANNER_COPY} from '@vibesys/feature-run-view/state';
 import {withGateway} from './gateway.js';
 
 /**

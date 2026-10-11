@@ -249,7 +249,7 @@ jobs:
 
       - name: Install Chromium for the web smoke test
         working-directory: clients
-        run: pnpm --filter @vibesys/web exec playwright install --with-deps chromium
+        run: pnpm --filter @vibesys/app-web exec playwright install --with-deps chromium
 
       - name: Test the replay-driven web viewer
         run: ./support/repoctl/repoctl run-checks --group tui_e2e

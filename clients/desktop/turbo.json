@@ -3,7 +3,7 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "dependsOn": ["^build", "@vibesys/web#build:desktop"],
+      "dependsOn": ["^build", "@vibesys/app-web#build:desktop"],
       "outputs": ["dist/**", ".welcome-dist/**"]
     },
     "test": {

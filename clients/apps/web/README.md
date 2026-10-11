@@ -18,27 +18,27 @@ immediately removes the token from its address bar and WebSocket URLs. Rotate a
 copied launch URL without interrupting attached pages with:
 
 ```bash
-uv run python -m entrypoints.web rotate --instance clients/web/.vibesys-demo/web-gateway.json
+uv run python -m entrypoints.web rotate --instance clients/apps/web/.vibesys-demo/web-gateway.json
 ```
 
 Each production build emits `dist/.vibesys-web-build.json`, which inventories
 the source trees, HTML entrypoint, Vite configuration, package metadata, and
 locked dependency graph used by the build. A live gateway rejects this default
 bundle after any recorded input changes and prints
-`pnpm --dir clients/web build` as the repair. Pass `--no-build` only to reuse a
+`pnpm --dir clients/apps/web build` as the repair. Pass `--no-build` only to reuse a
 build that still matches the checkout. The gateway's instance record and the
 `live` and `status` commands expose the build ID.
 
 This command invokes the browser entrypoint directly. It does not start the
 OpenTUI client. Re-running the command reuses the same live demo gateway. The
 gateway remains detached until explicitly stopped; its stable instance record
-is `clients/web/.vibesys-demo/web-gateway.json`:
+is `clients/apps/web/.vibesys-demo/web-gateway.json`:
 
 ```bash
-uv run python -m entrypoints.web stop --instance clients/web/.vibesys-demo/web-gateway.json
+uv run python -m entrypoints.web stop --instance clients/apps/web/.vibesys-demo/web-gateway.json
 ```
 
-See [Web UI development](../../docs/contributing/web-development.md) for replay,
+See [Web UI development](../../../docs/contributing/web-development.md) for replay,
 real-project, and remote-host workflows. In an SSH session the script does not
 try to open a browser on the remote host; forward port 8765 and open the printed
 capability URL on the local machine.

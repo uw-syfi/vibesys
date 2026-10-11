@@ -65,9 +65,11 @@
     },
     {
       "includes": [
-        "web/src/**/*.ts",
-        "web/src/**/*.tsx",
-        "!web/src/platform/backend.ts",
+        "apps/web/src/**/*.ts",
+        "apps/web/src/**/*.tsx",
+        "features/*/src/**/*.ts",
+        "features/*/src/**/*.tsx",
+        "!apps/web/src/platform/backend.ts",
         "!**/*.test.ts",
         "!**/*.test.tsx"
       ],

@@ -1,6 +1,7 @@
 {
-  // The shipping page: DOM and Vite's client types only, so a Node import is a type error.
-  "extends": "../tsconfig.base.json",
+  // The shipping pages (the browser entry and the desktop shell's run page): DOM and Vite's client
+  // types only, so a Node import is a type error.
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
@@ -8,16 +9,20 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "noEmit": true,
-    "tsBuildInfoFile": ".tsbuild/app.tsbuildinfo"
+    "tsBuildInfoFile": ".tsbuild/lib.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/shared/testing/**"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
   "references": [
-    {"path": "../contracts/tsconfig.lib.json"},
-    {"path": "../transport/tsconfig.lib.json"},
-    {"path": "../transport/tsconfig.websocket.json"},
-    {"path": "../core-state/tsconfig.lib.json"},
-    {"path": "../ipc/tsconfig.lib.json"},
-    {"path": "../ui/tsconfig.lib.json"}
+    {"path": "../../contracts/tsconfig.lib.json"},
+    {"path": "../../transport/tsconfig.lib.json"},
+    {"path": "../../transport/tsconfig.websocket.json"},
+    {"path": "../../core-state/tsconfig.lib.json"},
+    {"path": "../../ipc/tsconfig.lib.json"},
+    {"path": "../../features/run-view/tsconfig.state.json"},
+    {"path": "../../features/run-view/tsconfig.renderer.json"},
+    {"path": "../../features/gateway-connect/tsconfig.renderer.json"},
+    {"path": "../../features/replay/tsconfig.state.json"},
+    {"path": "../../features/replay/tsconfig.renderer.json"}
   ]
 }

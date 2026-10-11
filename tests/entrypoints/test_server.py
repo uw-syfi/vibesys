@@ -206,8 +206,8 @@ def test_web_gateway_rejects_a_manifest_after_its_source_changes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     workspace = tmp_path / "workspace"
-    assets = workspace / "clients" / "web" / "dist"
-    source = workspace / "clients" / "web" / "src"
+    assets = workspace / "clients" / "apps" / "web" / "dist"
+    source = workspace / "clients" / "apps" / "web" / "src"
     assets.mkdir(parents=True)
     source.mkdir(parents=True)
     source_file = source / "entry.ts"
@@ -222,7 +222,7 @@ def test_web_gateway_rejects_a_manifest_after_its_source_changes(
     assert exit_info.value.code == 2
     assert f"web assets {assets} are stale" in diagnostic
     assert str(source_file) in diagnostic
-    assert "pnpm --dir clients/web build" in diagnostic
+    assert "pnpm --dir clients/apps/web build" in diagnostic
     assert not (tmp_path / "web-gateway.json").exists()
 
 
@@ -231,8 +231,8 @@ def test_web_gateway_rejects_a_manifest_after_a_build_input_file_changes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     workspace = tmp_path / "workspace"
-    assets = workspace / "clients" / "web" / "dist"
-    build_input = workspace / "clients" / "web" / "index.html"
+    assets = workspace / "clients" / "apps" / "web" / "dist"
+    build_input = workspace / "clients" / "apps" / "web" / "index.html"
     assets.mkdir(parents=True)
     build_input.parent.mkdir(parents=True, exist_ok=True)
     build_input.write_text('<main id="root"></main>\n', encoding="utf-8")
@@ -249,7 +249,7 @@ def test_web_gateway_rejects_a_manifest_after_a_build_input_file_changes(
     assert exit_info.value.code == 2
     assert f"web assets {assets} are stale" in diagnostic
     assert str(build_input) in diagnostic
-    assert "pnpm --dir clients/web build" in diagnostic
+    assert "pnpm --dir clients/apps/web build" in diagnostic
     assert not (tmp_path / "web-gateway.json").exists()
 
 
@@ -258,8 +258,8 @@ def test_web_gateway_accepts_a_manifest_that_matches_its_sources(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     workspace = tmp_path / "workspace"
-    assets = workspace / "clients" / "web" / "dist"
-    source = workspace / "clients" / "web" / "src"
+    assets = workspace / "clients" / "apps" / "web" / "dist"
+    source = workspace / "clients" / "apps" / "web" / "src"
     assets.mkdir(parents=True)
     source.mkdir(parents=True)
     (source / "entry.ts").write_text("export const version = 1;\n", encoding="utf-8")
@@ -279,8 +279,8 @@ def test_web_gateway_rejects_assets_that_do_not_match_their_build_id(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     workspace = tmp_path / "workspace"
-    assets = workspace / "clients" / "web" / "dist"
-    source = workspace / "clients" / "web" / "src"
+    assets = workspace / "clients" / "apps" / "web" / "dist"
+    source = workspace / "clients" / "apps" / "web" / "src"
     assets.mkdir(parents=True)
     source.mkdir(parents=True)
     (source / "entry.ts").write_text("export const version = 1;\n", encoding="utf-8")
@@ -294,7 +294,7 @@ def test_web_gateway_rejects_assets_that_do_not_match_their_build_id(
     assert exit_info.value.code == 2
     assert f"web assets {assets} do not match build" in diagnostic
     assert str(assets / "index.html") in diagnostic
-    assert "pnpm --dir clients/web build" in diagnostic
+    assert "pnpm --dir clients/apps/web build" in diagnostic
 
 
 def test_web_reopen_accepts_a_log_directory_or_run_events_file(tmp_path: Path) -> None:

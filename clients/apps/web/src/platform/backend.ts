@@ -1,38 +1,27 @@
 /**
- * The run page's one path to the backend. It is the only module of `clients/web` that imports
- * @vibesys/transport's runtime values or calls `fetch` (`clients/.dependency-cruiser.mjs` and
- * `clients/lint-rules/web-fetch-only-in-backend.grit` hold it to that): the control transport
- * (a WebSocket, or the desktop shell's bridge shaped as one), the run's event stream and snapshot
- * over it, the gateway's capability exchange, and the replay fixture. It is also the entry of the
- * browser transport bundle that `check:web-browser-bundle` keeps free of Node builtins.
+ * The run page's one path to the backend. It is the only module of `apps/web`, and of the features
+ * it composes, that imports @vibesys/transport's runtime values or calls `fetch`
+ * (`clients/.dependency-cruiser.mjs` and `clients/lint-rules/web-fetch-only-in-backend.grit` hold
+ * it to that): the control transport (a WebSocket, or the desktop shell's bridge shaped as one),
+ * the run's event stream and snapshot over it, the gateway's capability exchange, and the replay
+ * fixture. It implements the interfaces `@vibesys/feature-run-view/state` declares. It is also the
+ * entry of the browser transport bundle that `check:web-browser-bundle` keeps free of Node builtins.
  */
 
+import {type RunEvent, ServerError, validateRunEvent} from '@vibesys/contracts';
+import type {RunConnection, TransportHooks} from '@vibesys/feature-run-view/state';
 import {
-  type EventBatchMessage,
-  type RunEvent,
-  type RunSnapshot,
-  ServerError,
-  validateRunEvent,
-} from '@vibesys/contracts';
-import {
-  type BatchReconciliation,
   type ControlChannelState,
   type ControlTransport,
   PersistentEventStream,
   type PersistentEventStreamOptions,
   type ScheduleTimeout,
-  type StreamConnectionState,
   StreamReconciler,
   sameControlChannelState,
 } from '@vibesys/transport';
 import {type WebSocketLike, WebSocketTransport} from '@vibesys/transport/websocket';
 
 export type {ControlTransport, WebSocketLike};
-
-/** Where a transport reports control-channel connectivity. */
-export interface TransportHooks {
-  readonly onConnectionState: (state: ControlChannelState) => void;
-}
 
 /** Timing seams; the defaults are the browser's. Tests supply a deterministic scheduler. */
 export interface TransportTiming {
@@ -58,32 +47,6 @@ export function openTransport(
     ...(scheduleTimeout === undefined ? {} : {scheduleTimeout}),
     ...(reconnectDelaysMs === undefined ? {} : {reconnectDelaysMs}),
   });
-}
-
-/** What the run's event stream reports to the session. */
-export interface RunStreamHandlers {
-  /** The last sequence folded, where a resumed subscription continues. */
-  cursor(): number;
-  /** Whether a dropped stream is worth redialing (false once the run has ended). */
-  shouldReconnect(): boolean;
-  onBatch(message: EventBatchMessage, reconciliation: BatchReconciliation): void;
-  /** An in-band protocol error; the transport suppresses the close that follows it. */
-  onFault(error: Error): void;
-  onConnectionState(state: StreamConnectionState): void;
-}
-
-/** The run behind one control transport: its snapshot and its persistent event stream. */
-export interface RunConnection {
-  loadSnapshot(): Promise<RunSnapshot>;
-  /** Subscribe once; settles when the first subscription does. */
-  subscribe(handlers: RunStreamHandlers): Promise<void>;
-  /** Resume the stream where it was. */
-  retry(): void;
-  /** Restart the stream from a fresh bootstrap. */
-  rebootstrap(): void;
-  /** Cancel an armed control-channel redial and dial now (inert when healthy or dialing). */
-  redialControls(): void;
-  close(): Promise<void>;
 }
 
 export interface RunConnectionOptions extends TransportTiming {

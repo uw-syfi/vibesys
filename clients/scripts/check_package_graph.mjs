@@ -115,7 +115,6 @@ const NODE_BUILTINS = {runtimes: ['node']};
 export const LEGACY_EXEMPTIONS = {
   '@vibesys/desktop': new Set(['entry-projects']),
   '@vibesys/tui': new Set(['entry-projects']),
-  '@vibesys/web': new Set(['entry-projects']),
 };
 
 /**

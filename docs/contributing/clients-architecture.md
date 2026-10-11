@@ -46,11 +46,13 @@ clients/
   ipc/              @vibesys/ipc              typed main <-> renderer messages   -> contracts, entities
   connection/       @vibesys/connection       host connection manager            -> contracts, transport-node
   settings/         @vibesys/settings         settings store, atomic files       -> entities
-  features/<x>/     @vibesys/feature-<x>      run-view, connect-host, start-run, stop-run,
-                                              resume-run, recent-runs, path-autocomplete
+  features/<x>/     @vibesys/feature-<x>      run-view, gateway-connect, replay, connect-host,
+                                              start-run, stop-run, resume-run, recent-runs,
+                                              path-autocomplete
   apps/desktop-main      @vibesys/app-desktop-main      composition only (Electron main)
   apps/desktop-renderer  @vibesys/app-desktop-renderer  composition only (Electron renderer)
-  apps/web               @vibesys/app-web               composition only (browser)
+  apps/web               @vibesys/app-web               composition only (browser, and the
+                                                        desktop shell's run page)
 ```
 
 ```mermaid
@@ -82,7 +84,7 @@ cycles, and forbids feature-to-feature and app-to-app edges, because peers share
 | `domain` | 2 | `entities`, `transport-node` | foundation, core |
 | `service` | 3 | `ipc`, `connection`, `settings` | foundation, core, domain |
 | `feature` | 4 | `feature-*` | anything below |
-| `app` | 5 | `apps/*` (and the legacy `desktop`, `web`, `tui`) | anything below |
+| `app` | 5 | `apps/*` (and the legacy `desktop` and `tui`) | anything below |
 
 This refines the sketch in the brief in two places. `ui` sits in `foundation`, not beside
 `entities`: rank 0 is the mechanical form of "no domain dependencies", so the layer rule enforces
@@ -110,6 +112,13 @@ runtime. A feature package has up to three entries:
   interfaces. It depends on `@vibesys/ui`, never on a platform package.
 - `./main` (`node`): the main-process controller that implements the interfaces with
   `@vibesys/connection`, `@vibesys/settings`, and `@vibesys/transport-node`.
+
+A feature publishes only the entries it has. Its pure core is `./state` when it needs nothing
+beyond `ES2022`; a core that needs a DOM global (`@vibesys/feature-gateway-connect` parses with
+the WHATWG `URL`) stays pure but lives in `renderer/state/`, and the feature publishes `./renderer`
+alone. Effects reach the platform only through the interfaces `./state` declares, which the app
+implements (run-view's `RunConnection` and `BrowserLifecycle`, implemented by `apps/web`'s
+backend adapter and lifecycle).
 
 Node-only packages (`transport-node`, `connection`, `settings`) therefore reach the renderer
 through no path: only `node` entries may import them, and only `desktop-main` and features'
@@ -169,7 +178,7 @@ A package that declares one of them in `dependencies` must have an entry allowed
 imports of packages not declared, so between the two a dependency is declared exactly when it is
 used, and used only where its runtime allows.
 
-**Legacy packages.** `desktop`, `web`, and `tui` predate the per-entry layout,
+**Legacy packages.** `desktop` and `tui` predate the per-entry layout,
 so `LEGACY_EXEMPTIONS` in the checker lets them skip the per-entry project rules. Every other rule
 applies to them. Desktop declares an entry per process: `.` is the `node` main process,
 `./renderer` the `dom` welcome bundle, and `./preload/run` and `./preload/welcome` the `node`
@@ -258,14 +267,17 @@ names a missing or extra one.
 | `@vibesys/core-state` | core | exists, on the per-entry layout, depends on `contracts` only | foundation item (#1869) |
 | `@vibesys/transport` | core | exists: `.` and `./testing` (the shared `FakeClock`) are `neutral`, `./websocket` is `dom` | backend-client split (#1910) |
 | `@vibesys/transport-node` | domain | exists: the Unix-socket `ServerClient`; desktop's ssh and local-host links join it with the connection manager | backend-client split (#1910) |
-| `@vibesys/entities` | domain | exists: hosts and their connection status, run, task, and instance ids, a host's listed runs with the run phase text (startup stage and progress), recent runs, the stop flow, the exact-resume policy, task arguments; depends on `contracts`. Web's `entities/` stays in web for now (the gateway URL policy, the page's session status, and run-view's fold over transport's reconciliation are web-only) | domain packages (phase 5 of #1878) |
+| `@vibesys/entities` | domain | exists: hosts and their connection status, run, task, and instance ids, a host's listed runs with the run phase text (startup stage and progress), recent runs, the stop flow, the exact-resume policy, task arguments; depends on `contracts`. The run fold over transport's reconciliation and the page's session status live in `@vibesys/feature-run-view/state`, and the gateway URL policy in `@vibesys/feature-gateway-connect`, the only features that use them | domain packages (phase 5 of #1878) |
 | `@vibesys/ipc` | service | exists: the run page's bridge (port messages, their validation, the preload contract web's desktop shell reads) and the welcome view's channels, events, and payloads; depends on `entities` | domain packages (phase 5 of #1878) |
 | `@vibesys/connection` | service | planned (desktop's connection manager) | desktop main/renderer split |
 | `@vibesys/settings` | service | planned (desktop's settings store) | desktop main/renderer split |
-| `@vibesys/feature-*` | feature | planned: run-view, connect-host, start-run, stop-run, resume-run, recent-runs, path-autocomplete | feature extraction, after the web feature-folder refactor lands |
-| `apps/desktop-main`, `apps/desktop-renderer`, `apps/web` | app | planned | app composition, last |
+| `@vibesys/feature-run-view`, `@vibesys/feature-gateway-connect`, `@vibesys/feature-replay` | feature | exist: the run page's transcript, rounds, status, banners, and live session (`./state`, `./renderer`); the browser's gateway connect form (`./renderer`); the recorded-run load (`./state`, `./renderer`) | feature packages (phase 6 of #1878) |
+| `@vibesys/feature-*` (desktop) | feature | planned: connect-host, start-run, stop-run, resume-run, recent-runs, path-autocomplete | desktop main/renderer split |
+| `apps/web` | app | exists: composition only, on the per-entry layout (one `dom` entry, no exports): the browser entry and boot decision, the desktop shell's run page (`desktop-main.tsx` and the bridge transport, until `apps/desktop-renderer` exists), the one backend adapter, storage and lifecycle | feature packages (phase 6 of #1878) |
+| `apps/desktop-main`, `apps/desktop-renderer` | app | planned | app composition, last |
 | `@vibesys/backend-client` | core | deleted: split into `transport` and `transport-node` | backend-client split (#1910) |
-| `@vibesys/desktop`, `@vibesys/web` | app | exist; emptied into features and apps, then deleted | app composition |
+| `@vibesys/desktop` | app | exists; emptied into features and apps, then deleted | app composition |
+| `@vibesys/web` | app | moved: features into `features/*`, the composition into `apps/web` | feature packages (phase 6 of #1878) |
 | `@vibesys/tui` | app | deprecated; kept building, not migrated | none |
 
 Roadmap [#1878](https://github.com/uw-syfi/vibesys/issues/1878) tracks this migration; each item gets

@@ -1,5 +1,8 @@
 import {describe, expect, test} from 'bun:test';
-import {scrubLaunchCapability, serializeBrowserSession} from '../entities/gateway.js';
+import {
+  scrubLaunchCapability,
+  serializeBrowserSession,
+} from '@vibesys/feature-gateway-connect/renderer';
 import {bootPlan} from './boot.js';
 
 const NOTHING = {gateway: null, browserSession: null};

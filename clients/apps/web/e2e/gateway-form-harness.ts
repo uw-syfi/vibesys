@@ -1,6 +1,6 @@
+import {createGatewayConnectStore, GatewayForm} from '@vibesys/feature-gateway-connect/renderer';
 import {createElement, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
-import {createGatewayConnectStore, GatewayForm} from '../src/features/gateway-connect/index.js';
 
 interface Exchange {
   readonly reject: (reason: unknown) => void;

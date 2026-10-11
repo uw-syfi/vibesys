@@ -8,7 +8,7 @@ import {
   type GatewayBootstrapTarget,
   type GatewayTarget,
   resolveGatewayTarget,
-} from '../entities/gateway.js';
+} from '@vibesys/feature-gateway-connect/renderer';
 import type {Remembered} from '../platform/gateway-storage.js';
 
 export type BootPlan =

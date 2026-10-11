@@ -1,8 +1,8 @@
 import {expect, test} from 'bun:test';
 import {initialCoreState} from '@vibesys/core-state';
-import {runStep} from '../../../entities/run.js';
-import {fetchReplayFixture} from '../../../platform/backend.js';
-import {createReplayStore} from './replay.js';
+import {createReplayStore} from '@vibesys/feature-replay/renderer';
+import {runStep} from '@vibesys/feature-run-view/state';
+import {fetchReplayFixture} from '../platform/backend.js';
 
 /** Load the replay demo over `fetcher`; resolves once the load settles. */
 async function replay(fetcher: () => Promise<Response>) {

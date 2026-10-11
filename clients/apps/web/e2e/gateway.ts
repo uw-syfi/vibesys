@@ -32,7 +32,7 @@ export interface LiveGateway {
   stop(): GatewayStop;
 }
 
-const repositoryRoot = fileURLToPath(new URL('../../..', import.meta.url));
+const repositoryRoot = fileURLToPath(new URL('../../../..', import.meta.url));
 
 /**
  * The bundle the gateway serves to the browser.
@@ -44,13 +44,13 @@ const repositoryRoot = fileURLToPath(new URL('../../..', import.meta.url));
  * installed" and a spec that reports whatever the page did next.
  *
  * It is a `vite build` output, not the dev server: nothing about these specs
- * goes through Vite, so editing `clients/web/src` has no effect on what the
- * browser runs until this is rebuilt. `pnpm --dir clients/web test:e2e` builds
+ * goes through Vite, so editing `clients/apps/web/src` has no effect on what the
+ * browser runs until this is rebuilt. `pnpm --dir clients/apps/web test:e2e` builds
  * it first for exactly that reason. A run that skipped the build once measured a
  * bundle eight hours older than the fix under test, and reported the fixed
  * defect as still present.
  */
-const webAssets = join(repositoryRoot, 'clients/web/dist');
+const webAssets = join(repositoryRoot, 'clients/apps/web/dist');
 
 export function startLiveGateway(browserOrigins: readonly string[] = []): LiveGateway {
   const runtimeDirectory = mkdtempSync(join(tmpdir(), 'vibesys-web-e2e-'));
@@ -60,7 +60,7 @@ export function startLiveGateway(browserOrigins: readonly string[] = []): LiveGa
   if (!existsSync(join(webAssets, 'index.html'))) {
     rmSync(runtimeDirectory, {recursive: true, force: true});
     throw new Error(
-      `No web bundle at ${webAssets}: run \`pnpm --dir clients/web build\` (or use the ` +
+      `No web bundle at ${webAssets}: run \`pnpm --dir clients/apps/web build\` (or use the ` +
         '`test:e2e` script, which builds first) before running the browser specs',
     );
   }
@@ -376,7 +376,7 @@ class MatrixGatewayProcess implements MatrixGateway, MatrixGatewayResource {
 
   async start(): Promise<void> {
     if (!existsSync(join(webAssets, 'index.html'))) {
-      throw new Error(`No web bundle at ${webAssets}: run \`pnpm --dir clients/web build\``);
+      throw new Error(`No web bundle at ${webAssets}: run \`pnpm --dir clients/apps/web build\``);
     }
     const child = spawn(
       'uv',

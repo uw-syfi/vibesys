@@ -39,7 +39,7 @@ test('dependency-cruiser rejects relative paths into a package, cycles, and unre
           '@vibesys/core-state': ['core-state/src/index.ts'],
           '@vibesys/core-state/testing': ['core-state/src/testing/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
-          '@vibesys/web': ['web/src/index.ts'],
+          '@vibesys/feature-replay/renderer': ['features/replay/src/renderer/index.ts'],
         },
       },
     }),
@@ -98,27 +98,25 @@ const VALID_FILES = {
     "import '@vibesys/core-state/testing';\nimport '../../../testing/fake-chrome.js';\nimport 'node:fs';\n",
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
-  // The web run page's layers, each reaching only down: the composition enters a feature through
-  // its index, the feature's shell drives its pure core, and only the backend adapter imports
-  // transport's runtime values.
-  'web/src/index.ts': "import './app/compose.js';\n",
-  'web/src/app/compose.ts':
-    "import '../features/replay/index.js';\nimport '../platform/backend.js';\n",
-  'web/src/features/replay/index.ts': "import './effects/replay.js';\nimport './ui/view.js';\n",
-  'web/src/features/replay/effects/replay.ts':
-    "import '../state/replay.js';\nimport '../../../shared/store.js';\n",
-  'web/src/features/replay/state/replay.ts':
-    "import '@vibesys/core-state';\nimport type {} from '@vibesys/transport';\nimport '../../../entities/run.js';\n",
-  'web/src/features/replay/ui/view.ts': "import '../state/replay.js';\n",
-  'web/src/features/replay/state/replay.test.ts':
-    "import '@vibesys/core-state/testing';\nimport '../../../app/compose.js';\n",
-  'web/src/entities/run.ts': "import '@vibesys/core-state';\nimport '../shared/store.js';\n",
-  'web/src/platform/backend.ts': "import '@vibesys/transport';\n",
-  'web/src/shared/store.ts': '',
+  // The web app's composition enters a feature through its entries, and only the backend adapter
+  // imports transport's runtime values. A feature's renderer drives its pure state; the state
+  // names transport's types only.
+  'apps/web/src/app/compose.ts':
+    "import '@vibesys/feature-replay/renderer';\nimport '../platform/backend.js';\n",
+  'apps/web/src/platform/backend.ts': "import '@vibesys/transport';\n",
+  'features/replay/src/renderer/index.ts':
+    "import './effects/replay.js';\nimport './ui/view.js';\n",
+  'features/replay/src/renderer/effects/replay.ts': "import '../../state/replay.js';\n",
+  'features/replay/src/renderer/ui/view.ts': "import '../../state/replay.js';\n",
+  'features/replay/src/state/index.ts': "import './replay.js';\n",
+  'features/replay/src/state/replay.ts':
+    "import '@vibesys/core-state';\nimport type {} from '@vibesys/transport';\n",
+  'features/replay/src/state/replay.test.ts':
+    "import '@vibesys/core-state/testing';\nimport '../renderer/index.js';\n",
   // A leaf tool reaching its own directory is the edge `tools-are-leaves` must keep allowing, and
   // the only thing its `$1` back-reference permits.
-  'web/e2e/live.spec.ts': "import 'declared-package';\nimport './fixtures.js';\n",
-  'web/e2e/fixtures.ts': '',
+  'apps/web/e2e/live.spec.ts': "import 'declared-package';\nimport './fixtures.js';\n",
+  'apps/web/e2e/fixtures.ts': '',
   'tui/src/runtime.ts': "import '@opentui/core';\nimport type {} from './session-controller.js';\n",
   'tui/src/session-controller.ts': "import './session-model.js';\nimport './theme.js';\n",
   'tui/src/session-model.ts': "import './theme.js';\n",
@@ -232,27 +230,23 @@ const RULE_CASES = [
   },
   {
     rule: 'renderers-do-not-import-electron',
-    files: {'web/src/platform/backend.ts': "import 'electron';\n"},
+    files: {'apps/web/src/platform/backend.ts': "import 'electron';\n"},
+  },
+  {
+    rule: 'renderers-do-not-import-electron',
+    files: {'features/replay/src/renderer/effects/replay.ts': "import 'electron';\n"},
   },
   {
     rule: 'web-opens-no-sockets-or-processes',
-    files: {'web/src/platform/backend.ts': "import 'net';\n"},
+    files: {'apps/web/src/platform/backend.ts': "import 'net';\n"},
   },
   {
-    rule: 'web-features-does-not-import-layers-above',
-    files: {'web/src/features/replay/state/replay.ts': "import '../../../app/compose.js';\n"},
-  },
-  {
-    rule: 'web-entities-does-not-import-layers-above',
-    files: {'web/src/entities/run.ts': "import '../features/replay/index.js';\n"},
-  },
-  {
-    rule: 'web-layers-do-not-import-the-package-surface',
-    files: {'web/src/platform/backend.ts': "import '../index.js';\n"},
+    rule: 'web-opens-no-sockets-or-processes',
+    files: {'features/replay/src/renderer/effects/replay.ts': "import 'net';\n"},
   },
   {
     rule: 'production-code-does-not-import-core-state-test-support',
-    files: {'web/src/features/replay/state/replay.ts': "import '@vibesys/core-state/testing';\n"},
+    files: {'features/replay/src/state/replay.ts': "import '@vibesys/core-state/testing';\n"},
   },
   {
     rule: 'production-code-does-not-import-core-state-test-support',
@@ -260,46 +254,29 @@ const RULE_CASES = [
       'desktop/src/renderer/welcome/state/store.ts': "import '@vibesys/core-state/testing';\n",
     },
   },
-
   {
-    rule: 'web-shared-does-not-import-layers-above',
-    files: {'web/src/shared/store.ts': "import '../entities/run.js';\n"},
-  },
-  {
-    rule: 'web-platform-does-not-import-layers-above',
-    files: {'web/src/platform/backend.ts': "import '../features/replay/index.js';\n"},
-  },
-  {
-    rule: 'web-features-are-isolated',
-    files: {'web/src/features/other/index.ts': "import '../replay/index.js';\n"},
-  },
-  {
-    rule: 'web-features-are-entered-through-their-index',
-    files: {'web/src/app/compose.ts': "import '../features/replay/state/replay.js';\n"},
-  },
-  {
-    rule: 'web-core-is-pure',
-    files: {'web/src/entities/run.ts': "import '../platform/backend.js';\n"},
-  },
-  {
-    rule: 'web-feature-state-does-not-import-its-shell-or-view',
-    files: {'web/src/features/replay/state/replay.ts': "import '../ui/view.js';\n"},
-  },
-  {
-    rule: 'web-feature-ui-does-not-depend-on-shell',
-    files: {'web/src/features/replay/ui/view.ts': "import '../effects/replay.js';\n"},
-  },
-  {
-    rule: 'web-feature-effects-do-not-import-ui',
-    files: {'web/src/features/replay/effects/replay.ts': "import '../ui/view.js';\n"},
+    rule: 'web-platform-does-not-import-app',
+    files: {'apps/web/src/platform/backend.ts': "import '../app/compose.js';\n"},
   },
   {
     rule: 'web-transport-only-in-backend-adapter',
-    files: {'web/src/features/replay/effects/replay.ts': "import '@vibesys/transport';\n"},
+    files: {'apps/web/src/app/compose.ts': "import '@vibesys/transport';\n"},
   },
   {
-    rule: 'web-shared-is-domain-free',
-    files: {'web/src/shared/store.ts': "import '@vibesys/core-state';\n"},
+    rule: 'feature-state-is-pure',
+    files: {'features/replay/src/state/replay.ts': "import '../renderer/index.js';\n"},
+  },
+  {
+    rule: 'feature-ui-does-not-depend-on-shell',
+    files: {'features/replay/src/renderer/ui/view.ts': "import '../effects/replay.js';\n"},
+  },
+  {
+    rule: 'feature-effects-do-not-import-ui',
+    files: {'features/replay/src/renderer/effects/replay.ts': "import '../ui/view.js';\n"},
+  },
+  {
+    rule: 'feature-transport-is-type-only',
+    files: {'features/replay/src/renderer/effects/replay.ts': "import '@vibesys/transport';\n"},
   },
   {
     rule: 'shipping-path-does-not-depend-on-dev-harness',
@@ -319,21 +296,21 @@ const RULE_CASES = [
   },
   {
     rule: 'tools-are-leaves',
-    files: {'web/src/index.ts': "import '../e2e/live.spec.js';\n"},
+    files: {'apps/web/src/app/compose.ts': "import '../../e2e/live.spec.js';\n"},
   },
   {
     // One leaf tool reaching another. Excluding every tool from `from` rather than only the
     // importer's own directory permits this, so this case fails without the `$1` back-reference.
     rule: 'tools-are-leaves',
-    files: {'web/e2e/live.spec.ts': "import '../../scripts/check.mjs';\n"},
+    files: {'apps/web/e2e/live.spec.ts': "import '../../../scripts/check.mjs';\n"},
   },
   {
     rule: 'tools-are-leaves',
-    files: {'web/e2e/live.spec.ts': "import '../../tui/benchmarks/bench.js';\n"},
+    files: {'apps/web/e2e/live.spec.ts': "import '../../../tui/benchmarks/bench.js';\n"},
   },
   {
     rule: 'tools-are-leaves',
-    files: {'core-state/bench/run.ts': "import '../../web/e2e/fixtures.js';\n"},
+    files: {'core-state/bench/run.ts': "import '../../apps/web/e2e/fixtures.js';\n"},
   },
   {
     rule: 'scripts-do-not-import-package-code',
@@ -444,7 +421,7 @@ async function violatedRules(t, files) {
           '@vibesys/core-state': ['core-state/src/index.ts'],
           '@vibesys/core-state/testing': ['core-state/src/testing/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
-          '@vibesys/web': ['web/src/index.ts'],
+          '@vibesys/feature-replay/renderer': ['features/replay/src/renderer/index.ts'],
         },
       },
     }),
@@ -666,6 +643,17 @@ test('declarations accept a package whose entry points and scripts agree with th
     join(root, 'tsconfig.architecture.json'),
     JSON.stringify({compilerOptions: {paths: {'@vibesys/stub': ['stub/src/index.ts']}}}),
   );
+
+  assert.deepEqual(declarationErrors(root, workspaceLayout(root)), []);
+});
+
+test('declarations need no path map entry for an app that exports nothing', async t => {
+  const root = await workspaceFixture(t, 'vibesys-declarations-app-');
+  await writePackage(root, 'page', '@vibesys/app-page', ['src'], {
+    scripts: {build: 'true', check: 'true', test: 'true'},
+    vibesys: {layer: 'app', entries: {'.': 'dom'}},
+  });
+  await writeFile(join(root, 'tsconfig.architecture.json'), JSON.stringify({compilerOptions: {}}));
 
   assert.deepEqual(declarationErrors(root, workspaceLayout(root)), []);
 });

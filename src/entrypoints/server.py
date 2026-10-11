@@ -138,7 +138,7 @@ def _web_assets_from_argv(argv: list[str]) -> WebAssetBundle | None:
     if value is not None:
         return WebAssetBundle.from_directory(Path(value), require_manifest=False)
     source_root = Path(__file__).resolve().parents[2]
-    candidate = source_root / "clients" / "web" / "dist"
+    candidate = source_root / "clients" / "apps" / "web" / "dist"
     return (
         WebAssetBundle.from_directory(candidate, require_manifest=True)
         if candidate.is_dir()

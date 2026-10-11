@@ -1,5 +1,5 @@
 import {expect, test} from 'bun:test';
-import {resolveGatewayTarget} from '../entities/gateway.js';
+import {resolveGatewayTarget} from '@vibesys/feature-gateway-connect/renderer';
 import {GatewaySessionStore} from './gateway-storage.js';
 
 test('treats denied session storage as optional browser state', () => {
