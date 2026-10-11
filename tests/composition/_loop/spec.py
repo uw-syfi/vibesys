@@ -15,6 +15,10 @@ from vibesys.orchestration.dynamic.strategy.api import (
     DynamicStrategyState,
     dynamic_operation_registry,
 )
+from vibesys.orchestration.issue_queue.strategy.api import (
+    IssueQueueStrategyState,
+    plain_operation_registry,
+)
 from vs_core.api import RunEnvelope
 
 if TYPE_CHECKING:
@@ -38,7 +42,15 @@ def _dynamic_core(envelope: str) -> CoreState:
     return codec.decode_envelope(RunEnvelope[DynamicStrategyState], envelope).core
 
 
-LOOPS = {"dynamic": LoopSpec("dynamic", _dynamic_core)}
+def _plain_core(envelope: str) -> CoreState:
+    codec = plain_operation_registry()
+    return codec.decode_envelope(RunEnvelope[IssueQueueStrategyState], envelope).core
+
+
+LOOPS = {
+    "dynamic": LoopSpec("dynamic", _dynamic_core),
+    "plain": LoopSpec("plain", _plain_core),
+}
 
 
 class UnknownLoopError(ValueError):
