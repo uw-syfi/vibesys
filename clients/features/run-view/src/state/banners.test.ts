@@ -1,8 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {BackendClientError, type RunEvent} from '@vibesys/contracts';
 import {type CoreRunStatus, hasRunEnded, initialCoreState} from '@vibesys/core-state';
-import type {WebSessionState, WebSessionStatus} from '../../../entities/connection.js';
-import {runStep} from '../../../entities/run.js';
 import {
   CONTROLS_BANNER_COPY,
   connectionBanners,
@@ -13,6 +11,8 @@ import {
   pageHeader,
   STREAM_BANNER_COPY,
 } from './banners.js';
+import type {WebSessionState, WebSessionStatus} from './connection.js';
+import {runStep} from './run.js';
 
 /** Every status core state can hold, so a new one is a compile error here. */
 const RUN_STATUSES: readonly CoreRunStatus[] = [
@@ -194,7 +194,7 @@ describe('connectionBanners', () => {
   });
 
   test('names no operation this client cannot perform', () => {
-    // `query.snapshot` is the only request `clients/web` issues, so promising
+    // `query.snapshot` is the only request `clients/apps/web` issues, so promising
     // that pause, resume, steer, and chat will not be delivered would describe
     // affordances the page does not have. They arrive with #815.
     for (const controls of ['lost', 'cold'] as const) {

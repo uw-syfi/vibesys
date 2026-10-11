@@ -1,6 +1,6 @@
 import {activeRunFocus, type CoreState, hasRunEnded, phaseText} from '@vibesys/core-state';
 import type {ControlChannelState} from '@vibesys/transport';
-import type {WebSessionState} from '../../../entities/connection.js';
+import type {WebSessionState} from './connection.js';
 
 /** The control-channel outage a banner describes, once there is one to show. */
 type ControlOutage = Extract<ControlChannelState, {status: 'disconnected'}>;
@@ -134,7 +134,7 @@ export const EMPTY_TRANSCRIPT_COPY = {
  * thing today, so the copy does not branch on it yet.
  *
  * The consequence named is the true one. `query.snapshot` is the only request
- * `clients/web` issues, so a dead channel means the run's state cannot be
+ * `clients/apps/web` issues, so a dead channel means the run's state cannot be
  * reloaded; pause, resume, steer, and chat are not affordances this client has,
  * and they arrive with #815, which owns the web run controls.
  *

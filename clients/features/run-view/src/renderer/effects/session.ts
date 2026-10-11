@@ -1,6 +1,6 @@
 /**
  * The live session's shell: it runs the connection core (`state/session.ts`) and the run fold
- * (`entities/run.ts`) as stores, performs each request through the run connection the composition
+ * (`state/run.ts`) as stores, performs each request through the run connection the composition
  * injects, and turns the browser's lifecycle (visibility, network) into actions. Decisions live in
  * the core; this module only does what the core asks and reports what happened.
  */
@@ -11,10 +11,9 @@ import {
   initialCoreState,
   type Store,
 } from '@vibesys/core-state';
-import type {WebSessionState} from '../../../entities/connection.js';
-import {type RunAction, runStep} from '../../../entities/run.js';
-import type {RunConnection, TransportHooks} from '../../../platform/backend.js';
-import type {BrowserLifecycle} from '../../../platform/lifecycle.js';
+import type {WebSessionState} from '../../state/connection.js';
+import type {BrowserLifecycle, RunConnection, TransportHooks} from '../../state/ports.js';
+import {type RunAction, runStep} from '../../state/run.js';
 import {
   type Reachability,
   SESSION_INITIAL,
@@ -23,7 +22,7 @@ import {
   type SessionState,
   type SnapshotResult,
   sessionStep,
-} from '../state/session.js';
+} from '../../state/session.js';
 
 /** What the composition injects: the run's connection and the page's lifecycle. */
 export interface WebSessionOptions {

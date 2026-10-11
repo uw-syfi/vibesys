@@ -4,13 +4,13 @@
  */
 import type {CoreState} from '@vibesys/core-state';
 import type {JSX} from 'react';
-import type {WebSessionState} from '../../../entities/connection.js';
 import {
   connectionBanners,
   emptyTranscriptCopy,
   pageHeader,
   REPLAY_SESSION,
-} from '../state/banners.js';
+} from '../../state/banners.js';
+import type {WebSessionState} from '../../state/connection.js';
 import {Banners} from './banners.js';
 import {Activity, RunSummary} from './run-summary.js';
 
