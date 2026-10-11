@@ -342,6 +342,64 @@ describe('HostConnection over the FakeHelper', () => {
     expect(connection.phase.kind).toBe('ready');
   });
 
+  // regression: openRun's own catch used to dispatch `run-ended` only when the dial failed with
+  // cause 'link', so 'incompatible' (and 'auth', the same code path) never reached the machine: the
+  // host stayed ready forever and every later attach failed the same generic way. It now forwards
+  // whatever cause the dial actually failed with, same as `#connectRun`'s stream-error listener; the
+  // machine's own routing for each cause (`run-ended` -> `lost` -> `failed`) is covered by its model
+  // tests in `../state/host-connection.test.ts`, so this only proves the shell forwards what it saw.
+  const dialFailures: readonly {
+    readonly cause: Cause;
+    readonly nextPhase: string;
+    readonly arrange: (link: FakeLink) => void;
+  }[] = [
+    {
+      cause: 'link',
+      nextPhase: 'reconnecting',
+      arrange: link => {
+        link.linkFault = {cause: 'link', detail: 'down'};
+      },
+    },
+    {
+      cause: 'incompatible',
+      nextPhase: 'incompatible',
+      arrange: link => {
+        // The checkout turns incompatible on disk after the control channel is already up: the
+        // next helper this link starts (for the run channel) fails its bootstrap before any
+        // `hello` reply.
+        link.helper.bootstrapExit = {code: 65, stdout: 'notvibesys'};
+      },
+    },
+    {
+      cause: 'auth',
+      nextPhase: 'auth-needed',
+      arrange: link => {
+        link.linkFault = {cause: 'auth', detail: 'Permission denied'};
+      },
+    },
+    {cause: 'run-gone', nextPhase: 'ready', arrange: () => {}},
+    {
+      cause: 'denied',
+      nextPhase: 'ready',
+      arrange: link => {
+        link.helper.publish(record('0000000000f0', 'run-f0'));
+        link.helper.host.runs.set('0000000000f0', ECHO_SERVER);
+        link.helper.host.denied.add('0000000000f0');
+      },
+    },
+  ];
+  for (const {cause, nextPhase, arrange} of dialFailures) {
+    test(`openRun's own dial failure reaches the machine as ${cause}`, async () => {
+      const link = new FakeLink();
+      await using connection = fakeConnection(link);
+      await connection.ready();
+      arrange(link);
+      const error = await rejection(connection.openRun('0000000000f0'));
+      expect((error as ConnectionError).reason).toBe(cause);
+      await phaseReached(connection, nextPhase);
+    });
+  }
+
   test('a request the helper answers past its deadline fails with that code; a late ping is a lost link', async () => {
     const clock = new FakeClock();
     const link = new FakeLink();

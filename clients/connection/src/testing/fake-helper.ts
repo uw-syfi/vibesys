@@ -603,6 +603,8 @@ export class FakeLink implements Link {
   }
 
   explain(code: number | null, stderr: string, where: string): ConnectionError {
+    if (this.linkFault !== null)
+      return new ConnectionError(this.linkFault.cause, this.linkFault.detail);
     if (code === 255 || code === null)
       return new ConnectionError('link', stderr || 'the channel broke');
     return new ConnectionError('incompatible', `the helper for ${where} exited with ${code}`);

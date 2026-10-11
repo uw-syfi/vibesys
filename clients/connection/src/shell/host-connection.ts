@@ -11,7 +11,10 @@
  *
  * Callers never retry: `request` and `openRun` wait until the host is ready, and reject with the
  * machine's terminal reason (offline, auth-needed, incompatible, closed) or with the failure itself.
- * A run dial the link broke is reported to the machine, whose recovery ends in ready.
+ * A failed run dial is reported to the machine with its real cause, whose routing decides what that
+ * means: a link-class cause starts a check that ends in ready or stops; `auth`/`incompatible` move
+ * the host to its matching terminal phase; `run-gone`/`denied` are the run's own fact and leave the
+ * host ready.
  */
 
 import type {InstanceList} from '@vibesys/contracts/host-helper';
@@ -244,10 +247,11 @@ export class HostConnection implements AsyncDisposable {
 
   /**
    * A run channel to `instanceId`, relaying the run protocol, with the run id the helper reported:
-   * one dial once the host is ready. A dial the link broke is reported to the machine, which checks
-   * the run and returns to ready (which wakes the run's page) or stops; a stream that later ends
-   * abnormally is reported too. Rejects with `run-gone`, `denied`, `link`, or the host's terminal
-   * reason.
+   * one dial once the host is ready. A dial that fails is reported to the machine with its real
+   * cause, same as a stream that later ends abnormally (`#connectRun`'s `error` listener): a
+   * link-class cause is checked and returns to ready (which wakes the run's page) or stops;
+   * `auth`/`incompatible` move the host to its matching terminal phase. Rejects with `run-gone`,
+   * `denied`, `link`, or the host's terminal reason.
    */
   async openRun(instanceId: string): Promise<{runId: string; stream: RunStream}> {
     await this.ready();
@@ -255,9 +259,12 @@ export class HostConnection implements AsyncDisposable {
       return await this.#connectRun(instanceId, this.#abort.signal);
     } catch (error) {
       const failure = asConnectionError(error);
-      if (failure.reason === 'link') {
-        this.dispatch({type: 'run-ended', instanceId, cause: 'link', detail: failure.message});
-      }
+      this.dispatch({
+        type: 'run-ended',
+        instanceId,
+        cause: failure.reason,
+        detail: failure.message,
+      });
       throw failure;
     }
   }
