@@ -95,6 +95,26 @@ def test_clean_removes_untracked_files_but_not_ignored_or_protected_ones(
     assert (sandbox.root / "cfg/settings.txt").exists()
 
 
+def test_clean_leaves_the_files_named_in_keep_even_when_ignored(sandbox: ContractProject) -> None:
+    sandbox.start({"a.txt": "1\n"})
+    sandbox.repo.add_excludes(["*.log"])
+    sandbox.write("memory/plan.md", "plan\n")
+    sandbox.write("notes.txt", "n\n")
+    sandbox.write("memory.log", "m\n")
+    sandbox.write("stray.txt", "s\n")
+    sandbox.write("sub/stray.txt", "s\n")
+
+    assert sandbox.repo.clean_untracked(
+        include_ignored=True, protect="cfg/", keep=["/memory", "/notes.txt"]
+    )
+
+    assert (sandbox.root / "memory/plan.md").exists()
+    assert (sandbox.root / "notes.txt").exists()
+    assert not (sandbox.root / "memory.log").exists()
+    assert not (sandbox.root / "stray.txt").exists()
+    assert not (sandbox.root / "sub").exists()
+
+
 def test_restore_then_clean_yields_exactly_the_revision(sandbox: ContractProject) -> None:
     first = sandbox.start({"a.txt": "1\n", "dir/b.txt": "1\n"})
     sandbox.write("a.txt", "2\n")

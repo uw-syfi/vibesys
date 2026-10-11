@@ -417,8 +417,14 @@ class GitRepository(Protocol):
         """
         ...
 
-    def clean_untracked(self, *, include_ignored: bool, protect: Pathspec) -> bool:
-        """Delete untracked files and directories except ``protect``; return success.
+    def clean_untracked(
+        self, *, include_ignored: bool, protect: Pathspec, keep: Sequence[Pathspec] = ()
+    ) -> bool:
+        """Delete untracked files and directories except ``protect`` and ``keep``.
+
+        Return success. ``keep`` lists further paths (workspace-relative, anchored at the
+        worktree root) that the caller has no other copy of, so a crash mid-restore never
+        loses them.
 
         Best effort: ``False`` means some paths may remain (cli-only).
         """

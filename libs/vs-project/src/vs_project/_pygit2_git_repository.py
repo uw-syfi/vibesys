@@ -488,8 +488,12 @@ class Pygit2GitRepository:
         except _LIBGIT2_ERRORS as error:
             self._fail("reset --mixed HEAD", error)
 
-    def clean_untracked(self, *, include_ignored: bool, protect: Pathspec) -> bool:
-        return self._cli.clean_untracked(include_ignored=include_ignored, protect=protect)
+    def clean_untracked(
+        self, *, include_ignored: bool, protect: Pathspec, keep: Sequence[Pathspec] = ()
+    ) -> bool:
+        return self._cli.clean_untracked(
+            include_ignored=include_ignored, protect=protect, keep=keep
+        )
 
     def restore_worktree(self, revision: Revision, exclude: Sequence[Pathspec] = ()) -> None:
         self._cli.restore_worktree(revision, exclude)

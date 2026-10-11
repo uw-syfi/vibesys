@@ -55,6 +55,7 @@ class WorkspaceResource(Protocol):
         clean: bool,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
+        exact: bool = False,
     ) -> bool: ...
 
     def try_restore(self, revision: str, *, clean: bool) -> bool: ...
@@ -63,7 +64,7 @@ class WorkspaceResource(Protocol):
 
     def has_revision(self, revision: str) -> bool: ...
 
-    def matches_revision(self, revision: str) -> bool: ...
+    def matches_revision(self, revision: str, *, exact: bool = False) -> bool: ...
 
     def find_snapshot(self, label: str) -> str | None: ...
 
@@ -199,8 +200,9 @@ class RuntimeWorkspace:
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-228402 [SLF001]; a workspace handle delegates synchronization to its owning collection.
             return await run_sync(self._owner.runner, self._resource.snapshot, label)
 
-    async def restore(self, revision: str, *, clean: bool = True) -> None:
-        await self._restore(revision, clean=clean)
+    async def restore(self, revision: str, *, clean: bool = True, exact: bool = False) -> None:
+        """Materialize *revision*; *exact* also removes ignored files from any checkout."""
+        await self._restore(revision, clean=clean, exact=exact)
 
     async def _restore(
         self,
@@ -209,6 +211,7 @@ class RuntimeWorkspace:
         clean: bool,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
+        exact: bool = False,
     ) -> None:
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-228403 [SLF001]; a workspace handle delegates synchronization to its owning collection.
             restored = await run_sync(
@@ -218,6 +221,7 @@ class RuntimeWorkspace:
                 clean=clean,
                 preserve_paths=preserve_paths,
                 preserve_memory=preserve_memory,
+                exact=exact,
             )
         if not restored:
             raise WorkspaceRestoreError(revision)
@@ -248,10 +252,12 @@ class RuntimeWorkspace:
         self._ensure_open()
         return await run_sync(self._owner.runner, self._resource.has_revision, revision)
 
-    async def matches_revision(self, revision: str) -> bool:
+    async def matches_revision(self, revision: str, *, exact: bool = False) -> bool:
         self._ensure_open()
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402310 [SLF001]; a workspace handle delegates synchronization to its owning collection.
-            return await run_sync(self._owner.runner, self._resource.matches_revision, revision)
+            return await run_sync(
+                self._owner.runner, self._resource.matches_revision, revision, exact=exact
+            )
 
     async def find_snapshot(self, label: str) -> str | None:
         self._ensure_open()

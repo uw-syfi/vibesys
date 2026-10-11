@@ -278,13 +278,14 @@ class RuntimeWorkspaceResource:
         clean: bool,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
+        exact: bool = False,
     ) -> bool:
         if preserve_memory:
             preserve_paths = tuple(dict.fromkeys((*preserve_paths, *self._memory_paths)))
         restored = self._project.git.checkout_tree(
             revision,
             clean=clean,
-            clean_ignored=self.owns_checkout,
+            clean_ignored=self.owns_checkout or exact,
             preserve_paths=preserve_paths,
         )
         if restored and self._id is not None:
@@ -303,14 +304,17 @@ class RuntimeWorkspaceResource:
     def has_revision(self, revision: str) -> bool:
         return self._root_project.git.has_revision(revision)
 
-    def matches_revision(self, revision: str) -> bool:
+    def matches_revision(self, revision: str, *, exact: bool = False) -> bool:
         """Return whether the workspace tree equals the revision.
 
-        Ignored files count only in a workspace the runtime owns. Preserved memory
-        paths are exempt.
+        Ignored files count only in a workspace the runtime owns, or when *exact* asks
+        for the whole tree (an exclusive-root attempt owns everything it leaves behind).
+        Preserved memory paths are exempt.
         """
         return self._project.git.matches_tree(
-            revision, exempt_paths=self._memory_paths, include_ignored=self.owns_checkout
+            revision,
+            exempt_paths=self._memory_paths,
+            include_ignored=self.owns_checkout or exact,
         )
 
     def find_snapshot(self, label: str) -> str | None:
