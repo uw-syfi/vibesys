@@ -348,7 +348,7 @@ def test_journal_attach_reuses_the_index_despite_server_started(
 
     def attach() -> WireJournal:
         journal = _journal()
-        journal.attach(log_dir)
+        journal.attach(log_dir, run_id="run-1")
         return journal
 
     attach()  # creates the log; there is nothing to index yet

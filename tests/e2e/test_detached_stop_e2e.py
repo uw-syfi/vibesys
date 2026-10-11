@@ -21,7 +21,14 @@ import pytest
 
 from launch import default_runs
 from server.api.protocol import SubscribeRequest
-from server.host_api import InstanceStatus, LiveInstanceRecord, StopOutcome, StopRoute
+from server.host_api import (
+    InstanceStatus,
+    LiveInstanceRecord,
+    RunPhase,
+    RunStatus,
+    StopOutcome,
+    StopRoute,
+)
 from server.instances import ControlSocketStopRequester
 from server.registry import (
     FileInstanceStore,
@@ -34,13 +41,13 @@ from server.registry import (
 )
 from server.runtime import ServerRuntime
 from vibesys.run.integration import LocalRunIntegration
-from vs_sim.api import OsThreads, UnixNetwork
+from vs_sim.api import OsThreads, SystemClock, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from vibesys.api import RunSession
+    from vibesys.api import RunControl
     from vs_runtime.api.infrastructure import RunControlChannel
 
 
@@ -60,6 +67,16 @@ class _Session:
 
     def stop(self) -> None:
         self._control.request_stop()
+
+
+def _wait_for_stop(control: RunControlChannel, threads: OsThreads) -> None:
+    """Reach control boundaries until a stop lands or the e2e guard expires."""
+    deadline = threads.now() + HANG_GUARD_S
+    while threads.now() < deadline:
+        control.raise_if_stopped()
+        threads.sleep(0.05)
+    message = "the stop never reached the run"
+    raise AssertionError(message)
 
 
 @pytest.fixture
@@ -126,25 +143,22 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     instance_id = new_instance_id()
     socket_path = instance_socket_path(root, instance_id)
     socket_path.parent.mkdir(parents=True, mode=0o700)
-    registry = LiveRegistry(FileInstanceStore(root))
-    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path, detach=True)
+    registry = LiveRegistry(FileInstanceStore(root), SystemClock())
+    runtime = ServerRuntime(
+        run_id="run-1", runs=default_runs(), socket_path=socket_path, detach=True
+    )
     integration = LocalRunIntegration()
     integration.events.subscribe(runtime.integration.project_event)
     threads = OsThreads()
     outcome: list[object] = []
 
     def run() -> None:
-        with runtime.condition:
-            # The runtime reads only the `RunControl` slice of its session
-            # (through `RunApi`'s session provider), which `_Session` implements.
-            runtime.session = cast("RunSession", _Session(integration.control))
-        deadline = threads.now() + HANG_GUARD_S
-        while threads.now() < deadline:
-            # The run's next controlled boundary: a requested stop lands here.
-            integration.control.raise_if_stopped()
-            threads.sleep(0.05)
-        message = "the stop never reached the run"
-        raise AssertionError(message)
+        control = _Session(integration.control)
+        runtime.controls.install(cast("RunControl", control))
+        try:
+            _wait_for_stop(integration.control, threads)
+        finally:
+            runtime.controls.release(cast("RunControl", control))
 
     def serve() -> None:
         hostname, version = host_facts()
@@ -153,8 +167,11 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
                 LiveInstanceRecord(
                     id=instance_id,
                     status=InstanceStatus.SERVING,
+                    phase=RunPhase(status=RunStatus.RUNNING),
+                    log_path=str(root / "server.log"),
                     socket_path=str(socket_path),
                     project_root=str(root),
+                    run_id="run-1",
                     pid=os.getpid(),
                     started_at=threads.now(),
                     hostname=hostname,

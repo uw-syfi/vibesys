@@ -83,7 +83,13 @@ def test_instances_list_loads_no_engine(
 ) -> None:
     stdout = _run_light(["instances", "list", "--json"], env, record_property)
 
-    assert json.loads(stdout) == {"version": 1, "instances": [], "unverified": []}
+    assert json.loads(stdout) == {
+        "version": 3,
+        "instances": [],
+        "ended": [],
+        "unreadable": [],
+        "unverified": [],
+    }
 
 
 def test_instances_stop_loads_no_engine(
@@ -109,3 +115,10 @@ def test_tasks_loads_no_engine(
     stdout = _run_light(["tasks", str(tmp_path / "project"), "--json"], env, record_property)
 
     assert [entry["name"] for entry in json.loads(stdout)["tasks"]] == ["spsc"]
+
+
+def test_example_list_loads_no_engine(env: dict[str, str], record_property: RecordProperty) -> None:
+    stdout = _run_light(["example", "list", "--json"], env, record_property)
+
+    names = [entry["name"] for entry in json.loads(stdout)["examples"]]
+    assert "data-structures/stack" in names

@@ -7,13 +7,19 @@ builder live here once.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import socket
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from vs_evaluation.agent_models import AgentEvaluationReply, SocketFailure, SocketReply
+from vs_evaluation.agent_models import (
+    RECEIPT_LINE,
+    AgentEvaluationReply,
+    SocketFailure,
+    SocketReply,
+)
 from vs_evaluation.profiler_models import AgentToolArgs
 from vs_mcp.api import ToolSpec
 
@@ -38,7 +44,13 @@ class EvaluationServiceClientError(RuntimeError):
     @classmethod
     def unavailable(cls, error: OSError) -> EvaluationServiceClientError:
         """Build the error for a service the client could not reach or that dropped the call."""
-        return cls(f"evaluation service unavailable: {type(error).__name__}: {error}")
+        text = f"evaluation service unavailable: {type(error).__name__}: {error}"
+        if isinstance(error, TimeoutError):
+            text += (
+                "; the call may still have been accepted. Repeat the same call: a repeated "
+                "submit_evaluation for an unchanged candidate returns the handle it already made"
+            )
+        return cls(text)
 
     @classmethod
     def oversized(cls) -> EvaluationServiceClientError:
@@ -76,6 +88,9 @@ class SocketClient:
                 client.connect(str(self._path))
                 client.sendall(document)
                 response = _read_line(client)
+                with contextlib.suppress(OSError):
+                    # A host that cannot hear the receipt loses nothing but its certainty.
+                    client.sendall(RECEIPT_LINE)
         except OSError as error:
             # A stopped service, a dropped oversized frame, or a timeout: the
             # agent gets the typed tool error, never a raw socket exception.

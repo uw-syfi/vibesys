@@ -76,6 +76,37 @@ The local machine needs OpenSSH and rsync. The login host needs rsync and the
 Slurm commands named by the configuration, and `remote_workspace_root` must be
 writable and visible from compute nodes.
 
+A host that is itself a Slurm submit node uses the local transport: scheduler
+and filesystem commands run through `shell_command` on this host, and
+transfers are local `rsync` copies.
+
+```toml
+[slurm.transport]
+kind = "local"
+# shell_command = ["bash", "-c"]   # receives the command line as its last argument
+# rsync_command = ["rsync"]
+```
+
+`remote_workspace_root` must then be a directory this host shares with the
+compute nodes. A wrapper may precede the shell in `shell_command`, for example
+one that runs the shell on a login node the host reaches without SSH.
+
+Every program the local transport starts (`shell_command` and `rsync_command`)
+runs in a login-like environment, not this process's: only `HOME`, `USER`,
+`LOGNAME`, `SHELL`, `PATH`, `LANG`, `LC_*`, `TZ` and `TMPDIR`, when set, and
+nothing else. This is what the SSH transport gets from sshd. A host process can
+hold credentials, and one that runs inside an allocation or batch job holds
+`SLURM_*` variables that would point the gate's own `sbatch` at the wrong job;
+none of it reaches the programs. `sbatch` itself is submitted exactly as over
+SSH, so a job gets the environment Slurm's defaults give it.
+
+The local transport runs whatever `shell_command` names with the host's
+privileges, so it is for the host's own trusted code only. VibeSys therefore
+does not offer it to the sandboxed agent: the host-side transport broker that
+lets an agent container make ad hoc Slurm calls (used by the ROCprof capture
+tool) accepts only the SSH transport, and a run configured with the local
+transport simply has no such broker. Gates still run through the full job path.
+
 Sites whose gateway is not reachable through OpenSSH can provide the advanced
 versioned JSON connector transport:
 

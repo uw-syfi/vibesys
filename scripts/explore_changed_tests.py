@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
@@ -42,6 +43,8 @@ DEFAULT_SEEDS = 24
 DEFAULT_REPEATS = 3
 DEFAULT_BUDGET_SECONDS = 240.0
 PYTEST_NO_TESTS_COLLECTED = 5
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 _FILE = re.compile(r"^\+\+\+ b/(.+)$", re.MULTILINE)
@@ -134,9 +137,21 @@ def _git(*args: str) -> str:
     return subprocess.run([git, *args], check=True, capture_output=True, text=True).stdout  # noqa: S603
 
 
+def suite_pathspecs(pyproject_text: str) -> list[str]:
+    """Git pathspecs for the Python files under the suite's ``testpaths``.
+
+    Only tests the main suite collects are explored. Example projects carry their own
+    test suites with their own runners and import roots (``cpu_check/run.sh``), so
+    collecting them from the repository root would fail for reasons the PR did not cause.
+    """
+    roots = tomllib.loads(pyproject_text)["tool"]["pytest"]["ini_options"]["testpaths"]
+    return [f":(glob){root}/**/*.py" for root in roots]
+
+
 def _select(args: argparse.Namespace) -> int:
+    pathspecs = suite_pathspecs((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     diff = _git(
-        "diff", "-U0", "--no-color", "--diff-filter=AMR", f"{args.base}...HEAD", "--", "*.py"
+        "diff", "-U0", "--no-color", "--diff-filter=AMR", f"{args.base}...HEAD", "--", *pathspecs
     )
     ids = selected_ids(diff, lambda path: Path(path).read_text(encoding="utf-8"))
     Path(args.ids_file).write_text("".join(f"{i}\n" for i in ids), encoding="utf-8")

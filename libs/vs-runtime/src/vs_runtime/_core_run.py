@@ -49,7 +49,7 @@ from vs_runtime._run_control import RunStopped
 from vs_sim.api import SleepingClock, SystemClock
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from vs_core.api import CoreEvent
     from vs_runtime._core_loop import CoreRuntime, PublicationDelivery
@@ -115,6 +115,19 @@ class SteerArtifacts(Protocol):
     def put(self, ref: ArtifactRef, text: str) -> None:
         """Store the text under the reference before the control is submitted."""
         ...
+
+
+class StallNotes(Protocol):
+    """What the host can add to a stall report: causes core's state does not show."""
+
+    def __call__(self) -> Sequence[str]:
+        """Short clauses, each naming one reason nothing can proceed; empty when none."""
+        ...
+
+
+def no_stall_notes() -> Sequence[str]:
+    """The default: the host knows nothing beyond core's state."""
+    return ()
 
 
 class RunStalledError(RuntimeError):
@@ -286,7 +299,11 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
 
 
 async def drive_core(
-    host: CoreRunHost, config: RunLoopConfig, *, next_wake: NextWake = core_next_wake
+    host: CoreRunHost,
+    config: RunLoopConfig,
+    *,
+    next_wake: NextWake = core_next_wake,
+    stall_notes: StallNotes = no_stall_notes,
 ) -> RunOutcome:
     """Run a started shell until its run is terminal, an executor is refused, or it fails.
 
@@ -300,18 +317,28 @@ async def drive_core(
     A stop is a control like the others: core commits it and cancels the running turns
     itself, and the run ends terminal. If a request core cannot cancel is running, the
     loop cancels it and raises ``RunStopped`` instead.
+
+    ``stall_notes`` adds what only the host knows to the ``RunStalledError`` message, such
+    as a charged submission whose handle never reached its agent.
     """
-    return await _Loop(host, config, next_wake).run()
+    return await _Loop(host, config, next_wake, stall_notes).run()
 
 
 class _Loop:
-    def __init__(self, host: CoreRunHost, config: RunLoopConfig, next_wake: NextWake) -> None:
+    def __init__(
+        self,
+        host: CoreRunHost,
+        config: RunLoopConfig,
+        next_wake: NextWake,
+        stall_notes: StallNotes,
+    ) -> None:
         self._shell = host.shell
         self._delivery = host.delivery
         self._clock = host.clock
         self._controls = host.controls
         self._config = config
         self._next_wake = next_wake
+        self._stall_notes = stall_notes
         self._time = self._core().run.now_at
         self._renewed_at = self._read()
         self._deadline_stop = any(
@@ -478,7 +505,7 @@ class _Loop:
         recovering = core.intents.recovery.phase != RecoveryPhase.READY
         past_deadline = now >= core.run.deadline_at
         if due is None and not paused and (not recovering or past_deadline):
-            raise RunStalledError(_describe(core))
+            raise RunStalledError(_describe(core, self._stall_notes()))
         wake = [self._renewed_at + self._config.lease_duration / 3]
         if due is not None:
             wake.append(due)
@@ -536,13 +563,16 @@ def _noop() -> None:
     return None
 
 
-def _describe(core: CoreState) -> str:
+def _describe(core: CoreState, notes: Sequence[str]) -> str:
     open_intents = [
         f"{intent.request.kind}:{intent.phase.value}"
         for intent in core.intents.intents
         if intent.phase.value != "completed"
     ]
-    return (
+    text = (
         f"run {core.run.run_id.root} stalled at core revision {core.revision} "
         f"with status {core.run.status.value}; open intents {open_intents}"
     )
+    if notes:
+        text += f"; {'; '.join(notes)}"
+    return text

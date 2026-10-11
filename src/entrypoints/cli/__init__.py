@@ -62,7 +62,12 @@ from entrypoints.cli.loops import (
 )
 from entrypoints.cli.resume import _resolve_resume_args
 from vibesys.api import ConfigurationError, RunRequest, boot_trace
-from vibesys.api.request import load_objective, with_operator_constraints
+from vibesys.api.request import (
+    generate_experiment_name,
+    load_objective,
+    with_operator_constraints,
+)
+from vs_project.api import generate_run_id
 
 if TYPE_CHECKING:
     import argparse
@@ -177,7 +182,21 @@ def parse_cli_invocation(argv: list[str]) -> CliInvocation:
     _normalize_runs_dir(args)
     _resolve_resume_args(args, loop_kind=loop_kind)
     command.validate(args)
+    _allocate_run_id(args)
     return CliInvocation(loop_kind=loop_kind, args=args)
+
+
+def _allocate_run_id(args: argparse.Namespace) -> None:
+    """Fix the run's durable id once, before anything starts or detaches.
+
+    A resume has resolved its run already; a fresh run keeps a launcher's
+    ``--run-id`` or gets a new one, so every consumer reads ``args.run_id``.
+    """
+    if args.run_id is not None:
+        return
+    if args.exp_name is None:
+        args.exp_name = generate_experiment_name(args.input_bundle.root)
+    args.run_id = generate_run_id(args.exp_name)
 
 
 def dispatch(argv: list[str], runs: Runs | None = None) -> None:

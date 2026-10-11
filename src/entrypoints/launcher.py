@@ -25,8 +25,8 @@ Interactive paths run the compiled launcher with ``VIBESYS_PYTHON`` set so it
 drives the current interpreter. Every child runs through :func:`call_child`,
 which never kills the child: the child owns its run's teardown.
 
-The light host commands (``instances``, ``tasks``) run in this process, routed
-on ``argv`` before anything heavy is imported. This module's own imports stay
+The light host commands (``example``, ``instances``, ``tasks``) run in this
+process, routed on ``argv`` before anything heavy is imported. This module's own imports stay
 light for that reason (``tests/architecture/test_light_entrypoints.py``); the
 boot trace, which lives behind ``vibesys.api``, is loaded only on the paths that
 start the engine or the TUI.
@@ -49,7 +49,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
-from entrypoints import instances, tasks
+from entrypoints import examples, instances, tasks
 from vs_sim.api import (
     InheritedStdioLauncher,
     LoopSignalSource,
@@ -578,6 +578,7 @@ def _run_source_tui(
 #: contracts, so the command answers in the interpreter's startup time instead
 #: of paying for the engine twice (here and in a child).
 _LIGHT_COMMANDS: dict[str, Callable[[list[str]], int]] = {
+    "example": examples.main,
     "instances": instances.main,
     "tasks": tasks.main,
 }

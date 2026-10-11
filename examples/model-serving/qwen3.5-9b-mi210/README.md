@@ -3,27 +3,28 @@
 VibeSys input bundle: maximize serving throughput of `Qwen/Qwen3.5-9B` (bf16)
 on 1x AMD MI210, measured by replaying an agentic multi-turn coding-session
 trace with Request Factory's `session_runner`. See
-[`OBJECTIVE.md`](OBJECTIVE.md) for the objective, hardware facts, and
+[`OBJECTIVE.md`](.vibesys/tasks/default/OBJECTIVE.md) for the objective, hardware facts, and
 interface contract.
 
 ## Layout
 
 ```
 qwen3.5-9b-mi210/
-├── vibesys.input.toml        # manifest: request-factory-adapter entrypoint, headline metric
-├── OBJECTIVE.md              # what to optimize, hardware facts, interface contract
 ├── pyproject.toml            # uv environment for the checker and reference engine
-├── config/platforms/mi210.toml  # accelerator facts and capacity budget
-├── reference/                # minimal PyTorch engine + OpenAI-compatible server
-├── accuracy_checker/         # HF-golden gate (golden.json checked in)
-├── cpu_check/                # 10-20 s tiny-model engine check on CPU: cpu_check/run.sh
-└── benchmark/
-    ├── run.py                # --mode {smoke,quick,full,holdout}, wraps session_runner
-    ├── test_run.py           # unit tests: mode/trace resolution, digest + disjointness checks
-    ├── traces/               # checked-in session slices + full-trace manifest
-    ├── slice_trace.py        # cuts traces/ out of the full tracegen output
-    ├── fetch_corpus.py       # downloads and verifies the token corpus
-    └── vllm_baseline.sh      # tuned vLLM launch (external comparison point)
+└── .vibesys/tasks/default/   # trusted task files; read-only for the agent
+    ├── vibesys.input.toml    # manifest: request-factory-adapter entrypoint, headline metric
+    ├── OBJECTIVE.md          # what to optimize, hardware facts, interface contract
+    ├── config/platforms/mi210.toml  # accelerator facts and capacity budget
+    ├── reference/            # minimal PyTorch engine + OpenAI-compatible server
+    ├── accuracy_checker/     # HF-golden gate (golden.json checked in)
+    ├── cpu_check/            # 10-20 s tiny-model engine check on CPU: cpu_check/run.sh
+    └── benchmark/
+        ├── run.py            # --mode {smoke,quick,full,holdout}, wraps session_runner
+        ├── test_run.py       # unit tests: mode/trace resolution, digest + disjointness checks
+        ├── traces/           # checked-in session slices + full-trace manifest
+        ├── slice_trace.py    # cuts traces/ out of the full tracegen output
+        ├── fetch_corpus.py   # downloads and verifies the token corpus
+        └── vllm_baseline.sh  # tuned vLLM launch (external comparison point)
 ```
 
 ## Run it
@@ -38,7 +39,8 @@ vibesys --runs-dir /work/vibesys-runs --local \
   --input examples/model-serving/qwen3.5-9b-mi210
 ```
 
-Each piece by hand, from the bundle root on a node with the MI210:
+Each piece by hand, from the task directory (`.vibesys/tasks/default/`) on a node
+with the MI210:
 
 ```bash
 # reference server (reads weights from the local HF cache)
@@ -60,8 +62,8 @@ progress line, that record's `partial` field holds the achieved warmup output
 rate, the rate that finishes within 180 s, and rounds completed out of 72.
 
 `pyproject.toml` pulls torch from the PyTorch ROCm 6.4 wheel index on Linux.
-See [`reference/README.md`](reference/README.md) and
-[`accuracy_checker/README.md`](accuracy_checker/README.md) for the engine
+See [`reference/README.md`](.vibesys/tasks/default/reference/README.md) and
+[`accuracy_checker/README.md`](.vibesys/tasks/default/accuracy_checker/README.md) for the engine
 surface and the gate policy.
 
 ## Benchmark inputs

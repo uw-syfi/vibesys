@@ -19,6 +19,7 @@ only the shell's own commit error; every suspension core accepted is resumed exa
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -110,7 +111,12 @@ FACTS = RunFacts(
 LEASE = 100.0
 REPLY = TypeAdapter(SocketSuccess | SocketFailure)
 
-type Step = tuple[Literal["submit"]] | tuple[Literal["wait"], tuple[int, ...]]
+type Step = (
+    tuple[Literal["submit"]]
+    | tuple[Literal["lose"]]
+    | tuple[Literal["timeout_retry"]]
+    | tuple[Literal["wait"], tuple[int, ...]]
+)
 type Program = tuple[Step, ...]
 
 
@@ -136,6 +142,25 @@ def _commit(label: str) -> str:
     return hashlib.sha256(label.encode()).hexdigest()[:40]
 
 
+class SlowSnapshot:
+    """A snapshot that can be held, as one queued behind other work on a lock is.
+
+    While held, a snapshot reports that it has arrived and waits for the release. The test
+    decides when the release comes, so how long the submit takes against the agent's tool
+    deadline is chosen by the schedule, never measured.
+    """
+
+    def __init__(self) -> None:
+        self.hold: asyncio.Event | None = None
+        self.arrived = asyncio.Event()
+
+    async def pass_through(self) -> None:
+        """Wait here while a hold is in place."""
+        if self.hold is not None and not self.hold.is_set():
+            self.arrived.set()
+            await self.hold.wait()
+
+
 class Workspace:
     """A Fake agent workspace: its revision changes with each turn's edit, as Git content does.
 
@@ -143,12 +168,14 @@ class Workspace:
     retention commit carries its own metadata); the same content gives the same snapshot.
     """
 
-    def __init__(self, edits: list[str]) -> None:
+    def __init__(self, edits: list[str], slow: SlowSnapshot) -> None:
         self._edits = edits
+        self._slow = slow
 
     async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
         """The current content as a snapshot revision, the same one until the next edit."""
         del label, retention_label
+        await self._slow.pass_through()
         return _commit(f"snapshot:{self._edits[-1]}")
 
     async def matches_revision(self, revision: str) -> bool:
@@ -161,6 +188,7 @@ class Workspaces:
 
     def __init__(self) -> None:
         self.edits = [_commit("edit:0")]
+        self.slow = SlowSnapshot()
 
     def edit(self) -> None:
         """The agent changed its candidate."""
@@ -169,7 +197,7 @@ class Workspaces:
     async def workspace_of(self, scope: Scope) -> SnapshotWorkspace | None:
         """The one workspace."""
         del scope
-        return Workspace(self.edits)
+        return Workspace(self.edits, self.slow)
 
 
 class ShellView:
@@ -252,6 +280,14 @@ class Agent:
         match step:
             case ("submit",):
                 frame = SubmitCall(token=token).model_dump_json().encode()
+            case ("lose",):
+                # The call completes on the host; the agent's deadline passed, so it never
+                # reads the reply and the client never confirms it.
+                await self.bridge.answer(SubmitCall(token=token).model_dump_json().encode())
+                return True
+            case ("timeout_retry",):
+                frame = SubmitCall(token=token).model_dump_json().encode()
+                return await self._record(step, await self._after_timeout(frame), count=count)
             case ("wait", picks):
                 names = tuple(
                     dict.fromkeys(
@@ -260,15 +296,38 @@ class Agent:
                 )
                 frame = WaitCall(token=token, handles=names).model_dump_json().encode()
         try:
-            reply = REPLY.validate_json(await self.bridge.handle(frame))
+            return await self._record(step, await self.bridge.handle(frame), count=count)
         except RuntimeCommitError:
             assert self.run_over, "only a call after the run ended meets the shell's commit error"
             return False
+
+    async def _after_timeout(self, frame: bytes) -> bytes:
+        """A submit that outlasts the agent's deadline, then the agent's retry.
+
+        The first call is held in its snapshot while the agent gives up (nobody reads its
+        reply), the retry arrives and queues behind it, and the snapshot then finishes.
+        """
+        assert self.bridge is not None
+        slow = self.workspaces.slow
+        slow.hold, slow.arrived = asyncio.Event(), asyncio.Event()
+        first = asyncio.create_task(self.bridge.answer(frame))
+        arrived = asyncio.create_task(slow.arrived.wait())
+        await asyncio.wait({first, arrived}, return_when=asyncio.FIRST_COMPLETED)
+        retry = asyncio.create_task(self.bridge.handle(frame))
+        await asyncio.sleep(0)
+        slow.hold.set()
+        arrived.cancel()
+        await first
+        return await retry
+
+    async def _record(self, step: Step, raw: bytes, *, count: bool) -> bool:
+        """File one reply: an error with its text, a new handle, or an accepted wait."""
+        reply = REPLY.validate_json(raw)
         if isinstance(reply, SocketFailure):
             assert reply.error
             self.errors.append(reply.error)
             return False
-        if step[0] == "submit" and "handle_id" in reply.result:  # type: ignore[operator]
+        if step[0] in ("submit", "timeout_retry") and "handle_id" in reply.result:  # type: ignore[operator]
             self.handles.append(reply.result["handle_id"])  # type: ignore[index]
         elif count:
             self.waits_accepted += 1
@@ -639,3 +698,73 @@ def test_a_submission_finished_in_its_submit_round_does_not_halt_the_run(
 ) -> None:
     """An executor that answers a submission as finished wakes the turns that wait on it."""
     check(play(turns, total, finished_in_submit_round=True))
+
+
+_LOSSY_STEP = st.sampled_from((("submit",), ("lose",), ("timeout_retry",)))
+
+
+def _expected(program: Program) -> tuple[int, bool, bool]:
+    """What one turn's submit calls must come to: (budget refusals seen, handle learned, owed).
+
+    A candidate's one submission is charged by the first call that reaches the host. If that
+    call's reply is lost the submission stays owed, and the agent's next call for the same
+    candidate returns it; once the agent has read it, a further call is a real duplicate.
+    ``timeout_retry`` is a lost call followed by the retry.
+    """
+    refusals, learned, owed, charged = 0, False, False, False
+    for kind, *_rest in program:
+        for lost in {"submit": (False,), "lose": (True,), "timeout_retry": (True, False)}.get(
+            kind, ()
+        ):
+            if charged and not owed:
+                refusals += 0 if lost else 1
+            elif lost:
+                charged = owed = True
+            else:
+                charged, owed, learned = True, False, True
+    return refusals, learned, owed
+
+
+@settings(
+    max_examples=_EXAMPLES,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+)
+@given(program=st.lists(_LOSSY_STEP, min_size=1, max_size=4).map(tuple))
+def test_a_submit_reply_the_agent_never_read_is_returned_to_its_retry(program: Program) -> None:
+    """Whatever the latency against the agent's deadline, a charged submission is never lost.
+
+    A reply that never reached the agent leaves its submission owed; the agent's next submit
+    for the same candidate gets that handle, not a budget refusal; only a call after the
+    agent has read the handle is a duplicate. A submission still owed at the end of the turn
+    is listed, so a stalled run can name it.
+    """
+    played = play((Turn(program=program),), 1)
+    check(played)
+    refusals, learned, owed = _expected(program)
+    state = played.shell.record.envelope.core
+    admitted = [c.request_id for c in state.evaluation.agent_calls if c.request_id is not None]
+    assert len(admitted) == 1
+    assert len([e for e in played.agent.errors if "submission budget" in e]) == refusals
+    assert len(played.agent.errors) == refusals
+    assert played.agent.handles == ([handle_for(admitted[0])] if learned else [])
+    assert played.agent.bridge is not None
+    notes = played.agent.bridge.unacknowledged()
+    assert len(notes) == (1 if owed else 0)
+    assert all(handle_for(admitted[0]) in note for note in notes)
+
+
+def test_a_submit_slower_than_the_agents_deadline_is_one_submission_the_agent_can_wait_on() -> None:
+    """The failing live run: the first call outlasts the deadline, the retry must get its handle.
+
+    Before the fix the retry was refused as an exhausted budget while the lost call's
+    measurement ran unseen, and the run ended stalled with ``open intents []``.
+    """
+    turn = Turn(program=(("timeout_retry",), ("wait", (0,))))
+    played = play((turn,), 1)
+    check(played)
+    state = played.shell.record.envelope.core
+    assert played.agent.errors == []
+    assert len(played.agent.handles) == 1
+    assert [c.request_id for c in state.evaluation.agent_calls if c.request_id is not None] != []
+    assert played.agent.waits_accepted == 1, "the agent could wait on the submission it retried"

@@ -1,0 +1,18 @@
+version = 1
+
+[agent]
+domain = "llm-serving"
+
+[accuracy]
+command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/vllm/accuracy_checker/checker.py"]
+timeout_seconds = 120
+
+[benchmark]
+command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/vllm/benchmark/benchmark.py"]
+timeout_seconds = 300
+
+[[workspace.sources]]
+name = "vllm"
+repo = "https://github.com/vllm-project/vllm"
+commit = "568afb3a13806beb53bb2e6bd518269357b237c0"
+dest = "vllm"

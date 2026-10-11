@@ -11,12 +11,13 @@ from tests.support.docker_environment import (
     fake_docker_environment,
     host_container_backend,
 )
+from tests.support.task_project import write_task
 
 from launch import LaunchSettings, create_session
 from vibesys.api import PluginProjection, RunStopped
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.inputs import load_input_bundle
+from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_catalog import OrchestrationRegistration, OrchestrationRegistry
 from vibesys.run.contracts import ResumeRef, RunRequest
@@ -83,11 +84,12 @@ def _discard_event(event: CoreEvent) -> None:
 
 def _write_project(root: Path) -> None:
     root.mkdir(parents=True)
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Improve the queue.\n",
     )
 
 
@@ -97,7 +99,7 @@ def _request(project_root: Path) -> RunRequest:
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id=PLUGIN.id, config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "state-probe"}}),
-        input_bundle=load_input_bundle(project_root),
+        input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name="state-probe",
         agent_backend="stub",

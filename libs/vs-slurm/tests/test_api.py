@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vs_slurm.api import (
@@ -328,6 +332,25 @@ accuracy_arguments = ["--endpoint", "private"]
     assert config.sbatch_arguments == ("-p", "accelerators", "-N", "1")
 
 
+@pytest.mark.parametrize("key", ["host", "ssh_command", "command"])
+def test_local_transport_rejects_settings_of_other_transports(tmp_path: Path, key: str) -> None:
+    path = tmp_path / "slurm.toml"
+    path.write_text(
+        f"""[slurm]
+name = "research-cluster"
+remote_workspace_root = "/shared/runs"
+
+[slurm.transport]
+kind = "local"
+{key} = ["value"]
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SlurmConfigError, match=f"transport.local.{key}"):
+        load_slurm_config(path)
+
+
 def test_runner_uses_versioned_connector_protocol_and_collects_artifacts(tmp_path: Path) -> None:
     workspace = tmp_path / "candidate"
     workspace.mkdir()
@@ -367,16 +390,36 @@ def test_runner_uses_versioned_connector_protocol_and_collects_artifacts(tmp_pat
     assert all(request["version"] == 1 for request in connector.requests)
 
 
+def _split_clean_environment(argv: Sequence[str]) -> tuple[dict[str, str] | None, tuple[str, ...]]:
+    """Split ``env -i NAME=VALUE... PROGRAM ARGS`` into the environment and the program's argv.
+
+    A program that does not start with ``env -i`` inherits this process's environment: ``None``.
+    """
+    command = tuple(argv)
+    if command[:2] != ("env", "-i"):
+        return None, command
+    rest = command[2:]
+    count = 0
+    while count < len(rest) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", rest[count], re.DOTALL):
+        count += 1
+    return dict(item.split("=", 1) for item in rest[:count]), rest[count:]
+
+
 class _FakeSshProcess:
-    def __init__(self) -> None:
+    """Answer a transport's processes; *program* is what executes remote commands."""
+
+    def __init__(self, program: str = "ssh") -> None:
         self.calls: list[tuple[tuple[str, ...], str | None, float]] = []
+        self.environments: list[dict[str, str] | None] = []
+        self._program = program
 
     def __call__(
         self, argv: Sequence[str], *, stdin: str | None, timeout: float
     ) -> subprocess.CompletedProcess[str]:
-        command = tuple(argv)
+        environment, command = _split_clean_environment(argv)
+        self.environments.append(environment)
         self.calls.append((command, stdin, timeout))
-        if command[0] == "ssh":
+        if command[0] == self._program:
             remote_command = command[-1]
             if "sbatch" in remote_command:
                 stdout = "Submitted batch job 4567\n"
@@ -440,6 +483,98 @@ def test_runner_uses_builtin_ssh_and_rsync_transport(tmp_path: Path) -> None:
         "--",
     )
     assert ".tmp.ssh_01.workspace/payload/" in sync_argv[-1]
+
+
+def test_local_transport_runs_commands_and_copies_on_this_host(tmp_path: Path) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    process = _FakeSshProcess(program="/operator/bin/login-shell")
+    config = _config(
+        transport={
+            "kind": "local",
+            "shell_command": ["/operator/bin/login-shell", "-c"],
+            "rsync_command": ["/operator/bin/rsync"],
+        }
+    )
+
+    result = SlurmJobRunner(config, process=process, invocation_id=lambda: "local_01").run(
+        SlurmJobRequest(workspace=workspace, command=("true",))
+    )
+
+    assert result.job_id == "4567"
+    assert result.output == "ssh output\n"
+    assert process.calls[0][0] == (
+        "/operator/bin/login-shell",
+        "-c",
+        "mkdir -p /operator/campaign/runs/test-cluster/local_01 "
+        "/operator/campaign/runs/test-cluster/.vibesys-content-cache",
+    )
+    copies = [call[0] for call in process.calls if call[0][0] == "/operator/bin/rsync"]
+    assert copies
+    for argv in copies:
+        # No remote shell and no host: both operands are paths on this host.
+        assert "-e" not in argv
+        source, destination = argv[argv.index("--") + 1 :]
+        assert source.startswith("/")
+        assert destination.startswith("/")
+    assert all(
+        call[0][0] in {"/operator/bin/login-shell", "/operator/bin/rsync"} for call in process.calls
+    )
+
+
+def test_the_ssh_transport_leaves_the_environment_to_the_login_session(tmp_path: Path) -> None:
+    """sshd supplies a fresh environment; the argv carries no environment and no export option."""
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    process = _FakeSshProcess()
+
+    config = _config(transport={"kind": "ssh", "host": "cluster.example"})
+    SlurmJobRunner(config, process=process, invocation_id=lambda: "env_01").run(
+        SlurmJobRequest(workspace=workspace, command=("true",))
+    )
+
+    assert process.environments
+    assert all(environment is None for environment in process.environments)
+    assert not any("--export" in call[0][-1] for call in process.calls)
+
+
+_ENVIRONMENT_NAMES = st.one_of(
+    st.sampled_from(
+        [
+            *("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"),
+            *("TMPDIR", "SLURM_JOB_ID", "SBATCH_EXPORT", "SALLOC_PARTITION", "SRUN_CPUS_PER_TASK"),
+            *("LC_", "ANTHROPIC_API_KEY", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "LD_PRELOAD"),
+        ]
+    ),
+    st.from_regex(r"[A-Z][A-Z0-9_]{0,12}", fullmatch=True),
+)
+_ENVIRONMENT_VALUES = st.text(
+    st.characters(blacklist_characters="\x00", blacklist_categories=("Cs",)), max_size=20
+)
+
+
+@given(host=st.dictionaries(_ENVIRONMENT_NAMES, _ENVIRONMENT_VALUES, max_size=12))
+@settings(max_examples=60, deadline=None)
+def test_local_transport_processes_get_exactly_the_login_environment(host: dict[str, str]) -> None:
+    """Whatever the host holds, a local-transport process gets only the login-like names."""
+    process = _FakeSshProcess(program="bash")
+    config = _config(transport={"kind": "local", "shell_command": ["bash", "-c"]})
+
+    with tempfile.TemporaryDirectory() as workspace:
+        SlurmJobRunner(
+            config, process=process, invocation_id=lambda: "env_01", host_environment=lambda: host
+        ).run(SlurmJobRequest(workspace=Path(workspace), command=("true",)))
+
+    expected = {
+        name: value
+        for name, value in host.items()
+        if name in {"HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ", "TMPDIR"}
+        or (name.startswith("LC_") and name != "LC_")
+    }
+    assert len(process.environments) > 1
+    assert all(environment == expected for environment in process.environments)
+    submit = next(call[0][-1] for call in process.calls if "sbatch-rr" in call[0][-1])
+    assert "--export" not in submit
 
 
 def test_builtin_ssh_does_not_consume_embedding_process_stdin(tmp_path: Path) -> None:

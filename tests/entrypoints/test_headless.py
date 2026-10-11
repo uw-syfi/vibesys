@@ -7,12 +7,12 @@ import json
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from tests.support import run_test_command
+from tests.support.task_project import task_path, write_task
 
 from entrypoints import cli
 from entrypoints.cli import (
@@ -34,7 +34,7 @@ from vibesys.config import Config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType
-from vibesys.inputs import ProfileGuidedInput, load_input_bundle
+from vibesys.inputs import ProfileGuidedInput, load_task
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
@@ -54,6 +54,9 @@ from vs_project.api import (
 )
 from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, run_environment_record
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _LOOP_RUN_TARGETS = {
     "agent": "vibesys.api._session.run_plugin",
@@ -76,8 +79,8 @@ def agent_descriptor(
 def _write_input_project(parent: Path, name: str = "queue-spsc") -> Path:
     project = parent / name
     (project / "src").mkdir(parents=True)
-    (project / "OBJECTIVE.md").write_text("Make the queue faster.\n")
-    (project / "vibesys.input.toml").write_text(
+    write_task(
+        project,
         """\
 version = 1
 
@@ -89,7 +92,8 @@ command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 
 [benchmark]
 command = ["uv", "run", "python", "benchmark/benchmark.py"]
-"""
+""",
+        objective="Make the queue faster.\n",
     )
     (project / "src" / "queue.py").write_text("class Queue: pass\n")
     return project
@@ -121,10 +125,10 @@ def test_run_environment_spec_uses_task_modal_entrypoint(tmp_path: Path) -> None
     entrypoint = project / "deploy" / "service.py"
     entrypoint.parent.mkdir()
     entrypoint.write_text("app = object()\n")
-    with (project / "vibesys.input.toml").open("a") as manifest:
+    with (task_path(project) / "vibesys.input.toml").open("a") as manifest:
         manifest.write('\n[environment.modal]\nentrypoint = "deploy/service.py"\n')
     args = argparse.Namespace(
-        input_bundle=load_input_bundle(project),
+        input_bundle=load_task(project),
         docker_image=None,
         modal=True,
         modal_gpu="H100!",
@@ -140,7 +144,7 @@ def test_run_environment_spec_uses_task_modal_entrypoint(tmp_path: Path) -> None
 
 def test_cli_selects_documented_skypilot_environment(tmp_path: Path) -> None:
     project = _write_input_project(tmp_path)
-    with (project / "vibesys.input.toml").open("a") as manifest:
+    with (task_path(project) / "vibesys.input.toml").open("a") as manifest:
         manifest.write(
             """
 [resources]
@@ -168,9 +172,19 @@ accelerator_backend = "rocm"
     assert spec.resources.accelerators_per_node == 4
 
 
+def _write_slurm_operator_config(path: Path) -> Path:
+    """Write the smallest operator file that the CLI's profiler validation can load."""
+    path.write_text(
+        '[slurm]\nname = "cluster"\nremote_workspace_root = "/remote/runs"\n'
+        '[slurm.transport]\nkind = "ssh"\nhost = "cluster"\n',
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_cli_selects_slurm_with_external_operator_config(tmp_path: Path) -> None:
     project = _write_input_project(tmp_path)
-    config_path = tmp_path / "operator-slurm.toml"
+    config_path = _write_slurm_operator_config(tmp_path / "operator-slurm.toml")
 
     invocation = parse_cli_invocation(["--input", str(project), "--slurm-config", str(config_path)])
     spec = run_environment_spec_from_args(invocation.args)
@@ -212,8 +226,6 @@ _MODAL_ENVIRONMENT = RunEnvironmentRecord(
     model_volume="weights",
     app="run-app",
 )
-_SLURM_CONFIG = Path("/srv/vibesys/operator/slurm.toml")
-_SLURM_ENVIRONMENT = RunEnvironmentRecord(name="slurm", config_path=str(_SLURM_CONFIG))
 
 
 def _common_configuration() -> _CommonConfiguration:
@@ -414,7 +426,7 @@ def test_profile_guided_loop_requires_and_accepts_manifest_capability(tmp_path: 
         parse_cli_invocation(command)
     assert exc.value.diagnostic.code == "missing_profile_guided_input"
 
-    with (project / "vibesys.input.toml").open("a") as manifest:
+    with (task_path(project) / "vibesys.input.toml").open("a") as manifest:
         manifest.write('\n[profile_guided]\ncommand = ["python", "profile.py"]\n')
     invocation = parse_cli_invocation(command)
     assert invocation.loop_kind == "profile-guided"
@@ -706,7 +718,7 @@ def test_direct_project_rejects_materialization_inputs_but_copy_accepts_them(
     tmp_path: Path,
 ) -> None:
     project = _write_input_project(tmp_path)
-    with (project / "vibesys.input.toml").open("a") as manifest:
+    with (task_path(project) / "vibesys.input.toml").open("a") as manifest:
         manifest.write(
             """
 [[workspace.sources]]
@@ -854,7 +866,7 @@ def test_openevolve_knobs_cannot_be_combined_with_vibesys_policy(tmp_path: Path)
 def test_target_validation_loads_the_manifest_contract(tmp_path: Path) -> None:
 
     project = _write_input_project(tmp_path)
-    with (project / "vibesys.input.toml").open("a") as manifest:
+    with (task_path(project) / "vibesys.input.toml").open("a") as manifest:
         manifest.write(
             '\n[benchmark.result]\njson_argument = "--output-json"\nmetric = "ops_per_sec"\n'
         )
@@ -873,7 +885,7 @@ def test_target_validation_reports_missing_required_files(
 ) -> None:
 
     project = _write_input_project(tmp_path)
-    (project / missing).unlink()
+    (task_path(project) / missing).unlink()
     with pytest.raises(ConfigurationError) as exc:
         parse_cli_invocation(["--input", str(project)])
     assert missing in exc.value.diagnostic.message
@@ -990,7 +1002,7 @@ def test_validate_command_reports_an_invalid_project_without_running_a_loop(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     project = _write_input_project(tmp_path)
-    (project / "OBJECTIVE.md").unlink()
+    (task_path(project) / "OBJECTIVE.md").unlink()
     with (
         patch.object(sys, "argv", ["vibesys", "validate", str(project)]),
         pytest.raises(SystemExit) as exc,
@@ -998,7 +1010,7 @@ def test_validate_command_reports_an_invalid_project_without_running_a_loop(
         main()
 
     assert exc.value.code == 1
-    assert "OBJECTIVE.md not found" in capsys.readouterr().err
+    assert "missing required file OBJECTIVE.md" in capsys.readouterr().err
 
 
 def test_direct_resume_selects_an_explicit_run_id(
@@ -1406,7 +1418,7 @@ def test_resume_switches_to_the_recorded_run_branch(
     )
     run_id = "20260811-120000-11111111-agent"
     _git(project, "switch", "-q", "-c", f"vibesys-runs/{run_id}")
-    (project / "OBJECTIVE.md").write_text("Objective on the run branch.\n")
+    (task_path(project) / "OBJECTIVE.md").write_text("Objective on the run branch.\n")
     store = _write_project_run(
         project,
         run_id,
@@ -1418,7 +1430,7 @@ def test_resume_switches_to_the_recorded_run_branch(
         .resolve_snapshot(store.state.initialization_snapshot(run_id))
         .scope_pathspec
     )
-    _git(project, "add", "OBJECTIVE.md", state_pathspec)
+    _git(project, "add", ".vibesys/tasks/default/OBJECTIVE.md", state_pathspec)
     _git(
         project,
         "-c",
@@ -1487,7 +1499,7 @@ def test_v5_agent_resume_restores_config_constraints_and_budget(
 ) -> None:
     project = _write_input_project(tmp_path)
     if loop_kind == "profile-guided":
-        with (project / "vibesys.input.toml").open("a") as input_manifest:
+        with (task_path(project) / "vibesys.input.toml").open("a") as input_manifest:
             input_manifest.write('\n[profile_guided]\ncommand = ["python", "profile.py"]\n')
     run_id = f"20260811-120000-11111111-{loop_kind}-v5"
     configuration = _agent_configuration(
@@ -1789,7 +1801,7 @@ def _modal_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, s
 def test_fresh_run_records_the_selected_run_environment(tmp_path: Path) -> None:
     project = _write_input_project(tmp_path)
     args = argparse.Namespace(
-        input_bundle=load_input_bundle(project),
+        input_bundle=load_task(project),
         docker_image=None,
         modal=True,
         modal_gpu="A100-80GB",
@@ -1822,11 +1834,14 @@ def test_resume_restores_the_external_slurm_config_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = _write_input_project(tmp_path)
+    slurm_config = _write_slurm_operator_config(tmp_path / "operator-slurm.toml")
     run_id = "20260811-120000-11111111-agent"
     _write_project_run(
         project,
         run_id,
-        configuration=_agent_configuration(run_environment=_SLURM_ENVIRONMENT),
+        configuration=_agent_configuration(
+            run_environment=RunEnvironmentRecord(name="slurm", config_path=str(slurm_config))
+        ),
         created_at=datetime(2026, 8, 11, 12, tzinfo=UTC),
     )
     monkeypatch.chdir(project)
@@ -1834,10 +1849,10 @@ def test_resume_restores_the_external_slurm_config_path(
     args = parse_cli_invocation(["--resume", run_id]).args
     spec = run_environment_spec_from_args(args)
 
-    assert args.slurm_config == _SLURM_CONFIG
-    assert spec == RunEnvironmentSpec("slurm", {"config_path": str(_SLURM_CONFIG)})
+    assert args.slurm_config == slurm_config
+    assert spec == RunEnvironmentSpec("slurm", {"config_path": str(slurm_config)})
 
-    matching = parse_cli_invocation(["--resume", run_id, "--slurm-config", str(_SLURM_CONFIG)]).args
+    matching = parse_cli_invocation(["--resume", run_id, "--slurm-config", str(slurm_config)]).args
     assert run_environment_spec_from_args(matching) == spec
 
     with pytest.raises(ConfigurationError, match=r"run_environment\.config_path"):
@@ -2023,14 +2038,14 @@ def _write_microservice_project(parent: Path, *, traced: bool, name: str = "hote
     """Write a microservice bundle that does or does not capture a trace graph."""
     project = parent / name
     (project / "src").mkdir(parents=True)
-    (project / "OBJECTIVE.md").write_text("Make the request path faster.\n")
     telemetry = (
         ', "--telemetry-output", "/tmp/otel/telemetry.json"'
         ', "--trace-graph-json", "/tmp/otel/trace-graph.json"'
         if traced
         else ""
     )
-    (project / "vibesys.input.toml").write_text(
+    write_task(
+        project,
         f"""\
 version = 1
 
@@ -2046,7 +2061,8 @@ command = ["servicebench", "trace", "--candidate-dir", "svc"{telemetry}]
 [benchmark.result]
 json_argument = "--output-json"
 metric = "primary_value"
-"""
+""",
+        objective="Make the request path faster.\n",
     )
     return project
 
@@ -2086,7 +2102,7 @@ def test_non_microservice_task_is_unaffected_by_trace_arguments(tmp_path: Path) 
     """OTel is microservices-only; a generic bundle must not be upgraded."""
 
     project = _write_microservice_project(tmp_path, traced=True, name="generic-task")
-    manifest = project / "vibesys.input.toml"
+    manifest = task_path(project) / "vibesys.input.toml"
     manifest.write_text(manifest.read_text().replace('"microservices"', '"generic"'))
 
     invocation = parse_cli_invocation(["--input", str(project)])

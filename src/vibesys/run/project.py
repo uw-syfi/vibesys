@@ -14,10 +14,8 @@ from pydantic import ValidationError
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.inputs import (
     MANIFEST_NAME,
-    EvaluatorInput,
     InputManifest,
     WorkspaceSource,
-    render_input_manifest,
 )
 from vibesys.run.workspace_policy import materialization_source
 from vs_project.api import (
@@ -181,11 +179,6 @@ class ProjectProvisioningError(ValueError):
         return cls(f"input project is not a directory: {path}")
 
     @classmethod
-    def objective_missing(cls, path: Path) -> Self:
-        """Describe a legacy input project without its objective file."""
-        return cls(f"OBJECTIVE.md not found: {path}")
-
-    @classmethod
     def destination_inside_input(cls, path: Path) -> Self:
         """Describe a destination that would copy a project into itself."""
         return cls(f"project destination must be outside the input project: {path}")
@@ -222,16 +215,6 @@ class ProjectProvisioningError(ValueError):
         """Describe workspace sources that retain repository metadata."""
         return cls("copied projects require workspace sources with strip_git = true")
 
-    @classmethod
-    def evaluator_declaration_mismatch(cls) -> Self:
-        """Describe mismatched evaluator declarations and resolved sources."""
-        return cls("evaluator declaration and resolved provisioning source do not match")
-
-    @classmethod
-    def evaluator_source_not_directory(cls, path: Path) -> Self:
-        """Describe a resolved evaluator source that is not a directory."""
-        return cls(f"evaluator source is not a directory: {path}")
-
 
 @dataclass(frozen=True)
 class ProjectProvisioningSpec:
@@ -243,9 +226,8 @@ class ProjectProvisioningSpec:
     """
 
     materializer: ProjectMaterializer
+    task_name: str
     workspace_sources: tuple[WorkspaceSource, ...] = ()
-    evaluator_source: Path | None = None
-    task_name: str | None = None
     input_project_dir: Path | None = None
     input_excludes: frozenset[str] = frozenset()
 
@@ -263,56 +245,30 @@ def provision_project(
     copy, source checkout, or manifest rewrite fails, the newly created
     destination is removed.
     """
-    source = _require_input_root(
-        input_root,
-        require_legacy_objective=spec.task_name is None,
-    )
+    source = _require_input_root(input_root)
     destination = destination_root.expanduser().resolve()
-    repository_task = spec.task_name is not None
-    manifest_root = (
-        Project.open(source).select_task(spec.task_name).path if repository_task else source
-    )
-    manifest = _load_manifest(manifest_root)
+    manifest = _load_manifest(Project.open(source).select_task(spec.task_name).path)
     _validate_materialization_contract(manifest, spec)
 
-    copy_excludes = _project_copy_excludes(
-        source,
-        preserve_configuration=repository_task,
-    )
+    copy_excludes = _project_copy_excludes(source, preserve_configuration=True)
     primary_steps = _primary_steps(source, destination, spec, copy_excludes)
 
     try:
         with spec.materializer.fresh_project(source, destination):
             spec.materializer.materialize(primary_steps, existing=False)
-            evaluator_relative = _materialize_evaluator(
-                source,
-                destination,
-                manifest,
-                spec,
-            )
             _remove_private_entries(destination, materializer=spec.materializer)
-            if not repository_task:
-                normalized = manifest.model_copy(
-                    update={
-                        "workspace": None,
-                        "evaluator": _provisioned_evaluator(manifest, evaluator_relative),
-                    }
-                )
-                (destination / MANIFEST_NAME).write_text(render_input_manifest(normalized))
     except FreshProjectError as exc:
         raise _provisioning_error(exc) from exc
 
     return destination
 
 
-def _require_input_root(path: Path, *, require_legacy_objective: bool) -> Path:
+def _require_input_root(path: Path) -> Path:
     root = path.expanduser().resolve()
     if not root.exists():
         raise ProjectProvisioningError.input_missing(root)
     if not root.is_dir():
         raise ProjectProvisioningError.input_not_directory(root)
-    if require_legacy_objective and not (root / "OBJECTIVE.md").is_file():
-        raise ProjectProvisioningError.objective_missing(root / "OBJECTIVE.md")
     return root
 
 
@@ -346,9 +302,6 @@ def _validate_materialization_contract(
         raise ProjectProvisioningError.workspace_sources_mismatch()
     if any(not source.strip_git for source in spec.workspace_sources):
         raise ProjectProvisioningError.workspace_sources_require_git_strip()
-    declared_evaluator = manifest.evaluator is not None and manifest.evaluator.source is not None
-    if declared_evaluator != (spec.evaluator_source is not None):
-        raise ProjectProvisioningError.evaluator_declaration_mismatch()
 
 
 def _project_copy_excludes(
@@ -385,53 +338,6 @@ def _primary_steps(
     if spec.input_project_dir is not None:
         steps.append(InputProjectMaterialization(project_dir=spec.input_project_dir))
     return tuple(steps)
-
-
-def _provisioned_evaluator(
-    manifest: InputManifest, evaluator_relative: str | None
-) -> EvaluatorInput | None:
-    """Return the evaluator declaration the provisioned project's manifest carries.
-
-    A copied evaluator source is relocated into the project. A packaged evaluator
-    is resolved by name and version, not copied, so its declaration stays as is;
-    dropping it would leave entrypoint commands without their package.
-    """
-    if evaluator_relative is not None:
-        return EvaluatorInput(source=evaluator_relative)
-    if manifest.evaluator is not None and manifest.evaluator.package_requirement is not None:
-        return manifest.evaluator
-    return None
-
-
-def _materialize_evaluator(
-    source: Path,
-    destination: Path,
-    manifest: InputManifest,
-    spec: ProjectProvisioningSpec,
-) -> str | None:
-    if manifest.evaluator is None or spec.evaluator_source is None:
-        return None
-
-    evaluator_source = spec.evaluator_source.expanduser().resolve()
-    if not evaluator_source.is_dir():
-        raise ProjectProvisioningError.evaluator_source_not_directory(evaluator_source)
-    relative = Path("_evaluator") / evaluator_source.name
-    evaluator_destination = destination / relative
-
-    spec.materializer.relocate_copied_tree(
-        ProjectTreeCopy(
-            src=evaluator_source,
-            dest=evaluator_destination,
-            extra_excludes=_project_copy_excludes(evaluator_source),
-            require_absent=evaluator_destination,
-            require_absent_message=(
-                "evaluator destination already exists in provisioned project: "
-                f"{relative.as_posix()}"
-            ),
-        ),
-        copied_from=source,
-    )
-    return relative.as_posix()
 
 
 def _remove_private_entries(root: Path, *, materializer: ProjectMaterializer) -> None:

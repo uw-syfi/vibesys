@@ -1,0 +1,8 @@
+schema_version = 1
+name = "vibesys-evaluator-unordered-map"
+version = "0.1.0"
+protocol_version = 1
+toolchains = ["go", "rust"]
+
+[entrypoints]
+vibesys-unordered-map = ["go", "-C", "${PACKAGE_ROOT}", "run", "."]

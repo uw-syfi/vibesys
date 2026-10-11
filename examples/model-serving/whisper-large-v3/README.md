@@ -9,21 +9,22 @@ reference's transcripts.
 This is the offline-batch counterpart to `moonshine-streaming` (streaming TTFT):
 the algorithmic wins here are cross-attention K/V caching, continuous batching of
 the decoder across requests, and batching the fixed-shape encoder — not per-chunk
-incremental encoding. See [`OBJECTIVE.md`](OBJECTIVE.md).
+incremental encoding. See [`OBJECTIVE.md`](.vibesys/tasks/default/OBJECTIVE.md).
 
 ## Layout
 
 ```
 whisper-large-v3/
-├── vibesys.input.toml     # manifest: domain, accuracy + benchmark commands, headline metric
-├── OBJECTIVE.md           # what to optimize + the algorithmic levers
-├── reference/             # HF WhisperForConditionalGeneration reference (correctness ground truth)
-│   ├── meta.json          # model id + pinned revision
-│   ├── config.json        # whisper-large-v3 config
-│   └── reference.py       # reference_transcribe() used by the checker
-├── accuracy_checker/      # checker.py — reference-vs-candidate word-overlap gate
-├── benchmark/             # checked-in Request Factory workload trace
-└── test_audio/            # LibriSpeech test-clean clips + manifest.json
+└── .vibesys/tasks/default/  # trusted task files; read-only for the agent
+    ├── vibesys.input.toml   # manifest: domain, accuracy + benchmark commands, headline metric
+    ├── OBJECTIVE.md         # what to optimize + the algorithmic levers
+    ├── reference/           # HF WhisperForConditionalGeneration reference (correctness ground truth)
+    │   ├── meta.json        # model id + pinned revision
+    │   ├── config.json      # whisper-large-v3 config
+    │   └── reference.py     # reference_transcribe() used by the checker
+    ├── accuracy_checker/    # checker.py: reference-vs-candidate word-overlap gate
+    ├── benchmark/           # checked-in Request Factory workload trace
+    └── test_audio/          # LibriSpeech test-clean clips + manifest.json
 ```
 
 ## Candidate contract

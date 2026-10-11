@@ -85,7 +85,7 @@ class _WebAssetError(ValueError):
 
 
 class _ManifestSource(BaseModel):
-    """One source tree captured by the web build."""
+    """One file or source tree captured by the web build."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -218,6 +218,8 @@ def _first_changed_file(
 
 
 def _file_snapshot(root: Path) -> dict[str, str]:
+    if root.is_file():
+        return {".": hashlib.sha256(root.read_bytes()).hexdigest()}
     if not root.is_dir():
         raise FileNotFoundError(root)
     snapshot: dict[str, str] = {}

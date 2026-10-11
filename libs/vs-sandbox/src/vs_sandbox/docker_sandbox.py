@@ -899,6 +899,21 @@ class DockerSandbox(WorkspaceSandbox):
         env_flags = [flag for key, value in self._env.items() for flag in ("-e", f"{key}={value}")]
         return ["docker", "exec", "-i", "-w", workdir, *env_flags, self._container_id, *argv]
 
+    def execute_as_root(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: Event | None = None,
+    ) -> CommandResult:
+        """Execute *command* as root inside the started container.
+
+        Same result contract as :meth:`execute`. The agent image's default
+        user is not root, so a step that needs root (installing system
+        packages) uses this instead.
+        """
+        return self._execute(command, timeout=timeout, cancel=cancel, user="root")
+
     def execute(
         self,
         command: str,
@@ -915,6 +930,16 @@ class DockerSandbox(WorkspaceSandbox):
         documented in :mod:`vs_sandbox.command_execution`; every sandbox kind
         shares it.
         """
+        return self._execute(command, timeout=timeout, cancel=cancel, user=None)
+
+    def _execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None,
+        cancel: Event | None,
+        user: str | None,
+    ) -> CommandResult:
         if self._container_id is None:
             raise DockerSandboxNotStartedError.operation_before_start()
         container_id = self._container_id
@@ -922,6 +947,7 @@ class DockerSandbox(WorkspaceSandbox):
         exec_cmd = [
             "docker",
             "exec",
+            *(("-u", user) if user is not None else ()),
             "-e",
             f"{EXEC_MARKER_ENV}={exec_id}",
             "-w",

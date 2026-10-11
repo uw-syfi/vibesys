@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support import run_test_command
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.task_project import write_task
 
 from launch import LaunchSettings, create_session
 from vibesys.api import (
@@ -17,7 +18,7 @@ from vibesys.api import (
     ProfilerKind,
     RunRequest,
 )
-from vibesys.api.request import load_input_bundle
+from vibesys.api.request import load_task
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -27,14 +28,15 @@ if TYPE_CHECKING:
 
 def _request(root: Path, domain: str) -> RunRequest:
     root.mkdir(parents=True)
-    (root / "OBJECTIVE.md").write_text("Improve inference.\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         f'version = 1\n[agent]\ndomain = "{domain}"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Improve inference.\n",
     )
     return RunRequest(
         project_root=root,
-        input_bundle=load_input_bundle(root),
+        input_bundle=load_task(root),
         orchestration=OrchestrationDescriptor(id="multi-agent", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "test"}}),
         exp_name="fail-fast",

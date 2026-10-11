@@ -31,3 +31,30 @@ test('surfaces a server-truncated event beside its retained payload', () => {
   expect(html).toContain('class="event-truncated"');
   expect(html).toContain('Event payload truncated at the server');
 });
+
+test('renders formatted transcript payloads as plain text', () => {
+  const content = `first line
+  indented line
+${'A'.repeat(256)}
+<strong>not markup</strong>`;
+  const run = runStep(initialCoreState(), {
+    type: 'events',
+    events: [event(1, 'agent_output_chunk', content)],
+  }).state;
+
+  const html = renderToStaticMarkup(
+    <RunPage
+      run={run}
+      session={null}
+      replayFailure={null}
+      onReattach={() => undefined}
+      onReconnectControls={() => undefined}
+      onRetryReplay={() => undefined}
+    />,
+  );
+
+  expect(html).toContain('class="transcript-content"');
+  expect(html).toContain('first line\n  indented line');
+  expect(html).toContain('&lt;strong&gt;not markup&lt;/strong&gt;');
+  expect(html).not.toContain('<strong>not markup</strong>');
+});

@@ -1,0 +1,28 @@
+version = 1
+
+[agent]
+domain = "generic"
+
+[evaluator]
+name = "vibesys-evaluator-priority-queue"
+version = "0.1.0"
+
+[accuracy]
+entrypoint = "vibesys-priority-queue"
+args = [
+  "check", "--workspace", "${PROJECT_ROOT}",
+  "--scenario", "mpmc", "--operations", "24", "--trials", "100",
+]
+timeout_seconds = 120
+
+[benchmark]
+entrypoint = "vibesys-priority-queue"
+args = [
+  "benchmark", "--workspace", "${PROJECT_ROOT}",
+  "--scenario", "mpmc", "--repetitions", "3",
+]
+timeout_seconds = 300
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "total_ops_per_sec"

@@ -1,7 +1,9 @@
-"""The run lifecycle: its statuses, its triggers, and the legal moves between.
+"""The run lifecycle: its triggers and the legal moves between statuses.
 
 Pure module. It owns what a run's status may become and nothing else: no
-locks, no journal, no I/O. :class:`~server.controller.RunController` owns the
+locks, no journal, no I/O. The status vocabulary, ``RunStatus``, lives in the
+light ``server.host_api`` with ``RunPhase``, the status a registry record
+advertises, so the record can name it without loading the server. :class:`~server.controller.RunController` owns the
 current value and the side effects of changing it, so the rules here can be
 enumerated in a unit test without composing a server.
 """
@@ -12,44 +14,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Final
 
-
-class RunStatus(StrEnum):
-    """Lifecycle status of one run, as frontends observe it.
-
-    This is the authoritative closed set for the ``status`` field of
-    ``RunSnapshot`` and of ``RunStatusChangedData``; the generated TypeScript
-    protocol types derive their union from it.
-
-    ``PAUSING`` and ``PAUSED`` are distinct because a pause is only applied at
-    an invocation boundary: ``/pause`` records the request, and the run keeps
-    executing the call already in flight until it reaches that boundary.
-    ``STOPPING`` and ``STOPPED`` split the same way for ``/stop``, whose
-    boundary is where the run ends instead of where it parks.
-    """
-
-    STARTING = "starting"
-    RUNNING = "running"
-    PAUSING = "pausing"
-    PAUSED = "paused"
-    STOPPING = "stopping"
-    STOPPED = "stopped"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-    @property
-    def has_ended(self) -> bool:
-        """Whether the run has settled into a status it never leaves."""
-        match self:
-            case RunStatus.COMPLETED | RunStatus.FAILED | RunStatus.STOPPED:
-                return True
-            case (
-                RunStatus.STARTING
-                | RunStatus.RUNNING
-                | RunStatus.PAUSING
-                | RunStatus.PAUSED
-                | RunStatus.STOPPING
-            ):
-                return False
+from server.host_api import RunStatus
 
 
 class RunTrigger(StrEnum):

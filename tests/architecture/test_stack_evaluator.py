@@ -5,29 +5,30 @@ import shutil
 import subprocess
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.support.fast_cargo import fast_cargo_env
 from tests.support.shared_build import shared_build
 
-from vibesys.inputs import load_input_bundle
+from vibesys.inputs import load_project_task
+from vs_project.api import Project
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
 STACK_INPUTS = {
-    "stack-spsc": "spsc",
-    "stack-mpsc": "mpsc",
-    "stack-spmc": "spmc",
-    "stack-mpmc": "mpmc",
+    "spsc": "spsc",
+    "mpsc": "mpsc",
+    "spmc": "spmc",
+    "mpmc": "mpmc",
 }
 
 STACK_ACCURACY_SETTINGS = {
-    "stack-spsc": ("32", "100"),
-    "stack-mpsc": ("24", "50"),
-    "stack-spmc": ("24", "50"),
-    "stack-mpmc": ("24", "100"),
+    "spsc": ("32", "100"),
+    "mpsc": ("24", "50"),
+    "spmc": ("24", "50"),
+    "mpmc": ("24", "100"),
 }
 
 # mpmc relaxes strict linearizability to tolerate reservation windows; the other
@@ -66,22 +67,42 @@ def _copy_input_bundle(source: Path, target: Path) -> None:
     )
 
 
+def _project(project_root: Path) -> Path:
+    return project_root / "examples" / "data-structures" / "stack"
+
+
+def _evaluator(project_root: Path) -> Path:
+    return project_root / "resources" / "evaluators" / "stack"
+
+
+def _task_manifest(project_root: Path, task_name: str) -> dict[str, Any]:
+    manifest = _project(project_root) / ".vibesys" / "tasks" / task_name / "vibesys.input.toml"
+    return tomllib.loads(manifest.read_text())
+
+
+def _evaluator_command(
+    project_root: Path,
+    manifest: dict[str, Any],
+    section: str,
+    workspace: Path,
+) -> list[str]:
+    """Resolve a task command the way VibeSys does for a local run."""
+    evaluator = _evaluator(project_root)
+    package = tomllib.loads((evaluator / "vibesys.evaluator.toml").read_text())
+    prefix = package["entrypoints"][manifest[section]["entrypoint"]]
+    return [part.replace("${PACKAGE_ROOT}", str(evaluator)) for part in prefix] + [
+        part.replace("${PROJECT_ROOT}", str(workspace)) for part in manifest[section]["args"]
+    ]
+
+
 def _materialize_stack_input(
     project_root: Path,
-    input_name: str,
+    task_name: str,
     workspace: Path,
-) -> Path:
-    input_dir = project_root / "examples" / "data-structures" / input_name
-    starter = project_root / "examples" / "starters" / "stack-rs"
-    bundle = load_input_bundle(input_dir)
-    assert bundle.evaluator_path is not None
-    _copy_input_bundle(starter, workspace)
-    _copy_input_bundle(input_dir, workspace)
-    _copy_input_bundle(
-        bundle.evaluator_path,
-        workspace / "_evaluator" / bundle.evaluator_path.name,
-    )
-    return input_dir
+) -> dict[str, Any]:
+    """Copy the project into ``workspace`` and return the task's manifest."""
+    _copy_input_bundle(_project(project_root), workspace)
+    return _task_manifest(project_root, task_name)
 
 
 @pytest.fixture(scope="session")
@@ -91,7 +112,7 @@ def compiled_stack_candidate(tmp_path_factory) -> Path:  # noqa: ANN001  # lint-
         pytest.skip("Rust is required by the trusted stack evaluator")
 
     project_root = Path(__file__).parents[2]
-    starter = project_root / "examples" / "starters" / "stack-rs"
+    starter = project_root / "examples" / "data-structures" / "stack"
 
     def build(directory: Path) -> None:
         _copy_input_bundle(starter, directory / "starter")
@@ -116,7 +137,7 @@ def stack_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: ANN001  # 
         pytest.skip("Rust is required by the trusted stack evaluator")
 
     project_root = Path(__file__).parents[2]
-    source = project_root / "examples" / "evaluators" / "stack" / "native_runner"
+    source = project_root / "resources" / "evaluators" / "stack" / "native_runner"
 
     def build(directory: Path) -> None:
         subprocess.run(  # noqa: S603  # lint-waiver: LW-994621 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
@@ -149,18 +170,16 @@ def stack_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: ANN001  # 
 
 
 def test_stack_manifests_invoke_go_evaluator_directly():  # noqa: ANN201  # lint-waiver: LW-994623 [ANN201]; Test return type is unused and left unannotated for the pytest runner.
-    root = Path(__file__).parents[2] / "examples" / "data-structures"
+    project_root = Path(__file__).parents[2]
 
     for input_name, scenario in STACK_INPUTS.items():
-        manifest = tomllib.loads((root / input_name / "vibesys.input.toml").read_text())
+        manifest = _task_manifest(project_root, input_name)
         operations, trials = STACK_ACCURACY_SETTINGS[input_name]
         expected_suffixes = {
             "accuracy": [
-                "run",
-                ".",
                 "check",
                 "--workspace",
-                "../..",
+                "${PROJECT_ROOT}",
                 "--scenario",
                 scenario,
                 "--operations",
@@ -169,11 +188,9 @@ def test_stack_manifests_invoke_go_evaluator_directly():  # noqa: ANN201  # lint
                 trials,
             ],
             "benchmark": [
-                "run",
-                ".",
                 "benchmark",
                 "--workspace",
-                "../..",
+                "${PROJECT_ROOT}",
                 "--scenario",
                 scenario,
                 "--repetitions",
@@ -181,17 +198,16 @@ def test_stack_manifests_invoke_go_evaluator_directly():  # noqa: ANN201  # lint
             ],
         }
         assert manifest["agent"] == {"domain": "generic"}
-        assert manifest["evaluator"] == {"source": "../../evaluators/stack"}
-        for section, expected_suffix in expected_suffixes.items():
-            command = manifest[section]["command"]
-            assert command[:3] == ["go", "-C", "_evaluator/stack"]
-            assert command[3:] == expected_suffix
+        assert manifest["evaluator"] == {"name": "vibesys-evaluator-stack", "version": "0.1.0"}
+        for section, expected_args in expected_suffixes.items():
+            assert manifest[section]["entrypoint"] == "vibesys-stack"
+            assert manifest[section]["args"] == expected_args
         assert manifest["benchmark"]["result"] == {
             "json_argument": "--output-json",
             "metric": "total_ops_per_sec",
         }
 
-    evaluator = root.parents[0] / "evaluators" / "stack"
+    evaluator = _evaluator(project_root)
     assert (evaluator / "DESIGN.md").exists()
     assert (evaluator / "CANDIDATE_CONTRACT.md").exists()
     assert (evaluator / "include" / "vibesys_stack_abi.h").exists()
@@ -199,9 +215,9 @@ def test_stack_manifests_invoke_go_evaluator_directly():  # noqa: ANN201  # lint
 
 def test_stack_inputs_use_shared_editable_rust_starter():  # noqa: ANN201  # lint-waiver: LW-994624 [ANN201]; Test return type is unused and left unannotated for the pytest runner.
     project_root = Path(__file__).parents[2]
-    root = project_root / "examples" / "data-structures"
-    starter = project_root / "examples" / "starters" / "stack-rs"
-    evaluator = project_root / "examples" / "evaluators" / "stack"
+    starter = _project(project_root)
+    project = Project.open(starter)
+    evaluator = project_root / "resources" / "evaluators" / "stack"
     starter_files = [
         ".gitignore",
         "Cargo.toml",
@@ -215,10 +231,13 @@ def test_stack_inputs_use_shared_editable_rust_starter():  # noqa: ANN201  # lin
         assert (starter / relative).is_file()
 
     for input_name in STACK_INPUTS:
-        input_dir = root / input_name
-        bundle = load_input_bundle(input_dir)
+        task = project.select_task(input_name)
+        input_dir = task.path
+        bundle = load_project_task(project, task)
+        assert bundle.root == starter.resolve()
         assert bundle.workspace_sources == ()
-        assert bundle.evaluator_path == evaluator.resolve()
+        assert bundle.evaluator_path is None
+        assert bundle.evaluator_package_root == evaluator.resolve()
         assert not (input_dir / "baseline").exists()
         assert not (input_dir / "reference").exists()
         assert not (input_dir / "pyproject.toml").exists()
@@ -242,7 +261,7 @@ def test_stack_benchmark_pins_linux_workers(tmp_path):  # noqa: ANN001, ANN201  
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted stack evaluator")
 
-    source = Path(__file__).parents[2] / "examples" / "evaluators" / "stack" / "native_runner"
+    source = Path(__file__).parents[2] / "resources" / "evaluators" / "stack" / "native_runner"
     text = (source / "src" / "benchmark.rs").read_text()
     assert "fn pin_current_thread(worker_index: usize)" in text
     assert "sched_setaffinity" in text
@@ -282,15 +301,14 @@ def test_materialized_rust_starter_passes_accuracy(  # noqa: ANN201  # lint-waiv
 
     project_root = Path(__file__).parents[2]
     workspace = tmp_path / "workspace"
-    _materialize_stack_input(project_root, input_name, workspace)
+    manifest = _materialize_stack_input(project_root, input_name, workspace)
 
     candidate = workspace / "stack-candidate.so"
     shutil.copy2(compiled_stack_candidate, candidate)
     assert candidate.is_file()
 
-    manifest = tomllib.loads((workspace / "vibesys.input.toml").read_text())
     accuracy = [
-        *manifest["accuracy"]["command"],
+        *_evaluator_command(project_root, manifest, "accuracy", workspace),
         "--capacity",
         "4",
         "--value-size",
@@ -319,17 +337,15 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(
 
     project_root = Path(__file__).parents[2]
     workspace = tmp_path / "workspace"
-    input_dir = _materialize_stack_input(
+    manifest = _materialize_stack_input(
         project_root,
-        "stack-spsc",
+        "spsc",
         workspace,
     )
-    assert (workspace / "_evaluator" / "stack" / "DESIGN.md").is_file()
     shutil.copy2(compiled_stack_candidate, workspace / "stack-candidate.so")
-    manifest = tomllib.loads((input_dir / "vibesys.input.toml").read_text())
 
     accuracy = [
-        *manifest["accuracy"]["command"],
+        *_evaluator_command(project_root, manifest, "accuracy", workspace),
         "--capacity",
         "4",
         "--operations",
@@ -341,7 +357,7 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(
 
     output = workspace / "results.json"
     benchmark = [
-        *manifest["benchmark"]["command"],
+        *_evaluator_command(project_root, manifest, "benchmark", workspace),
         "--capacity",
         "4",
         "--duration",
@@ -363,7 +379,7 @@ def test_stack_evaluator_rejects_adversarial_histories():  # noqa: ANN201  # lin
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted stack evaluator")
 
-    evaluator = Path(__file__).parents[2] / "examples" / "evaluators" / "stack"
+    evaluator = Path(__file__).parents[2] / "resources" / "evaluators" / "stack"
     subprocess.run(["go", "test", "./..."], cwd=evaluator, check=True)  # noqa: S607  # lint-waiver: LW-994642 [S607]; Executable name is a project tool resolved from PATH in tests.
 
 
@@ -390,7 +406,7 @@ def built_stack_boost_lockfree(tmp_path_factory) -> Path:  # noqa: ANN001  # lin
         pytest.skip("Boost.Lockfree (libboost-dev) is required by the Boost stack baseline")
 
     project_root = Path(__file__).parents[2]
-    evaluator = project_root / "examples" / "evaluators" / "stack"
+    evaluator = project_root / "resources" / "evaluators" / "stack"
     abi_header = evaluator / "include" / "vibesys_stack_abi.h"
     baseline = tmp_path_factory.mktemp("stack-boost-lockfree") / "baseline"
     shutil.copytree(
@@ -416,7 +432,7 @@ def test_stack_boost_lockfree_baseline_builds_and_passes_accuracy(  # noqa: ANN2
     if shutil.which("go") is None:
         pytest.skip("Go is required by the Boost stack baseline")
 
-    evaluator = Path(__file__).parents[2] / "examples" / "evaluators" / "stack"
+    evaluator = Path(__file__).parents[2] / "resources" / "evaluators" / "stack"
     completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-994650 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
         [  # noqa: S607  # lint-waiver: LW-994651 [S607]; Executable name is a project tool resolved from PATH in tests.
             "go",

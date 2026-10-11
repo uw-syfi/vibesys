@@ -125,6 +125,37 @@ class SlurmSshTransport(BaseModel):
         return value
 
 
+class SlurmLocalTransport(BaseModel):
+    """Transport for a host that is itself a Slurm submit node.
+
+    Scheduler and filesystem commands run through ``shell_command`` on this
+    host, and transfers are local ``rsync`` copies. ``remote_workspace_root``
+    must therefore be a directory this host shares with the compute nodes.
+    ``shell_command`` receives the command line as its last argument, so a
+    wrapper (for example one that enters a login container) may precede the
+    shell.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    kind: Literal["local"]
+    shell_command: tuple[str, ...] = ("bash", "-c")
+    rsync_command: tuple[str, ...] = ("rsync",)
+
+    @field_validator("shell_command", "rsync_command", mode="before")
+    @classmethod
+    def _normalize_command_array(cls, value: object) -> object:
+        return tuple(value) if isinstance(value, list) else value
+
+    @field_validator("shell_command", "rsync_command")
+    @classmethod
+    def _valid_command_array(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value or any(not argument for argument in value):
+            message = "command arrays must contain at least one non-empty string"
+            raise ValueError(message)
+        return value
+
+
 class SlurmConnectorTransport(BaseModel):
     """Advanced transport delegated to a versioned JSON connector executable."""
 
@@ -148,7 +179,7 @@ class SlurmConnectorTransport(BaseModel):
 
 
 SlurmTransport = Annotated[
-    SlurmSshTransport | SlurmConnectorTransport,
+    SlurmSshTransport | SlurmLocalTransport | SlurmConnectorTransport,
     Field(discriminator="kind"),
 ]
 
@@ -157,7 +188,8 @@ class SlurmConfig(BaseModel):
     """Cluster-neutral scheduler and transport settings.
 
     The normal transport invokes OpenSSH and rsync, which obtain credentials
-    and site routing from the user's SSH agent and configuration. An advanced
+    and site routing from the user's SSH agent and configuration. The local
+    transport serves a host that is itself a submit node. An advanced
     connector transport supports gateways that cannot expose SSH directly.
     """
 

@@ -41,6 +41,7 @@ import {
   withChatWidthOverride,
   withGraphWidthOverride,
 } from './layout-state.js';
+import type {ModalViewport} from './modal-geometry.js';
 import {NotepadView} from './notepad.js';
 import {OverlayView} from './overlay.js';
 import {PaletteView} from './palette.js';
@@ -448,7 +449,18 @@ export function createOpenTuiApp(
       : 0;
     const showExperimentLog = showLog && (zoomedPane === null || zoomedPane === 'experiments');
     paintHeader(renderHeader(state, showLog, renderer.terminalWidth - HEADER_CHROME));
-    errorBanner.render(state, renderer.terminalHeight - headerFrame.height - MIN_WORKSPACE_HEIGHT);
+    const errorHeight = errorBanner.render(
+      state,
+      renderer.terminalHeight - headerFrame.height - MIN_WORKSPACE_HEIGHT,
+    );
+    // The root owns vertical allocation between its siblings. Modal views get
+    // the remainder as data, so none has to know that a banner exists or infer
+    // its rows from session state.
+    const modalTop = state.errorBanner === null ? 0 : headerFrame.height + errorHeight;
+    const modalViewport: ModalViewport = {
+      top: modalTop,
+      height: Math.max(0, renderer.terminalHeight - modalTop),
+    };
     // The log carries its own key hints in its footer, so when it shares the
     // row with a pane the global line is the place for the pane's keys.
     renderedKeyHelp = showSplit
@@ -472,7 +484,6 @@ export function createOpenTuiApp(
     // The rail takes a fixed column off the left of the round view. The agent
     // map is sized against what is left so the transcript keeps its floor beside
     // the rail rather than being squeezed by it.
-    const errorHeight = state.errorBanner === null ? 0 : errorBanner.output.height;
     const railWidth = roundRailColumns(state, renderer.terminalWidth);
     agentMap.output.visible = showAgents;
     transcriptFrame.visible = showTranscript;
@@ -531,19 +542,22 @@ export function createOpenTuiApp(
     const rowsOn = (pane: BoxRenderable): number => (pane.visible ? pane.height : 0);
     // The rounds rail is a column inside the main row, not a strip above it, so
     // only the header and the banner take rows off the top.
-    const above = headerFrame.height + rowsOn(errorBanner.output);
+    const above = headerFrame.height + errorHeight;
     const belowRows = rowsOn(todoStrip.output) + help.height;
     // Match the chat to the left pane's rectangle so it sits beside the
     // visualization instead of over it.
     if (showSplit) {
-      chat.setPaneBounds({
-        left: 1,
-        width: leftWidth - 2,
-        top: above,
-        height: renderer.terminalHeight - above - belowRows,
-      });
+      chat.setPaneBounds(
+        {
+          left: 1,
+          width: leftWidth - 2,
+          top: above,
+          height: renderer.terminalHeight - above - belowRows,
+        },
+        modalViewport,
+      );
     } else {
-      chat.setPaneBounds(null);
+      chat.setPaneBounds(null, modalViewport);
     }
     chatPane.render(state, showChatPane, chatWidth);
     const chatInputFocused = showChatPane && state.layout.focus === 'chat';
@@ -583,7 +597,7 @@ export function createOpenTuiApp(
     experimentLog.render(state);
     experimentLog.output.visible = showExperimentLog;
     rightPane.render(state, showRightPane, rightWidth);
-    overlay.render(state, paneFallback);
+    overlay.render(state, paneFallback, modalViewport);
     overlay.renderScrim(
       state.overlay !== null ||
         state.diffViewer !== null ||
@@ -592,9 +606,9 @@ export function createOpenTuiApp(
         state.palette !== null ||
         state.notepad.open,
     );
-    themePicker.render(state);
-    palette.render(state);
-    notepad.render(state);
+    themePicker.render(state, modalViewport);
+    palette.render(state, modalViewport);
+    notepad.render(state, modalViewport);
     chat.render(state);
     conversationActivityBar.render(state, !showLog);
     // One cursor, four places it can be. The notepad and the modal chat each
@@ -731,6 +745,8 @@ export function createOpenTuiApp(
     destroy(): void {
       renderer.off('resize', onResize);
       unsubscribe();
+      palette.destroy();
+      themePicker.destroy();
       unbindKeys();
       commandInput.destroy();
       conversationActivityBar.destroy();

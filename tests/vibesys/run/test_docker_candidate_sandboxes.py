@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.api import (
@@ -25,7 +26,7 @@ from vibesys.api import (
     ProfilerKind,
     RunRequest,
 )
-from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
+from vibesys.api.request import RunEnvironmentSpec, load_task
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.testing import FakeDockerBuildRunner
@@ -67,11 +68,12 @@ class _DaemonBackend(HostExecutedContainerBackend):
 
 def _write_project(root: Path) -> None:
     root.mkdir()
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Improve the queue.\n",
     )
 
 
@@ -91,7 +93,7 @@ def _candidate_container_counts(
             id="three-agent-rounds", config_version=1, options={"rounds": 2}
         ),
         config=Config.model_validate({"model": {"name": "gpt-test"}}),
-        input_bundle=load_input_bundle(project_root),
+        input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name="docker-candidates",
         run_environment=RunEnvironmentSpec("docker", options),

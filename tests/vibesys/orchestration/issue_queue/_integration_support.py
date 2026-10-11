@@ -7,6 +7,7 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.task_project import write_task
 
 from launch.testing import create_session
 from vibesys.api import (
@@ -17,7 +18,7 @@ from vibesys.api import (
     ResumeRef,
     RunRequest,
 )
-from vibesys.inputs import load_input_bundle
+from vibesys.inputs import load_task
 from vibesys.orchestration.issue_queue import PLUGIN, IssueQueueState
 from vibesys.orchestration.profilers import ProfilerKind
 from vs_project.api import Project
@@ -54,12 +55,12 @@ def options(**changes: object) -> BaseModel:
 def write_input(root: Path) -> Path:
     """Create a self-contained input project that can be copied and resumed."""
     root.mkdir(parents=True)
-    (root / "OBJECTIVE.md").write_text("Build a correct inference service.\n", encoding="utf-8")
     (root / "server.py").write_text("READY = False\n", encoding="utf-8")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
-        encoding="utf-8",
+        objective="Build a correct inference service.\n",
     )
     return root
 
@@ -89,7 +90,7 @@ def execute(
     resume_run_id: str | None = None,
 ) -> tuple[RunStatus, str, Path]:
     """Run the issue-queue plugin through the production runtime adapter."""
-    bundle = load_input_bundle(project_root)
+    bundle = load_task(project_root)
     selected = configured or options()
     descriptor = OrchestrationDescriptor(
         id=PLUGIN.id,

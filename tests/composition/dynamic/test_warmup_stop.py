@@ -21,6 +21,7 @@ from tests.composition.dynamic._harness import (
     run_request,
     workstream,
 )
+from tests.support.task_project import task_path
 
 from vibesys.dynamic_roles import ORCHESTRATOR
 
@@ -29,7 +30,9 @@ if TYPE_CHECKING:
 
 _REPO = Path(__file__).resolve().parents[3]
 # The real benchmark harness of the bundle whose warmup stops r19 recorded.
-_BUNDLE_BENCHMARK = _REPO / "examples/model-serving/qwen3.5-9b-mi210/benchmark/run.py"
+_BUNDLE_BENCHMARK = (
+    _REPO / "examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/benchmark/run.py"
+)
 _WARMUP_STOP_STDERR = Path(__file__).with_name("golden") / "warmup_stop.stderr"
 
 _REPLAY = """\
@@ -66,7 +69,7 @@ def test_a_stopped_warmup_reaches_the_planner_as_its_rate(tmp_path: Path) -> Non
     engine = tmp_path / "recorded-session-runner"
     engine.write_text(f"#!/bin/sh\nexec cat {_WARMUP_STOP_STDERR} >&2\n", encoding="utf-8")
     engine.chmod(0o755)
-    benchmark = loop_input.root / "benchmark.py"
+    benchmark = task_path(loop_input.root) / "benchmark.py"
     benchmark.write_text(
         _REPLAY.format(bundle=str(_BUNDLE_BENCHMARK), engine=str(engine))
         + benchmark.read_text(encoding="utf-8"),

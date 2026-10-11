@@ -6,13 +6,14 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
+  type GatewayBootstrapTarget,
   type GatewayConnection,
   scrubLaunchCapability,
   serializeBrowserSession,
   webSocketUrlWithSession,
 } from '../entities/gateway.js';
 import {WebSession} from '../features/run-view/index.js';
-import {bootstrapGateway, connectRun, openTransport} from '../platform/backend.js';
+import {connectRun, openTransport} from '../platform/backend.js';
 import {markDesktopShell} from '../platform/desktop-shell.js';
 import {GatewaySessionStore} from '../platform/gateway-storage.js';
 import {browserLifecycle} from '../platform/lifecycle.js';
@@ -44,16 +45,7 @@ function start(): void {
     renderLive(plan.target.webSocketUrl, plan.browserSession);
     return;
   }
-  const {target} = plan;
-  bootstrapGateway(target.bootstrapUrl).then(
-    browserSession => {
-      storedSessions.rememberBrowserSession(
-        serializeBrowserSession(target.gatewayUrl, browserSession),
-      );
-      renderLive(target.webSocketUrl, browserSession);
-    },
-    (reason: unknown) => renderDemo(reason instanceof Error ? reason.message : String(reason)),
-  );
+  renderDemo(null, plan.target);
 }
 
 function gatewayConnected(connection: GatewayConnection): void {
@@ -68,12 +60,16 @@ function gatewayConnected(connection: GatewayConnection): void {
   renderLive(connection.webSocketUrl, connection.browserSession);
 }
 
-function renderDemo(initialGatewayError: string | null = null): void {
+function renderDemo(
+  initialGatewayError: string | null = null,
+  initialGatewayTarget: GatewayBootstrapTarget | null = null,
+): void {
   reactRoot.render(
     <StrictMode>
       {createDemoApp({
         page: window.location.href,
         initialGatewayError,
+        initialGatewayTarget,
         onGatewayConnected: gatewayConnected,
       })}
     </StrictMode>,

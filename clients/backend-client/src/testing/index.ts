@@ -152,3 +152,5 @@ export function snapshotResponse(overrides: Partial<RunSnapshot> = {}): Protocol
     },
   };
 }
+
+export {FakeClock} from './fake-clock.js';

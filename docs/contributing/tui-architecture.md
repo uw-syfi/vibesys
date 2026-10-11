@@ -98,8 +98,9 @@ Unix adapter and a loopback WebSocket gateway around the same `RunApi` and
 `SubscriptionTracker`; the gateway changes only framing, not request dispatch, replay, batching, or
 store-identity handling. It binds `127.0.0.1`, serves the built `clients/web/dist` bundle from the
 same port, and prints a capability-bearing page URL. The bundle's build manifest inventories the
-three client source trees and supplies an opaque build ID to the instance record; the entrypoint
-rejects the checkout's default bundle when that inventory is stale. Server runtime receives only
+tracked source, configuration, entrypoint, package, and dependency-lock inputs and supplies an
+opaque build ID to the instance record; the entrypoint rejects the checkout's default bundle when
+that inventory is stale. Server runtime receives only
 the resolved asset directory and build ID, not client-workspace layout. The first page response exchanges that launch
 capability for an HttpOnly browser-session cookie and scrubs the token from browser and WebSocket
 URLs. A separate-origin Vite harness retains only the minted browser-session credential in
@@ -161,9 +162,13 @@ if the backend does not answer in time. `--theme` skips the query and reaches th
 ### Headless detached runs and the live-instance registry
 
 `vibesys --detach` without `--web` starts a run that outlives the shell or SSH session that started
-it. The launcher validates the run arguments, spawns `entrypoints.server` in a new session (no
-controlling terminal, stdin from `/dev/null`), waits until the child's control socket accepts
-connections, and prints the child's `LiveInstanceRecord` as one JSON line on stdout. The server
+it. The launcher validates the run arguments and fixes the run's id: parsing allocates a fresh
+run's id, or resolves a resume (`latest` included) to the run it names. It then spawns
+`entrypoints.detached_run` with `--run-id` in a new session (no controlling terminal, stdin from
+`/dev/null`), waits until the child's control socket accepts connections, and prints the child's
+`LiveInstanceRecord` as one JSON line on stdout. The child takes its registry lock and publishes a
+record naming its run before it imports the engine, then serves the run through
+`entrypoints.server`; every event the server journals names that run, from the first. The server
 keeps running with or without clients and exits when the run ends; a finished run is reopened
 read-only from its stored events with `--web-reopen`.
 
@@ -179,15 +184,31 @@ $XDG_RUNTIME_DIR/vibesys/            (else /tmp/vibesys-<uid>/), mode 0700
   runs/<id>/server.log               the server's stdout and stderr
 ```
 
-A record's `vibesys_root` is the absolute path of the VibeSys source checkout the server runs from
-(the directory whose `pyproject.toml` declares the `vibesys` project), or `null` for a server run
-from an installed distribution and for records written before the field existed. The desktop app
-uses it to suggest the checkout to run `vibesys` from on that host.
+A record (version 3) always names its `run_id` and its run's `phase`: the `RunStatus` with the
+startup `stage` while `starting`, or the failure `reason` (`code`, `stage`, `message`) once
+`failed`. The server folds the phase from the `run_status_changed` events and the diagnostic of
+the failure event it journals, and rewrites its record atomically on each change. `log_path` is the
+server's log. `vibesys_root` is the absolute path of the VibeSys source checkout the server runs
+from (the directory whose `pyproject.toml` declares the `vibesys` project), or `null` for a server
+run from an installed distribution. The desktop app uses it to suggest the checkout to run
+`vibesys` from on that host.
+
+When a server exits, on any path, it leaves its last record, with the phase its run ended in and
+`ended_at`, as a tombstone; a server that dies without one (`kill -9`) is reported, and recorded,
+as `failed` with reason `server_crashed`. `vibesys instances list` reports tombstones under `ended`
+for 24 hours, and the next listing after that removes them. A run that fails before any client
+attaches is therefore still visible, with its reason, to a client that looks later.
+
+Records carry their own `version`, because two checkouts on one host share one registry. A lister
+parses the version it knows strictly; a live server's record that it cannot read (another version,
+or corrupt) is listed under `unreadable` with its id and claimed version, never dropped and never a
+failure of the listing. A newer checkout's tombstone is left for that checkout's lister to age.
 
 The root is never under `$HOME`, which may be on NFS. Liveness is proven, not read from the record:
 the server holds an exclusive `flock` on its lock file for its lifetime, and the kernel releases it
-on any exit, `kill -9` included. `vibesys instances list [--json]` reports a record only while its
-lock is held and removes the files of every id whose lock is free. The web gateway's project-local
+on any exit, `kill -9` included. `vibesys instances list [--json]` reports a server as live only
+while its lock is held; once the lock is free it reports the server's tombstone and, after a day,
+removes its files. The web gateway's project-local
 record keeps its own format (`server.transport.discovery`); its claim and startup-log hold use the
 same lock primitives from `server.registry`.
 
@@ -203,7 +224,7 @@ one `InstanceStopResult`:
 
 | `outcome` | Exit | Meaning |
 | --- | --- | --- |
-| `stopped` | 0 | The server stopped and its record is gone. |
+| `stopped` | 0 | The server stopped; its record is now a tombstone. |
 | `stopping` | 0 | The server accepted the stop; its active agent call outlasted the wait, and it exits on its own after it. Poll `instances list`. |
 | `not_running` | 1 | No live server holds the id. |
 | `still_running` | 1 | The server was signalled and still held its lock when the wait ended. |

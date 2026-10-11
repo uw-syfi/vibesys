@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import tempfile
 import tomllib
-from typing import TYPE_CHECKING, Any, Literal
+from pathlib import Path
+from typing import Any, Literal
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.support.task_project import task_path, write_task
 
 from vibesys.inputs import (
     BenchmarkResult,
@@ -16,12 +19,10 @@ from vibesys.inputs import (
     InputCommand,
     InputManifest,
     WorkspaceSource,
-    load_input_bundle,
+    load_task,
     render_input_manifest,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from vs_project.api import AmbiguousTaskError, InvalidTaskDefinitionError
 
 _COMMIT = "0123456789abcdef"
 _BENCHMARK_CONTRACTS = st.one_of(
@@ -102,7 +103,7 @@ def test_workspace_source_normalizes_commit_case() -> None:
     ("fields", "message"),
     [
         ({"source": " "}, "source must be a non-empty path"),
-        ({"source": "/abs"}, "source must be relative to the input bundle"),
+        ({"source": "/abs"}, "source must be relative to the task directory"),
         ({"source": "eval", "name": "pkg"}, "cannot be combined with name or version"),
         ({"source": "eval", "version": "1"}, "cannot be combined with name or version"),
         ({"name": "pkg"}, "requires both name and version"),
@@ -241,42 +242,80 @@ command = ["{benchmark}"]
 
 
 def _bundle(tmp_path: Path, benchmark: str = "python") -> Path:
-    (tmp_path / "vibesys.input.toml").write_text(_VALID_TOML.format(benchmark=benchmark))
-    (tmp_path / "OBJECTIVE.md").write_text("objective\n")
+    write_task(tmp_path, _VALID_TOML.format(benchmark=benchmark))
     return tmp_path
 
 
-def test_load_input_bundle_rejects_missing_or_non_directory_root(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="--input path does not exist"):
-        load_input_bundle(tmp_path / "missing")
+def test_load_task_rejects_missing_or_non_directory_root(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="project path does not exist"):
+        load_task(tmp_path / "missing")
     file_path = tmp_path / "file"
     file_path.write_text("x")
-    with pytest.raises(ValueError, match="--input path is not a directory"):
-        load_input_bundle(file_path)
+    with pytest.raises(ValueError, match="project path is not a directory"):
+        load_task(file_path)
 
 
-def test_load_input_bundle_reports_missing_files_and_invalid_manifest(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="Input manifest not found"):
-        load_input_bundle(tmp_path)
-    (tmp_path / "vibesys.input.toml").write_text("version = 2\n")
-    with pytest.raises(FileNotFoundError, match=r"OBJECTIVE\.md not found"):
-        load_input_bundle(tmp_path)
-    (tmp_path / "OBJECTIVE.md").write_text("objective\n")
+def test_load_task_reports_missing_files_and_invalid_manifest(tmp_path: Path) -> None:
+    task = task_path(tmp_path)
+    task.mkdir(parents=True)
+    with pytest.raises(InvalidTaskDefinitionError, match=r"OBJECTIVE\.md"):
+        load_task(tmp_path)
+    (task / "OBJECTIVE.md").write_text("objective\n")
+    with pytest.raises(InvalidTaskDefinitionError, match=r"vibesys\.input\.toml"):
+        load_task(tmp_path)
+    (task / "vibesys.input.toml").write_text("version = 2\n")
     with pytest.raises(ValueError, match="Invalid input manifest"):
-        load_input_bundle(tmp_path)
+        load_task(tmp_path)
 
 
-def test_load_input_bundle_keeps_bare_executable_and_checks_relative_ones(
+_TASK_NAMES = st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=8)
+
+
+@given(task=_TASK_NAMES, has_tasks=st.booleans())
+def test_load_task_rejects_a_root_manifest_naming_the_task_location(
+    *, task: str, has_tasks: bool
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        if has_tasks:
+            write_task(root, _VALID_TOML.format(benchmark="python"), task=task)
+        (root / "vibesys.input.toml").write_text(_VALID_TOML.format(benchmark="python"))
+
+        with pytest.raises(ValueError, match="root-level input manifest") as info:
+            load_task(root, task if has_tasks else None)
+
+    message = str(info.value)
+    assert str((root / "vibesys.input.toml").resolve()) in message
+    assert ".vibesys/tasks/<task>/vibesys.input.toml" in message
+
+
+def test_load_task_requires_a_tasks_directory(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="does not exist") as info:
+        load_task(tmp_path)
+
+    assert str(tmp_path.resolve() / ".vibesys" / "tasks") in str(info.value)
+
+
+def test_load_task_selects_the_only_task_or_the_named_one(tmp_path: Path) -> None:
+    write_task(tmp_path, _VALID_TOML.format(benchmark="python"), task="alpha")
+    assert load_task(tmp_path).task_name == "alpha"
+    write_task(tmp_path, _VALID_TOML.format(benchmark="python"), task="beta")
+    assert load_task(tmp_path, "beta").task_name == "beta"
+    with pytest.raises(AmbiguousTaskError, match="alpha"):
+        load_task(tmp_path)
+
+
+def test_load_task_keeps_bare_executable_and_checks_relative_ones(
     tmp_path: Path,
 ) -> None:
-    bundle = load_input_bundle(_bundle(tmp_path))
+    bundle = load_task(_bundle(tmp_path))
     assert bundle.resolved_benchmark_command == ("python",)
     assert bundle.resolved_accuracy_command == ("python", "acc.py")
 
     (tmp_path / "bin").mkdir()
     (tmp_path / "bin" / "run.sh").write_text("#!/bin/sh\n")
     _bundle(tmp_path, "bin/run.sh")
-    assert load_input_bundle(tmp_path).resolved_benchmark_command == ("bin/run.sh",)
+    assert load_task(tmp_path).resolved_benchmark_command == ("bin/run.sh",)
 
 
 @pytest.mark.parametrize(
@@ -288,20 +327,20 @@ def test_load_input_bundle_keeps_bare_executable_and_checks_relative_ones(
         ("bin/.", ValueError, "benchmark.command executable is not a file"),
     ],
 )
-def test_load_input_bundle_rejects_bad_executables(
+def test_load_task_rejects_bad_executables(
     tmp_path: Path, benchmark: str, error: type[Exception], message: str
 ) -> None:
     (tmp_path / "bin").mkdir()
     _bundle(tmp_path, benchmark)
     with pytest.raises(error, match=message):
-        load_input_bundle(tmp_path)
+        load_task(tmp_path)
 
 
-def test_load_input_bundle_rejects_reference_that_is_a_file(tmp_path: Path) -> None:
-    _bundle(tmp_path)
-    (tmp_path / "reference").write_text("not a dir")
+def test_load_task_rejects_reference_that_is_a_file(tmp_path: Path) -> None:
+    task = write_task(tmp_path, _VALID_TOML.format(benchmark="python"))
+    (task / "reference").write_text("not a dir")
     with pytest.raises(ValueError, match="reference path is not a directory"):
-        load_input_bundle(tmp_path)
+        load_task(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -311,18 +350,18 @@ def test_load_input_bundle_rejects_reference_that_is_a_file(tmp_path: Path) -> N
         ("adir", "dir", ValueError, "environment.modal.entrypoint is not a file"),
     ],
 )
-def test_load_input_bundle_validates_modal_entrypoint(
+def test_load_task_validates_modal_entrypoint(
     tmp_path: Path, entrypoint: str, setup: str | None, error: type[Exception], message: str
 ) -> None:
     _bundle(tmp_path)
     if setup == "dir":
         (tmp_path / entrypoint).mkdir()
-    manifest = tmp_path / "vibesys.input.toml"
+    manifest = task_path(tmp_path) / "vibesys.input.toml"
     manifest.write_text(
         manifest.read_text() + f'[environment.modal]\nentrypoint = "{entrypoint}"\n'
     )
     with pytest.raises(error, match=message):
-        load_input_bundle(tmp_path)
+        load_task(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -358,9 +397,8 @@ def test_profile_workload_is_a_strict_trusted_command_roundtrip(
         }
     )
     assert InputManifest.model_validate(tomllib.loads(render_input_manifest(manifest))) == manifest
-    (tmp_path / "OBJECTIVE.md").write_text("Optimize throughput.\n")
-    (tmp_path / "vibesys.input.toml").write_text(render_input_manifest(manifest))
-    bundle = load_input_bundle(tmp_path)
+    write_task(tmp_path, render_input_manifest(manifest), objective="Optimize throughput.\n")
+    bundle = load_task(tmp_path)
     assert bundle.profile_command is not None
     if "command" in profile:
         assert bundle.profile_command == tuple(profile["command"])

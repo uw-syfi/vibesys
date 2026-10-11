@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import ExitStack, suppress
+from functools import partial
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
-from server.api.service import RunApi
+from server.api.service import RunApi, RunControlSlot
 from server.chat.manager import ChatManager
 from server.controller import RunController
 from server.diagnostics import (
@@ -21,9 +22,11 @@ from server.events import (
     EventStatus,
     EventType,
     RunInterruptedData,
+    RunStatusChangedData,
     ServerReadyData,
 )
 from server.execution import ExecutionTracker
+from server.host_api import FailureReason
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
@@ -70,36 +73,49 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from server.events import RunEvent
+    from server.host_api import RunStatus
     from server.settings import InteractiveSetupDefaults
-    from vibesys.api import RunHandle, RunReady, RunRequest, RunResult, Runs, RunSession
+    from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
     from vs_sim.api import Threads
 
 
 _RunValueT = TypeVar("_RunValueT")
 DETACHED_DRAIN_TIMEOUT_SECONDS = 2.0
 """How long a detached server that is exiting waits for clients to read its last events."""
-UNWATCHED_FAILURE_GRACE_SECONDS = 20.0
-"""How long a detached server whose run failed before any client attached waits for one.
-
-The client that started the run (the desktop app over ssh) attaches several seconds
-after the launch returns; without the wait a run that fails sooner, such as a container
-that cannot start, exits before anyone can read why.
-"""
 _TERMINAL_EVENT_TYPES = frozenset(
     {EventType.RUN_FINISHED, EventType.RUN_FAILED, EventType.RUN_INTERRUPTED}
+)
+_FAILURE_EVENT_TYPES = frozenset(
+    {EventType.RUN_FAILED, EventType.RUN_INTERRUPTED, EventType.CONFIGURATION_FAILED}
 )
 
 
 class ServerLifecycleObserver(Protocol):
-    """Told when a server reaches the milestones a registry advertises."""
+    """Told the facts a registry record advertises: the server's milestones and its run's phase."""
 
     def listening(self) -> None:
         """The control socket accepts connections."""
         ...
 
-    def run_ready(self, run_id: str) -> None:
-        """The run acquired its resources and has its durable id."""
+    def observe(
+        self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+    ) -> None:
+        """The run's status changed, or it failed for ``failure``."""
         ...
+
+
+def failure_reason(event: RunEvent) -> FailureReason | None:
+    """Why the run failed, if ``event`` is the failure that ended it."""
+    diagnostic = event.diagnostic
+    if event.type not in _FAILURE_EVENT_TYPES or diagnostic is None:
+        return None
+    stage = (
+        event.data.stage
+        if isinstance(event.data, ConfigurationFailedData)
+        else diagnostic.scope.value
+    )
+    return FailureReason(code=diagnostic.code, stage=stage, message=diagnostic.summary)
 
 
 class ServerRuntime:
@@ -117,6 +133,7 @@ class ServerRuntime:
         *,
         socket_path: Path,
         runs: Runs,
+        run_id: str | None = None,
         tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
         web: bool = False,
         web_port: int = 0,
@@ -128,12 +145,14 @@ class ServerRuntime:
         read_only_log: Path | None = None,
         observer: ServerLifecycleObserver | None = None,
         threads: Threads | None = None,
-        unwatched_failure_grace: float = UNWATCHED_FAILURE_GRACE_SECONDS,
     ) -> None:
         """Compose all server components around one shared condition.
 
-        ``threads`` supplies every lock, condition, event and worker thread the
-        server creates; it defaults to the operating system's.
+        ``run_id`` names the run every journaled event belongs to, from the
+        first; only a read-only reopen (``read_only_log``) takes it from the
+        recorded events instead. ``threads`` supplies every lock, condition,
+        event and worker thread the server creates; it defaults to the
+        operating system's.
         """
         self.threads = threads or OsThreads()
         self.runs = runs
@@ -146,8 +165,6 @@ class ServerRuntime:
         self.instance_path = instance_path
         self.detach = detach
         self.read_only_log = read_only_log
-        self.unwatched_failure_grace = unwatched_failure_grace
-        self._run_failed = False
         self.observer = observer
         self._shutdown = self.threads.event()
         # Set once the Unix socket accepts connections: how a same-process
@@ -157,6 +174,15 @@ class ServerRuntime:
         self.journal = WireJournal(self.condition, threads=self.threads)
         self.executions = ExecutionTracker(self.condition, self.journal)
         self.controller = RunController(self.condition, self.journal, self.executions)
+        if read_only_log is not None:
+            self._attach_journal = partial(self.controller.attach_read_only, read_only_log)
+        elif run_id is not None:
+            self._attach_journal = partial(
+                self.controller.attach, socket_path.parent, run_id=run_id
+            )
+        else:
+            message = "a server that drives a run must be given its run id"
+            raise ValueError(message)
         self.chat = ChatManager(
             self.condition,
             self.journal,
@@ -174,6 +200,7 @@ class ServerRuntime:
             self.chat,
         )
         self.chat.set_fallback_answer(RunInspector(self.integration).answer)
+        self.controls = RunControlSlot(self.condition)
         self.api = RunApi(
             self.condition,
             self.controller,
@@ -181,11 +208,15 @@ class ServerRuntime:
             self.journal,
             self.chat,
             self.integration,
-            session_provider=lambda: self.session,
+            controls=self.controls,
             tui_defaults=tui_defaults,
             threads=self.threads,
         )
         self.chat.enable_terminal_retention()
+        if observer is not None:
+            self.journal.add_listener(
+                partial(_report_phase_facts, observer), replay_filter=lambda _header: False
+            )
         self.session: RunSession | None = None
         self.handle: RunHandle | None = None
 
@@ -201,26 +232,27 @@ class ServerRuntime:
             session = handle.session
             session.on_committed_view(self.api.observe_committed_state)
 
-            def on_ready(ready: RunReady) -> None:
-                self.integration.handle_run_ready(session, ready)
-                if self.observer is not None:
-                    self.observer.run_ready(ready.record.run_id)
-
-            session.on_ready(on_ready)
+            session.on_ready(partial(self.integration.handle_run_ready, session))
             with self.condition:
                 self.handle = handle
                 self.session = session
+            control_installed = False
             try:
-                async for event in handle.events():
-                    self.integration.project_event(event)
-                return await handle.result()
-            except asyncio.CancelledError as cancellation:
-                handle.stop()
+                self.controls.install(session)
+                control_installed = True
                 try:
-                    await handle.result()
-                finally:
-                    raise cancellation
+                    async for event in handle.events():
+                        self.integration.project_event(event)
+                    return await handle.result()
+                except asyncio.CancelledError as cancellation:
+                    handle.stop()
+                    try:
+                        await handle.result()
+                    finally:
+                        raise cancellation
             finally:
+                if control_installed:
+                    self.controls.release(session)
                 with self.condition:
                     self.handle = None
                     self.session = None
@@ -229,10 +261,8 @@ class ServerRuntime:
 
     def run(self, run: Callable[[], _RunValueT]) -> _RunValueT | None:
         """Serve requests while executing ``run`` in the calling thread."""
-        if self.read_only_log is not None:
-            self.controller.attach_read_only(self.read_only_log)
-        else:
-            self.controller.attach(self.socket_path.parent)
+        self._attach_journal()
+        if self.read_only_log is None:
             self.journal.record(
                 EventType.SERVER_READY,
                 status=EventStatus.ACTIVE,
@@ -312,11 +342,9 @@ class ServerRuntime:
         A detached server exits with its run, so without this a client could
         see the connection close before the terminal status that explains it.
         The wait is bounded: a client that stopped reading cannot hold the
-        server open. A run that failed first waits, also bounded, for a first
-        client when none has attached yet (``UNWATCHED_FAILURE_GRACE_SECONDS``).
+        server open.
         """
-        grace = self.unwatched_failure_grace if self._run_failed else 0.0
-        transport.wait_for_a_reader(self.api.latest_sequence, grace, DETACHED_DRAIN_TIMEOUT_SECONDS)
+        transport.wait_until_delivered(self.api.latest_sequence, DETACHED_DRAIN_TIMEOUT_SECONDS)
 
     def shutdown(self) -> None:
         """Request a clean shutdown of a detached or read-only server."""
@@ -362,7 +390,6 @@ class ServerRuntime:
             self._wait_for_detached_shutdown(transport)
             return None
         except ConfigurationError as exc:
-            self._run_failed = True
             configuration_diagnostic = exc.diagnostic
             event_diagnostic = Diagnostic(
                 code=configuration_diagnostic.code,
@@ -396,7 +423,6 @@ class ServerRuntime:
             )
             raise
         except BaseException as exc:
-            self._run_failed = True
             self.controller.finish(
                 exc,
                 record_event=not self._terminal_recorded_after(terminal_cursor),
@@ -441,3 +467,12 @@ class ServerRuntime:
     def _terminal_recorded_after(self, sequence: int) -> bool:
         """Return whether the run callback already emitted its terminal event."""
         return any(event.type in _TERMINAL_EVENT_TYPES for event in self.journal.read(sequence))
+
+
+def _report_phase_facts(observer: ServerLifecycleObserver, event: RunEvent) -> None:
+    """Tell ``observer`` the lifecycle facts in one journaled event."""
+    if isinstance(event.data, RunStatusChangedData):
+        observer.observe(status=event.data.status)
+    failure = failure_reason(event)
+    if failure is not None:
+        observer.observe(failure=failure)

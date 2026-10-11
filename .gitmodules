@@ -17,7 +17,7 @@
 	shallow = true
 	update = none
 [submodule "inputs/show-o2-1.5B-HQ/reference/Show-o"]
-	path = examples/model-serving/show-o2-1.5B-HQ/reference/Show-o
+	path = examples/model-serving/show-o2-1.5B-HQ/.vibesys/tasks/default/reference/Show-o
 	url = https://github.com/showlab/Show-o.git
 	update = none
 [submodule "examples/model-serving/repositories/vllm-omni"]

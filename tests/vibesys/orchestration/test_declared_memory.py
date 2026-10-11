@@ -23,6 +23,7 @@ from tests.support.docker_environment import (
     fake_docker_environment,
     host_container_backend,
 )
+from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.api import (
@@ -32,7 +33,7 @@ from vibesys.api import (
     ProfilerKind,
     RunRequest,
 )
-from vibesys.api.request import load_input_bundle
+from vibesys.api.request import load_task
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 
@@ -47,12 +48,13 @@ _PLUGIN = capability_plugin("memory-preserving", memory_paths=("progress.md",))
 
 def _write_project(root: Path) -> None:
     root.mkdir()
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "code.py").write_text("VALUE = 1\n")
     (root / "progress.md").write_text("round 1: baseline\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Improve the queue.\n",
     )
 
 
@@ -61,7 +63,7 @@ def _request(project_root: Path) -> RunRequest:
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id="memory-preserving", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "gpt-test"}}),
-        input_bundle=load_input_bundle(project_root),
+        input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name="team-demo",
         run_environment=fake_docker_environment(),

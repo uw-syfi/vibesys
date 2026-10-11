@@ -27,6 +27,11 @@ can route every call through the host-side broker as production does: set
 transfers are recorded and do nothing, so the SSH stand-in supports only the
 pending mode.
 
+It stands in for the local transport's programs the same way:
+``shell_command = [python, -m, vs_slurm.fake_connector, STATE_DIR, shell]``
+answers its last argument as an ``exec`` request, and the ``rsync`` stand-in
+above copies local paths in both modes, as the real local ``rsync`` would.
+
 Other files in ``STATE_DIR``:
 
 - ``requests.jsonl``: every request, one JSON object per line, in order.
@@ -670,9 +675,12 @@ def _purged_reply(program: str, job_id: str) -> dict[str, object]:
 def _rsync(state: Path, arguments: list[str]) -> None:
     operands = arguments[arguments.index("--") + 1 :]
     source, destination = operands
-    remote = destination if ":" in destination else source
     executing = (state / RUN_FILE).exists()
-    metadata = ".cluster-operation" in remote or ".cluster-cancelled" in remote
+    metadata = any(
+        marker in operand
+        for operand in operands
+        for marker in (".cluster-operation", ".cluster-cancelled")
+    )
     if not executing and not metadata:
         return
 
@@ -701,12 +709,12 @@ def _rsync(state: Path, arguments: list[str]) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Answer the one request on stdin, or one SSH-transport program call."""
+    """Answer the one request on stdin, or one SSH- or local-transport program call."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     state = Path(arguments[0])
     program = arguments[1:2]
-    if program == ["ssh"]:
-        # ssh [options] -- HOST COMMAND
+    if program in (["ssh"], ["shell"]):
+        # ssh [options] -- HOST COMMAND, or the local transport's SHELL COMMAND
         response = handle(state, {"operation": "exec", "command": arguments[-1]})
         sys.stdout.write(str(response["stdout"]))
         sys.stderr.write(str(response["stderr"]))

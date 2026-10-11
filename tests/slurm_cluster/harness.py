@@ -1,16 +1,22 @@
-"""Open the ``slurm`` and ``slurm-gpu`` run environments against a real cluster.
+"""Open the ``slurm`` run environment, in each of its configurations, against a real cluster.
 
-Both environments are opened through ``open_run_environment`` exactly as a run
+The kinds are ``slurm`` (SSH transport), ``slurm-local`` (local transport),
+``slurm-local-gpu`` (local transport plus the agent's own GPU commands), and
+``slurm-gpu-alias`` (the deprecated ``slurm-gpu`` selection, translated to the
+previous one).
+
+The environments are opened through ``open_run_environment`` exactly as a run
 opens them. What differs from production is only what the tier cannot have on a
 single host: the agent image carries no agent CLI, and the host reaches Slurm
-through the operator-configured command prefixes (``ssh`` for ``slurm``, the
-login-node shim for ``slurm-gpu``). The agent side is a real Docker container;
-tests drive it with scripted commands through the session's sandbox.
+through the operator-configured command prefixes (``ssh`` for the SSH transport,
+the login-node shim as the local transport's shell). The agent side is a real
+Docker container; tests drive it with scripted commands through the session's sandbox.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import shlex
 import subprocess
@@ -30,10 +36,10 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentRequest,
     RunEnvironmentSession,
     SlurmEnvironment,
-    SlurmGpuEnvironment,
     TrustedEvaluatorRequirements,
 )
 from vs_sandbox.api import ComputeBackend, DockerSandbox, LocalBackend
+from vs_sandbox.api.slurm import load_slurm_operator_settings
 
 if TYPE_CHECKING:
     import threading
@@ -44,6 +50,9 @@ if TYPE_CHECKING:
 #: The label ``DockerSandbox`` puts on its containers (``vs_sandbox.docker_sandbox.RUN_ID_LABEL``).
 _RUN_ID_LABEL = "vibesys.run-id"
 BENCHMARK_OUTPUT_ARGUMENT = "--output"
+#: The kinds in which the agent runs its own GPU commands.
+GPU_KINDS = ("slurm-local-gpu", "slurm-gpu-alias")
+ALL_KINDS = ("slurm", "slurm-local", "slurm-local-gpu", "slurm-gpu-alias")
 #: The container's own ``/tmp``, where the framework's benchmark result is relayed to.
 CONTAINER_TMP = "/tmp"  # noqa: S108  # lint-waiver: LW-960011 [S108]; the framework result location is fixed, and it is this directory in the agent container.
 # > A tempfile call would name the test process's directory, not the container's.
@@ -119,12 +128,20 @@ class OpenRun:
     session: RunEnvironmentSession
     request: RunEnvironmentRequest
     run_id: str
+    kind: str
+    #: What the environment logged while opening, for the one-time notices.
+    log_lines: tuple[str, ...] = ()
 
     def agent(
         self, command: str, *, cancel: threading.Event | None = None, timeout: int | None = None
     ) -> CommandResult:
         """Run a scripted *command* as the agent, in the container, and return its result."""
         return self.session.sandbox.execute(command, timeout=timeout, cancel=cancel)
+
+    @property
+    def has_gpu_commands(self) -> bool:
+        """Whether the agent may run its own GPU commands (``$VIBESYS_GPU``) in this run."""
+        return self.kind in GPU_KINDS
 
     def launcher(self) -> str:
         """The broker client the agent runs for gates: the program named by its gate commands."""
@@ -186,27 +203,62 @@ def remove_run_containers(run_id: str) -> None:
         docker("rm", "-f", "-v", *ids, check=False)
 
 
-def _slurm_config(cluster: SlurmCluster) -> str:
-    ssh = json.dumps(list(cluster.ssh_command()))
-    return textwrap.dedent(
-        f"""\
-        [slurm]
-        name = "vibesys-test"
-        remote_workspace_root = "{cluster.root}/remote"
-        poll_interval_seconds = 0.2
+_AGENT_GPU_TABLE = textwrap.dedent(
+    """\
 
-        [slurm.transport]
-        kind = "ssh"
-        host = "{cluster.ssh_host()}"
-        ssh_command = {ssh}
+    [vibesys.agent_gpu]
+    partitions = ["main"]
+    max_gpus = 4
+    max_time_minutes = 10
+    default_time_minutes = 5
+    read_only_paths = [{tools}]
+    """
+)
+#: The one file in the operator's read-only tools directory (see :func:`operator_tools`).
+OPERATOR_TOOL_FILE = "interpreter.txt"
+OPERATOR_TOOL_TEXT = "operator interpreter\n"
 
-        [vibesys]
-        remote_python = "/usr/bin/python3"
-        """
+
+def operator_tools(cluster: SlurmCluster) -> Path:
+    """The directory of host tools outside any workspace that ``slurm-local-gpu`` exposes read-only.
+
+    It stands for the operator's Python environment in a home directory: shared
+    with the node, and invisible to a job unless ``read_only_paths`` names it.
+    """
+    return cluster.root / "operator-tools"
+
+
+def _slurm_config(cluster: SlurmCluster, kind: str, shim: Path | None) -> str:
+    """The operator file of *kind*: the SSH transport, or the local one with *shim* as its shell."""
+    if shim is None:
+        ssh = json.dumps(list(cluster.ssh_command()))
+        transport = f'kind = "ssh"\nhost = "{cluster.ssh_host()}"\nssh_command = {ssh}'
+    else:
+        shell = json.dumps([str(shim), "bash", "-c"])
+        transport = f'kind = "local"\nshell_command = {shell}'
+    return (
+        textwrap.dedent(
+            f"""\
+            [slurm]
+            name = "vibesys-test"
+            remote_workspace_root = "{cluster.root}/remote"
+            poll_interval_seconds = 0.2
+
+            [slurm.transport]
+            """
+        )
+        + transport
+        + '\n\n[vibesys]\nremote_python = "/usr/bin/python3"\n'
+        + (
+            _AGENT_GPU_TABLE.format(tools=json.dumps(str(operator_tools(cluster))))
+            if kind == "slurm-local-gpu"
+            else ""
+        )
     )
 
 
-def _slurm_gpu_config(shim: Path) -> str:
+def _slurm_gpu_alias_config(shim: Path) -> str:
+    """The deprecated ``[slurm_gpu]`` file, whose wrappers are the login-node shim."""
     return textwrap.dedent(
         f"""\
         [slurm_gpu]
@@ -222,22 +274,44 @@ def _slurm_gpu_config(shim: Path) -> str:
     )
 
 
+@contextmanager
+def _home(directory: Path) -> Iterator[None]:
+    """Point ``HOME`` at *directory* while the alias environment reads its stage root from it.
+
+    The alias stages gates under the user's home, which the cluster must share
+    with its nodes; here only the cluster's directory is shared.
+    """
+    previous = os.environ["HOME"]
+    os.environ["HOME"] = str(directory)
+    try:
+        yield
+    finally:
+        os.environ["HOME"] = previous
+
+
 def make_environment(
     kind: str, cluster: SlurmCluster, directory: Path, image_id: str
 ) -> RunEnvironment:
-    """Return the *kind* (``slurm`` or ``slurm-gpu``) environment configured for *cluster*."""
+    """Return the *kind* environment configured for *cluster* (see the module docstring)."""
     docker = DockerEnvironmentConfig(build_runner=PrebuiltImageRunner(image_id))
-    if kind == "slurm":
-        config = directory / "slurm.toml"
-        config.write_text(_slurm_config(cluster), encoding="utf-8")
-        return SlurmEnvironment(config, docker=docker)
-    config = directory / "slurm-gpu.toml"
-    config.write_text(_slurm_gpu_config(cluster.write_login_shim(directory)), encoding="utf-8")
-    return SlurmGpuEnvironment(
-        config,
-        RunResourceRequest(accelerators_per_node=1, accelerator_backend="cuda"),
-        docker=docker,
-    )
+    shim = None if kind == "slurm" else cluster.write_login_shim(directory)
+    if kind == "slurm-gpu-alias":
+        config = directory / "slurm-gpu.toml"
+        assert shim is not None
+        config.write_text(_slurm_gpu_alias_config(shim), encoding="utf-8")
+        with _home(cluster.root / "alias-home"):
+            return SlurmEnvironment.from_slurm_gpu(
+                config,
+                RunResourceRequest(accelerators_per_node=1, accelerator_backend="cuda"),
+                docker=docker,
+            )
+    if kind == "slurm-local-gpu":
+        tools = operator_tools(cluster)
+        tools.mkdir(exist_ok=True)
+        (tools / OPERATOR_TOOL_FILE).write_text(OPERATOR_TOOL_TEXT, encoding="utf-8")
+    config = directory / f"{kind}.toml"
+    config.write_text(_slurm_config(cluster, kind, shim), encoding="utf-8")
+    return SlurmEnvironment(load_slurm_operator_settings(config), docker=docker)
 
 
 def make_request(
@@ -246,6 +320,7 @@ def make_request(
     run_id: str,
     *,
     accuracy: bool = True,
+    log: Callable[[str], None] | None = None,
 ) -> RunEnvironmentRequest:
     """Build the request: a workspace under the cluster's shared directory, planned gates."""
     workspace = cluster.root / f"workspace-{run_id}"
@@ -264,6 +339,7 @@ def make_request(
         agent_backend="stub",
         cli_provider=None,
         run_id=run_id,
+        log=log,
         framework_root=directory / "framework",
         accuracy_command="python3 accuracy.py" if accuracy else None,
         benchmark_command="python3 benchmark.py",
@@ -284,10 +360,11 @@ def open_run(
     """Open *kind* against *cluster*; close the session and remove its containers on exit."""
     run_id = f"t{secrets.token_hex(5)}"
     environment = make_environment(kind, cluster, directory, image_id)
-    request = make_request(cluster, directory, run_id, accuracy=accuracy)
+    lines: list[str] = []
+    request = make_request(cluster, directory, run_id, accuracy=accuracy, log=lines.append)
     session = open_run_environment(environment, request)
     try:
-        yield OpenRun(session, request, run_id)
+        yield OpenRun(session, request, run_id, kind, tuple(lines))
     finally:
         try:
             session.close()

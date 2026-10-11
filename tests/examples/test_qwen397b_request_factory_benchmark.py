@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.examples.example_task import load_example_task, task_root
 from tests.examples.request_factory_cpu_smoke import load_profile
-
-from vibesys.api.request import load_input_bundle
 
 _REPO_ROOT = Path(__file__).parents[2]
 _BUNDLE_ROOT = _REPO_ROOT / "examples" / "model-serving" / "qwen3.5-397b-a17b-4xb200"
@@ -12,7 +11,7 @@ _BENCHMARK = _REPO_ROOT / "resources" / "evaluators" / "request-factory" / "fixe
 
 
 def test_bundle_runs_the_benchmark_through_the_pinned_rf_adapter() -> None:
-    bundle = load_input_bundle(_BUNDLE_ROOT)
+    bundle = load_example_task(_BUNDLE_ROOT)
 
     assert bundle.manifest.evaluator is not None
     assert bundle.manifest.evaluator.name == "vibesys-evaluator-request-factory"
@@ -40,14 +39,14 @@ def test_bundle_runs_the_benchmark_through_the_pinned_rf_adapter() -> None:
 
 
 def test_objectives_match_the_rf_protocol_metrics() -> None:
-    objectives = (_BUNDLE_ROOT / "objectives.toml").read_text(encoding="utf-8")
+    objectives = (task_root(_BUNDLE_ROOT) / "objectives.toml").read_text(encoding="utf-8")
 
     assert 'name = "output_token_throughput_per_s"' in objectives
     assert 'name = "p90_latency_ms"' in objectives
 
 
 def test_cpu_smoke_profile_declares_the_expected_request_and_result_contract() -> None:
-    profile = load_profile(_BUNDLE_ROOT / "benchmark" / "cpu_smoke.toml")
+    profile = load_profile(task_root(_BUNDLE_ROOT) / "benchmark" / "cpu_smoke.toml")
 
     assert profile.benchmark_path == _BENCHMARK
     assert profile.shape_counts == {(16, 4): 8}
