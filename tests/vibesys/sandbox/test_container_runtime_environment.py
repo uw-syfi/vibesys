@@ -7,8 +7,10 @@ so nothing patches the code under test.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -36,7 +38,6 @@ from vs_sandbox.api.testing import FakeDockerEngine
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
 
     from vs_sandbox.api import CommandRunner, HostResource
 
@@ -44,16 +45,26 @@ _IMAGE_ID = "sha256:" + "c" * 64
 
 
 class _RecordingBuildRunner:
-    """Answers ``docker build`` and ``docker image inspect`` without a daemon."""
+    """Answers image builds and ``docker image inspect`` without a daemon.
+
+    The devcontainer CLI's workspace is deleted after the build, so the
+    ``devcontainer.json`` it was given is read when the CLI is "run" and kept as
+    ``selected_features``.
+    """
 
     def __init__(self) -> None:
         self.argvs: list[tuple[str, ...]] = []
+        self.selected_features: list[str] = []
 
     def run(
         self, argv: Sequence[str], *, cwd: Path, timeout: float
     ) -> subprocess.CompletedProcess[str]:
         del cwd, timeout
         self.argvs.append(tuple(argv))
+        if argv[1] == "run":
+            root = Path(argv[list(argv).index("--workspace-folder") + 1])
+            config = json.loads((root / ".devcontainer" / "devcontainer.json").read_text())
+            self.selected_features = [key.rsplit("/", 1)[-1] for key in config["features"]]
         stdout = _IMAGE_ID if argv[1] == "image" else ""
         return subprocess.CompletedProcess(tuple(argv), 0, stdout, "")
 
@@ -148,8 +159,7 @@ def test_a_docker_in_docker_task_gets_the_runtime_layer_and_a_same_path_workspac
 
     session = open_run_environment(_environment(engine, runner), request)
     try:
-        build = next(argv for argv in runner.argvs if argv[1] == "build")
-        assert f"TOOLCHAINS={CONTAINER_RUNTIME_TOOLCHAIN}" in build
+        assert f"vibesys-{CONTAINER_RUNTIME_TOOLCHAIN}" in runner.selected_features
         run = next(call for call in engine.calls if call[1] == "run")
         mounts = [run[i + 1] for i, flag in enumerate(run) if flag == "-v"]
         assert f"{request.workspace}:{request.workspace}" in mounts
@@ -171,8 +181,7 @@ def test_an_ordinary_task_keeps_the_workspace_mount_and_an_unchanged_image(
 
     session = open_run_environment(_environment(engine, runner), request)
     try:
-        build = next(argv for argv in runner.argvs if argv[1] == "build")
-        assert "TOOLCHAINS=" in build
+        assert runner.selected_features == ["vibesys-agent"]
         run = next(call for call in engine.calls if call[1] == "run")
         assert f"{request.workspace}:/workspace" in run
         assert "info" not in [call[1] for call in engine.calls]
