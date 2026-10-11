@@ -11,7 +11,8 @@
  *   reader sees the old file or the new one, never a partial write.
  * - **Changes are announced.** `onRecentChanged` listeners hear every update of the recent runs, so
  *   no view has a refresh path to forget.
- * - **Invalid files are ignored, not fatal**, and the problem is reported (`hostsProblem`).
+ * - **Invalid files are ignored by reads and reported** (`hostsProblem` for hosts); updates reject
+ *   them before writing, so the bytes remain available for repair.
  *
  * Electron-free: the main process supplies the paths.
  */
@@ -36,7 +37,7 @@ export interface SettingsFilesystem {
 
 interface ReadResult<T> {
   readonly value: T;
-  /** A filesystem failure that makes writing from `value` unsafe; null for absent/invalid JSON. */
+  /** Why writing from `value` is unsafe; null only when the file was valid or absent. */
   readonly failure: Error | null;
 }
 
@@ -80,9 +81,10 @@ export class SettingsStore {
       this.#hostsProblem = null;
       return {value: parsed, failure: null};
     } catch (error) {
-      this.#hostsProblem = `${this.#options.settingsPath}: ${(error as Error).message}`;
+      const failure = invalidFile(this.#options.settingsPath, error);
+      this.#hostsProblem = failure.message;
       this.#options.log(`ignoring ${this.#hostsProblem}`);
-      return {value: EMPTY_SETTINGS, failure: null};
+      return {value: EMPTY_SETTINGS, failure};
     }
   }
 
@@ -102,8 +104,9 @@ export class SettingsStore {
     try {
       return {value: parseRecent(JSON.parse(read.text) as unknown), failure: null};
     } catch (error) {
-      this.#options.log(`ignoring ${this.#options.recentPath}: ${(error as Error).message}`);
-      return {value: EMPTY_RECENT, failure: null};
+      const failure = invalidFile(this.#options.recentPath, error);
+      this.#options.log(`ignoring ${failure.message}`);
+      return {value: EMPTY_RECENT, failure};
     }
   }
 
@@ -173,6 +176,11 @@ async function readText(filesystem: SettingsFilesystem, path: string): Promise<T
 function readFailure(path: string, cause: unknown): Error {
   const detail = cause instanceof Error ? cause.message : String(cause);
   return new Error(`could not read ${path}: ${detail}`, {cause});
+}
+
+function invalidFile(path: string, cause: unknown): Error {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  return new Error(`${path}: ${detail}`, {cause});
 }
 
 /** Replace `path` with `value` as JSON, private to the user, atomically (write aside, rename). */

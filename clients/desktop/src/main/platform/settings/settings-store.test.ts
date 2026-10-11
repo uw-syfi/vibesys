@@ -3,7 +3,7 @@ import {mkdtempSync, readdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Seeded} from '@vibesys/core-state/testing';
-import {withHostSettings} from './host-settings.js';
+import {EMPTY_SETTINGS, withHostSettings} from './host-settings.js';
 import {EMPTY_RECENT, type RecentFile, remember} from './recent.js';
 import {SettingsStore} from './settings-store.js';
 import {FakeSettingsFilesystem, fileError} from './testing/fake-settings-filesystem.js';
@@ -33,6 +33,107 @@ function run(index: number) {
 }
 
 describe('SettingsStore', () => {
+  test('regression: invalid host settings stay intact and block updates until corrected', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'hosts.json');
+    const invalidFiles = [
+      '{"version":2,"hosts":{"ssh:existing":{"checkout":"/existing"}}',
+      JSON.stringify({version: 2, hosts: {'ssh:existing': {checkout: 42}}}),
+    ];
+
+    for (const invalid of invalidFiles) {
+      const filesystem = new FakeSettingsFilesystem({[path]: invalid});
+      const {settings, logged} = store(filesystem, directory);
+      expect(await settings.hosts()).toEqual(EMPTY_SETTINGS);
+      expect(settings.hostsProblem).toContain(path);
+
+      let updates = 0;
+      const changing = settings.updateHosts(current => {
+        updates += 1;
+        return withHostSettings(current, {kind: 'ssh', alias: 'new'}, {checkout: '/new'});
+      });
+      await expect(changing).rejects.toThrow(path);
+      expect(updates).toBe(0);
+      expect(filesystem.text(path)).toBe(invalid);
+      expect(filesystem.operations.map(operation => operation.kind)).toEqual(['read', 'read']);
+      expect(logged).toHaveLength(2);
+
+      await filesystem.writePrivateText(
+        path,
+        `${JSON.stringify({
+          version: 2,
+          hosts: {'ssh:existing': {checkout: '/existing'}},
+        })}\n`,
+      );
+      await settings.updateHosts(current =>
+        withHostSettings(current, {kind: 'ssh', alias: 'new'}, {checkout: '/new'}),
+      );
+      expect(JSON.parse(filesystem.text(path))).toEqual({
+        version: 2,
+        hosts: {
+          'ssh:existing': {checkout: '/existing'},
+          'ssh:new': {checkout: '/new'},
+        },
+      });
+      expect(settings.hostsProblem).toBeNull();
+    }
+  });
+
+  test('regression: invalid recent runs stay intact and emit nothing until corrected', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'recent.json');
+    const invalidFiles = [
+      '{"version":2,"runs":[{"host":"local","project":"/old"}]',
+      JSON.stringify({version: 2, runs: [{...run(1), runId: null}]}),
+    ];
+
+    for (const invalid of invalidFiles) {
+      const filesystem = new FakeSettingsFilesystem({[path]: invalid});
+      const {settings, logged} = store(filesystem, directory);
+      const heard: RecentFile[] = [];
+      settings.onRecentChanged(recent => heard.push(recent));
+      expect(await settings.recent()).toEqual(EMPTY_RECENT);
+
+      let updates = 0;
+      const changing = settings.updateRecent(current => {
+        updates += 1;
+        return remember(current, run(2));
+      });
+      await expect(changing).rejects.toThrow(path);
+      expect(updates).toBe(0);
+      expect(heard).toEqual([]);
+      expect(filesystem.text(path)).toBe(invalid);
+      expect(filesystem.operations.map(operation => operation.kind)).toEqual(['read', 'read']);
+      expect(logged).toHaveLength(2);
+
+      await filesystem.writePrivateText(path, `${JSON.stringify({version: 2, runs: [run(1)]})}\n`);
+      await settings.updateRecent(current => remember(current, run(2)));
+      expect(JSON.parse(filesystem.text(path))).toEqual({version: 2, runs: [run(2), run(1)]});
+      expect(heard).toEqual([{version: 2, runs: [run(2), run(1)]}]);
+    }
+  });
+
+  test('updates still initialize absent files and merge subsequent valid updates', async () => {
+    const directory = '/settings';
+    const filesystem = new FakeSettingsFilesystem();
+    const {settings} = store(filesystem, directory);
+
+    await settings.updateHosts(current =>
+      withHostSettings(current, {kind: 'ssh', alias: 'one'}, {checkout: '/one'}),
+    );
+    await settings.updateHosts(current =>
+      withHostSettings(current, {kind: 'ssh', alias: 'two'}, {checkout: '/two'}),
+    );
+    await settings.updateRecent(current => remember(current, run(1)));
+    await settings.updateRecent(current => remember(current, run(2)));
+
+    expect(await settings.hosts()).toEqual({
+      version: 2,
+      hosts: {'ssh:one': {checkout: '/one'}, 'ssh:two': {checkout: '/two'}},
+    });
+    expect(await settings.recent()).toEqual({version: 2, runs: [run(2), run(1)]});
+  });
+
   test('regression: a host-settings read failure cannot replace the existing file', async () => {
     const directory = '/settings';
     const path = join(directory, 'hosts.json');
