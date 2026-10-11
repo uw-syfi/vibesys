@@ -1,10 +1,9 @@
-"""Planned gates run; anything else is refused; the benchmark result is relayed (D18).
-
-The agent names only the gate. The broker supplies the benchmark's result argument."""
+"""Planned gates run; anything else is refused; the benchmark result is relayed (D18)."""
 
 from __future__ import annotations
 
 import json
+import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,6 +17,10 @@ if TYPE_CHECKING:
     from tests.slurm_cluster.harness import OpenRun
 
 pytestmark = pytest.mark.slurm_cluster
+
+
+def _framework_result() -> str:
+    return f"{CONTAINER_TMP}/vibesys-framework-benchmark-{secrets.token_hex(8)}.json"
 
 
 def test_the_agent_finds_its_gate_client_by_name_in_any_shell_and_runs_it(run: OpenRun) -> None:
@@ -34,7 +37,20 @@ def test_the_agent_finds_its_gate_client_by_name_in_any_shell_and_runs_it(run: O
     assert "accuracy ok" in gate.output
 
 
-def _relayed_result_path(output: str) -> str:
+def test_a_benchmark_result_written_under_tmp_is_relayed_to_the_agents_tmp(run: OpenRun) -> None:
+    run.set_mode("benchmark", "pass")
+    result_path = _framework_result()
+
+    gate = run.gate("benchmark", "--output", result_path)
+
+    assert gate.exit_code == 0, gate.output
+    # The file is in the agent container's /tmp, never in the host's.
+    assert not Path(result_path).exists()
+    relayed = json.loads(run.agent(f"cat {result_path}").output)
+    assert relayed["score"] == 42
+
+
+def _announced_result(output: str) -> str:
     """The path the gate's output names for the benchmark result it relayed."""
     (line,) = [line for line in output.splitlines() if line.startswith("benchmark result file: ")]
     return line.removeprefix("benchmark result file: ")
@@ -49,21 +65,40 @@ def test_the_agent_names_only_the_benchmark_gate_and_gets_the_result_in_its_tmp(
     gate = run.gate("benchmark")
 
     assert gate.exit_code == 0, gate.output
-    result_path = _relayed_result_path(gate.output)
+    result_path = _announced_result(gate.output)
     assert classify_benchmark_output(result_path) is BenchmarkOutputKind.FRAMEWORK
     # The file is in the agent container's /tmp, never in the host's.
     assert not Path(result_path).exists()
     assert json.loads(run.agent(f"cat {result_path}").output)["score"] == 42
 
 
-def test_a_failed_benchmark_still_relays_the_result_it_wrote(run: OpenRun) -> None:
+def test_a_failed_bare_benchmark_still_relays_the_result_it_wrote(run: OpenRun) -> None:
     run.set_mode("benchmark", "exit:3")
 
     gate = run.gate("benchmark")
 
     assert gate.exit_code == 3, gate.output
-    result_path = _relayed_result_path(gate.output)
+    assert json.loads(run.agent(f"cat {_announced_result(gate.output)}").output)["score"] == 42
+
+
+def test_a_failed_benchmark_still_relays_the_result_it_wrote(run: OpenRun) -> None:
+    run.set_mode("benchmark", "exit:3")
+    result_path = _framework_result()
+
+    gate = run.gate("benchmark", "--output", result_path)
+
+    assert gate.exit_code == 3, gate.output
     assert json.loads(run.agent(f"cat {result_path}").output)["score"] == 42
+
+
+def test_a_workspace_benchmark_result_lands_in_the_shared_workspace(run: OpenRun) -> None:
+    run.set_mode("benchmark", "pass")
+    name = f".vibesys-benchmark-{secrets.token_hex(4)}.json"
+
+    gate = run.gate("benchmark", "--output", name)
+
+    assert gate.exit_code == 0, gate.output
+    assert json.loads((run.workspace / name).read_text(encoding="utf-8"))["score"] == 42
 
 
 @pytest.mark.parametrize(
@@ -71,11 +106,12 @@ def test_a_failed_benchmark_still_relays_the_result_it_wrote(run: OpenRun) -> No
     [
         ("--output", "/etc/passwd"),
         ("--output", f"{CONTAINER_TMP}/not-the-framework-name.json"),
-        ("--output", ".vibesys-benchmark-x.json"),
+        ("--output", f"{CONTAINER_TMP}/vibesys-framework-benchmark-../x.json"),
+        ("--output", ".vibesys-benchmark-/../escape.json"),
         ("--unplanned-flag", "x"),
     ],
 )
-def test_a_benchmark_with_arguments_is_refused_without_a_job(
+def test_a_benchmark_with_arguments_the_plan_does_not_allow_is_refused_without_a_job(
     run: OpenRun, slurm_cluster: SlurmCluster, arguments: tuple[str, ...]
 ) -> None:
     gate = run.gate("benchmark", *arguments)

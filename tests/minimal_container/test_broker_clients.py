@@ -27,15 +27,25 @@ def test_the_gate_client_runs_the_planned_accuracy_command(editor: Editor) -> No
     assert "accuracy ok" in output
 
 
-def test_the_gate_client_relays_the_benchmark_result_without_the_agent_naming_it(
+def test_the_gate_client_returns_the_benchmark_result_to_the_shared_workspace(
     editor: Editor,
 ) -> None:
+    result = ".vibesys-benchmark-minimal-container.json"
+
+    status, output = editor.gate("benchmark", "--output", result)
+
+    assert status == 0, output
+    assert json.loads((editor.request.workspace / result).read_text(encoding="utf-8")) == {
+        "score": 42
+    }
+
+
+def test_the_gate_client_relays_the_bare_benchmark_result_and_names_it(editor: Editor) -> None:
     status, output = editor.gate("benchmark")
 
     assert status == 0, output
     (line,) = [x for x in output.splitlines() if x.startswith("benchmark result file: ")]
-    path = line.removeprefix("benchmark result file: ")
-    read_status, content = editor.run(f"cat {path}")
+    read_status, content = editor.run(f"cat {line.removeprefix('benchmark result file: ')}")
     assert read_status == 0, content
     assert json.loads(content) == {"score": 42}
 

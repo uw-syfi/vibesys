@@ -14,7 +14,9 @@ offers:
   :class:`GateRunner`. The agent names only which gate; it never supplies a
   command or an argument. For a benchmark that declares a result argument the
   broker supplies the result path itself and relays the file back to the
-  caller, so nothing task-specific is part of what the agent types.
+  caller, so nothing task-specific is part of what the agent types. The
+  framework's own evaluation names the result path explicitly instead, and the
+  broker validates that form.
 
 The agent's workspace is mounted in its container at the same path as on the
 host, so the working directory a request names is a path the host can check
@@ -41,6 +43,11 @@ from vs_sandbox.agent_gpu import (
     AgentGpuConfig,
     GpuCommand,
     GpuLauncher,
+)
+from vs_sandbox.benchmark_output import (
+    OUTPUT_ARGUMENT_COUNT,
+    BenchmarkOutputKind,
+    classify_benchmark_output,
 )
 from vs_sandbox.host_command_client import SOCKET_ENV, TOKEN_ENV
 from vs_sim.api import Network, OsThreads, Threads, UnixNetwork
@@ -146,6 +153,7 @@ class GateCall(BaseModel):
     op: Literal["gate"]
     token: str
     kind: GateKind
+    arguments: tuple[str, ...] = ()
     cwd: str = Field(min_length=1)
 
 
@@ -170,6 +178,11 @@ class HostCommandBrokerError(PermissionError):
     def unsupported(cls, operation: str) -> HostCommandBrokerError:
         """Reject an operation this run does not offer."""
         return cls(f"this run does not offer the {operation} operation")
+
+    @classmethod
+    def invalid_gate_arguments(cls, kind: GateKind) -> HostCommandBrokerError:
+        """Reject gate arguments that differ from the plan."""
+        return cls(f"invalid arguments for the {kind.value} gate")
 
 
 class GateRunner(Protocol):
@@ -246,6 +259,8 @@ class _Job:
     run: Callable[[Callable[[bytes], None], Event], int]
     #: ``(host file, path in the caller)``: the result to relay once the job ends.
     relay: tuple[Path, str] | None = None
+    #: Whether the relayed path is the broker's choice, so the output must name it.
+    announce_relay: bool = False
 
 
 def _read_frame(connection: Connection) -> bytes:
@@ -270,11 +285,13 @@ def _send(connection: Connection, payload: Mapping[str, object]) -> None:
     connection.send(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
 
 
-def _relay_file(connection: Connection, host_file: Path, caller_path: str) -> None:
+def _relay_file(
+    connection: Connection, host_file: Path, caller_path: str, *, announce: bool
+) -> None:
     """Send the result a gate wrote at *host_file*, to be written at *caller_path*.
 
-    The output that follows tells the caller where the file is, because the
-    caller did not choose the path.
+    With *announce*, the output that follows names *caller_path*, because the
+    caller did not choose it.
     """
     content = _read_owned_file(host_file)
     if content is None:
@@ -283,8 +300,9 @@ def _relay_file(connection: Connection, host_file: Path, caller_path: str) -> No
         connection,
         {"file": {"path": caller_path, "data": base64.b64encode(content).decode()}},
     )
-    note = f"benchmark result file: {caller_path}\n".encode()
-    _send(connection, {"output": base64.b64encode(note).decode()})
+    if announce:
+        note = f"benchmark result file: {caller_path}\n".encode()
+        _send(connection, {"output": base64.b64encode(note).decode()})
 
 
 def _read_owned_file(path: Path) -> bytes | None:
@@ -491,7 +509,7 @@ class HostCommandBroker:
             return
         try:
             if job.relay is not None:
-                _relay_file(connection, *job.relay)
+                _relay_file(connection, *job.relay, announce=job.announce_relay)
             _send(connection, {"exit": status})
         except OSError:
             return
@@ -532,24 +550,42 @@ class HostCommandBroker:
                 call.kind, arguments, cwd=cwd, write=write, cancel=cancel
             ),
             relay=relay,
+            announce_relay=relay is not None and not call.arguments,
         )
 
     @staticmethod
     def _gate_arguments(
         call: GateCall, gates: Gates
     ) -> tuple[tuple[str, ...], tuple[Path, str] | None]:
-        """Return the arguments the gate runs with, and any file to relay.
+        """Validate a gate's arguments against the plan; return them and any file to relay.
 
-        The agent supplies none. A benchmark that declares a result argument
-        gets it with a private file of the broker's, relayed to a fresh
-        framework path in the caller's ``/tmp`` when the gate ends, because the
-        caller's ``/tmp`` is not the gate host's. Every other gate takes none.
+        An accuracy gate takes none. A benchmark that declares a result
+        argument takes either none, which is what the agent types, or that
+        argument and one allowed result path, which is what the framework's own
+        evaluation sends. With none, the broker names a fresh framework result
+        path in the caller's ``/tmp`` itself. A result under the caller's
+        ``/tmp`` is redirected to a private file of the broker's and relayed
+        back when the gate ends, because the caller's ``/tmp`` is not the gate
+        host's.
         """
+        arguments = call.arguments
         output_argument = gates.benchmark_output_argument
         if call.kind is GateKind.ACCURACY or output_argument is None:
+            if arguments:
+                raise HostCommandBrokerError.invalid_gate_arguments(call.kind)
             return (), None
+        if not arguments:
+            host_file = _reserve_result_file()
+            return (output_argument, str(host_file)), (host_file, _framework_result_path())
+        if len(arguments) != OUTPUT_ARGUMENT_COUNT or arguments[0] != output_argument:
+            raise HostCommandBrokerError.invalid_gate_arguments(call.kind)
+        kind = classify_benchmark_output(arguments[1])
+        if kind is None:
+            raise HostCommandBrokerError.invalid_gate_arguments(call.kind)
+        if kind is BenchmarkOutputKind.WORKSPACE:
+            return arguments, None
         host_file = _reserve_result_file()
-        return (output_argument, str(host_file)), (host_file, _framework_result_path())
+        return (output_argument, str(host_file)), (host_file, arguments[1])
 
     def _workspace_for(self, cwd: Path) -> Path:
         for workspace in self._workspaces:

@@ -20,8 +20,9 @@ def test_a_gate_run_by_the_agent_runs_in_a_real_job_and_reports_success(
     run.set_mode("benchmark", "pass")
     command = getattr(run.session.view.paths, f"{gate}_command")
     assert command is not None
+    suffix = " --output .vibesys-benchmark-ok.json" if gate == "benchmark" else ""
 
-    result = run.agent(command)
+    result = run.agent(command + suffix)
 
     assert result.exit_code == 0, result.output
     assert ("accuracy ok" if gate == "accuracy" else "benchmark wrote") in result.output
@@ -33,8 +34,9 @@ def test_a_failing_gate_exit_status_reaches_the_agent_unchanged(
     run: OpenRun, gate: str, code: int
 ) -> None:
     run.set_mode(gate, f"exit:{code}")
+    suffix = ["--output", ".vibesys-benchmark-fail.json"] if gate == "benchmark" else []
 
-    result = run.gate(gate)
+    result = run.gate(gate, *suffix)
 
     assert result.exit_code == code, result.output
 

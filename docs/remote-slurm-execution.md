@@ -24,7 +24,8 @@ cluster wrapper (`vs_sandbox.slurm_command`), which stages the workspace, runs
 the job, and copies the result back. The agent names only the gate and supplies no
 arguments; the broker passes the benchmark's declared result argument itself,
 relays the result file into the container's `/tmp`, and names it in the gate's
-output. Interrupting the client or
+output. The framework's own evaluation sends the argument and path explicitly,
+which the broker validates. Interrupting the client or
 dropping the connection cancels the job.
 
 The ROCprof server runs in the container and reaches the cluster through a
