@@ -132,6 +132,17 @@ class SubscriptionTracker:
                 timeout=timeout,
             )
 
+    def wait_for_a_reader(self, sequence: int, grace: float, timeout: float) -> bool:
+        """Wait, at most ``grace``, for a first client, then drain through ``sequence``.
+
+        A detached server whose run failed before any client attached would
+        otherwise close its socket first and take the failure's reason with it:
+        the client that started the run attaches seconds later. A client that
+        subscribed before costs no grace. The drain is ``wait_until_delivered``.
+        """
+        self._ever_subscribed.wait(grace)
+        return self.wait_until_delivered(sequence, timeout)
+
     def wait_for_subscriber(self, timeout: float) -> bool:
         """Wait until any client has established an event stream."""
         return self._ever_subscribed.wait(timeout)

@@ -1,5 +1,5 @@
 import {expect, type Locator, type Page, test} from '@playwright/test';
-import {CONTROLS_BANNER_COPY} from '../src/banners.js';
+import {CONTROLS_BANNER_COPY} from '../src/features/run-view/index.js';
 import {withGateway} from './gateway.js';
 
 /**

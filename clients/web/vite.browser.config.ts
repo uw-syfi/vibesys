@@ -9,7 +9,7 @@ export default defineConfig({
   build: {
     emptyOutDir: true,
     lib: {
-      entry: fileURLToPath(new URL('./src/browser-entry.ts', import.meta.url)),
+      entry: fileURLToPath(new URL('./src/platform/backend.ts', import.meta.url)),
       formats: ['es'],
       fileName: 'browser-entry',
     },

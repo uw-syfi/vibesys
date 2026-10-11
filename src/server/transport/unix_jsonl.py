@@ -294,6 +294,10 @@ class UnixJsonlServer:
         """Wait, bounded, until every open stream wrote through ``sequence``."""
         return self._subscriptions.wait_until_delivered(sequence, timeout)
 
+    def wait_for_a_reader(self, sequence: int, grace: float, timeout: float) -> bool:
+        """Wait, at most ``grace``, for a first stream, then until streams wrote ``sequence``."""
+        return self._subscriptions.wait_for_a_reader(sequence, grace, timeout)
+
     def wait_for_subscriber_disconnect(self) -> None:
         """Keep terminal events queryable until the last active subscriber exits."""
         self._subscriptions.wait_for_none_active()
