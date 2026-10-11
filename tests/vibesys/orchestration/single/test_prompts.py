@@ -106,8 +106,10 @@ _ROUND = st.builds(
 )
 
 
-def _variables(context: object, *, agent_evaluation: bool = False) -> dict[str, object]:
-    variables = {name: getattr(context, name) for name in type(context).model_fields}  # type: ignore[attr-defined]
+def _variables(
+    context: PlanPrompt | RoundPrompt, *, agent_evaluation: bool = False
+) -> dict[str, object]:
+    variables = {name: getattr(context, name) for name in type(context).model_fields}
     variables.pop("template")
     return {
         **run_prompt_variables(

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import deque
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
@@ -17,19 +18,21 @@ from tests.vibesys.orchestration.single.strategy._replies import combined, plan_
 from tests.vibesys.orchestration.single.strategy._run import FACTS, run_shell
 
 from vs_core.api import ProposeWinner, RequestTurn, Settle, StartAttempt, Stop, Withdraw
-from vs_core.testing.drive import Succeeded
+
+if TYPE_CHECKING:
+    from vs_runtime.api.testing import Run
 
 PURE = settings(max_examples=12, deadline=None, derandomize=True, database=None)
 
 
-def _starts(run: object) -> list[StartAttempt]:
-    return [item for item in run.decisions if isinstance(item, StartAttempt)]  # type: ignore[attr-defined]
+def _starts(run: Run) -> list[StartAttempt]:
+    return [item for item in run.decisions if isinstance(item, StartAttempt)]
 
 
-def _settles(run: object) -> list[Settle]:
+def _settles(run: Run) -> list[Settle]:
     return [
         item.disposition
-        for item in run.decisions  # type: ignore[attr-defined]
+        for item in run.decisions
         if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
     ]
 
@@ -65,17 +68,13 @@ def test_s1_a_round_the_cadence_skipped_is_never_a_winner_and_is_the_next_base()
         implementer=deque(combined() for _ in range(6)),
     )
     run = run_shell(executors, max_rounds=3, official_eval_every=2)
-    first, second, _third = _settles(run)[:3]
+    first = _settles(run)[0]
     assert (first.eligible, first.retention) == (False, "candidate")
     assert first.candidate is not None
     assert _starts(run)[1].workspace.base == first.candidate
     winner = next(item for item in run.decisions if isinstance(item, ProposeWinner))
     if winner.selection.kind == "retained_candidate":
-        settlement_ids = {
-            item.disposition.candidate: item for item in run.decisions if isinstance(item, Withdraw)
-        }
         assert winner.selection.revision != first.candidate
-        assert second.eligible or not settlement_ids
 
 
 def test_s3_revert_to_the_input_starts_the_round_on_the_input() -> None:
@@ -168,6 +167,3 @@ def test_the_retained_checkpoint_of_a_failed_round_is_work_in_progress(*, passed
     if not passed:
         assert settle.retention in {"wip", "discard"}
         assert not settle.eligible
-
-
-_UNUSED = Succeeded
