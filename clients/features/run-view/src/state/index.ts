@@ -1,5 +1,5 @@
-// The run view's pure entry: the run fold, what the page knows about its connection, the banner
-// copy, and the interfaces the live session needs from its platform.
+// The run view's pure entry: the banners the page shows for its connection and their copy. The
+// live session itself (the run fold, the session lifecycle, its ports) is `@vibesys/run-session`.
 export {
   CONTROLS_BANNER_COPY,
   connectionBanners,
@@ -8,12 +8,3 @@ export {
   PAGE_CONNECTION_BANNER_COPY,
   STREAM_BANNER_COPY,
 } from './banners.js';
-export type {WebSessionState, WebSessionStatus} from './connection.js';
-export type {
-  BrowserLifecycle,
-  PageVisibility,
-  RunConnection,
-  RunStreamHandlers,
-  TransportHooks,
-} from './ports.js';
-export {type RunAction, runStep} from './run.js';

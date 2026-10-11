@@ -19,6 +19,11 @@
     "src/testing/**"
   ],
   "references": [
-    {"path": "../entities/tsconfig.lib.json"}
+    {
+      "path": "../hosts/tsconfig.lib.json"
+    },
+    {
+      "path": "../runs/tsconfig.lib.json"
+    }
   ]
 }

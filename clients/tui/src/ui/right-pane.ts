@@ -1,5 +1,5 @@
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
-import {projectPerformance} from '@vibesys/core-state';
+import {projectPerformance} from '@vibesys/run-state/performance';
 import {renderDesignSummary} from '../design-log.js';
 import {designRoundViews} from '../experiments.js';
 import {PLOT_WIDTH, renderPerformanceCurve} from '../performance-chart.js';

@@ -1,5 +1,5 @@
 import type {DesignFileChange} from '@vibesys/contracts';
-import {formatPerformanceDelta} from '@vibesys/core-state';
+import {formatPerformanceDelta} from '@vibesys/run-state/performance';
 import type {DesignRoundView} from './experiments.js';
 
 /**

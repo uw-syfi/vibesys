@@ -2,7 +2,7 @@ import {afterEach, describe, expect, it, spyOn} from 'bun:test';
 import type {Renderable} from '@opentui/core';
 import {rgbToHex} from '@opentui/core';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
-import type {AgentPhase} from '@vibesys/core-state';
+import type {AgentPhase} from '@vibesys/run-state/rounds';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
 import {contrastRatio, listThemes, mix, resolveTheme} from '../theme.js';

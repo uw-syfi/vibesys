@@ -2,23 +2,15 @@
  * The run page's one path to the backend. It is the only module of `apps/web`, and of the features
  * it composes, that imports @vibesys/transport's runtime values or calls `fetch`
  * (`clients/.dependency-cruiser.mjs` and `clients/lint-rules/web-fetch-only-in-backend.grit` hold
- * it to that): the control transport (a WebSocket, or the desktop shell's bridge shaped as one),
- * the run's event stream and snapshot over it, the gateway's capability exchange, and the replay
- * fixture. It implements the interfaces `@vibesys/feature-run-view/state` declares. It is also the
+ * it to that): the control transport (a WebSocket, or the desktop shell's bridge shaped as one)
+ * that `@vibesys/run-session`'s `connectRun` runs the run over, the gateway's capability exchange,
+ * and the replay fixture. It is also the
  * entry of the browser transport bundle that `check:web-browser-bundle` keeps free of Node builtins.
  */
 
-import {type RunEvent, ServerError, validateRunEvent} from '@vibesys/contracts';
-import type {RunConnection, TransportHooks} from '@vibesys/feature-run-view/state';
-import {
-  type ControlChannelState,
-  type ControlTransport,
-  PersistentEventStream,
-  type PersistentEventStreamOptions,
-  type ScheduleTimeout,
-  StreamReconciler,
-  sameControlChannelState,
-} from '@vibesys/transport';
+import {type RunEvent, validateRunEvent} from '@vibesys/contracts';
+import type {TransportHooks} from '@vibesys/run-session';
+import type {ControlTransport, ScheduleTimeout} from '@vibesys/transport';
 import {type WebSocketLike, WebSocketTransport} from '@vibesys/transport/websocket';
 
 export type {ControlTransport, WebSocketLike};
@@ -47,85 +39,6 @@ export function openTransport(
     ...(scheduleTimeout === undefined ? {} : {scheduleTimeout}),
     ...(reconnectDelaysMs === undefined ? {} : {reconnectDelaysMs}),
   });
-}
-
-export interface RunConnectionOptions extends TransportTiming {
-  readonly tail?: number;
-}
-
-/**
- * How a session opens its run: the transport `open` builds (reporting to the session's hooks, with
- * repeats of one control-channel state dropped), and the run connection over it.
- */
-export function connectRun(
-  open: (hooks: TransportHooks) => ControlTransport,
-  options: RunConnectionOptions = {},
-): (hooks: TransportHooks) => RunConnection {
-  return hooks => {
-    let last: ControlChannelState = {status: 'connected'};
-    const transport = open({
-      onConnectionState: state => {
-        if (sameControlChannelState(last, state)) return;
-        last = state;
-        hooks.onConnectionState(state);
-      },
-    });
-    return openRunConnection(transport, options);
-  };
-}
-
-function openRunConnection(
-  transport: ControlTransport,
-  options: RunConnectionOptions = {},
-): RunConnection {
-  const {tail, reconnectDelaysMs, scheduleTimeout} = options;
-  const streamOptions: PersistentEventStreamOptions = {
-    ...(tail === undefined ? {} : {tail}),
-    ...(reconnectDelaysMs === undefined ? {} : {reconnectDelaysMs}),
-    ...(scheduleTimeout === undefined ? {} : {scheduleTimeout}),
-  };
-  const stream = new PersistentEventStream(transport, streamOptions);
-  // The browser replays the whole log and exposes no backfill action, so the positive chunk is
-  // dormant; it follows the configured tail so a future history action cannot drift from it.
-  const reconciler = new StreamReconciler({backfillChunk: tail ?? 1});
-  return {
-    async loadSnapshot(storeId) {
-      const response = await transport.request({
-        type: 'query.snapshot',
-        ...(storeId === undefined ? {} : {expected_store_id: storeId}),
-      });
-      if (response.ok !== true || response.snapshot === null || response.snapshot === undefined) {
-        throw new ServerError(
-          response.error ?? 'Server did not return a run snapshot',
-          response.diagnostic ?? null,
-        );
-      }
-      return response.snapshot;
-    },
-    subscribe(handlers) {
-      return stream.subscribe({
-        cursor: handlers.cursor,
-        storeId: () => reconciler.storeId(),
-        shouldReconnect: handlers.shouldReconnect,
-        onMessage: (message, context) => {
-          if (message.type === 'event_batch') {
-            handlers.onBatch(message, reconciler.reconcileBatch(message, context), context);
-          } else if (message.type === 'protocol_error') {
-            handlers.onFault(new ServerError(message.message, message.diagnostic ?? null));
-          }
-        },
-        onConnectionState: handlers.onConnectionState,
-      });
-    },
-    retry: () => stream.retry(),
-    retryIfDisconnected: () => stream.retryIfDisconnected(),
-    rebootstrap: () => stream.rebootstrap(),
-    redialControls: () => transport.reconnect(),
-    async close() {
-      await stream.close();
-      await transport.close();
-    },
-  };
 }
 
 const BROWSER_SESSION_HEADER = 'X-VibeSys-Browser-Session';

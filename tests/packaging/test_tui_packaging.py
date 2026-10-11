@@ -27,16 +27,17 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
 
     assert set(pins) == {
         "clients/contracts/package.json",
-        "clients/core-state/package.json",
         "clients/desktop/package.json",
-        "clients/entities/package.json",
+        "clients/hosts/package.json",
         "clients/ipc/package.json",
-        "clients/transport-node/package.json",
+        "clients/run-session/package.json",
+        "clients/run-state/package.json",
+        "clients/runs/package.json",
+        "clients/store/package.json",
         "clients/transport/package.json",
+        "clients/transport-node/package.json",
         "clients/tui/package.json",
         "clients/ui/package.json",
-        "clients/apps/desktop-renderer/package.json",
-        "clients/apps/web/package.json",
         "clients/features/gateway-connect/package.json",
         "clients/features/hosts/package.json",
         "clients/features/recent-runs/package.json",
@@ -44,6 +45,8 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
         "clients/features/run-control/package.json",
         "clients/features/run-view/package.json",
         "clients/features/start-run/package.json",
+        "clients/apps/desktop-renderer/package.json",
+        "clients/apps/web/package.json",
     }
     assert set(pins.values()) == {BUN_VERSION}
 
@@ -62,8 +65,8 @@ def _write_payload(
         "app/package.json": json.dumps({"name": "@vibesys/tui", "version": tui_version}).encode(),
         "app/node_modules/@vibesys/contracts/package.json": b'{"name":"@vibesys/contracts"}\n',
         "app/node_modules/@vibesys/contracts/dist/index.js": b"// contracts\n",
-        "app/node_modules/@vibesys/core-state/package.json": b'{"name":"@vibesys/core-state"}\n',
-        "app/node_modules/@vibesys/core-state/dist/index.js": b"// core state\n",
+        "app/node_modules/@vibesys/run-state/package.json": b'{"name":"@vibesys/run-state"}\n',
+        "app/node_modules/@vibesys/run-state/dist/index.js": b"// run state\n",
         "app/node_modules/@vibesys/transport/package.json": b'{"name":"@vibesys/transport"}\n',
         "app/node_modules/@vibesys/transport/dist/index.js": b"// transport\n",
         "app/node_modules/@vibesys/transport-node/package.json": b'{"name":"@vibesys/transport-node"}\n',
@@ -140,7 +143,7 @@ def test_tui_payload_rejects_checkout_specific_dependencies(tmp_path: Path) -> N
     package_path = source / "app" / "package.json"
     package = json.loads(package_path.read_text())
     package["dependencies"] = {
-        "@vibesys/core-state": "@vibesys/core-state@file:///build/clients/core-state"
+        "@vibesys/run-state": "@vibesys/run-state@file:///build/clients/run-state"
     }
     package_path.write_text(json.dumps(package))
 
@@ -166,7 +169,7 @@ def test_required_staging_rejects_a_missing_payload(tmp_path: Path) -> None:
         ("app/dist/launcher.js", "launcher.js"),
         ("app/dist/self-test.js", "self-test.js"),
         ("app/node_modules/@vibesys/contracts/dist/index.js", "contracts"),
-        ("app/node_modules/@vibesys/core-state/dist/index.js", "core-state"),
+        ("app/node_modules/@vibesys/run-state/dist/index.js", "run-state"),
         ("app/node_modules/@vibesys/transport/dist/index.js", "transport"),
         ("app/node_modules/@vibesys/transport-node/dist/index.js", "transport-node"),
         ("licenses/BUN-LICENSE.md", "BUN-LICENSE"),

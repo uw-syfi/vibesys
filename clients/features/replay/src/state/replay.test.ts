@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {event} from '@vibesys/contracts/testing';
-import {checkModel} from '@vibesys/core-state/testing';
+import {checkModel} from '@vibesys/store/testing';
 import {
   DEFAULT_REPLAY_FIXTURE_URL,
   REPLAY_IDLE,

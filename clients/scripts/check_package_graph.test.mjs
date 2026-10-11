@@ -228,6 +228,11 @@ const RULE_CASES = {
     workspace.ui.files['src/index.ts'] += 'export const runStatus = 2;\n';
     workspace.ui.files['src/tokens.css'] += '.host-row { color: red; }\n';
   },
+  'bucket-names': workspace => {
+    // A foundation package named for where things go rather than what it owns.
+    workspace['shared-models'] = structuredClone(workspace.contracts);
+    workspace['shared-models'].manifest.name = '@vibesys/shared-models';
+  },
 };
 
 test('every package-graph rule has a failing fixture', () => {
@@ -334,6 +339,24 @@ test('domain words are matched per word, across case changes and plurals', () =>
     'task',
   ]);
   assert.deepEqual(domainWords('const trunk = ghost; brunch; Dialog; tokens'), []);
+  assert.deepEqual(domainWords('running hosting; gatewayUrl replays transcripts listing'), [
+    'run',
+    'host',
+    'gateway',
+    'replay',
+    'transcript',
+    'listing',
+  ]);
+  assert.deepEqual(domainWords('a rounded string; padding, rendering'), []);
+});
+
+test('a bucket name is allowed above the domain layer and as part of a longer word', async t => {
+  const workspace = validWorkspace();
+  workspace['web-app'].manifest.name = '@vibesys/app-shared';
+  workspace['web-app'].manifest.vibesys.layer = 'app';
+  workspace['core-model'] = structuredClone(workspace.contracts);
+  workspace['core-model'].manifest.name = '@vibesys/coresident';
+  assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
 });
 
 test('a stylesheet entry is a dom asset with no project', async t => {

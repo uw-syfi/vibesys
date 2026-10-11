@@ -21,13 +21,12 @@ import {
   hostKey,
   hostLabel,
   liveRecord,
-  type ResumeRunId,
-  type StopView,
-} from '@vibesys/entities';
+} from '@vibesys/hosts';
 import type {ChromeState, StartOutcome} from '@vibesys/ipc';
+import type {ResumeRunId, StopView} from '@vibesys/runs';
 import {connectionStatus} from '../../entities/connection.js';
 import type {HostConnection, Phase} from '../../platform/connection/index.js';
-import type {RecentRun} from '../../platform/settings/index.js';
+import type {StoredRecentRun} from '../../platform/settings/index.js';
 import {type RelayPort, relay} from './relay.js';
 import {StopController} from './stop-controller.js';
 
@@ -46,7 +45,7 @@ export interface RunControlDeps {
   /** Ask the user; resolves true on "yes". */
   confirm(text: string): Promise<boolean>;
   /** Record a run only while `current` says this selection still owns navigation. */
-  remember(run: RecentRun, current: () => boolean): Promise<void>;
+  remember(run: StoredRecentRun, current: () => boolean): Promise<void>;
   /** The window's state changed: send it again. */
   changed(): void;
   readonly log: (message: string) => void;
@@ -448,7 +447,7 @@ export class RunControl {
     }
   }
 
-  async #remember(generation: number, run: RecentRun): Promise<void> {
+  async #remember(generation: number, run: StoredRecentRun): Promise<void> {
     try {
       await this.#deps.remember(run, () => this.#owns(generation));
     } catch (error) {

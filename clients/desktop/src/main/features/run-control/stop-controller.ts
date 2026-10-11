@@ -5,9 +5,9 @@
  * the caller reports what it sees and is told, through `changed`, when a view must be redrawn.
  */
 import type {InstanceStopResult} from '@vibesys/contracts/host-helper';
+import type {HostKey} from '@vibesys/hosts';
 import {
   confirmText,
-  type HostKey,
   STOP_IDLE,
   type StopEvent,
   type StopState,
@@ -16,7 +16,7 @@ import {
   stopKey,
   stopStep,
   stopView,
-} from '@vibesys/entities';
+} from '@vibesys/runs';
 
 export interface StopDeps {
   /** Ask the host to stop the instance, distinguishing withdrawal from answer and failure. */

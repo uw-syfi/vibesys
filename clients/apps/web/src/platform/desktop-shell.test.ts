@@ -1,9 +1,9 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent} from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
-import {WebSession} from '@vibesys/feature-run-view/renderer';
-import type {BrowserLifecycle} from '@vibesys/feature-run-view/state';
 import type {DesktopSocketHandlers} from '@vibesys/ipc';
+import type {BrowserLifecycle} from '@vibesys/run-session';
+import {WebSession} from '@vibesys/run-session';
 import type {ScheduleTimeout} from '@vibesys/transport';
 import {
   desktopBridge,

@@ -1,6 +1,7 @@
-import {activeRunFocus, type CoreState, hasRunEnded, phaseText} from '@vibesys/core-state';
+import type {WebSessionState} from '@vibesys/run-session';
+import {type CoreState, hasRunEnded} from '@vibesys/run-state';
+import {activeRunFocus, phaseText} from '@vibesys/run-state/rounds';
 import type {ControlChannelState} from '@vibesys/transport';
-import type {WebSessionState} from './connection.js';
 
 /** The control-channel outage a banner describes, once there is one to show. */
 type ControlOutage = Extract<ControlChannelState, {status: 'disconnected'}>;

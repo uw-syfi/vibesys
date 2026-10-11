@@ -3,8 +3,8 @@
  * (`stripControls`). While a run fills the window, only this strip of the welcome view shows.
  */
 
-import type {ResumeRunId} from '@vibesys/entities';
 import type {ChromeState} from '@vibesys/ipc';
+import type {ResumeRunId} from '@vibesys/runs';
 import {Button, StatusChip, type Tone} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {RunCommand} from '../../state/run-control.js';

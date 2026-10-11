@@ -28,7 +28,7 @@
       "path": "../../contracts/tsconfig.lib.json"
     },
     {
-      "path": "../../core-state/tsconfig.lib.json"
+      "path": "../../store/tsconfig.lib.json"
     }
   ]
 }

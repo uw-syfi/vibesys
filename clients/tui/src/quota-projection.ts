@@ -1,4 +1,4 @@
-import type {QuotaPause} from '@vibesys/core-state';
+import type {QuotaPause} from '@vibesys/run-state';
 
 /** The error banner id a quota pause is shown under, so it can retire with the pause. */
 export const QUOTA_BANNER_ID = 'quota_paused';

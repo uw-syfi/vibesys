@@ -16,8 +16,16 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     // whether or not a client uses it, and the file must not be edited by hand.
     ignore: ['src/generated/**'],
   },
-  'core-state': {
-    entry: ['src/**/*.test.ts', 'bench/*.ts'],
+  'run-state': {
+    // The entries its exports name, plus the hand-run benchmarks (`pnpm bench:*`).
+    entry: [
+      'src/index.ts',
+      'src/rounds/index.ts',
+      'src/performance/index.ts',
+      'src/transcript/index.ts',
+      'src/**/*.test.ts',
+      'bench/*.ts',
+    ],
     project: ['src/**/*.ts', 'bench/**/*.ts'],
   },
   desktop: {

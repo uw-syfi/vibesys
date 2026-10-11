@@ -830,13 +830,13 @@ def test_source_launcher_rebuilds_on_watched_config_file(
     assert "launcher.js" in calls[0][1]
 
 
-def test_source_launcher_rebuilds_on_core_state_source_change(
+def test_source_launcher_rebuilds_on_run_state_source_change(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = _make_checkout(tmp_path)
     dist = root / "clients" / "tui" / "dist"
-    core_source = root / "clients" / "core-state" / "src" / "index.ts"
+    core_source = root / "clients" / "run-state" / "src" / "index.ts"
     core_source.parent.mkdir(parents=True)
     core_source.write_text("export {};\n")
     _set_mtime(root / "clients" / "tui" / "src" / "app.ts", 1000)

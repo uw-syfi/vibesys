@@ -5,7 +5,6 @@
  * Wiring only; the entries (`main.tsx`, `desktop-main.tsx`) decide which page to compose.
  */
 
-import type {Store} from '@vibesys/core-state';
 import {
   createGatewayConnectStore,
   type GatewayBootstrapTarget,
@@ -16,12 +15,9 @@ import {
 } from '@vibesys/feature-gateway-connect/renderer';
 import {createReplayStore} from '@vibesys/feature-replay/renderer';
 import {type ReplayAction, type ReplayState, replayFailure} from '@vibesys/feature-replay/state';
-import {
-  createRunStore,
-  RunPage,
-  type RunStore,
-  type WebSession,
-} from '@vibesys/feature-run-view/renderer';
+import {RunPage} from '@vibesys/feature-run-view/renderer';
+import {createRunStore, type RunStore, type WebSession} from '@vibesys/run-session';
+import type {Store} from '@vibesys/store';
 import type {JSX} from 'react';
 import {useSyncExternalStore} from 'react';
 import {bootstrapGateway, fetchReplayFixture} from '../platform/backend.js';

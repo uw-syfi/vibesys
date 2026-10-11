@@ -1,0 +1,98 @@
+/**
+ * The run connection over a control transport: the run's snapshot request and its persistent event
+ * stream, placed by the stream reconciler. Runtime-neutral: the app supplies the transport (a
+ * WebSocket, or the desktop shell's bridge shaped as one).
+ */
+import {ServerError} from '@vibesys/contracts';
+import {
+  type ControlChannelState,
+  type ControlTransport,
+  PersistentEventStream,
+  type PersistentEventStreamOptions,
+  type ScheduleTimeout,
+  StreamReconciler,
+  sameControlChannelState,
+} from '@vibesys/transport';
+import type {RunConnection, TransportHooks} from './ports.js';
+
+/** The event stream's tail and its redial timing; the defaults are the transport's. */
+export interface RunConnectionOptions {
+  readonly tail?: number;
+  readonly scheduleTimeout?: ScheduleTimeout;
+  readonly reconnectDelaysMs?: readonly number[];
+}
+
+/**
+ * How a session opens its run: the transport `open` builds (reporting to the session's hooks, with
+ * repeats of one control-channel state dropped), and the run connection over it.
+ */
+export function connectRun(
+  open: (hooks: TransportHooks) => ControlTransport,
+  options: RunConnectionOptions = {},
+): (hooks: TransportHooks) => RunConnection {
+  return hooks => {
+    let last: ControlChannelState = {status: 'connected'};
+    const transport = open({
+      onConnectionState: state => {
+        if (sameControlChannelState(last, state)) return;
+        last = state;
+        hooks.onConnectionState(state);
+      },
+    });
+    return openRunConnection(transport, options);
+  };
+}
+
+function openRunConnection(
+  transport: ControlTransport,
+  options: RunConnectionOptions = {},
+): RunConnection {
+  const {tail, reconnectDelaysMs, scheduleTimeout} = options;
+  const streamOptions: PersistentEventStreamOptions = {
+    ...(tail === undefined ? {} : {tail}),
+    ...(reconnectDelaysMs === undefined ? {} : {reconnectDelaysMs}),
+    ...(scheduleTimeout === undefined ? {} : {scheduleTimeout}),
+  };
+  const stream = new PersistentEventStream(transport, streamOptions);
+  // The browser replays the whole log and exposes no backfill action, so the positive chunk is
+  // dormant; it follows the configured tail so a future history action cannot drift from it.
+  const reconciler = new StreamReconciler({backfillChunk: tail ?? 1});
+  return {
+    async loadSnapshot(storeId) {
+      const response = await transport.request({
+        type: 'query.snapshot',
+        ...(storeId === undefined ? {} : {expected_store_id: storeId}),
+      });
+      if (response.ok !== true || response.snapshot === null || response.snapshot === undefined) {
+        throw new ServerError(
+          response.error ?? 'Server did not return a run snapshot',
+          response.diagnostic ?? null,
+        );
+      }
+      return response.snapshot;
+    },
+    subscribe(handlers) {
+      return stream.subscribe({
+        cursor: handlers.cursor,
+        storeId: () => reconciler.storeId(),
+        shouldReconnect: handlers.shouldReconnect,
+        onMessage: (message, context) => {
+          if (message.type === 'event_batch') {
+            handlers.onBatch(message, reconciler.reconcileBatch(message, context), context);
+          } else if (message.type === 'protocol_error') {
+            handlers.onFault(new ServerError(message.message, message.diagnostic ?? null));
+          }
+        },
+        onConnectionState: handlers.onConnectionState,
+      });
+    },
+    retry: () => stream.retry(),
+    retryIfDisconnected: () => stream.retryIfDisconnected(),
+    rebootstrap: () => stream.rebootstrap(),
+    redialControls: () => transport.reconnect(),
+    async close() {
+      await stream.close();
+      await transport.close();
+    },
+  };
+}

@@ -4,9 +4,9 @@
  * list is empty). Choosing a row asks the shell to show that host's panel (`show-host`).
  */
 
-import {only, type Step} from '@vibesys/core-state';
-import {type HostKey, validAlias} from '@vibesys/entities';
+import {type HostKey, validAlias} from '@vibesys/hosts';
 import type {WelcomeResult} from '@vibesys/ipc';
+import {only, type Step} from '@vibesys/store';
 
 /** One row of the host list: an alias from `~/.ssh/config`, or the destination the user typed. */
 export interface HostChoice {

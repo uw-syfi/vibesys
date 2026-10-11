@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {rgbToHex, type TextRenderable} from '@opentui/core';
 import {createTestRenderer} from '@opentui/core/testing';
 import type {HypothesisRound} from '@vibesys/contracts';
-import type {RoundState} from '@vibesys/core-state';
+import type {RoundState} from '@vibesys/run-state/rounds';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
 import {resolveTheme} from '../theme.js';

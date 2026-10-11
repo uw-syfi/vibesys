@@ -4,15 +4,9 @@
  * (`ChromeState`) in step, and opens what a launch asked for.
  */
 
-import {
-  type HostId,
-  type HostKey,
-  hostFromKey,
-  hostKey,
-  hostLabel,
-  type RecentRun,
-} from '@vibesys/entities';
+import {type HostId, type HostKey, hostFromKey, hostKey, hostLabel} from '@vibesys/hosts';
 import {type ChromeState, WELCOME_EVENTS, type WelcomeOverview} from '@vibesys/ipc';
+import type {RecentRun} from '@vibesys/runs';
 import {ipcMain} from 'electron';
 import type {Hosts} from '../features/hosts/index.js';
 import type {RunControl} from '../features/run-control/index.js';

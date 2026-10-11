@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import type {ActiveAgentExecution, ExecutionStatus} from '@vibesys/core-state';
+import type {ActiveAgentExecution, ExecutionStatus} from '@vibesys/run-state';
 import {activityLine, activitySummary, runtimeSuffix, statusSuffix} from './activity-bar.js';
 
 const STARTED_AT = '2026-08-25T12:00:00.000Z';

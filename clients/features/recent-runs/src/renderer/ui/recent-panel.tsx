@@ -1,12 +1,7 @@
 /** Recent: the runs this user opened, each with its status on its host and what it allows. */
 
-import {
-  type HostKey,
-  type RecentRun,
-  type RecentStatus,
-  type ResumeRunId,
-  resumeDecision,
-} from '@vibesys/entities';
+import type {HostKey} from '@vibesys/hosts';
+import {type RecentRun, type RecentStatus, type ResumeRunId, resumeDecision} from '@vibesys/runs';
 import {Button} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {type ListsState, statusOf} from '../../state/lists.js';

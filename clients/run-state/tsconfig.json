@@ -1,0 +1,20 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.rounds.json"
+    },
+    {
+      "path": "./tsconfig.performance.json"
+    },
+    {
+      "path": "./tsconfig.transcript.json"
+    },
+    {
+      "path": "./tsconfig.test.json"
+    }
+  ]
+}

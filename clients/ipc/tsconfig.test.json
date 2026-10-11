@@ -12,7 +12,11 @@
     "src/**/*.test.tsx"
   ],
   "references": [
-    {"path": "./tsconfig.lib.json"},
-    {"path": "../core-state/tsconfig.testing.json"}
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "../store/tsconfig.testing.json"
+    }
   ]
 }

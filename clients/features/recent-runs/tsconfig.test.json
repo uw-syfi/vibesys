@@ -19,7 +19,13 @@
       "path": "./tsconfig.renderer.json"
     },
     {
-      "path": "../../core-state/tsconfig.testing.json"
+      "path": "../../hosts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../runs/tsconfig.lib.json"
+    },
+    {
+      "path": "../../store/tsconfig.testing.json"
     }
   ]
 }

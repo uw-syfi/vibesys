@@ -150,8 +150,8 @@ def _wheel_files(source_root: Path) -> dict[str, bytes]:
         "app/package.json": b'{"name":"@vibesys/tui","version":"0.1.0"}\n',
         "app/node_modules/@vibesys/contracts/package.json": b'{"name":"@vibesys/contracts"}\n',
         "app/node_modules/@vibesys/contracts/dist/index.js": b"// contracts\n",
-        "app/node_modules/@vibesys/core-state/package.json": b'{"name":"@vibesys/core-state"}\n',
-        "app/node_modules/@vibesys/core-state/dist/index.js": b"// core state\n",
+        "app/node_modules/@vibesys/run-state/package.json": b'{"name":"@vibesys/run-state"}\n',
+        "app/node_modules/@vibesys/run-state/dist/index.js": b"// run state\n",
         "app/node_modules/@vibesys/transport/package.json": b'{"name":"@vibesys/transport"}\n',
         "app/node_modules/@vibesys/transport/dist/index.js": b"// transport\n",
         "app/node_modules/@vibesys/transport-node/package.json": b'{"name":"@vibesys/transport-node"}\n',
@@ -442,7 +442,7 @@ def test_rejects_checkout_specific_tui_dependencies(
     package_path = f"{PLATLIB}entrypoints/_tui/app/package.json"
     package = json.loads(files[package_path])
     package["dependencies"] = {
-        "@vibesys/core-state": "@vibesys/core-state@file:///build/clients/core-state"
+        "@vibesys/run-state": "@vibesys/run-state@file:///build/clients/run-state"
     }
     files[package_path] = json.dumps(package).encode()
     _write_wheel(wheel, source_root, extra={package_path: files[package_path]})

@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
-import {checkModel, type Seeded} from '@vibesys/core-state/testing';
-import type {HostListing, RecentRun} from '@vibesys/entities';
+import type {HostListing} from '@vibesys/hosts';
+import type {RecentRun} from '@vibesys/runs';
+import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {LISTS_EMPTY, type ListsAction, listsInvariants, listsStep, statusOf} from './lists.js';
 
 function run(host: string, runId: string): RecentRun {

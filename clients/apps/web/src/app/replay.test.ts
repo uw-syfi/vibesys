@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test';
-import {initialCoreState} from '@vibesys/core-state';
 import {createReplayStore} from '@vibesys/feature-replay/renderer';
-import {runStep} from '@vibesys/feature-run-view/state';
+import {runStep} from '@vibesys/run-session';
+import {initialCoreState} from '@vibesys/run-state';
 import {fetchReplayFixture} from '../platform/backend.js';
 
 /** Load the replay demo over `fetcher`; resolves once the load settles. */

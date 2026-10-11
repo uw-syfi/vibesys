@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {hostFromKey, hostKey, SettingsError, validAlias, validHostPath} from '@vibesys/entities';
+import {HostValidationError, hostFromKey, hostKey, validAlias, validHostPath} from '@vibesys/hosts';
 import {
   EMPTY_SETTINGS,
   parseSettings,
@@ -45,8 +45,8 @@ describe('sshConfigHosts', () => {
 
   test('never offers a name that ssh would read as an option', () => {
     expect(sshConfigHosts('Host -oProxyCommand=evil ok')).toEqual(['ok']);
-    expect(() => validAlias('-oProxyCommand=x')).toThrow(SettingsError);
-    expect(() => validAlias('a b')).toThrow(SettingsError);
+    expect(() => validAlias('-oProxyCommand=x')).toThrow(HostValidationError);
+    expect(() => validAlias('a b')).toThrow(HostValidationError);
   });
 });
 
@@ -63,7 +63,7 @@ describe('host keys', () => {
 
   test('reject anything else', () => {
     for (const key of ['ssh:-oProxyCommand=x', 'ssh:', 'gpu-box', 'ssh:a b', 7, null]) {
-      expect(() => hostFromKey(key)).toThrow(SettingsError);
+      expect(() => hostFromKey(key)).toThrow(HostValidationError);
     }
   });
 });
@@ -97,7 +97,7 @@ describe('validHostPath', () => {
       try {
         path = validHostPath(value, 'p');
       } catch (error) {
-        expect(error).toBeInstanceOf(SettingsError);
+        expect(error).toBeInstanceOf(HostValidationError);
         continue;
       }
       expect(path).not.toMatch(/[\n\r\0]/);

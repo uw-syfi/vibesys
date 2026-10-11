@@ -19,13 +19,16 @@
   ],
   "references": [
     {
-      "path": "../../core-state/tsconfig.lib.json"
-    },
-    {
-      "path": "../../entities/tsconfig.lib.json"
+      "path": "../../hosts/tsconfig.lib.json"
     },
     {
       "path": "../../ipc/tsconfig.lib.json"
+    },
+    {
+      "path": "../../runs/tsconfig.lib.json"
+    },
+    {
+      "path": "../../store/tsconfig.lib.json"
     }
   ]
 }

@@ -15,7 +15,7 @@ import {
   hostLabel,
   hostListing,
   validHostPath,
-} from '@vibesys/entities';
+} from '@vibesys/hosts';
 import type {PathCompletion} from '@vibesys/ipc';
 import {connectionStatus} from '../../entities/connection.js';
 import {

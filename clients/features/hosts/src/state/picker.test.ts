@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
-import {checkModel, Seeded} from '@vibesys/core-state/testing';
 import type {WelcomeResult} from '@vibesys/ipc';
+import {checkModel, Seeded} from '@vibesys/store/testing';
 import {
   filterHosts,
   moveSelection,

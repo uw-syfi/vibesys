@@ -29,7 +29,7 @@ import {
   initialCoreState,
   reduceEventBatch,
   reduceSnapshot,
-} from '@vibesys/core-state';
+} from '@vibesys/run-state';
 import {canonicalJournalEvents, type RunEventRecord, readJournalRecords} from './journal.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));

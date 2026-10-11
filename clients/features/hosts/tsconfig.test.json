@@ -19,10 +19,16 @@
       "path": "./tsconfig.renderer.json"
     },
     {
-      "path": "../../core-state/tsconfig.testing.json"
+      "path": "../../hosts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../ipc/tsconfig.lib.json"
     },
     {
       "path": "../../ipc/tsconfig.testing.json"
+    },
+    {
+      "path": "../../store/tsconfig.testing.json"
     }
   ]
 }

@@ -7,9 +7,9 @@
  * replace the current one.
  */
 
-import {only, type Step} from '@vibesys/core-state';
-import type {HostKey} from '@vibesys/entities';
+import type {HostKey} from '@vibesys/hosts';
 import type {PathCompletion, WelcomeResult} from '@vibesys/ipc';
+import {only, type Step} from '@vibesys/store';
 
 /** How long typing must pause before a directory is listed. */
 const COMPLETION_PAUSE_MS = 80;

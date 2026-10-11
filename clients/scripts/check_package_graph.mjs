@@ -43,6 +43,9 @@
  * - `domain-free`: the production source of a domain-free package (`DOMAIN_FREE`) names no word of
  *   the product's domain (`DOMAIN_WORDS`), in identifiers, strings, or comments, so a primitive
  *   that grows a domain concept is caught where the layer rule alone cannot see it.
+ * - `bucket-names`: a foundation, core, or domain package is named for the one concept it owns, so
+ *   no segment of its name is a bucket word (`BUCKET_NAMES`: entities, core, common, ...). A bucket
+ *   name invites unrelated code in, which the layer rule cannot see.
  *
  * An export whose source is a stylesheet (`./tokens.css`) is a `dom` asset, not a compiled entry:
  * it has no tsconfig project, and bundlers resolve it through the same source condition.
@@ -78,6 +81,7 @@ export const RULES = [
   'entry-capability',
   'references-match-dependencies',
   'domain-free',
+  'bucket-names',
 ];
 
 /** Layer ranks. A package may depend only on a strictly lower rank. */
@@ -122,23 +126,42 @@ export const LEGACY_EXEMPTIONS = {
  * name it. Matching is per word: identifiers are split at case changes (`runStatus` is `run` and
  * `status`), and a plural `s` is dropped.
  */
-export const DOMAIN_FREE = new Set(['@vibesys/ui']);
+export const DOMAIN_FREE = new Set(['@vibesys/ui', '@vibesys/store']);
 export const DOMAIN_WORDS = new Set([
   'agent',
   'candidate',
   'checkout',
   'experiment',
+  'gateway',
   'host',
   'instance',
+  'listing',
   'project',
+  'replay',
   'resume',
   'round',
   'run',
   'ssh',
   'task',
+  'transcript',
   'vibesys',
   'welcome',
 ]);
+
+/**
+ * Words no foundation, core, or domain package name may contain as a segment: each names a place to
+ * put things rather than a concept, so the package it names grows into a junk drawer.
+ */
+export const BUCKET_NAMES = new Set([
+  'common',
+  'core',
+  'entities',
+  'helpers',
+  'misc',
+  'shared',
+  'utils',
+]);
+const NAMED_LAYERS = new Set(['foundation', 'core', 'domain']);
 
 const STYLESHEET = /\.css$/;
 
@@ -185,6 +208,7 @@ export function packageGraphErrors(root) {
     if (DOMAIN_FREE.has(workspacePackage.name)) {
       errors.push(...domainWordErrors(root, workspacePackage));
     }
+    errors.push(...bucketNameErrors(workspacePackage));
   }
   return errors;
 }
@@ -644,13 +668,27 @@ function projectErrors(root, workspacePackage, byName) {
 
 // --- domain-free packages ---------------------------------------------------------------------
 
-/** The domain words in `text`: its words split at case changes, lower-cased, without a plural. */
+/**
+ * The stems a word may be an inflection of: the word, without a plural `s`, and without `ing`
+ * (undoubling a final consonant, so `running` is `run`). Not `ed`: `rounded` names a shape.
+ */
+function stems(word) {
+  const candidates = [word, word.replace(/s$/, '')];
+  if (word.endsWith('ing') && word.length > 5) {
+    const stem = word.slice(0, -3);
+    candidates.push(stem, stem.replace(/([b-df-hj-np-tv-z])\1$/, '$1'));
+  }
+  return candidates;
+}
+
+/** The domain words in `text`: its words split at case changes, lower-cased, without inflection. */
 export function domainWords(text) {
-  const words = text
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .split(/[^A-Za-z]+/)
-    .map(word => word.toLowerCase().replace(/s$/, ''));
-  return [...new Set(words.filter(word => DOMAIN_WORDS.has(word)))];
+  const found = new Set();
+  for (const word of text.replace(/([a-z0-9])([A-Z])/g, '$1 $2').split(/[^A-Za-z]+/)) {
+    const match = stems(word.toLowerCase()).find(stem => DOMAIN_WORDS.has(stem));
+    if (match !== undefined) found.add(match);
+  }
+  return [...found];
 }
 
 function domainWordErrors(root, workspacePackage) {
@@ -677,6 +715,25 @@ function domainWordErrors(root, workspacePackage) {
     }
   }
   return errors;
+}
+
+// --- bucket names -----------------------------------------------------------------------------
+
+function bucketNameErrors({name, directory, manifest}) {
+  if (!NAMED_LAYERS.has(manifest.vibesys.layer)) return [];
+  const buckets = name
+    .slice(SCOPE.length)
+    .split('-')
+    .filter(segment => BUCKET_NAMES.has(segment));
+  if (buckets.length === 0) return [];
+  return [
+    violation(
+      'bucket-names',
+      `${directory}/package.json`,
+      `${name} (${manifest.vibesys.layer}) is named for a bucket (${buckets.join(', ')}), not the ` +
+        'concept it owns; name it for that concept, or split it into one package per concept',
+    ),
+  ];
 }
 
 function main() {

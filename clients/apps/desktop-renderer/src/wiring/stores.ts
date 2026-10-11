@@ -5,8 +5,6 @@
  * data arrives as pushes (`onListing`).
  */
 
-import type {Store} from '@vibesys/core-state';
-import type {HostKey, HostListing, RecentRun} from '@vibesys/entities';
 import {
   createCompletionStore,
   createHostStore,
@@ -26,6 +24,7 @@ import {type Confirm, createRunControlStore} from '@vibesys/feature-run-control/
 import type {WelcomeAction, WelcomeState} from '@vibesys/feature-run-control/state';
 import {createStartStore} from '@vibesys/feature-start-run/renderer';
 import type {StartAction, StartState} from '@vibesys/feature-start-run/state';
+import type {HostKey, HostListing} from '@vibesys/hosts';
 import {
   type ChromeState,
   settled,
@@ -34,6 +33,8 @@ import {
   type WelcomeOverview,
   type WelcomeResult,
 } from '@vibesys/ipc';
+import type {RecentRun} from '@vibesys/runs';
+import type {Store} from '@vibesys/store';
 
 export interface WelcomeStores {
   readonly welcome: Store<WelcomeState, WelcomeAction>;

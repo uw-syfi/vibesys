@@ -21,11 +21,12 @@
   },
   "dependencies": {
     "@vibesys/contracts": "workspace:*",
-    "@vibesys/core-state": "workspace:*",
     "@vibesys/feature-gateway-connect": "workspace:*",
     "@vibesys/feature-replay": "workspace:*",
     "@vibesys/feature-run-view": "workspace:*",
     "@vibesys/ipc": "workspace:*",
+    "@vibesys/run-session": "workspace:*",
+    "@vibesys/store": "workspace:*",
     "@vibesys/transport": "workspace:*",
     "react": "19.1.1",
     "react-dom": "19.1.1"
@@ -33,9 +34,10 @@
   "devDependencies": {
     "@playwright/test": "1.55.0",
     "@types/bun": "1.4.2",
+    "@types/node": "^24.0.0",
     "@types/react": "19.1.13",
     "@types/react-dom": "19.1.9",
-    "@types/node": "^24.0.0",
+    "@vibesys/run-state": "workspace:*",
     "@vitejs/plugin-react": "5.0.4",
     "typescript": "^5.8.3"
   }

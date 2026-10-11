@@ -4,9 +4,9 @@
  * host's runs arrive as pushes the app routes elsewhere.
  */
 
-import {createStore, type Store} from '@vibesys/core-state';
-import type {HostKey} from '@vibesys/entities';
+import type {HostKey} from '@vibesys/hosts';
 import {settled} from '@vibesys/ipc';
+import {createStore, type Store} from '@vibesys/store';
 import {
   COMPLETION_EMPTY,
   type CompletionAction,

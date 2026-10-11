@@ -19,10 +19,13 @@
   ],
   "references": [
     {
-      "path": "../../contracts/tsconfig.lib.json"
+      "path": "../../run-session/tsconfig.lib.json"
     },
     {
-      "path": "../../core-state/tsconfig.lib.json"
+      "path": "../../run-state/tsconfig.lib.json"
+    },
+    {
+      "path": "../../run-state/tsconfig.rounds.json"
     },
     {
       "path": "../../transport/tsconfig.lib.json"

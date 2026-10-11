@@ -1,4 +1,4 @@
-import type {AgentPhase} from '@vibesys/core-state';
+import type {AgentPhase} from '@vibesys/run-state/rounds';
 
 /**
  * Layout for the agent graph drawn in the Agents pane.

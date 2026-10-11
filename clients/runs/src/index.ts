@@ -1,0 +1,31 @@
+/**
+ * `@vibesys/runs`: what the app knows about a run as data: its identifiers, the status a recent run
+ * shows from its host's listing, the exact-resume policy, and the stop flow's pure step. No I/O.
+ */
+export {isInstanceId, isRunId, isTaskName} from './ids.js';
+export {
+  type RecentRun,
+  type RecentStatus,
+  recentStatus,
+  suggestProjects,
+} from './recent-status.js';
+export {
+  exactResumeRunId,
+  type ResumeDecision,
+  ResumeRequestError,
+  type ResumeRunId,
+  RUN_ID_UNAVAILABLE,
+  resumeArguments,
+  resumeDecision,
+} from './resume-run.js';
+export {
+  confirmText,
+  STOP_IDLE,
+  type StopEvent,
+  type StopState,
+  type StopStep,
+  type StopView,
+  stopKey,
+  stopStep,
+  stopView,
+} from './stop-run.js';

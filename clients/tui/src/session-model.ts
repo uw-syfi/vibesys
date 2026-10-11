@@ -10,26 +10,27 @@ import type {
 import {
   type ActiveAgentExecution,
   type ActiveExecutionCheckpoint,
-  type AgentPhase,
   type CoreDiagnostic,
   type CoreState,
-  DEFAULT_CHAT_THREAD_ID,
   type ExecutionTodos,
   hasRunEnded,
   initialCoreState,
   latestDiagnosticChange,
-  phasesForRound,
-  type RoundState,
   reduceEvent,
   reduceEventBatch,
   reduceEventPrefix,
   reduceEventRebootstrap,
   reduceResponseEvents,
   reduceSnapshot,
-  roundsWithPlan,
   type TodoItem,
-  type TranscriptEntry,
-} from '@vibesys/core-state';
+} from '@vibesys/run-state';
+import {
+  type AgentPhase,
+  phasesForRound,
+  type RoundState,
+  roundsWithPlan,
+} from '@vibesys/run-state/rounds';
+import {DEFAULT_CHAT_THREAD_ID, type TranscriptEntry} from '@vibesys/run-state/transcript';
 import {agentRuntimeLabel} from './agent-runtime-label.js';
 import * as diagnosticProjection from './diagnostic-projection.js';
 import type {NoteRecord} from './notes-store.js';

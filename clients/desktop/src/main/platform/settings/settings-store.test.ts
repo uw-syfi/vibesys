@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {mkdtempSync, readdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {Seeded} from '@vibesys/core-state/testing';
+import {Seeded} from '@vibesys/store/testing';
 import {EMPTY_SETTINGS, withHostSettings} from './host-settings.js';
 import {EMPTY_RECENT, type RecentFile, remember} from './recent.js';
 import {SettingsStore} from './settings-store.js';

@@ -1,8 +1,8 @@
 import {describe, test} from 'bun:test';
-import {checkModel} from '@vibesys/core-state/testing';
-import {exactResumeRunId} from '@vibesys/entities';
 import type {WelcomeResult} from '@vibesys/ipc';
 import {randomChrome} from '@vibesys/ipc/testing';
+import {exactResumeRunId} from '@vibesys/runs';
+import {checkModel} from '@vibesys/store/testing';
 import {type RunCommand, WELCOME_INITIAL, type WelcomeAction, welcomeStep} from './run-control.js';
 
 function failed<T>(error: string): WelcomeResult<T> {

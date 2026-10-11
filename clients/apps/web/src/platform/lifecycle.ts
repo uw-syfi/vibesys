@@ -1,5 +1,5 @@
 /** The browser service a live session wakes on. */
-import type {BrowserLifecycle} from '@vibesys/feature-run-view/state';
+import type {BrowserLifecycle} from '@vibesys/run-session';
 
 /** The page's own visibility and network reachability. */
 export const browserLifecycle: BrowserLifecycle = {

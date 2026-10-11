@@ -38,7 +38,7 @@ import {readFileSync, unlinkSync} from 'node:fs';
 import {createServer, type Socket} from 'node:net';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import type {ActiveExecutionCheckpoint} from '@vibesys/core-state';
+import type {ActiveExecutionCheckpoint} from '@vibesys/run-state';
 import {
   canonicalJournalEvents,
   optionalString,

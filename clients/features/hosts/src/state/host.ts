@@ -9,9 +9,9 @@
  * the window comes back from a run (the run's host is shown).
  */
 
-import {only, type Step} from '@vibesys/core-state';
-import type {HostKey, HostSummary} from '@vibesys/entities';
+import type {HostKey, HostSummary} from '@vibesys/hosts';
 import type {ChromeState, WelcomeResult} from '@vibesys/ipc';
+import {only, type Step} from '@vibesys/store';
 
 /** The checkout form: "Where is your VibeSys checkout on HOST?". */
 export interface CheckoutForm {

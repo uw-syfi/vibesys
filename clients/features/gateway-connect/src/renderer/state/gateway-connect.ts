@@ -6,7 +6,7 @@
  * cancelled attempts retain their validated target privately in state for an explicit retry.
  */
 
-import {only, type Step} from '@vibesys/core-state';
+import {only, type Step} from '@vibesys/store';
 import {
   type GatewayBootstrapTarget,
   type GatewayConnection,

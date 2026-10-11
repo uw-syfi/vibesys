@@ -13,7 +13,7 @@ import {
   hostKey,
   SSH_ALIAS,
   validHostPath,
-} from '@vibesys/entities';
+} from '@vibesys/hosts';
 import {object, onlyKeys, SettingsError} from './parse.js';
 
 /** How the app runs VibeSys on one host. */

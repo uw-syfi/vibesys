@@ -3,7 +3,7 @@
  * start runs the form is read-only; Cancel (or Esc) then cancels the start ("Cancelling…").
  */
 
-import type {HostKey} from '@vibesys/entities';
+import type {HostKey} from '@vibesys/hosts';
 import {Button, Dialog} from '@vibesys/ui';
 import type {InputHTMLAttributes, JSX, ReactNode} from 'react';
 import {type StartAction, type StartState, startable, type Tasks} from '../../state/start.js';

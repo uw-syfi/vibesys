@@ -3,8 +3,8 @@
  * `StartRunBridge` and its reply dispatched back with the request's token.
  */
 
-import {createStore, type Store} from '@vibesys/core-state';
 import {settled} from '@vibesys/ipc';
+import {createStore, type Store} from '@vibesys/store';
 import {
   START_CLOSED,
   type StartAction,

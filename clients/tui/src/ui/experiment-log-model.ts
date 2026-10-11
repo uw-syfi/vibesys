@@ -1,4 +1,4 @@
-import {formatPerformanceDelta, projectPerformance} from '@vibesys/core-state';
+import {formatPerformanceDelta, projectPerformance} from '@vibesys/run-state/performance';
 import {
   detailedHypothesis,
   experimentIndexItems,
