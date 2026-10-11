@@ -119,10 +119,10 @@ async function connectionManager(): Promise<ConnectionManager> {
   const controlPath = join(await controlDirectory(process.getuid?.() ?? 0), '%C');
   const askpass = await installAskpass(join(app.getPath('userData'), 'askpass.sh'));
   return new ConnectionManager({
-    linkFor: (host: HostId, checkout: string): Link =>
+    linkFor: (host: HostId): Link =>
       host.kind === 'local'
-        ? new LocalLink(checkout)
-        : new SshLink({alias: host.alias, checkout, controlPath, askpass}),
+        ? new LocalLink()
+        : new SshLink({alias: host.alias, controlPath, askpass}),
     appVersion: app.getVersion(),
     scheduleTimeout: realTimers,
     log,

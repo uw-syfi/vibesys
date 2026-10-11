@@ -1,9 +1,10 @@
 /**
- * `ConnectionManager`: the only code that creates links and channels. It keeps one `HostConnection`
- * per host, built from that host's checkout, and owns every connection it built and every host's
- * link (an ssh master, shared by every connection to that host, a checkout check included):
- * disposing the manager (quitting) closes every channel, then every link, once. Runs are detached
- * and keep going.
+ * `ConnectionManager`: the only code that creates links and channels. It keeps one `Link` per host
+ * (the host's one ssh master, so concurrent connections never race two sign-ins) and one shown
+ * `HostConnection` per host, built from that host's current checkout. When the checkout changes,
+ * the connection it replaces closes as soon as no run is attached through it (`hold`). Disposing
+ * the manager (quitting) closes every connection, waits for their channels to end, then releases
+ * every link, once. Runs are detached and keep going.
  */
 import {DEFAULT_RECONNECT_DELAYS_MS, type ScheduleTimeout} from '@vibesys/backend-client';
 import {type HostId, type HostKey, hostKey} from '../../../../common/hosts.js';
@@ -20,8 +21,8 @@ export const DEFAULT_CONNECTION_CONFIG: ConnectionConfig = {
 };
 
 export interface ConnectionManagerOptions {
-  /** The link to `host` running VibeSys from `checkout`. */
-  readonly linkFor: (host: HostId, checkout: string) => Link;
+  /** The link to `host`; asked once per host. */
+  readonly linkFor: (host: HostId) => Link;
   readonly appVersion: string;
   readonly scheduleTimeout: ScheduleTimeout;
   readonly log: (message: string) => void;
@@ -30,11 +31,14 @@ export interface ConnectionManagerOptions {
 
 export class ConnectionManager implements AsyncDisposable {
   readonly #options: ConnectionManagerOptions;
-  readonly #stack = new AsyncDisposableStack();
-  readonly #connections = new Map<HostKey, {checkout: string; connection: HostConnection}>();
+  readonly #links = new Map<HostKey, Link>();
+  /** Each host's shown connection: the one built from its current checkout. */
+  readonly #shown = new Map<HostKey, {checkout: string; connection: HostConnection}>();
+  /** Connections a changed checkout replaced, open while a run is attached through them. */
+  readonly #replaced = new Set<HostConnection>();
+  /** Closes under way, which the manager's own release waits for. */
+  readonly #closing = new Set<Promise<void>>();
   readonly #created = new Set<(host: HostKey, connection: HostConnection) => void>();
-  /** Hosts whose link release is registered: one per host, however many connections use it. */
-  readonly #links = new Set<HostKey>();
 
   constructor(options: ConnectionManagerOptions) {
     this.#options = options;
@@ -42,26 +46,27 @@ export class ConnectionManager implements AsyncDisposable {
 
   /**
    * The one connection to `host` from `checkout`. A changed checkout gets a new connection; the one
-   * it replaces keeps serving the runs attached through it until the app quits.
+   * it replaces keeps serving the runs attached through it, and closes once none is.
    */
   connection(host: HostId, checkout: string): HostConnection {
     const key = hostKey(host);
-    const existing = this.#connections.get(key);
+    const existing = this.#shown.get(key);
     if (existing?.checkout === checkout) return existing.connection;
-    const connection = this.#stack.use(this.#build(host, checkout));
-    this.#connections.set(key, {checkout, connection});
+    const connection = this.#build(host, checkout);
+    this.#shown.set(key, {checkout, connection});
     for (const listener of this.#created) listener(key, connection);
+    if (existing !== undefined) this.#replace(existing.connection);
     return connection;
   }
 
   /** The connection to `host`, if one was built. */
   existing(host: HostKey): HostConnection | null {
-    return this.#connections.get(host)?.connection ?? null;
+    return this.#shown.get(host)?.connection ?? null;
   }
 
   /**
    * A connection to `host` from `checkout` that is not kept: for checking a checkout before it is
-   * saved. The caller owns it (`await using`).
+   * saved. It shares the host's link; the caller owns it (`await using`).
    */
   candidate(host: HostId, checkout: string): HostConnection {
     return this.#build(host, checkout);
@@ -78,28 +83,54 @@ export class ConnectionManager implements AsyncDisposable {
    * stuck on it then tries again.
    */
   async signIn(host: HostId): Promise<void> {
-    await this.#link(host, '~').establish(true);
-    this.#connections.get(hostKey(host))?.connection.dispatch({type: 'user-retry'});
+    await this.#link(host).establish(true);
+    this.#shown.get(hostKey(host))?.connection.dispatch({type: 'user-retry'});
   }
 
   /** The machine woke, or the network came back: every connection checks what it waits on. */
   wake(): void {
-    for (const {connection} of this.#connections.values()) connection.dispatch({type: 'wake'});
+    for (const {connection} of this.#shown.values()) connection.dispatch({type: 'wake'});
+    for (const connection of this.#replaced) connection.dispatch({type: 'wake'});
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
-    this.#connections.clear();
-    await this.#stack.disposeAsync();
+    const shown = [...this.#shown.values()].map(entry => entry.connection);
+    const connections = [...shown, ...this.#replaced];
+    this.#shown.clear();
+    this.#replaced.clear();
+    for (const connection of connections) this.#close(connection);
+    // Every channel rides its host's link: the links go last.
+    await Promise.all(this.#closing);
+    const links = [...this.#links.values()];
+    this.#links.clear();
+    await Promise.all(links.map(link => link.release().catch(() => {})));
   }
 
-  /** The link to `host` from `checkout`; the host's link is released once, when the manager is. */
-  #link(host: HostId, checkout: string): Link {
-    const link = this.#options.linkFor(host, checkout);
+  /** `connection` is no longer shown: close it once no run is attached through it. */
+  #replace(connection: HostConnection): void {
+    this.#replaced.add(connection);
+    const close = (): void => {
+      stop();
+      if (this.#replaced.delete(connection)) this.#close(connection);
+    };
+    const stop = connection.onUnheld(close);
+    if (!connection.held) close();
+  }
+
+  #close(connection: HostConnection): void {
+    // A connection's release settles every channel it started; it has nothing to report.
+    const closing = connection[Symbol.asyncDispose]().catch(() => {});
+    this.#closing.add(closing);
+    void closing.then(() => this.#closing.delete(closing));
+  }
+
+  /** The one link to `host`. */
+  #link(host: HostId): Link {
     const key = hostKey(host);
-    if (!this.#links.has(key)) {
-      this.#links.add(key);
-      // Deferred before any connection that uses it is added, so it is released after them.
-      this.#stack.defer(() => link.release().catch(() => {}));
+    let link = this.#links.get(key);
+    if (link === undefined) {
+      link = this.#options.linkFor(host);
+      this.#links.set(key, link);
     }
     return link;
   }
@@ -107,7 +138,8 @@ export class ConnectionManager implements AsyncDisposable {
   #build(host: HostId, checkout: string): HostConnection {
     const {appVersion, scheduleTimeout, log, config} = this.#options;
     return new HostConnection({
-      link: this.#link(host, checkout),
+      link: this.#link(host),
+      checkout,
       appVersion,
       config: config ?? DEFAULT_CONNECTION_CONFIG,
       scheduleTimeout,

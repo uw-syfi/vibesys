@@ -393,43 +393,53 @@ export class RunControl {
     task: string | null,
   ): Promise<boolean> {
     if (!this.#owns(generation)) return false;
-    await this.#remember(generation, {
-      host: hostKey(id),
-      project: record.project_root,
-      task,
-      runId: record.run_id,
-      attachedAt: this.#deps.now(),
-    });
-    if (!this.#owns(generation)) return false;
-    this.#releaseBinding();
-    const page = this.#deps.openPage(hostLabel(id));
-    const releases: (() => void)[] = [];
-    const binding: Binding = {
-      id,
-      instanceId: record.id,
-      runId: record.run_id,
-      project: record.project_root,
-      task,
-      connection,
-      page,
-      status: connectionStatus(connection.phase),
-      seenLive: false,
-      release: () => {
-        for (const release of releases.splice(0)) release();
-      },
-    };
-    this.#run = binding;
-    this.#settleAdoption(id, record.id, true);
-    // Subscribed once the binding exists: a listing the connection already holds arrives at once.
-    releases.push(
-      connection.onPhase(phase => this.#phase(binding, phase)),
-      connection.watchInstances(listing => this.#listing(binding, listing)),
-      connection.onRunUnreachable(instanceId => {
-        if (instanceId === binding.instanceId) this.#ended(binding);
-      }),
-    );
-    this.#deps.changed();
-    return true;
+    // Remembering crosses an await. Lease this exact connection before it so a checkout change
+    // cannot replace and close the connection that this still-current attach is about to bind.
+    const releaseHold = connection.hold();
+    let bound = false;
+    try {
+      await this.#remember(generation, {
+        host: hostKey(id),
+        project: record.project_root,
+        task,
+        runId: record.run_id,
+        attachedAt: this.#deps.now(),
+      });
+      if (!this.#owns(generation)) return false;
+      this.#releaseBinding();
+      const page = this.#deps.openPage(hostLabel(id));
+      // The provisional lease becomes the binding's lease. It is released once by `release`.
+      const releases: (() => void)[] = [releaseHold];
+      const binding: Binding = {
+        id,
+        instanceId: record.id,
+        runId: record.run_id,
+        project: record.project_root,
+        task,
+        connection,
+        page,
+        status: connectionStatus(connection.phase),
+        seenLive: false,
+        release: () => {
+          for (const release of releases.splice(0)) release();
+        },
+      };
+      this.#run = binding;
+      this.#settleAdoption(id, record.id, true);
+      // Subscribed once the binding exists: a listing the connection already holds arrives at once.
+      releases.push(
+        connection.onPhase(phase => this.#phase(binding, phase)),
+        connection.watchInstances(listing => this.#listing(binding, listing)),
+        connection.onRunUnreachable(instanceId => {
+          if (instanceId === binding.instanceId) this.#ended(binding);
+        }),
+      );
+      this.#deps.changed();
+      bound = true;
+      return true;
+    } finally {
+      if (!bound) releaseHold();
+    }
   }
 
   async #remember(generation: number, run: RecentRun): Promise<void> {
