@@ -153,7 +153,7 @@ class _CancellableTextPipe(io.TextIOBase):
         except BaseException as construction_error:
             try:
                 _close_pipe_resources(selector, cancel_reader, cancel_writer)
-            except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-010102 [BLE001]; cancellation and interpreter-exit exceptions must not leak descriptors, and the wrapper-construction failure remains the primary error.
+            except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-994698 [BLE001]; cancellation and interpreter-exit exceptions must not leak descriptors, and the wrapper-construction failure remains the primary error.
                 construction_error.add_note(f"output pipe cleanup also failed: {cleanup_error}")
             raise
 
@@ -333,7 +333,7 @@ def _close_process_output(process: _StartedPipedProcess) -> None:
 
 
 def _start_subprocess_group(argv: tuple[str, ...], cwd: Path | None) -> _StartedPipedProcess:
-    process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-010101 [S603]; execute the caller's argv directly with no shell at the process adapter boundary.
+    process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-994699 [S603]; execute the caller's argv directly with no shell at the process adapter boundary.
         argv,
         cwd=cwd,
         stdout=subprocess.PIPE,
