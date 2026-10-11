@@ -10,7 +10,9 @@ import {
 
 describe('gateway session lifecycle', () => {
   test('turns a direct capability page into clean durable browser state', () => {
-    const target = resolveGatewayTarget('http://127.0.0.1:8765/?token=launch-secret', null);
+    const launch = 'http://127.0.0.1:8765/?token=launch-secret';
+    const scrubbed = scrubLaunchCapability(launch);
+    const target = resolveGatewayTarget(launch, null);
 
     expect(target).toEqual({
       gatewayUrl: 'http://127.0.0.1:8765/',
@@ -18,6 +20,18 @@ describe('gateway session lifecycle', () => {
       webSocketUrl: 'ws://127.0.0.1:8765/ws',
       bootstrapUrl: null,
     });
+    expect(scrubbed).toEqual({
+      pageUrl: 'http://127.0.0.1:8765/',
+      historyState: {
+        vibesysGateway: {
+          kind: 'direct-gateway',
+          version: 1,
+          gatewayUrl: 'http://127.0.0.1:8765/',
+        },
+      },
+    });
+    expect(JSON.stringify(scrubbed.historyState)).not.toContain('launch-secret');
+    expect(resolveGatewayTarget(scrubbed.pageUrl, null, scrubbed.historyState)).toEqual(target);
   });
 
   test('keeps a harness launch secret only in the transient bootstrap request', () => {
@@ -42,14 +56,52 @@ describe('gateway session lifecycle', () => {
     expect(() => resolveGatewayTarget(launch, null)).toThrow(
       'An HTTPS browser page requires an HTTPS gateway URL',
     );
-    expect(scrubLaunchCapability(launch)).toBe(
-      'https://viewer.test/?gateway=http%3A%2F%2F127.0.0.1%3A8765%2F',
-    );
+    expect(scrubLaunchCapability(launch)).toEqual({
+      pageUrl: 'https://viewer.test/?gateway=http%3A%2F%2F127.0.0.1%3A8765%2F',
+      historyState: null,
+    });
     expect(
       scrubLaunchCapability(
         'https://viewer.test/?gateway=http%3A%2F%2F%5B%3A%3A1%2F%3Ftoken%3Dsecret',
       ),
-    ).toBe('https://viewer.test/');
+    ).toEqual({pageUrl: 'https://viewer.test/', historyState: null});
+    expect(scrubLaunchCapability('file:///viewer.html?token=secret')).toEqual({
+      pageUrl: 'file:///viewer.html',
+      historyState: null,
+    });
+  });
+
+  test('accepts only exact same-origin direct-gateway history provenance', () => {
+    const page = 'http://127.0.0.1:8765/';
+    const valid = scrubLaunchCapability(`${page}?token=secret`).historyState;
+    expect(resolveGatewayTarget(page, null, valid)).not.toBeNull();
+
+    const invalid = [
+      null,
+      {},
+      {vibesysGateway: {kind: 'direct-gateway', version: 2, gatewayUrl: page}},
+      {vibesysGateway: {kind: 'direct-gateway', version: 1, gatewayUrl: page}, extra: true},
+      {
+        vibesysGateway: {
+          kind: 'direct-gateway',
+          version: 1,
+          gatewayUrl: `${page}?token=secret`,
+        },
+      },
+      {
+        vibesysGateway: {
+          kind: 'direct-gateway',
+          version: 1,
+          gatewayUrl: 'http://127.0.0.1:9000/',
+        },
+      },
+      {
+        vibesysGateway: {kind: 'direct-gateway', version: 1, gatewayUrl: 'file:///viewer.html'},
+      },
+    ];
+    for (const historyState of invalid) {
+      expect(resolveGatewayTarget(page, null, historyState)).toBeNull();
+    }
   });
 
   test('restores only a direct same-origin target from nonsecret session state', () => {

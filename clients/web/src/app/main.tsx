@@ -24,8 +24,10 @@ import {createDemoApp, createLiveApp} from './compose.js';
 // Remove the launch secret before DOM validation, storage access, or any
 // asynchronous work can fail and leave it in browser-visible history.
 const launchUrl = window.location.href;
-const cleanUrl = scrubLaunchCapability(launchUrl);
-if (cleanUrl !== launchUrl) window.history.replaceState(null, '', cleanUrl);
+const scrubbed = scrubLaunchCapability(launchUrl);
+if (scrubbed.pageUrl !== launchUrl) {
+  window.history.replaceState(scrubbed.historyState, '', scrubbed.pageUrl);
+}
 
 markDesktopShell(document.documentElement, window.vibesysDesktop);
 
@@ -35,7 +37,7 @@ const reactRoot = createRoot(root);
 const storedSessions = new GatewaySessionStore(() => window.sessionStorage);
 
 function start(): void {
-  const plan = bootPlan(launchUrl, storedSessions.remembered());
+  const plan = bootPlan(launchUrl, storedSessions.remembered(), window.history.state);
   if (plan.kind === 'demo') {
     renderDemo(plan.error);
     return;
