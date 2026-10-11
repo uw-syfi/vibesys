@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
-from hypothesis import HealthCheck, assume, given, settings
+from hypothesis import HealthCheck, assume, example, given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
 from tests.support.owed_submissions import owed_namespace
@@ -365,7 +365,9 @@ class Agent:
                 return True
             case ("timeout_retry",):
                 frame = SubmitCall(token=token).model_dump_json().encode()
-                return await self._record(step, await self._after_timeout(frame), count=count)
+                return await self._read_and_confirm(
+                    step, await self._after_timeout(frame), count=count
+                )
             case ("wait", picks):
                 names = tuple(
                     dict.fromkeys(
@@ -374,12 +376,26 @@ class Agent:
                 )
                 frame = WaitCall(token=token, handles=names).model_dump_json().encode()
         try:
-            return await self._record(step, await self.bridge.handle(frame), count=count)
+            return await self._read_and_confirm(step, await self.bridge.answer(frame), count=count)
         except RuntimeCommitError:
             assert self.run_over, "only a call after the run ended meets the shell's commit error"
             return False
 
-    async def _after_timeout(self, frame: bytes) -> bytes:
+    async def _read_and_confirm(
+        self, step: Step, answered: tuple[bytes, Callable[[], None]], *, count: bool
+    ) -> bool:
+        """The agent reads the reply, and only then does its client confirm the receipt.
+
+        A confirmation made before the reply is read (as the bridge once did in a ``handle``
+        shortcut) would let a host that dies right after it leave the reply unread with the
+        owed record already cleared. That state cannot occur: the transport asks for the
+        clearing only after the client has read the whole reply."""
+        reply, confirm = answered
+        ok = await self._record(step, reply, count=count)
+        confirm()
+        return ok
+
+    async def _after_timeout(self, frame: bytes) -> tuple[bytes, Callable[[], None]]:
         """A submit that outlasts the agent's deadline, then the agent's retry.
 
         The first call is held in its snapshot while the agent gives up (nobody reads its
@@ -391,7 +407,7 @@ class Agent:
         first = asyncio.create_task(self.bridge.answer(frame))
         arrived = asyncio.create_task(slow.arrived.wait())
         await asyncio.wait({first, arrived}, return_when=asyncio.FIRST_COMPLETED)
-        retry = asyncio.create_task(self.bridge.handle(frame))
+        retry = asyncio.create_task(self.bridge.answer(frame))
         await asyncio.sleep(0)
         slow.hold.set()
         arrived.cancel()
@@ -761,7 +777,7 @@ def _failing_admission(error: Exception | None) -> Callable[[Agent], Awaitable[N
         try:
             assert agent.bridge is not None
             with pytest.raises(RuntimeCommitError) as raised:
-                await agent.bridge.handle(frame)
+                await agent.bridge.answer(frame)
             assert type(raised.value) is type(error or RuntimeCommitError())
         finally:
             agent.view.admitting = None
@@ -963,6 +979,13 @@ def check_owed(played: Played) -> None:
     max_examples=_EXAMPLES,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+)
+@example(
+    # A host that dies right after the owed record is cleared: the clearing must follow the
+    # agent's read of the reply, so this kill leaves the submission owed and reported.
+    programs=[(("submit",),)],
+    edits=[False, False, False],
+    crashes=(Crash(ledger_at=3, publish_at=None),),
 )
 @given(
     programs=st.lists(st.lists(_RESTART_STEPS, max_size=4).map(tuple), min_size=1, max_size=3),
