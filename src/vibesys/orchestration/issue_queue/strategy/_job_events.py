@@ -6,6 +6,7 @@ the state unchanged.
 """
 
 import json
+from collections.abc import Sequence
 from typing import Literal
 
 from pydantic import ValidationError
@@ -17,6 +18,8 @@ from vibesys.orchestration.issue_queue.models import (
     IssueJudgeResult,
     IssuePerfEvalResult,
     JudgeReplyModel,
+    NewBug,
+    NewIssue,
     perf_result_model,
 )
 from vibesys.orchestration.issue_queue.strategy import _ids as ids
@@ -396,13 +399,9 @@ def on_exhausted(
     return fail(state, f"attempt budget exhausted ({event.reason})")
 
 
-def _files(filed: tuple[object, ...]) -> tuple[FiledIssue, ...]:
+def _files(filed: Sequence[NewBug | NewIssue]) -> tuple[FiledIssue, ...]:
     return tuple(
-        FiledIssue(
-            type=IssueType(item.type),  # type: ignore[attr-defined]
-            title=item.title,  # type: ignore[attr-defined]
-            description=item.description,  # type: ignore[attr-defined]
-        )
+        FiledIssue(type=IssueType(item.type), title=item.title, description=item.description)
         for item in filed
     )
 

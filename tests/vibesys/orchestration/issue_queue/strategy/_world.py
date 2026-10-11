@@ -16,7 +16,10 @@ from tests.vibesys.orchestration.issue_queue.strategy._executors import WorldTra
 from tests.vibesys.orchestration.issue_queue.strategy._run import config, harness
 
 from vibesys.orchestration.issue_queue.core_policy.api import reply_schemas
-from vibesys.orchestration.issue_queue.strategy.api import IssueQueueStrategy
+from vibesys.orchestration.issue_queue.strategy.api import (
+    IssueQueueStrategy,
+    IssueQueueStrategyState,
+)
 from vs_core.api import (
     EventId,
     InspectRequest,
@@ -47,7 +50,11 @@ from vs_runtime.api.testing import (
 from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
-    from vs_core.api import CoreState, Decision, Request
+    from collections.abc import Callable, Mapping
+
+    from pydantic import BaseModel
+
+    from vs_core.api import CoreState, Decision, OperationRegistry, Request, SchemaRef
     from vs_runtime.api.core import ExecutionContext, OwnerEvent, RuntimeRecord
     from vs_runtime.api.testing import Script
 
@@ -84,7 +91,11 @@ class _Observer:
         self._outside = outside
         self._dies = dies
 
-    def committed(self, previous: RuntimeRecord[object] | None, current: object) -> None:
+    def committed(
+        self,
+        previous: RuntimeRecord[IssueQueueStrategyState] | None,
+        current: RuntimeRecord[IssueQueueStrategyState],
+    ) -> None:
         del previous, current
         self._outside.commits += 1
         if self._dies.commit is not None and self._outside.commits == self._dies.commit:
@@ -94,8 +105,17 @@ class _Observer:
 class _Executors(WorldTranslator):
     """Scripted executors whose effects are remembered, so a restart inspects them."""
 
-    def __init__(self, *args: object, outside: Outside, dies: DiesAt) -> None:
-        super().__init__(*args)  # type: ignore[arg-type]
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-771106 [PLR0913]; the scripted executor's own arguments plus the process's world and death.
+        self,
+        script: Script,
+        core: Callable[[], CoreState],
+        registry: OperationRegistry,
+        schemas: Mapping[SchemaRef, type[BaseModel]],
+        *,
+        outside: Outside,
+        dies: DiesAt,
+    ) -> None:
+        super().__init__(script, core, registry, schemas)
         self._outside = outside
         self._dies = dies
 

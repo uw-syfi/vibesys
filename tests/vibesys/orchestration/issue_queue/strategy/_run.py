@@ -17,7 +17,15 @@ from vibesys.orchestration.issue_queue.strategy.api import (
     IssueQueueStrategyState,
     plain_operation_registry,
 )
-from vs_core.api import ArtifactId, ArtifactRef, Limits, RevisionRef, RunEnvelope, RunFacts
+from vs_core.api import (
+    ArtifactId,
+    ArtifactRef,
+    LifecycleCapability,
+    Limits,
+    RevisionRef,
+    RunEnvelope,
+    RunFacts,
+)
 from vs_core.testing.drive import Faults, Harness, Trace, drive
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_runtime.api.testing import HostOptions, Run, Script, drive_shell
@@ -54,14 +62,20 @@ def limits(settings: IssueQueueConfig) -> Limits:
     )
 
 
-def harness(settings: IssueQueueConfig, **overrides: object) -> Harness:
+def harness(
+    settings: IssueQueueConfig,
+    *,
+    deadline_at: float = Harness.deadline_at,
+    lifecycle: frozenset[LifecycleCapability] = frozenset(),
+) -> Harness:
     return Harness(
         registry=plain_operation_registry(),
         facts=FACTS,
         limits=limits(settings),
         envelope_type=RunEnvelope[IssueQueueStrategyState],
         requirements=requirements_for(),
-        **overrides,
+        deadline_at=deadline_at,
+        lifecycle=lifecycle,
     )
 
 

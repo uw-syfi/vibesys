@@ -7,6 +7,8 @@ of a run (a blocked queue, a quiet board, an exhausted round budget) is a functi
 snapshot, so it is the same on every replay.
 """
 
+from typing import Literal
+
 from vibesys.orchestration.issue_queue.strategy import _board as board
 from vibesys.orchestration.issue_queue.strategy import _job as job_decisions
 from vibesys.orchestration.issue_queue.strategy._draft import Draft, change_key, operation
@@ -56,8 +58,8 @@ def decide(draft: Draft) -> None:
         _after_perf(draft)
 
 
-def _finish(draft: Draft, outcome: str, reason: str) -> None:
-    draft.update(ending=Ending(outcome=outcome, reason=reason))  # type: ignore[arg-type]
+def _finish(draft: Draft, outcome: Literal["success", "failure"], reason: str) -> None:
+    draft.update(ending=Ending(outcome=outcome, reason=reason))
 
 
 def _fresh(draft: Draft) -> bool:

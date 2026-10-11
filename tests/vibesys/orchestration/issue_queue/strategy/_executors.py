@@ -12,9 +12,9 @@ import tempfile
 from collections import Counter, deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from vibesys.orchestration.issue_queue.strategy.api import OPERATIONS
+from vibesys.orchestration.issue_queue.strategy.api import OPERATIONS, RenderRoleArtifacts
 from vs_core.api import (
     AdoptRevision,
     ArtifactId,
@@ -73,7 +73,7 @@ from vs_runtime.api.testing import ScriptedExecutors
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CoreState
+    from vs_core.api import CoreState, OperationRequest
 
 
 class Texts:
@@ -96,19 +96,22 @@ _KINDS = {
 class FakeRenderer:
     """The render owner: stores nothing and names the prompt after the request."""
 
-    async def execute(self, request: object, context: object) -> dict[str, object]:
+    async def execute(
+        self, request: OperationRequest, context: ExecutionContext
+    ) -> dict[str, object]:
         del context
+        render = cast("RenderRoleArtifacts", request)
         return {
             "status": "succeeded",
             "prompts": (
                 ArtifactRef(
-                    artifact_id=ArtifactId(root=f"prompt:{request.subject}:{request.ordinal}"),  # type: ignore[attr-defined]
+                    artifact_id=ArtifactId(root=f"prompt:{render.subject}:{render.ordinal}"),
                     digest="prompt",
                 ),
             ),
         }
 
-    async def inspect(self, request: object, context: object) -> Applied:
+    async def inspect(self, request: OperationRequest, context: ExecutionContext) -> Applied:
         return Applied(await self.execute(request, context))
 
 
@@ -299,7 +302,10 @@ class WorldTranslator(ScriptedExecutors):
         self.journal.issue(request)
         if isinstance(request, ExecuteRegisteredOperation):
             world.operation_ids.add(request.request_id.root)
-        result = await world.operations.execute(request, context)  # type: ignore[arg-type]
+        assert isinstance(
+            request, ExecuteRegisteredOperation | CancelOwnedResource | InspectRequest
+        )
+        result = await world.operations.execute(request, context)
         self.journal.observe_event(result.observation)
         return result
 

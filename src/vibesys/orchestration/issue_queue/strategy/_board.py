@@ -13,7 +13,9 @@ _TYPE_RANK = {IssueType.BUG: 0, IssueType.FEATURE: 1, IssueType.PERF: 2}
 def next_open(issues: tuple[IssueRow, ...]) -> IssueRow | None:
     """The open issue with the earliest type priority, then the earliest creation."""
     candidates = [issue for issue in issues if issue.status is IssueStatus.OPEN]
-    return min(candidates, key=lambda issue: (_TYPE_RANK[issue.type], issue.id), default=None)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda issue: (_TYPE_RANK[issue.type], issue.id))
 
 
 def remaining(issues: tuple[IssueRow, ...]) -> tuple[IssueRow, ...]:

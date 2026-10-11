@@ -8,6 +8,7 @@ fake tracker, so a test reads the outcome off the board as well as off the decis
 from __future__ import annotations
 
 from collections import deque
+from typing import TYPE_CHECKING
 
 from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors
 from tests.vibesys.orchestration.issue_queue.strategy._replies import evaluated, implemented, judged
@@ -15,6 +16,9 @@ from tests.vibesys.orchestration.issue_queue.strategy._run import kinds, run_she
 
 from vs_core.api import ProposeWinner, RequestTurn, Stop
 from vs_issue_tracker.api import IssueStatus
+
+if TYPE_CHECKING:
+    from vs_runtime.api.testing import Run
 
 
 def _board(executors: Executors) -> dict[int, tuple[str, int]]:
@@ -33,8 +37,8 @@ def _one_issue() -> Executors:
     )
 
 
-def _stop(trace: object) -> Stop:
-    final = trace.decisions[-1]  # type: ignore[attr-defined]
+def _stop(trace: Run) -> Stop:
+    final = trace.decisions[-1]
     assert isinstance(final, Stop)
     return final
 

@@ -429,7 +429,12 @@ def settle_for(job: Job) -> Settle:
     """
     if job.failure == STOPPED:
         return Settle(assessments=(), eligible=False, retention="discard", outcome="cancelled")
-    if job.kind is JobKind.ISSUE and job.closed and job.candidate is not None:
+    if (
+        job.kind is JobKind.ISSUE
+        and job.closed
+        and job.candidate is not None
+        and job.judge_invocation is not None
+    ):
         return Settle(
             assessments=(
                 AssessmentProposal(
