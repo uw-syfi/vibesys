@@ -183,6 +183,15 @@ cost is a startup paid on attach, not per action. Both kinds of channel are open
 (`HostConnection.open(kind)`), which performs the bootstrap and `hello` and returns a typed channel
 or a typed failure; there is no other way to reach a host.
 
+The Electron message-port hop preserves that per-channel backpressure with symmetric byte credits.
+The main-process relay and sandbox preload each grant one bounded window. A sender spends the UTF-8
+size of the protocol frame plus its byte-stream newline, and the receiver returns those bytes only
+after the page callback or host-stream write has accepted them. Exhausted page credit pauses the
+owned host stream; exhausted host credit keeps page frames in one bounded preload queue. Invalid or
+excess credit, an oversized frame, or a queue that would exceed the window closes the connection
+instead of growing memory. Thus a frozen renderer eventually stalls the helper's stdout and reaches
+the relay's `client_stalled` deadline, rather than moving an unbounded queue into Electron IPC.
+
 ### Methods
 
 All messages are Pydantic models in `server.host_api` with `extra="forbid"`, discriminated by
