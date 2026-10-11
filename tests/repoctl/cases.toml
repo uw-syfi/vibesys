@@ -25,7 +25,7 @@ jobs = ["tui"]
 [cases.collections]
 native_languages = []
 native_targets = []
-pnpm_packages = ["@vibesys/core-state", "@vibesys/tui", "@vibesys/web"]
+pnpm_packages = ["@vibesys/core-state", "@vibesys/desktop", "@vibesys/tui", "@vibesys/web"]
 
 [[cases]]
 name = "evaluator SDK changes reach consumers"
