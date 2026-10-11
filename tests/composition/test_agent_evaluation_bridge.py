@@ -66,6 +66,7 @@ from vs_runtime.api.core import (
     ReceiptStore,
     ScopeWorkspaces,
     StoreWorkspaceReceipts,
+    handle_for,
 )
 from vs_runtime.contracts import AgentRole, AgentTool
 from vs_sim.api.testing import VirtualClock, clock_from, run_virtual
@@ -354,7 +355,9 @@ async def _synthesized(tmp_path: Path, calls: list[tuple[Any, ...]]) -> None:
             pass
         core_state = process.shell.record.envelope.core
         admitted = [c for c in core_state.evaluation.agent_calls if c.request_id is not None]
-        assert len(admitted) == len(handles) == len(set(handles))
+        assert {handle_for(c.request_id) for c in admitted if c.request_id and not c.repeat} == set(
+            handles
+        )
         assert len(admitted) <= core_state.run.limits.max_measurement_submissions
         assert len(admitted) <= 1, "an unchanged workspace is one identity with one submission"
 
@@ -373,14 +376,14 @@ def test_synthesized_tool_calls_never_exceed_the_budget_or_cross_tokens(
     run_virtual(VirtualClock(), _synthesized(root, calls))
 
 
-async def test_resubmitting_an_unchanged_candidate_is_refused_with_the_reason(
+async def test_resubmitting_an_unchanged_candidate_returns_the_same_handle(
     tmp_path: Path,
 ) -> None:
     async with scenario(tmp_path, submissions=3) as played:
         process, _ = await run(played)
         state = process.shell.record.envelope.core
         assert state.run.status == RunStatus.TERMINAL
-        assert len(played.writer.handles) == 1
-        assert len(played.writer.refusals) == 2
-        assert all("submission budget" in text for text in played.writer.refusals)
+        assert played.writer.refusals == []
+        assert len(played.writer.handles) == 3
+        assert len(set(played.writer.handles)) == 1, "one candidate, one evaluation, one handle"
         assert len(played.world.cluster.submissions) == 3, "no duplicate measurement was started"

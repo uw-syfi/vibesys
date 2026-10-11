@@ -59,7 +59,9 @@ def project_strategy_state(
     )
     return PluginProjection(
         payload=projection.model_dump(mode="json"),
-        rounds=tuple(_summary(view) for view in projection.rounds),
+        rounds=tuple(
+            _summary(view, record) for view, record in zip(projection.rounds, rounds, strict=True)
+        ),
         experiment_revision=experiment_revision,
     )
 
@@ -101,10 +103,18 @@ def _round_view(record: RoundRecord) -> RoundView:
     )
 
 
-def _summary(view: RoundView) -> RoundSummary:
+def _summary(view: RoundView, record: RoundRecord) -> RoundSummary:
+    """The round as a run event: failed when the review failed it or the workstream did.
+
+    A workstream that failed after a passing review (its measurement produced no evidence)
+    has no metric; reporting it as completed would leave a pass with a null metric and no
+    sign of why.
+    """
     return RoundSummary(
         number=view.round_number,
-        status="failed" if view.judge_verdict == "fail" else "completed",
+        status="failed"
+        if view.judge_verdict == "fail" or record.failure is not None
+        else "completed",
         attempts=view.attempts,
         judge_verdict=view.judge_verdict,
         perf_metric=view.perf_metric,

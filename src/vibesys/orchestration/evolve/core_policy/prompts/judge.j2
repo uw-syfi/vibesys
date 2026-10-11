@@ -8,29 +8,31 @@ discards its tree while retaining your feedback for later mutations.
 ## Authoritative inputs
 
 {% include 'run_context.j2' %}
+{% include 'agent_evaluation.j2' %}
 
 Your workspace is the offspring as it stands, at `{{ rev(candidate) }}`.
 
 ## Pass criteria
 
-The candidate obeys the input bundle's contract, preserves the evaluator-owned files and does not
-game the score. The framework runs the trusted accuracy and benchmark gates itself after your
-verdict, so a pass here sends the candidate to them.
+The candidate obeys the input bundle's contract, the accuracy check passes, and the
+benchmark sanity step completes without modifying evaluator-owned files.
 
-## Required review
+## Required evaluation
 
-Review the candidate as it stands. Do not modify candidate or evaluator files. Read the changed
-source, the contract the input bundle documents and the evaluator-owned code, and judge from them.
+Review and test the candidate as-is. Do not modify candidate or evaluator files.
+The candidate must obey the input bundle's documented contract, and evaluator-
+owned code must remain unmodified.
 
-Do not submit an evaluation: the mutator may have measured this exact candidate already, and the
-run admits no second submission for it. The unavailability of an evaluation is not a failure of the
-candidate, and neither is the absence of a measured number: the gates decide those.
+Commands suffixed with `--help` are informational flag-discovery probes. Ignore
+their exit status; only the actual accuracy and benchmark executions are gates.
 
-When a pass criterion mentions performance, the end-to-end headline metric from the trusted
-benchmark is what counts, and the framework reads it. Static-inspection criteria apply to
-candidate-owned files, not framework-provided reference, evaluator, benchmark, accuracy, profiler,
-or skills directories. If candidate code copies or tampers with evaluator logic to game the score,
-fail it.
+When a pass criterion mentions performance, compare the objective's end-to-end
+headline metric from the trusted benchmark output. Diagnostic micro-measurements
+can support the analysis but do not replace that metric.
+
+Static-inspection criteria apply to candidate-owned files, not framework-provided
+reference, evaluator, benchmark, accuracy, profiler, or skills directories. If
+candidate code copies or tampers with evaluator logic to game the score, fail it.
 
 ## Verdict rule
 

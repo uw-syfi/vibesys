@@ -541,11 +541,22 @@ class AvailabilityReply(BaseModel):
 
 
 class SubmittedReply(BaseModel):
-    """Nonblocking submission receipt."""
+    """Nonblocking submission receipt.
+
+    ``repeat`` is set when the run already held an evaluation of this exact candidate (same
+    content and measurement policy) in this workspace's scope: the handle is that
+    evaluation's, nothing was charged, and whichever role of the scope submitted it first.
+    ``outcome`` names how it ended (``succeeded``, ``failed``, ...) when it has; it is None
+    while the evaluation runs. A finished evaluation needs no wait: ``evidence`` lists the
+    ids of the records it produced, as the resume of a wait would.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["submitted"] = "submitted"
     handle_id: str
+    repeat: bool = False
+    outcome: str | None = Field(default=None, min_length=1)
+    evidence: tuple[str, ...] = ()
 
 
 class StatusReply(BaseModel):

@@ -537,13 +537,60 @@ class AgentRejection(StrEnum):
 
 
 class AgentCall(Value):
-    """Record of one admitted or rejected agent tool call, keyed by its call_id."""
+    """Record of one admitted or rejected agent tool call, keyed by its call_id.
+
+    A call that asks for a candidate its scope already measures (same identity) is a
+    ``repeat``: it names the existing submission and charged nothing. Every other admitted
+    call allocated the submission it names. ``deadline_at`` is the submission's deadline.
+    """
 
     call_id: str
     scope: Scope
     request_id: RequestId | None = None
-    """The submission it allocated, or None when core rejected the call."""
+    """The submission it names, or None when core rejected the call."""
+    deadline_at: Seconds | None = None
+    """The named submission's deadline, bounded by the run's; None when rejected."""
+    repeat: bool = False
+    """Whether the call named a submission an earlier call (or a Measure) had allocated."""
     rejection: AgentRejection | None = None
+
+    @classmethod
+    def refused(
+        cls, event: AgentMeasurementRequested, rejection: AgentRejection | None
+    ) -> AgentCall:
+        """The record of a call core refused; nothing was charged."""
+        if rejection is None:
+            message = "a refused call names its rejection"
+            raise ContractValidationError("rejection", message)
+        return cls(call_id=event.call_id, scope=event.scope, rejection=rejection)
+
+    @classmethod
+    def answered(
+        cls,
+        event: AgentMeasurementRequested,
+        request_id: RequestId,
+        deadline_at: Seconds,
+        *,
+        repeat: bool,
+    ) -> AgentCall:
+        """The record of a call core answered with a submission."""
+        return cls(
+            call_id=event.call_id,
+            scope=event.scope,
+            request_id=request_id,
+            deadline_at=deadline_at,
+            repeat=repeat,
+        )
+
+    @model_validator(mode="after")
+    def names_a_submission_or_a_rejection(self) -> AgentCall:
+        """Exactly one of a rejection and a submission with its deadline."""
+        answered = self.request_id is not None
+        if answered == (self.rejection is not None):
+            raise ContractValidationError("rejection", "a call has a request or a rejection")
+        if answered != (self.deadline_at is not None) or (self.repeat and not answered):
+            raise ContractValidationError("deadline_at", "only an answered call has a deadline")
+        return self
 
 
 class RegisteredJobRequested(Value):

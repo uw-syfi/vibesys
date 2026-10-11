@@ -31,10 +31,39 @@ admission, budget and identity. The tool server holds no policy.
   emit one `SubmitMeasurement` with no decision id. Every call is recorded in
   `EvaluationState.agent_calls` with its `AgentRejection` or its request id. A replayed
   `call_id` changes nothing.
+- A call for a candidate its scope already evaluates is a repeat, not a second charge (below).
+  An agent's call, admitted or refused, and the end of its job are answered to the agent
+  only: core does not report them to the strategy as a `MeasurementResult`. A strategy takes
+  a result of its scope for the Measure it awaits, so reporting an agent's job there handed
+  a waiting Measure another submission's local-validation evidence (the v13 round that
+  passed review and recorded no metric).
 - A decision-less submission is proven by its admitted call (`_measure_origin`), not by an
   accepted `Measure` receipt. Agent calls and `Measure` decisions share one budget.
 - The measurement request id is deterministic, so the handle the executor derives is
   known before it runs.
+
+## One evaluation per candidate and scope (repeats)
+
+An exact candidate (same content and measurement policy, so the same `MeasurementIdentity`)
+is evaluated once per core scope. The scope's `SubmissionBudget` receipts are the one record
+of "this candidate's evaluation"; the bridge keeps no second one. When a call finds a
+budget for its identity that would not admit another submission (the earlier submission is
+running, or ended and cannot be redone), core records the call as a repeat
+(`AgentCall.repeat`) naming the earlier submission and its deadline, charges nothing, and
+the reply carries the same handle (`repeat: true`), plus `outcome` and the evidence ids
+when it has ended. A released, retryable infrastructure failure is not a repeat: the next
+call is a real retry and is charged. A call for another candidate is another charge.
+
+Who may read whose evaluation: every role that holds the scope. A workstream's roles
+(implementer, judge, profiler) run in its attempt's scope, so a judge reviewing a candidate
+gets the evaluation its implementer made, and the other way round. Another attempt's
+evaluation is not readable, even for identical content: its evidence and its budget belong
+to that attempt, and sharing them would let siblings of a population read each other's
+measurements. A reply is a handle and evidence ids, never another scope's data.
+
+Owed submissions (#1868, #2021) are only the promise that a reply the agent never read is
+returned on the retry; they hold the call and core says what it decided. They do not decide
+what a repeat is, so a repeat that was lost is owed like any other reply.
 
 ## Reply: one continuation, never a poll
 

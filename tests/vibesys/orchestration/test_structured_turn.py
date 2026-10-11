@@ -11,7 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
-from vibesys.core_roles import CONTINUATION
+from vibesys.core_roles import MEASURING
 from vibesys.evolve_roles import JUDGE as MUTATOR
 from vibesys.orchestration.evolve import PLUGIN
 from vibesys.orchestration.structured_turn import structured_turn
@@ -85,7 +85,8 @@ def test_fake_structured_reply_serializes_nested_typed_models(
             PLUGIN,
             project_root=Path("/candidate"),
             responder=respond,
-            supported_agent_capabilities=CONTINUATION,
+            supported_agent_capabilities=MEASURING,
+            supported_extra_tools={"evaluation"},
         )
         try:
             session = await run.agents.create_session(MUTATOR, workspace=run.workspaces.root)
@@ -123,7 +124,8 @@ def _run(script: _Script) -> _Reply:
             PLUGIN,
             project_root=Path("/candidate"),
             responder=script.respond,
-            supported_agent_capabilities=CONTINUATION,
+            supported_agent_capabilities=MEASURING,
+            supported_extra_tools={"evaluation"},
         )
         try:
             session = await run.agents.create_session(MUTATOR, workspace=run.workspaces.root)

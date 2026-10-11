@@ -702,7 +702,9 @@ _STEPS = st.one_of(
 )
 _PROGRAM = st.lists(_STEPS, max_size=3).map(tuple)
 _TURNS = st.lists(
-    st.builds(Turn, program=_PROGRAM, late=_PROGRAM, restart=st.booleans()), min_size=1, max_size=3
+    st.builds(Turn, program=_PROGRAM, late=_PROGRAM, restart=st.booleans(), edit=st.booleans()),
+    min_size=1,
+    max_size=3,
 ).map(tuple)
 
 
@@ -871,55 +873,35 @@ def test_a_submission_finished_in_its_submit_round_does_not_halt_the_run(
 _LOSSY_STEP = st.sampled_from((("submit",), ("lose",), ("timeout_retry",)))
 
 
-def _expected(program: Program) -> tuple[int, bool, bool]:
-    """What one turn's submit calls must come to: (budget refusals seen, handle learned, owed).
-
-    A candidate's one submission is charged by the first call that reaches the host. If that
-    call's reply is lost the submission stays owed, and the agent's next call for the same
-    candidate returns it; once the agent has read it, a further call is a real duplicate.
-    ``timeout_retry`` is a lost call followed by the retry.
-    """
-    refusals, learned, owed, charged = 0, False, False, False
-    for kind, *_rest in program:
-        for lost in {"submit": (False,), "lose": (True,), "timeout_retry": (True, False)}.get(
-            kind, ()
-        ):
-            if charged and not owed:
-                refusals += 0 if lost else 1
-            elif lost:
-                charged = owed = True
-            else:
-                charged, owed, learned = True, False, True
-    return refusals, learned, owed
-
-
 @settings(
     max_examples=_EXAMPLES,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
 )
 @given(program=st.lists(_LOSSY_STEP, min_size=1, max_size=4).map(tuple))
-def test_a_submit_reply_the_agent_never_read_is_returned_to_its_retry(program: Program) -> None:
-    """Whatever the latency against the agent's deadline, a charged submission is never lost.
+def test_a_repeated_submit_is_answered_with_the_one_evaluation_whatever_the_latency(
+    program: Program,
+) -> None:
+    """However many times the agent asks, lost replies and retries included, it gets one handle.
 
-    A reply that never reached the agent leaves its submission owed; the agent's next submit
-    for the same candidate gets that handle, not a budget refusal; only a call after the
-    agent has read the handle is a duplicate. A submission still owed at the end of the turn
-    is listed, so a stalled run can name it.
+    The candidate is charged once, by the first call that reaches the host. Every later call
+    for it (a retry of a lost reply, or a repeat after the agent read the handle) is answered
+    with that submission and refused never. A submission whose last reply was lost is listed
+    as owed, so a stalled run can name it.
     """
     played = play((Turn(program=program),), 1)
     check(played)
-    refusals, learned, owed = _expected(program)
     state = played.shell.record.envelope.core
-    admitted = [c.request_id for c in state.evaluation.agent_calls if c.request_id is not None]
+    admitted = {c.request_id for c in state.evaluation.agent_calls if c.request_id is not None}
     assert len(admitted) == 1
-    assert len([e for e in played.agent.errors if "submission budget" in e]) == refusals
-    assert len(played.agent.errors) == refusals
-    assert played.agent.handles == ([handle_for(admitted[0])] if learned else [])
+    (request,) = admitted
+    assert played.agent.errors == []
+    assert set(played.agent.handles) <= {handle_for(request)}
+    assert len(played.agent.handles) == sum(kind != "lose" for kind, *_ in program)
     assert played.agent.bridge is not None
     notes = played.agent.bridge.unacknowledged()
-    assert len(notes) == (1 if owed else 0)
-    assert all(handle_for(admitted[0]) in note for note in notes)
+    assert len(notes) == (1 if program[-1][0] == "lose" else 0)
+    assert all(handle_for(request) in note for note in notes)
 
 
 def test_a_submit_slower_than_the_agents_deadline_is_one_submission_the_agent_can_wait_on() -> None:
@@ -1038,3 +1020,53 @@ def test_a_submission_the_agent_never_read_is_its_retry_after_a_host_restart(
     assert jobs.count(handle_for(charged[0])) == 1, "the first measurement is the one that runs"
     assert played.agent.bridge is not None
     assert played.agent.bridge.unacknowledged() == ()
+
+
+_ROLE_STEP = st.sampled_from((("submit",), ("lose",), ("timeout_retry",)))
+
+
+@settings(
+    max_examples=_EXAMPLES,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+)
+@given(
+    programs=st.lists(st.lists(_ROLE_STEP, max_size=3).map(tuple), min_size=1, max_size=4),
+    edits=st.lists(st.booleans(), min_size=4, max_size=4),
+    crashes=st.lists(_CRASH, max_size=2).map(tuple),
+)
+def test_roles_sharing_a_scope_get_one_evaluation_for_each_candidate(
+    programs: list[Program], edits: list[bool], crashes: tuple[Crash, ...]
+) -> None:
+    """Successive roles of one workstream ask for the same and for new candidates, across restarts.
+
+    Each turn stands for a role that holds the attempt's scope (the implementer, then the
+    judge reviewing its candidate, then another turn). A turn that leaves the candidate as
+    it was asks for an evaluation that exists, and a turn that edits asks for a new one.
+    Without a restart, each distinct candidate is charged once and every ask for it, from
+    any turn, is answered with that handle and never refused. With restarts, no ask is
+    refused for budget either, and a candidate's handle never differs between reads.
+    """
+    turns = tuple(
+        Turn(program=program, edit=edit) for program, edit in zip(programs, edits, strict=False)
+    )
+    try:
+        played = play(turns, len(turns), crashes=crashes)
+    except UnrecoverableRestartError:
+        assume(condition=False)
+    check_owed(played)
+    agent = played.agent
+    assert agent.budget_refused == []
+    assert not [text for text in agent.errors if "budget" in text]
+    if crashes:
+        return
+    contents = 0
+    asked: set[int] = set()
+    for turn in turns:
+        contents += turn.edit
+        if turn.program:
+            asked.add(contents)
+    state = played.shell.record.envelope.core
+    charged = {c.request_id for c in state.evaluation.agent_calls if not c.repeat and c.request_id}
+    assert len(charged) == len(asked)
+    assert {handle for _, handle in agent.read} <= {handle_for(r) for r in charged}

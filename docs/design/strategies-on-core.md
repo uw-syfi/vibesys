@@ -1058,12 +1058,8 @@ of the committed strategy state. Deviations from the mapping above, each deliber
   start reads them); the proposals come from `generation_start`.
 - A run whose task configures neither an accuracy nor a benchmark gate has no trusted reading to
   adopt, so none of its children is winner-eligible and the run ends with no selection.
-- The judge has no evaluation tool. The mutator measures its own candidate through the tool, and the run
-  admits one submission per exact candidate, so a judge that tried to measure the same candidate was
-  refused and failed it (found by the first live run). The judge reviews source, contract and evaluator
-  integrity, and the framework's gates measure after its verdict.
 - Prompts are domain-agnostic as `single`'s and `multi`'s are (the domain sections are not rendered);
-  the mutator learns about the evaluation tool from the shared protocol text.
+  the judge and the mutator learn about the evaluation tool from the shared protocol text.
 - `--turn-drop-backoff-seconds` is accepted by `--outer-loop evolve`. Q3 holds: a resumed run uses
   its recorded options.
 - Properties: E1 and E3 are the trajectory tests (`strategy/test_trajectory.py`, serial and with

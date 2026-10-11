@@ -2,9 +2,8 @@
 
 They are declared here, outside the legacy orchestration tree, because a role is host wiring: its
 capabilities and workspace access name `vs_runtime` values and its prompt is read from a template
-file, neither of which the pure policy may do. The mutator edits its candidate and carries the bridged evaluation tool, while the judge only
-reads it (the framework's gates measure after its verdict, and the run admits no second
-submission for the candidate the mutator already measured); the profiler only reads the candidate and
+file, neither of which the pure policy may do. The mutator edits its candidate and, like the judge
+that reads it, carries the bridged evaluation tool; the profiler only reads the candidate and
 analyses captures with the stateless profiler tool. Each role's id is the strategy's (`role_id`), so
 the roles the strategy names and the roles the host declares cannot drift apart.
 """
@@ -15,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.core_roles import (
-    CONTINUING_READER,
+    MEASURING_READER,
     MEASURING_WRITER,
     RoleKind,
     core_role,
@@ -49,7 +48,7 @@ def _role(role: Role, kind: RoleKind) -> AgentRole:
 
 
 MUTATOR = _role(Role.MUTATOR, MEASURING_WRITER)
-JUDGE = _role(Role.JUDGE, CONTINUING_READER)
+JUDGE = _role(Role.JUDGE, MEASURING_READER)
 PROFILER = _role(Role.PROFILER, PROFILER_KIND)
 
 CORE_ROLES = (MUTATOR, JUDGE, PROFILER)
