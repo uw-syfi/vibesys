@@ -5,7 +5,7 @@ Objective: Maximize measured token throughput without losing correctness.
 Accuracy command: uv run check-accuracy
 Benchmark command: uv run benchmark
 Runtime notes: Use CUDA with bfloat16.
-No profiler tool is available in this run; do not attempt a profile.
+Profiler `torch` is available through the fixed `profiler` tool and executes on the local path.
 Configured load levels: "discover a low, medium, high, and saturation workload"
 Prior performance records:
 none yet
@@ -17,12 +17,15 @@ shape could change the ceiling. Save and read structured benchmark output for
 every run. You work in your own checkout of the accumulated candidate, which is discarded when
 this evaluation ends, so scratch files and logs can go anywhere in it. Diagnose the limiting
 resource separately at low, medium, and saturation load. Compare with both the
-immediately prior result and the best recorded result. Always stop any server process
-that this turn started, including after benchmark failure.
+immediately prior result and the best recorded result.
+
+Profiling is optional, limited to one run, and must answer a specific unresolved
+bottleneck question. Do not attempt profiling when profiler is `none`. Always stop any server process
+that this turn started, including after benchmark or profiling failure.
 
 The board below lists every issue. Before filing, check it for the same work. File at
 most 3 non-duplicate issues in `new_issues`, ranked by impact over effort.
-Each issue background must cite code_evidence or metric_evidence and name expected_impact,
+Each issue background must cite code_evidence, metric_evidence, or profile_evidence and name expected_impact,
 effort, and scope. Each description must contain `## Background`, `## Acceptance criteria`,
 and `## Notes`.
 

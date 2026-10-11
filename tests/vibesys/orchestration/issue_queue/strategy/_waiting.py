@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from tests.support.owed_submissions import owed_in
 from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors, WorldTranslator
 from tests.vibesys.orchestration.issue_queue.strategy._run import FACTS, config
 
@@ -63,7 +64,9 @@ def new_bridge(root: Path) -> AgentEvaluationBridge:
     policy = agent_evaluation_policy(
         measurement_recipe(config(), FACTS), accuracy=True, benchmark=True
     )
-    return AgentEvaluationBridge(root / "evaluation.sock", policy, _Workspaces())
+    return AgentEvaluationBridge(
+        root / "evaluation.sock", policy, _Workspaces(), owed_in(root / "owed")
+    )
 
 
 @dataclass

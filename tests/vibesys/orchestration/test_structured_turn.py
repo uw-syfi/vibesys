@@ -10,9 +10,9 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel
-from vibesys.orchestration.issue_queue.agents import IMPLEMENTER
 
-from vibesys.orchestration.issue_queue import PLUGIN
+from vibesys.orchestration.evolve import PLUGIN
+from vibesys.orchestration.evolve.agents import MUTATOR
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_agent.api import (
     AgentClient,
@@ -82,7 +82,7 @@ def test_fake_structured_reply_serializes_nested_typed_models(
     async def scenario() -> None:
         run = FakeRun(PLUGIN, project_root=Path("/candidate"), responder=respond)
         try:
-            session = await run.agents.create_session(IMPLEMENTER, workspace=run.workspaces.root)
+            session = await run.agents.create_session(MUTATOR, workspace=run.workspaces.root)
             assert await session.turn("work", response=_ReplyBatch) == expected
         finally:
             await run.close()
@@ -115,7 +115,7 @@ def _run(script: _Script) -> _Reply:
     async def scenario() -> _Reply:
         run = FakeRun(PLUGIN, project_root=Path("/candidate"), responder=script.respond)
         try:
-            session = await run.agents.create_session(IMPLEMENTER, workspace=run.workspaces.root)
+            session = await run.agents.create_session(MUTATOR, workspace=run.workspaces.root)
             return await structured_turn(session, "work", _Reply)
         finally:
             await run.close()
