@@ -28,6 +28,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
     evaluator_agent_toolchains,
     evaluator_container_setup,
+    image_features,
     load_evaluator_package,
 )
 from vs_sandbox.api.evaluator_tools import evaluator_tools_install_command, tool_install_root
@@ -61,7 +62,9 @@ def test_every_bundled_evaluator_tool_installs_in_the_agent_image(base: str, roo
         tools_root=root / "tools",
     )
     image_id = agent_image(
-        base, toolchains=evaluator_agent_toolchains(requirements), timeout=_BUILD_TIMEOUT_S
+        base,
+        features=image_features(evaluator_agent_toolchains(requirements)),
+        timeout=_BUILD_TIMEOUT_S,
     )
     script = "set -eux\n" + "\n".join(
         (
