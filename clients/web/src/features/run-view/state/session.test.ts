@@ -272,6 +272,43 @@ describe('sessionStep', () => {
     expect(settled.requests).toEqual([{kind: 'recover-stream', mode: 'rebootstrap'}]);
   });
 
+  test('a failed fresh stream releases recovery for a later Reattach', () => {
+    const visible = {visible: true, online: true};
+    const failure = ERRORS[1] ?? new Error();
+    const reports: readonly SessionAction[] = [
+      {type: 'stream', state: {status: 'disconnected', error: failure}},
+      {type: 'fault', error: failure},
+    ];
+    for (const report of reports) {
+      let state = sessionStep(SESSION_INITIAL, {type: 'start'}).state;
+      state = sessionStep(state, {type: 'stream-established', storeId: 'store-a'}).state;
+      state = sessionStep(state, {
+        type: 'replacement-snapshot-reply',
+        token: 2,
+        storeId: 'store-a',
+        result: loaded(2),
+      }).state;
+      state = sessionStep(state, {type: 'subscribe-reply', token: 1, error: null}).state;
+
+      const first = sessionStep(state, {type: 'reattach', reach: visible, runEnded: false});
+      expect(first.requests).toEqual([{kind: 'refresh', token: 3, mode: 'rebootstrap'}]);
+      const establishing = sessionStep(first.state, {
+        type: 'refresh-reply',
+        token: 3,
+        outcome: {kind: 'ready'},
+      });
+      expect(establishing.requests).toEqual([{kind: 'recover-stream', mode: 'rebootstrap'}]);
+
+      const failed = sessionStep(establishing.state, report);
+      const retry = sessionStep(failed.state, {
+        type: 'reattach',
+        reach: visible,
+        runEnded: false,
+      });
+      expect(retry.requests).toEqual([{kind: 'refresh', token: 4, mode: 'rebootstrap'}]);
+    }
+  });
+
   test('fences pre-replacement replies and accepts only the proven generation snapshot', () => {
     const visible = {visible: true, online: true};
     const refreshing = sessionStep(SESSION_INITIAL, {type: 'wake', reach: visible}).state;
