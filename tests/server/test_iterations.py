@@ -60,7 +60,8 @@ def test_cursor_free_page_is_an_authoritative_reset_at_the_current_revision() ->
     stale = page_iterations(_view(), parent_id=None, cursor=None, limit=2)
     reset = page_iterations(_view(6), parent_id=None, cursor=None, limit=2)
 
-    assert stale.kind == reset.kind == "page"
+    assert stale.kind == "page"
+    assert reset.kind == "page"
     assert reset.from_cursor is None
     assert reset.projection_revision != stale.projection_revision
     assert [item.id for item in reset.items] == ["generation:0", "generation:1"]
