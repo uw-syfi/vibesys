@@ -127,11 +127,6 @@ class _Mode(Protocol):
         """Whether the profiler's tool must exist on this host."""
         ...
 
-    @property
-    def parallel_candidate_blocker(self) -> str | None:
-        """Why parallel candidates are unavailable, or ``None``."""
-        ...
-
     def gpu_commands(
         self, request: RunEnvironmentRequest, confinement: JobConfinement | None
     ) -> GpuCommands | None:
@@ -157,7 +152,6 @@ class _ClusterGates:
     agent_gpu_facts = None
     materialize_local_model_weights = False
     requires_local_profiler_preflight = False
-    parallel_candidate_blocker = None
 
     @property
     def default_profiler_id(self) -> str:
@@ -189,11 +183,6 @@ class _AgentGpuMode:
     default_profiler_id = "nsys"
     supported_profiler_ids = None
     requires_local_profiler_preflight = True
-    # Gates run on the sbatch path whichever way the agent runs, and that path serves
-    # one candidate per session as the plain slurm environment does, so only the agent
-    # GPU broker needs a blocker: its launcher and worktree-root checks have never run
-    # with one broker per candidate (#1624 made the blocker a computed, quoted reason).
-    parallel_candidate_blocker = "it has not been verified to run one GPU broker per candidate"
 
     @property
     def agent_gpu_facts(self) -> AgentGpuFacts:
@@ -445,7 +434,6 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                     host_device_reselect=False,
                     env_kind="slurm",
                     profile_execution="remote" if remote_profiling else "local",
-                    parallel_candidate_blocker=mode.parallel_candidate_blocker,
                     framework_setup_timeout_seconds=config.job_timeout_seconds,
                     profiler_mcp_env=profiler_mcp[0],
                     profiler_mcp_resources=profiler_mcp[1],
@@ -557,7 +545,9 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
     ) -> HostCommandBroker:
         broker = HostCommandBroker(
             new_broker_socket_path(),
-            roots=RunRoots((request.workspace,), tuple(request.run_owned_roots)),
+            # Only this session's own workspace: with parallel candidates each session has
+            # its own broker, and none may run a command in another candidate's worktree.
+            roots=RunRoots((request.workspace,)),
             gpu=gpu,
             gates=Gates(
                 SlurmCommandGateRunner(

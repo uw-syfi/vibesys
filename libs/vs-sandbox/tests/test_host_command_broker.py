@@ -172,7 +172,7 @@ def _serving(
 ) -> Iterator[HostCommandBroker]:
     broker = HostCommandBroker(
         tmp_path / "broker.sock",
-        roots=RunRoots((workspace,), (tmp_path / "worktrees",)),
+        roots=RunRoots((workspace,)),
         gpu=gpu,
         gates=gates,
         transport=net.transport,
@@ -283,21 +283,22 @@ class TestGpuOperation:
         assert command.env["KEEP_ME"] == "1"
         assert "CUDA_VISIBLE_DEVICES" not in command.env
 
-    def test_a_candidate_worktree_is_confined_to_itself(
-        self, sim: Sim, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
+    def test_a_sibling_directory_of_the_workspace_is_refused_by_name(
+        self, sim: Sim, tmp_path: Path, workspace: Path
     ) -> None:
-        candidate = tmp_path / "worktrees" / "candidate-1"
-        (candidate / "src").mkdir(parents=True)
-        monkeypatch.chdir(candidate / "src")
+        """A broker serves one session: a sibling candidate's worktree is not its to run in."""
+        sibling = tmp_path / "worktrees" / "candidate-2" / "workspace"
+        sibling.mkdir(parents=True)
 
-        def program(net: _Network) -> _RecordingLauncher:
+        def program(net: _Network) -> tuple[list[dict[str, Any]], _RecordingLauncher]:
             launcher = _RecordingLauncher(net.threads)
             with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
-                _point_at(monkeypatch, broker)
-                _run_client(net, ["--gpus", "1", "--time", "1", "--", "true"])
-            return launcher
+                return _frames(net, broker, _gpu_call(broker, str(sibling))), launcher
 
-        assert _simulate(sim, program).commands[0].argv[1] == str(candidate.resolve())
+        reply, launcher = _simulate(sim, program)
+
+        assert "inside the run's workspace" in str(reply[0]["error"])
+        assert launcher.commands == []
 
     @pytest.mark.parametrize(
         ("overrides", "message"),
@@ -612,14 +613,14 @@ class TestRoots:
         base=st.sampled_from(["workspace", "worktrees", "other", "root"]),
         parts=st.lists(st.sampled_from(["a", "b", "..", "."]), max_size=4),
     )
-    def test_a_directory_is_accepted_exactly_when_it_is_inside_the_runs_roots(
+    def test_a_directory_is_accepted_exactly_when_it_is_inside_the_sessions_workspace(
         self,
         seed: int | None,
         base: str,
         parts: list[str],
         tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
-        """Whatever path the container names, the broker agrees with a path model of the roots."""
+        """Whatever path the container names, the broker agrees with a path model of its workspace."""
         tmp_path = tmp_path_factory.mktemp("roots")
         workspace = tmp_path / "workspace"
         worktrees = tmp_path / "worktrees"
@@ -641,15 +642,12 @@ class TestRoots:
         reply, launcher = _simulate_with(seed, program)
 
         cwd = posixpath.normpath(named)
-        ws, wt = str(workspace.resolve()), str(worktrees.resolve())
+        ws = str(workspace.resolve())
         inside_workspace = cwd == ws or cwd.startswith(ws + "/")
-        inside_candidate = cwd.startswith(wt + "/")
-        accepted = bool(launcher.commands)
-        assert accepted == (inside_workspace or inside_candidate)
-        if accepted:
-            # The job is confined to the run's workspace or to one candidate under the root.
-            confined = launcher.commands[0].argv[1]
-            assert confined == ws or confined.startswith(wt + "/")
+        assert bool(launcher.commands) == inside_workspace
+        if inside_workspace:
+            # The job is confined to the session's own workspace, never a sibling's.
+            assert launcher.commands[0].argv[1] == ws
             assert reply[-1] == {"exit": 5}
 
     def test_a_symlink_inside_the_workspace_cannot_reach_outside_it(
