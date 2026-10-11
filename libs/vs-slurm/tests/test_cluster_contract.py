@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -254,6 +255,59 @@ def test_lost_submit_reply_requires_inspection_and_retains_identity(case: _Case)
     replayed = case.cluster.submit(_request(case), operation_id="lost")
     assert isinstance(replayed, ClusterSubmitted)
     assert _job_id(replayed.handle) == observed.job_id
+
+
+def _drop_before_scheduler_acceptance() -> None:
+    message = "SSH transport dropped before scheduler acceptance"
+    raise OSError(message)
+
+
+@pytest.mark.parametrize("implementation", ["fake", "slurm"])
+def test_cancel_acknowledges_a_tombstoned_dispatch_with_no_scheduler_job(
+    tmp_path: Path, implementation: str
+) -> None:
+    """The real cluster and Fake agree when an ambiguous dispatch created no job."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    if implementation == "fake":
+        fake = FakeCluster()
+        fake.script("never-accepted", on_dispatch=_drop_before_scheduler_acceptance)
+        cluster: Cluster = fake
+    else:
+        connector = FakeConnector(tmp_path / "connector")
+        connector.script("never-accepted")
+
+        def drop_sbatch(
+            request: dict[str, object],
+            answer: Callable[[dict[str, object]], dict[str, object]],
+        ) -> dict[str, object]:
+            if request.get("operation") == "exec" and "sbatch" in shlex.split(
+                str(request.get("command", ""))
+            ):
+                _drop_before_scheduler_acceptance()
+            return answer(request)
+
+        connector.intercept(drop_sbatch)
+        config = SlurmConfig(
+            name="never-accepted",
+            remote_workspace_root=str(tmp_path / "remote"),
+            transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+        )
+        cluster = SlurmCluster(
+            SlurmJobRunner(config, process=connector),
+            state_root=tmp_path / "cluster-state",
+        )
+
+    submitted = cluster.submit(
+        SlurmJobRequest(workspace=workspace, command=("true",)),
+        operation_id="never-accepted",
+    )
+    assert isinstance(submitted, ClusterUnknown)
+
+    cancelled = cluster.cancel("never-accepted")
+    assert isinstance(cancelled, ClusterCancelRequested)
+    assert cancelled.operation_id == "never-accepted"
+    assert cancelled.job_id is None
 
 
 def test_pending_running_and_terminal_observations_include_queue_details(case: _Case) -> None:

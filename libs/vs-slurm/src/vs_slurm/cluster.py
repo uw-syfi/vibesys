@@ -7,7 +7,7 @@ import json
 import re
 import subprocess
 from collections.abc import Mapping
-from dataclasses import fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
 from typing import TypeAlias
 
@@ -50,6 +50,13 @@ from .runner import (
 from .staging import _ContentStageError, tree_content_identity
 
 Request: TypeAlias = SlurmJobRequest | SlurmBatchRequest
+
+
+@dataclass(frozen=True, slots=True)
+class _SubmissionAbsent:
+    """One successful scheduler lookup found no job for a dispatched intent."""
+
+    operation_id: str
 
 
 class Operation(BaseModel):
@@ -410,13 +417,14 @@ class SlurmCluster:
             # four round trips and only guards a replay, which also finds the
             # job cancelled, so it follows the scancel instead of delaying it.
             try:
-                observation = self._reconcile(record)
+                observation = self._reconcile_record(record)
             finally:
                 self._runner.cancel_operation(record.operation_id)
             if isinstance(observation, ClusterUnknown):
                 return observation
             return ClusterCancelRequested(
-                operation_id=record.operation_id, job_id=observation.job_id
+                operation_id=record.operation_id,
+                job_id=None if isinstance(observation, _SubmissionAbsent) else observation.job_id,
             )
 
     def _cancel_job(self, job_id: str) -> ClusterCancelOutcome:
@@ -610,6 +618,18 @@ class SlurmCluster:
     def _reconcile(
         self, record: Operation, evidence: RemoteOperationEvidence | None = None
     ) -> ClusterInspectOutcome:
+        observed = self._reconcile_record(record, evidence)
+        if isinstance(observed, _SubmissionAbsent):
+            return ClusterUnknown(
+                operation_id=observed.operation_id,
+                reason="submission acceptance unresolved",
+            )
+        return observed
+
+    def _reconcile_record(
+        self, record: Operation, evidence: RemoteOperationEvidence | None = None
+    ) -> ClusterInspectOutcome | _SubmissionAbsent:
+        """Reconcile once while retaining a successful no-job lookup for cancellation."""
         handle = record.handle
         if handle is None or not record.dispatched:
             return ClusterUnknown(
@@ -646,9 +666,7 @@ class SlurmCluster:
             if job.job_id == "0":
                 identity = self._runner.find_operation(record.operation_id)
                 if identity is None:
-                    return ClusterUnknown(
-                        operation_id=record.operation_id, reason="submission acceptance unresolved"
-                    )
+                    return _SubmissionAbsent(operation_id=record.operation_id)
                 handle = replace_job_id(handle, identity)
                 record = record.model_copy(update={"handle": handle})
                 self._save(record)

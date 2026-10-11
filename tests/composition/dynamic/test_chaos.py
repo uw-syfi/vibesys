@@ -29,33 +29,13 @@ if TYPE_CHECKING:
 _PR_SEEDS = "0,1,3"
 
 
-# A submission whose sbatch exec dies with the SSH link down has an unknown outcome, and the
-# run then reconciles it forever instead of ending (seeds 2 and 4 of 0-14). The sweep keeps
-# running such seeds so the gap stays measured; they cannot fail a pull request.
-_SUBMISSION_GAP = pytest.mark.xfail(
-    reason="an unknown-outcome submission is reconciled forever (#1776)", strict=False
-)
-
-
-def _declares_a_lost_submission(seed: int) -> bool:
-    return any(
-        rule.boundary is Boundary.CLUSTER and rule.fault is ClusterFault.SSH_DOWN
-        for rule in plan_for(seed).rules
-    )
-
-
 def _seeds() -> list[object]:
     spec = os.environ.get("CHAOS_SEEDS", _PR_SEEDS)
     seeds: list[object] = []
     for part in spec.split(","):
         low, _, high = part.partition("-")
         seeds.extend(
-            pytest.param(
-                seed,
-                id=f"seed_{seed}",
-                marks=_SUBMISSION_GAP if _declares_a_lost_submission(seed) else (),
-            )
-            for seed in range(int(low), int(high or low) + 1)
+            pytest.param(seed, id=f"seed_{seed}") for seed in range(int(low), int(high or low) + 1)
         )
     return seeds
 

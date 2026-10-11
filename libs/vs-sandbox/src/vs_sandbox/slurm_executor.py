@@ -128,7 +128,7 @@ def _scheduler_view(
 
 @dataclass(frozen=True)
 class _CancelConfirmed:
-    """The job is observed ended, or was never dispatched."""
+    """The job ended, was never dispatched, or stayed absent after its tombstone."""
 
 
 @dataclass(frozen=True)
@@ -142,6 +142,12 @@ _CancelOutcome = _CancelConfirmed | _CancelRequested
 
 # Real clusters keep a cancelled job in COMPLETING for tens of seconds.
 _DEFAULT_CANCEL_CONFIRMATION_SECONDS = 120.0
+# A no-job reading already combines the active queue and accounting history.
+# Three successful follow-ups, separated by the scheduler polling interval, are
+# enough to distinguish stable nonacceptance from a just-published identity.
+# This is intentionally independent of the much longer allocation teardown
+# budget: there is no known allocation whose termination needs waiting for.
+_SUBMISSION_ABSENCE_CONFIRMATIONS = 3
 
 
 class SlurmTargetLifecycle(StrEnum):
@@ -276,6 +282,10 @@ class _DurableSlurmEvaluation(BaseModel):
     # evidence is conservative: never authorize a replay from its absence.
     dispatch_started: bool = True
     submission_rejection: str | None = None
+    # A provider failure is final only after cleanup proves no allocation remains.
+    # Persist it before process-local publication so polling-only recovery sees the
+    # same terminal result instead of reconciling an already-closed dispatch forever.
+    terminal_failure: str | None = None
     # Set once the evaluation was cancelled while it waited for local admission.
     # Such a record is final: nothing may dispatch it.
     ended: _DurableEnd | None = None
@@ -284,6 +294,13 @@ class _DurableSlurmEvaluation(BaseModel):
     def _ended_before_dispatch_has_no_job(self) -> _DurableSlurmEvaluation:
         if self.ended is not None and (self.handle is not None or self.dispatch_started):
             message = "an evaluation ended before dispatch cannot have a job or a dispatch"
+            raise ValueError(message)
+        terminal_facts = sum(
+            value is not None
+            for value in (self.submission_rejection, self.terminal_failure, self.ended)
+        )
+        if terminal_facts > 1:
+            message = "an evaluation cannot have multiple durable terminal outcomes"
             raise ValueError(message)
         return self
 
@@ -445,6 +462,13 @@ class SlurmEvaluationExecutor:
                 phase=PollPhase.ENDED,
                 terminal=ExecutorObservation(
                     state=EvaluationState.FAILED, failure=durable.submission_rejection
+                ),
+            )
+        if durable.terminal_failure is not None:
+            return ExecutorPoll(
+                phase=PollPhase.ENDED,
+                terminal=ExecutorObservation(
+                    state=EvaluationState.FAILED, failure=durable.terminal_failure
                 ),
             )
         if durable.ended is not None:
@@ -652,12 +676,10 @@ class SlurmEvaluationExecutor:
         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-930042 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
             if not await self._cancel_running_best_effort(handle_id):
                 return
+            failure = f"{type(exc).__name__}: {exc}"
+            self._record_terminal_failure(handle_id, failure)
             self._publish(
-                handle_id,
-                ExecutorObservation(
-                    state=EvaluationState.FAILED,
-                    failure=f"{type(exc).__name__}: {exc}",
-                ),
+                handle_id, ExecutorObservation(state=EvaluationState.FAILED, failure=failure)
             )
 
     async def _accept_cancellation_safe(
@@ -1114,6 +1136,8 @@ class SlurmEvaluationExecutor:
     async def _confirm_termination(
         self, handle_id: str, target: SlurmBatchHandle | str, job_id: str | None
     ) -> _CancelOutcome:
+        if job_id is None:
+            return await self._confirm_unaccepted(handle_id, target)
         left = self._confirmations_left.setdefault(handle_id, self._cancel_confirmations)
         for _ in range(max(left, 1)):
             observed = await self._finish_in_thread(self._cluster.inspect, target)
@@ -1129,6 +1153,29 @@ class SlurmEvaluationExecutor:
             if left > 0:
                 await self._pace(self._poll_interval)
         return _CancelRequested(job_id)
+
+    async def _confirm_unaccepted(
+        self, handle_id: str, target: SlurmBatchHandle | str
+    ) -> _CancelOutcome:
+        """Confirm that a tombstoned ambiguous dispatch never acquired a job identity.
+
+        Only another cancellation acknowledgement with no job counts as absence:
+        unlike a plain inspection, it proves the cluster both retained the tombstone
+        and completed a scheduler lookup. A transport-unknown answer remains owned.
+        """
+        for attempt in range(_SUBMISSION_ABSENCE_CONFIRMATIONS):
+            cancelled = await self._finish_in_thread(self._cluster.cancel, target)
+            if isinstance(cancelled, ClusterUnknown):
+                return _CancelRequested(None)
+            job_id = cancelled.job_id
+            if job_id is not None:
+                self._cancel_sent.add(job_id)
+                self._canceling.add(handle_id)
+                self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELING))
+                return await self._confirm_termination(handle_id, target, job_id)
+            if attempt + 1 < _SUBMISSION_ABSENCE_CONFIRMATIONS:
+                await self._pace(self._poll_interval)
+        return _CancelConfirmed()
 
     async def _cancel_running_best_effort(self, handle_id: str) -> bool:
         """Report confirmed cleanup, retaining nonterminal ownership on failure."""
@@ -1172,6 +1219,11 @@ class SlurmEvaluationExecutor:
         """Publish the end the saved record states, or None when the record holds none."""
         if durable.submission_rejection is not None:
             return self._publish_rejection(handle_id, durable.submission_rejection)
+        if durable.terminal_failure is not None:
+            return self._publish(
+                handle_id,
+                ExecutorObservation(state=EvaluationState.FAILED, failure=durable.terminal_failure),
+            )
         if durable.ended is not None:
             return self._publish(handle_id, _ENDED_BEFORE_DISPATCH)
         return None
@@ -1185,6 +1237,14 @@ class SlurmEvaluationExecutor:
         return self._publish(
             handle_id, ExecutorObservation(state=EvaluationState.FAILED, failure=reason)
         )
+
+    def _record_terminal_failure(self, handle_id: str, failure: str) -> None:
+        durable = self._read_evaluation(handle_id)
+        if durable is None:
+            raise _SlurmExecutionError.missing_durable_evaluation(handle_id)
+        record = durable.model_copy(update={"terminal_failure": failure})
+        path = self._handle_root / f"{handle_id}.json"
+        atomic_write_bytes(path, (record.model_dump_json() + "\n").encode("utf-8"))
 
     def _write_evaluation(
         self,
@@ -1289,6 +1349,10 @@ class _SlurmExecutionError(RuntimeError):
     @classmethod
     def not_accepted(cls) -> _SlurmExecutionError:
         return cls("Slurm evaluation was not durably accepted before execution")
+
+    @classmethod
+    def missing_durable_evaluation(cls, handle_id: str) -> _SlurmExecutionError:
+        return cls(f"Slurm evaluation {handle_id!r} lost its durable lifecycle record")
 
     @classmethod
     def deadline_exceeded(cls, timeout_seconds: int) -> _SlurmExecutionError:
