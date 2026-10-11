@@ -88,7 +88,7 @@ def on_blocked(state: EvolveStrategyState, event: IntentBlocked) -> EvolveStrate
         if (
             candidate is not None
             and candidate.generation == event.scope.generation
-            and candidate.step is Step.AWAITING
+            and candidate.step in (Step.AWAITING, Step.RENDERING)
             and candidate.phase is not WorkPhase.DONE
         ):
             slot = candidate

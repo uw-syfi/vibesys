@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from vs_core.api import (
     CAPTURE_SUFFIX,
+    EXPORT_PATCH_SUFFIX,
     INTERPRET_SUFFIX,
     RENDER_SUFFIX,
     RETAIN_SUFFIX,
@@ -28,6 +29,7 @@ from vs_core.api import (
 from vs_runtime._capture_command_operation import CaptureCommandOwner
 from vs_runtime._core_loop import CoreRuntimeBindings
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
+from vs_runtime._export_patch_operation import ExportPatchOwner
 from vs_runtime._observation_factory import ObservationFactory
 from vs_runtime._operation_catalog import OperationCatalog, OperationEntry, RefusalReason
 from vs_runtime._operation_receipts import NamespaceOperationReceipts
@@ -64,6 +66,7 @@ class OperationRole(StrEnum):
     RETAIN_REVISION = "retain_revision"
     CAPTURE_COMMAND = "capture_command"
     VALIDATE_LOCAL = "validate_local"
+    EXPORT_PATCH = "export_patch"
 
 
 # A role whose owner is absent is declared but refused with the contract it lacks.
@@ -109,6 +112,7 @@ _SUFFIX_OF_ROLE = {
     OperationRole.RETAIN_REVISION: RETAIN_SUFFIX,
     OperationRole.CAPTURE_COMMAND: CAPTURE_SUFFIX,
     OperationRole.VALIDATE_LOCAL: VALIDATE_LOCAL_SUFFIX,
+    OperationRole.EXPORT_PATCH: EXPORT_PATCH_SUFFIX,
 }
 
 
@@ -125,6 +129,19 @@ class OperationPorts:
     retention_label: str
     variables: Mapping[str, object] = field(default_factory=dict)
     commands: Commands | None = None
+
+
+def _command_owner(role: OperationRole, ports: OperationPorts) -> OperationOwner | None:
+    """The owner of a role that runs commands, or None when the run cannot offer it."""
+    if ports.commands is None:
+        return None
+    if role is OperationRole.CAPTURE_COMMAND:
+        return CaptureCommandOwner(ports.workspaces, ports.commands, ports.ledger, ports.commit_of)
+    if not ports.workspaces.supports_parallel_candidates:
+        return None
+    return ValidateLocalOwner(
+        ports.workspaces, ports.commands, ports.ledger, ports.commit_of, ports.artifacts
+    )
 
 
 def production_owners(
@@ -146,20 +163,11 @@ def production_owners(
                 owners[role] = RetainRevisionOwner(
                     ports.workspaces, ports.ledger, ports.commit_of, ports.retention_label
                 )
-            case OperationRole.CAPTURE_COMMAND:
-                if ports.commands is not None:
-                    owners[role] = CaptureCommandOwner(
-                        ports.workspaces, ports.commands, ports.ledger, ports.commit_of
-                    )
-            case OperationRole.VALIDATE_LOCAL:
-                if ports.commands is not None and ports.workspaces.supports_parallel_candidates:
-                    owners[role] = ValidateLocalOwner(
-                        ports.workspaces,
-                        ports.commands,
-                        ports.ledger,
-                        ports.commit_of,
-                        ports.artifacts,
-                    )
+            case OperationRole.EXPORT_PATCH:
+                owners[role] = ExportPatchOwner(ports.workspaces, ports.ledger, ports.commit_of)
+            case OperationRole.CAPTURE_COMMAND | OperationRole.VALIDATE_LOCAL:
+                if (owner := _command_owner(role, ports)) is not None:
+                    owners[role] = owner
     return owners
 
 
