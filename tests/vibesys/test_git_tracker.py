@@ -442,6 +442,34 @@ def test_checkout_restores_candidate_tree_and_preserves_framework_state(tmp_path
     assert not (tmp_path / "scratch.txt").exists()
 
 
+def test_unversioned_paths_collapse_directories_without_tracked_files(tmp_path: Path) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/tracked.py").write_text("X = 1\n", encoding="utf-8")
+    _git(tmp_path, "add", "src/tracked.py")
+    _git(tmp_path, "commit", "-m", "tracked")
+    (tmp_path / ".gitignore").write_text(".venv/\n", encoding="utf-8")
+    for name in (
+        ".venv/bin/python",
+        ".venv/lib/a.py",
+        "src/new.py",
+        "src/odd[1]*.txt",
+        "n/d/e.txt",
+    ):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("x\n", encoding="utf-8")
+
+    kept = tracker.unversioned_paths()
+
+    assert kept == (".gitignore", ".venv/", "n/", "src/new.py", "src/odd[1]*.txt")
+    (tmp_path / "src/stray.txt").write_text("s\n", encoding="utf-8")
+    assert tracker.checkout_tree("HEAD", clean=True, clean_ignored=True, keep_paths=kept)
+    assert not (tmp_path / "src/stray.txt").exists()
+    assert (tmp_path / ".venv/lib/a.py").read_text(encoding="utf-8") == "x\n"
+    assert (tmp_path / "src/odd[1]*.txt").exists()
+    assert (tmp_path / "n/d/e.txt").exists()
+
+
 def test_trusted_input_changes_compare_against_branch_point(tmp_path: Path) -> None:
     (tmp_path / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
     objective = tmp_path / "OBJECTIVE.md"

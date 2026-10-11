@@ -433,7 +433,9 @@ async def _replay(env: WorkspaceEnv, ops: list[Op], crash: RestoreCrash) -> None
     for index, op in enumerate(ops):
         attempt = _POOL[op.pick % len(_POOL)]
         dirty_names = (*_LEFTOVERS, "candidate.py")
-        _write_files(root.path, dirty_names)
+        # Files present before the first grant belong to the user; only attempts leave a mess.
+        if StoreWorkspaceReceipts(MortalStore(env)).root_baseline() is not None:
+            _write_files(root.path, dirty_names)
         before = _visible_files(root.path)
         was_new_hold = model.holder != attempt
         if op.kind == "repeat" and sent:

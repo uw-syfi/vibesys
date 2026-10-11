@@ -305,6 +305,14 @@ class CliGitRepository:
         prefix = self._prefix()
         return tuple(sorted(self._status_paths(status.stdout, prefix)))
 
+    def unversioned_paths(self, *, include_ignored: bool) -> tuple[str, ...]:
+        found: set[str] = set()
+        for ignored in [False, True] if include_ignored else [False]:
+            args = ["ls-files", "-z", "--others", "--exclude-standard"]
+            listing = self._run_checked([*args, *(["--ignored"] if ignored else []), "--", "."])
+            found.update(part for part in _text(listing.stdout).split("\0") if part)
+        return tuple(sorted(found))
+
     def changed_since(self, commit: Revision, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
         committed = self._run_checked(["diff", "--name-only", f"{commit}..HEAD", "--", *pathspecs])
         pending = self._run_checked(
