@@ -285,16 +285,28 @@ class UnreadableRecord(BaseModel):
     version: int | None
 
 
-_READABLE_RECORD_VERSIONS = frozenset({3, RECORD_VERSION})
+_UPGRADED_RECORD_VERSION = 3
+"""The earlier record version this reader still reads, through ``_upgrade_v3``."""
+
+
+def _upgrade_v3(record: LiveInstanceRecord) -> LiveInstanceRecord | None:
+    """A version 3 record read as version 4, or ``None`` if it uses what version 3 lacked.
+
+    Version 4 only added startup stages past ``resolving`` and their progress
+    to the phase, so every version 3 phase is a version 4 phase.
+    """
+    stage = record.phase.stage
+    if record.phase.progress is not None or stage not in {None, StartupStage.RESOLVING}:
+        return None
+    return record
 
 
 def parse_record(instance_id: str, raw: str) -> LiveInstanceRecord | UnreadableRecord:
     """Parse one stored record, strictly, if it is of a version this reader knows.
 
-    A version 3 record is upgraded: version 4 only added startup stages and
-    progress to its phase, so every version 3 phase is a version 4 phase.
-    Records of earlier versions predate phases and tombstones and are not
-    upgraded: their servers report no phase this reader could stand behind.
+    A version 3 record is upgraded (``_upgrade_v3``). Records of earlier
+    versions predate phases and tombstones and are not upgraded: their servers
+    report no phase this reader could stand behind.
     """
     try:
         document = json.loads(raw)
@@ -303,14 +315,14 @@ def parse_record(instance_id: str, raw: str) -> LiveInstanceRecord | UnreadableR
     version = document.get("version") if isinstance(document, dict) else None
     if not isinstance(version, int) or isinstance(version, bool):
         return UnreadableRecord(id=instance_id, version=None)
-    try:
-        record = (
-            LiveInstanceRecord.model_validate({**document, "version": RECORD_VERSION})
-            if version in _READABLE_RECORD_VERSIONS
-            else None
-        )
-    except ValidationError:
-        record = None
+    record: LiveInstanceRecord | None = None
+    if version in {_UPGRADED_RECORD_VERSION, RECORD_VERSION}:
+        try:
+            record = LiveInstanceRecord.model_validate({**document, "version": RECORD_VERSION})
+        except ValidationError:
+            record = None
+    if record is not None and version == _UPGRADED_RECORD_VERSION:
+        record = _upgrade_v3(record)
     if record is None or record.id != instance_id:
         return UnreadableRecord(id=instance_id, version=version)
     return record
