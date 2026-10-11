@@ -1,6 +1,6 @@
 import {describe, it} from 'node:test';
 import {expect} from '../test-support/expect.js';
-import {FakeClock} from './fake-clock.test-helper.js';
+import {FakeClock} from './fake-clock.js';
 
 describe('FakeClock', () => {
   it('does not fire a timer cancelled while an awaiting runner observes it', async () => {

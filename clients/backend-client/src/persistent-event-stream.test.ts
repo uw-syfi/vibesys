@@ -9,8 +9,7 @@ import {
 } from './persistent-event-stream.js';
 import type {RunEvent, ServerMessage} from './protocol.js';
 import {expect} from './test-support/expect.js';
-import {FakeClock} from './testing/fake-clock.test-helper.js';
-import {event} from './testing/index.js';
+import {event, FakeClock} from './testing/index.js';
 import type {EventSubscription} from './transport.js';
 
 /** A production stream with only its public scheduling seam replaced. */

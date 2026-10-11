@@ -10,7 +10,7 @@ import type {
 import {REQUEST_POLICIES, ServerError} from './index.js';
 import {parseProtocolResponse} from './protocol-parse.js';
 import {expect} from './test-support/expect.js';
-import {FakeClock as FakeScheduler} from './testing/fake-clock.test-helper.js';
+import {FakeClock as FakeScheduler} from './testing/index.js';
 import {type WebSocketLike, WebSocketTransport} from './websocket.js';
 
 const URL = 'ws://127.0.0.1:43123';

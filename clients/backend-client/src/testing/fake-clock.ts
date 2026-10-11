@@ -8,12 +8,15 @@ interface ScheduledEntry {
 }
 
 /**
- * Package-owned deterministic timer Fake.
+ * The one deterministic timer Fake for every client package, exported through
+ * `@vibesys/backend-client/testing`.
  *
  * It structurally satisfies both `ScheduleTimeout` and the Node client's
- * `ClientClock`. Tests that only need scheduling use `schedule`; deadline
- * tests also read and advance `now`. The helper is excluded from production
- * builds by name but included by the check configuration through its imports.
+ * `ClientClock`. Tests that only need scheduling use `schedule` (or the
+ * `scheduleTimeout` seam); deadline tests also read and advance `now()`.
+ * `advanceBy` fires timers due in the interval earliest first, so one jump
+ * (hours, to model sleep) fires everything that came due, as Electron does on
+ * wake.
  */
 export class FakeClock {
   #nowMs = 0;
@@ -96,6 +99,11 @@ export class FakeClock {
       entry.callback();
     }
     this.#nowMs = target;
+  }
+
+  /** Timers scheduled and not yet fired or cancelled. */
+  get pending(): number {
+    return this.#entries.filter(entry => !entry.cancelled).length;
   }
 
   pendingDelays(): number[] {

@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 import {BackendClientError, type ControlChannelState, ServerError} from '../index.js';
 import {expect} from '../test-support/expect.js';
-import {FakeClock} from '../testing/fake-clock.test-helper.js';
+import {FakeClock} from '../testing/index.js';
 import {ServerClient, type ServerClientOptions} from './client.js';
 
 /** One reported state as a short string; see `websocket.test.ts`'s `trace`. */
