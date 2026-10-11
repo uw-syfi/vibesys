@@ -180,6 +180,64 @@ describe('HostConnection over the FakeHelper', () => {
     expect(await pushed).toEqual(['00000000000a']);
   });
 
+  test('registry-watch setup failures cannot publish a watchless control channel', async () => {
+    const clock = new FakeClock();
+    const link = new FakeLink();
+    link.helper.expired.add('instances.watch');
+    await using connection = fakeConnection(link, clock);
+
+    const ready = connection.ready();
+    for (const [index, delay] of CONFIG.delaysMs.entries()) {
+      await clock.waitUntilScheduled(delay);
+      expect(link.helper.running).toBe(0);
+      expect(link.helper.watching).toBe(0);
+      if (index === CONFIG.delaysMs.length - 1) {
+        link.helper.expired.delete('instances.watch');
+      }
+      clock.advanceBy(delay);
+    }
+    await ready;
+
+    expect(connection.phase.kind).toBe('ready');
+    expect(link.helper.running).toBe(1);
+    expect(link.helper.watching).toBe(1);
+    const pushed = new Promise<string[]>(resolve => {
+      connection.watchInstances(listing => {
+        if (listing.instances.length > 0) resolve(listing.instances.map(entry => entry.id));
+      });
+    });
+    link.helper.publish(record('00000000000f', 'run-f'));
+    expect(await pushed).toEqual(['00000000000f']);
+  });
+
+  test('a control channel ending after its watch reply cannot complete the handshake', async () => {
+    const clock = new FakeClock();
+    const link = new FakeLink();
+    const watched = link.helper.deferNext('instances.watch');
+    await using connection = fakeConnection(link, clock);
+    const nextPhase = new Promise<string>(resolve => {
+      const stop = connection.onPhase(phase => {
+        if (phase.kind !== 'ready' && phase.kind !== 'reconnecting') return;
+        stop();
+        resolve(phase.kind);
+      });
+    });
+
+    const ready = connection.ready();
+    await watched.received;
+    watched.release();
+    link.helper.channels.at(-1)?.end(null);
+
+    expect(await nextPhase).toBe('reconnecting');
+    expect(connection.checkoutRoot).toBeNull();
+    expect(link.helper.watching).toBe(0);
+    await clock.waitUntilScheduled(CONFIG.delaysMs[0] ?? 0);
+    clock.advanceBy(CONFIG.delaysMs[0] ?? 0);
+    await ready;
+    expect(connection.phase.kind).toBe('ready');
+    expect(link.helper.watching).toBe(1);
+  });
+
   test('a refused sign-in stops the loop until the user retries', async () => {
     const link = new FakeLink();
     link.linkFault = {cause: 'auth', detail: 'Permission denied'};
