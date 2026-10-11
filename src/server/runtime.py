@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import ExitStack, suppress
+from functools import partial
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from server.api.service import RunApi
@@ -71,7 +72,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from server.settings import InteractiveSetupDefaults
-    from vibesys.api import RunHandle, RunReady, RunRequest, RunResult, Runs, RunSession
+    from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
     from vs_sim.api import Threads
 
 
@@ -90,10 +91,6 @@ class ServerLifecycleObserver(Protocol):
         """The control socket accepts connections."""
         ...
 
-    def run_ready(self, run_id: str) -> None:
-        """The run acquired its resources and has its durable id."""
-        ...
-
 
 class ServerRuntime:
     """Compose and run one frontend-facing JSONL server.
@@ -110,6 +107,7 @@ class ServerRuntime:
         *,
         socket_path: Path,
         runs: Runs,
+        run_id: str | None = None,
         tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
         web: bool = False,
         web_port: int = 0,
@@ -124,8 +122,11 @@ class ServerRuntime:
     ) -> None:
         """Compose all server components around one shared condition.
 
-        ``threads`` supplies every lock, condition, event and worker thread the
-        server creates; it defaults to the operating system's.
+        ``run_id`` names the run every journaled event belongs to, from the
+        first; only a read-only reopen (``read_only_log``) takes it from the
+        recorded events instead. ``threads`` supplies every lock, condition,
+        event and worker thread the server creates; it defaults to the
+        operating system's.
         """
         self.threads = threads or OsThreads()
         self.runs = runs
@@ -147,6 +148,15 @@ class ServerRuntime:
         self.journal = WireJournal(self.condition, threads=self.threads)
         self.executions = ExecutionTracker(self.condition, self.journal)
         self.controller = RunController(self.condition, self.journal, self.executions)
+        if read_only_log is not None:
+            self._attach_journal = partial(self.controller.attach_read_only, read_only_log)
+        elif run_id is not None:
+            self._attach_journal = partial(
+                self.controller.attach, socket_path.parent, run_id=run_id
+            )
+        else:
+            message = "a server that drives a run must be given its run id"
+            raise ValueError(message)
         self.chat = ChatManager(
             self.condition,
             self.journal,
@@ -191,12 +201,7 @@ class ServerRuntime:
             session = handle.session
             session.on_committed_view(self.api.observe_committed_state)
 
-            def on_ready(ready: RunReady) -> None:
-                self.integration.handle_run_ready(session, ready)
-                if self.observer is not None:
-                    self.observer.run_ready(ready.record.run_id)
-
-            session.on_ready(on_ready)
+            session.on_ready(partial(self.integration.handle_run_ready, session))
             with self.condition:
                 self.handle = handle
                 self.session = session
@@ -219,10 +224,8 @@ class ServerRuntime:
 
     def run(self, run: Callable[[], _RunValueT]) -> _RunValueT | None:
         """Serve requests while executing ``run`` in the calling thread."""
-        if self.read_only_log is not None:
-            self.controller.attach_read_only(self.read_only_log)
-        else:
-            self.controller.attach(self.socket_path.parent)
+        self._attach_journal()
+        if self.read_only_log is None:
             self.journal.record(
                 EventType.SERVER_READY,
                 status=EventStatus.ACTIVE,

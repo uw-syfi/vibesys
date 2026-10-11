@@ -117,3 +117,49 @@ def test_a_detached_child_runs_in_its_own_session_without_a_terminal(tmp_path: P
                 child.kill()
 
     assert log.read_text().splitlines() == ["True", "no tty"]
+
+
+_WITHHELD_ENGINE = """\
+import sys
+sys.stdout.write("engine import started\\n")
+sys.stdout.flush()
+sys.stdin.readline()
+raise ImportError("the engine is withheld by this test")
+"""
+"""A ``vibesys`` package that reports its import, then blocks until stdin closes."""
+
+
+def test_a_detached_server_names_its_run_before_it_imports_the_engine(
+    registry: LiveRegistry, tmp_path: Path
+) -> None:
+    shadow = tmp_path / "shadow"
+    (shadow / "vibesys").mkdir(parents=True)
+    (shadow / "vibesys" / "__init__.py").write_text(_WITHHELD_ENGINE)
+    run_id = "20261010-120000-11111111-e2e"
+    child = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-183001 [S603]; the test runs its own fixed child module.
+        # > Only a real interpreter shows what a server publishes before the engine loads.
+        [
+            sys.executable,
+            "-m",
+            "entrypoints.detached_run",
+            "--instance-id",
+            INSTANCE,
+            "--run-id",
+            run_id,
+            "--control-socket",
+            str(tmp_path / "control.sock"),
+        ],
+        env={**os.environ, "PYTHONPATH": os.pathsep.join([str(shadow), *sys.path])},
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline() == "engine import started\n"
+
+        record = registry.find(INSTANCE)
+        assert record is not None
+        assert (record.run_id, record.pid) == (run_id, child.pid)
+    finally:
+        stop_process(child)

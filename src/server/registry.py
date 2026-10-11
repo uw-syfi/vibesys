@@ -49,8 +49,6 @@ from importlib.metadata import version as distribution_version
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from pydantic import ValidationError
-
 from server.host_api import (
     INSTANCE_ID_PATTERN,
     InstanceList,
@@ -58,6 +56,8 @@ from server.host_api import (
     LiveInstanceRecord,
     StopOutcome,
     StopRoute,
+    UnreadableRecord,
+    parse_record,
 )
 
 if TYPE_CHECKING:
@@ -232,11 +232,11 @@ def unlock(descriptor: int) -> None:
 
 @dataclass(frozen=True)
 class InstanceObservation:
-    """One look at an id: its lock first, then its record (``None``: absent or invalid)."""
+    """One look at an id: its lock first, then its record (``None``: absent)."""
 
     id: str
     lock: LockState
-    record: LiveInstanceRecord | None
+    record: LiveInstanceRecord | UnreadableRecord | None
 
 
 class Verdict(StrEnum):
@@ -244,8 +244,10 @@ class Verdict(StrEnum):
 
     LIVE = "live"
     """The owner holds the lock and has published a valid record."""
+    UNREADABLE = "unreadable"
+    """The owner holds the lock and published a record this reader cannot interpret."""
     PENDING = "pending"
-    """The owner holds the lock but has no valid record yet (or any more)."""
+    """The owner holds the lock but has no record yet (or any more)."""
     DEAD = "dead"
     """No process holds the lock: the files are leftovers to remove."""
     UNVERIFIED = "unverified"
@@ -256,7 +258,13 @@ def judge(observation: InstanceObservation) -> Verdict:
     """Decide one id from its observed lock state and record."""
     match observation.lock:
         case LockState.HELD:
-            return Verdict.LIVE if observation.record is not None else Verdict.PENDING
+            match observation.record:
+                case LiveInstanceRecord():
+                    return Verdict.LIVE
+                case UnreadableRecord():
+                    return Verdict.UNREADABLE
+                case None:
+                    return Verdict.PENDING
         case LockState.FREE | LockState.ABSENT:
             return Verdict.DEAD
         case LockState.UNKNOWN:
@@ -268,6 +276,7 @@ class Survey:
     """A listing decision: what to report and what to remove."""
 
     live: tuple[LiveInstanceRecord, ...]
+    unreadable: tuple[UnreadableRecord, ...]
     unverified: tuple[str, ...]
     dead: tuple[str, ...]
 
@@ -275,18 +284,22 @@ class Survey:
 def survey(observations: Iterable[InstanceObservation]) -> Survey:
     """Partition observations, ordered by start time then id for a stable listing."""
     live: list[LiveInstanceRecord] = []
+    unreadable: list[UnreadableRecord] = []
     unverified: list[str] = []
     dead: list[str] = []
     for observation in observations:
         verdict = judge(observation)
-        if verdict is Verdict.LIVE and observation.record is not None:
+        if isinstance(observation.record, LiveInstanceRecord) and verdict is Verdict.LIVE:
             live.append(observation.record)
+        elif isinstance(observation.record, UnreadableRecord) and verdict is Verdict.UNREADABLE:
+            unreadable.append(observation.record)
         elif verdict is Verdict.UNVERIFIED:
             unverified.append(observation.id)
         elif verdict is Verdict.DEAD:
             dead.append(observation.id)
     return Survey(
         live=tuple(sorted(live, key=lambda record: (record.started_at, record.id))),
+        unreadable=tuple(sorted(unreadable, key=lambda record: record.id)),
         unverified=tuple(sorted(unverified)),
         dead=tuple(sorted(dead)),
     )
@@ -296,8 +309,7 @@ def driving(listing: InstanceList, run_id: str) -> LiveInstanceRecord | None:
     """Return the live server already driving ``run_id``, if any.
 
     Run ids are generated per experiment, so a match on this node is the same
-    run. A server still starting has not published its run id; the run's own
-    write lease is what refuses a second writer in that window.
+    run. Every record names its run from the moment it is published.
     """
     return next((record for record in listing.instances if record.run_id == run_id), None)
 
@@ -469,13 +481,14 @@ class FileInstanceStore:
         lock = LifetimeLock.publish(self._lock_path(instance_id))
         return FileInstanceHold(lock, self._record_path(instance_id))
 
-    def _read(self, instance_id: str) -> LiveInstanceRecord | None:
+    def _read(self, instance_id: str) -> LiveInstanceRecord | UnreadableRecord | None:
         try:
             raw = self._record_path(instance_id).read_text(encoding="utf-8")
-            record = LiveInstanceRecord.model_validate_json(raw)
-        except (OSError, ValidationError):
+        except FileNotFoundError:
             return None
-        return record if record.id == instance_id else None
+        except OSError:
+            return UnreadableRecord(id=instance_id, version=None)
+        return parse_record(instance_id, raw)
 
     def _lock_path(self, instance_id: str) -> Path:
         return self._directory / f"{_checked_id(instance_id)}{_LOCK_SUFFIX}"
@@ -487,7 +500,7 @@ class FileInstanceStore:
 @dataclass
 class _FakeEntry:
     lock: LockState
-    record: LiveInstanceRecord | None = None
+    raw: str | None = None
 
 
 class FakeInstanceHold:
@@ -504,7 +517,7 @@ class FakeInstanceHold:
         if self._released:
             message = f"instance {self._id} was released"
             raise RuntimeError(message)
-        self._store.entries[self._id].record = record
+        self._store.entries[self._id].raw = record.model_dump_json()
 
     def release(self) -> None:
         """Remove record and lock; idempotent."""
@@ -529,6 +542,11 @@ class FakeInstanceStore:
         self.entries: dict[str, _FakeEntry] = {}
         self._published: set[str] = set()
 
+    def plant(self, instance_id: str, raw: str, lock: LockState = LockState.HELD) -> None:
+        """Store ``raw`` as an id's record, as a server of another version would write it."""
+        self._published.add(_checked_id(instance_id))
+        self.entries[instance_id] = _FakeEntry(lock, raw)
+
     def ids(self) -> tuple[str, ...]:
         """List ids with any state."""
         return tuple(sorted(self.entries))
@@ -538,7 +556,8 @@ class FakeInstanceStore:
         entry = self.entries.get(_checked_id(instance_id))
         if entry is None:
             return InstanceObservation(instance_id, LockState.ABSENT, None)
-        return InstanceObservation(instance_id, entry.lock, entry.record)
+        record = None if entry.raw is None else parse_record(instance_id, entry.raw)
+        return InstanceObservation(instance_id, entry.lock, record)
 
     def reap(self, instance_id: str) -> bool:
         """Remove an entry unless its lock is held or unreadable."""
@@ -584,12 +603,21 @@ class LiveRegistry:
         decision = survey(self._store.observe(instance_id) for instance_id in self._store.ids())
         for instance_id in decision.dead:
             self._store.reap(instance_id)
-        return InstanceList(instances=decision.live, unverified=decision.unverified)
+        return InstanceList(
+            instances=decision.live,
+            unreadable=decision.unreadable,
+            unverified=decision.unverified,
+        )
 
     def find(self, instance_id: str) -> LiveInstanceRecord | None:
         """Return the record of a live server, else ``None``."""
         observation = self._store.observe(instance_id)
-        return observation.record if judge(observation) is Verdict.LIVE else None
+        live = judge(observation) is Verdict.LIVE
+        return (
+            observation.record
+            if live and isinstance(observation.record, LiveInstanceRecord)
+            else None
+        )
 
     @contextmanager
     def register(self, instance_id: str) -> Iterator[InstanceHold]:

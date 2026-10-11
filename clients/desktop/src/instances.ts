@@ -41,6 +41,8 @@ export interface InstanceListing {
   readonly records: readonly InstanceRecord[];
   /** Registry ids whose liveness the host could not establish. */
   readonly unverified: readonly string[];
+  /** Live servers whose record the host could not read (another version, or corrupt); absent from an older host. */
+  readonly unreadable?: readonly {readonly id: string; readonly version: number | null}[];
 }
 
 /** What the registry established about one id, in decreasing order of authority. */
@@ -101,16 +103,16 @@ export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRe
     };
   }
   onlyKeys(record, RECORD_KEYS, path);
-  if (record['version'] !== 1) throw new RecordError(`${path}.version must be 1`);
+  // Version 2 names its run from the first write; version 1 (an older host) may not yet.
+  const version = record['version'];
+  if (version !== 1 && version !== 2) throw new RecordError(`${path}.version must be 1 or 2`);
   const id = instanceId(record['id'], `${path}.id`);
   const status = record['status'];
   if (status !== 'starting' && status !== 'serving') {
     throw new RecordError(`${path}.status must be "starting" or "serving"`);
   }
-  const runId = record['run_id'] ?? null;
-  if (runId !== null && typeof runId !== 'string') {
-    throw new RecordError(`${path}.run_id must be a string or null`);
-  }
+  const runId =
+    version === 2 ? string(record, 'run_id', path) : nullableString(record, 'run_id', path);
   const socketPath = absolutePath(record, 'socket_path', path);
   const vibesysRoot = nullableString(record, 'vibesys_root', path);
   const pid = number(record, 'pid', path);
@@ -137,8 +139,10 @@ export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRe
 /** Parse a `vibesys instances list --json` document. */
 export function parseInstanceList(value: unknown): InstanceListing {
   const listing = object(value, 'listing');
-  onlyKeys(listing, ['version', 'instances', 'unverified'], 'listing');
-  if (listing['version'] !== 1) throw new RecordError('listing.version must be 1');
+  onlyKeys(listing, ['version', 'instances', 'unreadable', 'unverified'], 'listing');
+  if (listing['version'] !== 1 && listing['version'] !== 2) {
+    throw new RecordError('listing.version must be 1 or 2');
+  }
   const instances = listing['instances'];
   if (!Array.isArray(instances)) throw new RecordError('listing.instances must be a list');
   const unverified = listing['unverified'] ?? [];
@@ -148,7 +152,24 @@ export function parseInstanceList(value: unknown): InstanceListing {
       parseInstanceRecord(record, `listing.instances[${index}]`),
     ),
     unverified: unverified.map((id, index) => instanceId(id, `listing.unverified[${index}]`)),
+    ...(listing['unreadable'] === undefined
+      ? {}
+      : {unreadable: unreadableRecords(listing['unreadable'])}),
   };
+}
+
+function unreadableRecords(value: unknown): NonNullable<InstanceListing['unreadable']> {
+  if (!Array.isArray(value)) throw new RecordError('listing.unreadable must be a list');
+  return value.map((entry, index) => {
+    const path = `listing.unreadable[${index}]`;
+    const record = object(entry, path);
+    onlyKeys(record, ['id', 'version'], path);
+    const version = record['version'] ?? null;
+    if (version !== null && !Number.isInteger(version)) {
+      throw new RecordError(`${path}.version must be an integer or null`);
+    }
+    return {id: string(record, 'id', path), version: version as number | null};
+  });
 }
 
 /** Why `vibesys --detach` started nothing (`DetachedLaunchFailure`). */

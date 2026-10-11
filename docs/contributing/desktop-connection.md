@@ -479,7 +479,7 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Stdio relay core | built (entrypoint to be replaced) |
 | Pure supervisor core | built (check to be replaced) |
 | Light host commands and import guard (phase 1) | built |
-| Explicit run identity (phase 2) | not built |
+| Explicit run identity (phase 2) | built (server side; the desktop app still keeps its id inference until phase 5 or 6 removes it) |
 | Lifecycle phases, progress, tombstones (phase 3) | not built |
 | Control envelope split (phase 4, step one) | built (`server.control_envelope`) |
 | Host helper and its contract (phase 4) | not built |

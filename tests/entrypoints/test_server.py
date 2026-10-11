@@ -12,6 +12,7 @@ from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
 from string import ascii_lowercase
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -1071,7 +1072,7 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
 ) -> None:
     observed: dict[str, object] = {}
     invocation = object()
-    request = object()
+    request = SimpleNamespace(resolved_run_id="run-1")
 
     class ReturnValue:
         def __init__(self, value: object) -> None:
@@ -1109,4 +1110,5 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     assert options["web_port"] == 4312
     assert options["web_assets"] == tmp_path.resolve()
     assert callable(options["tui_defaults"])
+    assert options["run_id"] == "run-1"
     assert observed["request"] is request

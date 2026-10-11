@@ -54,11 +54,9 @@ def test_cli_rejects_missing_profile_before_repository_preparation(
 ) -> None:
     invocation = parse_cli_invocation(_arguments(tmp_path, profiler))
     before = set(tmp_path.rglob("*"))
-    assert invocation.args.exp_name is None
     with pytest.raises(ConfigurationError, match=r"profile\.command") as error:
         build_run_request(invocation)
     assert error.value.diagnostic.code == "profile_workload_invalid"
-    assert invocation.args.exp_name is None
     assert invocation.args.repo is None
     assert set(tmp_path.rglob("*")) == before
 

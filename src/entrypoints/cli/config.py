@@ -12,7 +12,6 @@ from vibesys.api import ComputeBackend, Config, DomainName, load_config
 from vibesys.api.request import (
     REPOSITORY_SLUG,
     default_skill_roots,
-    generate_experiment_name,
     repository_name_from_experiment,
     resolve_skill_source_dirs,
 )
@@ -208,9 +207,6 @@ def _prepare_experiment_repository(args: argparse.Namespace, config: Config) -> 
         args.repo = f"{_resolve_repository_owner(config)}/{args.repo}"
     if args.resume is not None:
         return
-
-    if args.exp_name is None:
-        args.exp_name = generate_experiment_name(args.input_bundle.root)
 
     # A direct project run stays local unless publication was requested
     # explicitly. Copied projects retain the convenient generated remote.

@@ -165,11 +165,9 @@ class ServerParts:
         session, so `core_events` needs its own attach call to write
         ``core-events.jsonl`` under *log_dir*.
         """
-        self.integration.attach(log_dir, record=record)
-        self.core_events.attach(
-            log_dir,
-            record.run_id if record is not None else log_dir.parent.name,
-        )
+        run_id = record.run_id if record is not None else HARNESS_RUN_ID
+        self.integration.attach(log_dir, run_id=run_id, record=record)
+        self.core_events.attach(log_dir, run_id)
 
     def close(self) -> None:
         """Release subscriptions owned by the integration adapter."""
@@ -254,6 +252,10 @@ def build_server_parts(
     if log_dir is not None:
         parts.attach(log_dir, record=record)
     return parts
+
+
+HARNESS_RUN_ID = "harness-run"
+"""The run a harness without a ``RunRecord`` journals as."""
 
 
 # Bounds a wait that always ends when the thing waited on happens; reaching it

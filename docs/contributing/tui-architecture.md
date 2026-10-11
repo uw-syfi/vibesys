@@ -161,9 +161,13 @@ if the backend does not answer in time. `--theme` skips the query and reaches th
 ### Headless detached runs and the live-instance registry
 
 `vibesys --detach` without `--web` starts a run that outlives the shell or SSH session that started
-it. The launcher validates the run arguments, spawns `entrypoints.server` in a new session (no
-controlling terminal, stdin from `/dev/null`), waits until the child's control socket accepts
-connections, and prints the child's `LiveInstanceRecord` as one JSON line on stdout. The server
+it. The launcher validates the run arguments and fixes the run's id: parsing allocates a fresh
+run's id, or resolves a resume (`latest` included) to the run it names. It then spawns
+`entrypoints.detached_run` with `--run-id` in a new session (no controlling terminal, stdin from
+`/dev/null`), waits until the child's control socket accepts connections, and prints the child's
+`LiveInstanceRecord` as one JSON line on stdout. The child takes its registry lock and publishes a
+record naming its run before it imports the engine, then serves the run through
+`entrypoints.server`; every event the server journals names that run, from the first. The server
 keeps running with or without clients and exits when the run ends; a finished run is reopened
 read-only from its stored events with `--web-reopen`.
 
@@ -179,10 +183,15 @@ $XDG_RUNTIME_DIR/vibesys/            (else /tmp/vibesys-<uid>/), mode 0700
   runs/<id>/server.log               the server's stdout and stderr
 ```
 
-A record's `vibesys_root` is the absolute path of the VibeSys source checkout the server runs from
-(the directory whose `pyproject.toml` declares the `vibesys` project), or `null` for a server run
-from an installed distribution and for records written before the field existed. The desktop app
-uses it to suggest the checkout to run `vibesys` from on that host.
+A record (version 2) always names its `run_id`. Its `vibesys_root` is the absolute path of the
+VibeSys source checkout the server runs from (the directory whose `pyproject.toml` declares the
+`vibesys` project), or `null` for a server run from an installed distribution. The desktop app uses
+it to suggest the checkout to run `vibesys` from on that host.
+
+Records carry their own `version`, because two checkouts on one host share one registry. A lister
+parses every version it knows strictly and upgrades it (a version 1 record upgrades once it names
+its run); a live server's record that it cannot read (another version, or corrupt) is listed under
+`unreadable` with its id and claimed version, never dropped and never a failure of the listing.
 
 The root is never under `$HOME`, which may be on NFS. Liveness is proven, not read from the record:
 the server holds an exclusive `flock` on its lock file for its lifetime, and the kernel releases it

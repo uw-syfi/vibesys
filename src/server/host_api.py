@@ -7,18 +7,26 @@ a host command that reads or writes them starts in a fraction of the time the
 run engine takes to import. ``tests/architecture/test_light_entrypoints.py``
 keeps it that way.
 
+Durable documents carry their own ``version``. A reader parses every version
+it knows strictly and upgrades it (``parse_record``); a record of a version it
+does not know, or one it cannot parse, is ``UnreadableRecord``, never dropped
+and never a failure of the whole listing: two checkouts on one host share one
+registry.
+
 Public surface: ``PROTOCOL_VERSION``, ``INSTANCE_ID_PATTERN``, ``InstanceId``,
-``InstanceStatus``, ``LiveInstanceRecord``, ``InstanceList``, ``StopOutcome``,
-``StopRoute``, ``InstanceStopResult``, ``DetachedLaunchErrorCode``, and
+``RunId``, ``InstanceStatus``, ``LiveInstanceRecord``, ``UnreadableRecord``,
+``parse_record``, ``InstanceList``, ``StopOutcome``, ``StopRoute``,
+``InstanceStopResult``, ``DetachedLaunchErrorCode``, and
 ``DetachedLaunchFailure``.
 """
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, PositiveInt, StringConstraints
+from pydantic import BaseModel, ConfigDict, PositiveInt, StringConstraints, ValidationError
 
 PROTOCOL_VERSION = 1
 """The run protocol version a server speaks on its control socket.
@@ -31,6 +39,9 @@ INSTANCE_ID_PATTERN = r"^[0-9a-f]{12}$"
 InstanceId = Annotated[str, StringConstraints(pattern=INSTANCE_ID_PATTERN)]
 """A registry key: 12 lowercase hex digits, so it is never a path fragment."""
 
+RunId = Annotated[str, StringConstraints(min_length=1)]
+"""The durable run a server drives; ``vs_project`` owns its full syntax."""
+
 
 class InstanceStatus(StrEnum):
     """How far a live server has come; run status itself is on its socket."""
@@ -42,16 +53,20 @@ class InstanceStatus(StrEnum):
 
 
 class LiveInstanceRecord(BaseModel):
-    """What a live detached server publishes about itself (version 1)."""
+    """What a live detached server publishes about itself (version 2).
+
+    ``run_id`` is allocated by the launcher before the server starts, so the
+    record names its run from the first time it is published.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[1] = 1
+    version: Literal[2] = 2
     id: InstanceId
     status: InstanceStatus
     socket_path: str
     project_root: str
-    run_id: str | None = None
+    run_id: RunId
     pid: PositiveInt
     started_at: float
     hostname: str
@@ -61,19 +76,78 @@ class LiveInstanceRecord(BaseModel):
     """Absolute path of the VibeSys source checkout this server runs from.
 
     ``None`` when the server runs from an installed distribution rather than a
-    checkout, and in records written before the field existed (the field is
-    additive, so the record stays version 1). A client uses it to suggest the
-    checkout it should run ``vibesys`` from on this host.
+    checkout. A client uses it to suggest the checkout it should run
+    ``vibesys`` from on this host.
     """
 
 
-class InstanceList(BaseModel):
-    """``vibesys instances list --json``: the live servers on this node."""
+class _LiveInstanceRecordV1(BaseModel):
+    """Version 1: ``run_id`` was published only once the run was ready."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[1] = 1
+    version: Literal[1]
+    id: InstanceId
+    status: InstanceStatus
+    socket_path: str
+    project_root: str
+    run_id: RunId | None = None
+    pid: PositiveInt
+    started_at: float
+    hostname: str
+    protocol_version: Literal[1]
+    vibesys_version: str
+    vibesys_root: str | None = None
+
+    def upgrade(self) -> LiveInstanceRecord | None:
+        """The version 2 record, or ``None`` while this server has not named its run."""
+        if self.run_id is None:
+            return None
+        return LiveInstanceRecord.model_validate(self.model_dump(exclude={"version"}))
+
+
+class UnreadableRecord(BaseModel):
+    """A registry entry this reader cannot interpret; ``version`` is ``None`` if it has none."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: InstanceId
+    version: int | None
+
+
+def parse_record(instance_id: str, raw: str) -> LiveInstanceRecord | UnreadableRecord:
+    """Parse one stored record of any version, strictly, into the current version."""
+    try:
+        document = json.loads(raw)
+    except ValueError:
+        return UnreadableRecord(id=instance_id, version=None)
+    version = document.get("version") if isinstance(document, dict) else None
+    if not isinstance(version, int) or isinstance(version, bool):
+        return UnreadableRecord(id=instance_id, version=None)
+    try:
+        match version:
+            case 1:
+                record = _LiveInstanceRecordV1.model_validate(document).upgrade()
+            case 2:
+                record = LiveInstanceRecord.model_validate(document)
+            case _:
+                record = None
+    except ValidationError:
+        record = None
+    if record is None or record.id != instance_id:
+        return UnreadableRecord(id=instance_id, version=version)
+    return record
+
+
+class InstanceList(BaseModel):
+    """``vibesys instances list --json``: the live servers on this node (version 2)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: Literal[2] = 2
     instances: tuple[LiveInstanceRecord, ...]
+    unreadable: tuple[UnreadableRecord, ...] = ()
+    """Live servers whose record this reader cannot interpret (another version, or corrupt)."""
     unverified: tuple[InstanceId, ...] = ()
     """Records whose lock this host could not read; neither live nor removed."""
 

@@ -27,6 +27,7 @@ def main(instance_id: str) -> None:
                 status=InstanceStatus.SERVING,
                 socket_path=str(instance_socket_path(root, instance_id)),
                 project_root=str(Path.cwd()),
+                run_id=f"run-{instance_id}",
                 pid=os.getpid(),
                 started_at=0.0,
                 hostname=hostname,

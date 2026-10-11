@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
-import tempfile
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,13 +23,14 @@ from server.host_api import (
     LiveInstanceRecord,
     StopOutcome,
     StopRoute,
+    UnreadableRecord,
+    parse_record,
 )
 from server.instances import CONTROL_REPLY_TIMEOUT_SECONDS, ControlSocketStopRequester
 from server.registry import (
     STOP_TIMEOUT_SECONDS,
     FakeInstanceHold,
     FakeInstanceStore,
-    FileInstanceHold,
     FileInstanceStore,
     InstanceObservation,
     LiveRegistry,
@@ -49,39 +50,26 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from server.host_api import InstanceStopResult
-    from server.registry import InstanceHold, InstanceStore
+    from server.registry import InstanceStore
     from vs_sim.api import Listener
 
 IDS = [f"{index:012x}" for index in range(1, 6)]
 
 
-def _record(instance_id: str, *, started_at: float = 1.0) -> LiveInstanceRecord:
+def _record(
+    instance_id: str, *, started_at: float = 1.0, run_id: str = "run-1"
+) -> LiveInstanceRecord:
     return LiveInstanceRecord(
         id=instance_id,
         status=InstanceStatus.SERVING,
         socket_path=f"/run/vibesys/runs/{instance_id}/control.sock",
         project_root="/project",
+        run_id=run_id,
         pid=4242,
         started_at=started_at,
         hostname="node",
         vibesys_version="0+test",
     )
-
-
-def _crash(hold: InstanceHold) -> None:
-    """Die without cleanup, as ``kill -9`` would: the lock drops, the files stay.
-
-    A crashed hold must not be released afterwards: its descriptor is gone.
-    """
-    if isinstance(hold, FakeInstanceHold):
-        hold.crash()
-        return
-    assert isinstance(hold, FileInstanceHold)
-    # test-isolation: a real crash is the kernel closing the lock descriptor;
-    # closing it here reproduces exactly that in process, without a child.
-    os.close(hold._lock._descriptor or -1)  # noqa: SLF001  # lint-waiver: LW-178207 [SLF001]; model kill -9 by closing the private lock descriptor the kernel would close
-    # > A public crash method on the production hold would exist only for tests,
-    # > and a real child process per step would make the interleaving property slow.
 
 
 @pytest.fixture(params=["fake", "file"])
@@ -111,10 +99,12 @@ def test_a_live_holder_is_never_reaped(store: InstanceStore) -> None:
     assert judge(store.observe(IDS[0])) is Verdict.LIVE
 
 
-def test_a_crashed_holder_is_dead_and_reaped(store: InstanceStore) -> None:
+def test_a_crashed_holder_is_dead_and_reaped() -> None:
+    # A real kill -9 of a holder is tests/e2e/test_live_instances_e2e.py's.
+    store = FakeInstanceStore()
     hold = store.hold(IDS[0])
     hold.publish(_record(IDS[0]))
-    _crash(hold)
+    hold.crash()
 
     assert store.observe(IDS[0]).lock is LockState.FREE
     assert judge(store.observe(IDS[0])) is Verdict.DEAD
@@ -152,7 +142,8 @@ def test_a_record_naming_another_id_is_not_trusted(tmp_path: Path) -> None:
     hold = store.hold(IDS[0])
     hold.publish(_record(IDS[1]))
 
-    assert judge(store.observe(IDS[0])) is Verdict.PENDING
+    assert store.observe(IDS[0]).record == UnreadableRecord(id=IDS[0], version=2)
+    assert judge(store.observe(IDS[0])) is Verdict.UNREADABLE
 
 
 def test_file_records_are_private_and_reject_unknown_keys(tmp_path: Path) -> None:
@@ -167,7 +158,7 @@ def test_file_records_are_private_and_reject_unknown_keys(tmp_path: Path) -> Non
     with pytest.raises(ValidationError, match="extra"):
         LiveInstanceRecord.model_validate_json(raw)
     record_path.write_text(raw)
-    assert judge(store.observe(IDS[0])) is Verdict.PENDING
+    assert judge(store.observe(IDS[0])) is Verdict.UNREADABLE
 
 
 # --- pure core ----------------------------------------------------------------
@@ -175,97 +166,168 @@ def test_file_records_are_private_and_reject_unknown_keys(tmp_path: Path) -> Non
 
 @given(
     lock=st.sampled_from(LockState),
-    record=st.one_of(st.none(), st.sampled_from(IDS).map(_record)),
+    record=st.one_of(
+        st.none(),
+        st.sampled_from(IDS).map(_record),
+        st.builds(UnreadableRecord, id=st.just(IDS[0]), version=st.none() | st.integers()),
+    ),
 )
-def test_only_a_held_lock_with_a_record_is_live(
-    lock: LockState, record: LiveInstanceRecord | None
+def test_only_a_held_lock_with_a_readable_record_is_live(
+    lock: LockState, record: LiveInstanceRecord | UnreadableRecord | None
 ) -> None:
     verdict = judge(InstanceObservation(IDS[0], lock, record))
+    held = lock is LockState.HELD
 
-    assert (verdict is Verdict.LIVE) == (lock is LockState.HELD and record is not None)
+    assert (verdict is Verdict.LIVE) == (held and isinstance(record, LiveInstanceRecord))
+    assert (verdict is Verdict.UNREADABLE) == (held and isinstance(record, UnreadableRecord))
     assert (verdict is Verdict.DEAD) == (lock in {LockState.FREE, LockState.ABSENT})
+
+
+# --- record versions ------------------------------------------------------------
+
+_RECORD_DOCUMENTS = {
+    "current": lambda instance_id: _record(instance_id).model_dump(mode="json"),
+    "v1 named": lambda instance_id: {**_record(instance_id).model_dump(mode="json"), "version": 1},
+    "v1 unnamed": lambda instance_id: {
+        **_record(instance_id).model_dump(mode="json", exclude={"run_id"}),
+        "version": 1,
+    },
+    "future": lambda instance_id: {"version": 9, "id": instance_id, "phase": "anything"},
+    "no version": lambda instance_id: {"id": instance_id},
+    "not an object": lambda _instance_id: [1, 2],
+    "current, extra key": lambda instance_id: {
+        **_record(instance_id).model_dump(mode="json"),
+        "extra": 1,
+    },
+}
+
+
+def _raw(kind: str, instance_id: str) -> str:
+    return json.dumps(_RECORD_DOCUMENTS[kind](instance_id)) if kind != "corrupt" else "{"
+
+
+@given(
+    kinds=st.lists(st.sampled_from([*_RECORD_DOCUMENTS, "corrupt"]), min_size=1, max_size=len(IDS))
+)
+def test_a_listing_over_mixed_record_versions_reports_every_live_id_exactly_once(
+    kinds: list[str],
+) -> None:
+    store = FakeInstanceStore()
+    for instance_id, kind in zip(IDS, kinds, strict=False):
+        store.plant(instance_id, _raw(kind, instance_id))
+
+    listing = LiveRegistry(store).list()
+
+    live = [record.id for record in listing.instances]
+    unreadable = [record.id for record in listing.unreadable]
+    assert sorted(live + unreadable) == IDS[: len(kinds)]
+    for instance_id, kind in zip(IDS, kinds, strict=False):
+        assert (instance_id in live) == (kind in {"current", "v1 named"})
+
+
+@pytest.mark.parametrize(
+    ("kind", "version"),
+    [
+        ("v1 unnamed", 1),
+        ("future", 9),
+        ("no version", None),
+        ("not an object", None),
+        ("corrupt", None),
+        ("current, extra key", 2),
+    ],
+)
+def test_an_unreadable_record_names_the_version_it_claims(kind: str, version: int | None) -> None:
+    assert parse_record(IDS[0], _raw(kind, IDS[0])) == UnreadableRecord(id=IDS[0], version=version)
+
+
+def test_a_version_1_record_that_named_its_run_upgrades_to_the_current_version() -> None:
+    assert parse_record(IDS[0], _raw("v1 named", IDS[0])) == _record(IDS[0])
 
 
 # --- registry under any interleaving -------------------------------------------
 
 
 class RegistryInterleavings(RuleBasedStateMachine):
-    """Start, publish, crash, release and list in any order, on both stores at once.
+    """Start, publish, crash, release and list in any order.
 
-    Each operation is applied to the Fake and to the filesystem store, so the
-    Fake is held to the real store's behavior as well as to the invariants.
+    Each server is named its run when it starts, as a launcher does, and other
+    checkouts plant records this reader cannot interpret. Whatever the order,
+    a listed record names the run its server started with, and every live id
+    is listed exactly once.
     """
 
     def __init__(self) -> None:
         super().__init__()
-        self._directory = tempfile.TemporaryDirectory()
-        self.stores: tuple[InstanceStore, ...] = (
-            FakeInstanceStore(),
-            FileInstanceStore(Path(self._directory.name)),
-        )
-        self.holds: dict[str, tuple[InstanceHold, ...]] = {}
-        self.crashed: set[str] = set()
+        self.store = FakeInstanceStore()
+        self.holds: dict[str, FakeInstanceHold] = {}
+        self.run_ids: dict[str, str] = {}
         self.alive: set[str] = set()
         self.published: set[str] = set()
+        self.foreign: set[str] = set()
         self.started_at = 0.0
 
-    @precondition(lambda self: len(self.holds) < len(IDS))
+    def _fresh(self) -> list[str]:
+        return [i for i in IDS if i not in self.holds and i not in self.foreign]
+
+    @precondition(lambda self: bool(self._fresh()))
     @rule(data=st.data())
     def start(self, data: st.DataObject) -> None:
-        instance_id = data.draw(st.sampled_from([i for i in IDS if i not in self.holds]))
-        self.holds[instance_id] = tuple(store.hold(instance_id) for store in self.stores)
+        instance_id = data.draw(st.sampled_from(self._fresh()))
+        self.holds[instance_id] = self.store.hold(instance_id)
+        self.run_ids[instance_id] = f"run-{instance_id}"
         self.alive.add(instance_id)
+
+    @precondition(lambda self: bool(self._fresh()))
+    @rule(data=st.data(), version=st.integers(min_value=3, max_value=9))
+    def another_checkout_starts(self, data: st.DataObject, version: int) -> None:
+        instance_id = data.draw(st.sampled_from(self._fresh()))
+        self.store.plant(instance_id, json.dumps({"version": version, "id": instance_id}))
+        self.foreign.add(instance_id)
 
     @precondition(lambda self: bool(self.alive))
     @rule(data=st.data())
     def publish(self, data: st.DataObject) -> None:
         instance_id = data.draw(st.sampled_from(sorted(self.alive)))
         self.started_at += 1
-        for hold in self.holds[instance_id]:
-            hold.publish(_record(instance_id, started_at=self.started_at))
+        self.holds[instance_id].publish(
+            _record(instance_id, started_at=self.started_at, run_id=self.run_ids[instance_id])
+        )
         self.published.add(instance_id)
 
     @precondition(lambda self: bool(self.alive))
     @rule(data=st.data(), ending=st.sampled_from(["release", "crash"]))
     def end(self, data: st.DataObject, ending: str) -> None:
         instance_id = data.draw(st.sampled_from(sorted(self.alive)))
-        for hold in self.holds[instance_id]:
-            if ending == "release":
-                hold.release()
-            else:
-                _crash(hold)
-        if ending == "crash":
-            self.crashed.add(instance_id)
+        hold = self.holds[instance_id]
+        if ending == "release":
+            hold.release()
+        else:
+            hold.crash()
         self.alive.discard(instance_id)
 
     @rule()
     def list_instances(self) -> None:
-        listings = [LiveRegistry(store).list() for store in self.stores]
+        listing = LiveRegistry(self.store).list()
 
-        assert listings[0] == listings[1]
-        listed = {record.id for record in listings[0].instances}
-        assert listed == self.alive & self.published
-        for store in self.stores:
-            # Listing removes every dead id and keeps every live one.
-            assert set(store.ids()) == self.alive
+        live = [record.id for record in listing.instances]
+        unreadable = [record.id for record in listing.unreadable]
+        assert sorted(live) == sorted(self.alive & self.published)
+        assert sorted(unreadable) == sorted(self.foreign)
+        for record in listing.instances:
+            assert record.run_id == self.run_ids[record.id]
+        # Listing removes every dead id and keeps every live one.
+        assert set(self.store.ids()) == self.alive | self.foreign
 
     @invariant()
     def no_dead_server_is_live_and_no_live_one_is_lost(self) -> None:
-        for store in self.stores:
-            for instance_id in IDS:
-                verdict = judge(store.observe(instance_id))
-                if instance_id in self.alive:
-                    assert verdict in {Verdict.LIVE, Verdict.PENDING}
-                    assert (verdict is Verdict.LIVE) == (instance_id in self.published)
-                else:
-                    assert verdict is Verdict.DEAD
-
-    def teardown(self) -> None:
-        for instance_id, holds in self.holds.items():
-            if instance_id not in self.crashed:
-                for hold in holds:
-                    hold.release()
-        self._directory.cleanup()
+        for instance_id in self.holds:
+            verdict = judge(self.store.observe(instance_id))
+            if instance_id in self.alive:
+                assert verdict is (
+                    Verdict.LIVE if instance_id in self.published else Verdict.PENDING
+                )
+            else:
+                assert verdict is Verdict.DEAD
 
 
 TestRegistryInterleavings = RegistryInterleavings.TestCase
@@ -531,11 +593,3 @@ def test_socket_paths_fit_the_unix_limit_with_room_to_spare() -> None:
     assert len(str(instance_socket_path(root, new_instance_id())).encode()) <= (
         MAX_SOCKET_PATH_BYTES - 40
     )
-
-
-def test_record_without_vibesys_root_still_parses_as_version_1() -> None:
-    document = _record(IDS[0]).model_dump(exclude={"vibesys_root"})
-
-    record = LiveInstanceRecord.model_validate(document)
-
-    assert (record.version, record.vibesys_root) == (1, None)

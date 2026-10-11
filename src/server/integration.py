@@ -233,11 +233,12 @@ class RunIntegrationAdapter:
         self,
         log_dir: Path,
         *,
+        run_id: str,
         record: RunRecord | None = None,
     ) -> None:
-        """Attach the wire journal to durable run storage."""
+        """Attach the wire journal of ``run_id`` to durable run storage."""
         self._failure_diagnostics.clear()
-        self.controller.attach(log_dir, record=record)
+        self.controller.attach(log_dir, run_id=run_id, record=record)
 
     def handle_run_ready(self, session: RunSession, ready: RunReady) -> None:
         """Attach frontend projection and chat from narrow readiness facts.
@@ -246,7 +247,7 @@ class RunIntegrationAdapter:
         attach runs first so the wire journal is ready before experiment chat
         can read the run history.
         """
-        self.attach(ready.log_directory, record=ready.record)
+        self.attach(ready.log_directory, run_id=ready.record.run_id, record=ready.record)
         attachment = RunAttachment(
             chat_state_dir=ready.frontend_state_directory / "chat",
             agent_defaults=AgentSelection(

@@ -20,6 +20,7 @@ from vibesys.api import (
 from vibesys.api.metrics import Objective
 from vibesys.api.profilers import CLI_PROFILER_CHOICES, coerce_profiler_kind
 from vs_agent.api import SHIPPED_PROVIDERS
+from vs_project.api import ProjectStateError, validate_run_id
 
 
 def _parse_profiler_kind(value: str) -> ProfilerKind:
@@ -512,6 +513,22 @@ def _apply_common_args(parser: argparse.ArgumentParser) -> None:
         metavar="RUN",
         help="Resume a run; omit RUN to select the current or latest run.",
     )
+    parser.add_argument(
+        "--run-id",
+        type=_run_id,
+        default=None,
+        help=(
+            "The run's durable id, allocated by a launcher before the run starts; "
+            "with --resume, the exact run to resume. Generated when omitted."
+        ),
+    )
+
+
+def _run_id(value: str) -> str:
+    try:
+        return validate_run_id(value)
+    except ProjectStateError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
 
 
 def _make_parser(prog: str, description: str) -> argparse.ArgumentParser:

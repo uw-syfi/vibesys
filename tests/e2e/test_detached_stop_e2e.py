@@ -127,7 +127,9 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     socket_path = instance_socket_path(root, instance_id)
     socket_path.parent.mkdir(parents=True, mode=0o700)
     registry = LiveRegistry(FileInstanceStore(root))
-    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path, detach=True)
+    runtime = ServerRuntime(
+        run_id="run-1", runs=default_runs(), socket_path=socket_path, detach=True
+    )
     integration = LocalRunIntegration()
     integration.events.subscribe(runtime.integration.project_event)
     threads = OsThreads()
@@ -155,6 +157,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
                     status=InstanceStatus.SERVING,
                     socket_path=str(socket_path),
                     project_root=str(root),
+                    run_id="run-1",
                     pid=os.getpid(),
                     started_at=threads.now(),
                     hostname=hostname,

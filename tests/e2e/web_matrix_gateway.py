@@ -41,6 +41,7 @@ def main() -> int:
     arguments = _arguments()
     stopped = threading.Event()
     runtime = ServerRuntime(
+        run_id="run-1",
         runs=default_runs(),
         socket_path=arguments.store_directory / "control.sock",
         web=True,

@@ -129,7 +129,7 @@ def test_headless_entry_prints_one_run_failed_line_with_the_typed_reason(
 
 def test_server_entry_starts_launch_run_and_projects_events(tmp_path: Path) -> None:
     runs = _runs()
-    runtime = ServerRuntime(socket_path=tmp_path / "control.sock", runs=runs)
+    runtime = ServerRuntime(run_id="run-1", socket_path=tmp_path / "control.sock", runs=runs)
     try:
         result = runtime.drive(_request(tmp_path / "project"))
         assert result.succeeded
@@ -165,7 +165,7 @@ def test_launch_rejects_invalid_builtin_options_before_execution(
 def test_server_retains_chat_after_run_result_and_releases_it_on_close(tmp_path: Path) -> None:
     clients: list[FakeAgentClient] = []
     runs = _runs(clients)
-    runtime = ServerRuntime(socket_path=tmp_path / "control.sock", runs=runs)
+    runtime = ServerRuntime(run_id="run-1", socket_path=tmp_path / "control.sock", runs=runs)
     try:
         result = runtime.drive(_request(tmp_path / "project"))
         assert result.succeeded

@@ -42,11 +42,12 @@ def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
         def listening(self) -> None:
             milestones.append("listening")
 
-        def run_ready(self, run_id: str) -> None:
-            milestones.append(run_id)
-
     runtime = ServerRuntime(
-        runs=default_runs(), socket_path=socket_path, detach=True, observer=Observer()
+        run_id="run-1",
+        runs=default_runs(),
+        socket_path=socket_path,
+        detach=True,
+        observer=Observer(),
     )
     started = threading.Event()
     finish = runtime.threads.event()
@@ -114,6 +115,7 @@ def test_detached_runtime_unwinds_callback_failures_without_shutdown(
     merge-base runtime from its old detached wait in ``finally``.
     """
     runtime = ServerRuntime(
+        run_id="run-1",
         runs=default_runs(),
         socket_path=tmp_path / "control.sock",
         detach=True,

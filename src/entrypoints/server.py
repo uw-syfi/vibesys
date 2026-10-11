@@ -9,15 +9,14 @@ import sys
 import tempfile
 import threading
 import webbrowser
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn, Protocol, TypeVar
+from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from entrypoints import cli
-from entrypoints.launcher import source_checkout_root
 from entrypoints.web_assets import WebAssetBundle
 from launch import default_runs
 from server.host_api import (
@@ -28,10 +27,8 @@ from server.host_api import (
 )
 from server.registry import (
     FileInstanceStore,
-    InstanceHold,
     LiveRegistry,
     driving,
-    host_facts,
     instance_root,
     instance_run_directory,
     instance_socket_path,
@@ -55,7 +52,7 @@ from vibesys.api.request import generate_experiment_name, repository_name_from_e
 from vs_github.api import GitHubCLI, GitHubCLIError
 from vs_project.api import Project
 from vs_sandbox.api import relay_signals
-from vs_sim.api import OsThreads, SystemClock
+from vs_sim.api import OsThreads
 
 _WEB_PORT_MAX = 65_535
 _DETACHED_START_TIMEOUT_SECONDS = 10.0
@@ -68,14 +65,12 @@ _DETACHED_LOG_TAIL_BYTES = 4_096
 _INTERRUPT_SIGNAL = signal.SIGUSR1
 """Private signal that wakes the main thread; only the relay sends it."""
 
-_T = TypeVar("_T")
-
 if TYPE_CHECKING:
     import argparse
     from collections.abc import Callable, Iterator
     from typing import BinaryIO
 
-    from server.runtime import ServerRuntime
+    from server.runtime import ServerLifecycleObserver, ServerRuntime
     from vibesys.api import Config
     from vs_sim.api import Threads
 
@@ -418,63 +413,72 @@ def _spawn_detached(
             )
         os.fchmod(descriptor, 0o600)
         output.truncate(0)
-        child_arguments = _detached_child_arguments(arguments, instance_path)
         record = _start_detached_child(
-            child_arguments,
-            output,
-            log_path,
-            lambda: effects.discover(instance_path),
-            "Detached VibeSys web gateway",
+            _DetachedLaunch(
+                module="entrypoints.server",
+                arguments=_detached_child_arguments(arguments, instance_path),
+                output=output,
+                log_path=log_path,
+                ready=lambda: effects.discover(instance_path),
+                name="Detached VibeSys web gateway",
+            ),
             effects,
         )
         print(f"VibeSys web UI: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101036 [T201]; expose the detached capability URL to the launcher user
         webbrowser.open(record.url, new=2)
 
 
-def _start_detached_child(  # noqa: PLR0913  # lint-waiver: LW-178204 [PLR0913]; one launch loop serves both detached servers, and each argument is an independent fact of the launch (argv, log stream and its path, readiness probe, operator-facing name, effects)
-    # > A parameter object would exist only to carry these six values into this
-    # > one private function; two copies of the loop would let the web and
-    # > headless launches drift in timeout and failure reporting.
-    child_arguments: list[str],
-    output: BinaryIO,
-    log_path: Path,
-    ready: Callable[[], _T | None],
-    name: str,
-    effects: _DetachedGatewayEffects,
-) -> _T:
-    """Spawn a detached server in its own session and wait, bounded, until ``ready``.
+@dataclass(frozen=True)
+class _DetachedLaunch[T]:
+    """One detached server to start: what to run, where its output goes, when it is ready."""
+
+    module: str
+    arguments: list[str]
+    output: BinaryIO
+    log_path: Path
+    ready: Callable[[], T | None]
+    """Polled until it returns the started server's record."""
+    name: str
+    """How failures name the server to an operator."""
+
+    def exited(self, status: int) -> _DetachedStartError:
+        return self._failure(f"{self.name} exited with status {status}")
+
+    def not_ready(self) -> _DetachedStartError:
+        return self._failure(
+            f"{self.name} did not become ready within {_DETACHED_START_TIMEOUT_SECONDS:g} seconds"
+        )
+
+    def _failure(self, summary: str) -> _DetachedStartError:
+        return _DetachedStartError(
+            _detached_failure(summary, self.log_path, self.output), self.log_path
+        )
+
+
+def _start_detached_child[T](launch: _DetachedLaunch[T], effects: _DetachedGatewayEffects) -> T:
+    """Spawn a detached server in its own session and wait, bounded, until it is ready.
 
     The child gets a new session (no controlling terminal, so a closed SSH
-    session's hangup never reaches it), stdin from ``/dev/null``, and
-    ``output`` as stdout and stderr.
+    session's hangup never reaches it), stdin from ``/dev/null``, and the
+    launch's output as stdout and stderr.
     """
     environment = {**os.environ, "VIBESYS_DETACHED_CHILD": "1"}
     process = effects.spawn(
-        [sys.executable, "-m", "entrypoints.server", *child_arguments],
+        [sys.executable, "-m", launch.module, *launch.arguments],
         environment,
-        output,
+        launch.output,
     )
     deadline = effects.monotonic() + _DETACHED_START_TIMEOUT_SECONDS
     while effects.monotonic() < deadline:
-        value = ready()
+        value = launch.ready()
         if value is not None:
             return value
         status = process.poll()
         if status is not None:
-            raise _DetachedStartError(
-                _detached_failure(f"{name} exited with status {status}", log_path, output),
-                log_path,
-            )
+            raise launch.exited(status)
         effects.sleep(_DETACHED_POLL_SECONDS)
     _stop_detached(process)
-    raise _DetachedStartError(
-        _detached_failure(
-            f"{name} did not become ready within {_DETACHED_START_TIMEOUT_SECONDS:g} seconds",
-            log_path,
-            output,
-        ),
-        log_path,
-    )
+    raise launch.not_ready()
 
 
 class _DetachedStartError(RuntimeError):
@@ -490,7 +494,11 @@ def _spawn_detached_instance(
     root: Path,
     effects: _DetachedGatewayEffects = _DETACHED_EFFECTS,
 ) -> LiveInstanceRecord:
-    """Start a headless detached server under ``root`` and return its serving record."""
+    """Start a headless detached server under ``root`` and return its serving record.
+
+    ``arguments`` name the run (``--run-id``); the server publishes it in its
+    first record, before it loads the engine (``entrypoints.detached_run``).
+    """
     registry = LiveRegistry(FileInstanceStore(root))
     instance_id = new_instance_id()
     run_directory = instance_run_directory(root, instance_id)
@@ -507,17 +515,20 @@ def _spawn_detached_instance(
             )
 
         return _start_detached_child(
-            [
-                *arguments,
-                "--control-socket",
-                str(instance_socket_path(root, instance_id)),
-                "--instance-id",
-                instance_id,
-            ],
-            output,
-            log_path,
-            serving,
-            "Detached VibeSys server",
+            _DetachedLaunch(
+                module="entrypoints.detached_run",
+                arguments=[
+                    *arguments,
+                    "--control-socket",
+                    str(instance_socket_path(root, instance_id)),
+                    "--instance-id",
+                    instance_id,
+                ],
+                output=output,
+                log_path=log_path,
+                ready=serving,
+                name="Detached VibeSys server",
+            ),
             effects,
         )
 
@@ -882,7 +893,13 @@ class _DetachedLiveRunError(RuntimeError):
 def _start_detached_instance(
     arguments: list[str], effects: _DetachedGatewayEffects
 ) -> LiveInstanceRecord:
-    """Reject a malformed or already-live run, then spawn it; raise on any failure."""
+    """Reject a malformed or already-live run, then spawn it; raise on any failure.
+
+    The run's id is fixed here, before anything detaches: parsing allocates a
+    fresh run's id and resolves a resume (``latest`` included) to the run it
+    names. The server receives it as ``--run-id`` and names that run in its
+    record and in every event from the first.
+    """
     if _control_socket_from_argv(arguments) is not None:
         cli.configuration_error(
             "--detach without --web chooses its own control socket; drop --control-socket",
@@ -890,75 +907,20 @@ def _start_detached_instance(
             stage="argument_parsing",
         )
     # Reject a malformed run before anything is spawned, so the operator sees
-    # the diagnostic here rather than in a detached server's log. Resume
-    # resolution happens here too, so ``resume`` is the run id it chose.
-    invocation = cli.parse_cli_invocation(_headless_argv(arguments))
+    # the diagnostic here rather than in a detached server's log.
+    run_id: str = cli.parse_cli_invocation(_headless_argv(arguments)).args.run_id
     root = instance_root(os.environ, os.getuid())
-    resume = invocation.args.resume
-    if isinstance(resume, str):
-        live = driving(LiveRegistry(FileInstanceStore(root)).list(), resume)
-        if live is not None:
-            raise _DetachedLiveRunError(live)
-    return _spawn_detached_instance(arguments, root, effects)
+    live = driving(LiveRegistry(FileInstanceStore(root)).list(), run_id)
+    if live is not None:
+        raise _DetachedLiveRunError(live)
+    return _spawn_detached_instance([*arguments, "--run-id", run_id], root, effects)
 
 
-class _RegistryPublisher:
-    """Keep a held instance's record current as the server reaches milestones."""
-
-    def __init__(self, hold: InstanceHold, record: LiveInstanceRecord) -> None:
-        self._hold = hold
-        self._record = record
-        hold.publish(record)
-
-    def listening(self) -> None:
-        self._publish(self._record.model_copy(update={"status": InstanceStatus.SERVING}))
-
-    def run_ready(self, run_id: str) -> None:
-        self._publish(self._record.model_copy(update={"run_id": run_id}))
-
-    def _publish(self, record: LiveInstanceRecord) -> None:
-        self._record = LiveInstanceRecord.model_validate(record.model_dump())
-        self._hold.publish(self._record)
-
-
-def _running_checkout() -> str | None:
-    """The VibeSys source checkout this server runs from, for its registry record."""
-    root = source_checkout_root()
-    return None if root is None else str(root)
-
-
-def _register_detached_instance(
-    arguments: list[str], control_socket: Path, scope: ExitStack
-) -> _RegistryPublisher:
-    """Hold this detached server's registry id until ``scope`` closes."""
-    instance_id = cli.option_from_argv(arguments, "--instance-id")
-    if instance_id is None:
-        cli.configuration_error(
-            "a detached server needs the --instance-id its launcher assigned",
-            code="invalid_arguments",
-            stage="argument_parsing",
-        )
-    root = instance_root(os.environ, os.getuid())
-    hold = scope.enter_context(LiveRegistry(FileInstanceStore(root)).register(instance_id))
-    hostname, version = host_facts()
-    return _RegistryPublisher(
-        hold,
-        LiveInstanceRecord(
-            id=instance_id,
-            status=InstanceStatus.STARTING,
-            socket_path=str(control_socket),
-            project_root=str(Path.cwd().resolve()),
-            pid=os.getpid(),
-            started_at=SystemClock().now(),
-            hostname=hostname,
-            vibesys_version=version,
-            vibesys_root=_running_checkout(),
-        ),
-    )
-
-
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, *, observer: ServerLifecycleObserver | None = None) -> None:
     """Run the frontend server and headless engine in one process.
+
+    ``observer`` is a detached server's registry record
+    (``entrypoints.detached_run``), told when the server reaches a milestone.
 
     Every configuration diagnostic raised below this frame is rendered to
     stderr and exits with the diagnostic's code, the way
@@ -969,7 +931,7 @@ def main(argv: list[str] | None = None) -> None:
     by the TUI launcher and redirected onto the detached startup log.
     """
     try:
-        _serve(sys.argv[1:] if argv is None else argv)
+        _serve(sys.argv[1:] if argv is None else argv, observer)
     except ConfigurationError as exc:
         cli.render_configuration_error(exc)
     except WebSocketBindError as exc:
@@ -982,7 +944,7 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(1) from None
 
 
-def _serve(arguments: list[str]) -> None:  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR0912, PLR0915]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches
+def _serve(arguments: list[str], observer: ServerLifecycleObserver | None) -> None:  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR0912, PLR0915]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches
     """Serve one invocation, leaving configuration diagnostics to `main`."""
     if arguments and arguments[0] == "tui-defaults":
         _run_tui_defaults(arguments[1:])
@@ -1051,18 +1013,19 @@ def _serve(arguments: list[str]) -> None:  # noqa: C901, PLR0912, PLR0915  # lin
     if control_socket is None:
         temp_socket_dir = tempfile.TemporaryDirectory(prefix="vibesys-web-")
         control_socket = Path(temp_socket_dir.name) / "control.sock"
-    registration = ExitStack()
     try:
-        observer = (
-            _register_detached_instance(arguments, control_socket, registration)
-            if detach and not web
-            else None
+        request = (
+            None
+            if read_only_log is not None
+            else cli.build_run_request(cli.parse_cli_invocation(_headless_argv(arguments)))
         )
+        run_id = None if request is None else request.resolved_run_id
         server_runtime = import_module("server.runtime").ServerRuntime
         if web:
             runtime = server_runtime(
                 socket_path=control_socket,
                 runs=default_runs(),
+                run_id=run_id,
                 tui_defaults=_tui_defaults_from_argv(arguments),
                 web=True,
                 web_port=web_port,
@@ -1077,20 +1040,14 @@ def _serve(arguments: list[str]) -> None:  # noqa: C901, PLR0912, PLR0915  # lin
             runtime = server_runtime(
                 socket_path=control_socket,
                 runs=default_runs(),
+                run_id=run_id,
                 tui_defaults=_tui_defaults_from_argv(arguments),
                 detach=detach,
                 observer=observer,
             )
-        if read_only_log is not None:
-            with _termination_signal(runtime):
-                result = runtime.run(lambda: None)
-        else:
-            invocation = cli.parse_cli_invocation(_headless_argv(arguments))
-            request = cli.build_run_request(invocation)
-            with _termination_signal(runtime):
-                result = runtime.run(lambda: runtime.drive(request))
+        with _termination_signal(runtime):
+            result = runtime.run(lambda: None if request is None else runtime.drive(request))
     finally:
-        registration.close()
         if temp_socket_dir is not None:
             temp_socket_dir.cleanup()
     # `result` is `None` when `ServerRuntime.run` absorbed an operator stop

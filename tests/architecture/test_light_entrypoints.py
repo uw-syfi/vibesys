@@ -35,6 +35,7 @@ LIGHT_ENTRYPOINTS = (
     "entrypoints.instances",
     "entrypoints.tasks",
     "entrypoints.stdio_bridge",
+    "entrypoints.detached_run",
 )
 """Modules a light host command loads first. The launcher routes on argv before
 it loads anything heavy, so its own module level is held to the same bound."""
@@ -48,6 +49,7 @@ ALLOWED_FIRST_PARTY = (
     "entrypoints.instances",
     "entrypoints.tasks",
     "entrypoints.stdio_bridge",
+    "entrypoints.detached_run",
     "server",
     "server.control_envelope",
     "server.diagnostics",

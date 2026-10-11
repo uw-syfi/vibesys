@@ -124,6 +124,24 @@ describe('registry records', () => {
       }
     }
   });
+
+  test('a version 2 record always names its run, and a listing reports records it cannot read', () => {
+    const named = {...fakeRecord(ID, SOCKET), version: 2, run_id: 'run-7'};
+    const record = parseInstanceRecord(named);
+    expect(record.kind === 'compatible' && record.instance.runId).toBe('run-7');
+    expect(() => parseInstanceRecord({...named, run_id: null})).toThrow('record.run_id');
+
+    const listing = parseInstanceList({
+      version: 2,
+      instances: [named],
+      unreadable: [{id: 'ba9876543210', version: 9}],
+      unverified: [],
+    });
+    expect(listing.unreadable).toEqual([{id: 'ba9876543210', version: 9}]);
+    expect(() => parseInstanceList({version: 2, instances: [], unreadable: [{id: 3}]})).toThrow(
+      'listing.unreadable[0].id',
+    );
+  });
 });
 
 describe('version gate', () => {

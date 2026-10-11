@@ -83,6 +83,26 @@ EventListener = Callable[[RunEvent], None]
 HeaderFilter = Callable[[EventHeader], bool]
 
 
+class _RunIdentityError(ValueError):
+    """A writable journal was asked to name no run, or to change its run."""
+
+    @classmethod
+    def unnamed(cls) -> _RunIdentityError:
+        return cls("A writable journal must name its run")
+
+    @classmethod
+    def changed(cls, attached: str, requested: str) -> _RunIdentityError:
+        return cls(f"Journal of run {attached!r} cannot continue as run {requested!r}")
+
+
+def _writable_run_id(attached: str | None, requested: str | None) -> str:
+    if not requested:
+        raise _RunIdentityError.unnamed()
+    if attached is not None and requested != attached:
+        raise _RunIdentityError.changed(attached, requested)
+    return requested
+
+
 class _ReadOnlyRunIdentityError(ValueError):
     """A durable replay log cannot establish one requested identity."""
 
@@ -147,7 +167,13 @@ class WireJournal:
     def attach(  # noqa: C901  # lint-waiver: LW-101046 [C901]; attachment handles store replacement, replay continuity, and read-only validation as one atomic operation
         self, log_dir: Path, *, run_id: str | None = None, read_only: bool = False
     ) -> None:
-        """Attach the journal to a durable run event file."""
+        """Attach the journal to a durable run event file.
+
+        A writable journal names its run from the first event, and keeps that
+        name when it moves to another file: ``run_id`` is required and must
+        match the run already attached. A read-only journal takes its name
+        from the recorded events, checked against ``run_id`` when given.
+        """
         if read_only:
             if not log_dir.is_dir():
                 raise FileNotFoundError(log_dir)
@@ -162,17 +188,17 @@ class WireJournal:
                 previous.run_id = (
                     _read_only_run_id(previous.event_headers(), run_id)
                     if read_only
-                    else run_id or previous.run_id
+                    else _writable_run_id(previous.run_id, run_id)
                 )
                 self.log_dir = log_dir
                 self._read_only = read_only
                 return
-            # Until the run is ready the server does not know its id, and events
-            # name no run (an empty ``run_id``). A client latches the first id
-            # it folds, so a stand-in derived from a path would make it ignore
-            # every event the run sends once its real id is known.
             durable = (
-                EventStore(events_path, run_id=run_id or "", threads=self._threads)
+                EventStore(
+                    events_path,
+                    run_id=_writable_run_id(previous.run_id if previous else None, run_id),
+                    threads=self._threads,
+                )
                 if not read_only
                 else EventStore(events_path, run_id="", read_only=True, threads=self._threads)
             )
