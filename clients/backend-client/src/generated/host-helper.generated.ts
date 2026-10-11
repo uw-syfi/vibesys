@@ -100,8 +100,8 @@ export type Commit = string | null;
 export type Dirty = boolean | null;
 export type RequestId12 = string;
 export type Type12 = "instances.list";
-export type Version = 3;
-export type Version1 = 3;
+export type Version = 4;
+export type Version1 = 4;
 export type Id = string;
 /**
  * How far a live server has come; run status itself is on its socket.
@@ -123,8 +123,13 @@ export type InstanceStatus = "starting" | "serving";
 export type RunStatus = "starting" | "running" | "pausing" | "paused" | "stopping" | "stopped" | "completed" | "failed";
 /**
  * Where a starting run is, in the order it gets there.
+ *
+ * Declaration order is the order: a starting run only moves to a later stage.
  */
-export type StartupStage = "resolving";
+export type StartupStage = "resolving" | "building_image" | "starting_container";
+export type Done = number;
+export type Total = number | null;
+export type Label = string;
 export type Code = string;
 export type Stage = string;
 export type Message1 = string;
@@ -389,7 +394,7 @@ export interface InstancesListReply {
   listing: InstanceList;
 }
 /**
- * ``vibesys instances list --json``: the detached servers on this node (version 3).
+ * ``vibesys instances list --json``: the detached servers on this node (version 4).
  */
 export interface InstanceList {
   version?: Version;
@@ -399,7 +404,7 @@ export interface InstanceList {
   unverified?: Unverified;
 }
 /**
- * What a detached server publishes about itself (version 3).
+ * What a detached server publishes about itself (version 4).
  *
  * ``run_id`` is allocated by the launcher before the server starts, so the
  * record names its run from the first time it is published. ``phase`` is the
@@ -427,13 +432,26 @@ export interface LiveInstanceRecord {
 /**
  * A run's lifecycle status with the detail its status needs.
  *
- * ``stage`` says where a ``starting`` run is; ``reason`` says why a
- * ``failed`` one ended. Neither is present for any other status.
+ * ``stage`` (and, when the stage reports it, ``progress``) says where a
+ * ``starting`` run is; ``reason`` says why a ``failed`` one ended. None of
+ * them is present for any other status.
  */
 export interface RunPhase {
   status: RunStatus;
   stage?: StartupStage | null;
+  progress?: StartupProgress | null;
   reason?: FailureReason | null;
+}
+/**
+ * How far a startup stage has come: ``done`` of ``total`` steps, now on ``label``.
+ *
+ * ``total`` is ``None`` when the stage does not know it. ``label`` names the
+ * step now running (an image build's Dockerfile instruction), as data.
+ */
+export interface StartupProgress {
+  done: Done;
+  total?: Total;
+  label?: Label;
 }
 /**
  * Why a run failed: the diagnostic it ended with.
