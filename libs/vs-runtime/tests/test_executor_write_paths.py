@@ -34,6 +34,9 @@ OWNERS = frozenset(
         "_operation_receipts.py",
         # A Fake of the whole shell, not a receipt-backed executor.
         "_fake_core_execution.py",
+        # The scripted shell test kit: it stands in for the executors, so it builds the
+        # observations their translators would.
+        "_shell_kit.py",
     }
 )
 RECORD_NAMES = frozenset({"ExecutionRecord", "ExecutionPhase"})
