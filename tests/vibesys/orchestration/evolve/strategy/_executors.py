@@ -100,7 +100,7 @@ class Executors:
     # When set, the reply of (role, child key, serial) instead of the queues above.
     replies: Callable[[str, str, int], str | Answer] | None = None
     # False retains one commit per attempt, whatever its turns did.
-    # True: only the attempt's first snapshot yields a revision.
+    # True: after the attempt's first snapshot a turn that changed nothing records the same revision.
     unchanged_after_first_retain: bool = False
     # False: a turn changes nothing, so no checkpoint is retained.
     changes: Callable[[str], bool] = lambda _attempt: True
@@ -190,7 +190,8 @@ class Executors:
         if not self.changes(attempt):
             return Succeeded()
         if self.retained[attempt] and self.unchanged_after_first_retain:
-            return Succeeded()
+            # Production snapshotting records the same revision when a turn changed nothing.
+            return Succeeded(revision=RevisionRef.of_git_commit(commit_of(attempt)))
         self.retained[attempt] += 1
         return Succeeded(revision=RevisionRef.of_git_commit(commit_of(attempt)))
 
