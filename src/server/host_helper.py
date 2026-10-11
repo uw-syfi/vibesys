@@ -932,7 +932,7 @@ class _Channel:
 
     def _watch(self, watch_id: str, stop: Event) -> None:
         while not stop.is_set():
-            self.post(Observed(watch_id, self._host.registry.list()))
+            self.post(Observed(watch_id, self._host.registry.read()))
             stop.wait(WATCH_INTERVAL_SECONDS)
 
 

@@ -12,9 +12,10 @@ reused), no heartbeats, and no cleanup daemon.
 The registry answers "what is running on this node now, and what ended here
 in the last day". A server that exits leaves its last record, with the phase
 its run ended in, as a tombstone; a server that died without writing one is
-reported as crashed. A listing removes tombstones older than
-``TOMBSTONE_RETENTION_SECONDS``. Older runs are the per-project run history's
-business and are reopened read-only from it.
+reported as crashed. A writing listing (``LiveRegistry.list``) buries the
+crashed and removes tombstones older than ``TOMBSTONE_RETENTION_SECONDS``; a
+watch reads with ``LiveRegistry.read``, which writes nothing. Older runs are
+the per-project run history's business and are reopened read-only from it.
 
 Layout under ``instance_root``::
 
@@ -307,13 +308,18 @@ def _judge_left_behind(record: LiveInstanceRecord | UnreadableRecord | None, now
             return Verdict.DEAD
 
 
-def crashed(record: LiveInstanceRecord, now: float) -> LiveInstanceRecord:
-    """The tombstone of a server that died, at ``now``, without writing its own."""
+def crashed(record: LiveInstanceRecord, ended_at: float | None = None) -> LiveInstanceRecord:
+    """The record of a server that died without writing its own tombstone.
+
+    ``ended_at`` is when a writing listing found it dead, and the tombstone it
+    writes carries it. A read-only listing reports the crash without one, so
+    reading the same registry twice reports the same record.
+    """
     return LiveInstanceRecord.model_validate(
         {
             **record.model_dump(),
             "phase": RunPhase(status=RunStatus.FAILED, reason=CRASHED),
-            "ended_at": now,
+            "ended_at": ended_at,
         }
     )
 
@@ -324,8 +330,9 @@ class Survey:
 
     live: tuple[LiveInstanceRecord, ...]
     ended: tuple[LiveInstanceRecord, ...]
-    buried: tuple[LiveInstanceRecord, ...]
-    """Crashed servers' new tombstones, also in ``ended``."""
+    """Tombstones younger than a day."""
+    crashed: tuple[LiveInstanceRecord, ...]
+    """Servers that died without a tombstone, as :func:`crashed` reports them before burial."""
     unreadable: tuple[UnreadableRecord, ...]
     unverified: tuple[str, ...]
     dead: tuple[str, ...]
@@ -335,7 +342,7 @@ def survey(observations: Iterable[InstanceObservation], now: float) -> Survey:
     """Partition observations, ordered by start time then id for a stable listing."""
     live: list[LiveInstanceRecord] = []
     ended: list[LiveInstanceRecord] = []
-    buried: list[LiveInstanceRecord] = []
+    dead_without_tombstone: list[LiveInstanceRecord] = []
     unreadable: list[UnreadableRecord] = []
     unverified: list[str] = []
     dead: list[str] = []
@@ -347,7 +354,7 @@ def survey(observations: Iterable[InstanceObservation], now: float) -> Survey:
             case Verdict.ENDED, LiveInstanceRecord():
                 ended.append(record)
             case Verdict.CRASHED, LiveInstanceRecord():
-                buried.append(crashed(record, now))
+                dead_without_tombstone.append(crashed(record))
             case Verdict.UNREADABLE, UnreadableRecord():
                 unreadable.append(record)
             case Verdict.UNVERIFIED, _:
@@ -358,8 +365,8 @@ def survey(observations: Iterable[InstanceObservation], now: float) -> Survey:
                 pass
     return Survey(
         live=_by_start(live),
-        ended=_by_start([*ended, *buried]),
-        buried=_by_start(buried),
+        ended=_by_start(ended),
+        crashed=_by_start(dead_without_tombstone),
         unreadable=tuple(sorted(unreadable, key=lambda record: record.id)),
         unverified=tuple(sorted(unverified)),
         dead=tuple(sorted(dead)),
@@ -698,21 +705,32 @@ class LiveRegistry:
         self._clock = clock
 
     def list(self) -> InstanceList:
-        """Report live and recently ended servers; bury the crashed and remove the expired."""
-        decision = survey(
-            (self._store.observe(instance_id) for instance_id in self._store.ids()),
-            self._clock.now(),
-        )
-        for record in decision.buried:
+        """Report live and recently ended servers; bury the crashed and remove the expired.
+
+        The writing listing: an explicit ``instances list`` or ``runs.list``. A
+        crashed server's tombstone is stamped with the time this listing found it.
+        """
+        now = self._clock.now()
+        decision = self._survey(now)
+        buried = tuple(crashed(record, now) for record in decision.crashed)
+        for record in buried:
             self._store.bury(record)
         for instance_id in decision.dead:
             self._store.reap(instance_id)
-        return InstanceList(
-            instances=decision.live,
-            ended=decision.ended,
-            unreadable=decision.unreadable,
-            unverified=decision.unverified,
-        )
+        return _listing(decision, buried)
+
+    def read(self) -> InstanceList:
+        """Report what :meth:`list` would, without writing a tombstone or removing a record.
+
+        For a watch, which reads the registry every second: a crashed server is
+        reported without ``ended_at`` until a writing listing buries it, and an
+        expired record stays on disk, unreported, until one removes it.
+        """
+        decision = self._survey(self._clock.now())
+        return _listing(decision, decision.crashed)
+
+    def _survey(self, now: float) -> Survey:
+        return survey((self._store.observe(instance_id) for instance_id in self._store.ids()), now)
 
     def find(self, instance_id: str) -> LiveInstanceRecord | None:
         """Return the record of a live server, else ``None``."""
@@ -782,6 +800,15 @@ class LiveRegistry:
 
     def _held(self, instance_id: str) -> bool:
         return self._store.observe(instance_id).lock is LockState.HELD
+
+
+def _listing(decision: Survey, crashed_records: Iterable[LiveInstanceRecord]) -> InstanceList:
+    return InstanceList(
+        instances=decision.live,
+        ended=_by_start([*decision.ended, *crashed_records]),
+        unreadable=decision.unreadable,
+        unverified=decision.unverified,
+    )
 
 
 def host_facts() -> tuple[str, str]:

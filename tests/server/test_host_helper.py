@@ -55,6 +55,7 @@ from server.host_api import (
     parse_helper_request,
 )
 from server.host_helper import (
+    WATCH_INTERVAL_SECONDS,
     Answered,
     ChannelOutput,
     ChannelState,
@@ -656,6 +657,43 @@ def test_a_watch_pushes_the_listing_and_each_change(seed: int) -> None:
     assert (first["type"], first["listing"]["instances"]) == ("instances.changed", [])
     assert [record["id"] for record in changed["listing"]["instances"]] == ["0123456789ab"]
     assert unwatched["type"] == "instances.unwatch"
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_a_watch_reads_the_registry_without_writing_and_a_listing_buries(seed: int) -> None:
+    threads = SimThreads(schedule_seed=seed)
+    network = SimNetwork(threads)
+    store = FakeInstanceStore()
+    store.hold("0123456789ab").publish(record("0123456789ab"))
+    store.hold("0123456789ac").crash()
+    crashing = store.hold("0123456789ad")
+    crashing.publish(record("0123456789ad"))
+    crashing.crash()
+    before = {key: (entry.lock, entry.raw) for key, entry in store.entries.items()}
+
+    def main() -> tuple[list[dict[str, Any]], object, dict[str, Any]]:
+        client = ChannelClient(threads)
+        worker = serve_on(threads, client, ByteBuffer(), fake_host(threads, network, store=store))
+        client.send(_hello())
+        client.receive()
+        client.send(_request("instances.watch", "w"))
+        received = [client.receive(), client.receive()]
+        threads.sleep(WATCH_INTERVAL_SECONDS * 3)
+        after_watching = {key: (entry.lock, entry.raw) for key, entry in store.entries.items()}
+        client.send(_request("instances.list", "l"))
+        listed = client.receive()
+        client.close()
+        worker.join(HANG_GUARD_S)
+        return received, after_watching, listed
+
+    (_, pushed), after_watching, listed = threads.run(main)
+    assert after_watching == before
+    assert [(entry["id"], entry["ended_at"]) for entry in pushed["listing"]["ended"]] == [
+        ("0123456789ad", None)
+    ]
+    assert [entry["id"] for entry in listed["listing"]["ended"]] == ["0123456789ad"]
+    assert listed["listing"]["ended"][0]["ended_at"] is not None
+    assert set(store.ids()) == {"0123456789ab", "0123456789ad"}
 
 
 _FRAMES = st.lists(
