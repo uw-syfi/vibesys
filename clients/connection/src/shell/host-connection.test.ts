@@ -436,10 +436,11 @@ describe('HostConnection over the FakeHelper', () => {
 });
 
 describe('ConnectionManager', () => {
-  test('regression: releasing a link waits for an in-flight ssh master before its exit', async () => {
+  test('regression: releasing a link kills an in-flight ssh master attempt instead of waiting it out', async () => {
     const actions: string[] = [];
+    const killed: string[] = [];
     const check = fakeProcess();
-    const master = fakeProcess();
+    const master = fakeProcess(signal => killed.push(signal));
     let announceMaster = (): void => {};
     const masterStarted = new Promise<void>(resolve => {
       announceMaster = resolve;
@@ -470,12 +471,53 @@ describe('ConnectionManager', () => {
     check.end(255);
     await masterStarted;
 
+    // The master-creation command can legitimately run for its 20s ConnectTimeout; nothing here
+    // ever finishes it on its own, modeling a handshake still under way when the app quits.
+    // Release must not wait that out: it kills the attempt itself, rather than leaving an ssh
+    // process free to fork off a persistent master nobody ever asks to exit.
     const closing = link.release();
+    expect(killed).toEqual(['SIGTERM']);
     expect(actions).toEqual(['check', 'master-start']);
-    master.end(0);
-    await Promise.all([establishing, closing]);
+
+    const error = await rejection(establishing);
+    expect((error as ConnectionError).reason).toBe('link');
+    await closing;
 
     expect(actions).toEqual(['check', 'master-start', 'exit']);
+  });
+
+  test('releasing after the master check resolves never starts a late master attempt', async () => {
+    const actions: string[] = [];
+    const check = fakeProcess();
+    const spawn: Spawn = (_command, args) => {
+      const control = args.indexOf('-O');
+      const operation = control < 0 ? null : args[control + 1];
+      if (operation === 'check') {
+        actions.push('check');
+        return check.process;
+      }
+      if (operation === 'exit') {
+        actions.push('exit');
+        const exiting = fakeProcess();
+        exiting.end(0);
+        return exiting.process;
+      }
+      actions.push('master-start');
+      const master = fakeProcess();
+      master.end(0);
+      return master.process;
+    };
+    const link = sshLink(spawn);
+    const establishing = link.establish(false);
+    check.end(255);
+
+    // End the link before the completed check's continuation can start a master process.
+    const closing = link.release();
+
+    expect(await rejection(establishing)).toBeInstanceOf(ConnectionError);
+    await closing;
+    expect(await rejection(link.establish(false))).toBeInstanceOf(ConnectionError);
+    expect(actions).toEqual(['check', 'exit']);
   });
 
   test('a checkout check shares the host link, and the manager releases it once, at the end', async () => {

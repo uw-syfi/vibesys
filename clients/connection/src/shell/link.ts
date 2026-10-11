@@ -129,6 +129,12 @@ export class SshLink implements Link {
   readonly #options: SshLinkOptions;
   readonly #spawn: Spawn;
   #establishing: Promise<void> | null = null;
+  #released = false;
+  /**
+   * The master-creation command while it is running. Its `ConnectTimeout` lets it legitimately take
+   * up to 20s; `release` kills it rather than waiting that out.
+   */
+  #masterProcess: SpawnedProcess | null = null;
   /** The `uv` a bootstrap on the host found, passed to the next one. */
   #uv: string | null = null;
 
@@ -140,6 +146,7 @@ export class SshLink implements Link {
 
   /** Establish the master if it is down; one attempt at a time. */
   establish(interactive: boolean): Promise<void> {
+    if (this.#released) return Promise.reject(this.#releasedError());
     this.#establishing ??= this.#establish(interactive).finally(() => {
       this.#establishing = null;
     });
@@ -165,38 +172,49 @@ export class SshLink implements Link {
   }
 
   async release(): Promise<void> {
-    // An establish attempt owns the same master this release closes. Let a started attempt settle
-    // before sending `-O exit`, otherwise its master can come up after the exit command completed.
+    // An establish attempt owns the same master this release closes. A started attempt can still be
+    // mid-handshake (up to its 20s ConnectTimeout); kill it instead of waiting it out, so quitting is
+    // never held hostage by a slow or stalled host. Still await it settling before sending `-O exit`:
+    // if OpenSSH had already forked the persistent master just before the kill reached it, `-O exit`
+    // reaches that master and closes it; sending it without waiting could instead race a master that
+    // comes up after the exit command completed.
+    this.#released = true;
+    this.#masterProcess?.kill('SIGTERM');
     await this.#establishing?.catch(() => {});
     await this.#finish(this.#ssh(['-O', 'exit', '--', this.#options.alias]));
   }
 
   async #establish(interactive: boolean): Promise<void> {
     const check = await this.#finish(this.#ssh(['-O', 'check', '--', this.#options.alias]));
+    if (this.#released) throw this.#releasedError();
     if (check.code === 0) return;
     const env: Record<string, string> = interactive
       ? {SSH_ASKPASS: this.#options.askpass, SSH_ASKPASS_REQUIRE: 'force'}
       : {};
-    const master = await this.#finish(
-      this.#ssh(
-        [
-          ...(interactive ? [] : ['-o', 'BatchMode=yes']),
-          '-T',
-          '-o',
-          'ControlMaster=auto',
-          '-o',
-          'ControlPersist=30m',
-          '-o',
-          'ConnectTimeout=20',
-          '--',
-          this.#options.alias,
-          'true',
-        ],
-        undefined,
-        env,
-      ),
+    const process = this.#ssh(
+      [
+        ...(interactive ? [] : ['-o', 'BatchMode=yes']),
+        '-T',
+        '-o',
+        'ControlMaster=auto',
+        '-o',
+        'ControlPersist=30m',
+        '-o',
+        'ConnectTimeout=20',
+        '--',
+        this.#options.alias,
+        'true',
+      ],
+      undefined,
+      env,
     );
-    if (master.code !== 0) throw this.#sshError(master.stderr);
+    this.#masterProcess = process;
+    try {
+      const master = await this.#finish(process);
+      if (master.code !== 0) throw this.#sshError(master.stderr);
+    } finally {
+      this.#masterProcess = null;
+    }
   }
 
   #ssh(
@@ -237,5 +255,9 @@ export class SshLink implements Link {
     if (AUTH_FAILURE.test(stderr))
       return new ConnectionError('auth', `ssh ${alias}: ${lastLine(stderr)}`);
     return new ConnectionError('link', `the connection to ${alias} is down: ${lastLine(stderr)}`);
+  }
+
+  #releasedError(): ConnectionError {
+    return new ConnectionError('link', `the connection to ${this.#options.alias} was released`);
   }
 }
