@@ -58,11 +58,23 @@ export class StopController {
    * failed one. Resolves once the host has answered (an accepted stop is still ending then).
    */
   async request(target: StopTarget, force: boolean): Promise<void> {
+    await this.#stop(target, force, () =>
+      this.#deps.confirm(confirmText({label: target.label, host: target.hostLabel, force})),
+    );
+  }
+
+  /**
+   * Stop `target` without asking: the user already decided (they cancelled the start that launched
+   * it). The same flow as `request`, so the views show it and the registry ends it.
+   */
+  async stopConfirmed(target: StopTarget): Promise<void> {
+    await this.#stop(target, false, async () => true);
+  }
+
+  async #stop(target: StopTarget, force: boolean, confirm: () => Promise<boolean>): Promise<void> {
     const key = stopKey(target.host, target.instanceId);
     if (this.#step(key, {type: 'request', force}).state.phase !== 'confirming') return;
-    const yes = await this.#deps.confirm(
-      confirmText({label: target.label, host: target.hostLabel, force}),
-    );
+    const yes = await confirm();
     const {effect} = this.#step(key, yes ? {type: 'confirm'} : {type: 'cancel'});
     if (effect === null) return;
     try {

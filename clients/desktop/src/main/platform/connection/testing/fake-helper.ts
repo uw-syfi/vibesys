@@ -6,10 +6,14 @@
  * a real helper: the `helper-*` conformance scenarios replay against it unchanged.
  *
  * The test controls the host: its registry (`publish`, `end`), its projects and directories, how a
- * run answers (`runs`), and its faults: a link that refuses or is down (`linkFault`), a bootstrap
- * that fails (`bootstrapExit`), and dropping every channel at once (`drop`, a broken link).
+ * run answers (`runs`, `denied`), and its faults: a link that refuses or is down (`linkFault`), a
+ * bootstrap that fails (`bootstrapExit`) or reports what it found (`preamble`), a helper that never
+ * answers (`silent`), answers some requests past their deadline (`expired`) or with a line outside
+ * the contract (`garbled`), or exits after its handshake (`exitAfterHello`), and dropping every
+ * channel at once (`drop`, a broken link).
  */
 import {
+  type ChannelEndOutcome,
   type HelperRequest,
   type InstanceList,
   type LiveInstanceRecord,
@@ -24,10 +28,13 @@ import {type FakeProcess, fakeProcess} from './fake-process.js';
 
 type Reply = Record<string, unknown>;
 
-/** A run's server end: it gets the run channel's bytes and writes the server's. */
+/**
+ * A run's server end: it gets the run channel's bytes and writes the server's. `end` ends the
+ * relay with `outcome` (default `server_closed`), as the helper's `ChannelEnd` line reports it.
+ */
 export type RunServer = (stream: {
   write(line: string): void;
-  end(): void;
+  end(outcome?: ChannelEndOutcome): void;
   onLine(listener: (line: string) => void): void;
 }) => void;
 
@@ -44,6 +51,8 @@ export interface FakeHost {
   readonly directories: Map<string, readonly string[]>;
   /** How each live run answers its run channel. */
   readonly runs: Map<string, RunServer>;
+  /** Live runs this user may not connect to (`connect_denied`). */
+  readonly denied: Set<string>;
 }
 
 export function record(id: string, runId: string, project = '/p'): LiveInstanceRecord {
@@ -73,27 +82,67 @@ export class FakeHelper {
     projects: new Map(),
     directories: new Map(),
     runs: new Map(),
+    denied: new Set(),
   };
-  /** Exit every new channel at once with this status and line, as a failing bootstrap does. */
+  /** Exit every new channel at once with this status and stdout, as a failing bootstrap does. */
   bootstrapExit: {readonly code: number; readonly stdout: string} | null = null;
+  /** Lines every new channel prints before its helper starts, as a bootstrap reporting `uv`. */
+  preamble: readonly string[] = [];
+  /** Channels answer nothing, `hello` included, until `answerHeld`. */
+  silent = false;
+  /** Request types answered with `deadline_exceeded`. */
+  readonly expired = new Set<string>();
+  /** Request types answered with a reply the contract rejects (an unknown field). */
+  readonly garbled = new Set<string>();
+  /** Every new channel's helper exits with this status and stdout right after answering `hello`. */
+  exitAfterHello: {readonly code: number; readonly stdout: string} | null = null;
   /** Every channel ever started, in order. */
   readonly channels: FakeProcess[] = [];
   /** How many helpers were started: one per channel. */
   spawned = 0;
+  /** How many of them have exited. */
+  exited = 0;
+  /** Every checkout a helper was started from, in order. */
+  readonly checkouts: string[] = [];
   readonly #watches = new Set<() => void>();
+  readonly #held: (() => void)[] = [];
   #nextInstance = 1;
 
-  /** Start one helper: a new channel. */
-  spawn(): SpawnedProcess {
+  /** Start one helper from `checkout`: a new channel. */
+  spawn(checkout = '/src/vibesys'): SpawnedProcess {
     this.spawned += 1;
+    this.checkouts.push(checkout);
     const channel = fakeProcess();
     this.channels.push(channel);
+    void channel.process.exit.then(() => (this.exited += 1));
     if (this.bootstrapExit !== null) {
       channel.end(this.bootstrapExit.code, `${this.bootstrapExit.stdout}\n`);
       return channel.process;
     }
+    for (const line of this.preamble) channel.stdout.write(`${line}\n`);
     new HelperSession(this, channel).start();
     return channel.process;
+  }
+
+  /** Helpers started and not yet exited. */
+  get running(): number {
+    return this.spawned - this.exited;
+  }
+
+  /** Registry watches being served. */
+  get watching(): number {
+    return this.#watches.size;
+  }
+
+  /** Keep a silent helper's answer until `answerHeld`. */
+  hold(answer: () => void): void {
+    this.#held.push(answer);
+  }
+
+  /** Stop being silent: answer, late, everything held (a channel that ended writes nothing). */
+  answerHeld(): void {
+    this.silent = false;
+    for (const answer of this.#held.splice(0)) answer();
   }
 
   /** Publish a live record; watches push it. */
@@ -197,11 +246,33 @@ class HelperSession {
       this.#send(this.#error(id, 'invalid_request', (error as Error).message));
       return;
     }
+    const helper = this.#helper;
+    if (helper.silent) {
+      helper.hold(() => this.#respond(request));
+      return;
+    }
+    this.#respond(request);
+  }
+
+  #respond(request: HelperRequest): void {
+    const helper = this.#helper;
     if (this.#features === null && request.type !== 'hello') {
       this.#send(this.#error(request.request_id, 'handshake_required', 'hello first'));
       return;
     }
+    if (helper.expired.has(request.type)) {
+      this.#send(this.#error(request.request_id, 'deadline_exceeded', 'past its deadline'));
+      return;
+    }
+    if (helper.garbled.has(request.type)) {
+      this.#send({type: request.type, request_id: request.request_id, unexpected: true});
+      return;
+    }
     this.#answer(request);
+    const crash = helper.exitAfterHello;
+    if (request.type === 'hello' && crash !== null) {
+      this.#channel.end(crash.code, `${crash.stdout}\n`);
+    }
   }
 
   #answer(request: HelperRequest): void {
@@ -361,6 +432,10 @@ class HelperSession {
       this.#send(this.#error(id, 'run_gone', `no live server has id ${instanceId}`));
       return;
     }
+    if (helper.host.denied.has(instanceId)) {
+      this.#send(this.#error(id, 'connect_denied', `run ${instanceId} is not yours`));
+      return;
+    }
     this.#send({type: 'run.connect', request_id: id, run_id: live.run_id, protocol_version: 1});
     const listeners: ((line: string) => void)[] = [];
     this.#relay = line => {
@@ -368,11 +443,8 @@ class HelperSession {
     };
     server({
       write: line => this.#channel.stdout.write(`${line}\n`),
-      end: () =>
-        this.#close(
-          3,
-          `${JSON.stringify({outcome: 'server_closed', exit_status: 3, detail: 'closed'})}\n`,
-        ),
+      end: (outcome = 'server_closed') =>
+        this.#close(3, `${JSON.stringify({outcome, exit_status: 3, detail: 'ended'})}\n`),
       onLine: listener => listeners.push(listener),
     });
   }
@@ -414,13 +486,15 @@ export type LinkFault = {readonly cause: Cause; readonly detail: string} | null;
 
 /** The `Link` to a `FakeHelper`'s host. */
 export class FakeLink implements Link {
-  readonly where = '/src/vibesys on fake';
+  readonly host = 'fake';
   readonly helper: FakeHelper;
   /** When set, `establish` rejects with it (an interactive attempt included, unless `signIn` clears it). */
   linkFault: LinkFault = null;
   /** Interactive sign-ins asked for. */
   interactive = 0;
   released = 0;
+  /** Every line a bootstrap reported, in order. */
+  readonly heardLines: string[] = [];
 
   constructor(helper = new FakeHelper()) {
     this.helper = helper;
@@ -432,19 +506,23 @@ export class FakeLink implements Link {
       throw new ConnectionError(this.linkFault.cause, this.linkFault.detail);
   }
 
-  spawnHelper(): SpawnedProcess {
+  spawnHelper(checkout: string): SpawnedProcess {
     if (this.linkFault !== null) {
       const channel = fakeProcess();
       channel.end(255, '', 'ssh: connect to host fake: Network is unreachable\n');
       return channel.process;
     }
-    return this.helper.spawn();
+    return this.helper.spawn(checkout);
   }
 
-  explain(code: number | null, stderr: string): ConnectionError {
+  heard(line: string): void {
+    this.heardLines.push(line);
+  }
+
+  explain(code: number | null, stderr: string, where: string): ConnectionError {
     if (code === 255 || code === null)
       return new ConnectionError('link', stderr || 'the channel broke');
-    return new ConnectionError('incompatible', `the helper exited with ${code}`);
+    return new ConnectionError('incompatible', `the helper for ${where} exited with ${code}`);
   }
 
   async release(): Promise<void> {

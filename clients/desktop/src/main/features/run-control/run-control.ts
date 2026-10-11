@@ -219,7 +219,7 @@ export class RunControl {
     }
     if (cancel.cancelled) {
       // Stop only the run this start launched, never one that was already live.
-      if (!alreadyLive) await this.#stopCancelled(connection, record.id);
+      if (!alreadyLive) await this.#stopCancelled(id, record.id);
       return 'cancelled';
     }
     this.#deps.log(
@@ -231,13 +231,15 @@ export class RunControl {
     return 'started';
   }
 
-  async #stopCancelled(connection: HostConnection, instanceId: string): Promise<void> {
+  /** Stop the run a cancelled start launched: the user's cancel is the confirmation. */
+  async #stopCancelled(id: HostId, instanceId: string): Promise<void> {
     this.#deps.log(`the start was cancelled; stopping run ${instanceId}`);
-    try {
-      await connection.request({type: 'run.stop', instance_id: instanceId, force: false});
-    } catch (error) {
-      this.#deps.log(`could not stop cancelled run ${instanceId}: ${(error as Error).message}`);
-    }
+    await this.#stops.stopConfirmed({
+      host: hostKey(id),
+      hostLabel: hostLabel(id),
+      instanceId,
+      label: instanceId,
+    });
   }
 
   async #bind(
@@ -273,6 +275,8 @@ export class RunControl {
     this.#run = binding;
     // Subscribed once the binding exists: a listing the connection already holds arrives at once.
     releases.push(
+      // The run's page dials through this connection: it stays open while the run is attached.
+      connection.hold(),
       connection.onPhase(phase => this.#phase(binding, phase)),
       connection.watchInstances(listing => this.#listing(binding, listing)),
       connection.onRunUnreachable(instanceId => {

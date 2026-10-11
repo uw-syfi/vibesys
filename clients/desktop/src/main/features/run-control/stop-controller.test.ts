@@ -28,6 +28,7 @@ async function world(options: {stop?: StopDeps['stop']; answer?: boolean} = {}):
   link.helper.publish(record(TARGET.instanceId, 'run-1'));
   const host = new HostConnection({
     link,
+    checkout: '/src/vibesys',
     appVersion: 'test',
     config: DEFAULT_CONNECTION_CONFIG,
     scheduleTimeout: new FakeClock().scheduleTimeout,

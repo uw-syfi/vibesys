@@ -13,20 +13,24 @@ function world() {
   link.helper.host.projects.set('/p', ['spsc']);
   const connection = new HostConnection({
     link,
+    checkout: '/src/vibesys',
     appVersion: 'test',
     config: DEFAULT_CONNECTION_CONFIG,
     scheduleTimeout: new FakeClock().scheduleTimeout,
     log: () => {},
   });
   const remembered: RecentRun[] = [];
-  const pages = {opened: 0, closed: 0, woken: 0};
+  const pages = {opened: 0, closed: 0, woken: 0, confirms: 0};
   const runs = new RunControl({
     connection: async () => connection,
     openPage: () => {
       pages.opened += 1;
       return {wake: () => (pages.woken += 1), close: () => (pages.closed += 1)};
     },
-    confirm: async () => true,
+    confirm: async () => {
+      pages.confirms += 1;
+      return true;
+    },
     remember: async run => {
       remembered.push(run);
     },
@@ -78,6 +82,30 @@ describe('RunControl over the FakeHelper', () => {
     await w.runs.resume({kind: 'local'}, '/p', exactResumeRunId('run-b'));
     expect(w.runs.attached()).toMatchObject({instanceId: '00000000000b', runId: 'run-b'});
     expect(w.link.helper.host.instances).toHaveLength(1);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('regression: a cancelled start stops its run through the one stop flow, without asking', async () => {
+    const w = world();
+    const started = w.runs.start({kind: 'local'}, '/p', 'spsc', [], 1);
+    w.runs.cancelStart(1);
+    expect(await started).toBe('cancelled');
+    expect(w.link.helper.host.instances).toHaveLength(0);
+    expect(Object.values(w.runs.stops())).toEqual([
+      {phase: 'ended', text: 'Run ended', canForce: false},
+    ]);
+    expect(w.pages.confirms).toBe(0);
+    expect(w.runs.attached()).toBeNull();
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('an attached run holds its connection open until it is detached', async () => {
+    const w = world();
+    w.link.helper.publish(record('00000000000c', 'run-c', '/p'));
+    await w.runs.attach({kind: 'local'}, '00000000000c');
+    expect(w.connection.held).toBe(true);
+    w.runs.detach();
+    expect(w.connection.held).toBe(false);
     await w.connection[Symbol.asyncDispose]();
   });
 });

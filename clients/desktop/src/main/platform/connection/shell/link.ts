@@ -2,7 +2,9 @@
  * How the app reaches one host: the `Link` role, and its two implementations.
  *
  * A link brings the way to the host up (`establish`) and starts one host helper per channel
- * (`spawnHelper`); everything after that is the helper's typed channel, the same for every host.
+ * (`spawnHelper`) from a checkout; everything after that is the helper's typed channel, the same
+ * for every host. There is one link per host, whatever checkouts its connections run from: it owns
+ * the host's ssh master and what the host's bootstraps reported (`heard`).
  *
  * - `LocalLink` (This Mac): no link to establish; each helper is a child process running the
  *   bootstrap with an argument vector.
@@ -17,22 +19,25 @@
  */
 import {spawn} from 'node:child_process';
 import {homedir} from 'node:os';
-import {localBootstrap, remoteBootstrap} from './bootstrap.js';
+import {bootstrapUv, localBootstrap, remoteBootstrap} from './bootstrap.js';
 import {ConnectionError} from './helper-channel.js';
 import {fromChild, type SpawnedProcess} from './process.js';
 
 export interface Link {
-  /** `CHECKOUT on HOST`, for messages. */
-  readonly where: string;
+  /** The host, for messages: `This Mac`, or its ssh alias. */
+  readonly host: string;
   /**
    * Bring the link up; only an `interactive` attempt (the user's own action) may prompt. Rejects
    * with a `ConnectionError`: `auth` when the host refused the user, `link` when it is unreachable.
+   * Concurrent calls share one attempt.
    */
   establish(interactive: boolean): Promise<void>;
-  /** Start one helper on the host: a new channel. */
-  spawnHelper(): SpawnedProcess;
-  /** Why a helper's process ended, when the helper did not say. */
-  explain(code: number | null, stderr: string): ConnectionError;
+  /** Start one helper on the host from `checkout`: a new channel. */
+  spawnHelper(checkout: string): SpawnedProcess;
+  /** A line a bootstrap printed before its helper answered; the link keeps what it reports. */
+  heard(line: string): void;
+  /** Why a helper's process for `where` (`CHECKOUT on HOST`) ended, when the helper did not say. */
+  explain(code: number | null, stderr: string, where: string): ConnectionError;
   /** Release the link itself (the ssh master); channels are already ended. */
   release(): Promise<void>;
 }
@@ -73,24 +78,27 @@ function helperExit(code: number | null, stderr: string, where: string): Connect
 }
 
 export class LocalLink implements Link {
-  readonly where: string;
-  readonly #checkout: string;
+  readonly host = 'This Mac';
   readonly #spawn: Spawn;
+  /** The `uv` a bootstrap found, passed to the next one. */
+  #uv: string | null = null;
 
-  constructor(checkout: string, run: Spawn = nodeSpawn) {
-    this.#checkout = checkout;
+  constructor(run: Spawn = nodeSpawn) {
     this.#spawn = run;
-    this.where = `${checkout} on This Mac`;
   }
 
   async establish(): Promise<void> {}
 
-  spawnHelper(): SpawnedProcess {
-    return this.#spawn('/bin/sh', localBootstrap(this.#checkout), {});
+  spawnHelper(checkout: string): SpawnedProcess {
+    return this.#spawn('/bin/sh', localBootstrap(checkout, this.#uv), {});
   }
 
-  explain(code: number | null, stderr: string): ConnectionError {
-    return helperExit(code, stderr, this.where);
+  heard(line: string): void {
+    this.#uv = bootstrapUv(line) ?? this.#uv;
+  }
+
+  explain(code: number | null, stderr: string, where: string): ConnectionError {
+    return helperExit(code, stderr, where);
   }
 
   async release(): Promise<void> {}
@@ -99,8 +107,6 @@ export class LocalLink implements Link {
 export interface SshLinkOptions {
   /** The `Host` alias from `~/.ssh/config` (validated by the settings). */
   readonly alias: string;
-  /** The VibeSys checkout on the host (validated by the settings), e.g. `~/src/vibesys`. */
-  readonly checkout: string;
   /** The master connection's socket path on this machine; short (Unix sockets cap paths). */
   readonly controlPath: string;
   /** The askpass helper the master uses for password and 2FA prompts. */
@@ -119,15 +125,17 @@ const AUTH_FAILURE =
   /Permission denied|Too many authentication failures|Authentication failed|Host key verification failed/;
 
 export class SshLink implements Link {
-  readonly where: string;
+  readonly host: string;
   readonly #options: SshLinkOptions;
   readonly #spawn: Spawn;
   #establishing: Promise<void> | null = null;
+  /** The `uv` a bootstrap on the host found, passed to the next one. */
+  #uv: string | null = null;
 
   constructor(options: SshLinkOptions) {
     this.#options = options;
     this.#spawn = options.spawn ?? nodeSpawn;
-    this.where = `${options.checkout} on ${options.alias}`;
+    this.host = options.alias;
   }
 
   /** Establish the master if it is down; one attempt at a time. */
@@ -138,18 +146,22 @@ export class SshLink implements Link {
     return this.#establishing;
   }
 
-  spawnHelper(): SpawnedProcess {
+  spawnHelper(checkout: string): SpawnedProcess {
     return this.#ssh(
       ['-T', '-o', 'ControlMaster=no', '-o', 'BatchMode=yes', '--', this.#options.alias],
-      remoteBootstrap(this.#options.checkout),
+      remoteBootstrap(checkout, this.#uv),
     );
   }
 
-  explain(code: number | null, stderr: string): ConnectionError {
+  heard(line: string): void {
+    this.#uv = bootstrapUv(line) ?? this.#uv;
+  }
+
+  explain(code: number | null, stderr: string, where: string): ConnectionError {
     if (code === SSH_FAILED) return this.#sshError(stderr);
     if (code === null)
       return new ConnectionError('link', `the channel to ${this.#options.alias} broke`);
-    return helperExit(code, stderr, this.where);
+    return helperExit(code, stderr, where);
   }
 
   async release(): Promise<void> {
