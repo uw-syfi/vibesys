@@ -5,7 +5,7 @@
  * The page speaks message-framed protocol (one port message per protocol message, like a WebSocket
  * frame) and the server speaks the Unix transport's newline-delimited JSON. The relay is the frame
  * adapter between them, following docs/contributing/wire-protocol.md: each page message becomes
- * one line (WP-GRANULARITY, WP-NEWLINE), and each server line, reassembled by backend-client's
+ * one line (WP-GRANULARITY, WP-NEWLINE), and each server line, reassembled by @vibesys/transport's
  * `NewlineFramer` (WP-FRAMER), becomes one page message. It never parses the protocol itself.
  *
  * Guarantees: the page sees `open` only after the stream is up, and `close` exactly once, whoever
@@ -14,12 +14,8 @@
  * receiver has accepted and returned them. Invalid framing or credit ends the connection.
  */
 import type {Duplex} from 'node:stream';
-import {NewlineFramer} from '@vibesys/backend-client/node';
-import {
-  BRIDGE_CREDIT_WINDOW_BYTES,
-  type MainToPage,
-  parsePageMessage,
-} from '../../../common/bridge-protocol.js';
+import {BRIDGE_CREDIT_WINDOW_BYTES, type MainToPage, parsePageMessage} from '@vibesys/ipc';
+import {NewlineFramer} from '@vibesys/transport';
 
 /** The page side of one connection: a started message port. */
 export interface RelayPort {

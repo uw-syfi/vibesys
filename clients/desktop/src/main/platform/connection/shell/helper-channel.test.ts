@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import type {PassThrough} from 'node:stream';
-import {FakeClock} from '@vibesys/backend-client/testing';
+import {FakeClock} from '@vibesys/transport/testing';
 import {fakeProcess} from '../testing/fake-process.js';
 import {type ChannelOptions, ConnectionError, HelperChannel} from './helper-channel.js';
 

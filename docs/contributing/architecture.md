@@ -156,12 +156,14 @@ graph TD
     vs_evaluation --> vs_project
     vs_evaluation --> vs_sim
     vs_faults --> vs_sim
+    vs_issue_tracker --> vs_core
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
     vs_runtime --> vs_async_ops
     vs_runtime --> vs_core
     vs_runtime --> vs_evaluation
     vs_runtime --> vs_evaluator_protocol
+    vs_runtime --> vs_issue_tracker
     vs_runtime --> vs_mcp
     vs_runtime --> vs_project
     vs_runtime --> vs_prompts

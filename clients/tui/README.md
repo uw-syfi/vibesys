@@ -344,9 +344,10 @@ round shows elapsed time.
 ## Architecture
 
 The Python backend owns the validated, append-only event contract and serves it
-as JSONL over a private Unix socket. `@vibesys/backend-client` owns the generated
-TypeScript protocol, framing, request correlation, and event subscription.
-`@vibesys/core-state` owns the pure projection of backend messages. This package
+as JSONL over a private Unix socket. `@vibesys/contracts` owns the generated
+TypeScript protocol; `@vibesys/transport` owns framing, request correlation, and event
+subscription, and `@vibesys/transport-node` the Unix-socket client this package runs.
+`@vibesys/run-state` owns the pure projection of backend messages. This package
 owns UI interaction state, effects, OpenTUI rendering, and input. The detailed
 ownership matrix is in the [TUI architecture guide](../../docs/contributing/tui-architecture.md).
 
@@ -364,7 +365,7 @@ From the repository root:
 ```bash
 cd clients
 pnpm install --frozen-lockfile
-pnpm --dir backend-client generate:protocol
+pnpm --dir contracts generate:protocol
 pnpm check:ts-architecture
 pnpm check:knip
 pnpm check:clients
@@ -375,6 +376,6 @@ uv run pytest tests/server tests/vibesys/agents/test_callbacks.py tests/vibesys/
 ```
 
 After changing Python protocol models, regenerate both files in
-`clients/backend-client/src/generated/` and review their diff. The test suite covers reducer behavior,
+`clients/contracts/src/generated/` and review their diff. The test suite covers reducer behavior,
 OpenTUI frames and navigation, launcher cleanup, socket fragmentation and
 timeouts, replay/live delivery, and the Python server.

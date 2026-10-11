@@ -6,23 +6,18 @@
  * machine woke from sleep). A connection is a MessagePort handed to the main process, which relays
  * it to the server; the port itself stays here, in the isolated world, and the page holds only the
  * two functions below. Sandboxed preloads cannot be ES modules or import local files, hence `.cts`
- * and the channel names repeated from `bridge-protocol.ts`, whose types keep them in step.
+ * and the channel names repeated from `@vibesys/ipc`, whose types keep them in step.
  */
-import type {MainToPage, PageToMain} from '../../common/bridge-protocol.js';
+import type {
+  DesktopPreload,
+  DesktopSocket,
+  DesktopSocketHandlers,
+  MainToPage,
+  PageToMain,
+} from '@vibesys/ipc';
 
-const CONNECT_CHANNEL: typeof import('../../common/bridge-protocol.js').CONNECT_CHANNEL = 'vibesys:connect';
-const WAKE_CHANNEL: typeof import('../../common/bridge-protocol.js').WAKE_CHANNEL = 'vibesys:wake';
-
-interface SocketHandlers {
-  onOpen(): void;
-  onMessage(data: string): void;
-  onClose(): void;
-}
-
-interface PageSocket {
-  send(data: string): void;
-  close(): void;
-}
+const CONNECT_CHANNEL: typeof import('@vibesys/ipc').CONNECT_CHANNEL = 'vibesys:connect';
+const WAKE_CHANNEL: typeof import('@vibesys/ipc').WAKE_CHANNEL = 'vibesys:wake';
 
 interface PreloadMessagePort {
   onmessage: ((event: MessageEvent<unknown>) => void) | null;
@@ -38,17 +33,10 @@ interface RunPreloadCapabilities<RemotePort> {
   onWake(listener: () => void): void;
 }
 
-/** The complete capability exposed to the isolated page as `window.vibesysDesktop`. */
-interface RunPreloadBridge {
-  readonly platform: string;
-  connect(handlers: SocketHandlers): PageSocket;
-  onWake(listener: () => void): void;
-}
-
 /** Build the page capability from its Electron boundary effects. */
 function createRunPreload<RemotePort>(
   capabilities: RunPreloadCapabilities<RemotePort>,
-): RunPreloadBridge {
+): DesktopPreload {
   return {
     platform: capabilities.platform,
     connect: handlers => connect(capabilities, handlers),
@@ -58,8 +46,8 @@ function createRunPreload<RemotePort>(
 
 function connect<RemotePort>(
   capabilities: RunPreloadCapabilities<RemotePort>,
-  handlers: SocketHandlers,
-): PageSocket {
+  handlers: DesktopSocketHandlers,
+): DesktopSocket {
   const {port, remote} = capabilities.createChannel();
   const connection = new PortConnection(port, handlers);
   capabilities.attach(remote);
@@ -69,9 +57,9 @@ function connect<RemotePort>(
   };
 }
 
-class PortConnection implements PageSocket {
+class PortConnection implements DesktopSocket {
   readonly #port: PreloadMessagePort;
-  readonly #handlers: SocketHandlers;
+  readonly #handlers: DesktopSocketHandlers;
   readonly #queued: Array<{readonly data: string; readonly bytes: number}> = [];
   #queuedBytes = 0;
   #windowBytes = 0;
@@ -80,7 +68,7 @@ class PortConnection implements PageSocket {
   #opened = false;
   #closed = false;
 
-  constructor(port: PreloadMessagePort, handlers: SocketHandlers) {
+  constructor(port: PreloadMessagePort, handlers: DesktopSocketHandlers) {
     this.#port = port;
     this.#handlers = handlers;
     port.onmessage = event => this.#receive(event.data);

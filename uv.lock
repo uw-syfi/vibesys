@@ -3110,12 +3110,14 @@ version = "0.1.0"
 source = { editable = "libs/vs-issue-tracker" }
 dependencies = [
     { name = "pydantic" },
+    { name = "vs-core" },
     { name = "vs-github" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
+    { name = "vs-core", editable = "libs/vs-core" },
     { name = "vs-github", editable = "libs/vs-github" },
 ]
 
@@ -3173,6 +3175,7 @@ dependencies = [
     { name = "vs-core" },
     { name = "vs-evaluation" },
     { name = "vs-evaluator-protocol" },
+    { name = "vs-issue-tracker" },
     { name = "vs-mcp" },
     { name = "vs-project" },
     { name = "vs-prompts" },
@@ -3191,6 +3194,7 @@ requires-dist = [
     { name = "vs-core", editable = "libs/vs-core" },
     { name = "vs-evaluation", editable = "libs/vs-evaluation" },
     { name = "vs-evaluator-protocol", editable = "libs/vs-evaluator-protocol" },
+    { name = "vs-issue-tracker", editable = "libs/vs-issue-tracker" },
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },
     { name = "vs-prompts", editable = "libs/vs-prompts" },

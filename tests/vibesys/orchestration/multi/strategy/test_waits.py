@@ -1,8 +1,8 @@
 """An implementer or judge turn that waits for its own evaluation is resumed.
 
 Either role submits an evaluation through the production bridge and ends its turn waiting;
-core resumes it once the job ends. The resumed turn only reads the verdict, so it retains
-nothing of its own: the round's candidate is what the turn checkpointed before it waited.
+core resumes it once the job ends. A resumed implementer that only reads the verdict records
+the same revision again, and that current invocation's checkpoint remains authoritative.
 """
 
 from __future__ import annotations

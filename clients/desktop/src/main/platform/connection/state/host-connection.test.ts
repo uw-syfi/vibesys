@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {SEEDS, Seeded} from '@vibesys/core-state/testing';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
   type Cause,
   type ConnectionConfig,

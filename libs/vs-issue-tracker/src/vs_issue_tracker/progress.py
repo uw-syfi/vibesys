@@ -54,6 +54,22 @@ class FileProgressLog:
             stream.write(entry)
 
 
+class MemoryProgressLog:
+    """Run notes held in memory, for tests of code that logs progress."""
+
+    def __init__(self) -> None:
+        """Start with only the header."""
+        self._text = _HEADER
+
+    def read(self) -> str:
+        """Return the accumulated progress text."""
+        return self._text
+
+    def append(self, entry: str) -> None:
+        """Append one entry without changing prior entries."""
+        self._text += entry
+
+
 class GitHubProgressLog:
     """Run notes stored in comments on a separate tagged GitHub issue."""
 
@@ -142,6 +158,7 @@ def _label_names(value: object) -> set[str]:
 __all__ = [
     "FileProgressLog",
     "GitHubProgressLog",
+    "MemoryProgressLog",
     "ProgressLog",
     "open_progress_log",
 ]

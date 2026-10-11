@@ -82,21 +82,32 @@ _MIN_NODE_MAJOR = 20
 #: modules feed the Pydantic models serialized into the schema, so changes to
 #: them cannot change the generated output and are deliberately excluded here.
 _REBUILD_WATCH_FILES: tuple[str, ...] = (
-    "clients/backend-client/package.json",
-    "clients/backend-client/tsconfig.json",
-    "clients/backend-client/tsconfig.check.json",
-    "clients/core-state/package.json",
-    "clients/core-state/tsconfig.json",
-    "clients/core-state/tsconfig.check.json",
+    "clients/contracts/package.json",
+    "clients/contracts/tsconfig.json",
+    "clients/contracts/tsconfig.lib.json",
+    "clients/run-state/package.json",
+    "clients/run-state/tsconfig.json",
+    "clients/run-state/tsconfig.lib.json",
+    "clients/run-state/tsconfig.performance.json",
+    "clients/run-state/tsconfig.rounds.json",
+    "clients/run-state/tsconfig.transcript.json",
+    "clients/transport/package.json",
+    "clients/transport/tsconfig.json",
+    "clients/transport/tsconfig.lib.json",
+    "clients/transport-node/package.json",
+    "clients/transport-node/tsconfig.json",
+    "clients/transport-node/tsconfig.lib.json",
     "clients/tui/package.json",
     "clients/tui/tsconfig.json",
     "clients/tui/tsconfig.check.json",
+    "clients/tsconfig.base.json",
+    "clients/turbo.json",
     "clients/package.json",
     "clients/pnpm-lock.yaml",
     "clients/pnpm-workspace.yaml",
     "clients/biome.json",
     # Inputs to `generate:protocol` (python -m server.api.schema), which
-    # feeds clients/backend-client's generated types and, downstream, the TUI
+    # feeds clients/contracts' generated types and, downstream, the TUI
     # bundle. See the principle above for why this is the full set, no more.
     "src/server/api/schema.py",
     "src/server/events.py",
@@ -106,8 +117,10 @@ _REBUILD_WATCH_FILES: tuple[str, ...] = (
     "src/server/settings.py",
 )
 _REBUILD_WATCH_DIRS: tuple[str, ...] = (
-    "clients/backend-client/src",
-    "clients/core-state/src",
+    "clients/contracts/src",
+    "clients/run-state/src",
+    "clients/transport/src",
+    "clients/transport-node/src",
     "clients/tui/src",
 )
 
@@ -505,7 +518,7 @@ def _run_pnpm_install(pnpm: list[str], root: Path, host: LauncherHost) -> bool:
 
 def _run_codegen_and_build(pnpm: list[str], root: Path, host: LauncherHost) -> bool:
     steps = (
-        [*pnpm, "--dir", "backend-client", "generate:protocol"],
+        [*pnpm, "--dir", "contracts", "generate:protocol"],
         [*pnpm, "build:clients"],
     )
     for command in steps:

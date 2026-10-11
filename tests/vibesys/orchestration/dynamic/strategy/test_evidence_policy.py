@@ -48,6 +48,8 @@ from vs_core.api import (
     RunView,
     Scope,
     SessionId,
+    TurnCandidatePending,
+    TurnCandidateRetained,
     TurnChain,
     Value,
     WorkspaceMode,
@@ -286,18 +288,13 @@ def test_evidence_ids_are_unique_only_within_a_source_request() -> None:
     ),
     first_retains=st.booleans(),
 )
-def test_a_turn_chains_candidate_is_the_latest_checkpoint_of_the_chain(
+def test_a_turn_chains_candidate_is_only_the_current_invocations_outcome(
     steps: list[tuple[str, bool]], *, first_retains: bool
 ) -> None:
-    """Whatever mix of suspends, resumes, corrections, lost turns and retries came before.
-
-    Each turn retains a checkpoint or not. A retry starts a different logical answer, so the
-    earlier turns stop counting; every other step keeps them in the chain.
-    """
+    """Older turns never decide the current turn, whatever transitions produced them."""
     chain: TurnChain[Value] = TurnChain()
     current = 0
     retained = {0: first_retains}
-    members = [0]
     for kind, retains in steps:
         ref = _invocation(f"t{current}")
         nxt = current + 1
@@ -318,14 +315,14 @@ def test_a_turn_chains_candidate_is_the_latest_checkpoint_of_the_chain(
             chain = again
         else:
             chain = chain.followed_by(charge="paid")
-            members = []
         current = nxt
         retained[current] = retains
-        members.append(current)
     view = _view(
         *(_checkpoint(f"t{turn}", f"r{turn}") for turn in sorted(retained) if retained[turn])
     )
-    held = [turn for turn in members if retained[turn]]
-    expected = revision(f"r{held[-1]}") if held else None
-
-    assert chain.candidate(view, AttemptId(root="attempt"), _invocation(f"t{current}")) == expected
+    candidate = chain.candidate_outcome(view, AttemptId(root="attempt"), _invocation(f"t{current}"))
+    if retained[current]:
+        assert isinstance(candidate, TurnCandidateRetained)
+        assert candidate.revision == revision(f"r{current}")
+    else:
+        assert isinstance(candidate, TurnCandidatePending)

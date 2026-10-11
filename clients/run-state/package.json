@@ -1,0 +1,57 @@
+{
+  "name": "@vibesys/run-state",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "vibesys": {
+    "layer": "core",
+    "entries": {
+      ".": "neutral",
+      "./rounds": "neutral",
+      "./performance": "neutral",
+      "./transcript": "neutral"
+    }
+  },
+  "exports": {
+    ".": {
+      "@vibesys/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./rounds": {
+      "@vibesys/source": "./src/rounds/index.ts",
+      "types": "./dist/rounds/index.d.ts",
+      "default": "./dist/rounds/index.js"
+    },
+    "./performance": {
+      "@vibesys/source": "./src/performance/index.ts",
+      "types": "./dist/performance/index.d.ts",
+      "default": "./dist/performance/index.js"
+    },
+    "./transcript": {
+      "@vibesys/source": "./src/transcript/index.ts",
+      "types": "./dist/transcript/index.d.ts",
+      "default": "./dist/transcript/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.*.tsbuildinfo",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.lib.json tsconfig.rounds.json tsconfig.performance.json tsconfig.transcript.json",
+    "check": "tsc -b",
+    "test": "node ../scripts/run_bun_tests.mjs ./src",
+    "bench:performance": "bun bench/performance-projection.ts",
+    "bench:run-map": "bun bench/run-map.ts"
+  },
+  "dependencies": {
+    "@vibesys/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "typescript": "^5.8.3"
+  }
+}

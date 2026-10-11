@@ -31,15 +31,27 @@ from vs_core.api import (
     Scope,
     Value,
 )
+from vs_issue_tracker.api import (
+    ApplyIssueChanges,
+    CreateIssue,
+    FakeIssueTracker,
+    IssueType,
+    LogProgress,
+    MemoryProgressLog,
+    TextBody,
+    board_operation_registrations,
+)
 from vs_project.api import StateNamespace
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import ArtifactStore
 from vs_runtime.api.core import (
     Applied,
+    BoardTexts,
     Cancelled,
     ExecutionContext,
     Indeterminate,
     Inspection,
+    IssueBoardOwner,
     NotApplied,
     OperationCatalog,
     OperationEntry,
@@ -233,7 +245,22 @@ class OperationScenario:
         return self.entry.registration.descriptor.lifecycle is LifecycleClass.QUERY
 
 
-SCENARIO_NAMES = ("echo", "render", "verify", "interpret", "retain")
+SCENARIO_NAMES = ("echo", "render", "verify", "board", "interpret", "retain")
+
+
+class _BoardTexts:
+    def issue_body(self, template: str) -> str:
+        return f"body of {template}"
+
+    def progress_entry(self, request: LogProgress) -> str:
+        return f"step {request.step} of iteration {request.iteration}"
+
+
+def _board_entry(tracker: FakeIssueTracker, progress: MemoryProgressLog) -> OperationEntry:
+    """The apply registration of the issue board, served by the real owner over fakes."""
+    texts: BoardTexts = _BoardTexts()
+    apply = board_operation_registrations()[1]
+    return OperationEntry.owned(apply, IssueBoardOwner(tracker, progress, texts))
 
 
 def scenarios(root: Path, namespace: StateNamespace) -> tuple[OperationScenario, ...]:
@@ -247,6 +274,7 @@ def scenarios(root: Path, namespace: StateNamespace) -> tuple[OperationScenario,
     workspace = FakeWorkspace(known_revisions={"abc"})
     workspaces = FakeWorkspaces(workspace)
     artifacts = root_artifacts(namespace)
+    board = FakeIssueTracker()
     echo_entry = OperationEntry.owned(
         _registration(
             "test.echo", EchoRequest, EchoOutcome, LifecycleClass.IDEMPOTENT_WRITE, cancel=True
@@ -277,7 +305,7 @@ def scenarios(root: Path, namespace: StateNamespace) -> tuple[OperationScenario,
             ),
             OperationRole.VERIFY_REVISION: VerifyRevisionOwner(workspaces, workspaces, commit_of),
         },
-        extra=(echo_entry,),
+        extra=(echo_entry, _board_entry(board, MemoryProgressLog())),
     )
     entries = {entry.registration.descriptor.kind: entry for entry in built.entries}
     return (
@@ -298,6 +326,23 @@ def scenarios(root: Path, namespace: StateNamespace) -> tuple[OperationScenario,
             entries["test.verify"],
             VerifyParentRevision(parent=revision("abc")),
             lambda: 0,
+        ),
+        OperationScenario(
+            "board",
+            entries["issue_board.apply_changes"],
+            ApplyIssueChanges(
+                changes=(
+                    CreateIssue(
+                        key="create-1",
+                        type=IssueType.FEATURE,
+                        title="Build it",
+                        body=TextBody(text="described"),
+                        created_by="loop",
+                        iteration=1,
+                    ),
+                )
+            ),
+            lambda: sum(len(issue.history) for issue in board.list()),
         ),
         OperationScenario(
             "interpret",

@@ -47,8 +47,11 @@ from vs_core.api import (
     OperationResult,
     Rejected,
     ResumeAuthorized,
-    RevisionRef,
     RunView,
+    TurnCandidate,
+    TurnCandidateFailed,
+    TurnCandidatePending,
+    TurnCandidateRetained,
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
@@ -251,11 +254,17 @@ def _next_turn(record: RoundState, update: dict[str, object]) -> RoundState:
 
 def _candidate_of(
     view: RunView, record: RoundState, invocation: InvocationRef
-) -> RevisionRef | None:
-    """The revision the reply's turn chain retained, by core's one rule (`TurnChain.candidate`)."""
-    if record.turn is None:
-        return None
-    return record.turn.candidate(view, record.attempt, invocation)
+) -> TurnCandidate | None:
+    """Resolve the current invocation through its shared logical turn chain."""
+    return (
+        None
+        if record.turn is None
+        else record.turn.candidate_outcome(view, record.attempt, invocation)
+    )
+
+
+def _checkpoint_failure(candidate: TurnCandidateFailed) -> str:
+    return f"implementer checkpoint declined ({candidate.reason.value})"
 
 
 def settle_retained(
@@ -268,17 +277,15 @@ def settle_retained(
     invocation = record.held_invocation
     if invocation is None or record.held_reply is None:
         return state
-    live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
     candidate = _candidate_of(view, record, invocation)
-    declined = live is not None and any(
-        row.invocation == invocation for row in live.checkpoint_declines
-    )
-    if candidate is None and not declined:
+    if candidate is None or isinstance(candidate, TurnCandidatePending):
         return state
     reply = _decode(record.held_reply)
     released = state.model_copy(update={"round": record.released()})
-    if isinstance(reply, SingleAgentRoundResponse):
-        return _replied(released, config, record.released(), reply, candidate)
+    if isinstance(candidate, TurnCandidateFailed):
+        return fail(released, record.released(), _checkpoint_failure(candidate))
+    if isinstance(candidate, TurnCandidateRetained) and isinstance(reply, SingleAgentRoundResponse):
+        return _replied(released, config, record.released(), reply, candidate.revision)
     return released
 
 
@@ -319,9 +326,13 @@ def on_turn(
     if isinstance(reply, WaitingForEvaluation):
         return _waiting(state, view, config, record, event)
     candidate = _candidate_of(view, record, event.invocation)
-    if candidate is None:
-        return _put(state, record.holding(event.output_json, event.invocation))
-    return _replied(state, config, record, reply, candidate)
+    if candidate is None or isinstance(candidate, TurnCandidatePending):
+        result = _put(state, record.holding(event.output_json, event.invocation))
+    elif isinstance(candidate, TurnCandidateFailed):
+        result = fail(state, record, _checkpoint_failure(candidate))
+    else:
+        result = _replied(state, config, record, reply, candidate.revision)
+    return result
 
 
 def _corrected(

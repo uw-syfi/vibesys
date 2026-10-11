@@ -33,7 +33,8 @@
 # Libs form a DAG by review: every lib edge is explicit here. The edges are
 # `vs_agent` -> {`vs_sandbox`, `vs_project`, `vs_prompts`}, and
 # `vs_issue_tracker` -> `vs_github` for its
-# GitHub-backed tracker and progress-log implementations.
+# GitHub-backed tracker and progress-log implementations, and `vs_issue_tracker` -> `vs_core`
+# for the board operations a strategy declares.
 # `vs_runtime` owns the run mechanisms and depends only on lower mechanism
 # libraries. Reject any upward lib-to-application edge.
 
@@ -457,7 +458,7 @@ depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "v
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_async_ops.api", "vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
+depends_on = ["vs_async_ops.api", "vs_core", "vs_agent", "vs_issue_tracker", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_runtime._fake_agent_invocations"
@@ -477,7 +478,7 @@ depends_on = []
 [[modules]]
 path = "vs_issue_tracker"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_github"]
+depends_on = ["vs_core", "vs_github"]
 
 [[modules]]
 path = "vs_evaluator_protocol"

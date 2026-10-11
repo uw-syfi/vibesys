@@ -8,14 +8,16 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 let bundle;
 for (const name of ['browser-entry.js', 'browser-entry.mjs']) {
   try {
-    bundle = await readFile(join(root, 'web', '.browser-dist', name), 'utf8');
+    bundle = await readFile(join(root, 'apps', 'web', '.browser-dist', name), 'utf8');
     break;
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
   }
 }
 if (bundle === undefined) {
-  throw new Error('Browser bundle was not built at web/.browser-dist/browser-entry.js or .mjs');
+  throw new Error(
+    'Browser bundle was not built at apps/web/.browser-dist/browser-entry.js or .mjs',
+  );
 }
 const forbidden = [...bundle.matchAll(/(?:node:|node_modules\/node:)[^'"\s]*/g)].map(
   match => match[0],

@@ -14,7 +14,7 @@ which connection carries which role, how errors and disconnects are expressed, a
 flow control behave. It does not specify the schema of the messages themselves: those are the
 Pydantic models in `src/server/api/protocol.py` (built on the light control envelope in
 `src/server/control_envelope.py`), generated into
-`clients/backend-client/src/generated/`. A transport relays whole protocol messages opaquely. If the
+`clients/contracts/src/generated/`. A transport relays whole protocol messages opaquely. If the
 payload schema changes (for example a version bump), this layer does not.
 
 One payload invariant is relevant to framing: a recorded `RunEvent` is bounded by
@@ -77,7 +77,7 @@ transports; a reader that requires one is Unix specific and wrong.
 
 ### WP-FRAMER: NewlineFramer is Unix only
 
-`NewlineFramer` (`clients/backend-client/src/newline-framer.ts`) reassembles messages from a byte
+`NewlineFramer` (`clients/transport/src/newline-framer.ts`) reassembles messages from a byte
 stream that may split a message across reads or pack several into one read. That problem exists only
 on a stream transport. WebSocket delivers whole messages, so the framer does not run on the
 WebSocket path. Framing lives in the transport adapter, below the shared client, so each transport
@@ -217,7 +217,7 @@ There is no capability advertisement. A client discovers whether the server supp
 subscribe field by sending it and reading the result: acceptance means the field works, a
 `extra="forbid"` rejection means the server predates it. `tail` and `store_id` are the two fields
 this already governs (`SubscribeRequest` in `protocol.py`; the client's probe-and-fallback in
-`clients/backend-client/src/persistent-event-stream.ts`).
+`clients/transport/src/persistent-event-stream.ts`).
 
 The recorded consequence, accepted deliberately: a browser resume that carries `store_id` against a
 server that lacks it costs one extra speculative dial (the rejected probe, then the cursor-only
@@ -330,7 +330,7 @@ by both conformance suites: the client-side fold suite (#812) and the server-sid
 
 - `tests/conformance/events/` holds one fixture per `EventType` (the event-kind enum in the generated
   schema). The corpus gate enumerates the enum from
-  `clients/backend-client/src/generated/protocol.schema.json` and fails if a kind has no fixture, so
+  `clients/contracts/src/generated/protocol.schema.json` and fails if a kind has no fixture, so
   a new event kind cannot land without a fixture.
 - `tests/conformance/scenarios/` holds the connection scenarios (bootstrap, resume, rebootstrap,
   capability probes, protocol error, and so on), each tagging the framing decisions it exercises.

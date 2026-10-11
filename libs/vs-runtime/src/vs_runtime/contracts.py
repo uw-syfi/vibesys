@@ -29,10 +29,11 @@ if TYPE_CHECKING:
     from vs_core.api import Limits, OperationRegistration, RevisionRef, SchemaRef, Strategy
     from vs_core.api import RunFacts as CoreRunFacts
     from vs_evaluation.api import EvaluationSettlements, ProfilerOperation
-    from vs_project.api import OrchestrationDescriptor, StateModels
+    from vs_project.api import OrchestrationDescriptor, Project, StateModels
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._agent_evaluation import AgentEvaluationPolicy
     from vs_runtime._artifact_store import ArtifactStore
+    from vs_runtime._operation_catalog import OperationEntry
     from vs_runtime._operation_wiring import OperationRole
     from vs_runtime._run_environment import RunEnvironmentView
     from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
@@ -1367,6 +1368,21 @@ class CorePlan:
 
 
 @dataclass(frozen=True, slots=True)
+class OwnedOperationResources:
+    """What a policy builds the owners of its own operations from.
+
+    ``variables`` are the plan's run-level template variables and ``templates`` is the
+    directory of the policy's templates, the same two inputs the render operation reads.
+    """
+
+    run_id: str
+    project: Project
+    options: BaseModel
+    variables: Mapping[str, object]
+    templates: Path
+
+
+@dataclass(frozen=True, slots=True)
 class CorePolicy:
     """Declarative data that makes a plugin a core run: a pure plan and what it needs.
 
@@ -1386,6 +1402,12 @@ class CorePolicy:
     """Directories searched, in order, for a template or include the strategy's own lacks."""
     artifact_directories: tuple[str, ...] = ()
     """Workspace-relative directories a write-artifacts turn may write."""
+    owned_operations: Callable[[OwnedOperationResources], tuple[OperationEntry, ...]] | None = None
+    """Operations outside the runtime's roles, each with the owner the policy builds for the run.
+
+    The runtime offers them beside the role operations, so a strategy that declares one as
+    required fails at composition when the policy supplies no owner.
+    """
 
 
 async def core_driven(run: Run, options: BaseModel) -> RunStatus:

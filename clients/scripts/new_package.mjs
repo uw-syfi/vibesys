@@ -132,7 +132,7 @@ function entryFiles(plan, subpath, base) {
         ...(references.length > 0 ? {references} : {}),
       }),
       [`src/${module}.ts`]:
-        `/** The ${plan.packageName} ${label} (${runtime}). */\n` +
+        `/** This package's ${label} (${runtime}). */\n` +
         `export const ${identifier} = '${plan.name}';\n`,
       [`src/${module}.test.ts`]:
         "import {expect, test} from 'bun:test';\n" +
@@ -224,8 +224,11 @@ export function createPackage(workspaceRoot, argv) {
       subpath === '.' ? plan.packageName : `${plan.packageName}/${subpath.slice(2)}`;
     paths[specifier] = [`${plan.directory}/src/${entryModule(subpath)}.ts`];
   }
-  config.compilerOptions = {...config.compilerOptions, paths};
-  writeFileSync(architecture, json(config));
+  const sorted = Object.fromEntries(Object.entries(paths).sort(([a], [b]) => a.localeCompare(b)));
+  config.compilerOptions = {...config.compilerOptions, paths: sorted};
+  // One line per specifier, in specifier order, as the file is kept by hand.
+  const text = json(config).replace(/\[\n\s+("[^"]+")\n\s+\]/g, '[$1]');
+  writeFileSync(architecture, text);
   return plan.directory;
 }
 

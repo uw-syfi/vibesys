@@ -1,11 +1,17 @@
 import {describe, expect, test} from 'bun:test';
-import {SEEDS, Seeded} from '@vibesys/core-state/testing';
-import {EMPTY_RECENT, parseRecent, type RecentFile, type RecentRun, remember} from './recent.js';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
+import {
+  EMPTY_RECENT,
+  parseRecent,
+  type RecentFile,
+  remember,
+  type StoredRecentRun,
+} from './recent.js';
 
 const HOSTS = ['local', 'ssh:gpu-box', 'ssh:me@node-1'];
 const RUN_IDS = ['run-1', 'run-2', 'run-3'];
 
-function arbitraryRun(random: Seeded, attachedAt: number): RecentRun {
+function arbitraryRun(random: Seeded, attachedAt: number): StoredRecentRun {
   return {
     host: random.pick(HOSTS),
     project: random.pick(['/srv/a', '~/b']),

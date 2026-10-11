@@ -5,7 +5,7 @@
  * to that implementation's own tests.
  */
 import {describe, expect, test} from 'bun:test';
-import type {InstanceList} from '@vibesys/backend-client/host-helper';
+import type {InstanceList} from '@vibesys/contracts/host-helper';
 import {ConnectionError, HelperRequestError} from '../shell/helper-channel.js';
 import type {HostConnection} from '../shell/host-connection.js';
 

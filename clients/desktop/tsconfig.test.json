@@ -1,5 +1,5 @@
 {
-  // Tests and their fakes, with the main-process and welcome-state sources they import.
+  // Tests and their fakes, with the main-process sources they import.
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "esnext.disposable"],
@@ -9,7 +9,13 @@
   },
   "include": ["src/**/*.ts", "src/**/*.cts"],
   "references": [
-    {"path": "../backend-client/tsconfig.lib.json"},
-    {"path": "../core-state/tsconfig.lib.json"}
+    {"path": "../transport/tsconfig.lib.json"},
+    {"path": "../transport/tsconfig.testing.json"},
+    {"path": "../contracts/tsconfig.lib.json"},
+    {"path": "../store/tsconfig.testing.json"},
+    {"path": "../hosts/tsconfig.lib.json"},
+    {"path": "../runs/tsconfig.lib.json"},
+    {"path": "../features/start-run/tsconfig.state.json"},
+    {"path": "../ipc/tsconfig.lib.json"}
   ]
 }

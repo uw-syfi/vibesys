@@ -1,7 +1,7 @@
 import {afterEach, describe, expect, it} from 'bun:test';
 import {type Renderable, TextRenderable} from '@opentui/core';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
-import type {TodoItem} from '@vibesys/core-state';
+import type {TodoItem} from '@vibesys/run-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
 import {resolveTheme} from '../theme.js';

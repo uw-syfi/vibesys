@@ -18,7 +18,7 @@
  *
  * Electron-free: the main process supplies `release`, `exit`, and a timer.
  */
-import type {ScheduleTimeout} from '@vibesys/backend-client';
+import type {ScheduleTimeout} from '@vibesys/transport';
 
 export type QuitState =
   | {readonly kind: 'running'}

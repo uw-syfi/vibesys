@@ -20,16 +20,33 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 def test_bun_type_packages_match_the_packaged_runtime() -> None:
     pins = {
         manifest.relative_to(PROJECT_ROOT).as_posix(): package["devDependencies"]["@types/bun"]
-        for manifest in (PROJECT_ROOT / "clients").glob("*/package.json")
+        for pattern in ("*/package.json", "features/*/package.json", "apps/*/package.json")
+        for manifest in (PROJECT_ROOT / "clients").glob(pattern)
         if "@types/bun" in (package := json.loads(manifest.read_text())).get("devDependencies", {})
     }
 
     assert set(pins) == {
-        "clients/backend-client/package.json",
-        "clients/core-state/package.json",
+        "clients/contracts/package.json",
         "clients/desktop/package.json",
+        "clients/hosts/package.json",
+        "clients/ipc/package.json",
+        "clients/run-session/package.json",
+        "clients/run-state/package.json",
+        "clients/runs/package.json",
+        "clients/store/package.json",
+        "clients/transport/package.json",
+        "clients/transport-node/package.json",
         "clients/tui/package.json",
-        "clients/web/package.json",
+        "clients/ui/package.json",
+        "clients/features/gateway-connect/package.json",
+        "clients/features/hosts/package.json",
+        "clients/features/recent-runs/package.json",
+        "clients/features/replay/package.json",
+        "clients/features/run-control/package.json",
+        "clients/features/run-view/package.json",
+        "clients/features/start-run/package.json",
+        "clients/apps/desktop-renderer/package.json",
+        "clients/apps/web/package.json",
     }
     assert set(pins.values()) == {BUN_VERSION}
 
@@ -46,10 +63,14 @@ def _write_payload(
         "app/dist/launcher.js": b"// launcher\n",
         "app/dist/self-test.js": b"// self-test\n",
         "app/package.json": json.dumps({"name": "@vibesys/tui", "version": tui_version}).encode(),
-        "app/node_modules/@vibesys/backend-client/package.json": b'{"name":"@vibesys/backend-client"}\n',
-        "app/node_modules/@vibesys/backend-client/dist/index.js": b"// backend client\n",
-        "app/node_modules/@vibesys/core-state/package.json": b'{"name":"@vibesys/core-state"}\n',
-        "app/node_modules/@vibesys/core-state/dist/index.js": b"// core state\n",
+        "app/node_modules/@vibesys/contracts/package.json": b'{"name":"@vibesys/contracts"}\n',
+        "app/node_modules/@vibesys/contracts/dist/index.js": b"// contracts\n",
+        "app/node_modules/@vibesys/run-state/package.json": b'{"name":"@vibesys/run-state"}\n',
+        "app/node_modules/@vibesys/run-state/dist/index.js": b"// run state\n",
+        "app/node_modules/@vibesys/transport/package.json": b'{"name":"@vibesys/transport"}\n',
+        "app/node_modules/@vibesys/transport/dist/index.js": b"// transport\n",
+        "app/node_modules/@vibesys/transport-node/package.json": b'{"name":"@vibesys/transport-node"}\n',
+        "app/node_modules/@vibesys/transport-node/dist/index.js": b"// transport node\n",
         "app/node_modules/@opentui/core/index.js": b"// core\n",
         "app/node_modules/@opentui/core-linux-x64/index.js": b"// native\n",
         "licenses/BUN-LICENSE.md": b"Bun license\n",
@@ -122,7 +143,7 @@ def test_tui_payload_rejects_checkout_specific_dependencies(tmp_path: Path) -> N
     package_path = source / "app" / "package.json"
     package = json.loads(package_path.read_text())
     package["dependencies"] = {
-        "@vibesys/core-state": "@vibesys/core-state@file:///build/clients/core-state"
+        "@vibesys/run-state": "@vibesys/run-state@file:///build/clients/run-state"
     }
     package_path.write_text(json.dumps(package))
 
@@ -147,8 +168,10 @@ def test_required_staging_rejects_a_missing_payload(tmp_path: Path) -> None:
     [
         ("app/dist/launcher.js", "launcher.js"),
         ("app/dist/self-test.js", "self-test.js"),
-        ("app/node_modules/@vibesys/backend-client/dist/index.js", "backend-client"),
-        ("app/node_modules/@vibesys/core-state/dist/index.js", "core-state"),
+        ("app/node_modules/@vibesys/contracts/dist/index.js", "contracts"),
+        ("app/node_modules/@vibesys/run-state/dist/index.js", "run-state"),
+        ("app/node_modules/@vibesys/transport/dist/index.js", "transport"),
+        ("app/node_modules/@vibesys/transport-node/dist/index.js", "transport-node"),
         ("licenses/BUN-LICENSE.md", "BUN-LICENSE"),
         ("licenses/opentui-core.txt", "opentui-core"),
     ],

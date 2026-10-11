@@ -1,4 +1,4 @@
-import type {ToolResultPayload} from '@vibesys/core-state';
+import type {ToolResultPayload} from '@vibesys/run-state/transcript';
 
 const MAX_TOOL_OUTPUT_LINES = 6;
 const MAX_TOOL_OUTPUT_CHARACTERS = 600;

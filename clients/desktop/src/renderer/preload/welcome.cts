@@ -1,31 +1,19 @@
 /**
  * Sandboxed preload of the welcome view: the page's only way out of its sandbox.
  *
- * It exposes one function per welcome request (`welcome-protocol.ts`'s `WelcomeBridge`); each is an
+ * It exposes one function per welcome request (`@vibesys/ipc`'s `WelcomeBridge`); each is an
  * `invoke` the main process answers only for the welcome view's own web contents, and validates.
  * Four events come back: the window's state (`onChrome`), the recent runs (`onRecent`), a host to
  * show (`onShowHost`), and a host's runs as its helper pushed them (`onListing`). Sandboxed
  * preloads cannot import local files, hence the channel names repeated here; the types keep them
- * in step.
+ * in step. It imports only `@vibesys/ipc` and Electron (`.dependency-cruiser.mjs`): the payload
+ * types come from the bridge interface, which types every member below.
  */
 import electron = require('electron');
-import type {HostKey} from '../../common/hosts.js';
-import type {ResumeRunId} from '../../common/resume-run.js';
-import type {
-  ChromeState,
-  HostListing,
-  PathCompletion,
-  StartOutcome,
-  WelcomeBridge,
-  WelcomeEvent,
-  WelcomeHost,
-  WelcomeOverview,
-  WelcomeRecent,
-  WelcomeResult,
-} from '../../common/welcome-protocol.js';
+import type {WelcomeBridge, WelcomeEvent, WelcomeResult} from '@vibesys/ipc';
 
-type Channels = typeof import('../../common/welcome-protocol.js').WELCOME_CHANNELS;
-type Events = typeof import('../../common/welcome-protocol.js').WELCOME_EVENTS;
+type Channels = typeof import('@vibesys/ipc').WELCOME_CHANNELS;
+type Events = typeof import('@vibesys/ipc').WELCOME_EVENTS;
 
 const CHANNELS: Channels = {
   overview: 'vibesys:welcome:overview',
@@ -62,34 +50,27 @@ function on<T>(channel: string, listener: (event: WelcomeEvent<T>) => void): voi
 
 const bridge: WelcomeBridge = {
   platform: process.platform,
-  overview: () => call<WelcomeOverview>(CHANNELS.overview),
-  hosts: () => call<string[]>(CHANNELS.hosts),
-  host: (host: HostKey) => call<WelcomeHost>(CHANNELS.host, host),
-  setCheckout: (host: HostKey, path: string, change: number) =>
-    call<string>(CHANNELS.setCheckout, host, path, change),
-  cancelCheckout: (change: number) => call<null>(CHANNELS.cancelCheckout, change),
-  signIn: (host: HostKey) => call<null>(CHANNELS.signIn, host),
-  tasks: (host: HostKey, project: string) => call<string[]>(CHANNELS.tasks, host, project),
-  complete: (host: HostKey, directory: string) =>
-    call<PathCompletion>(CHANNELS.complete, host, directory),
-  attach: (host: HostKey, instance: string) => call<null>(CHANNELS.attach, host, instance),
-  start: (host: HostKey, project: string, task: string, args: string, start: number) =>
-    call<StartOutcome>(CHANNELS.start, host, project, task, args, start),
-  cancelStart: (start: number) => call<null>(CHANNELS.cancelStart, start),
-  resume: (host: HostKey, project: string, run: ResumeRunId) =>
-    call<null>(CHANNELS.resume, host, project, run),
-  showRun: () => call<null>(CHANNELS.showRun),
-  showWelcome: () => call<null>(CHANNELS.showWelcome),
-  retry: () => call<null>(CHANNELS.retry),
-  stop: (host: HostKey, instance: string, force: boolean) =>
-    call<null>(CHANNELS.stop, host, instance, force),
-  onChrome: (listener: (event: WelcomeEvent<ChromeState>) => void) => on(EVENTS.chrome, listener),
-  onRecent: (listener: (event: WelcomeEvent<readonly WelcomeRecent[]>) => void) =>
-    on(EVENTS.recent, listener),
-  onShowHost: (listener: (event: WelcomeEvent<HostKey>) => void) =>
-    on(EVENTS.showHost, listener),
-  onListing: (listener: (event: WelcomeEvent<HostListing>) => void) =>
-    on(EVENTS.listing, listener),
+  overview: () => call(CHANNELS.overview),
+  hosts: () => call(CHANNELS.hosts),
+  host: host => call(CHANNELS.host, host),
+  setCheckout: (host, path, change) => call(CHANNELS.setCheckout, host, path, change),
+  cancelCheckout: change => call(CHANNELS.cancelCheckout, change),
+  signIn: host => call(CHANNELS.signIn, host),
+  tasks: (host, project) => call(CHANNELS.tasks, host, project),
+  complete: (host, directory) => call(CHANNELS.complete, host, directory),
+  attach: (host, instance) => call(CHANNELS.attach, host, instance),
+  start: (host, project, task, args, start) =>
+    call(CHANNELS.start, host, project, task, args, start),
+  cancelStart: start => call(CHANNELS.cancelStart, start),
+  resume: (host, project, run) => call(CHANNELS.resume, host, project, run),
+  showRun: () => call(CHANNELS.showRun),
+  showWelcome: () => call(CHANNELS.showWelcome),
+  retry: () => call(CHANNELS.retry),
+  stop: (host, instance, force) => call(CHANNELS.stop, host, instance, force),
+  onChrome: listener => on(EVENTS.chrome, listener),
+  onRecent: listener => on(EVENTS.recent, listener),
+  onShowHost: listener => on(EVENTS.showHost, listener),
+  onListing: listener => on(EVENTS.listing, listener),
 };
 
 electron.contextBridge.exposeInMainWorld('vibesysWelcome', bridge);

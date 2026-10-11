@@ -7,6 +7,8 @@
  * preload hands this process a MessagePort, which the window passes on only when it comes from the
  * current run page.
  */
+
+import {type ChromeState, CONNECT_CHANNEL, WAKE_CHANNEL, type WelcomeEvent} from '@vibesys/ipc';
 import {
   BaseWindow,
   dialog,
@@ -15,8 +17,6 @@ import {
   nativeTheme,
   type WebContentsView,
 } from 'electron';
-import {CONNECT_CHANNEL, WAKE_CHANNEL} from '../../common/bridge-protocol.js';
-import type {ChromeState, WelcomeEvent} from '../../common/welcome-protocol.js';
 import type {RelayPort} from '../features/run-control/index.js';
 import {APP_ENTRY_URL, isAppPage} from './app-assets.js';
 import {sandboxedView} from './app-security.js';

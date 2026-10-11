@@ -25,7 +25,7 @@ from vs_agent.api import (
 from vs_core.api import ContractError, SchemaRef
 from vs_evaluation.api import PollingEvaluationExecutor as PollingEvaluation
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api import ArtifactStore, CorePlan, CoreRunContext
+from vs_runtime.api import ArtifactStore, CorePlan, CoreRunContext, OwnedOperationResources
 from vs_runtime.api.core import (
     EVALUATION_TOOL_ID,
     AgentEvaluationBridge,
@@ -376,7 +376,22 @@ def _catalog(
         variables=plan.prompt_variables,
         commands=resources.commands,
     )
-    return build_operation_catalog(registrations, production_owners(registrations, ports))
+    owned = (
+        ()
+        if policy.owned_operations is None
+        else policy.owned_operations(
+            OwnedOperationResources(
+                run_id=resources.run_id,
+                project=resources.project,
+                options=resources.options,
+                variables=plan.prompt_variables,
+                templates=policy.prompt_templates,
+            )
+        )
+    )
+    return build_operation_catalog(
+        registrations, production_owners(registrations, ports), extra=owned
+    )
 
 
 def _agent_sessions(resources: CoreResources) -> ClientAgentSessions:

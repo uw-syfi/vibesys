@@ -92,8 +92,8 @@ class Executors:
     # False retains one commit per attempt, whatever its turns did. True retains a new commit
     # after every turn, as a worktree that changed between turns would.
     retain_per_turn: bool = False
-    # True: only the attempt's first snapshot yields a revision, as when a resumed turn only
-    # reads a verdict and leaves the worktree as it was.
+    # True returns the same revision after the attempt's first snapshot, as production
+    # snapshotting does when a resumed turn only reads a verdict and changes nothing.
     unchanged_after_first_retain: bool = False
     # Throughput per candidate commit; None makes the benchmark fail.
     benchmark: Callable[[str], float | None] = lambda _commit: 100.0
@@ -115,6 +115,7 @@ class Executors:
     seen: list[Request] = field(default_factory=list)
     readings: dict[EvidenceId, EvidenceReading] = field(default_factory=dict)
     retained: Counter[str] = field(default_factory=Counter)
+    retained_revisions: dict[str, RevisionRef] = field(default_factory=dict)
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
         self.seen.append(request)
@@ -153,10 +154,10 @@ class Executors:
     def _retain(self, request: SnapshotAndRetain) -> Answer:
         attempt = request.attempt.attempt_id.root
         if self.retained[attempt] and self.unchanged_after_first_retain:
-            # The turn changed nothing since the attempt's first checkpoint: no new commit.
-            return Succeeded()
+            return Succeeded(revision=self.retained_revisions[attempt])
         revision = self._retained(attempt)
         self.retained[attempt] += 1
+        self.retained_revisions[attempt] = revision
         return Succeeded(revision=revision)
 
     def finished_agent_evaluation(self, request: SubmitMeasurement) -> Answer:

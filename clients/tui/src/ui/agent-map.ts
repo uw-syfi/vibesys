@@ -11,7 +11,7 @@ import {
   hasActiveAgentTiming,
   type RoundState,
   roundAgentElapsedMs,
-} from '@vibesys/core-state';
+} from '@vibesys/run-state/rounds';
 import {agentRuntimeLabel} from '../agent-runtime-label.js';
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';

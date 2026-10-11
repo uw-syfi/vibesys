@@ -9,19 +9,22 @@ import {promisify} from 'node:util';
 import {compiledTestFileNames, missingCompiledTestFileNames} from './run_node_tests.mjs';
 
 const RUNNER = resolve(dirname(fileURLToPath(import.meta.url)), 'run_node_tests.mjs');
-const BACKEND_MANIFEST = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  '../backend-client/package.json',
-);
+const TRANSPORT_PACKAGES = ['transport', 'transport-node'];
 const run = promisify(execFile);
 
-test('the backend-client package gate runs the same tests under Bun and Node', async () => {
-  const manifest = JSON.parse(await readFile(BACKEND_MANIFEST, 'utf8'));
+for (const directory of TRANSPORT_PACKAGES) {
+  test(`the ${directory} package gate runs the same tests under Bun and Node`, async () => {
+    const manifestPath = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      `../${directory}/package.json`,
+    );
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
 
-  assert.equal(manifest.scripts.test, 'pnpm test:bun && pnpm test:node');
-  assert.equal(manifest.scripts['test:bun'], 'node ../scripts/run_bun_tests.mjs ./src');
-  assert.equal(manifest.scripts['test:node'], 'node ../scripts/run_node_tests.mjs ./src');
-});
+    assert.equal(manifest.scripts.test, 'pnpm test:bun && pnpm test:node');
+    assert.equal(manifest.scripts['test:bun'], 'node ../scripts/run_bun_tests.mjs ./src');
+    assert.equal(manifest.scripts['test:node'], 'node ../scripts/run_node_tests.mjs ./src');
+  });
+}
 
 test('TypeScript module kinds map to the files Node executes', () => {
   assert.deepEqual(

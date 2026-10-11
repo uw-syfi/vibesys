@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import type {AgentPhase} from '@vibesys/core-state';
+import type {AgentPhase} from '@vibesys/run-state/rounds';
 import {
   type AgentGraph,
   type GraphCell,

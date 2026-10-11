@@ -220,7 +220,7 @@ Relevant if you extend `mock-server.ts`:
 `harness.test.ts` covers the parts that only exist at runtime: process
 lifetime, by driving `mock-ui.sh` with a client that exits before it
 subscribes; the liveness checkpoint, by folding a real bootstrap batch plus the
-snapshot query that follows it through `@vibesys/core-state`; the legacy
+snapshot query that follows it through `@vibesys/run-state`; the legacy
 translation, by replaying `bad-cpp-round1` over a real socket and folding the
 executions back out with the client's own reducer; and the subscription
 semantics above, by driving a reconnect-resume, a store-id mismatch, a tail

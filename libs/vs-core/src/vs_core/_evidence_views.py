@@ -9,14 +9,16 @@ read only core values, so every strategy applies one rule.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
+
+from vs_core.types.attempts import CheckpointDecline
+from vs_core.types.common import RevisionRef, Value
 
 if TYPE_CHECKING:
     from vs_core.types.common import (
         AttemptId,
         EvidenceKey,
         InvocationRef,
-        RevisionRef,
         Scope,
     )
     from vs_core.types.evaluation import EvidenceRef, MeasurementResult
@@ -54,6 +56,29 @@ def ledger_refs(view: RunView, keys: tuple[EvidenceKey, ...]) -> tuple[EvidenceR
     return tuple(item for item in refs if item is not None)
 
 
+class TurnCandidatePending(Value):
+    """Core has not recorded this invocation's checkpoint outcome yet."""
+
+    outcome: Literal["pending"] = "pending"
+
+
+class TurnCandidateRetained(Value):
+    """Core recorded the exact revision retained by this invocation."""
+
+    outcome: Literal["retained"] = "retained"
+    revision: RevisionRef
+
+
+class TurnCandidateFailed(Value):
+    """Core rejected or failed this invocation's checkpoint."""
+
+    outcome: Literal["failed"] = "failed"
+    reason: CheckpointDecline
+
+
+type TurnCandidate = TurnCandidatePending | TurnCandidateRetained | TurnCandidateFailed
+
+
 def turn_candidate(
     view: RunView,
     attempt: AttemptId,
@@ -61,18 +86,40 @@ def turn_candidate(
     *,
     predecessors: tuple[InvocationRef, ...],
 ) -> RevisionRef | None:
-    """The latest revision retained by this turn or by a turn it continues.
+    """The revision this very turn retained, never an earlier turn's checkpoint.
 
-    ``predecessors`` are the earlier turns of the same logical answer (the suspended turn a
-    resume continues, an invalid or lost turn a correction replaces); `TurnChain.candidate`
-    supplies them. A turn that only reads a verdict edits nothing, so its candidate is what the
-    turn it resumed checkpointed. A different logical turn, such as a paid retry, is not a
-    predecessor: that retained nothing new yields None even when the attempt holds older
-    checkpoints, so it reports "retained no changed candidate".
+    ``predecessors`` remains required for source compatibility with the published
+    v1 API, but older invocations cannot resolve the current invocation's outcome.
+    A retry turn that retained nothing new therefore yields None even when the
+    attempt holds older checkpoints.
     """
+    del predecessors
     live = next((item for item in view.attempts if item.attempt_id == attempt), None)
     if live is None:
         return None
-    chain = {invocation, *predecessors}
-    mine = tuple(item for item in live.checkpoints if item.invocation in chain)
+    mine = tuple(item for item in live.checkpoints if item.invocation == invocation)
     return mine[-1].revision if mine else None
+
+
+def resolve_turn_candidate(
+    view: RunView,
+    attempt: AttemptId,
+    invocation: InvocationRef,
+) -> TurnCandidate:
+    """Resolve exactly this invocation's durable checkpoint outcome.
+
+    Core returns a checkpoint even when the workspace is unchanged, using the current
+    revision. Every checkpoint decline is a typed failure, not evidence that an older
+    invocation's revision is still valid. Older turn evidence therefore cannot decide a
+    newer invocation while its own outcome is pending or failed.
+    """
+    live = next((item for item in view.attempts if item.attempt_id == attempt), None)
+    if live is None:
+        return TurnCandidatePending()
+    current = tuple(item for item in live.checkpoints if item.invocation == invocation)
+    if current:
+        return TurnCandidateRetained(revision=current[-1].revision)
+    declined = tuple(item for item in live.checkpoint_declines if item.invocation == invocation)
+    if declined:
+        return TurnCandidateFailed(reason=declined[-1].reason)
+    return TurnCandidatePending()

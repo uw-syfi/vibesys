@@ -16,6 +16,7 @@ dependencies = [
     "vs-core",
     "vs-evaluation",
     "vs-evaluator-protocol",
+    "vs-issue-tracker",
     "vs-mcp",
     "vs-project",
     "vs-prompts",
@@ -36,6 +37,7 @@ vs-async-ops = { workspace = true }
 vs-core = { workspace = true }
 vs-evaluation = { workspace = true }
 vs-evaluator-protocol = { workspace = true }
+vs-issue-tracker = { workspace = true }
 vs-mcp = { workspace = true }
 vs-project = { workspace = true }
 vs-prompts = { workspace = true }

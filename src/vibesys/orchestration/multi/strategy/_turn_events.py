@@ -47,6 +47,10 @@ from vs_core.api import (
     ResumeAuthorized,
     RevisionRef,
     RunView,
+    TurnCandidate,
+    TurnCandidateFailed,
+    TurnCandidatePending,
+    TurnCandidateRetained,
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
@@ -75,11 +79,17 @@ def _decode(
 
 def candidate_of(
     view: RunView, record: RoundState, invocation: InvocationRef
-) -> RevisionRef | None:
-    """The revision the reply's turn chain retained, by core's one rule (`TurnChain.candidate`)."""
-    if record.turn is None:
-        return None
-    return record.turn.candidate(view, record.attempt, invocation)
+) -> TurnCandidate | None:
+    """Resolve the current invocation through its shared logical turn chain."""
+    return (
+        None
+        if record.turn is None
+        else record.turn.candidate_outcome(view, record.attempt, invocation)
+    )
+
+
+def _checkpoint_failure(candidate: TurnCandidateFailed) -> str:
+    return f"implementer checkpoint declined ({candidate.reason.value})"
 
 
 def owns_turn(state: MultiStrategyState, event: TurnResult) -> bool:
@@ -130,9 +140,13 @@ def _answered(
         judged = record.model_copy(update={"judge_invocation": event.invocation})
         return _judged(state, view, config, judged, reply)
     candidate = candidate_of(view, record, event.invocation)
-    if candidate is None:
-        return put(state, record.holding(payload, event.invocation))
-    return _replied(state, config, record, reply, candidate)
+    if candidate is None or isinstance(candidate, TurnCandidatePending):
+        result = put(state, record.holding(payload, event.invocation))
+    elif isinstance(candidate, TurnCandidateFailed):
+        result = fail(state, record, _checkpoint_failure(candidate))
+    else:
+        result = _replied(state, config, record, reply, candidate.revision)
+    return result
 
 
 def settle_retained(
@@ -145,20 +159,17 @@ def settle_retained(
     invocation = record.held_invocation
     if invocation is None or record.held_reply is None:
         return state
-    live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
     candidate = candidate_of(view, record, invocation)
-    declined = live is not None and any(
-        row.invocation == invocation for row in live.checkpoint_declines
-    )
-    if candidate is None and not declined:
+    if candidate is None or isinstance(candidate, TurnCandidatePending):
         return state
     reply = _decode(Role.IMPLEMENTER, record.held_reply)
     released = record.released()
-    if isinstance(reply, ImplementerResponse):
-        return _replied(
-            state.model_copy(update={"round": released}), config, released, reply, candidate
-        )
-    return state.model_copy(update={"round": released})
+    released_state = state.model_copy(update={"round": released})
+    if isinstance(candidate, TurnCandidateFailed):
+        return fail(released_state, released, _checkpoint_failure(candidate))
+    if isinstance(candidate, TurnCandidateRetained) and isinstance(reply, ImplementerResponse):
+        return _replied(released_state, config, released, reply, candidate.revision)
+    return released_state
 
 
 def _corrected(

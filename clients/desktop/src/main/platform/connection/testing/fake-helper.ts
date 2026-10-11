@@ -19,7 +19,7 @@ import {
   type LiveInstanceRecord,
   type PathEntry,
   parseHelperRequest,
-} from '@vibesys/backend-client/host-helper';
+} from '@vibesys/contracts/host-helper';
 import {ConnectionError} from '../shell/helper-channel.js';
 import type {Link} from '../shell/link.js';
 import type {SpawnedProcess} from '../shell/process.js';

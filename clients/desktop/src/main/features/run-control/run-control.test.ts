@@ -1,14 +1,14 @@
 import {describe, expect, test} from 'bun:test';
-import {FakeClock} from '@vibesys/backend-client/testing';
-import type {ConnectionStatus} from '../../../common/connection-status.js';
-import {exactResumeRunId} from '../../../common/resume-run.js';
+import type {ConnectionStatus} from '@vibesys/hosts';
+import {exactResumeRunId} from '@vibesys/runs';
+import {FakeClock} from '@vibesys/transport/testing';
 import {
   ConnectionManager,
   DEFAULT_CONNECTION_CONFIG,
   HostConnection,
 } from '../../platform/connection/index.js';
 import {FakeLink, record} from '../../platform/connection/testing/fake-helper.js';
-import type {RecentRun} from '../../platform/settings/index.js';
+import type {StoredRecentRun} from '../../platform/settings/index.js';
 import {RunControl} from './run-control.js';
 
 const HOST = {kind: 'local'} as const;
@@ -59,7 +59,7 @@ class FakeLog {
 
 /** The recent-runs writer, including a gate before its next guarded commit. */
 class FakeRecentRuns {
-  readonly runs: RecentRun[] = [];
+  readonly runs: StoredRecentRun[] = [];
   #queue: Promise<void> = Promise.resolve();
   #next: Gate | null = null;
 
@@ -69,7 +69,7 @@ class FakeRecentRuns {
     return this.#next;
   }
 
-  remember(run: RecentRun, current: () => boolean): Promise<void> {
+  remember(run: StoredRecentRun, current: () => boolean): Promise<void> {
     const write = async (): Promise<void> => {
       const next = [...this.runs, run];
       const pending = this.#next;
