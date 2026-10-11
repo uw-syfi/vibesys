@@ -41,6 +41,7 @@ def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
         [sys.executable, "-m", "tests.e2e.foreground_run_child", str(transports)],
         env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
         stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
     )
     try:
@@ -55,9 +56,14 @@ def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
         # test-isolation: the deadline only guards a hang; a delivered stop returns at once
         output, _ = child.communicate(timeout=20)
     except subprocess.TimeoutExpired:
-        child.kill()
-        child.communicate(timeout=HANG_GUARD_S)
-        pytest.fail("SIGTERM did not interrupt the foreground run")
+        # SIGABRT makes the child's faulthandler dump every thread's stack, so a hang
+        # reports where the run was stuck instead of only that it was.
+        child.send_signal(signal.SIGABRT)
+        _, stuck_stderr = child.communicate(timeout=HANG_GUARD_S)
+        pytest.fail(
+            f"SIGTERM to thread {target} of {transports} transports did not interrupt "
+            f"the foreground run; its stacks:\n{stuck_stderr}"
+        )
     finally:
         child.kill()
     assert "cleanup shutdown=True" in output
