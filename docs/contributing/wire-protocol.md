@@ -12,7 +12,8 @@ cannot silently disagree.
 This contract is transport level, not payload level. It specifies how protocol messages are framed,
 which connection carries which role, how errors and disconnects are expressed, and how liveness and
 flow control behave. It does not specify the schema of the messages themselves: those are the
-Pydantic models in `src/server/api/protocol.py`, generated into
+Pydantic models in `src/server/api/protocol.py` (built on the light control envelope in
+`src/server/control_envelope.py`), generated into
 `clients/backend-client/src/generated/`. A transport relays whole protocol messages opaquely. If the
 payload schema changes (for example a version bump), this layer does not.
 

@@ -479,7 +479,7 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Light host commands and import guard (phase 1) | built |
 | Explicit run identity (phase 2) | not built |
 | Lifecycle phases, progress, tombstones (phase 3) | not built |
-| Control envelope split (phase 4, step one) | not built |
+| Control envelope split (phase 4, step one) | built (`server.control_envelope`) |
 | Host helper and its contract (phase 4) | not built |
 | Connection manager (phase 5) | not built |
 | Screen stores and app lifecycle (phase 6) | not built |

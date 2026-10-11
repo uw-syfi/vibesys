@@ -1,8 +1,8 @@
 """Real processes for the light host commands: what they load, and how long they take.
 
 ``tests/architecture/test_light_entrypoints.py`` checks the static import
-closure; this runs ``vibesys instances list --json`` and ``vibesys tasks --json``
-through the real launcher under ``python -X importtime`` and checks the modules
+closure; this runs ``vibesys instances list``, ``vibesys instances stop`` and
+``vibesys tasks`` through the real launcher under ``python -X importtime`` and checks the modules
 the interpreter actually loaded, deferred imports included. Wall time is
 reported against the 300 ms budget (``docs/contributing/desktop-connection.md``)
 as a test property and on stdout, never asserted: a test's result must not
@@ -42,7 +42,9 @@ def _loaded_modules(importtime_stderr: str) -> list[str]:
     ]
 
 
-def _run_light(argv: list[str], env: dict[str, str], record_property: RecordProperty) -> str:
+def _run_light(
+    argv: list[str], env: dict[str, str], record_property: RecordProperty, *, exit_code: int = 0
+) -> str:
     started = time.monotonic()
     # lint-waiver: LW-182903 [S603]; the command must be its own interpreter, as the app runs it.
     # > Import cost is per process; an in-process call would reuse modules this test
@@ -56,9 +58,9 @@ def _run_light(argv: list[str], env: dict[str, str], record_property: RecordProp
         check=False,
     )
     elapsed_ms = round((time.monotonic() - started) * 1000)
-    record_property(f"wall_ms[{argv[0]}]", elapsed_ms)
+    record_property(f"wall_ms[{' '.join(argv[:2])}]", elapsed_ms)
     sys.stdout.write(f"vibesys {' '.join(argv)}: {elapsed_ms} ms (budget {BUDGET_MS} ms)\n")
-    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.returncode == exit_code, result.stderr[-2000:]
     loaded = _loaded_modules(result.stderr)
     assert "pydantic" in loaded, "importtime reported no modules; the check would be vacuous"
     assert [name for name in loaded if is_heavy(name)] == []
@@ -82,6 +84,18 @@ def test_instances_list_loads_no_engine(
     stdout = _run_light(["instances", "list", "--json"], env, record_property)
 
     assert json.loads(stdout) == {"version": 1, "instances": [], "unverified": []}
+
+
+def test_instances_stop_loads_no_engine(
+    env: dict[str, str], record_property: RecordProperty
+) -> None:
+    # The stop requester is imported at module level, so stopping an id that
+    # is not live loads everything a stop over the control socket would.
+    stdout = _run_light(
+        ["instances", "stop", "0123456789ab", "--json"], env, record_property, exit_code=1
+    )
+
+    assert json.loads(stdout)["outcome"] == "not_running"
 
 
 def test_tasks_loads_no_engine(
