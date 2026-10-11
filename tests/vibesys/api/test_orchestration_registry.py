@@ -30,7 +30,6 @@ from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestration.evolve.models import EvolveOptions
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue import IssueQueueOptions
-from vibesys.orchestration.memory import declared_memory_paths
 from vibesys.orchestration.multi import (
     PLUGIN as MULTI_PLUGIN,
 )
@@ -254,12 +253,9 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
         OrchestrationDescriptor(id="single-agent", config_version=1, options=agent_options),
         OrchestrationDescriptor(id="multi-agent", config_version=1, options=agent_options),
     )
-    # A core strategy declares only the artifact directory its designer writes, and resumes
-    # with exact options (no round-budget variant until core can extend limits, #2013).
-    single = registry.resolve("single-agent")
-    assert single.plugin.memory_paths == ("roadmap",)
-    assert single.resume_policy is None
-    for descriptor in descriptors[1:]:
+    # A core strategy declares only the artifact directories its run-scoped turns write, and
+    # resumes with exact options (no round-budget variant until core can extend limits, #2013).
+    for descriptor, paths in zip(descriptors, (("roadmap",), ("roadmap", "profile")), strict=True):
         registration = registry.resolve(descriptor.id)
         options = registration.parse_options(descriptor)
         assert isinstance(options, AgentOrchestrationOptions)
@@ -268,8 +264,8 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
         assert options.max_rounds == descriptor.options["max_rounds"]
         assert registration.project_max_rounds is not None
         assert registration.project_max_rounds(options) == 4
-        assert registration.plugin.memory_paths == declared_memory_paths()
-        assert registration.resume_policy is not None
+        assert registration.plugin.memory_paths == paths
+        assert registration.resume_policy is None
 
     plain = OrchestrationDescriptor(
         id="plain",
@@ -368,6 +364,9 @@ def test_builtin_plugin_parsing_preserves_strict_tuples_from_persisted_json(
         observed = tuple(item.name for item in parsed.metric_space.objectives)
     assert observed == expected_tuple
     compare = registration.resume_policy
+    if plugin_id == "multi-agent":
+        assert compare is None  # a core strategy resumes with exact options
+        return
     assert compare is not None
     assert compare(descriptor, descriptor).descriptor is None
 
@@ -447,35 +446,6 @@ def test_evolve_plugin_resume_allows_only_increased_generation_budget() -> None:
     decreased = recorded.model_copy(update={"options": {**recorded.options, "max_generations": 1}})
     with pytest.raises(ConfigurationError, match=r"max_generations.*cannot decrease"):
         compare(recorded, decreased)
-
-
-def test_hypothesis_plugin_resume_uses_its_exact_option_schema() -> None:
-    registry = built_in_orchestrations()
-    recorded = OrchestrationDescriptor(
-        id="multi-agent",
-        config_version=1,
-        options={
-            "interface": "service",
-            "max_rounds": 2,
-            "max_retries_per_round": 2,
-            "judge_every": 1,
-            "official_eval_every": 3,
-        },
-    )
-    compare = registry.resolve(recorded.id).resume_policy
-    assert compare is not None
-
-    changed = recorded.model_copy(
-        update={"options": {**recorded.options, "judge_every": 2, "max_rounds": 3}}
-    )
-    with pytest.raises(ConfigurationError, match="judge_every"):
-        compare(recorded, changed)
-
-    wrong_preset = recorded.model_copy(
-        update={"options": {**recorded.options, "profile_guided": {"command": ["true"]}}}
-    )
-    with pytest.raises(ValidationError, match="profile_guided"):
-        compare(recorded, wrong_preset)
 
 
 def test_session_executes_registered_policy_with_canonical_request(tmp_path: Path) -> None:

@@ -1,9 +1,8 @@
 """What the agent is told about trusted evaluation depends on its loop (#1649).
 
-The loops on the core path (dynamic and single) give their agents the evaluation tool, so their prompts describe
+The loops on the core path (dynamic, single and multi) give their agents the evaluation tool, so their prompts describe
 evaluation only through that tool: no ``vibesys-gate``, no ``--gate``, and ``vibesys-gpu`` only as
-``-- COMMAND`` where the agent's own GPU commands are on. Every older loop (agent multi,
-profile-guided multi, plain/issue queue, evolve) has no evaluation tool and keeps the shell
+``-- COMMAND`` where the agent's own GPU commands are on. Every older loop (plain/issue queue, evolve) has no evaluation tool and keeps the shell
 gate until it is ported to the core path (roadmap #1952), so its notes are unchanged.
 """
 
@@ -85,7 +84,14 @@ def test_only_the_core_loops_have_the_evaluation_tool(loop: str) -> None:
     registration: OrchestrationRegistration = _LOOPS[loop]
 
     assert offers_evaluation_tool(registration.plugin) is (
-        loop in {"dynamic", "agent-single", "profile-guided-single"}
+        loop
+        in {
+            "dynamic",
+            "agent-single",
+            "profile-guided-single",
+            "agent-multi",
+            "profile-guided-multi",
+        }
     )
 
 

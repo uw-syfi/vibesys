@@ -30,16 +30,24 @@ if TYPE_CHECKING:
     import pytest
 
 
-def _run(root: Path, *, waits: tuple[bool, ...], polls: tuple[int, ...], rounds: int) -> Run:
+def _run(
+    root: Path,
+    *,
+    waits: tuple[bool, ...],
+    polls: tuple[int, ...],
+    rounds: int,
+    roles: tuple[str, ...] = ("implementer", "judge"),
+) -> Run:
+    """A run whose ``roles`` may wait; a lone implementer's resumed turn leaves the tree as it was."""
     bridge = new_bridge(root)
     script = WaitingTurns(
         planner=deque(plan_reply(f"h{n}") for n in range(rounds + 4)),
         implementer=deque(implemented() for _ in range(40)),
         judge=deque(reviewed() for _ in range(40)),
-        roles=("implementer", "judge"),
+        roles=roles,
         decide=lambda n: waits[n % len(waits)],
         polls=list(polls),
-        unchanged_after_first_retain=True,
+        unchanged_after_first_retain=roles == ("implementer",),
     )
     host = HostOptions(
         max_concurrent=2,
@@ -52,7 +60,7 @@ def _run(root: Path, *, waits: tuple[bool, ...], polls: tuple[int, ...], rounds:
 
 
 def test_a_round_whose_turn_waited_adopts_the_candidate_it_checkpointed(tmp_path: Path) -> None:
-    finished = _run(tmp_path, waits=(True,), polls=(2,), rounds=1)
+    finished = _run(tmp_path, waits=(True,), polls=(2,), rounds=1, roles=("implementer",))
 
     assert finished.core.run.status == RunStatus.TERMINAL
     assert finished.core.run.result is not None

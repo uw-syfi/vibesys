@@ -229,15 +229,11 @@ def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
         vibesys_version="test",
         run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
-        orchestration=OrchestrationDescriptor(
-            id="profile-guided-multi-agent", config_version=1, options={}
-        ),
+        orchestration=OrchestrationDescriptor(id="evolve", config_version=1, options={}),
         trusted_input_baseline="0" * 40,
     )
     project.state.create_run(manifest)
-    project.state.portable_namespace(manifest.run_id, "profile-guided-multi-agent").write_bytes(
-        "agent.json", b"{}"
-    )
+    project.state.portable_namespace(manifest.run_id, "evolve").write_bytes("agent.json", b"{}")
     project.state.portable_namespace(manifest.run_id, "plain").write_bytes("plain.json", b"{}")
 
     documents = open_run_store(project).get_record(manifest.run_id).history_documents()
