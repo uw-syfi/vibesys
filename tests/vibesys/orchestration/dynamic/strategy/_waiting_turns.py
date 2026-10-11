@@ -11,7 +11,7 @@ import asyncio
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._run import FACTS
@@ -44,7 +44,8 @@ if TYPE_CHECKING:
 
     from vs_core.api import CoreState, Request, Scope
     from vs_core.testing.drive import Answer
-    from vs_runtime.api.core import ExecutionContext
+    from vs_runtime.api.core import CoreRuntime, ExecutionContext
+    from vs_sim.api.testing import VirtualClock
 
 WAITING = json.dumps({"kind": "waiting_for_evaluation", "handles": ["h"]})
 _ROLE = AgentRole(
@@ -104,6 +105,8 @@ class WaitingTurns(Executors):
     submitted: int = 0
     waiting: set[str] = field(default_factory=set)
     running: dict[str, int] = field(default_factory=dict)
+    clock: VirtualClock | None = None
+    """The run's simulated clock, bound by `attach_for` once the run exists."""
 
     def __post_init__(self) -> None:
         self.submit = self._start
@@ -118,16 +121,16 @@ class WaitingTurns(Executors):
     def __call__(self, request: Request, core: CoreState) -> Answer:
         if isinstance(request, ResumeSessionTurn):
             self.seen.append(request)
-            return super()._turn(request)  # type: ignore[arg-type]
+            return self._turn(request)
         if isinstance(request, ObserveOwnedJob) and self.running.get(request.resource_id.root):
             self.running[request.resource_id.root] -= 1
             self.seen.append(request)
             return Running(resource_id=request.resource_id)
         return super().__call__(request, core)
 
-    def _turn(self, request: DispatchTurn) -> Answer:
+    def _turn(self, request: DispatchTurn | ResumeSessionTurn) -> Answer:
         role = request.turn.session.role_id.root
-        if role.endswith(self.roles):
+        if isinstance(request, DispatchTurn) and role.endswith(self.roles):
             ordinal = self.started
             self.started += 1
             if self.decide(ordinal):
@@ -136,6 +139,18 @@ class WaitingTurns(Executors):
                 lease = ResourceId(root=f"lease:{request.turn.session.session_id.root}")
                 return Succeeded(output_json=WAITING, resource_id=lease)
         return super()._turn(request)
+
+
+def attach_for(
+    script: WaitingTurns, bridge: AgentEvaluationBridge
+) -> Callable[[CoreRuntime[Any], VirtualClock], None]:
+    """Bind the shell and the run's clock to the bridge and the script, once they exist."""
+
+    def attach(shell: CoreRuntime[Any], clock: VirtualClock) -> None:
+        bridge.attach(shell, clock)
+        script.clock = clock
+
+    return attach
 
 
 def translator_for(script: WaitingTurns, bridge: AgentEvaluationBridge) -> type[ScriptedExecutors]:
@@ -147,6 +162,7 @@ def translator_for(script: WaitingTurns, bridge: AgentEvaluationBridge) -> type[
             if not isinstance(request, DispatchTurn) or request.request_id is None:
                 return result
             for _ in range(script.delay(script.delayed)):
+                # test-isolation: yields the event loop, no time passes
                 await asyncio.sleep(0)
             script.delayed += 1
             if request.request_id.root not in script.waiting:
@@ -157,7 +173,8 @@ def translator_for(script: WaitingTurns, bridge: AgentEvaluationBridge) -> type[
             handle = json.loads(reply).get("result", {}).get("handle_id")
             if handle is not None:
                 # The loop runs the submission while the agent works: it owns its job by now.
-                await asyncio.sleep(3.0)
+                assert script.clock is not None
+                await script.clock.sleep(3.0)
                 call = WaitCall(token=token, handles=(handle,))
                 await bridge.answer(call.model_dump_json().encode())
             suspension = bridge.yielded(request)

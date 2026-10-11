@@ -11,7 +11,7 @@ with every attempt closed and nothing left waiting.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
@@ -26,6 +26,7 @@ from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
 from tests.vibesys.orchestration.dynamic.strategy._shell import HostOptions
 from tests.vibesys.orchestration.dynamic.strategy._waiting_turns import (
     WaitingTurns,
+    attach_for,
     new_bridge,
     translator_for,
 )
@@ -91,7 +92,7 @@ def run_waiting(root: Path, scenario: Scenario) -> Run:
     host = HostOptions(
         max_concurrent=scenario.in_flight + 2,
         translator=translator_for(script, bridge),
-        attach=bridge.attach,
+        attach=attach_for(script, bridge),
         controlled=True,
         lifecycle=frozenset({"suspend"}),
     )
@@ -129,19 +130,17 @@ def test_a_run_ends_whatever_its_agents_wait_for(
         assert attempt.phase == AttemptPhase.TERMINAL
 
 
-def _judge_waits(**changes: object) -> Scenario:
-    fields: dict[str, object] = {
-        "rounds": 1,
-        "in_flight": 1,
-        "waits": (True,),
-        "polls": (2,),
-        "delays": (0,),
-        "verdicts": (True,),
-        "outcomes": ("supported",),
-        "throughput": (100.0,),
-        "roles": ("judge",),
-    }
-    return Scenario(**{**fields, **changes})  # type: ignore[arg-type]
+JUDGE_WAITS = Scenario(
+    rounds=1,
+    in_flight=1,
+    waits=(True,),
+    polls=(2,),
+    delays=(0,),
+    verdicts=(True,),
+    outcomes=("supported",),
+    throughput=(100.0,),
+    roles=("judge",),
+)
 
 
 def test_a_judge_that_waits_for_its_own_evaluation_is_resumed_and_the_run_adopts(
@@ -152,7 +151,7 @@ def test_a_judge_that_waits_for_its_own_evaluation_is_resumed_and_the_run_adopts
     Core published no suspension for a turn that cannot write, so nothing ever resumed it
     and the run stalled with every intent complete and the workstream still in review.
     """
-    finished = run_waiting(tmp_path, _judge_waits())
+    finished = run_waiting(tmp_path, JUDGE_WAITS)
 
     assert finished.core.run.status == RunStatus.TERMINAL
     assert finished.core.run.result is not None
@@ -164,7 +163,8 @@ def test_one_of_four_judges_waiting_does_not_hold_the_run_back(tmp_path: Path) -
     """Two workstreams a round for two rounds, and only the third workstream's judge waits."""
     finished = run_waiting(
         tmp_path,
-        _judge_waits(
+        replace(
+            JUDGE_WAITS,
             rounds=2,
             in_flight=2,
             waits=(False, False, False, False, False, True),

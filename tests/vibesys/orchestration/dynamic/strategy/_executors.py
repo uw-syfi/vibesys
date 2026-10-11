@@ -50,6 +50,7 @@ from vs_core.api import (
     Request,
     RequestId,
     ResourceId,
+    ResumeSessionTurn,
     RetainRevision,
     RevisionRef,
     Scope,
@@ -188,7 +189,7 @@ class Executors:
             )
         return Succeeded(resource_id=_lease(request.spec.session_id))
 
-    def _evaluate_from_turn(self, request: DispatchTurn) -> None:
+    def _evaluate_from_turn(self, request: DispatchTurn | ResumeSessionTurn) -> None:
         """The implementer measures the revision core will retain for its attempt."""
         assert self.admit is not None, "the shell must attach its admission before a run"
         facts = FACTS
@@ -221,7 +222,7 @@ class Executors:
 
     # -- agents -----------------------------------------------------------
 
-    def _turn(self, request: DispatchTurn) -> Answer:
+    def _turn(self, request: DispatchTurn | ResumeSessionTurn) -> Answer:
         role = request.turn.session.role_id.root.removeprefix("dynamic-")
         queue = {
             "orchestrator": self.planner,

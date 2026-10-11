@@ -449,7 +449,7 @@ def drive_shell[S: StrategyState](
         options.attach(shell, clock)
     controls = (
         RunControlBridge(
-            create_run_control_channel(lambda _transition: None),
+            create_run_control_channel(_IgnoredTransitions()),
             _NoSteer(),
             stop_result=RunResultProposal(outcome="cancelled", reason="stop"),
         )
@@ -478,6 +478,13 @@ def drive_shell[S: StrategyState](
         journal=journal,
         halted=halted,
     )
+
+
+class _IgnoredTransitions:
+    """A run-control event sink for a channel nobody records."""
+
+    def __call__(self, transition: object) -> None:
+        del transition
 
 
 class _NoSteer:
