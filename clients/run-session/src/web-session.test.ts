@@ -548,8 +548,7 @@ describe('WebSession', () => {
   });
 });
 
-/** Let the transport's pending callbacks run. */
+/** Let the transport's and the session's promise callbacks run: microtasks only, no timer. */
 async function settle(): Promise<void> {
-  await new Promise<void>(resolve => setTimeout(resolve, 0));
-  await Promise.resolve();
+  for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
 }

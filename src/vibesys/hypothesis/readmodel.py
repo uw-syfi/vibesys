@@ -168,7 +168,7 @@ def project_run_view(
     across every hypothesis, `state`'s own chronological round count. There is
     no other "current round" concept in core state; anything richer (a live
     in-progress round, a server-journal round label) is journal-derived and
-    out of scope for a core-state projection.
+    out of scope for a run-state projection.
     """
     projection = _agent_run_projection(state, experiment_revision=experiment_revision)
     return RunView(

@@ -10,7 +10,7 @@ export interface WebSessionState {
    * lifetime: a later refresh failure does not make the run state already on screen unknown again.
    *
    * The render uses this boundary to distinguish its own connection state from the run's
-   * lifecycle. Before the first snapshot, core-state's `connecting` is only its initial value and
+   * lifecycle. Before the first snapshot, run-state's `connecting` is only its initial value and
    * must not be presented as a run status.
    */
   readonly hasSnapshot: boolean;

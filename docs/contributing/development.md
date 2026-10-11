@@ -24,7 +24,7 @@ src/entrypoints/         Process composition and command entrypoints
 clients/contracts/       TypeScript server protocol types and validator
 clients/transport/       Runtime-neutral transport and the WebSocket adapter
 clients/transport-node/  Node transport: the Unix-socket client
-clients/core-state/      Pure backend-event projection
+clients/run-state/       Pure backend-event projection (the run fold)
 clients/tui/             TypeScript terminal UI and launcher
 libs/                    Reusable standalone libraries
 examples/                Candidate repositories, tasks, and input bundles

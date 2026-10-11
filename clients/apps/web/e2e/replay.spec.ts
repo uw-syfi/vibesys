@@ -4,7 +4,7 @@ test('renders the replay-driven run viewer', async ({page}) => {
   await page.goto('/');
   await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
   // The fixture still carries the backend compatibility label `round-2`, but
-  // the App heading is a core-state focus projection and must not render it.
+  // the App heading is a run-state focus projection and must not render it.
   await expect(page.getByText('round-2', {exact: true})).toHaveCount(0);
   await expect(page.getByText('15 folded events')).toBeVisible();
   await expect(page.getByText('PASS', {exact: true})).toBeVisible();

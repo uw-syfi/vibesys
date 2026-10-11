@@ -3,7 +3,6 @@
 {"path": "clients/tui/src/ui/agent-map-spinner.test.ts", "rule": "wall_clock_sync", "count": 2}
 {"path": "clients/tui/src/ui/app.test.ts", "rule": "wall_clock_sync", "count": 5}
 {"path": "clients/tui/src/ui/round-rail.test.ts", "rule": "wall_clock_sync", "count": 4}
-{"path": "clients/apps/web/src/app/session.test.ts", "rule": "wall_clock_sync", "count": 1}
 {"path": "libs/vs-agent/tests/test_cli_docker.py", "rule": "patch", "count": 2}
 {"path": "libs/vs-agent/tests/test_fake_client.py", "rule": "private_import", "count": 5}
 {"path": "libs/vs-agent/tests/test_host_resource_declarations.py", "rule": "patch", "count": 2}
