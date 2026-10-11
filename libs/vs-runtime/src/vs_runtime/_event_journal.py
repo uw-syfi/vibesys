@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -31,6 +32,13 @@ class EventCodec[EventT](Protocol):
 type EventSubscriber[EventT] = Callable[[EventT], None]
 
 
+@dataclass(frozen=True, slots=True)
+class _PendingWrite:
+    path: Path
+    offset: int
+    payload: bytes
+
+
 class DurableEventJournal[EventT]:
     """Persist codec-defined events while supporting replay and subscriptions."""
 
@@ -46,6 +54,7 @@ class DurableEventJournal[EventT]:
         self._stream_id = ""
         self._events: list[EventT] = []
         self._pending: list[EventT] = []
+        self._pending_write: _PendingWrite | None = None
         self._subscribers: tuple[EventSubscriber[EventT], ...] = ()
 
     @property
@@ -65,17 +74,32 @@ class DurableEventJournal[EventT]:
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / self._filename
         with self._condition:
-            if self._path == path:
+            if self._path is not None and self._pending and self._path != path:
+                message = "cannot change journal path while an attachment retry is pending"
+                raise RuntimeError(message)
+            if self._path is not None and self._pending and self._stream_id != stream_id:
+                message = "cannot change journal stream while an attachment retry is pending"
+                raise RuntimeError(message)
+            pending_write_persisted = self._pending_write_persisted_locked(path)
+            if self._path == path and not self._pending and pending_write_persisted is None:
                 self._stream_id = stream_id
                 return
             existing = self._read_path(path)
-            pending = self._pending
-            self._pending = []
+            if pending_write_persisted:
+                del self._pending[0]
+            if pending_write_persisted is not None:
+                self._pending_write = None
             self._path = path
             self._stream_id = stream_id
             self._events = existing
-            for event in pending:
-                self._append_locked(event, notify=False)
+            flushed = 0
+            try:
+                for event in self._pending:
+                    self._append_pending_locked(event)
+                    flushed += 1
+            finally:
+                if flushed:
+                    del self._pending[:flushed]
             self._condition.notify_all()
 
     def subscribe(
@@ -102,7 +126,7 @@ class DurableEventJournal[EventT]:
     def record(self, event: EventT) -> EventT:
         """Record an event and publish it exactly once."""
         with self._condition:
-            if self._path is None:
+            if self._path is None or self._pending:
                 self._pending.append(event)
                 recorded = event
             else:
@@ -127,17 +151,56 @@ class DurableEventJournal[EventT]:
             return self.read(after_sequence)
 
     def _append_locked(self, event: EventT, *, notify: bool) -> EventT:
+        recorded, payload = self._prepare_locked(event)
+        return self._write_locked(recorded, payload, notify=notify)
+
+    def _append_pending_locked(self, event: EventT) -> EventT:
+        recorded, payload = self._prepare_locked(event)
+        if self._path is None:
+            message = "cannot append a durable event before attachment"
+            raise RuntimeError(message)
+        offset = self._path.stat().st_size if self._path.exists() else 0
+        self._pending_write = _PendingWrite(path=self._path, offset=offset, payload=payload)
+        recorded = self._write_locked(recorded, payload, notify=False)
+        self._pending_write = None
+        return recorded
+
+    def _prepare_locked(self, event: EventT) -> tuple[EventT, bytes]:
         sequence = self._codec.sequence(self._events[-1]) + 1 if self._events else 1
         recorded = self._codec.stamp(event, sequence=sequence, stream_id=self._stream_id)
+        return recorded, self._codec.encode(recorded) + b"\n"
+
+    def _write_locked(self, recorded: EventT, payload: bytes, *, notify: bool) -> EventT:
         if self._path is None:
             message = "cannot append a durable event before attachment"
             raise RuntimeError(message)
         with self._path.open("ab") as stream:
-            stream.write(self._codec.encode(recorded) + b"\n")
+            written = stream.write(payload)
+            if written != len(payload):
+                message = f"incomplete event journal write: {written} of {len(payload)} bytes"
+                raise OSError(message)
         self._events.append(recorded)
         if notify:
             self._condition.notify_all()
         return recorded
+
+    def _pending_write_persisted_locked(self, path: Path) -> bool | None:
+        """Inspect an ambiguous append without consuming its retry state."""
+        pending_write = self._pending_write
+        if pending_write is None:
+            return None
+        if pending_write.path != path:
+            message = "cannot retry an interrupted journal write at a different path"
+            raise RuntimeError(message)
+        try:
+            with path.open("rb") as stream:
+                stream.seek(pending_write.offset)
+                persisted = stream.read(len(pending_write.payload))
+        except FileNotFoundError:
+            persisted = b""
+        complete = pending_write.payload
+        without_delimiter = complete[:-1] if len(complete) > 1 else complete
+        return persisted in (complete, without_delimiter)
 
     def _read_path(self, path: Path) -> list[EventT]:
         if not path.exists():
