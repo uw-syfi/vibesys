@@ -159,7 +159,7 @@ class ImplementPrompt(Value):
     feedback: str | None = None
     validation_failure: ValidationFailure | None = None
     no_valid_reply: str | None = None
-    dominated_by: ArchiveConflictView | None = None
+    pareto_archive_conflict: ArchiveConflictView | None = None
     official_due: bool = False
     official_reason: str | None = None
     benchmark_enabled: bool = True
@@ -181,7 +181,7 @@ class ContinuePrompt(Value):
     feedback: str | None = None
     validation_failure: ValidationFailure | None = None
     no_valid_reply: str | None = None
-    dominated_by: ArchiveConflictView | None = None
+    pareto_archive_conflict: ArchiveConflictView | None = None
 
 
 class JudgePrompt(Value):

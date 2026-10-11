@@ -10,6 +10,8 @@ proceeds. Attribution and the plan are the run's contract, so a failure of eithe
 search. A hypothesis the ledger keeps active continues without any of these.
 """
 
+from typing import Literal
+
 from pydantic import ValidationError
 
 from vibesys.hypothesis import Continue, Finished, OrchestratorPlan, rounds
@@ -56,6 +58,7 @@ from vs_core.api import (
     Access,
     ObservationStatus,
     RunView,
+    SchemaRef,
     TurnFailureKind,
     TurnResult,
     TurnShape,
@@ -64,13 +67,13 @@ from vs_core.api import (
 
 _SUBJECTS = {Track.PRE_ROUND: "preround", Track.PROFILE: "profile", Track.PLAN: "plan"}
 _ROLES = {Track.PRE_ROUND: Role.PLANNER, Track.PROFILE: Role.PROFILER, Track.PLAN: Role.PLANNER}
-_CORRECTION_ROLES = {
+_CORRECTION_ROLES: dict[Track, Literal["planner", "profiler"]] = {
     Track.PRE_ROUND: "planner",
     Track.PROFILE: "profiler",
     Track.PLAN: "planner",
 }
 _ADVISORY = frozenset({Track.PRE_ROUND, Track.PROFILE})
-CAPTURE_SUBJECT = "capture"
+CAPTURE_SUBJECT = "run"
 
 
 def subject_of(track: Track) -> str:
@@ -173,7 +176,7 @@ def _capture(draft: Draft, design: DesignState) -> DesignState:
     attribution = draft.config.attribution
     if attribution is None or design.step is not Step.NEEDED:
         return design
-    identifier = ids.decision_id(CAPTURE_SUBJECT, draft.state.closed + 1)
+    identifier = ids.decision_id("capture", CAPTURE_SUBJECT, draft.state.closed + 1)
     draft.emit(
         operation(
             draft,
@@ -204,7 +207,7 @@ def _body(draft: Draft, design: DesignState) -> PromptContext:
     return context.plan_prompt(state, config, draft.view, planning, focus)
 
 
-def _shape(draft: Draft, track: Track) -> tuple[Access, object, float]:
+def _shape(draft: Draft, track: Track) -> tuple[Access, SchemaRef, float]:
     config = draft.config
     if track is Track.PRE_ROUND:
         return Access.READ_ONLY, PRE_ROUND_REPLY, config.orchestrator_turn_seconds

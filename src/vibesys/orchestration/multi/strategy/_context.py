@@ -234,23 +234,33 @@ def implement_prompt(
     focus: FocusView | None,
 ) -> ImplementPrompt | ContinuePrompt:
     """The implementation request of the open round: first brief, or a bounded continuation."""
-    plan = plan_of(record)
-    shared = {
-        "round_number": record.number,
-        "retry": record.turns_spent + 1,
-        "plan": hypothesis_plan(plan),
-        "base_revision": record.base,
-        "gates": gate_facts(hypothesis),
-        "feedback": record.feedback,
-        "validation_failure": record.validation_failure,
-        "no_valid_reply": record.no_valid_reply,
-        "dominated_by": record.conflict,
-    }
+    plan = hypothesis_plan(plan_of(record))
+    gates = gate_facts(hypothesis)
+    retry = record.turns_spent + 1
     step = None if hypothesis is None else hypothesis.next_step
     if step:
-        return ContinuePrompt(**shared, continuation_step=step)
+        return ContinuePrompt(
+            round_number=record.number,
+            retry=retry,
+            plan=plan,
+            base_revision=record.base,
+            continuation_step=step,
+            gates=gates,
+            feedback=record.feedback,
+            validation_failure=record.validation_failure,
+            no_valid_reply=record.no_valid_reply,
+            pareto_archive_conflict=record.conflict,
+        )
     return ImplementPrompt(
-        **shared,
+        round_number=record.number,
+        retry=retry,
+        plan=plan,
+        base_revision=record.base,
+        gates=gates,
+        feedback=record.feedback,
+        validation_failure=record.validation_failure,
+        no_valid_reply=record.no_valid_reply,
+        pareto_archive_conflict=record.conflict,
         official_due=record.planned_official_reason is not None,
         official_reason=record.planned_official_reason,
         benchmark_enabled=config.benchmark_configured,

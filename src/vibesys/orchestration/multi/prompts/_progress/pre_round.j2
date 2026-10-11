@@ -1,7 +1,0 @@
-{# Context: `round_number` (int), `decision` (PreRoundDecision). #}
-{% from "_progress/section.j2" import section %}
-{% call section(round_number, "Pre-round profile decision") %}
-- profile: {{ decision.need_profile }}
-- focus: {{ decision.profile_focus or "(none)" }}
-- reasoning: {{ decision.reasoning }}
-{% endcall %}
