@@ -376,7 +376,8 @@ export class HostConnection implements AsyncDisposable {
     const {link} = this.#options;
     switch (operation.kind) {
       case 'link':
-        await link.establish(operation.interactive);
+        await link.establish(operation.interactive, signal);
+        stillWanted(signal);
         return () => {};
       case 'handshake': {
         const control = await this.#openControl(signal);
@@ -387,7 +388,7 @@ export class HostConnection implements AsyncDisposable {
         return () => this.#assertControl(control, signal);
       }
       case 'check': {
-        await link.establish(false);
+        await link.establish(false, signal);
         stillWanted(signal);
         if (this.#control === null) await this.#openControl(signal);
         const control = await this.#pingControl();

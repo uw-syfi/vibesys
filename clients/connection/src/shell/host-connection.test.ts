@@ -6,7 +6,7 @@ import type {ChannelEndOutcome} from '@vibesys/contracts/host-helper';
 import {FakeClock} from '@vibesys/transport/testing';
 import type {Cause, ConnectionConfig} from '../state/host-connection.js';
 import {ECHO_SERVER, FakeHelper, FakeLink, record} from '../testing/fake-helper.js';
-import {fakeProcess} from '../testing/fake-process.js';
+import {deferredKillProcess, fakeProcess} from '../testing/fake-process.js';
 import {hostConnectionContract, phaseReached} from '../testing/host-connection-contract.js';
 import {ConnectionManager} from './connection-manager.js';
 import {ConnectionError, type HelperRequestError} from './helper-channel.js';
@@ -284,6 +284,24 @@ describe('HostConnection over the FakeHelper', () => {
     await phaseReached(connection, 'ready');
   });
 
+  test('regression: wake abandons a stalled link and starts a fresh operation', async () => {
+    const link = new FakeLink();
+    const stale = link.deferEstablish();
+    await using connection = fakeConnection(link);
+    const ready = connection.ready();
+    await stale.received;
+    const fresh = link.deferEstablish();
+
+    connection.dispatch({type: 'wake'});
+
+    expect(stale.abandoned).toBe(true);
+    expect(link.establishments).toBe(2);
+    await fresh.received;
+    fresh.release();
+    await ready;
+    expect(connection.phase.kind).toBe('ready');
+  });
+
   test('regression: closing resolves only once every helper process has exited', async () => {
     const link = new FakeLink();
     link.helper.publish(record('00000000000c', 'run-c'));
@@ -494,7 +512,115 @@ describe('HostConnection over the FakeHelper', () => {
 });
 
 describe('ConnectionManager', () => {
-  test('regression: releasing a link kills an in-flight ssh master attempt instead of waiting it out', async () => {
+  test('release cancels every ssh attempt and waits for every retired process to exit', async () => {
+    const actions: string[] = [];
+    const stale = deferredKillProcess(() => actions.push('term-stale'));
+    const fresh = deferredKillProcess(() => actions.push('term-fresh'));
+    let checks = 0;
+    const spawn: Spawn = (_command, args) => {
+      const operation = args.at(args.indexOf('-O') + 1);
+      if (operation === 'check') {
+        actions.push(`check-${checks}`);
+        checks += 1;
+        return checks === 1 ? stale.process : fresh.process;
+      }
+      if (operation === 'exit') {
+        actions.push('exit');
+        const exit = fakeProcess();
+        exit.end(0);
+        return exit.process;
+      }
+      throw new Error(`unexpected ssh operation: ${args.join(' ')}`);
+    };
+    const link = sshLink(spawn);
+    const abandoned = new AbortController();
+    const first = link.establish(false, abandoned.signal);
+    abandoned.abort();
+    expect((await rejection(first)).message).toContain('abandoned');
+    const second = link.establish(false);
+
+    const releasing = link.release();
+    expect(actions).toEqual(['check-0', 'term-stale', 'check-1', 'term-fresh']);
+    expect(actions).not.toContain('exit');
+    fresh.end(null);
+    expect((await rejection(second)).message).toContain('abandoned');
+    expect(stale.process.running).toBe(true);
+    expect(actions).not.toContain('exit');
+
+    stale.end(null);
+    await releasing;
+    expect(actions).toEqual(['check-0', 'term-stale', 'check-1', 'term-fresh', 'exit']);
+  });
+
+  test('abandoning one shared ssh waiter leaves the other waiter and process intact', async () => {
+    const check = fakeProcess();
+    const spawn: Spawn = (_command, args) => {
+      const operation = args.at(args.indexOf('-O') + 1);
+      if (operation === 'check') return check.process;
+      if (operation === 'exit') {
+        const exit = fakeProcess();
+        exit.end(0);
+        return exit.process;
+      }
+      throw new Error(`unexpected ssh operation: ${args.join(' ')}`);
+    };
+    const link = sshLink(spawn);
+    const abandoned = new AbortController();
+    const retained = new AbortController();
+    const first = link.establish(false, abandoned.signal);
+    const second = link.establish(false, retained.signal);
+
+    abandoned.abort();
+
+    expect((await rejection(first)).message).toContain('abandoned');
+    expect(check.process.running).toBe(true);
+    check.end(0);
+    await second;
+    await link.release();
+  });
+
+  test('network wake retires one shared ssh attempt before connections start a fresh one', async () => {
+    const helper = new FakeHelper();
+    const checks: ReturnType<typeof fakeProcess>[] = [];
+    const killed: number[] = [];
+    const spawn: Spawn = (_command, args) => {
+      const control = args.indexOf('-O');
+      const operation = control < 0 ? null : args[control + 1];
+      if (operation === 'check') {
+        const index = checks.length;
+        const check = fakeProcess(() => killed.push(index));
+        checks.push(check);
+        return check.process;
+      }
+      if (operation === 'exit') {
+        const exit = fakeProcess();
+        exit.end(0);
+        return exit.process;
+      }
+      if (args.at(-1) === 'true') throw new Error('the controlled check reports a live master');
+      return helper.spawn();
+    };
+    const manager = fakeManager(() => sshLink(spawn));
+    const replaced = manager.connection(GPU, '/a');
+    const release = replaced.hold();
+    const firstReady = replaced.ready();
+    const shown = manager.connection(GPU, '/b');
+    const secondReady = shown.ready();
+    expect(checks).toHaveLength(1);
+
+    manager.wake();
+
+    expect(killed).toEqual([0]);
+    expect(checks).toHaveLength(2);
+    checks[1]?.end(0);
+    await Promise.all([firstReady, secondReady]);
+    expect(replaced.phase.kind).toBe('ready');
+    expect(shown.phase.kind).toBe('ready');
+    release();
+    await manager[Symbol.asyncDispose]();
+  });
+
+  test('regression: releasing a link kills an in-flight ssh master attempt before its exit', async () => {
     const actions: string[] = [];
     const killed: string[] = [];
     const check = fakeProcess();

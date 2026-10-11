@@ -12,10 +12,10 @@
  * "Connection manager"). Its check is the operation that failed: the control channel is checked by
  * restoring it and `ping`, a run channel by a fresh `run.connect` to the same run. Every operation
  * the machine waits for carries an id and a deadline timer; an operation the machine stops waiting
- * for (it outlived its deadline, a channel ended under it, the connection closed) is aborted, and
- * its late outcome is ignored by its id, so no wait is orphaned and no abandoned operation acts.
- * Time, ids, and outcomes arrive as events; the shell (`../shell/host-connection.ts`) performs the
- * requests.
+ * for (it outlived its deadline, a channel ended under it, a wake asked to redo it, the connection
+ * closed) is aborted, and its late outcome is ignored by its id, so no wait is orphaned and no
+ * abandoned operation acts. Time, ids, and outcomes arrive as events; the shell
+ * (`../shell/host-connection.ts`) performs the requests.
  */
 
 /** Why an operation or a channel failed: the closed set the machine decides on. */
@@ -384,17 +384,44 @@ function timerFired(state: ConnectionState, config: ConnectionConfig): Step {
   }
 }
 
-/** A wake or network change: check now from the start of the schedule, if anything is waiting. */
+/**
+ * A wake or network change: redo now whatever the phase is waiting on, as if that wait had just
+ * ended, instead of only the passive sub-phases (a pending timer with no operation). `ready` redoes
+ * its ping; `linking` and `handshaking` redo their operation; `reconnecting` and `offline` check
+ * again from the start of the schedule. A stale operation already in flight is aborted first, the
+ * same way a deadline or a dropped channel ends one, so the fresh one replaces it rather than
+ * racing it. `idle` and the phases only the user leaves (`auth-needed`, `incompatible`) hold nothing
+ * a wake should redo.
+ */
 function wake(state: ConnectionState, config: ConnectionConfig): Step {
   const phase = state.phase;
-  if (phase.kind === 'ready' && state.op === null) {
-    return begin(clear(state), phase, {kind: 'ping'}, config);
+  switch (phase.kind) {
+    case 'linking': {
+      const current = state.op?.operation;
+      const interactive = current !== undefined && current.kind === 'link' && current.interactive;
+      return begin(clear(state), phase, link(interactive), config);
+    }
+    case 'handshaking':
+      return begin(clear(state), phase, {kind: 'handshake'}, config);
+    case 'ready':
+      return begin(clear(state), phase, {kind: 'ping'}, config);
+    case 'reconnecting':
+    case 'offline': {
+      const {target} = phase;
+      return begin(
+        clear(state),
+        {kind: 'reconnecting', target},
+        {kind: 'check', target},
+        config,
+        1,
+      );
+    }
+    case 'idle':
+    case 'auth-needed':
+    case 'incompatible':
+    case 'closed':
+      return same(state);
   }
-  if ((phase.kind === 'reconnecting' && state.op === null) || phase.kind === 'offline') {
-    const {target} = phase;
-    return begin(clear(state), {kind: 'reconnecting', target}, {kind: 'check', target}, config, 1);
-  }
-  return same(state);
 }
 
 function userRetry(state: ConnectionState, config: ConnectionConfig): Step {

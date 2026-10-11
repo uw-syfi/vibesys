@@ -167,6 +167,18 @@ function checkStep(
   if (event.type === 'run-ended' && event.cause === 'link') {
     expect({...where, phase: state.phase.kind}).not.toEqual({...where, phase: 'ready'});
   }
+  // A wake never leaves a stale operation running: whatever was in flight is aborted and a fresh
+  // operation of the same kind takes its place at once, across every phase that can hold one.
+  if (event.type === 'wake' && before.op !== null) {
+    const abortedStale = requests.some(
+      request => request.type === 'abort' && request.op === before.op?.id,
+    );
+    expect({...where, abortedStale}).toEqual({...where, abortedStale: true});
+    expect({...where, redone: state.op?.operation}).toEqual({
+      ...where,
+      redone: before.op.operation,
+    });
+  }
 }
 
 /** Only failures and timers: a host that never answers. */
@@ -322,6 +334,17 @@ describe('HostConnection machine (scenarios)', () => {
     expect(lost.requests).toContainEqual({type: 'abort', op: ping});
     const closed = fold([{type: 'close'}], lost.state);
     expect(closed.requests).toContainEqual({type: 'abort', op: opOf(lost.state)});
+  });
+
+  test('regression: a wake while the heartbeat ping is already in flight aborts it and pings again', () => {
+    const ready = readyState();
+    const pinging = fold([{type: 'timer-fired', timer: timerOf(ready)}], ready).state;
+    const stalePing = opOf(pinging);
+    const {state, requests} = fold([{type: 'wake'}], pinging);
+    expect(requests).toContainEqual({type: 'abort', op: stalePing});
+    expect(state.phase.kind).toBe('ready');
+    expect(state.op?.operation.kind).toBe('ping');
+    expect(opOf(state)).not.toBe(stalePing);
   });
 
   test('the control channel is checked with a ping on a heartbeat', () => {

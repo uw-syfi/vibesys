@@ -567,6 +567,70 @@ function requestIdOf(line: string): string | null {
 /** How a `FakeLink` fails to come up. */
 export type LinkFault = {readonly cause: Cause; readonly detail: string} | null;
 
+/** One explicitly deferred link establishment, released by a deterministic test action. */
+export interface DeferredEstablish {
+  /** Resolves when `establish` reaches this deferred attempt. */
+  readonly received: Promise<void>;
+  /** Resolves when its caller abandons the attempt. */
+  readonly aborted: Promise<void>;
+  /** Whether its caller has abandoned the attempt. */
+  readonly abandoned: boolean;
+  release(): void;
+}
+
+class PendingEstablish implements DeferredEstablish {
+  readonly received: Promise<void>;
+  readonly aborted: Promise<void>;
+  readonly #received: () => void;
+  readonly #aborted: () => void;
+  #release: (() => void) | null = null;
+  #abandoned = false;
+
+  constructor() {
+    let received = (): void => {};
+    let aborted = (): void => {};
+    this.received = new Promise(resolve => {
+      received = resolve;
+    });
+    this.aborted = new Promise(resolve => {
+      aborted = resolve;
+    });
+    this.#received = received;
+    this.#aborted = aborted;
+  }
+
+  get abandoned(): boolean {
+    return this.#abandoned;
+  }
+
+  wait(signal?: AbortSignal): Promise<void> {
+    this.#received();
+    return new Promise((resolve, reject) => {
+      const abort = (): void => {
+        this.#release = null;
+        this.#abandoned = true;
+        this.#aborted();
+        reject(new ConnectionError('link', 'the connection attempt was abandoned'));
+      };
+      if (signal?.aborted === true) {
+        abort();
+        return;
+      }
+      signal?.addEventListener('abort', abort, {once: true});
+      this.#release = () => {
+        signal?.removeEventListener('abort', abort);
+        resolve();
+      };
+    });
+  }
+
+  release(): void {
+    const release = this.#release;
+    this.#release = null;
+    release?.();
+  }
+}
+
 /** The `Link` to a `FakeHelper`'s host. */
 export class FakeLink implements Link {
   readonly host = 'fake';
@@ -575,7 +639,10 @@ export class FakeLink implements Link {
   linkFault: LinkFault = null;
   /** Interactive sign-ins asked for. */
   interactive = 0;
+  /** Establish calls made, including attempts a caller later abandoned. */
+  establishments = 0;
   released = 0;
+  readonly #establishes: PendingEstablish[] = [];
   /** Every line a bootstrap reported, in order. */
   readonly heardLines: string[] = [];
 
@@ -583,11 +650,22 @@ export class FakeLink implements Link {
     this.helper = helper;
   }
 
-  async establish(interactive: boolean): Promise<void> {
+  /** Hold the next `establish` until the test releases or its caller abandons it. */
+  deferEstablish(): DeferredEstablish {
+    const pending = new PendingEstablish();
+    this.#establishes.push(pending);
+    return pending;
+  }
+
+  async establish(interactive: boolean, signal?: AbortSignal): Promise<void> {
+    this.establishments += 1;
     if (interactive) this.interactive += 1;
     if (this.linkFault !== null)
       throw new ConnectionError(this.linkFault.cause, this.linkFault.detail);
+    await this.#establishes.shift()?.wait(signal);
   }
+
+  networkChanged(): void {}
 
   spawnHelper(checkout: string): SpawnedProcess {
     if (this.linkFault !== null) {

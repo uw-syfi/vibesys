@@ -4,5 +4,5 @@
  * suite every implementation passes.
  */
 export {ECHO_SERVER, FakeHelper, FakeLink, record} from './fake-helper.js';
-export {fakeProcess} from './fake-process.js';
+export {deferredKillProcess, fakeProcess} from './fake-process.js';
 export {hostConnectionContract, phaseReached} from './host-connection-contract.js';
