@@ -1166,7 +1166,7 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.dynamic.models"
 layer = "roles_search"
-depends_on = ["vs_evaluation.api", "vibesys.orchestration.dynamic.parents", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vs_runtime"]
+depends_on = ["vs_core", "vs_evaluation.api", "vibesys.orchestration.dynamic.parents", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vs_runtime"]
 
 [[interfaces]]
 expose = ["[A-Za-z][A-Za-z0-9_]*"]

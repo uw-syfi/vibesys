@@ -24,13 +24,9 @@ from vibesys.orchestration.dynamic.core_policy.api import (
 )
 from vibesys.orchestration.dynamic.models import DynamicOptions
 from vibesys.orchestration.dynamic.strategy.api import (
-    INTERPRET_KIND,
-    RENDER_KIND,
-    RETAIN_KIND,
+    OPERATIONS,
     STATE_SCHEMA,
-    VERIFY_KIND,
     DynamicStrategyState,
-    dynamic_operation_registrations,
     dynamic_operation_registry,
     measurement_recipe,
 )
@@ -47,9 +43,9 @@ from vs_runtime.api.core import (
     AgentEvaluationPolicy,
     OperationCatalog,
     OperationPorts,
-    OperationRole,
     RuntimeRecord,
     build_operation_catalog,
+    operation_roles,
     production_owners,
 )
 
@@ -60,13 +56,6 @@ if TYPE_CHECKING:
     from vs_runtime.api import ArtifactStore, CoreRunContext, RunFacts
     from vs_runtime.api.infrastructure import RunEnvironmentView, TrustedEvaluationPlan
 
-# The runtime role that performs each operation kind the strategy requires.
-_ROLE_OF_KIND = {
-    RENDER_KIND: OperationRole.RENDER_ARTIFACTS,
-    VERIFY_KIND: OperationRole.VERIFY_REVISION,
-    INTERPRET_KIND: OperationRole.INTERPRET_EVIDENCE,
-    RETAIN_KIND: OperationRole.RETAIN_REVISION,
-}
 _PLUGIN_ID = STATE_SCHEMA.name.removesuffix(".strategy-state")
 
 
@@ -119,10 +108,7 @@ def resolve_core_policy(
 
 def dynamic_operation_catalog(ports: OperationPorts) -> OperationCatalog:
     """The operations the dynamic strategy requires, each owned by the production owner of its role."""
-    registrations = {
-        _ROLE_OF_KIND[registration.descriptor.kind]: registration
-        for registration in dynamic_operation_registrations()
-    }
+    registrations = operation_roles(OPERATIONS)
     return build_operation_catalog(registrations, production_owners(registrations, ports))
 
 
@@ -226,11 +212,11 @@ def _agent_evaluation(policy: DynamicCorePolicy) -> AgentEvaluationPolicy:
 
 def dynamic_core_policy() -> CorePolicy:
     """The dynamic search as a core run: its plan, operations and the roles that perform them."""
-    registrations = dynamic_operation_registrations()
     return CorePolicy(
         plan=_core_plan,
         operations=tuple(
-            CoreOperation(_ROLE_OF_KIND[item.descriptor.kind], item) for item in registrations
+            CoreOperation(role, registration)
+            for role, registration in operation_roles(OPERATIONS).items()
         ),
         retention_label=RETENTION_LABEL,
         prompt_templates=Path(prompts.__file__).parent,

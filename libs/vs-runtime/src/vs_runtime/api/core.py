@@ -148,6 +148,7 @@ from vs_runtime._operation_wiring import (
     OperationRole,
     bind_operations,
     build_operation_catalog,
+    operation_roles,
     production_owners,
 )
 from vs_runtime._receipt_store import (
@@ -374,6 +375,7 @@ __all__ = [
     "handle_for",
     "new_core_state",
     "open_session_requests",
+    "operation_roles",
     "owner_key",
     "production_owners",
     "receipt_executor_kinds",

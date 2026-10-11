@@ -19,6 +19,7 @@ from pydantic.json_schema import GenerateJsonSchema
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
+from vs_core.api import Waitable, WaitingForEvaluation
 from vs_runtime.api import (
     AgentId,
     ProfileField,
@@ -432,45 +433,8 @@ class ReviewResult(BaseModel):
     feedback: str = ""
 
 
-class WaitingForDependency(BaseModel):
-    """End this agent turn until every owned evaluation handle settles."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    handles: tuple[str, ...] = Field(min_length=1)
-
-    @field_validator("handles")
-    @classmethod
-    def _unique_nonempty_handles(cls, handles: tuple[str, ...]) -> tuple[str, ...]:
-        if any(not handle.strip() or handle != handle.strip() for handle in handles) or len(
-            handles
-        ) != len(set(handles)):
-            message = "handles must be nonblank and unique"
-            raise ValueError(message)
-        return handles
-
-
-class WaitingForEvaluation(WaitingForDependency):
-    """End this agent turn until every owned evaluation handle settles."""
-
-    kind: Literal["waiting_for_evaluation"]
-
-
-def _reply_kind(value: object) -> str:
-    if isinstance(value, dict):
-        return str(value.get("kind", "result"))
-    return str(getattr(value, "kind", "result"))
-
-
-type ImplementerReply = Annotated[
-    Annotated[ImplementerResult, Tag("result")]
-    | Annotated[WaitingForEvaluation, Tag("waiting_for_evaluation")],
-    Discriminator(_reply_kind),
-]
-type JudgeReply = Annotated[
-    Annotated[ReviewResult, Tag("result")]
-    | Annotated[WaitingForEvaluation, Tag("waiting_for_evaluation")],
-    Discriminator(_reply_kind),
-]
+type ImplementerReply = Waitable[ImplementerResult]
+type JudgeReply = Waitable[ReviewResult]
 
 
 __all__ = [

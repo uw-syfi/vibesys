@@ -18,12 +18,12 @@ from vibesys.orchestration.dynamic.strategy._draft import Draft, invocation_for
 from vibesys.orchestration.dynamic.strategy._ids import decision_of_operation
 from vibesys.orchestration.dynamic.strategy._operations import (
     INTERPRET_KIND,
+    OPERATIONS,
     RENDER_KIND,
     RETAIN_KIND,
     VERIFY_KIND,
     EvidenceReadings,
     RenderedArtifacts,
-    schema_ref,
 )
 from vibesys.orchestration.dynamic.strategy._schemas import STRATEGY_ID
 from vibesys.orchestration.dynamic.strategy._state import (
@@ -67,11 +67,11 @@ class DynamicStrategy:
             strategy_id=STRATEGY_ID,
             state_schema=STATE_SCHEMA,
             required_operations=(
-                schema_ref(RENDER_KIND),
-                schema_ref(VERIFY_KIND),
-                schema_ref(INTERPRET_KIND),
+                OPERATIONS.schema_ref(RENDER_KIND),
+                OPERATIONS.schema_ref(VERIFY_KIND),
+                OPERATIONS.schema_ref(INTERPRET_KIND),
             ),
-            optional_operations=(schema_ref(RETAIN_KIND),),
+            optional_operations=(OPERATIONS.schema_ref(RETAIN_KIND),),
             optional=frozenset({"suspend", "profile-capture"}),
         )
 

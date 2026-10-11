@@ -66,20 +66,6 @@
     "path": "src/vibesys/orchestration/dynamic/models.py",
     "symbol": "<module>",
     "rule": "effect-path",
-    "subject": "pydantic.Discriminator",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/models.py",
-    "symbol": "<module>",
-    "rule": "effect-path",
-    "subject": "pydantic.Tag",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/models.py",
-    "symbol": "<module>",
-    "rule": "effect-path",
     "subject": "pydantic.json_schema.JsonSchemaMode",
     "occurrence": 1
   },

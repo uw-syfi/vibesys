@@ -29,7 +29,12 @@ from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
-    from vs_core.api import OperationRegistration, RevisionRef, StrategyDeclaration
+    from vs_core.api import (
+        OperationRegistration,
+        RevisionRef,
+        StrategyDeclaration,
+        StrategyOperations,
+    )
     from vs_project.api import StateNamespace
     from vs_prompts.api import TemplateRenderer
     from vs_runtime._artifact_store import ArtifactStore
@@ -60,6 +65,21 @@ _REFUSALS: Mapping[OperationRole, tuple[RefusalReason, str]] = {
         "no workspace was wired to retain a revision its accuracy proof names",
     ),
 }
+
+
+def operation_roles(operations: StrategyOperations) -> dict[OperationRole, OperationRegistration]:
+    """The registration of each runtime role, from a strategy's four operations.
+
+    The runtime performs an operation by role, independent of the strategy's kind names, so
+    a strategy that declares its operations through `StrategyOperations` gets its owners.
+    """
+    render, verify, interpret, retain = operations.registrations()
+    return {
+        OperationRole.RENDER_ARTIFACTS: render,
+        OperationRole.VERIFY_REVISION: verify,
+        OperationRole.INTERPRET_EVIDENCE: interpret,
+        OperationRole.RETAIN_REVISION: retain,
+    }
 
 
 @dataclass(frozen=True)

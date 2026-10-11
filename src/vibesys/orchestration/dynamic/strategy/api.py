@@ -12,6 +12,7 @@ from vibesys.orchestration.dynamic.strategy._ids import (
 )
 from vibesys.orchestration.dynamic.strategy._operations import (
     INTERPRET_KIND,
+    OPERATIONS,
     RENDER_KIND,
     RETAIN_KIND,
     VERIFY_KIND,
@@ -70,6 +71,7 @@ __all__ = [
     "IMPLEMENTER_REPLY",
     "INTERPRET_KIND",
     "JUDGE_REPLY",
+    "OPERATIONS",
     "PLANNER_REPLY",
     "PROFILER_REPLY",
     "RENDER_KIND",
