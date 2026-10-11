@@ -1,6 +1,6 @@
 import {Button} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {ConnectionBanners} from '../state/banners.js';
+import type {ConnectionBanners} from '../../state/banners.js';
 
 /*
   Each banner carries an `aria-label` as well as a `data-testid`. They are different mechanisms for

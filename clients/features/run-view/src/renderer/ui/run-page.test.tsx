@@ -2,7 +2,7 @@ import {expect, test} from 'bun:test';
 import {event} from '@vibesys/contracts/testing';
 import {initialCoreState} from '@vibesys/core-state';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {runStep} from '../../../entities/run.js';
+import {runStep} from '../../state/run.js';
 import {RunPage} from './run-page.js';
 
 test('surfaces a server-truncated event beside its retained payload', () => {

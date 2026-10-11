@@ -12,7 +12,7 @@
 import type {RunSnapshot} from '@vibesys/contracts';
 import {only, type Step} from '@vibesys/core-state';
 import type {ControlChannelState, StreamConnectionState} from '@vibesys/transport';
-import type {WebSessionState, WebSessionStatus} from '../../../entities/connection.js';
+import type {WebSessionState, WebSessionStatus} from './connection.js';
 
 /** How a recovery restarts the event stream: resume where it was, or a fresh bootstrap. */
 type StreamRecovery = 'retry' | 'rebootstrap';

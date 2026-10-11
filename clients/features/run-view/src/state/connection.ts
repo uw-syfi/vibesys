@@ -1,5 +1,11 @@
 /** What a live page knows about its connection to the server: a value, no I/O. */
+import {ServerError} from '@vibesys/contracts';
 import type {ControlChannelState} from '@vibesys/transport';
+
+/** Whether a fenced snapshot failed because its stream store was replaced. */
+export function isSnapshotStoreReplaced(error: unknown): error is Error {
+  return error instanceof ServerError && error.diagnostic?.code === 'snapshot_store_replaced';
+}
 
 export type WebSessionStatus = 'connecting' | 'connected' | 'stale';
 
