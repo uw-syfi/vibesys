@@ -6,10 +6,13 @@
 #
 # A project folder holds `src/<id>/` and `test/<id>/` for each Feature, the
 # layout `devcontainer features test` expects; every Feature owner has one.
-# The CLI is the containerized one `build_feature_image` uses (built from the
-# Dockerfile beside this script), so CI and a run exercise the same pinned tool
-# and the host needs only Docker. It drives the host's Docker daemon through the
-# mounted socket and reads each project at the same absolute path the host sees.
+# This is the authoring and CI path only. A run never uses the CLI: it builds
+# the image with `docker build` from a Dockerfile `vs_sandbox.feature_dockerfile`
+# generates, so a run needs no Docker socket mount. Here the CLI (built from the
+# Dockerfile beside this script, so the tool is pinned) drives the host's Docker
+# daemon through the mounted socket and reads each project at the same absolute
+# path the host sees; run it on a host that allows that mount (CI runners do).
+# It checks that the Features conform to the specification the generator implements.
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then

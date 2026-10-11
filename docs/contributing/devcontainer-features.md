@@ -11,10 +11,17 @@ and `agent.Dockerfile` is gone.
 
 A [Dev Container Feature](https://containers.dev/implementors/features/) is a
 directory with a `devcontainer-feature.json` (id, options, environment) and an
-`install.sh` that runs as root during the image build. The reference
-`devcontainer` CLI reads a `devcontainer.json` (a base `image` plus a
-`features` map), builds one image layer per Feature in order, and caches each
-layer separately.
+`install.sh` that runs as root during the image build. The specification says
+what building with Features means: for each Feature in order, make its folder
+available, export its options as environment variables (the option id,
+upper-cased), run `install.sh` as root, and apply the Feature's `containerEnv`.
+The reference `devcontainer` CLI does that by driving Docker, one image layer per
+Feature.
+
+**At run time VibeSys does not use the CLI.** `vs_sandbox.feature_dockerfile`
+writes those same steps as a Dockerfile and `docker build` runs it. The CLI is
+the authoring and CI tool: `devcontainer features test` keeps proving that each
+Feature is specification-conformant, which is what the generator relies on.
 
 VibeSys's layers are repo-local Features. **Each Feature lives with the module
 that owns what it installs, and is passed to the image mechanism as data.** The
@@ -37,7 +44,8 @@ Ownership of the moving parts:
 
 | Part | Module | Knows about |
 | --- | --- | --- |
-| Image mechanism: `devcontainer.json` from a base plus Feature references (local folder or OCI reference), containerized CLI, content-addressed tag, final user and working directory, `feature_project_problems`, the per-base test runner | `vs_sandbox.feature_image` | Nothing about agents, Modal, or evaluator tools |
+| Dockerfile generation: Feature metadata and options in, Dockerfile and build-context file list out (pure), with the supported metadata fields | `vs_sandbox.feature_dockerfile` | Nothing about agents, Modal, or evaluator tools |
+| Image mechanism: reads Feature folders, writes the build context, runs `docker build`, content-addressed tag, `feature_project_problems`, the per-base test runner | `vs_sandbox.feature_image` | Nothing about agents, Modal, or evaluator tools |
 | Toolchain catalog: names, pins, Feature options | `vs_sandbox.toolchain_features` | Feature folders it owns |
 | `agent_image`: resolves the base (task image, bare ID), puts the agent Feature first, passes the caller's Features | `vs_agent.images` | The agent Feature and `provider_policy`; not what the extras are |
 | Selecting a run's Features (`image_features`: pure, property-tested) | `vs_runtime` | Which toolchains a task needs, which pip extras an environment adds |
@@ -57,8 +65,8 @@ Rules every Feature follows:
 - It takes versions as options. The option defaults equal the pins in the
   owner's policy (`vs_agent.provider_policy` for the agent Feature,
   `vs_sandbox.toolchain_features` for the catalog), and the owner's test fails
-  if they drift, so each pin has one source. The generated `devcontainer.json`
-  passes them explicitly anyway.
+  if they drift, so each pin has one source. The generator passes them
+  explicitly anyway.
 - Its environment (`PATH`, `RUSTUP_HOME`) is `containerEnv` in its own
   metadata, not a line in a shared file.
 
@@ -76,135 +84,162 @@ order. Selections are deduplicated and sorted, an unknown toolchain name or a
 requirement containing whitespace is an error, and the agent user joins the
 `docker` group through the container-runtime Feature's `users` option.
 `vs_agent.agent_image(base, features=...)` puts the agent Feature first and hands
-the list to `vs_sandbox.build_feature_image`, which generates, for `rust` on the
-CPU base:
+the list to `vs_sandbox.build_feature_image`. For `rust` on the CPU base the
+generated Dockerfile is (abridged to the first two Features and the last lines):
 
-```json
-{
-  "image": "python:3.12-bookworm",
-  "features": {
-    "./features/vibesys-agent": {"node_version": "24.21.0", "claude_version": "2.1.268"},
-    "./features/vibesys-rust": {"rust_version": "1.92.0"}
-  },
-  "overrideFeatureInstallOrder": ["./features/vibesys-agent", "./features/vibesys-rust"],
-  "containerUser": "agent"
-}
+```dockerfile
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+USER root
+# Feature vibesys-agent
+COPY features/vibesys-agent /usr/src/vibesys-features/vibesys-agent
+RUN cd /usr/src/vibesys-features/vibesys-agent \
+ && chmod +x ./install.sh \
+ && set -a && . ./devcontainer-features.env && set +a \
+ && ./install.sh \
+ && rm -rf /usr/src/vibesys-features/vibesys-agent
+ENV PIP_BREAK_SYSTEM_PACKAGES="1"
+# Feature vibesys-rust
+COPY features/vibesys-rust /usr/src/vibesys-features/vibesys-rust
+RUN ...
+ENV RUSTUP_HOME="/opt/rustup"
+ENV CARGO_HOME="/opt/cargo"
+ENV PATH="/opt/cargo/bin:${PATH}"
+WORKDIR /workspace
+USER agent
 ```
 
-(The real file lists every option.) Without `overrideFeatureInstallOrder` the CLI
-orders Features alphabetically, which would put the toolchains that change most
-often ahead of the agent layer; the mechanism keeps the caller's order, so the
-agent layer comes first.
+`devcontainer-features.env` is generated next to each Feature's `install.sh`.
+It holds the Feature's options (the caller's value, or the metadata default)
+as shell-quoted `NAME=value` lines, plus `_REMOTE_USER` and `_CONTAINER_USER`
+(`root`) and their home directories, the variables the CLI also provides. Each
+Feature is copied just before its own install step, so changing one Feature
+keeps every layer before it cached. The caller's order is the install order;
+the CLI's alphabetical default (which would put the toolchains that change most
+often ahead of the agent layer) does not apply.
 
 `build_feature_image` then:
 
-1. Builds the devcontainer CLI image from `vs_sandbox/devcontainer-cli/Dockerfile`
-   (tag keyed by the file's hash, so an unchanged one is a layer-cache hit of
-   about a second).
-2. Writes the `devcontainer.json`, the local Feature folders, and a three-line
-   finishing Dockerfile into a temporary workspace, and runs
-   `docker run --rm -v /var/run/docker.sock:... -v <ws>:<ws> <cli image> build`.
-   **The workspace is mounted at the same absolute path** inside the CLI
-   container: the CLI passes that path to the host's Docker daemon as the build
-   context, so a different path inside the container would name a directory the
-   daemon cannot see.
-3. Builds the finishing stage `FROM <features image>` with `WORKDIR` and `USER`
-   set (`agent` and `/workspace` for `agent_image`), because the CLI keeps the
-   base's `USER` and `WORKDIR` (`containerUser` only reaches the
-   `devcontainer.metadata` label). It tags the result with a unique local tag and
-   returns its immutable image ID, as the Dockerfile build did, then drops the
-   intermediate tag.
+1. Reads each Feature's `devcontainer-feature.json` and rejects what it cannot
+   honour (below).
+2. Writes the Feature folders, their options files, and the Dockerfile into a
+   temporary directory and runs
+   `docker build --build-arg BASE_IMAGE=<base> --tag <unique local tag> ...`.
+   No container is started and no host path is mounted. The base is a build
+   argument, so the Dockerfile text does not depend on it.
+3. Resolves the tag to its immutable image ID, as the old Dockerfile build did.
 
 The image ID is content-addressed: rebuilding the same selection on the same
 base resolves to the same ID from the layer cache, even though the temporary
-workspace has a different path each time. `push_agent_image` keys its GHCR tag
-off that ID as before.
+build directory has a different path each time. `push_agent_image` keys its
+GHCR tag off that ID as before.
+
+**Supported Feature metadata.** `id`, `version`, `name`, `description`,
+`documentationURL`, `options` (type `string` or `boolean`, each with a
+default), `containerEnv`, `installsAfter` (checked against the given order) and
+`dependsOn` (only empty, because VibeSys lists every Feature a build needs).
+Any other field (`mounts`, `privileged`, `init`, `capAdd`, `securityOpt`,
+`entrypoint`, `customizations`, lifecycle commands) would need the container
+runtime to act on it, which an image build cannot do, so it is rejected with an
+error naming the field instead of being ignored. The authoring check
+`feature_project_problems` runs the same parser. OCI-published Features are not
+supported either: nothing in the build fetches them, so there is no type for one.
 
 Features never depend on install order for correctness: a Feature that needs a
 user another Feature creates (the container-runtime Feature's `users` option)
 fails the install with a message if the user is missing.
 
-## Choosing how to invoke the devcontainer CLI
+## Choosing how to build the image
 
-The CLI (`@devcontainers/cli`, a Node.js program) was run both ways, pinned to
-0.89.0, on both bases, and produced images that pass the same checks.
+Three ways were built and run on both bases; all produced images that pass the
+same checks. The first design (phase 2 as first reviewed) used the second row;
+a real cluster host forced the change.
 
-| | Host install: `npx @devcontainers/cli@0.89.0` | CLI in a container, Docker socket mounted |
-| --- | --- | --- |
-| Host requirement | Node.js 20 or newer, plus network to npm on first use | Docker only, which VibeSys already requires |
-| Pinning | Version in the command; Node itself is whatever the host has (24.12 here) | Whole toolchain pinned by an image built from `vs_sandbox/devcontainer-cli/Dockerfile` (Node, docker CLI, buildx, devcontainer CLI) |
-| One-time cost | First `npx` run downloads the package (3 s on a warm npm cache) | Image build 23 s, 449 MB on disk |
-| Per-build overhead | None measured | Under 1 s (warm build 1.5 s against 3.3 s for the host CLI, within noise) |
-| Pitfalls | Different host Node versions behave differently | Workspace must be mounted at the same absolute path; the container holds the Docker socket, which is root-equivalent on the host (the same trust Docker access already grants) |
+| | Containerized CLI, Docker socket mounted | CLI installed on the host | Generated Dockerfile, plain `docker build` (chosen) |
+| --- | --- | --- | --- |
+| Host requirement | Docker, and a daemon that allows `-v /var/run/docker.sock` | Docker plus Node.js 20 or newer, plus network to npm on first use | Docker only |
+| Works where the daemon forbids the socket mount | No: `authorization denied by plugin authz-guard: bind-mount of sensitive host path is not allowed: /var/run/docker.sock` (exit 125) | Yes | Yes |
+| Pinning | Whole toolchain pinned by an image built from `vs_sandbox/devcontainer-cli/Dockerfile` (Node, docker CLI, buildx, devcontainer CLI) | CLI version in the command; Node is whatever the host has | The generator is VibeSys code; the Docker CLI is the host's |
+| Extra moving parts at run time | A 449 MB tool image, the same-absolute-path mount rule, a root-equivalent socket inside a container | A Node install on every host | None |
+| Spec conformance | The reference implementation | The reference implementation | Implements the specification's install steps for the supported fields; `devcontainer features test` in CI proves the Features themselves |
 
-**Decision: run the CLI in a container with the Docker socket mounted.** It
-adds no Node.js requirement to the host, which the issue asks us to record as
-a decision before adding, and it pins the Node version together with the CLI.
-The cost is a 449 MB tool image and the same-path mount rule. If a deployment
-cannot expose the socket to a container, the host `npx` form is the fallback;
-both are the same `devcontainer build` arguments.
+**Decision: generate a Dockerfile.** A hardened site is exactly where VibeSys
+should still work, a Node requirement on every host is a cost the issue asked
+us to avoid, and the Dockerfile needs nothing a Feature does not already
+declare. The cost is that VibeSys now owns the small part of the specification
+the CLI implemented (about 300 lines, pure, property-tested) and refuses the
+fields it does not implement. The CLI stays the conformance oracle in CI.
+Both sides were compared on the same bases (below): identical runtime
+configuration, tool versions, installed packages, and `/usr/local/bin` and
+`/opt` contents.
 
 ## Measured costs
 
 Wall-clock seconds on one machine, one run each, so differences under about
-20 percent are noise (network speed varies between runs). "Today" is
-`agent_image(base, toolchains=("rust",))`'s Dockerfile with identical build
-args. "Cold" disables the layer cache. "Warm" repeats an identical build.
-"Change rust" edits only the Rust step or Feature. "Change agent" edits the
-npm CLI step or the `vibesys-agent` Feature, which is the earliest step.
+20 percent are noise (network speed varies between runs). Both builds select
+`rust` and `go` through `agent_image` and start cold: the base is the named
+image plus one extra layer that is unique per build, so no layer is cached.
+"Warm" repeats the identical build.
 
-| Base | Build | Today | Features, host CLI | Features, CLI in container |
-| --- | --- | --- | --- | --- |
-| Debian (`python:3.12-bookworm`) | cold | 75 | 117 | 82 |
-| | warm | 0.4 | 3.3 | 1.5 |
-| | change rust | 24.5 | 24.8 | not run |
-| | change agent | 87.1 | 96.6 | not run |
-| ROCm (`rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release_2.4.0`) | cold | 231 | 241 | 221 |
-| | warm | 0.5 | 3.2 | not run |
-| | change rust | 137 | 28.8 | not run |
-| | change agent | 181 | 214 | not run |
+| Base | Build | Containerized CLI (socket mounted) | Generated Dockerfile |
+| --- | --- | --- | --- |
+| Debian (`python:3.12-bookworm`) | cold | 98.1 | 105.8 |
+| | warm | not measured | 0.4, same image ID |
+| ROCm (`rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release_2.4.0`) | cold | 279.0 | 221.3 |
+| | warm | not measured | 0.3, same image ID |
 
-`devcontainer features test` on both Features: 83 s on Debian, 237 s on ROCm,
-all checks passed.
+Earlier measurements of the CLI path, before this change (host CLI 3.3 s warm,
+containerized CLI 1.5 s warm) and of the hand-maintained Dockerfile it replaced
+(75 s cold on Debian, 231 s on ROCm) put all of these within noise of each
+other for cold builds. A warm rebuild now costs under a second because there is
+no CLI to start.
 
-Reading the numbers:
+Equivalence checks, run on both images of each base (the same script,
+`diff` of the reports empty):
 
-- A warm rebuild is a few seconds either way. The CLI adds about 3 s for
-  resolving Features and starting BuildKit.
-- Cold builds cost about the same. Where the Feature build is slower it is
-  the extra layers (one per Feature, plus the CLI's own bookkeeping layers).
-- Changing one Feature rebuilds that Feature and every Feature after it.
-  `vibesys-rust` is last, so a Rust change costs 29 s on ROCm, while in the
-  Dockerfile the later Go, user, and `/workspace` steps rebuild too (137 s).
-  This is an ordering effect, not a CLI effect: put the Features that change
-  most often last.
+- Image config: user `agent`, working directory `/workspace`, `PATH`,
+  `RUSTUP_HOME`, `CARGO_HOME`, `PIP_BREAK_SYSTEM_PACKAGES`.
+- Run with no flags: uid 1000 and `pwd` of `/workspace`; `claude` 2.1.268,
+  `codex` 0.160.0, `gemini` 0.59.0, `opencode` 1.18.30; Node 24.21.0; VibeSys's
+  Python imports `mcp`; `cargo` and `rustc` 1.92.0; Go 1.23.12; `uv`; `cargo` and
+  `go` found by a login shell.
+- The sorted list of installed Debian packages and the contents of
+  `/usr/local/bin` and `/opt` hash to the same value.
+
+Changing one Feature rebuilds that Feature and every Feature after it, so the
+Features that change most often go last (`vibesys-rust` and `vibesys-go` follow
+the agent layer).
 
 ## Gaps the spike found, and how phase 2 closed them
 
-- **`USER agent` and `WORKDIR /workspace`.** The CLI-built image keeps the
-  base's user (root) and working directory (`/var/lib/jenkins` on ROCm). The
-  user only appears in the `devcontainer.metadata` label as `containerUser`.
-  `agent_image` runs a three-line finishing build (`WORKDIR /workspace`,
-  `USER agent`) on the CLI's image. The alternative, `docker run --user agent
-  --workdir /workspace` at run start, would put the fix in every one of the
-  four run environments and in `docker exec` paths; one build step is the one
-  owner.
+- **`USER agent` and `WORKDIR /workspace`.** The CLI keeps the base's user
+  (root) and working directory (`/var/lib/jenkins` on ROCm); the user only
+  appears in the `devcontainer.metadata` label. The generated Dockerfile ends
+  with `WORKDIR /workspace` and `USER agent`, so the image runs as `agent` with
+  no flags. The alternative, `docker run --user agent --workdir /workspace` at
+  run start, would put the fix in every one of the four run environments and in
+  `docker exec` paths; the Dockerfile is the one owner. The image carries no
+  `devcontainer.metadata` label, which nothing in VibeSys reads.
 - **Selecting Features per run.** `TOOLCHAINS` and `PIP_EXTRAS` are no longer
-  build args: they are the keys of the generated `devcontainer.json`.
+  build args: they select which Features the Dockerfile copies and installs.
 - **`ENV HOME`** is not needed: Docker derives `HOME` from the user.
-- **Feature order.** The CLI orders Features alphabetically unless
-  `overrideFeatureInstallOrder` is set; the generator sets it.
+- **Feature order.** The generator installs in the caller's order.
 - **Group membership across Features.** The Dockerfile added `agent` to the
   `docker` group in a later step. The container-runtime Feature takes a `users`
   option, creates the group, and adds those users, failing loudly if one does
   not exist yet.
+- **A hardened Docker daemon** (#1898 follow-up). The containerized CLI needed
+  `-v /var/run/docker.sock`, which a daemon with an authorization plugin
+  refuses. The generated Dockerfile mounts nothing; a test asserts no build
+  argv names the socket, a volume, or a container run.
 
 ## Testing Features in CI
 
 `vs_sandbox/devcontainer-cli/test_features.sh <base> <project>...` runs
 `devcontainer features test` for every Feature in each project folder (one per
-owner) on one base, with the same containerized CLI `agent_image` uses. The
-`feature-tests` job in `.github/workflows/test.yml` runs it for one base per
+owner) on one base, with the pinned containerized CLI. This is the one place
+the CLI and the socket mount remain: CI runners allow it, a run never uses it.
+The `feature-tests` job in `.github/workflows/test.yml` runs it for one base per
 family, with Docker's storage cached between runs (the mechanism `agent-image`
 uses):
 
@@ -218,7 +253,10 @@ The backends' real default bases (`rocm/pytorch:...` at 23 GB compressed and
 `nvcr.io/nvidia/pytorch:25.04-py3` at 25 GB) cannot be pulled inside a
 10-minute job, so CI uses the small image of the same family. The real bases
 are built by hand with `agent_image` before a change to a Feature lands, and
-the measured results are in the PR that last changed one.
+the measured results are in the PR that last changed one. Because runs build
+with the generated Dockerfile and CI tests with the CLI, a change to a Feature
+should also be built both ways on one base and the smoke checks compared (see
+"Measured costs").
 
 When a Feature test is run through the containerized CLI, the CLI stages test
 projects under `/tmp/devcontainercli` and gives the host daemon that path as a
@@ -229,7 +267,8 @@ bind-mount source, so the script mounts that directory at the same path.
 | Part | State |
 | --- | --- |
 | Five Features, each with a `test.sh`, in their owners' folders; `feature_project_problems` checks every project | Built |
-| Image mechanism in `vs_sandbox` (generation, containerized CLI, final user and workdir, content-addressed tag) | Built |
+| Dockerfile generator in `vs_sandbox` (pure, property-tested) and the image mechanism that runs `docker build` with it (final user and workdir, content-addressed tag) | Built |
+| Run-time builds without a Docker socket mount | Built (tested through the injectable runner) |
 | Toolchain catalog in `vs_sandbox` with the Rust, Go, and container-runtime pins | Built |
 | `image_features` selection in `vs_runtime` (pure, property-tested) | Built |
 | `agent_image` as a thin wrapper that passes the agent Feature first | Built |

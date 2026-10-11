@@ -1,20 +1,20 @@
 """Tests for the agent image build (:func:`vs_agent.api.images.agent_image`).
 
 ``build_task_image`` itself is covered by ``test_task_image.py``. This file
-covers the agent layer: the commands it issues (the containerized devcontainer
-CLI, then the finishing stage), the workspace it hands the CLI, how it chains
-onto a task image, and that the files it builds from ship with the package.
+covers the agent layer: the commands it issues (one ``docker build`` of the
+Dockerfile generated from Features, then an inspect), the build context it
+hands Docker, how it chains onto a task image, and that the files it builds
+from ship with the package.
 """
 
 from __future__ import annotations
 
 import importlib.resources
-import json
 import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given
@@ -34,19 +34,19 @@ _BARE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 
 @dataclass(frozen=True)
 class _Workspace:
-    """What the devcontainer CLI would have seen when it was run."""
+    """What ``docker build`` would have seen for the agent image."""
 
     root: Path
-    config: dict[str, Any]
-    finish_dockerfile: str
-    feature_ids: frozenset[str]
+    base_image: str
+    dockerfile: str
+    feature_ids: tuple[str, ...]
 
 
 class _FakeRunner:
     """Answers Docker commands and records each one in order.
 
-    When the devcontainer CLI container is "run", the workspace it was pointed
-    at is read and kept, because the real one is deleted after the build.
+    When the agent image is built, its build context is read and kept, because
+    the real one is deleted after the build.
     """
 
     def __init__(
@@ -54,11 +54,11 @@ class _FakeRunner:
         *,
         task_image_id: str = _TASK_IMAGE_ID,
         agent_image_id: str = _AGENT_IMAGE_ID,
-        cli_returncode: int = 0,
+        build_returncode: int = 0,
     ) -> None:
         self.task_image_id = task_image_id
         self.agent_image_id = agent_image_id
-        self.cli_returncode = cli_returncode
+        self.build_returncode = build_returncode
         self.calls: list[tuple[tuple[str, ...], Path, float]] = []
         self.workspaces: list[_Workspace] = []
 
@@ -71,9 +71,9 @@ class _FakeRunner:
     ) -> DockerResult:
         normalized = tuple(argv)
         self.calls.append((normalized, cwd, timeout))
-        if normalized[1] == "run":
+        if normalized[1] == "build" and any(a.startswith("vibesys-agent-build:") for a in argv):
             self._read_workspace(normalized)
-            return docker_result(("docker",), self.cli_returncode, "", "cli failed")
+            return docker_result(("docker",), self.build_returncode, "", "build failed")
         if normalized[1] in {"build", "image"} and normalized[2] != "inspect":
             return docker_result(("docker",), 0, "", "")
         if normalized[1] == "image":
@@ -85,14 +85,19 @@ class _FakeRunner:
         return docker_result(("docker",), 0, "", "")
 
     def _read_workspace(self, argv: tuple[str, ...]) -> None:
-        root = Path(argv[argv.index("--workspace-folder") + 1])
-        features = root / ".devcontainer" / "features"
+        root = Path(argv[-1])
+        base = next(a for a in argv if a.startswith("BASE_IMAGE=")).removeprefix("BASE_IMAGE=")
+        dockerfile = Path(argv[argv.index("--file") + 1]).read_text()
         self.workspaces.append(
             _Workspace(
                 root=root,
-                config=json.loads((root / ".devcontainer" / "devcontainer.json").read_text()),
-                finish_dockerfile=(root / "finish.Dockerfile").read_text(),
-                feature_ids=frozenset(p.name for p in features.iterdir() if p.is_dir()),
+                base_image=base,
+                dockerfile=dockerfile,
+                feature_ids=tuple(
+                    line.split()[1].removeprefix("features/")
+                    for line in dockerfile.splitlines()
+                    if line.startswith("COPY ")
+                ),
             )
         )
 
@@ -100,56 +105,34 @@ class _FakeRunner:
         """The first words of each command, for asserting the order of the build."""
         return [call[0][1:3] if call[0][1] == "image" else call[0][1:2] for call in self.calls]
 
-    def final_build(self) -> tuple[str, ...]:
-        return next(
-            argv
-            for argv, _cwd, _timeout in self.calls
-            if argv[1] == "build" and any(a.startswith("vibesys-agent-build:") for a in argv)
-        )
 
-
-def test_agent_image_builds_through_the_containerized_cli_then_finishes() -> None:
+def test_agent_image_is_one_docker_build_of_the_generated_dockerfile() -> None:
     runner = _FakeRunner()
 
     image_id = agent_image("python:3.12-bookworm", command_runner=runner, timeout=42)
 
     assert image_id == _AGENT_IMAGE_ID
-    assert runner.verbs() == [
-        ("build",),  # the devcontainer CLI image (a layer-cache hit when unchanged)
-        ("run",),  # devcontainer build, in that image
-        ("build",),  # sets USER and WORKDIR
-        ("image", "inspect"),
-        ("image", "rm"),  # drops the intermediate tag
-    ]
+    assert runner.verbs() == [("build",), ("image", "inspect")]
     assert {timeout for _argv, _cwd, timeout in runner.calls} == {42}
     (workspace,) = runner.workspaces
-    cli_argv = runner.calls[1][0]
-    cli_image = runner.calls[0][0][runner.calls[0][0].index("--tag") + 1]
-    root = str(workspace.root)
-    assert cli_argv[:4] == ("docker", "run", "--rm", "--volume")
-    assert f"{root}:{root}" in cli_argv  # the workspace is mounted at the same path
-    assert "/var/run/docker.sock:/var/run/docker.sock" in cli_argv
-    assert cli_argv[cli_argv.index(cli_image) + 1] == "build"
-    assert workspace.config["image"] == "python:3.12-bookworm"
-    assert workspace.config["containerUser"] == "agent"
-    assert workspace.feature_ids == {"vibesys-agent"}
-    assert workspace.config["features"].keys() == {"./features/vibesys-agent"}
+    assert workspace.base_image == "python:3.12-bookworm"
+    assert workspace.feature_ids == ("vibesys-agent",)
+    assert not workspace.root.exists()  # the build context does not outlive the build
 
 
-def test_the_finishing_stage_makes_the_image_run_as_agent_in_workspace() -> None:
-    """The devcontainer CLI keeps the base's USER and WORKDIR, so a last stage sets both."""
+def test_the_image_runs_as_agent_in_workspace_and_never_mounts_the_docker_socket() -> None:
+    """The Dockerfile ends with WORKDIR and USER, and no command runs a container or mounts a path."""
     runner = _FakeRunner()
 
     agent_image("python:3.12-bookworm", command_runner=runner)
 
-    finish = runner.workspaces[0].finish_dockerfile.splitlines()
-    assert finish[-2:] == ["WORKDIR /workspace", "USER agent"]
-    cli_argv = runner.calls[1][0]
-    features_tag = cli_argv[cli_argv.index("--image-name") + 1]
-    final = runner.final_build()
-    assert f"BASE_IMAGE={features_tag}" in final
-    assert runner.calls[-1][0] == ("docker", "image", "rm", features_tag)
-    assert not runner.workspaces[0].root.exists()  # the workspace does not outlive the build
+    assert runner.workspaces[0].dockerfile.splitlines()[-2:] == [
+        "WORKDIR /workspace",
+        "USER agent",
+    ]
+    for argv, _cwd, _timeout in runner.calls:
+        assert argv[1] != "run"
+        assert not any("docker.sock" in token for token in argv)
 
 
 def test_agent_image_chains_task_image_as_base(tmp_path: Path) -> None:
@@ -194,7 +177,7 @@ def test_agent_image_chains_task_image_as_base(tmp_path: Path) -> None:
         "{{.Id}}",
         task_tag,
     )
-    assert runner.workspaces[0].config["image"] == task_tag
+    assert runner.workspaces[0].base_image == task_tag
 
 
 def test_extra_features_follow_the_agent_feature_in_order(tmp_path: Path) -> None:
@@ -209,12 +192,7 @@ def test_extra_features_follow_the_agent_feature_in_order(tmp_path: Path) -> Non
 
     agent_image("python:3.12-bookworm", features=extras, command_runner=runner)
 
-    assert runner.workspaces[0].feature_ids == {"vibesys-agent", "zeta", "alpha"}
-    assert list(runner.workspaces[0].config["features"]) == [
-        "./features/vibesys-agent",
-        "./features/zeta",
-        "./features/alpha",
-    ]
+    assert runner.workspaces[0].feature_ids == ("vibesys-agent", "zeta", "alpha")
 
 
 def test_agent_image_rejects_nonpositive_timeout() -> None:
@@ -222,13 +200,13 @@ def test_agent_image_rejects_nonpositive_timeout() -> None:
         agent_image("python:3.12-bookworm", command_runner=_FakeRunner(), timeout=0)
 
 
-def test_a_failed_devcontainer_build_is_a_task_image_build_error_and_cleans_up() -> None:
-    runner = _FakeRunner(cli_returncode=1)
+def test_a_failed_feature_image_build_is_a_task_image_build_error_and_cleans_up() -> None:
+    runner = _FakeRunner(build_returncode=1)
 
-    with pytest.raises(TaskImageBuildError, match=r"devcontainer build failed.*cli failed"):
+    with pytest.raises(TaskImageBuildError, match=r"feature image build failed.*build failed"):
         agent_image("python:3.12-bookworm", command_runner=runner)
 
-    assert runner.verbs() == [("build",), ("run",)]
+    assert runner.verbs() == [("build",)]
     assert not runner.workspaces[0].root.exists()
 
 
@@ -244,9 +222,7 @@ def test_agent_feature_ships_as_package_data() -> None:
 
 
 def _devcontainer_base(runner: _FakeRunner) -> str:
-    image = runner.workspaces[0].config["image"]
-    assert isinstance(image, str)
-    return image
+    return runner.workspaces[0].base_image
 
 
 @given(

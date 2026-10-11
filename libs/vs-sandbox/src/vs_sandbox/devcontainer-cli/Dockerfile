@@ -1,7 +1,8 @@
-# The devcontainer CLI in a container, so a host needs only Docker. It drives the
-# host's Docker daemon through a mounted /var/run/docker.sock, and reads the
-# workspace at the same absolute path the host sees. Built by
-# `vs_agent.images.agent_image`; see docs/contributing/devcontainer-features.md.
+# The devcontainer CLI in a container, for authoring and CI only: test_features.sh
+# runs `devcontainer features test` with it. It drives the host's Docker daemon
+# through a mounted /var/run/docker.sock, which a hardened host may forbid, so a
+# run never uses it (runs build images with plain `docker build`). See
+# docs/contributing/devcontainer-features.md.
 FROM node:24.21.0-bookworm-slim
 ARG DEVCONTAINERS_CLI_VERSION=0.89.0
 ARG DOCKER_CLI_VERSION=27.5.1

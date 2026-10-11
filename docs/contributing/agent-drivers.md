@@ -387,8 +387,9 @@ Docker's layer cache is what makes a repeat build of either image cheap;
 `vs_agent.api.images` builds an image once per launch and resolves its
 immutable manifest ID rather than keeping a manifest of its own.
 
-How a run's `devcontainer.json` is generated, how the containerized devcontainer
-CLI is invoked, and how Features are tested on each base family are in
+How a run's Dockerfile is generated from its Features, why no devcontainer CLI
+or Docker socket is involved at run time, and how Features are tested on each
+base family are in
 [devcontainer-features.md](devcontainer-features.md).
 
 CLI and toolchain versions are not in the Features' scripts: they are options
@@ -422,8 +423,10 @@ base and task Dockerfile already is. Because setup happens once, at build
 time, an agent cannot `apt-get install` mid-round: a missing system package
 is a Dockerfile gap, not something a running turn can patch around.
 
-The build needs the host's Docker socket at `/var/run/docker.sock`, because the
-devcontainer CLI runs in a container and drives the host daemon through it.
+The build needs only a Docker daemon the host user can run `docker build` against.
+It mounts no host path into a container, so a daemon that forbids bind-mounting
+`/var/run/docker.sock` (an authorization plugin on a hardened cluster host) builds
+the image normally.
 
 ### Registry: GHCR by digest
 

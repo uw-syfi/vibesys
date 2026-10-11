@@ -361,8 +361,8 @@ def agent_image(
     The agent layer is the ``vibesys-agent`` Feature (CLIs, the ``agent`` user,
     VibeSys's Python) followed by *features*, which the caller selects (a run
     environment's extras, toolchains from :mod:`vs_sandbox.toolchain_features`).
-    :func:`vs_sandbox.feature_image.build_feature_image` applies them with the
-    containerized devcontainer CLI; the result runs as the ``agent`` user in
+    :func:`vs_sandbox.feature_image.build_feature_image` applies them with one
+    ``docker build`` of a generated Dockerfile; the result runs as the ``agent`` user in
     ``/workspace``.
 
     When ``task_dockerfile`` is given, the task image is built first (as

@@ -7,7 +7,6 @@ so nothing patches the code under test.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from pathlib import Path
@@ -47,9 +46,9 @@ _IMAGE_ID = "sha256:" + "c" * 64
 class _RecordingBuildRunner:
     """Answers image builds and ``docker image inspect`` without a daemon.
 
-    The devcontainer CLI's workspace is deleted after the build, so the
-    ``devcontainer.json`` it was given is read when the CLI is "run" and kept as
-    ``selected_features``.
+    The build context is deleted after the build, so the Dockerfile generated
+    from the Features is read when the build is "run" and the Feature ids it
+    copies are kept as ``selected_features``.
     """
 
     def __init__(self) -> None:
@@ -61,10 +60,13 @@ class _RecordingBuildRunner:
     ) -> subprocess.CompletedProcess[str]:
         del cwd, timeout
         self.argvs.append(tuple(argv))
-        if argv[1] == "run":
-            root = Path(argv[list(argv).index("--workspace-folder") + 1])
-            config = json.loads((root / ".devcontainer" / "devcontainer.json").read_text())
-            self.selected_features = [key.rsplit("/", 1)[-1] for key in config["features"]]
+        if argv[1] == "build":
+            dockerfile = Path(argv[list(argv).index("--file") + 1]).read_text()
+            self.selected_features = [
+                line.split()[1].rsplit("/", 1)[-1]
+                for line in dockerfile.splitlines()
+                if line.startswith("COPY ")
+            ]
         stdout = _IMAGE_ID if argv[1] == "image" else ""
         return subprocess.CompletedProcess(tuple(argv), 0, stdout, "")
 
