@@ -5,23 +5,15 @@ Prompt contexts are typed values; the strategy never writes prompt text.
 """
 
 from vibesys.candidates.api import BaselineStage
-from vibesys.hypothesis import OrchestratorPlan, PlanningContext, RoundRecord, rounds
+from vibesys.hypothesis import OrchestratorPlan, PlanningContext, rounds
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.single.strategy._config import SingleConfig
-from vibesys.orchestration.single.strategy._prompts import (
-    Bottleneck,
-    FrontierRow,
-    LastProfile,
-    PendingClaim,
-    PlanPrompt,
-    RoundPrompt,
-    RoundRow,
-)
+from vibesys.orchestration.single.strategy._prompts import PlanPrompt, RoundPrompt
 from vibesys.orchestration.single.strategy._state import RoundState, SingleStrategyState
 from vibesys.profile_focus import FocusView
+from vibesys.serial_search import api as serial
+from vibesys.serial_search.api import LastProfile, PlanEvidence
 from vs_core.api import RevisionRef, RunView
-
-_HISTORY_ROWS = 12
 
 
 def ledger_of(state: SingleStrategyState, config: SingleConfig) -> rounds.Ledger:
@@ -71,23 +63,6 @@ def response_of(round_state: RoundState) -> SingleAgentRoundResponse | None:
     return SingleAgentRoundResponse.model_validate_json(round_state.response_json)
 
 
-def _row(record: RoundRecord) -> RoundRow:
-    return RoundRow(
-        round_number=record.round_number,
-        hypothesis_id=record.hypothesis_id or "",
-        claim=(record.hypothesis_claim or "")[:400],
-        passed=record.passed,
-        official=record.official_evaluation,
-        judge_verdict=record.judge_verdict or "deferred",
-        outcome=record.hypothesis_outcome,
-        metric=record.perf_metric,
-        unit=record.perf_unit,
-        delta_pct=record.perf_delta_pct,
-        retained=record.candidate_retained,
-        commit=record.commit,
-    )
-
-
 def plan_prompt(
     state: SingleStrategyState,
     config: SingleConfig,
@@ -96,53 +71,19 @@ def plan_prompt(
     focus: FocusView | None = None,
 ) -> PlanPrompt:
     """The new-hypothesis request: history, the frontier, carried notices and the last profile."""
-    ledger = ledger_of(state, config)
-    records = ledger.records
-    archive = rounds.archive_view(config.hypotheses, ledger)
-    ranked = () if focus is None else focus.ranked_bottlenecks
-    regression = planning.carry.regression
-    exhaustion = planning.carry.exhaustion
+    evidence = serial.plan_evidence(
+        config.hypotheses,
+        ledger_of(state, config),
+        planning,
+        focus,
+    ).model_copy(
+        update={
+            "benchmark_enabled": config.benchmark_configured,
+            "last_profile": state.last_profile,
+        }
+    )
     return PlanPrompt(
-        round_number=planning.round_number,
-        max_rounds=config.max_rounds,
-        plateau_warning=planning.plateau_warning,
-        provisional_candidates=planning.provisional_candidates,
-        official_eval_every=config.official_eval_every,
-        official_cadence_due=planning.provisional_candidates + 1 >= config.official_eval_every,
-        benchmark_enabled=config.benchmark_configured,
-        history=tuple(_row(item) for item in records[-_HISTORY_ROWS:]),
-        older_rounds=max(len(records) - _HISTORY_ROWS, 0),
-        frontier=tuple(
-            FrontierRow(
-                round_number=item.round_number,
-                commit=item.commit,
-                official=item.official,
-                metrics=tuple((m.name, m.value) for m in item.metrics),
-                operating_point=item.operating_point,
-            )
-            for item in archive.trusted_parents
-        ),
-        pending_claims=tuple(
-            PendingClaim(
-                round_number=item.round_number,
-                commit=item.commit,
-                metrics=tuple((m.name, m.value) for m in item.metrics),
-                reason=item.reason,
-            )
-            for item in archive.pending_claims
-        ),
-        last_profile=state.last_profile,
-        regression_round=getattr(regression, "round_number", None),
-        regression_kind=None if regression is None else type(regression).__name__,
-        exhaustion_feedback=None if exhaustion is None else exhaustion.feedback,
-        exhaustion_round=None if exhaustion is None else exhaustion.round_number,
-        active_component=None if focus is None else (focus.active_component or None),
-        ranked_bottlenecks=tuple(
-            Bottleneck(
-                component=item.name, cost_share_pct=item.share * 100, evidence=tuple(item.evidence)
-            )
-            for item in ranked
-        ),
+        **{name: getattr(evidence, name) for name in PlanEvidence.model_fields},
         base_revision=build_base(state, view),
     )
 
@@ -187,7 +128,6 @@ def round_prompt(round_state: RoundState, config: SingleConfig) -> RoundPrompt:
 
 
 __all__ = [
-    "Bottleneck",
     "baseline_resolved",
     "build_base",
     "commit_ref",

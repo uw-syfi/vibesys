@@ -1254,6 +1254,17 @@ from = ["vibesys.candidates"]
 expose = ["api", "api\\..*"]
 
 [[modules]]
+# Policy shared by the strategies that search one hypothesis at a time (single, multi): the
+# profile-guided attribution, the designer's view of the search so far and plan acceptance.
+path = "vibesys.serial_search"
+layer = "roles_search"
+depends_on = ["vs_core", "vibesys.hypothesis", "vibesys.profile_focus"]
+
+[[interfaces]]
+from = ["vibesys.serial_search"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
 path = "vibesys.orchestration.dynamic.strategy"
 layer = "loops"
 depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.dynamic.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.prompts"]
@@ -1326,7 +1337,7 @@ from = ["vibesys.orchestration.single.models"]
 [[modules]]
 path = "vibesys.orchestration.single.strategy"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.single.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.profile_focus", "vibesys.prompts", "vibesys.orchestration.review"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.single.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.profile_focus", "vibesys.prompts", "vibesys.orchestration.review", "vibesys.serial_search"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.single.strategy"]
@@ -1350,7 +1361,7 @@ expose = ["single_core_registration"]
 # stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.single_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.single_roles", "vibesys.orchestration.single.core_policy", "vibesys.orchestration.single.models", "vibesys.orchestration.single.strategy", "vibesys.plugin_registration", "vibesys.prompts"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.single_roles", "vibesys.orchestration.single.core_policy", "vibesys.orchestration.single.models", "vibesys.orchestration.single.strategy", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.serial_search"]
 
 [[interfaces]]
 from = ["vibesys.single_roles"]

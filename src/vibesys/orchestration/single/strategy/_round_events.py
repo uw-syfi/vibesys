@@ -16,7 +16,6 @@ from vibesys.orchestration.single.strategy import _context as context
 from vibesys.orchestration.single.strategy import _ids as ids
 from vibesys.orchestration.single.strategy._config import SingleConfig
 from vibesys.orchestration.single.strategy._draft import invocation_for
-from vibesys.orchestration.single.strategy._focus import focus_policy
 from vibesys.orchestration.single.strategy._operations import EvidenceReadings, RenderedArtifacts
 from vibesys.orchestration.single.strategy._prompts import (
     ReplyCorrectionPrompt,
@@ -35,6 +34,7 @@ from vibesys.orchestration.single.strategy._state import (
     UnreachableReason,
     WorkPhase,
 )
+from vibesys.serial_search import api as serial
 from vs_core.api import (
     AttemptExhausted,
     AttemptReady,
@@ -656,7 +656,7 @@ def on_settled(
             verdict_pass=record.verdict_pass,
         ),
     )
-    closed = _focused(closed, config, passed=passed)
+    closed = serial.record_round(closed, serial.focus_policy(config.attribution), passed=passed)
     encoded = rounds.encode(closed)
     benchmark_reading = reading_of(record.readings, EvidenceKind.BENCHMARK)
     retained = settlement.candidate
@@ -680,23 +680,4 @@ def on_settled(
                 ),
             ),
         }
-    )
-
-
-def _focused(ledger: rounds.Ledger, config: SingleConfig, *, passed: bool) -> rounds.Ledger:
-    """Record the closed round's result on the profile-guidance state of a profile-guided run."""
-    policy = focus_policy(config)
-    guidance = ledger.search.profile_guidance
-    if policy is None or guidance is None:
-        return ledger
-    record = ledger.records[-1]
-    delta = record.perf_delta_pct
-    focused = policy.record(
-        guidance,
-        round_number=record.round_number,
-        passed=passed and record.official_evaluation,
-        relative_improvement=None if delta is None else delta / 100,
-    )
-    return rounds.Ledger(
-        ledger.search.model_copy(update={"profile_guidance": focused}), ledger.carry
     )

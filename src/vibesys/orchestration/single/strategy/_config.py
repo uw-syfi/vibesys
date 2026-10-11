@@ -6,25 +6,15 @@ the same options reproduces every decision.
 
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from vibesys.candidates.api import CandidateConfig
 from vibesys.hypothesis import HypothesisConfig
+from vibesys.serial_search.api import AttributionConfig
 from vs_core.api import ArtifactRef, WorkspaceMode
 
 type Positive = Annotated[int, Field(gt=0)]
 type Duration = Annotated[float, Field(gt=0, allow_inf_nan=False)]
-
-
-class AttributionConfig(BaseModel):
-    """The profile-guided preset's attribution command and its plateau policy."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    command: tuple[str, ...] = Field(min_length=1)
-    timeout_seconds: Positive = 1800
-    min_measured_rounds: Positive = 2
-    min_relative_improvement: Annotated[float, Field(ge=0)] = 0.02
 
 
 class SingleConfig(CandidateConfig):

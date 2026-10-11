@@ -1,7 +1,7 @@
 """Public surface of the single strategy package."""
 
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
-from vibesys.orchestration.single.strategy._config import AttributionConfig, SingleConfig
+from vibesys.orchestration.single.strategy._config import SingleConfig
 from vibesys.orchestration.single.strategy._draft import measurement_recipe
 from vibesys.orchestration.single.strategy._ids import (
     decision_id,
@@ -48,6 +48,7 @@ from vibesys.orchestration.single.strategy._state import (
     SingleStrategyState,
 )
 from vibesys.orchestration.single.strategy._strategy import SingleStrategy
+from vibesys.serial_search.api import AttributionConfig
 
 __all__ = [
     "CAPTURE_KIND",
