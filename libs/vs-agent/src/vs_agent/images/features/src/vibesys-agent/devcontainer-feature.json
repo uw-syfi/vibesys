@@ -1,0 +1,52 @@
+{
+  "id": "vibesys-agent",
+  "version": "0.1.0",
+  "name": "VibeSys agent layer",
+  "description": "Node, the four provider CLIs, a non-root `agent` user (uid 1000), and VibeSys's uv-managed Python with the MCP library. Debian/Ubuntu bases only.",
+  "documentationURL": "https://github.com/uw-syfi/vibesys/blob/main/docs/contributing/devcontainer-features.md",
+  "options": {
+    "node_version": {
+      "type": "string",
+      "default": "24.21.0",
+      "description": "Node.js version from nodejs.org; default mirrors vs_agent.provider_policy.NODE_VERSION."
+    },
+    "claude_version": {
+      "type": "string",
+      "default": "2.1.268",
+      "description": "@anthropic-ai/claude-code version; default mirrors vs_agent.provider_policy."
+    },
+    "codex_version": {
+      "type": "string",
+      "default": "0.160.0",
+      "description": "@openai/codex version; default mirrors vs_agent.provider_policy."
+    },
+    "gemini_version": {
+      "type": "string",
+      "default": "0.59.0",
+      "description": "@google/gemini-cli version; default mirrors vs_agent.provider_policy."
+    },
+    "opencode_version": {
+      "type": "string",
+      "default": "1.18.30",
+      "description": "opencode-ai version; default mirrors vs_agent.provider_policy."
+    },
+    "python_version": {
+      "type": "string",
+      "default": "3.12",
+      "description": "Python version uv installs for VibeSys's own processes; default mirrors vs_agent.provider_policy."
+    },
+    "python_home": {
+      "type": "string",
+      "default": "/opt/vibesys-python",
+      "description": "Absolute path of VibeSys's Python virtual environment; default mirrors vs_agent.provider_policy."
+    },
+    "pip_extras": {
+      "type": "string",
+      "default": "",
+      "description": "Space-separated extra pip requirements installed next to uv (for example `modal`). Empty installs nothing."
+    }
+  },
+  "containerEnv": {
+    "PIP_BREAK_SYSTEM_PACKAGES": "1"
+  }
+}
