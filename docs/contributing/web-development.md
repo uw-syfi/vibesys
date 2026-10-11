@@ -166,7 +166,7 @@ uv run python -m entrypoints.web live --project /path/to/project --task TASK --o
 - `entities/` holds domain values and pure functions shared by features (the
   run fold, connection state, gateway URL policy). No I/O.
 - `platform/` holds system services: `backend.ts` is the only module that
-  imports backend-client runtime values or uses `fetch`
+  imports `@vibesys/transport` runtime values or uses `fetch`
   (`lint-rules/web-fetch-only-in-backend.grit`), plus the browser lifecycle,
   tab storage, and the desktop bridge transport.
 - `shared/` is for domain-free utilities; it is empty today.

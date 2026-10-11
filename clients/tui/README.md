@@ -344,8 +344,9 @@ round shows elapsed time.
 ## Architecture
 
 The Python backend owns the validated, append-only event contract and serves it
-as JSONL over a private Unix socket. `@vibesys/backend-client` owns the generated
-TypeScript protocol, framing, request correlation, and event subscription.
+as JSONL over a private Unix socket. `@vibesys/contracts` owns the generated
+TypeScript protocol; `@vibesys/transport` owns framing, request correlation, and event
+subscription, and `@vibesys/transport-node` the Unix-socket client this package runs.
 `@vibesys/core-state` owns the pure projection of backend messages. This package
 owns UI interaction state, effects, OpenTUI rendering, and input. The detailed
 ownership matrix is in the [TUI architecture guide](../../docs/contributing/tui-architecture.md).

@@ -16,11 +16,13 @@ run without the server. `entrypoints` composes either the headless integration
 or the server runtime. Tach enforces this direction in CI; see
 [architecture.md](architecture.md) for the generated graph.
 
-The TypeScript frontend has four packages with one allowed dependency direction:
+The TypeScript frontend packages have one allowed dependency direction (the full graph is in
+[clients-architecture.md](clients-architecture.md)):
 
 ```text
-@vibesys/backend-client <- @vibesys/core-state <- @vibesys/tui
-                         \____________________<- @vibesys/web
+@vibesys/contracts <- @vibesys/transport <- @vibesys/transport-node <- @vibesys/tui
+@vibesys/contracts <- @vibesys/transport <- @vibesys/web
+@vibesys/contracts <- @vibesys/core-state <- @vibesys/tui, @vibesys/web
 ```
 
 `@vibesys/tui` and `@vibesys/web` may depend on the lower layers. They never depend on each other,
@@ -60,18 +62,18 @@ therefore gated on its first commit. Beyond the package direction, it enforces:
 
 | State or behavior | Owner |
 | --- | --- |
-| Generated protocol types, socket framing, connection lifecycle, requests, event subscription | `backend-client` |
+| Generated protocol types and their validator | `contracts` |
+| Framing, connection lifecycle, requests, event subscription | `transport` (Unix socket: `transport-node`) |
 | Run identity, status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics | `core-state` |
 | Focus, selection, layout, zoom, theme, modals, drafts, query progress | `tui` |
 | Terminal widgets, rendering, keyboard and mouse events | `tui` |
 | Browser bindings, presentation, and browser-only interaction state | `web` |
 
-`@vibesys/backend-client` is the runtime-neutral entry. It exports protocol types, parsing,
-framing-independent stream policy, and the transport interfaces. `@vibesys/backend-client/node`
-contains the Unix-socket implementation used by the TUI, while
-`@vibesys/backend-client/websocket` contains the browser WebSocket implementation. The neutral
-entry and WebSocket entry have no Node builtin imports. The package exports and dependency-cruiser
-rule enforce this split, so a browser bundle cannot accidentally pull in `node:net`.
+`@vibesys/transport` is the runtime-neutral entry. It exports framing, stream policy, the control
+channel, and the transport interfaces. `@vibesys/transport/websocket` contains the browser
+WebSocket implementation, and `@vibesys/transport-node` the Unix-socket implementation used by
+the TUI. Each entry compiles with only its runtime's library and types, so a Node builtin in
+`@vibesys/transport` is a type error and a browser bundle cannot pull in `node:net`.
 
 The backend client performs I/O and exposes validated protocol messages. Core state is a pure fold
 over snapshots, ordered events, and active-execution checkpoints. The TUI owns all interaction and
@@ -309,7 +311,7 @@ pass excludes tests and runs as part of `pnpm check:ts`.
 Biome also enforces the presentational layer. Production files under any `ui/` directory of a
 client package may not call `fetch`, open a `WebSocket`/`EventSource`/`XMLHttpRequest`, use
 `useEffect`/`useLayoutEffect`/`useInsertionEffect`, schedule timers, or import
-`@vibesys/backend-client`, `electron`, or `node:*`. The GritQL plugins are in
+`@vibesys/transport`, `@vibesys/transport-node`, `electron`, or `node:*`. The GritQL plugins are in
 `clients/lint-rules/` and are attached to `ui/` globs in `clients/biome.json`;
 `clients/scripts/check_ui_no_effects.test.mjs` is their test. The timer rule excludes five OpenTUI
 widgets that own spinner or elapsed-time refresh (`activity-bar`, `agent-map`, `chat-composer`,

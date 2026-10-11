@@ -4,7 +4,8 @@
   "tasks": {
     "test": {
       // The Node lane (`scripts/run_node_tests.mjs`) runs compiled output under the shipping
-      // runtime, which resolves `@vibesys/contracts` through its built `dist`.
+      // runtime, which resolves `@vibesys/contracts` and `@vibesys/transport` through their
+      // built `dist`.
       "dependsOn": ["transit", "^build"]
     }
   }

@@ -21,7 +21,9 @@ bundles, and the TUI.
 src/vibesys/             Orchestration policy and thin product API/composition
 src/server/              Frontend-serving runtime and protocol
 src/entrypoints/         Process composition and command entrypoints
-clients/backend-client/  TypeScript server protocol and transport
+clients/contracts/       TypeScript server protocol types and validator
+clients/transport/       Runtime-neutral transport and the WebSocket adapter
+clients/transport-node/  Node transport: the Unix-socket client
 clients/core-state/      Pure backend-event projection
 clients/tui/             TypeScript terminal UI and launcher
 libs/                    Reusable standalone libraries
