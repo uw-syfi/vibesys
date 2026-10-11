@@ -11,8 +11,8 @@ import {
   stopKey,
   suggestProjects,
 } from '@vibesys/entities';
+import type {ChromeState} from '@vibesys/ipc';
 import type {FormEvent, JSX, KeyboardEvent, ReactNode} from 'react';
-import type {ChromeState} from '../../../common/welcome-protocol.js';
 import type {CompletionState} from '../state/completion.js';
 import {type CheckoutForm, type HostAction, type HostState, hostLabelOf} from '../state/host.js';
 import type {ListsState} from '../state/lists.js';

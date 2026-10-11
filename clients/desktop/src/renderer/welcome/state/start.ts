@@ -11,7 +11,7 @@
 
 import {only, type Step} from '@vibesys/core-state';
 import type {HostKey} from '@vibesys/entities';
-import type {StartOutcome, WelcomeResult} from '../../../common/welcome-protocol.js';
+import type {StartOutcome, WelcomeResult} from '@vibesys/ipc';
 
 interface SheetHost {
   readonly key: HostKey;

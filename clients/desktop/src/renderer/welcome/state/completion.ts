@@ -9,7 +9,7 @@
 
 import {only, type Step} from '@vibesys/core-state';
 import type {HostKey} from '@vibesys/entities';
-import type {PathCompletion, WelcomeResult} from '../../../common/welcome-protocol.js';
+import type {PathCompletion, WelcomeResult} from '@vibesys/ipc';
 
 /** How long typing must pause before a directory is listed. */
 const COMPLETION_PAUSE_MS = 80;

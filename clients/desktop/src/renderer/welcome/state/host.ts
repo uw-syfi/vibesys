@@ -11,7 +11,7 @@
 
 import {only, type Step} from '@vibesys/core-state';
 import type {HostKey, HostSummary} from '@vibesys/entities';
-import type {ChromeState, WelcomeResult} from '../../../common/welcome-protocol.js';
+import type {ChromeState, WelcomeResult} from '@vibesys/ipc';
 
 /** The checkout form: "Where is your VibeSys checkout on HOST?". */
 export interface CheckoutForm {

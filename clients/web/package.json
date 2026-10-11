@@ -20,9 +20,10 @@
     "test:e2e": "turbo run build --filter=@vibesys/web... && playwright test"
   },
   "dependencies": {
-    "@vibesys/transport": "workspace:*",
     "@vibesys/contracts": "workspace:*",
     "@vibesys/core-state": "workspace:*",
+    "@vibesys/ipc": "workspace:*",
+    "@vibesys/transport": "workspace:*",
     "react": "19.1.1",
     "react-dom": "19.1.1"
   },

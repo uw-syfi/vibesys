@@ -9,7 +9,7 @@ import {
   resumeDecision,
   stopKey,
 } from '@vibesys/entities';
-import type {ChromeState} from '../../../common/welcome-protocol.js';
+import type {ChromeState} from '@vibesys/ipc';
 
 /** The attached run's link as the strip shows it. */
 export type RunLink = 'connecting' | 'connected' | 'reconnecting' | 'stuck' | 'ended';

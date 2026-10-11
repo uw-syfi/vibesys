@@ -7,7 +7,7 @@
 
 import {createStore, type Store} from '@vibesys/core-state';
 import type {HostKey} from '@vibesys/entities';
-import type {WelcomeBridge, WelcomeResult} from '../../../common/welcome-protocol.js';
+import type {WelcomeBridge, WelcomeResult} from '@vibesys/ipc';
 import {
   COMPLETION_EMPTY,
   type CompletionAction,

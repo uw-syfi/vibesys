@@ -14,8 +14,8 @@
  * the connection instead of reaching the server.
  */
 import type {Duplex} from 'node:stream';
+import {type MainToPage, parsePageMessage} from '@vibesys/ipc';
 import {NewlineFramer} from '@vibesys/transport';
-import {type MainToPage, parsePageMessage} from '../../../common/bridge-protocol.js';
 
 /** The page side of one connection: a started message port. */
 export interface RelayPort {

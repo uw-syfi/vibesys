@@ -10,6 +10,12 @@
  * browser transport already drives, so redial, resume, and reconciliation run unchanged.
  */
 import {
+  DESKTOP_PLATFORMS,
+  type DesktopBridge,
+  type DesktopPlatform,
+  type DesktopSocket,
+} from '@vibesys/ipc';
+import {
   connectRun,
   openTransport,
   type RunConnection,
@@ -18,34 +24,6 @@ import {
   type WebSocketLike,
 } from './backend.js';
 import type {BrowserLifecycle} from './lifecycle.js';
-
-/** The platforms the desktop shell reports (`process.platform` values it supports). */
-const PLATFORMS = ['darwin', 'win32', 'linux'] as const;
-
-type DesktopPlatform = (typeof PLATFORMS)[number];
-
-/** What the page hears about one connection. Each callback runs on the page's event loop. */
-export interface DesktopSocketHandlers {
-  /** The connection to the server is up; at most once, before any message. */
-  onOpen(): void;
-  /** One protocol message from the server. */
-  onMessage(data: string): void;
-  /** The connection ended, or could not be opened; exactly once unless the page closed it. */
-  onClose(): void;
-}
-
-/** The page's end of one connection. */
-interface DesktopSocket {
-  /** Send one protocol message; only after `onOpen`. */
-  send(data: string): void;
-  close(): void;
-}
-
-/** The connection half of the bridge. */
-export interface DesktopBridge {
-  connect(handlers: DesktopSocketHandlers): DesktopSocket;
-  onWake(listener: () => void): void;
-}
 
 /** What the desktop shell's preload exposes on `window`. */
 interface VibesysDesktop extends Partial<DesktopBridge> {
@@ -68,7 +46,7 @@ export interface DesktopShellAttributes {
 export function desktopShellAttributes(bridge: unknown): DesktopShellAttributes | null {
   if (typeof bridge !== 'object' || bridge === null) return null;
   const platform: unknown = (bridge as {readonly platform?: unknown}).platform;
-  const known = PLATFORMS.find(candidate => candidate === platform);
+  const known = DESKTOP_PLATFORMS.find(candidate => candidate === platform);
   return known === undefined ? null : {'data-shell': 'desktop', 'data-platform': known};
 }
 

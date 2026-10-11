@@ -5,9 +5,9 @@
  */
 
 import type {Store} from '@vibesys/core-state';
+import type {WelcomeBridge} from '@vibesys/ipc';
 import {type JSX, StrictMode, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
-import type {WelcomeBridge} from '../../common/welcome-protocol.js';
 import {type WelcomeStores, welcomeStores} from './effects/stores.js';
 import {WelcomeView} from './ui/welcome-view.js';
 import './ui/welcome.css';

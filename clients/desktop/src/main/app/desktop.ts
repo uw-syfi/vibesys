@@ -12,12 +12,8 @@ import {
   hostLabel,
   type RecentRun,
 } from '@vibesys/entities';
+import {type ChromeState, WELCOME_EVENTS, type WelcomeOverview} from '@vibesys/ipc';
 import {ipcMain} from 'electron';
-import {
-  type ChromeState,
-  WELCOME_EVENTS,
-  type WelcomeOverview,
-} from '../../common/welcome-protocol.js';
 import type {Hosts} from '../features/hosts/index.js';
 import type {RunControl} from '../features/run-control/index.js';
 import type {RecentFile, SettingsStore} from '../platform/settings/index.js';

@@ -4,8 +4,8 @@
  */
 
 import type {ResumeRunId} from '@vibesys/entities';
+import type {ChromeState} from '@vibesys/ipc';
 import type {JSX} from 'react';
-import type {ChromeState} from '../../../common/welcome-protocol.js';
 import {
   connectionText,
   type RunLink,

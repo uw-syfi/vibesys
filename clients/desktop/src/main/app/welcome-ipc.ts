@@ -17,8 +17,8 @@ import {
   shellWords,
   validHostPath,
 } from '@vibesys/entities';
+import {WELCOME_CHANNELS, type WelcomeResult} from '@vibesys/ipc';
 import type {IpcMain, IpcMainInvokeEvent} from 'electron';
-import {WELCOME_CHANNELS, type WelcomeResult} from '../../common/welcome-protocol.js';
 import {ConnectionError} from '../platform/connection/index.js';
 
 export type WelcomeRequest =

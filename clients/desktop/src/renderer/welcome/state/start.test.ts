@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {checkModel, type Seeded} from '@vibesys/core-state/testing';
-import type {StartOutcome, WelcomeResult} from '../../../common/welcome-protocol.js';
+import type {StartOutcome, WelcomeResult} from '@vibesys/ipc';
 import {
   awaited,
   START_CLOSED,

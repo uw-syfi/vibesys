@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {Duplex} from 'node:stream';
-import type {MainToPage} from '../../../common/bridge-protocol.js';
+import type {MainToPage} from '@vibesys/ipc';
 import {type RelayPort, relay} from './relay.js';
 
 /** The server's end of one connection. */
