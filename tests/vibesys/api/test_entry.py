@@ -50,3 +50,19 @@ def test_run_request_owns_fresh_and_resumed_identity(repo_root: Path) -> None:
 
     assert fresh.resolved_run_id == "fresh-run"
     assert resumed.resolved_run_id == "prior-run"
+
+
+def test_run_request_resolves_the_project_that_owns_each_run(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    source = Project.open(repo_root / _EXAMPLE).root
+    request = _request(source).model_copy(
+        update={"run_id": "shared", "exp_name": "shared", "runs_dir": tmp_path / "runs"}
+    )
+
+    assert request.resolved_project_root == (tmp_path / "runs" / "shared").resolve()
+
+    resumed = request.model_copy(
+        update={"project_root": tmp_path / "existing", "resume": ResumeRef(run_id="shared")}
+    )
+    assert resumed.resolved_project_root == (tmp_path / "existing").resolve()

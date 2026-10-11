@@ -224,6 +224,9 @@ class RunSnapshot(ProtocolModel):
 
     protocol_version: Literal[1] = PROTOCOL_VERSION
     run_id: str
+    # Opaque machine-local namespace for client state keyed by project and run.
+    # None keeps snapshots from older/read-only composition roots compatible.
+    project_scope: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     sequence: int
     status: RunStatus
     agent_kind: str | None = None

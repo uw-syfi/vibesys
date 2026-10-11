@@ -107,6 +107,21 @@ class RunRequest(BaseModel):
             raise ValueError(message)
         return self.exp_name
 
+    @property
+    def resolved_project_root(self) -> Path:
+        """Return the canonical project root that owns this run.
+
+        A fresh collection run is materialized below ``runs_dir``. Resumes and
+        direct runs already name their canonical project in ``project_root``.
+        """
+        return self.project_root_for(self.resolved_run_id)
+
+    def project_root_for(self, run_id: str) -> Path:
+        """Return the canonical project root for the resolved ``run_id``."""
+        if self.resume is None and self.runs_dir is not None:
+            return self.runs_dir.expanduser().resolve() / run_id
+        return self.project_root.expanduser().resolve()
+
 
 class RunStatus(StrEnum):
     """Lifecycle status the public API can report for a run.

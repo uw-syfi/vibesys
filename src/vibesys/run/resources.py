@@ -266,7 +266,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             )
             collection_root = runs_dir.expanduser().resolve() if runs_dir is not None else None
             copied_project = not existing and collection_root is not None
-            project_root = collection_root / run_id if copied_project else input_dir
+            project_root = request.project_root_for(run_id)
             evaluator_source = _coerce_dir(evaluator_path, "evaluator.source")
 
             # A resumed collection run already holds its materialized sources.

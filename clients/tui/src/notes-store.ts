@@ -1,6 +1,6 @@
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {homedir} from 'node:os';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 
 /**
  * The operator's private notepad for one run, persisted outside
@@ -11,8 +11,13 @@ import {join} from 'node:path';
  * `promoteNoteTo*` controller methods). Keeping it in its own file means a
  * bundle export, a replay, or a `run-events.jsonl` reader never sees it.
  */
-export interface NoteRecord {
+export interface NoteIdentity {
+  /** Opaque stable namespace supplied by the backend for one local project. */
+  readonly projectScope: string;
   readonly runId: string;
+}
+
+export interface NoteRecord extends NoteIdentity {
   readonly text: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -22,7 +27,8 @@ export interface NoteRecord {
  * Machine-local state root, matching the backend's own convention
  * (`docs/cli-flags.md`): `~/.vibesys`, overridable with `VIBESYS_STATE_HOME`
  * for tests and multi-checkout setups. Notes live under a `tui/notes/`
- * subtree the frontend owns outright, rather than inside the backend's
+ * subtree the frontend owns outright, namespaced by the backend's opaque
+ * project scope rather than inside the backend's
  * `projects/<project-key>/runs/<run-id>/` tree: the frontend never computes a
  * project key (it only ever speaks to the backend over the control socket,
  * per `launcher.ts`), and a note is frontend-only state, so it does not
@@ -34,12 +40,18 @@ function stateHome(): string {
 }
 
 /** Run ids are opaque strings; this keeps one confined to a single path segment. */
-function sanitizeRunId(runId: string): string {
-  return runId.replace(/[^a-zA-Z0-9_.-]/g, '_');
+function sanitizeSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, '_');
 }
 
-export function notePath(runId: string): string {
-  return join(stateHome(), 'tui', 'notes', `${sanitizeRunId(runId)}.json`);
+export function notePath(identity: NoteIdentity): string {
+  return join(
+    stateHome(),
+    'tui',
+    'notes',
+    sanitizeSegment(identity.projectScope),
+    `${sanitizeSegment(identity.runId)}.json`,
+  );
 }
 
 /**
@@ -48,29 +60,30 @@ export function notePath(runId: string): string {
  * file degrades to "no note" rather than throwing: the notepad is a
  * convenience, not part of the run's correctness surface.
  */
-export function readNote(runId: string): NoteRecord | null {
-  const path = notePath(runId);
+export function readNote(identity: NoteIdentity): NoteRecord | null {
+  const path = notePath(identity);
   if (!existsSync(path)) return null;
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    return isNoteRecord(parsed) ? parsed : null;
+    return isNoteRecord(parsed, identity) ? parsed : null;
   } catch {
     return null;
   }
 }
 
-/** Overwrites the note for `record.runId`, creating the notes directory on first use. */
+/** Overwrites one project's note for `record.runId`, creating its directory on first use. */
 export function writeNote(record: NoteRecord): void {
-  const path = notePath(record.runId);
-  mkdirSync(join(stateHome(), 'tui', 'notes'), {recursive: true});
+  const path = notePath(record);
+  mkdirSync(dirname(path), {recursive: true});
   writeFileSync(path, JSON.stringify(record, null, 2));
 }
 
-function isNoteRecord(value: unknown): value is NoteRecord {
+function isNoteRecord(value: unknown, identity: NoteIdentity): value is NoteRecord {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return (
-    typeof candidate['runId'] === 'string' &&
+    candidate['projectScope'] === identity.projectScope &&
+    candidate['runId'] === identity.runId &&
     typeof candidate['text'] === 'string' &&
     typeof candidate['createdAt'] === 'string' &&
     typeof candidate['updatedAt'] === 'string'

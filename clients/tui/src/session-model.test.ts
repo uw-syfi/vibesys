@@ -2448,7 +2448,13 @@ describe('notepad', () => {
 
   it('hydrates from a saved record only when one is given', () => {
     const opened = openNotepad(initialSessionState());
-    const record = {runId: 'run-1', text: 'from disk', createdAt: 't0', updatedAt: 't1'};
+    const record = {
+      projectScope: 'a'.repeat(64),
+      runId: 'run-1',
+      text: 'from disk',
+      createdAt: 't0',
+      updatedAt: 't1',
+    };
 
     const hydrated = hydrateNotepad(opened, record);
     expect(hydrated.notepad.text).toBe('from disk');

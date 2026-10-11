@@ -1,6 +1,7 @@
 """Composition and terminal-event tests for the interactive server runtime."""
 
 import errno
+import hashlib
 import io
 import json
 import os
@@ -243,6 +244,22 @@ def test_runtime_explicitly_composes_server_components(tmp_path: Path) -> None:
     assert isinstance(runtime.api, RunApi)
     assert runtime.chat.terminal_retention_enabled()
 
+    runtime.integration.close()
+
+
+def test_runtime_snapshots_namespace_client_state_by_project(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    runtime = ServerRuntime(
+        run_id="shared",
+        project_root=project_root,
+        runs=default_runs(),
+        socket_path=tmp_path / "control.sock",
+    )
+
+    response = runtime.api.execute(SnapshotQuery())
+    expected = hashlib.sha256(project_root.resolve().as_posix().encode()).hexdigest()
+    assert response.snapshot is not None
+    assert response.snapshot.project_scope == expected
     runtime.integration.close()
 
 

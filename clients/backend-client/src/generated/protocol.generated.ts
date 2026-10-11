@@ -182,6 +182,7 @@ export type TuiTheme =
   | "high-contrast-light";
 export type ProtocolVersion17 = 1;
 export type RunId1 = string;
+export type ProjectScope = string | null;
 export type Sequence = number;
 /**
  * Lifecycle status of one run, as frontends observe it.
@@ -975,6 +976,7 @@ export interface InteractiveSetupDefaults {
 export interface RunSnapshot {
   protocol_version?: ProtocolVersion17;
   run_id: RunId1;
+  project_scope?: ProjectScope;
   sequence: Sequence;
   status: RunStatus;
   agent_kind?: AgentKind;

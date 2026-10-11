@@ -22,6 +22,8 @@ import {SocketSessionController} from './session-controller.js';
 import {chatPaneFocused, chatPaneVisible, experimentLogVisible} from './session-model.js';
 import {rightPaneContent, rightPaneTitle} from './ui/right-pane.js';
 
+const NOTE_PROJECT_SCOPE = 'a'.repeat(64);
+
 function paneContent(controller: SocketSessionController): string | null {
   const pane = controller.state.layout.right;
   return pane === null ? null : rightPaneContent(controller.state, pane);
@@ -2311,7 +2313,13 @@ describe('notepad', () => {
   });
 
   it('hydrates from a note already saved for this run', async () => {
-    writeNote({runId: 'run', text: 'from a previous session', createdAt: 't0', updatedAt: 't0'});
+    writeNote({
+      projectScope: NOTE_PROJECT_SCOPE,
+      runId: 'run',
+      text: 'from a previous session',
+      createdAt: 't0',
+      updatedAt: 't0',
+    });
     const controller = new SocketSessionController(new FakeTransport());
     await controller.start();
 
@@ -2329,7 +2337,9 @@ describe('notepad', () => {
 
     // A read with nothing cached, as a fresh process attached to the same
     // run would do.
-    expect(readNote('run')?.text).toBe('watch the retry budget');
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+      'watch the retry budget',
+    );
 
     const restarted = new SocketSessionController(new FakeTransport());
     await restarted.start();
@@ -2345,7 +2355,41 @@ describe('notepad', () => {
     controller.setNoteText('too early to save');
 
     expect(controller.state.notepad.text).toBe('too early to save');
-    expect(readNote('run')).toBeNull();
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})).toBeNull();
+  });
+
+  it('keeps controllers for the same run id in different projects isolated', async () => {
+    const projectA = new FakeTransport();
+    const projectB = new FakeTransport();
+    projectB.projectScope = 'b'.repeat(64);
+    const controllerA = new SocketSessionController(projectA);
+    const controllerB = new SocketSessionController(projectB);
+    await Promise.all([controllerA.start(), controllerB.start()]);
+    controllerA.openNotepad();
+    controllerA.setNoteText('private to project A');
+
+    controllerB.openNotepad();
+    expect(controllerB.state.notepad.text).toBe('');
+    controllerB.setNoteText('private to project B');
+
+    const restartedA = new SocketSessionController(projectA);
+    await restartedA.start();
+    restartedA.openNotepad();
+    expect(restartedA.state.notepad.text).toBe('private to project A');
+    expect(controllerB.state.notepad.text).toBe('private to project B');
+  });
+
+  it('fails closed when an older snapshot has no project scope', async () => {
+    const transport = new FakeTransport();
+    transport.projectScope = undefined;
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    controller.openNotepad();
+
+    controller.setNoteText('must not enter a global run-only file');
+
+    expect(controller.state.notepad.text).toBe('must not enter a global run-only file');
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})).toBeNull();
   });
 
   it('promotes to a steer draft: closes the notepad, returns the trimmed text, sends nothing', async () => {
@@ -2970,6 +3014,7 @@ class FakeTransport implements ServerTransport {
   designPatchTruncated = false;
   /** When set, only `query.design_patch` requests fail with it. */
   designPatchError: Error | null = null;
+  projectScope: string | undefined = NOTE_PROJECT_SCOPE;
   readonly requests: RequestInput[] = [];
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
@@ -3020,7 +3065,12 @@ class FakeTransport implements ServerTransport {
             },
           }
         : {}),
-      snapshot: {run_id: 'run', status: 'running', sequence: 12},
+      snapshot: {
+        run_id: 'run',
+        status: 'running',
+        sequence: 12,
+        ...(this.projectScope === undefined ? {} : {project_scope: this.projectScope}),
+      },
     });
   }
 

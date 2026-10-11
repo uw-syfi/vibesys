@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from contextlib import ExitStack, suppress
 from functools import partial
 from typing import TYPE_CHECKING, Protocol, TypeVar
@@ -92,6 +93,11 @@ _FAILURE_EVENT_TYPES = frozenset(
 )
 
 
+def _project_scope(project_root: Path) -> str:
+    """Return an opaque stable namespace for machine-local client state."""
+    return hashlib.sha256(project_root.expanduser().resolve().as_posix().encode()).hexdigest()
+
+
 class ServerLifecycleObserver(Protocol):
     """Told the facts a registry record advertises: the server's milestones and its run's phase."""
 
@@ -139,6 +145,7 @@ class ServerRuntime:
         socket_path: Path,
         runs: Runs,
         run_id: str | None = None,
+        project_root: Path | None = None,
         tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
         web: bool = False,
         web_port: int = 0,
@@ -214,6 +221,7 @@ class ServerRuntime:
             self.chat,
             self.integration,
             controls=self.controls,
+            project_scope=_project_scope(project_root) if project_root is not None else None,
             tui_defaults=tui_defaults,
             threads=self.threads,
         )

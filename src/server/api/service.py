@@ -233,6 +233,7 @@ class RunApi:
         integration: RunIntegrationAdapter,
         *,
         controls: RunControlSlot,
+        project_scope: str | None = None,
         tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
         threads: Threads | None = None,
     ) -> None:
@@ -245,6 +246,7 @@ class RunApi:
         self._chat = chat
         self._integration = integration
         self._controls = controls
+        self._project_scope = project_scope
         self._tui_defaults_provider = tui_defaults
         self._tui_defaults: InteractiveSetupDefaults | None = None
         self._tui_defaults_lock = threads.lock()
@@ -384,6 +386,7 @@ class RunApi:
             kind, round_label = self._executions.current_locked()
             return RunSnapshot(
                 run_id=self._journal.run_id_locked(),
+                project_scope=self._project_scope,
                 sequence=self._journal.latest_sequence_locked(),
                 status=self._controller.status_locked(),
                 agent_kind=kind,

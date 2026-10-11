@@ -1029,12 +1029,14 @@ def _serve(arguments: list[str], observer: ServerLifecycleObserver | None) -> No
             else cli.build_run_request(cli.parse_cli_invocation(_headless_argv(arguments)))
         )
         run_id = None if request is None else request.resolved_run_id
+        project_root = None if request is None else request.resolved_project_root
         server_runtime = import_module("server.runtime").ServerRuntime
         if web:
             runtime = server_runtime(
                 socket_path=control_socket,
                 runs=default_runs(),
                 run_id=run_id,
+                project_root=project_root,
                 tui_defaults=_tui_defaults_from_argv(arguments),
                 web=True,
                 web_port=web_port,
@@ -1050,6 +1052,7 @@ def _serve(arguments: list[str], observer: ServerLifecycleObserver | None) -> No
                 socket_path=control_socket,
                 runs=default_runs(),
                 run_id=run_id,
+                project_root=project_root,
                 tui_defaults=_tui_defaults_from_argv(arguments),
                 detach=detach,
                 observer=observer,

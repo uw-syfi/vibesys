@@ -67,7 +67,7 @@ import {
   setDesignLog,
   setExperiments,
 } from './experiments.js';
-import {readNote, writeNote} from './notes-store.js';
+import {type NoteIdentity, readNote, writeNote} from './notes-store.js';
 import {
   activeCommandSurface,
   closePalette,
@@ -290,6 +290,8 @@ export class SocketSessionController implements SessionController {
   /** Serializes the consumer effect of applying one shared backfill outcome. */
   #historyFetch: Promise<boolean> | null = null;
   #streamProtocolError = false;
+  /** Opaque server-owned namespace for project-local client state. */
+  #noteProjectScope: string | null = null;
 
   constructor(
     private readonly client: ServerTransport,
@@ -387,7 +389,13 @@ export class SocketSessionController implements SessionController {
   async #loadSnapshot(): Promise<void> {
     try {
       const response = await this.client.request({type: 'query.snapshot'});
-      if (response.snapshot) this.#setState(applySnapshot(this.#state, response.snapshot));
+      if (response.snapshot) {
+        const next = applySnapshot(this.#state, response.snapshot);
+        if (next.core.runId === response.snapshot.run_id) {
+          this.#noteProjectScope = response.snapshot.project_scope ?? null;
+        }
+        this.#setState(next);
+      }
     } catch (error) {
       this.#setState(reportCaughtError(this.#state, error, 'request'));
     }
@@ -577,8 +585,8 @@ export class SocketSessionController implements SessionController {
    * so a read here never clobbers text the operator is mid-edit on.
    */
   openNotepad(): void {
-    const runId = this.#state.core.runId;
-    const record = runId === null ? null : readNote(runId);
+    const identity = this.#noteIdentity();
+    const record = identity === null ? null : readNote(identity);
     this.#setState(openNotepad(hydrateNotepad(this.#state, record)));
   }
 
@@ -597,15 +605,21 @@ export class SocketSessionController implements SessionController {
     const timestamp = new Date().toISOString();
     const next = setNotepadText(this.#state, text, timestamp);
     this.#setState(next);
-    const runId = this.#state.core.runId;
-    if (runId !== null && next.notepad.createdAt !== null) {
+    const identity = this.#noteIdentity();
+    if (identity !== null && next.notepad.createdAt !== null) {
       writeNote({
-        runId,
+        ...identity,
         text: next.notepad.text,
         createdAt: next.notepad.createdAt,
         updatedAt: next.notepad.updatedAt ?? timestamp,
       });
     }
+  }
+
+  #noteIdentity(): NoteIdentity | null {
+    const runId = this.#state.core.runId;
+    const projectScope = this.#noteProjectScope;
+    return runId === null || projectScope === null ? null : {projectScope, runId};
   }
 
   /**

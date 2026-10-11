@@ -1100,7 +1100,7 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
 ) -> None:
     observed: dict[str, object] = {}
     invocation = object()
-    request = SimpleNamespace(resolved_run_id="run-1")
+    request = SimpleNamespace(resolved_run_id="run-1", resolved_project_root=tmp_path.resolve())
 
     class ReturnValue:
         def __init__(self, value: object) -> None:
@@ -1139,4 +1139,5 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     assert options["web_assets"] == tmp_path.resolve()
     assert callable(options["tui_defaults"])
     assert options["run_id"] == "run-1"
+    assert options["project_root"] == tmp_path.resolve()
     assert observed["request"] is request

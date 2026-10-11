@@ -3948,6 +3948,19 @@
           "title": "Run Id",
           "type": "string"
         },
+        "project_scope": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Project Scope"
+        },
         "sequence": {
           "title": "Sequence",
           "type": "integer"
