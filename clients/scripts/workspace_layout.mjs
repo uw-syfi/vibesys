@@ -201,12 +201,14 @@ function pathMapErrors(root, declared, expected) {
 /**
  * The path map the packages imply: every package's public entry points, mapped to the source their
  * `@vibesys/source` condition names, so a public import resolves to source instead of build output.
+ * An app (`vibesys.layer` `app`) with no `exports` is imported by nothing, so it has no entry.
  */
 function expectedArchitecturePaths(layout) {
   const expected = new Map();
   for (const {name, directory, manifest} of layout.packages) {
     const subpaths = manifest.exports;
     if (subpaths === undefined) {
+      if (manifest.vibesys?.layer === 'app') continue;
       expected.set(name, `${directory}/${SOURCE_DIRECTORY}/index${TYPESCRIPT_SUFFIX}`);
       continue;
     }

@@ -82,7 +82,7 @@ desktop main process (clients/desktop)                host (local or ssh)
 | Detached run server | `entrypoints.server` (changed) | Takes the lock and publishes its record (with `run_id` and phase `starting/resolving`) before importing the engine; owns its phases. |
 | Generated helper types | `clients/contracts/src/generated/`, read through `@vibesys/contracts/host-helper` | `host-helper.schema.json` (committed, language neutral), the TypeScript types and descriptor generated from it, and the strict parse every helper line goes through. |
 | Connection manager | `clients/desktop` (`src/main/platform/connection`: a pure `state/` machine and a `shell/`) | The only code that creates links and channels. One `HostConnection` per host; its machine is the one retry loop. |
-| Screen stores | `clients/desktop` and `clients/web` | One store per screen; pure reducer; React renders state. |
+| Screen stores | `clients/desktop` and `clients/apps/web` | One store per screen; pure reducer; React renders state. |
 | App lifecycle | `clients/desktop` (`src/main/app/app-lifecycle.ts`, `src/main/platform/settings`) | Single-instance lock, the quit sequence, the settings store. |
 
 Placement follows [architecture.md](architecture.md): the registry and relay are generic mechanisms
@@ -391,7 +391,7 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
   list or overview reply cannot overwrite newer state, by construction.
 - **Render is a function of state.** React components read the store and dispatch actions; they hold
   no state that changes behavior. The welcome view moves from imperative DOM to React (already used
-  by `clients/web`).
+  by `clients/apps/web`).
 - **Native `<dialog>`.** Sheets are `<dialog>` opened with `showModal()`: focus containment, inert
   background, Esc, and return of focus to the opener come from the platform.
 - **Data from watches.** Host panels and Recent statuses fold `instances.watch` pushes; there is no

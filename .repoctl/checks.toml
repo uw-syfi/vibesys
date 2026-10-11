@@ -105,7 +105,7 @@ name = "tui_e2e"
 language = "typescript"
 directory = "clients"
 timeout_seconds = 1200
-commands = [["pnpm", "--filter", "@vibesys/web", "test:e2e"]]
+commands = [["pnpm", "--filter", "@vibesys/app-web", "test:e2e"]]
 
 [[check_groups]]
 name = "tui_package_smoke"

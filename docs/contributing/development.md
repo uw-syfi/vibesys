@@ -337,7 +337,7 @@ an unrelated listener would run the wrong app.
 ```bash
 uv sync --dev
 pnpm --dir clients install --frozen-lockfile
-(cd clients && pnpm --filter @vibesys/web exec playwright install --with-deps chromium)
+(cd clients && pnpm --filter @vibesys/app-web exec playwright install --with-deps chromium)
 ./support/repoctl/repoctl run-checks --group tui_e2e
 ```
 

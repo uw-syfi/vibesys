@@ -37,60 +37,34 @@ const LEAF_TOOLS = `^(?:${LEAF_TOOL_DIRECTORIES})/`;
 // `^$1/` matches no path: such an importer may reach no tool directory at all.
 const LEAF_TOOL_IMPORTER = `^(${LEAF_TOOL_DIRECTORIES})/|${PACKAGES}`;
 
-// The web run page (`web/src`) is feature-sliced, with layers that point down only:
-// `app/` (composition) -> `features/<name>/` -> `entities/` (domain values and pure selectors)
-// -> `platform/` (system services: the one backend adapter, lifecycle, storage) -> `shared/`
-// (domain-free utilities). Inside a feature, `state/` is the pure core, `ui/` is presentational,
-// and `effects/` is the shell. `docs/contributing/web-development.md` describes the layout.
-const WEB = '^web/src/';
-const WEB_LAYERS = ['app', 'features', 'entities', 'platform', 'shared'];
+// A feature package (`features/<name>/src/`) is a pure `state/` core (its `./state` entry) and a
+// `renderer/` (its `./renderer` entry) of presentational `ui/` and an `effects/` shell that calls
+// the interfaces the app injects. Which packages a feature may reach is the package-graph
+// checker's; these rules hold the layers inside one feature package.
+const FEATURE = '^features/[^/]+/src/';
+const RENDERER_PART = part => `^features/[^/]+/src/renderer/${part}/`;
+// The web app (`apps/web/src`) is composition only: `app/` (the entries and the composition) over
+// `platform/` (the browser's services: the one backend adapter, lifecycle, storage, the desktop
+// shell's bridge). `docs/contributing/web-development.md` describes the layout.
+const WEB = '^apps/web/src/';
 const TRANSPORT = ['^transport(?:-node)?/', '/node_modules/@vibesys/transport(?:-node)?/'];
-// The protocol vocabulary, which presentational and domain-free code never names.
+// The protocol vocabulary, which presentational code never names.
 const CONTRACTS = ['^contracts/', '/node_modules/@vibesys/contracts/'];
-const CORE_STATE = ['^core-state/', '/node_modules/@vibesys/core-state/'];
 const WEB_BACKEND_ADAPTER = `${WEB}platform/backend\\.ts$`;
-const WEB_FEATURE_PART = part => `${WEB}features/[^/]+/${part}/`;
 
-function webRunPageRules() {
-  const layerRules = WEB_LAYERS.slice(1).map((layer, index) => ({
-    name: `web-${layer}-does-not-import-layers-above`,
-    severity: 'error',
-    from: {path: `${WEB}${layer}/`, pathNot: TEST_FILE},
-    to: {path: `${WEB}(?:${WEB_LAYERS.slice(0, index + 1).join('|')})/`},
-  }));
+function featureRules() {
   return [
-    ...layerRules,
     {
-      name: 'web-layers-do-not-import-the-package-surface',
+      // The functional core does no I/O: no React, no renderer, no transport runtime values.
+      // Generated types and core-state are the inputs it folds. Group 1 is the importer's own
+      // feature, whose renderer its state never reaches. A core that needs a DOM global (the
+      // gateway form parses with `URL`) sits in `renderer/state/` and is held to the same rule.
+      name: 'feature-state-is-pure',
       severity: 'error',
-      // `index.ts` is the package's public surface; nothing inside the layers reaches back to it.
-      from: {path: `${WEB}(?:${WEB_LAYERS.join('|')})/`},
-      to: {path: `${WEB}index\\.ts$`},
-    },
-    {
-      // A feature never reaches another feature; cross-feature flows are wired in `app/`.
-      name: 'web-features-are-isolated',
-      severity: 'error',
-      from: {path: `${WEB}features/([^/]+)/`},
-      to: {path: `${WEB}features/`, pathNot: `${WEB}features/$1/`},
-    },
-    {
-      // A feature's `index.ts` is its only public surface.
-      name: 'web-features-are-entered-through-their-index',
-      severity: 'error',
-      from: {path: WEB, pathNot: `${WEB}features/`},
-      to: {path: `${WEB}features/[^/]+/(?!index\\.ts$)`},
-    },
-    {
-      // The functional core (domain values and each feature's reducers) does no I/O: no React,
-      // no platform services, no transport runtime values. Generated types and core-state
-      // are the inputs it folds.
-      name: 'web-core-is-pure',
-      severity: 'error',
-      from: {path: [`${WEB}entities/`, WEB_FEATURE_PART('state')], pathNot: TEST_FILE},
+      from: {path: '^features/([^/]+)/src/(?:renderer/)?state/', pathNot: TEST_FILE},
       to: {
         path: [
-          `${WEB}platform/`,
+          '^features/$1/src/renderer/(?!state/)',
           '(?:^|/)node_modules/(?:react|react-dom|electron)/',
           ...TRANSPORT,
         ],
@@ -98,21 +72,14 @@ function webRunPageRules() {
       },
     },
     {
-      name: 'web-feature-state-does-not-import-its-shell-or-view',
-      severity: 'error',
-      from: {path: WEB_FEATURE_PART('state'), pathNot: TEST_FILE},
-      to: {path: [WEB_FEATURE_PART('ui'), WEB_FEATURE_PART('effects')]},
-    },
-    {
       // Presentational components render props and report events; `ui-no-*.grit` forbids their
       // I/O calls and effect hooks, and this forbids reaching anything that does I/O.
-      name: 'web-feature-ui-does-not-depend-on-shell',
+      name: 'feature-ui-does-not-depend-on-shell',
       severity: 'error',
-      from: {path: WEB_FEATURE_PART('ui'), pathNot: TEST_FILE},
+      from: {path: RENDERER_PART('ui'), pathNot: TEST_FILE},
       to: {
         path: [
-          WEB_FEATURE_PART('effects'),
-          `${WEB}platform/`,
+          RENDERER_PART('effects'),
           ...TRANSPORT,
           ...CONTRACTS,
           '(?:^|/)node_modules/electron/',
@@ -120,10 +87,29 @@ function webRunPageRules() {
       },
     },
     {
-      name: 'web-feature-effects-do-not-import-ui',
+      name: 'feature-effects-do-not-import-ui',
       severity: 'error',
-      from: {path: WEB_FEATURE_PART('effects'), pathNot: TEST_FILE},
-      to: {path: WEB_FEATURE_PART('ui')},
+      from: {path: RENDERER_PART('effects'), pathNot: TEST_FILE},
+      to: {path: RENDERER_PART('ui')},
+    },
+    {
+      // A feature's effects call the interfaces its `./state` declares; the web app's backend
+      // adapter is the one module that imports @vibesys/transport's runtime values.
+      name: 'feature-transport-is-type-only',
+      severity: 'error',
+      from: {path: FEATURE, pathNot: TEST_FILE},
+      to: {path: TRANSPORT, dependencyTypesNot: ['type-only']},
+    },
+  ];
+}
+
+function webAppRules() {
+  return [
+    {
+      name: 'web-platform-does-not-import-app',
+      severity: 'error',
+      from: {path: `${WEB}platform/`, pathNot: TEST_FILE},
+      to: {path: `${WEB}app/`},
     },
     {
       // One path to the backend: `platform/backend.ts` is the only module that imports
@@ -132,13 +118,6 @@ function webRunPageRules() {
       severity: 'error',
       from: {path: WEB, pathNot: [TEST_FILE, WEB_BACKEND_ADAPTER]},
       to: {path: TRANSPORT, dependencyTypesNot: ['type-only']},
-    },
-    {
-      // `shared/` is domain-free: no run, protocol, or connection vocabulary reaches it.
-      name: 'web-shared-is-domain-free',
-      severity: 'error',
-      from: {path: `${WEB}shared/`, pathNot: TEST_FILE},
-      to: {path: [...TRANSPORT, ...CONTRACTS, ...CORE_STATE]},
     },
   ];
 }
@@ -264,18 +243,18 @@ function rendererRules() {
       to: {path: [`${DESKTOP_WELCOME}ui/`, `${DESKTOP_WELCOME}main\\.tsx$`]},
     },
     {
-      // Renderer code (the welcome view, the web run page) reaches the main process only
+      // Renderer code (the welcome view, the web app, the features) reaches the main process only
       // through its preload's bridge.
       name: 'renderers-do-not-import-electron',
       severity: 'error',
-      from: {path: [DESKTOP_WELCOME, '^web/src/'], pathNot: TEST_FILE},
+      from: {path: [DESKTOP_WELCOME, WEB, FEATURE], pathNot: TEST_FILE},
       to: {path: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
     },
     {
-      // The web run page reaches its server only through @vibesys/transport.
+      // The web app and the features reach the server only through @vibesys/transport.
       name: 'web-opens-no-sockets-or-processes',
       severity: 'error',
-      from: {path: '^web/src/', pathNot: TEST_FILE},
+      from: {path: [WEB, FEATURE], pathNot: TEST_FILE},
       to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
     },
   ];
@@ -453,7 +432,8 @@ export default {
     },
     ...desktopRules(),
     ...rendererRules(),
-    ...webRunPageRules(),
+    ...featureRules(),
+    ...webAppRules(),
     {
       // `index.ts` (the frontend process) and `launcher.ts` (the `vibesys` bin) run on import,
       // so nothing may import them.

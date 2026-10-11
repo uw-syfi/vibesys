@@ -253,7 +253,7 @@ test('legacy packages skip only the per-entry project rules', async t => {
   const workspace = validWorkspace();
   workspace.legacy = {
     manifest: {
-      name: '@vibesys/web',
+      name: '@vibesys/desktop',
       vibesys: {layer: 'app', entries: {'.': 'dom'}},
       dependencies: {'@vibesys/connection': 'workspace:*'},
     },

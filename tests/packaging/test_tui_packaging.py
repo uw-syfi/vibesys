@@ -20,7 +20,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 def test_bun_type_packages_match_the_packaged_runtime() -> None:
     pins = {
         manifest.relative_to(PROJECT_ROOT).as_posix(): package["devDependencies"]["@types/bun"]
-        for manifest in (PROJECT_ROOT / "clients").glob("*/package.json")
+        for pattern in ("*/package.json", "features/*/package.json", "apps/*/package.json")
+        for manifest in (PROJECT_ROOT / "clients").glob(pattern)
         if "@types/bun" in (package := json.loads(manifest.read_text())).get("devDependencies", {})
     }
 
@@ -34,7 +35,10 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
         "clients/transport/package.json",
         "clients/tui/package.json",
         "clients/ui/package.json",
-        "clients/web/package.json",
+        "clients/apps/web/package.json",
+        "clients/features/gateway-connect/package.json",
+        "clients/features/replay/package.json",
+        "clients/features/run-view/package.json",
     }
     assert set(pins.values()) == {BUN_VERSION}
 

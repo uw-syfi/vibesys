@@ -6,27 +6,24 @@
  */
 
 import type {Store} from '@vibesys/core-state';
-import type {JSX} from 'react';
-import {useSyncExternalStore} from 'react';
-import type {GatewayBootstrapTarget, GatewayConnection} from '../entities/gateway.js';
 import {
   createGatewayConnectStore,
+  type GatewayBootstrapTarget,
   type GatewayConnectAction,
+  type GatewayConnection,
   type GatewayConnectState,
   GatewayForm,
-} from '../features/gateway-connect/index.js';
-import {
-  createReplayStore,
-  type ReplayAction,
-  type ReplayState,
-  replayFailure,
-} from '../features/replay/index.js';
+} from '@vibesys/feature-gateway-connect/renderer';
+import {createReplayStore} from '@vibesys/feature-replay/renderer';
+import {type ReplayAction, type ReplayState, replayFailure} from '@vibesys/feature-replay/state';
 import {
   createRunStore,
   RunPage,
   type RunStore,
   type WebSession,
-} from '../features/run-view/index.js';
+} from '@vibesys/feature-run-view/renderer';
+import type {JSX} from 'react';
+import {useSyncExternalStore} from 'react';
 import {bootstrapGateway, fetchReplayFixture} from '../platform/backend.js';
 
 function useStore<S>(store: Pick<Store<S, unknown>, 'getState' | 'subscribe'>): S {

@@ -97,7 +97,7 @@ _HOST_CHARACTERS = frozenset(ascii_lowercase + digits + "-.")
 # the policy that the gateway serves; `_content_security_policy` is its only
 # serializer. Two tests restate it as independent cross-checks
 # (`_expected_policy` in `tests/server/test_websocket_transport.py` and
-# `expectedPolicy` in `clients/web/e2e/gateway-hygiene.spec.ts`); neither
+# `expectedPolicy` in `clients/apps/web/e2e/gateway-hygiene.spec.ts`); neither
 # imports this module, so neither is tautological, and both fail when they
 # disagree with it.
 _POLICY_DIRECTIVES: Mapping[str, tuple[str, ...]] = MappingProxyType(

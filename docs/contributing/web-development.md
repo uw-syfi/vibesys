@@ -13,7 +13,7 @@ From the repository root, run:
 ```
 
 This is the browser-only source-checkout launcher. It installs the locked
-JavaScript workspace, builds `clients/web`, starts a detached live gateway on
+JavaScript workspace, builds `clients/apps/web`, starts a detached live gateway on
 `127.0.0.1:8765`, replays a recorded run through the real WebSocket protocol,
 and asks the host to open the capability URL in its default browser. If the
 browser cannot be opened automatically, open the `VibeSys web UI ready` URL
@@ -47,19 +47,19 @@ HTTP and WebSocket gateway:
 uv run python -m entrypoints.web live --demo --open
 ```
 
-The command builds `clients/web`, starts a detached loopback gateway on port
+The command builds `clients/apps/web`, starts a detached loopback gateway on port
 8765, and prints a capability-bearing URL. Open that URL in a browser. The
 gateway remains available until explicitly stopped, so the browser can inspect
 the completed state without an agent CLI or credentials. A second invocation
 from the same checkout reuses that gateway instead of competing for port 8765.
 
-The production build writes `clients/web/dist/.vibesys-web-build.json`. That
+The production build writes `clients/apps/web/dist/.vibesys-web-build.json`. That
 manifest identifies the build and records every tracked input that can change
 the production browser bundle, including the three client source trees, HTML
 entrypoint, Vite configuration, package metadata, and locked dependency graph.
 The gateway refuses the checkout's default bundle when any recorded input has
 changed or the manifest is missing, and reports the changed path plus
-`pnpm --dir clients/web build`. `--no-build` still reuses the last build, but
+`pnpm --dir clients/apps/web build`. `--no-build` still reuses the last build, but
 only while that build matches the current workspace. The build ID is stored in
 the instance record and printed by `live` and `status`, so an operator can tell
 which browser artifact a gateway is serving.
@@ -76,9 +76,9 @@ prints the replacement launch URL. For `--demo`, the ignored runtime
 directory is stable within the source checkout:
 
 ```bash
-uv run python -m entrypoints.web status --instance clients/web/.vibesys-demo/web-gateway.json
-uv run python -m entrypoints.web rotate --instance clients/web/.vibesys-demo/web-gateway.json
-uv run python -m entrypoints.web stop --instance clients/web/.vibesys-demo/web-gateway.json
+uv run python -m entrypoints.web status --instance clients/apps/web/.vibesys-demo/web-gateway.json
+uv run python -m entrypoints.web rotate --instance clients/apps/web/.vibesys-demo/web-gateway.json
+uv run python -m entrypoints.web stop --instance clients/apps/web/.vibesys-demo/web-gateway.json
 ```
 
 If the record is missing or belongs to another checkout, use the fixed port
@@ -137,7 +137,7 @@ is what runs the ordered teardown; SIGKILL leaves the record behind for the
 next launch to trip over, which is why escalation stays with the operator.
 
 Do not remove `<project>/.vibesys` itself. Only the demo's ignored
-`clients/web/.vibesys-demo` is disposable; a real project's `.vibesys` holds
+`clients/apps/web/.vibesys-demo` is disposable; a real project's `.vibesys` holds
 run state that `Project` owns.
 
 Pass a real project and task for an operator-owned run. Additional VibeSys run
@@ -149,27 +149,31 @@ uv run python -m entrypoints.web live --project /path/to/project --task TASK --o
 
 ## Run page layout
 
-`clients/web/src` is feature-sliced, with layers that point down only
-(`app/` -> `features/` -> `entities/` -> `platform/` -> `shared/`), enforced by
-`clients/.dependency-cruiser.mjs`:
+The run page is one app package over three feature packages
+([clients-architecture.md](clients-architecture.md) owns the package graph):
 
-- `app/` composes: the browser and desktop entries (`main.tsx`,
-  `desktop-main.tsx`), the pure boot decision (`boot.ts`), and `compose.tsx`,
-  which builds the feature stores, injects platform services into them, and
-  wires cross-feature flows (replayed events fold into the run view).
-- `features/<name>/` is one slice (`run-view`, `gateway-connect`, `replay`)
-  with `state/` (a pure `step(state, action) -> {state, requests}` reducer,
-  request tokens that drop stale replies, `invariants`), `ui/` (presentational
-  React, props in and events out), and `effects/` (performs the requests through
-  injected services; never imports `ui/`). Its `index.ts` is its only public
-  surface, and a feature never imports another feature.
-- `entities/` holds domain values and pure functions shared by features (the
-  run fold, connection state, gateway URL policy). No I/O.
-- `platform/` holds system services: `backend.ts` is the only module that
-  imports `@vibesys/transport` runtime values or uses `fetch`
-  (`lint-rules/web-fetch-only-in-backend.grit`), plus the browser lifecycle,
-  tab storage, and the desktop bridge transport.
-- `shared/` is for domain-free utilities; it is empty today.
+- `clients/apps/web` (`@vibesys/app-web`) is composition only. `src/app/` holds
+  the browser and desktop entries (`main.tsx`, `desktop-main.tsx`), the pure
+  boot decision (`boot.ts`), and `compose.tsx`, which builds the feature stores,
+  injects platform services into them, and wires cross-feature flows (replayed
+  events fold into the run view). `src/platform/` holds the browser's services:
+  `backend.ts` is the only module that imports `@vibesys/transport` runtime
+  values or uses `fetch` (`lint-rules/web-fetch-only-in-backend.grit`), plus the
+  browser lifecycle, tab storage, and the desktop shell's bridge transport.
+  `platform/` never imports `app/`.
+- `clients/features/<name>` (`@vibesys/feature-run-view`,
+  `@vibesys/feature-gateway-connect`, `@vibesys/feature-replay`) is one feature.
+  Its `src/state/` (the `./state` entry, `neutral`) is a pure
+  `step(state, action) -> {state, requests}` reducer with request tokens that
+  drop stale replies and `invariants`, plus the interfaces its effects need
+  (run-view's `RunConnection` and `BrowserLifecycle`). Its `src/renderer/` (the
+  `./renderer` entry, `dom`) holds `ui/` (presentational React, props in and
+  events out) and `effects/` (performs the requests through the injected
+  interfaces; never imports `ui/`). The gateway form's core parses with the
+  WHATWG `URL`, a DOM global, so it sits in `renderer/state/` and that feature
+  publishes `./renderer` only. A feature never imports another feature or a
+  platform module; the package-graph checker and `.dependency-cruiser.mjs`
+  enforce both.
 
 The store kernel (`Step`, `Reducer`, `createStore`) comes from
 `@vibesys/core-state`, shared with the desktop welcome view. The reducers are
@@ -196,7 +200,7 @@ merges the headers into one dict literal, so no route can set or duplicate one:
 the header value. Two exist on purpose, as independent cross-checks that fail
 when they disagree with the module: `_expected_policy` in
 `tests/server/test_websocket_transport.py` and the `expectedPolicy` function in
-`clients/web/e2e/gateway-hygiene.spec.ts`. Neither imports the gateway, so
+`clients/apps/web/e2e/gateway-hygiene.spec.ts`. Neither imports the gateway, so
 neither agrees by construction. The directive values named below are
 explanation and not a third copy, since nothing reads them. The shape is
 deny-everything (`default-src 'none'`) plus these grants:
@@ -216,7 +220,7 @@ deny-everything (`default-src 'none'`) plus these grants:
   gateway has no route for that path and answers 404 with or without a
   capability token. The grant is still load-bearing, because what needs
   permitting is the browser issuing the same-origin probe and not what the
-  probe is answered with. Only declaring an icon in `clients/web/index.html`
+  probe is answered with. Only declaring an icon in `clients/apps/web/index.html`
   would suppress the probe and let this tighten to `'none'`.
 - `font-src 'none'`, stated rather than left to the `default-src` fallback,
   because "no external font" is the air-gap property being asserted.
@@ -296,7 +300,7 @@ browser that already has a valid session. Rotation atomically replaces the
 token and instance record while preserving the session credential and existing
 connections. A fresh browser cannot open the clean URL because it has neither.
 
-`clients/web/e2e/gateway-hygiene.spec.ts` asserts the whole policy against a
+`clients/apps/web/e2e/gateway-hygiene.spec.ts` asserts the whole policy against a
 live gateway, fails on any reported `securitypolicyviolation` (with a negative
 control that proves the listener fires), and blocks plus fails on any request or
 WebSocket the page attempts off loopback.
@@ -398,8 +402,8 @@ pnpm --dir clients --filter @vibesys/desktop start -- --host HOST [--instance ID
 pnpm --dir clients --filter @vibesys/desktop start -- --project ~/proj [-- RUN_ARGS...]
 ```
 
-`start` builds the app, including the UI bundle (`@vibesys/web`'s
-`build:desktop`, from `clients/web/desktop.html`), which the window loads from
+`start` builds the app, including the UI bundle (`@vibesys/app-web`'s
+`build:desktop`, from `clients/apps/web/desktop.html`), which the window loads from
 the `app://vibesys` origin. The page has no network access: the main process
 cancels every http(s) and ws(s) request and the page's Content Security Policy
 forbids connections. Its only way to the server is the preload bridge,

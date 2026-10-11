@@ -3,16 +3,17 @@
  * the launch capability from the address bar, performs the plan (remember the gateway, exchange a
  * capability), and renders the composed page.
  */
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
+
 import {
   type GatewayBootstrapTarget,
   type GatewayConnection,
   scrubLaunchCapability,
   serializeBrowserSession,
   webSocketUrlWithSession,
-} from '../entities/gateway.js';
-import {WebSession} from '../features/run-view/index.js';
+} from '@vibesys/feature-gateway-connect/renderer';
+import {WebSession} from '@vibesys/feature-run-view/renderer';
+import {StrictMode} from 'react';
+import {createRoot} from 'react-dom/client';
 import {connectRun, openTransport} from '../platform/backend.js';
 import {markDesktopShell} from '../platform/desktop-shell.js';
 import {GatewaySessionStore} from '../platform/gateway-storage.js';

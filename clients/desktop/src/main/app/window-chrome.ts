@@ -2,16 +2,16 @@
  * The window's title-bar chrome, as pure data.
  *
  * The web UI draws its own top strip (`--page-background`, `--desktop-titlebar-height` in
- * `clients/web/src/styles.css`), so the native title bar is hidden and only the window controls
+ * `clients/apps/web/src/styles.css`), so the native title bar is hidden and only the window controls
  * remain, floating over that strip. The web UI has a single dark theme, so the colors do not vary
  * with the operating system's appearance; keep them equal to the web tokens.
  */
 
-/** `--page-background` in `clients/web/src/styles.css`. */
+/** `--page-background` in `clients/apps/web/src/styles.css`. */
 const PAGE_BACKGROUND = '#0c1018';
 /** The web UI's `color` on `:root`; used for the Windows/Linux control glyphs. */
 const PAGE_FOREGROUND = '#e9edf5';
-/** `--desktop-titlebar-height` in `clients/web/src/styles.css`. */
+/** `--desktop-titlebar-height` in `clients/apps/web/src/styles.css`. */
 export const TITLEBAR_HEIGHT = 40;
 
 /** macOS traffic lights are 12px discs; this centers them vertically in the strip. */

@@ -3,7 +3,7 @@ import {expect, test} from '@playwright/test';
 import {
   LIVE_SESSION_HEADER_COPY,
   PAGE_CONNECTION_BANNER_COPY,
-} from '../src/features/run-view/index.js';
+} from '@vibesys/feature-run-view/state';
 
 test('identifies a live page whose gateway is unreachable on cold start', async ({page}) => {
   const gateway = await rejectingLoopbackGateway();

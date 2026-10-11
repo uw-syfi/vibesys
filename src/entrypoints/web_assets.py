@@ -10,7 +10,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 WEB_BUILD_MANIFEST = ".vibesys-web-build.json"
-WEB_BUILD_COMMAND = "pnpm --dir clients/web build"
+WEB_BUILD_COMMAND = "pnpm --dir clients/apps/web build"
 
 _SHA256_PREFIX = "sha256:"
 _SHA256_HEX_LENGTH = 64

@@ -21,11 +21,11 @@ The TypeScript frontend packages have one allowed dependency direction (the full
 
 ```text
 @vibesys/contracts <- @vibesys/transport <- @vibesys/transport-node <- @vibesys/tui
-@vibesys/contracts <- @vibesys/transport <- @vibesys/web
-@vibesys/contracts <- @vibesys/core-state <- @vibesys/tui, @vibesys/web
+@vibesys/contracts <- @vibesys/transport <- @vibesys/app-web
+@vibesys/contracts <- @vibesys/core-state <- @vibesys/tui, @vibesys/app-web
 ```
 
-`@vibesys/tui` and `@vibesys/web` may depend on the lower layers. They never depend on each other,
+`@vibesys/tui` and `@vibesys/app-web` may depend on the lower layers. They never depend on each other,
 and reverse imports and cross-package relative imports are forbidden and checked by
 `pnpm check:ts-architecture`.
 
@@ -98,7 +98,7 @@ Recorded replay fixtures are served by the development harness and folded throug
 The browser launch path keeps the server composition shared. `vibesys --web` starts the existing
 Unix adapter and a loopback WebSocket gateway around the same `RunApi` and
 `SubscriptionTracker`; the gateway changes only framing, not request dispatch, replay, batching, or
-store-identity handling. It binds `127.0.0.1`, serves the built `clients/web/dist` bundle from the
+store-identity handling. It binds `127.0.0.1`, serves the built `clients/apps/web/dist` bundle from the
 same port, and prints a capability-bearing page URL. The bundle's build manifest inventories the
 tracked source, configuration, entrypoint, package, and dependency-lock inputs and supplies an
 opaque build ID to the instance record; the entrypoint rejects the checkout's default bundle when

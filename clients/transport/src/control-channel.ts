@@ -426,7 +426,7 @@ export class ControlChannel {
    * either way, because repeating it is free.
    *
    * Note for readers tracing coverage: the refusal branch is unreachable from
-   * `clients/web`, which issues only `query.snapshot` and so takes the
+   * `clients/apps/web`, which issues only `query.snapshot` and so takes the
    * idempotent default on every call. `websocket.test.ts` and
    * `node/client.test.ts` reach it directly.
    */

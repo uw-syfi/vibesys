@@ -1,5 +1,5 @@
 import {expect, type Locator, type Page, test} from '@playwright/test';
-import {CONTROLS_BANNER_COPY} from '../src/features/run-view/index.js';
+import {CONTROLS_BANNER_COPY} from '@vibesys/feature-run-view/state';
 import {withGateway} from './gateway.js';
 
 /**
@@ -186,8 +186,8 @@ async function injectFrames(page: Page, injection: Injection): Promise<Observed>
 /**
  * Fail fast, and say why, when the page is not running this checkout's code.
  *
- * The gateway serves `clients/web/dist`, a `vite build` output, so editing
- * `clients/web/src` changes nothing the browser runs until that is rebuilt.
+ * The gateway serves `clients/apps/web/dist`, a `vite build` output, so editing
+ * `clients/apps/web/src` changes nothing the browser runs until that is rebuilt.
  * `gateway.ts` now requires the bundle to exist and the `test:e2e` script builds
  * it, but a run that reaches the gateway by another route can still serve an old
  * one, and the failure mode is the worst available: the page served copy that
@@ -202,7 +202,7 @@ async function injectFrames(page: Page, injection: Injection): Promise<Observed>
 async function expectBundleUnderTest(banner: Locator): Promise<void> {
   await expect(
     banner,
-    'the dev server is serving a different build of clients/web: stop any vite on 5173 and re-run',
+    'the dev server is serving a different build of clients/apps/web: stop any vite on 5173 and re-run',
   ).toContainText(CONTROLS_BANNER_COPY.lost);
 }
 

@@ -5,11 +5,11 @@ import {defaultClientConditions, defineConfig, type Plugin} from 'vite';
 import {webBuildInputs} from './build-inputs.js';
 import {webBuildManifest} from './build-manifest.js';
 
-const workspaceRoot = fileURLToPath(new URL('../../', import.meta.url));
+const workspaceRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
 function replayFixturePlugin(): Plugin {
   const fixture = fileURLToPath(
-    new URL('../tui/dev/fixtures/framework-events.jsonl', import.meta.url),
+    new URL('../../tui/dev/fixtures/framework-events.jsonl', import.meta.url),
   );
   return {
     name: 'vibesys-replay-fixture',

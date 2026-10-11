@@ -9,21 +9,19 @@
  * machine waking from sleep. `desktopWebSocket` turns a connection into the `WebSocketLike` the
  * browser transport already drives, so redial, resume, and reconciliation run unchanged.
  */
+
+import type {
+  BrowserLifecycle,
+  RunConnection,
+  TransportHooks,
+} from '@vibesys/feature-run-view/state';
 import {
   DESKTOP_PLATFORMS,
   type DesktopBridge,
   type DesktopPlatform,
   type DesktopSocket,
 } from '@vibesys/ipc';
-import {
-  connectRun,
-  openTransport,
-  type RunConnection,
-  type TransportHooks,
-  type TransportTiming,
-  type WebSocketLike,
-} from './backend.js';
-import type {BrowserLifecycle} from './lifecycle.js';
+import {connectRun, openTransport, type TransportTiming, type WebSocketLike} from './backend.js';
 
 /** What the desktop shell's preload exposes on `window`. */
 interface VibesysDesktop extends Partial<DesktopBridge> {

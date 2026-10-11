@@ -44,7 +44,7 @@ _DEV_PORT = 5173
 _MAX_PORT = 65_535
 _RECORD_WAIT_SECONDS = 10.0
 _DEMO_LOG = Path("clients/tui/dev/fixtures/framework-events.jsonl")
-_DEMO_RUNTIME = Path("clients/web/.vibesys-demo")
+_DEMO_RUNTIME = Path("clients/apps/web/.vibesys-demo")
 
 
 def _repository_root() -> Path:
@@ -85,7 +85,7 @@ def _parser() -> argparse.ArgumentParser:
         "--no-build",
         action="store_true",
         help=(
-            "reuse the last verified clients/web build; the gateway rejects it if the "
+            "reuse the last verified clients/apps/web build; the gateway rejects it if the "
             "workspace sources have changed"
         ),
     )
@@ -157,7 +157,7 @@ def _run_dev(
     return _run_foreground(
         children,
         [_pnpm(), "dev", "--host", args.host, "--port", str(args.port)],
-        cwd=root / "clients" / "web",
+        cwd=root / "clients" / "apps" / "web",
     )
 
 
@@ -234,7 +234,9 @@ class _DefaultWebLiveEffects:
         self._children = children
 
     def build(self, root: Path) -> None:
-        status = _run_foreground(self._children, [_pnpm(), "build"], cwd=root / "clients" / "web")
+        status = _run_foreground(
+            self._children, [_pnpm(), "build"], cwd=root / "clients" / "apps" / "web"
+        )
         if status != 0:
             raise SystemExit(f"vibesys web: the web bundle build failed with status {status}")  # noqa: TRY003  # lint-waiver: LW-101081 [TRY003]; report a failed bundle build as the command's failure
 

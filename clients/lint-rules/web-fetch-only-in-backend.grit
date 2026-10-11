@@ -1,4 +1,4 @@
-// The web run page has one path to the backend: `web/src/platform/backend.ts`. It is the only
+// The web run page has one path to the backend: `apps/web/src/platform/backend.ts`, the only
 // module that uses `fetch`; dependency-cruiser holds @vibesys/transport's runtime imports to it too.
 // Any reference to the global `fetch` counts, not only a call: `const f = fetch; f(url)` reaches
 // the network as surely as `fetch(url)` does. A property named `fetch` (`client.fetch()`) is not
@@ -13,7 +13,7 @@ or {
 } as $reference where {
   register_diagnostic(
     span = $reference,
-    message = "Only web/src/platform/backend.ts uses fetch. Add the request there and inject it where it is needed.",
+    message = "Only apps/web/src/platform/backend.ts uses fetch. Add the request there and inject it where it is needed.",
     severity = "error"
   )
 }
