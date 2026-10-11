@@ -32,7 +32,7 @@ from vibesys.run.host import offers_evaluation_tool
 if TYPE_CHECKING:
     from hypothesis.strategies import DataObject
 
-    from vs_runtime.api import OrchestrationRegistration
+    from vibesys.plugin_registration import OrchestrationRegistration
 
 
 _ENVIRONMENTS = PROMPTS_DIR / "environments"
