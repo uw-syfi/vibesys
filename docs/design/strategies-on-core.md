@@ -80,7 +80,7 @@ stop), `RunEnded`.
 | Issue-tracker operations and `FakeIssueTracker` contract suite | unbuilt | 3 |
 | `issue_queue` strategy | unbuilt | 3 |
 | `ValidateLocal` operation (`vs_core.api.ValidateLocalBase`, owner `ValidateLocalOwner`) | built | 4 |
-| `multi` strategy (stateless tool admission, B15, is built) | unbuilt | 4 |
+| `multi` and `profile-guided multi` strategy (section 9.5.1 records the outcome) | built | 4 |
 | Immutable population state, `ExportPatch` operation, `evolve` strategy | unbuilt | 5 |
 | Removal of the legacy loop runtime and evaluation service | unbuilt | 6 |
 | Limits extension for a resumed run with a larger round budget | issue #2013 (Q3) | n/a |
@@ -918,6 +918,44 @@ mapping above, each deliberate:
   `test_persistence.py`, `test_infrastructure_failure.py`, `test_resilience.py`.
 - **Live run.** As 9.3 with `--inner-loop multi-agent`, with a profiler enabled, plain and
   profile-guided; also confirm the judge asked for the evaluation tool at least once.
+
+#### 9.5.1 Outcome of the `multi` port
+
+`multi` and `profile-guided multi` run as `vibesys.orchestration.multi` (`strategy/` pure,
+`core_policy/` limits, replies, projection and templates) wired by `vibesys.multi_core` and
+`vibesys.multi_roles` (roles `multi-orchestrator`, `multi-profiler`, `multi-implementer`,
+`multi-judge`). It shares the attribution, plan view, plan acceptance and `plan.j2` with `single`
+through `vibesys.serial_search`, and the reviewed-round functions (`review_due`, approving claims,
+closing a round) live with the round machine in `vibesys.hypothesis.reviewed`. Deviations from the
+mapping above, each deliberate:
+
+- The judge reads the candidate under `READ_ONLY_REVISION` at the revision the implementer's turn
+  retained, in the attempt's own workspace. Core attributes a reviewer's verdict to a candidate only
+  under that mode (`_read_only_view`), so the judge's `LOCAL_VALIDATION` assessment counts. Each review
+  is a fresh conversation (a session named by the paid turns spent so far); the implementer keeps
+  one conversation for the round's retries.
+- A round whose review was deferred by the sparse policy, whose judge never produced a valid verdict,
+  or whose candidate the judge rejected is never winner-eligible; a deferred or unreviewed round
+  keeps its checkpoint as work in progress. A judge that gives no valid verdict ends the round
+  without another paid implementer turn.
+- The routing (pre-round) turn is skipped when the run has no profiler: its answer would have to be
+  "no". The routing and profiler turns are advisory: a lost, unparsable or failed one is a note in
+  the strategy state and the plan goes on. The attribution and the plan are the run's contract and
+  fail the search.
+- `ValidateLocal` is optional. A run that cannot offer it (no isolated candidate workspaces) approves
+  on the judge's verdict and records a `validate-local-not-offered` note; a refused or failed
+  validation run is a note too, since nothing is wrong with the candidate. The earlier reuse of a
+  passing result across attempts is not carried over (the validation workspace is throwaway).
+- Prompts are domain-agnostic as `single`'s are: the evidence the loop kept in progress files (history,
+  frontier, notices, the implementer's claims for the judge, the profile) is rendered from typed
+  rows, the validation recipe contract is rendered from its schema, and the profiler prompt is the
+  per-kind shared template plus where to write its bounded evidence (`profile/round-NNNN/`). The
+  domain sections and skill-recommendation resolution are not rendered; the modality and interface
+  texts are.
+- Properties M1 to M4 are tests of the strategy on the production shell (the roles asked per round
+  against the cadence table, advisory failures, one `ValidateLocal` per paid turn, a gate failure
+  keeping the next review); M5 is the conformance crash sweep over the profile-guided subject,
+  which crashes between every pair of the capture, routing, profile and plan commits.
 
 ### 9.6 Phase 5: evolve
 

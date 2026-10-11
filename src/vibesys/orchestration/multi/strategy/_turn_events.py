@@ -323,9 +323,8 @@ def _judged(
     )
     noted = state.model_copy(update={"search_json": rounds.encode(ledger).search_json})
     guarded = conflict if verdict.verdict is Verdict.PASS else None
-    return retry_or_settle(
-        noted, config, judged, Repair(feedback=verdict.feedback or None, conflict=guarded)
-    )
+    repair = verdict.feedback or (None if guarded is not None else feedback)
+    return retry_or_settle(noted, config, judged, Repair(feedback=repair, conflict=guarded))
 
 
 def on_suspended(state: MultiStrategyState, event: TurnSuspended) -> MultiStrategyState:
