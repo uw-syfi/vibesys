@@ -24,12 +24,12 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
     reviewed,
 )
 from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
-from tests.vibesys.orchestration.dynamic.strategy._shell import HostOptions
 
 from vs_core.api import ResourceId, SubmitMeasurement
 from vs_core.testing.drive import Retryable, Running, Unknown
 from vs_core.testing.liveness import LivenessViolationError
 from vs_runtime.api.core import REQUEST_DISPATCH
+from vs_runtime.api.testing import HostOptions
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request

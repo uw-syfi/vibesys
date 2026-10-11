@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._run import FACTS
-from tests.vibesys.orchestration.dynamic.strategy._shell import ScriptedExecutors
 
 from vs_core.api import (
     ArtifactId,
@@ -36,6 +35,7 @@ from vs_runtime.api.core import (
     ExecutionResult,
     handle_for,
 )
+from vs_runtime.api.testing import ScriptedExecutors
 from vs_runtime.contracts import AgentRole, AgentTool
 
 if TYPE_CHECKING:

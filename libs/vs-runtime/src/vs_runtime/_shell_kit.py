@@ -1,4 +1,4 @@
-"""Run `DynamicStrategy` through the production shell with scripted executors.
+"""Run a strategy through the production shell with scripted executors.
 
 The loop, the lease, the fence, the clock, the durable commit and the owner-event
 queue are the real `vs_runtime` ones (`CoreRuntime` driven by `drive_core`), so the
@@ -45,9 +45,18 @@ from vs_core.api import (
     VerifyAdoption,
     WorkspaceObserved,
 )
-from vs_core.testing.drive import Failed, Harness, Retryable, Running, Succeeded, Unknown, new_run
-from vs_core.testing.liveness import Journal
+from vs_core.api.testing import (
+    Failed,
+    Harness,
+    Journal,
+    Retryable,
+    Running,
+    Succeeded,
+    Unknown,
+    new_run,
+)
 from vs_project.api import FakeStateStore
+from vs_runtime._fake_core_execution import FakePublicationDelivery
 from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
@@ -63,7 +72,6 @@ from vs_runtime.api.core import (
     start_core,
 )
 from vs_runtime.api.infrastructure import create_run_control_channel
-from vs_runtime.api.testing import FakePublicationDelivery
 from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -85,7 +93,7 @@ if TYPE_CHECKING:
         StrategyState,
         Transition,
     )
-    from vs_core.testing.drive import Answer
+    from vs_core.api.testing import Answer
     from vs_runtime.api.core import ExecutionContext, OwnerEvent
 
 
@@ -100,16 +108,23 @@ type Script = Callable[[Request, CoreState], Answer]
 """What the executors answer for one request, given core's state when it runs."""
 
 
+class UnidentifiedRequestError(RuntimeError):
+    """A request reached the scripted executors without the identity core assigns it."""
+
+    def __init__(self) -> None:
+        super().__init__("a dispatched request carries its identity")
+
+
 @dataclass(frozen=True)
-class _InvalidReply:
+class InvalidReply:
     """The turn ran and its reply does not parse as the schema it was asked to answer."""
 
     resource_id: ResourceId | None
 
 
-def _status(answer: Answer | _InvalidReply) -> tuple[ObservationStatus, bool, bool]:
+def _status(answer: Answer | InvalidReply) -> tuple[ObservationStatus, bool, bool]:
     """Status, accepted and terminal of the observation an answer stands for."""
-    if isinstance(answer, _InvalidReply):
+    if isinstance(answer, InvalidReply):
         return ObservationStatus.FAILED, True, True
     if isinstance(answer, Succeeded):
         return ObservationStatus.SUCCEEDED, True, True
@@ -122,7 +137,7 @@ def _status(answer: Answer | _InvalidReply) -> tuple[ObservationStatus, bool, bo
     return ObservationStatus.FAILED, answer.accepted, True
 
 
-def _reports_job(answer: Answer | _InvalidReply) -> bool:
+def _reports_job(answer: Answer | InvalidReply) -> bool:
     """Whether an executor that took a job request reports the job's own state with it."""
     return isinstance(answer, Succeeded | Running) or (
         isinstance(answer, Failed) and answer.accepted
@@ -186,7 +201,7 @@ class ScriptedExecutors:
                 self.journal.observe(event.observation, event.evidence)
         return ExecutionResult(observation=observed, owner_events=owner_events)
 
-    def _parsed(self, request: Request, answer: Answer) -> Answer | _InvalidReply:
+    def _parsed(self, request: Request, answer: Answer) -> Answer | InvalidReply:
         """A turn's reply is what the schema parses it to, as the session executor does."""
         if (
             not isinstance(request, DispatchTurn | ResumeSessionTurn)
@@ -198,7 +213,7 @@ class ScriptedExecutors:
         try:
             reply = schema.model_validate_json(answer.output_json)
         except ValidationError:
-            return _InvalidReply(answer.resource_id)
+            return InvalidReply(answer.resource_id)
         return replace(answer, output_json=reply.model_dump_json())
 
     def _next(self, key: str) -> int:
@@ -207,9 +222,10 @@ class ScriptedExecutors:
         return sequence
 
     def _observed(
-        self, request: Request, answer: Answer | _InvalidReply, now_at: float
+        self, request: Request, answer: Answer | InvalidReply, now_at: float
     ) -> RequestObserved:
-        assert request.request_id is not None, "a dispatched request carries its identity"
+        if request.request_id is None:
+            raise UnidentifiedRequestError
         key = request.request_id.root
         sequence = self._next(key)
         status, accepted, terminal = _status(answer)
@@ -231,7 +247,7 @@ class ScriptedExecutors:
             children_complete=terminal,
             resource_id=(
                 answer.resource_id
-                if isinstance(answer, Succeeded | Running | _InvalidReply)
+                if isinstance(answer, Succeeded | Running | InvalidReply)
                 else None
             ),
             revision=answer.revision if succeeded else None,
@@ -264,7 +280,7 @@ class ScriptedExecutors:
         return self._registry.validate_event(event) if answer.outcome is not None else event
 
     def _owner_events(
-        self, request: Request, answer: Answer | _InvalidReply, observed: RequestObserved
+        self, request: Request, answer: Answer | InvalidReply, observed: RequestObserved
     ) -> tuple[OwnerEvent, ...]:
         """The events a production translator attaches to the observation of ``request``."""
         match request:
@@ -281,7 +297,7 @@ class ScriptedExecutors:
     @staticmethod
     def turn_event(
         request: DispatchTurn | ResumeSessionTurn,
-        answer: Answer | _InvalidReply,
+        answer: Answer | InvalidReply,
         observed: RequestObserved,
     ) -> TurnObserved:
         """A turn's reply travels on the session owner's event, never on the request's own."""
@@ -299,7 +315,7 @@ class ScriptedExecutors:
 
     @staticmethod
     def _submission_events(
-        answer: Answer | _InvalidReply, observed: RequestObserved
+        answer: Answer | InvalidReply, observed: RequestObserved
     ) -> tuple[MeasurementSubmissionObserved | JobObserved, ...]:
         """The submission's own view, which is also the job's first observation."""
         view = observed.observation
@@ -435,7 +451,7 @@ def drive_shell[S: StrategyState](
         new_run(strategy, harness),
         bindings=CoreRuntimeBindings(
             registry=harness.registry,
-            executors=_executors(
+            executors=request_executors(
                 options.translator(
                     script, lambda: shell.record.envelope.core, harness.registry, schemas, journal
                 )
@@ -494,7 +510,7 @@ class _NoSteer:
         raise AssertionError((ref, text))
 
 
-def _executors(executor: ScriptedExecutors) -> RequestExecutors:
+def request_executors(executor: ScriptedExecutors) -> RequestExecutors:
     return RequestExecutors(
         workspaces=executor,  # type: ignore[arg-type]  # one scripted object serves every role
         sessions=executor,  # type: ignore[arg-type]  # the same scripted object serves this role

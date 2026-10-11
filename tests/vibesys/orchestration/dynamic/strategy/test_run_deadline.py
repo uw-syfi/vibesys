@@ -22,7 +22,6 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
     reviewed,
 )
 from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, LIMITS, config
-from tests.vibesys.orchestration.dynamic.strategy._shell import Run, drive_shell
 
 from vibesys.orchestration.dynamic.core_policy.api import reply_schemas, requirements_for
 from vibesys.orchestration.dynamic.strategy.api import (
@@ -32,6 +31,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
 )
 from vs_core.api import DispatchTurn, RequestTurn, ResumeSessionTurn, RunEnvelope
 from vs_core.testing.drive import Harness
+from vs_runtime.api.testing import Run, drive_shell
 
 
 def _run(deadline_at: float) -> Run:

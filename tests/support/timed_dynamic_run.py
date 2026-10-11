@@ -1,6 +1,6 @@
 """The dynamic strategy on the production shell and loop, with durations on a virtual clock.
 
-``tests/vibesys/orchestration/dynamic/strategy/_shell.py`` answers every request at once, so
+``vs_runtime.api.testing`` (the shell test kit) answers every request at once, so
 a lease that lapses, a stop that waits for a turn, or two turns that never overlap cannot
 show. Here the same production pieces (``CoreRuntime`` driven by ``drive_core``, the
 lease-enforcing state store, the run-control bridge) run on one :class:`VirtualClock` and
@@ -34,7 +34,6 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
     reviewed,
 )
 from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, LIMITS, config
-from tests.vibesys.orchestration.dynamic.strategy._shell import ScriptedExecutors, _executors
 
 from vibesys.orchestration.dynamic.core_policy.api import reply_schemas, requirements_for
 from vibesys.orchestration.dynamic.strategy.api import (
@@ -72,7 +71,7 @@ from vs_runtime.api.core import (
     start_core,
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
-from vs_runtime.api.testing import FakePublicationDelivery
+from vs_runtime.api.testing import FakePublicationDelivery, ScriptedExecutors, request_executors
 from vs_sim.api.testing import VirtualClock, run_virtual
 from vs_slurm.api import (
     ClusterObservation,
@@ -431,7 +430,7 @@ def _run(
         bindings=CoreRuntimeBindings(
             registry=harness.registry,
             commits=_PauseClock(clock, paused),
-            executors=_executors(
+            executors=request_executors(
                 _TimedExecutors(
                     _TimedScript(script, cluster),
                     lambda: shell.record.envelope.core,

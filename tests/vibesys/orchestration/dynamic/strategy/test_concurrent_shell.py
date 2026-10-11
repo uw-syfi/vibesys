@@ -25,11 +25,6 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
     reviewed,
 )
 from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, LIMITS, config
-from tests.vibesys.orchestration.dynamic.strategy._shell import (
-    LEASE,
-    ScriptedExecutors,
-    _executors,
-)
 
 from vibesys.orchestration.dynamic.core_policy.api import reply_schemas, requirements_for
 from vibesys.orchestration.dynamic.strategy.api import (
@@ -76,18 +71,23 @@ from vs_runtime.api.core import (
     drive_core,
     start_core,
 )
-from vs_runtime.api.testing import FakePublicationDelivery
+from vs_runtime.api.testing import (
+    LEASE,
+    FakePublicationDelivery,
+    ScriptedExecutors,
+    request_executors,
+)
 from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from pydantic import BaseModel
-    from tests.vibesys.orchestration.dynamic.strategy._shell import Script, _InvalidReply
 
     from vs_core.api import CoreEvent, CoreState, OperationRegistry, Request, SchemaRef, Transition
     from vs_core.testing.drive import Answer
     from vs_runtime.api.core import CommitObserver, ExecutionContext, OwnerEvent, RuntimeRecord
+    from vs_runtime.api.testing import InvalidReply, Script
 
 CAPS = (1, 2, 3)
 WAITING_KIND = "waiting_for_evaluation"
@@ -215,7 +215,7 @@ class _DelayedExecutors(ScriptedExecutors):
     @staticmethod
     def turn_event(
         request: DispatchTurn | ResumeSessionTurn,
-        answer: Answer | _InvalidReply,
+        answer: Answer | InvalidReply,
         observed: RequestObserved,
     ) -> TurnObserved:
         """A turn whose reply asks to wait carries the suspension the tool bridge would offer.
@@ -329,7 +329,7 @@ def _build(
             registry=harness.registry,
             transitions=_RecordingTransitions(ledger),
             commits=process.commits or IgnoreCommits(),
-            executors=_executors(
+            executors=request_executors(
                 _DelayedExecutors(
                     executors,
                     lambda: shell.record.envelope.core,

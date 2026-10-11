@@ -4,13 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.vibesys.orchestration.dynamic.strategy._shell import (
-    HostOptions,
-    Run,
-    Script,
-    drive_shell,
-)
-
 from vibesys.orchestration.dynamic.core_policy.api import (
     reply_schemas,
     requirements_for,
@@ -31,6 +24,12 @@ from vs_core.api import (
 )
 from vs_core.testing.drive import Faults, Harness, Trace, drive
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
+from vs_runtime.api.testing import (
+    HostOptions,
+    Run,
+    Script,
+    drive_shell,
+)
 
 if TYPE_CHECKING:
     from tests.vibesys.orchestration.dynamic.strategy._executors import Executors

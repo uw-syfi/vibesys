@@ -15,7 +15,6 @@ from typing import Literal
 
 import pytest
 from pydantic import BaseModel, ConfigDict
-from tests.vibesys.orchestration.dynamic.strategy._shell import Run, drive_shell
 
 from vs_core.api import (
     Access,
@@ -68,6 +67,7 @@ from vs_core.api import (
     WorkspaceRef,
 )
 from vs_core.testing.drive import Answer, Harness, Succeeded
+from vs_runtime.api.testing import Run, drive_shell
 
 type Retention = Literal["wip", "candidate"]
 

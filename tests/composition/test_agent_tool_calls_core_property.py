@@ -34,7 +34,6 @@ from pydantic import TypeAdapter
 from tests.support.skeleton_strategy import ATTEMPT, DECLARATION, DIGEST
 from tests.support.waiting_loop_strategy import LoopState, LoopStrategy
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
-from tests.vibesys.orchestration.dynamic.strategy._shell import ScriptedExecutors
 
 from vs_core.api import (
     ArtifactId,
@@ -77,7 +76,7 @@ from vs_runtime.api.core import (
     new_core_state,
     start_core,
 )
-from vs_runtime.api.testing import FakePublicationDelivery
+from vs_runtime.api.testing import FakePublicationDelivery, ScriptedExecutors
 from vs_runtime.contracts import AgentRole, AgentTool
 from vs_sim.api.testing import VirtualClock, run_virtual
 

@@ -10,6 +10,18 @@ from vs_runtime._fake_core_execution import (
 from vs_runtime._run_clocks import CrashableRunClock, ProbedRunClock
 from vs_runtime._run_environment import HostEnvironment
 from vs_runtime._runs import FakeRunHandle, FakeRuns
+from vs_runtime._shell_kit import (
+    LEASE,
+    Admitting,
+    HostOptions,
+    InvalidReply,
+    RecordingStrategy,
+    Run,
+    Script,
+    ScriptedExecutors,
+    drive_shell,
+    request_executors,
+)
 from vs_runtime.fake_docker_daemon import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_runtime.fakes import (
     FakeAccuracyCall,
@@ -57,6 +69,8 @@ def unconfined_host_environment() -> HostEnvironment:
 
 
 __all__ = [
+    "LEASE",
+    "Admitting",
     "CrashableRunClock",
     "DaemonBackend",
     "ExecutedRequest",
@@ -97,10 +111,18 @@ __all__ = [
     "FakeWorkspace",
     "FakeWorkspaceAgentSessions",
     "FakeWorkspaces",
+    "HostOptions",
+    "InvalidReply",
     "ObservationCall",
     "ProbedRunClock",
+    "RecordingStrategy",
+    "Run",
+    "Script",
+    "ScriptedExecutors",
     "TurnResponder",
     "daemon_docker_config",
     "daemon_engine",
+    "drive_shell",
+    "request_executors",
     "unconfined_host_environment",
 ]

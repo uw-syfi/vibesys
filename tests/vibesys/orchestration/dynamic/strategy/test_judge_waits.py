@@ -23,7 +23,6 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
     reviewed,
 )
 from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
-from tests.vibesys.orchestration.dynamic.strategy._shell import HostOptions
 from tests.vibesys.orchestration.dynamic.strategy._waiting_turns import (
     WaitingTurns,
     attach_for,
@@ -32,12 +31,14 @@ from tests.vibesys.orchestration.dynamic.strategy._waiting_turns import (
 )
 
 from vs_core.api import AttemptPhase, RunStatus
+from vs_runtime.api.testing import HostOptions
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     import pytest
-    from tests.vibesys.orchestration.dynamic.strategy._shell import Run
+
+    from vs_runtime.api.testing import Run
 
 
 @dataclass(frozen=True)

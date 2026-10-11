@@ -32,9 +32,8 @@ from vs_core.api import ProposeWinner, RequestTurn, Withdraw
 from vs_core.testing.drive import Failed
 
 if TYPE_CHECKING:
-    from tests.vibesys.orchestration.dynamic.strategy._shell import Run
-
     from vs_core.testing.drive import Answer
+    from vs_runtime.api.testing import Run
 
 
 def _failed(next_step: str, *cited: str) -> str:
