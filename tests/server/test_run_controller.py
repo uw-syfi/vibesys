@@ -22,7 +22,6 @@ from server.run_lifecycle import RunStatus
 from vibesys.api import RunStopped
 from vibesys.events import CoreEventType
 from vibesys.events import EventStatus as CoreEventStatus
-from vibesys.steering import splice_steering
 
 
 def _status_changes(parts: ServerParts) -> list[tuple[RunStatus, RunStatus]]:
@@ -48,17 +47,16 @@ def _folded_status(events: list[RunEvent], through_sequence: int) -> RunStatus |
 def _enter_boundary(parts: ServerParts, kind: str, round_label: str, user_prompt: str) -> str:
     """Simulate core's entry-side agent turn control gating for a test.
 
-    Production gating lives in `vibesys.orchestration.runtime`,
-    not in the server's `RunController.before_agent`/`start_agent_execution`
-    any more. Tests that need pause-blocking, stop-raising, or steering
-    splicing at an invocation boundary replicate that call sequence here,
+    Production gating lives in the core run loop, not in the server's
+    `RunController.before_agent`/`start_agent_execution`. Tests that need pause-blocking,
+    stop-raising, or steering at an invocation boundary replicate that call sequence here,
     against the same `RunControlChannel` the real loop reads.
     """
     control = parts.control
     control.raise_if_stopped()
     control.wait_while_paused()
     steer_texts = control.take_pending_steer()
-    effective_prompt = splice_steering(user_prompt, steer_texts)
+    effective_prompt = "\n".join([user_prompt, *steer_texts])
     execution = parts.start_execution(kind, round_label, effective_prompt)
     if steer_texts:
         control.notify_steer_consumed(

@@ -34,40 +34,6 @@ class OrchestrationProjector(Protocol):
         ...
 
 
-@dataclass(frozen=True, slots=True)
-class _PluginProjector:
-    """Adapt one runtime-neutral plugin projection to VibeSys read views."""
-
-    plugin: OrchestrationPlugin
-    project: Callable[[BaseModel], PluginProjection]
-
-    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
-        """Load the plugin's typed state and project its historical view."""
-        del loop
-        state_model = self.plugin.state
-        if state_model is None:
-            return _empty_run_view(run_id=run_id, status=status, loop=self.plugin.id)
-        state = (
-            project.state.portable_namespace(run_id, self.plugin.id)
-            .slot("state.json", state_model)
-            .load_optional()
-        )
-        projection = _require_plugin_projection(self.project(state)) if state is not None else None
-        return _plugin_run_view(self.plugin.id, run_id, status, projection)
-
-    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
-        """Project the exact state model committed under this plugin's namespace."""
-        state_model = self.plugin.state
-        if namespace != self.plugin.id or state_model is None or type(state) is not state_model:
-            return None
-        return _plugin_run_view(
-            self.plugin.id,
-            run_id,
-            RunStatus.ACTIVE,
-            _require_plugin_projection(self.project(state)),
-        )
-
-
 def _require_plugin_projection(value: BaseModel) -> PluginProjection:
     """Reject projection callbacks that escape the product-owned contract."""
     if not isinstance(value, PluginProjection) or type(value) is not PluginProjection:
@@ -144,7 +110,6 @@ class OrchestrationRegistration:
     """Bind one runtime-neutral plugin to VibeSys product policy."""
 
     plugin: OrchestrationPlugin
-    project: Callable[[BaseModel], PluginProjection] | None = None
     resume_policy: (
         Callable[
             [OrchestrationDescriptor, OrchestrationDescriptor],
@@ -156,25 +121,8 @@ class OrchestrationRegistration:
     projector: OrchestrationProjector | None = None
 
     def __post_init__(self) -> None:
-        """Bind exactly one read source: a projection of the declared state or a projector.
-
-        `project` reads the plugin's declared state model, so it needs one. A
-        plugin whose durable state lives elsewhere supplies a `projector` that
-        owns reading it. A registration never has both.
-        """
-        if self.project is not None and self.projector is not None:
-            message = "orchestration registration takes a projection or a projector, not both"
-            raise ValueError(message)
-        if self.project is not None and self.plugin.state is None:
-            message = (
-                "orchestration plugin projection requires a declared state model; "
-                "a plugin without one supplies its own projector"
-            )
-            raise ValueError(message)
-        if self.plugin.core is not None:
-            _validate_core_policy(self.plugin.id, self.plugin.core)
-        if self.project is not None:
-            object.__setattr__(self, "projector", _PluginProjector(self.plugin, self.project))
+        """Reject a malformed core policy at registration, before any run opens."""
+        _validate_core_policy(self.plugin.id, self.plugin.core)
 
     def parse_options(self, descriptor: OrchestrationDescriptor) -> BaseModel:
         """Validate one descriptor and return the plugin's typed options."""

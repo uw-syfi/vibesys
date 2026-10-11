@@ -7,12 +7,12 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.core_host_world import open_core_host
 from tests.support.docker_environment import (
     fake_docker_environment,
     host_container_backend,
 )
 from tests.support.task_project import write_task
-from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
@@ -26,7 +26,6 @@ from vibesys.events import (
 from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
-from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
@@ -37,7 +36,6 @@ from vs_runtime.api import (
     BenchmarkObjective,
     LocalValidationEvaluation,
     MetricDirection,
-    Run,
     RuntimeContractError,
 )
 from vs_runtime.api.testing import FakeWorkspace
@@ -51,12 +49,12 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TypeVar
 
+    from vibesys.run.host import CoreHost
     from vs_sim.api import Event
 
     _Result = TypeVar("_Result")
 
 
-_PLUGIN = capability_plugin("evaluation")
 # The held command blocks a worker thread of the sandbox runner, so its latches are the OS's.
 _THREADS = OsThreads()
 
@@ -163,7 +161,7 @@ def _request(project_root: Path, *, agent_backend: str | None = None) -> RunRequ
 
 def _run(
     tmp_path: Path,
-    body: Callable[[Run], Awaitable[_Result]],
+    body: Callable[[CoreHost], Awaitable[_Result]],
     *,
     agent_backend: str | None = None,
     accuracy_command: str = "true",
@@ -175,17 +173,16 @@ def _run(
 
 def _run_project(
     project_root: Path,
-    body: Callable[[Run], Awaitable[_Result]],
+    body: Callable[[CoreHost], Awaitable[_Result]],
     *,
     agent_backend: str | None = None,
 ) -> tuple[_Result, LocalRunIntegration]:
     integration = LocalRunIntegration()
 
     async def exercise() -> _Result:
-        async with open_product_run_host(
+        async with open_core_host(
             _request(project_root, agent_backend=agent_backend),
             integration,
-            plugin=_PLUGIN,
             backend_factory=host_container_backend,
         ) as ctx:
             return await body(ctx)
@@ -194,7 +191,7 @@ def _run_project(
 
 
 def test_adapter_returns_semantic_results_and_events(tmp_path: Path) -> None:
-    async def body(ctx: Run) -> tuple[AccuracyEvaluation, BenchmarkEvaluation]:
+    async def body(ctx: CoreHost) -> tuple[AccuracyEvaluation, BenchmarkEvaluation]:
         accuracy = await ctx.evaluation.accuracy(ctx.workspaces.root)
         benchmark = await ctx.evaluation.benchmark(
             ctx.workspaces.root,
@@ -226,7 +223,7 @@ def test_adapter_returns_semantic_results_and_events(tmp_path: Path) -> None:
 
 
 def test_accuracy_receipt_round_trips_across_framework_snapshot(tmp_path: Path) -> None:
-    async def body(ctx: Run) -> tuple[AccuracyEvaluation, AccuracyEvaluation]:
+    async def body(ctx: CoreHost) -> tuple[AccuracyEvaluation, AccuracyEvaluation]:
         first = await ctx.evaluation.accuracy(ctx.workspaces.root)
         assert first.receipt is not None
         restored = AccuracyReceipt.model_validate_json(first.receipt.model_dump_json())
@@ -247,7 +244,7 @@ def test_accuracy_receipt_round_trips_across_framework_snapshot(tmp_path: Path) 
 
 
 def test_adapter_preserves_failure_feedback(tmp_path: Path) -> None:
-    async def body(ctx: Run) -> AccuracyEvaluation:
+    async def body(ctx: CoreHost) -> AccuracyEvaluation:
         return await ctx.evaluation.accuracy(ctx.workspaces.root)
 
     result, integration = _run(tmp_path, body, accuracy_command="false")
@@ -260,7 +257,7 @@ def test_adapter_preserves_failure_feedback(tmp_path: Path) -> None:
 
 
 def test_single_metric_without_objectives_uses_scalar_contract_direction(tmp_path: Path) -> None:
-    async def body(ctx: Run) -> BenchmarkEvaluation:
+    async def body(ctx: CoreHost) -> BenchmarkEvaluation:
         return await ctx.evaluation.benchmark(ctx.workspaces.root)
 
     result, integration = _run(tmp_path, body)
@@ -274,7 +271,7 @@ def test_single_metric_without_objectives_uses_scalar_contract_direction(tmp_pat
 
 
 def test_multiple_metrics_without_objectives_have_no_implicit_headline(tmp_path: Path) -> None:
-    async def body(ctx: Run) -> BenchmarkEvaluation:
+    async def body(ctx: CoreHost) -> BenchmarkEvaluation:
         return await ctx.evaluation.benchmark(ctx.workspaces.root)
 
     row = {"latency": 8.0, "throughput": 42.0}
@@ -293,7 +290,7 @@ def test_multiple_metrics_without_objectives_have_no_implicit_headline(tmp_path:
 
 
 def test_executed_benchmark_failure_has_policy_feedback(tmp_path: Path) -> None:
-    async def body(ctx: Run) -> BenchmarkEvaluation:
+    async def body(ctx: CoreHost) -> BenchmarkEvaluation:
         return await ctx.evaluation.benchmark(ctx.workspaces.root)
 
     project_root = tmp_path / "project"
@@ -310,7 +307,7 @@ def test_executed_benchmark_failure_has_policy_feedback(tmp_path: Path) -> None:
 
 
 def test_local_validation_maps_runtime_result_and_gate_events(tmp_path: Path) -> None:
-    async def body(ctx: Run) -> LocalValidationEvaluation:
+    async def body(ctx: CoreHost) -> LocalValidationEvaluation:
         return await ctx.evaluation.validate_local(
             ctx.workspaces.root,
             recipe_artifact="validation/recipes.json",
@@ -349,7 +346,7 @@ def test_local_validation_maps_runtime_result_and_gate_events(tmp_path: Path) ->
 def test_unusable_recipe_reference_is_an_agent_input_error_not_a_framework_failure(
     tmp_path: Path, artifact: str
 ) -> None:
-    async def body(ctx: Run) -> LocalValidationEvaluation:
+    async def body(ctx: CoreHost) -> LocalValidationEvaluation:
         return await ctx.evaluation.validate_local(
             ctx.workspaces.root,
             recipe_artifact=artifact,
@@ -368,7 +365,7 @@ def test_unusable_recipe_reference_is_an_agent_input_error_not_a_framework_failu
 
 
 def test_stub_backend_skips_trusted_execution(tmp_path: Path) -> None:
-    async def body(ctx: Run) -> tuple[AccuracyEvaluation, BenchmarkEvaluation]:
+    async def body(ctx: CoreHost) -> tuple[AccuracyEvaluation, BenchmarkEvaluation]:
         return (
             await ctx.evaluation.accuracy(ctx.workspaces.root),
             await ctx.evaluation.benchmark(ctx.workspaces.root),
@@ -383,7 +380,7 @@ def test_stub_backend_skips_trusted_execution(tmp_path: Path) -> None:
 
 
 def test_adapter_rejects_duplicate_objectives_before_execution(tmp_path: Path) -> None:
-    async def body(ctx: Run) -> None:
+    async def body(ctx: CoreHost) -> None:
         objective = BenchmarkObjective(name="latency", direction=MetricDirection.MINIMIZE)
         with pytest.raises(ValueError, match="objective names must be unique"):
             await ctx.evaluation.benchmark(
@@ -396,7 +393,7 @@ def test_adapter_rejects_duplicate_objectives_before_execution(tmp_path: Path) -
 
 
 def test_adapter_pairs_foreign_receipt_exception_with_terminal_gate(tmp_path: Path) -> None:
-    async def body(ctx: Run) -> None:
+    async def body(ctx: CoreHost) -> None:
         with pytest.raises(TypeError, match="live handle"):
             await ctx.evaluation.accuracy(FakeWorkspace(path=ctx.workspaces.root.path))
         with pytest.raises(RuntimeContractError, match="another run"):
@@ -438,10 +435,9 @@ def test_a_docker_gate_runs_in_a_throwaway_candidate_not_the_live_root(tmp_path:
     backend = FakeComputeBackend()
 
     async def exercise() -> bool:
-        async with open_product_run_host(
+        async with open_core_host(
             _request(project_root),
             integration,
-            plugin=_PLUGIN,
             backend_factory=lambda *_args, **_kwargs: backend,
         ) as ctx:
             seen = {c.host_workspace for c in backend.creations}
@@ -468,10 +464,9 @@ def test_gate_starts_before_execution_and_finishes_on_cancellation(
     backend.script_sandbox_for_kind(SandboxKind.DOCKER, sandbox)
 
     async def exercise() -> None:
-        async with open_product_run_host(
+        async with open_core_host(
             _request(project_root),
             integration,
-            plugin=_PLUGIN,
             backend_factory=lambda *_args, **_kwargs: backend,
         ) as ctx:
             operation = (

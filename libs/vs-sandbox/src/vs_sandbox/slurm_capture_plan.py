@@ -52,7 +52,7 @@ class SlurmCapturePlan(BaseModel):
 
 
 class SlurmEvaluationPlan(BaseModel):
-    """Trusted commands and support trees for the local Slurm gate wrapper."""
+    """Trusted commands and support trees the cluster executor stages for one run."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -98,20 +98,5 @@ def read_slurm_capture_plan(path: Path) -> SlurmCapturePlan:
     """Load a strict machine-local capture plan."""
     try:
         return SlurmCapturePlan.model_validate_json(path.read_text(encoding="utf-8"), strict=True)
-    except (OSError, UnicodeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
-        raise SlurmCapturePlanError(path) from exc
-
-
-def write_slurm_evaluation_plan(path: Path, plan: SlurmEvaluationPlan) -> None:
-    """Persist a machine-local trusted gate plan without copying credentials."""
-    atomic_write_bytes(path, (plan.model_dump_json() + "\n").encode())
-
-
-def read_slurm_evaluation_plan(path: Path) -> SlurmEvaluationPlan:
-    """Load a strict machine-local trusted gate plan."""
-    try:
-        return SlurmEvaluationPlan.model_validate_json(
-            path.read_text(encoding="utf-8"), strict=True
-        )
     except (OSError, UnicodeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
         raise SlurmCapturePlanError(path) from exc

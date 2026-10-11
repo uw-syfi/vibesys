@@ -4,97 +4,41 @@ from __future__ import annotations
 
 import asyncio
 import threading
-import uuid
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypeAlias, TypeVar
 
 from pydantic import BaseModel
 
 from vs_agent.api import (
     NULL_SKILL_SELECTION,
-    AgentSessionKey,
-    inspect_invocation_journal,
-)
-from vs_agent.api.testing import FakeAgentInvocationStore
-from vs_evaluation.api import (
-    EVALUATION_ACCESS_STATE_PATH,
-    AccessErrorCode,
-    EvaluationAgentAccessError,
-    EvaluationAgentState,
-    EvidenceFingerprints,
-    ProfilerAgentAccessError,
-    ProfilerAgentService,
-    ProfilerOperation,
-    ScopeLifecycleStore,
-    ScopeRelease,
-    StoredEvaluation,
-    TrustedEvidence,
-    validate_evaluation_wait,
-)
-from vs_evaluation.api.testing import FakeEvaluationSettlements
-from vs_project.api import FakeStateModels, StateModels, validate_state_namespace
-from vs_runtime._agent_declarations import (
-    agent_session_key,
-    validate_agent_capabilities,
-    validate_extra_tools,
-)
-from vs_runtime._fake_agent_sessions import (
-    FakeAgentSession,
-    FakeSessionConfiguration,
-    TurnResponder,
-    echo_responder,
 )
 from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
-from vs_runtime._prepared_conversations import prepare_agent_conversation
 from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
 from vs_runtime._workspace_access import WorkspaceAccessRecovery
 from vs_runtime.contracts import (
     AccuracyEvaluation,
     AccuracyReceipt,
-    AgentBinding,
-    AgentCapability,
-    AgentConversationRequest,
-    AgentEvaluation,
-    AgentRole,
-    AgentSession,
     BenchmarkEvaluation,
     BenchmarkObjective,
-    CandidateProfile,
-    CandidateProfileStatus,
     CandidateWorkspace,
     CommandResult,
     LocalValidationEvaluation,
-    OrchestrationPlugin,
-    PreparedConversation,
-    ProfileField,
-    ReleasedJobs,
-    ResolvedSkillResources,
-    Run,
-    RunFacts,
     RuntimeContractError,
     SessionClosedError,
-    SkillCatalogError,
-    SkillResolution,
-    SkillResourceRequest,
-    StateModelError,
-    UnknownAgentRoleError,
     Workspace,
     WorkspaceAccess,
     WorkspaceRestoreError,
     member_workspace_id,
     validate_command,
-    validate_member_id,
     validate_objectives,
     validate_trusted_shell_command,
     validate_workspace_writable_paths,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Collection, Sequence
+    from collections.abc import Callable, Sequence
 
-    from vs_agent.api import AgentInvocationStore, AgentSessions, InvocationOutcome
-    from vs_evaluation.api import EvaluationSettlements
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
     from vs_runtime._run_control import RunControlChannel, RunControlTransition
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
@@ -379,183 +323,6 @@ class _FakeCandidateConfig:
     revision_prefix: str
 
 
-class FakeWorkspaceAgentSessions:
-    """Run-owned in-memory factory with isolated creation semantics."""
-
-    def __init__(
-        self,
-        agents: tuple[AgentRole, ...],
-        *,
-        responder: TurnResponder = echo_responder,
-        bindings: dict[str, AgentBinding] | None = None,
-        supported_extra_tools: Collection[str] | None = None,
-        supported_agent_capabilities: Collection[AgentCapability] | None = None,
-    ) -> None:
-        """Build role lookup, optionally restricting simulated agent support."""
-        self._session_transport: AgentSessions | None = None
-        self._invocation_store: AgentInvocationStore = FakeAgentInvocationStore()
-        self._roles = {role.id: role for role in agents}
-        self._responder = responder
-        self._bindings = bindings or {
-            role.id: AgentBinding(backend="fake", provider="fake") for role in agents
-        }
-        self._supported_extra_tools = frozenset(supported_extra_tools or ())
-        default_capabilities = {AgentCapability.SESSION_REUSE}
-        if self._supported_extra_tools:
-            default_capabilities.add(AgentCapability.MCP_SERVERS)
-        self._supported_agent_capabilities = frozenset(
-            default_capabilities
-            if supported_agent_capabilities is None
-            else supported_agent_capabilities
-        )
-        # Keep observations separate from live ownership. Candidate teardown
-        # removes sessions from the live set, but tests still need to inspect
-        # what the public fake created and whether runtime ownership closed it.
-        self._sessions: list[FakeAgentSession] = []
-        self._active_sessions: list[FakeAgentSession] = []
-        # Provider conversations by (role, member): the working directory the
-        # conversation ran in and its shared history. Providers key resumable
-        # history by working directory, so a member session continues only
-        # from the same path.
-        self._conversations: dict[AgentSessionKey, tuple[Path, list[str]]] = {}
-        self._creation_results: list[BaseException | None] = []
-        self._closing = False
-        self._closed = False
-
-    def bind_invocation_store(self, store: AgentInvocationStore) -> None:
-        """Use initial-turn backing when no continuation transport owns the ledger."""
-        self._invocation_store = store
-
-    def bind_session_transport(self, transport: AgentSessions) -> None:
-        """Bind continuation transport, whose journal also owns initial-turn fences."""
-        self._session_transport = transport
-
-    @property
-    def sessions(self) -> tuple[FakeAgentSession, ...]:
-        """Return created sessions in ownership order."""
-        return tuple(self._sessions)
-
-    def script_creation(self, *results: BaseException | None) -> None:
-        """Queue deterministic session-creation successes or failures."""
-        self._creation_results.extend(results)
-
-    def prepare_conversation(self, request: AgentConversationRequest) -> PreparedConversation:
-        """Bind policy inputs through the same lifetime owner as production."""
-        if self._closing:
-            raise SessionClosedError
-        return prepare_agent_conversation(self, request)
-
-    def inspect_invocation(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
-        """Inspect the authoritative initial or continuation journal before setup."""
-        if self._session_transport is not None:
-            return self._session_transport.inspect(key, invocation_id)
-        return inspect_invocation_journal(key, invocation_id, self._invocation_store)
-
-    async def create_session(
-        self,
-        role: AgentRole,
-        *,
-        workspace: Workspace,
-        member_id: str | None = None,
-        generation: int | None = None,
-        writable_paths: tuple[str, ...] = (),
-    ) -> AgentSession:
-        """Validate the declared role and create an independent conversation."""
-        if self._closing:
-            raise SessionClosedError
-        if self._roles.get(role.id) != role:
-            raise UnknownAgentRoleError(role.id)
-        validate_member_id(member_id)
-        key = agent_session_key(role.id, member_id, generation, uuid.uuid4().hex)
-        if (
-            member_id is not None
-            and AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities
-            and any(
-                session.retains_session_key and session.role == role and session.session_key == key
-                for session in self._active_sessions
-            )
-        ):
-            message = f"durable session {role.id}:{member_id} already has a live owner"
-            raise RuntimeContractError(message)
-        bound_tool_ids = validate_extra_tools(role, self._supported_extra_tools)
-        validate_agent_capabilities(
-            role,
-            self._supported_agent_capabilities,
-            member_id=member_id,
-            has_bound_tools=bool(bound_tool_ids),
-        )
-        validated_paths = validate_workspace_writable_paths(
-            role.workspace_access,
-            writable_paths,
-        )
-        if not isinstance(workspace, FakeWorkspace):
-            message = "workspace is not owned by this fake runtime"
-            raise TypeError(message)
-        if self._creation_results:
-            failure = self._creation_results.pop(0)
-            if failure is not None:
-                raise failure
-        session = FakeAgentSession(
-            role,
-            workspace,
-            self._bindings[role.id],
-            self._responder,
-            FakeSessionConfiguration(
-                member_id,
-                key,
-                validated_paths,
-                tuple(path for path in validated_paths if workspace.is_directory(path)),
-                self._member_history(key, workspace.path),
-                self._session_transport,
-                self._invocation_store,
-            ),
-        )
-        self._sessions.append(session)
-        self._active_sessions.append(session)
-        return session
-
-    def _member_history(self, key: AgentSessionKey, path: Path) -> list[str] | None:
-        """Return the conversation a member session resumes, or start one."""
-        if not key.durable:
-            return None
-        previous = self._conversations.get(key)
-        if previous is not None and previous[0] == path:
-            return previous[1]
-        history: list[str] = []
-        self._conversations[key] = (path, history)
-        return history
-
-    async def close(self) -> None:
-        """Close all sessions in reverse creation order, once."""
-        if self._closed:
-            return
-        self._closing = True
-        self._closed = True
-        for session in self._active_sessions:
-            session.mark_closed()
-        for session in reversed(self._active_sessions):
-            await session.close()
-        self._active_sessions.clear()
-
-    def begin_close(self) -> None:
-        """Reject new sessions before asynchronous teardown starts."""
-        self._closing = True
-        for session in self._active_sessions:
-            session.mark_closed()
-
-    async def close_workspace_sessions(self, workspace: Workspace) -> None:
-        """Invalidate every public session bound to a discarded workspace."""
-        sessions = [session for session in self._active_sessions if session.workspace is workspace]
-        for session in sessions:
-            session.mark_closed()
-        for session in reversed(sessions):
-            await session.close()
-        selected = set(sessions)
-        self._active_sessions = [
-            session for session in self._active_sessions if session not in selected
-        ]
-
-
 class FakeWorkspaces:
     """In-memory owner of one root and its isolated candidate workspaces."""
 
@@ -564,12 +331,10 @@ class FakeWorkspaces:
         root: FakeWorkspace,
         *,
         supports_parallel_candidates: bool = False,
-        sessions: FakeWorkspaceAgentSessions | None = None,
     ) -> None:
         """Bind the fake capability to one root and a fixed isolation capability."""
         self._root = root
         self._supports_parallel_candidates = supports_parallel_candidates
-        self._sessions = sessions
         self._candidates: list[FakeCandidateWorkspace] = []
         self._patches: dict[str, str] = {}
         self._default_patch: str | None = None
@@ -635,9 +400,6 @@ class FakeWorkspaces:
                 raise RuntimeContractError(message)
         candidate = FakeCandidateWorkspace(
             owner=self,
-            invalidate_sessions=(
-                self._sessions.close_workspace_sessions if self._sessions is not None else None
-            ),
             config=_FakeCandidateConfig(
                 workspace_id=workspace_id,
                 path=self._root.path / workspace_id,
@@ -693,23 +455,19 @@ class FakeWorkspaces:
         self._root.add_retained_revision(revision)
 
     def begin_close(self) -> None:
-        """Reject new candidates and sessions before asynchronous teardown."""
+        """Reject new candidates before asynchronous teardown."""
         if self._closing:
             return
         self._closing = True
-        if self._sessions is not None:
-            self._sessions.begin_close()
 
     async def close(self) -> None:
-        """Discard candidates, then close remaining root sessions, once."""
+        """Discard candidates, once."""
         if self._closed:
             return
         self.begin_close()
         self._closed = True
         for candidate in reversed(self._candidates):
             await candidate.discard()
-        if self._sessions is not None:
-            await self._sessions.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -795,107 +553,6 @@ class FakeCommands:
                 raise result
             return result
         return CommandResult(output="", exit_code=0)
-
-
-@dataclass(slots=True)
-class FakeSkills:
-    """In-memory skill catalog with the production resolver's observable rules."""
-
-    installed_resources: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    catalog_error: str | None = None
-
-    async def resolve(self, requests: tuple[SkillResourceRequest, ...]) -> SkillResolution:
-        """Resolve requests against installed names and their available files."""
-        if not requests:
-            return SkillResolution()
-        if self.catalog_error is not None:
-            raise SkillCatalogError(self.catalog_error)
-        if not self.installed_resources:
-            return SkillResolution(diagnostics=("no skill sources are installed",))
-
-        return _resolve_fake_skills(requests, self.installed_resources)
-
-
-def _resolve_fake_skills(
-    requests: tuple[SkillResourceRequest, ...], installed: dict[str, tuple[str, ...]]
-) -> SkillResolution:
-    """Mirror production name merging and partial resource validation in memory."""
-    merged: dict[str, tuple[str, list[str]]] = {}
-    diagnostics: list[str] = []
-    for index, request in enumerate(requests, start=1):
-        name = request.name.strip()
-        if name not in installed:
-            diagnostics.append(f"selection #{index}: unknown installed skill {name!r}")
-            continue
-        if name not in merged:
-            merged[name] = (request.purpose.strip(), [])
-        purpose, resources = merged[name]
-        diagnostics.extend(
-            _resolve_fake_resources(
-                request.resource_paths,
-                name=name,
-                selection_index=index,
-                available=set(installed[name]),
-                resources=resources,
-            )
-        )
-        merged[name] = purpose, resources
-
-    return SkillResolution(
-        resolved=tuple(
-            ResolvedSkillResources(
-                name=name,
-                router_path=f"{name}/SKILL.md",
-                resource_paths=tuple(f"{name}/{path}" for path in resources),
-                purpose=purpose,
-            )
-            for name, (purpose, resources) in merged.items()
-        ),
-        diagnostics=tuple(diagnostics),
-    )
-
-
-def _resolve_fake_resources(
-    paths: tuple[str, ...],
-    *,
-    name: str,
-    selection_index: int,
-    available: set[str],
-    resources: list[str],
-) -> list[str]:
-    """Validate one request's paths using the catalog's in-memory file set."""
-    diagnostics: list[str] = []
-    for raw_path in paths:
-        resource = raw_path.strip()
-        path = PurePosixPath(resource)
-        if (
-            not resource
-            or "\\" in resource
-            or path.is_absolute()
-            or not path.parts
-            or ".." in path.parts
-        ):
-            diagnostics.append(
-                f"selection #{selection_index} skill {name!r} resource {raw_path!r}: "
-                "resource path must be relative and stay within the skill"
-            )
-            continue
-        if any(part in {".git", "repos", "__pycache__"} for part in path.parts):
-            diagnostics.append(
-                f"selection #{selection_index} skill {name!r} resource {raw_path!r}: "
-                "resource path is excluded from agent skill materialization"
-            )
-            continue
-        resource = path.as_posix()
-        if resource not in available:
-            diagnostics.append(
-                f"selection #{selection_index} skill {name!r} resource {raw_path!r}: "
-                "resource file does not exist"
-            )
-            continue
-        if resource != "SKILL.md" and resource not in resources:
-            resources.append(resource)
-    return diagnostics
 
 
 class FakeWorkspace:
@@ -1083,7 +740,6 @@ class FakeCandidateWorkspace(FakeWorkspace):
         self,
         *,
         owner: FakeWorkspaces,
-        invalidate_sessions: Callable[[Workspace], Awaitable[None]] | None,
         config: _FakeCandidateConfig,
     ) -> None:
         """Bind a candidate to the one fake run that created it."""
@@ -1094,7 +750,6 @@ class FakeCandidateWorkspace(FakeWorkspace):
             trusted_input_baseline=config.trusted_input_baseline,
         )
         self._owner = owner
-        self._invalidate_sessions = invalidate_sessions
         self._discarded = False
         self.orphaned = False
         self._revision_prefix = config.revision_prefix
@@ -1168,8 +823,6 @@ class FakeCandidateWorkspace(FakeWorkspace):
         """Release this fake candidate idempotently."""
         if self._discarded:
             return
-        if self._invalidate_sessions is not None:
-            await self._invalidate_sessions(self)
         self._discarded = True
 
     def _require_open(self) -> None:
@@ -1177,123 +830,6 @@ class FakeCandidateWorkspace(FakeWorkspace):
         if self._discarded:
             message = "candidate workspace is closed"
             raise RuntimeContractError(message)
-
-
-class FakeControl:
-    """Deterministic cooperative-control boundary for plugin tests."""
-
-    def __init__(self) -> None:
-        """Create an active control with no pending failure."""
-        self._failure: BaseException | None = None
-        self._checkpoints = 0
-
-    @property
-    def checkpoints(self) -> int:
-        """Return how many checkpoints plugin control flow reached."""
-        return self._checkpoints
-
-    def fail_with(self, error: BaseException | None) -> None:
-        """Configure the error raised at subsequent checkpoints, or clear it."""
-        self._failure = error
-
-    async def checkpoint(self) -> None:
-        """Record the boundary and raise its configured stop failure, if any."""
-        self._checkpoints += 1
-        if self._failure is not None:
-            raise self._failure
-
-
-@dataclass(frozen=True, slots=True)
-class FakeStateCommit:
-    """One validated state replacement recorded by :class:`FakeState`."""
-
-    value: BaseModel
-    workspace: Workspace | None
-    label: str | None
-
-
-class FakeState:
-    """Faithful in-memory plugin-state durability with detached values."""
-
-    def __init__(self, model: type[BaseModel] | None, root: Workspace) -> None:
-        """Bind the exact plugin declaration and its only live workspace."""
-        self._model = model
-        self._root = root
-        self._value: BaseModel | None = None
-        self._namespaces: dict[str, FakeStateModels] = {}
-        self._commits: list[FakeStateCommit] = []
-        self._commit_results: list[BaseException | None] = []
-        self._commit_labels: dict[str, list[BaseException | None]] = {}
-
-    def namespace(self, name: str) -> StateModels:
-        """Return the same detached Project namespace for a validated host name."""
-        validate_state_namespace(name)
-        if self._model is None:
-            message = "orchestration plugin did not declare durable state"
-            raise TypeError(message)
-        return self._namespaces.setdefault(name, FakeStateModels())
-
-    @property
-    def commits(self) -> tuple[FakeStateCommit, ...]:
-        """Return detached commit records in durability order."""
-        return tuple(
-            FakeStateCommit(
-                type(commit.value).model_validate_json(
-                    commit.value.model_dump_json(round_trip=True), strict=True
-                ),
-                commit.workspace,
-                commit.label,
-            )
-            for commit in self._commits
-        )
-
-    def script_commit(self, *results: BaseException | None) -> None:
-        """Queue deterministic durable-commit successes or failures."""
-        self._commit_results.extend(results)
-
-    def script_commit_at(self, label: str, *results: BaseException | None) -> None:
-        """Inject one-shot durable-write outcomes at an explicit transition barrier."""
-        self._commit_labels.setdefault(label, []).extend(results)
-
-    async def load(self, model: type[ResponseT]) -> ResponseT | None:
-        """Return a detached value after validating the exact declared model."""
-        self._require_model(model)
-        if self._value is None:
-            return None
-        return model.model_validate_json(self._value.model_dump_json(round_trip=True), strict=True)
-
-    async def commit(
-        self,
-        value: BaseModel,
-        *,
-        workspace: Workspace | None = None,
-        label: str | None = None,
-    ) -> None:
-        """Record one deep-validated replacement and optional root association."""
-        self._require_model(type(value))
-        if workspace is not None and workspace is not self._root:
-            message = "state can commit only the live root workspace for this run"
-            raise RuntimeContractError(message)
-        model = self._model
-        if model is None:
-            raise StateModelError(None, type(value))
-        snapshot = model.model_validate_json(value.model_dump_json(round_trip=True), strict=True)
-        labelled = self._commit_labels.get(label or "", [])
-        if labelled:
-            failure = labelled.pop(0)
-            if failure is not None:
-                raise failure
-        elif self._commit_results:
-            failure = self._commit_results.pop(0)
-            if failure is not None:
-                raise failure
-        self._value = snapshot
-        recorded = model.model_validate_json(snapshot.model_dump_json(round_trip=True), strict=True)
-        self._commits.append(FakeStateCommit(recorded, workspace, label))
-
-    def _require_model(self, model: type[BaseModel]) -> None:
-        if model is not self._model:
-            raise StateModelError(self._model, model)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1310,16 +846,6 @@ class FakeBenchmarkCall:
 
     workspace: Workspace
     objectives: tuple[BenchmarkObjective, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class FakeProfileCall:
-    """One recorded policy-requested profile."""
-
-    revision: str
-    request: str
-    member_id: str
-    required_fields: tuple[ProfileField, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1400,349 +926,7 @@ class FakeEvaluation:
     benchmark_calls: list[FakeBenchmarkCall] = field(default_factory=list)
     local_validation_calls: list[FakeLocalValidationCall] = field(default_factory=list)
     run_id: str = "test-run"
-    settlement_observations: EvaluationSettlements | None = field(
-        default_factory=FakeEvaluationSettlements
-    )
-    deadline_time: float = 0.0
-    deadline_wait_started: asyncio.Event = field(default_factory=asyncio.Event)
-    _deadline_waiters: list[tuple[float, asyncio.Event]] = field(default_factory=list)
-    current_receipt_context: EvidenceFingerprints | None = None
-    submitted_revisions: dict[str, str] = field(default_factory=dict)
-    profiler_revisions: dict[str, str] = field(default_factory=dict)
-    profiler_service: ProfilerAgentService | None = None
-    wait_authorization: Callable[..., Awaitable[None]] | None = None
-    submitted_generations: dict[tuple[str, str], int] = field(default_factory=dict)
-    submitted_deadlines: dict[str, float] = field(default_factory=dict)
-    cancelled_submissions: list[str] = field(default_factory=list)
-    submitted_reports: dict[str, str] = field(default_factory=dict)
-    accepted_evidence: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    # Explicit owner effects for externally injected read-only settlement ports.
-    association_cancellation: Callable[[str, str], Awaitable[object]] | None = None
-    scope_release: Callable[[str], Awaitable[ScopeRelease]] | None = None
-    scope_reopen: Callable[[str], Awaitable[None]] | None = None
     _gates: dict[tuple[FakeEvaluationKind, int], FakeEvaluationGate] = field(default_factory=dict)
-    _agent_evaluations: dict[str | None, list[AgentEvaluation]] = field(default_factory=dict)
-    # Scripted profile outcomes, consumed in call order. Each is returned for
-    # the requested revision. Unscripted, a profile fails as it does in a run
-    # without a provisioned profiler.
-    profile_results: list[CandidateProfile | BaseException] = field(default_factory=list)
-    profile_calls: list[FakeProfileCall] = field(default_factory=list)
-    # Whether the evaluation executor this Fake stands in for produces profile
-    # evidence. The default matches the production executors, which do not
-    # unless their plan carries a profile capture; a test that profiles sets it
-    # to what the production executor of its run environment reports.
-    profiling_supported: bool = False
-    supported_profile_fields: tuple[ProfileField, ...] = (ProfileField.HIP_API_TIMING,)
-    # Every release_jobs call, in call order, including repeats.
-    released: list[str] = field(default_factory=list)
-    _released_members: set[str] = field(default_factory=set)
-
-    async def reopen_jobs(self, member_id: str) -> None:
-        """Reconcile a completed release and open a fresh generation for resumed work."""
-        if self.scope_reopen is not None:
-            await self.scope_reopen(member_workspace_id(member_id))
-        elif isinstance(self.settlement_observations, FakeEvaluationSettlements):
-            await self.settlement_observations.reopen_scope(member_workspace_id(member_id))
-        elif self.settlement_observations is not None:
-            message = "injected settlement observations require an explicit scope_reopen port"
-            raise RuntimeContractError(message)
-        self._released_members.discard(member_id)
-
-    async def jobs_released(self, member_id: str) -> bool:
-        """Project whether the member's durable scope refuses ordinary admission.
-
-        Closing and completed releases both fence new work. Recovery can
-        reconcile cleanup before opening a fresh scope generation.
-        """
-        return member_id in self._released_members
-
-    async def release_jobs(self, member_id: str) -> ReleasedJobs:
-        """Record the release; the first one for a member refuses its later profiles.
-
-        Release withdraws this member's requester waits, preserving other scopes.
-        As in production, only the first release of a member reports
-        ``first_release`` and a profile for a released member fails typed.
-        """
-        if self.scope_release is not None:
-            release = await self.scope_release(member_workspace_id(member_id))
-        elif isinstance(self.settlement_observations, FakeEvaluationSettlements):
-            release = await self.settlement_observations.release_scope(
-                member_workspace_id(member_id)
-            )
-        elif self.settlement_observations is None:
-            release = ScopeRelease(
-                scope_id=member_workspace_id(member_id),
-                first_release=member_id not in self._released_members,
-            )
-        else:
-            message = "injected settlement observations require an explicit scope_release port"
-            raise RuntimeContractError(message)
-        self.released.append(member_id)
-        self._released_members.add(member_id)
-        return ReleasedJobs(
-            member_id=member_id,
-            evaluations=release.evaluations,
-            profiler_operations=release.profiler_operations,
-            first_release=release.first_release,
-        )
-
-    def script_profile(self, *results: CandidateProfile | BaseException) -> None:
-        """Queue profile outcomes or failures in call order."""
-        self.profile_results.extend(results)
-
-    async def can_profile(self) -> bool:
-        """Return the configured executor capability, as production derives it."""
-        return self.profiling_supported
-
-    async def profile(
-        self,
-        revision: str,
-        request: str,
-        *,
-        member_id: str,
-        required_fields: tuple[ProfileField, ...] = (),
-    ) -> CandidateProfile:
-        """Return the next scripted outcome for ``revision``, or the unprovisioned failure.
-
-        Without :attr:`profiling_supported` every profile ends unsupported,
-        whatever is scripted, as a production profiler reports when the run's
-        executor cannot produce profile evidence.
-        """
-        self.profile_calls.append(FakeProfileCall(revision, request, member_id, required_fields))
-        if member_id in self._released_members:
-            return CandidateProfile(
-                revision=revision,
-                status=CandidateProfileStatus.FAILED,
-                failure="the member's jobs were released, so no profile started",
-            )
-        if not self.profiling_supported:
-            return CandidateProfile(
-                revision=revision,
-                status=CandidateProfileStatus.UNSUPPORTED,
-                capture_started=False,
-                diagnosis="this run's evaluation executor cannot produce evidence kind: profile",
-            )
-        missing = tuple(
-            field for field in required_fields if field not in self.supported_profile_fields
-        )
-        if missing:
-            return CandidateProfile(
-                revision=revision,
-                status=CandidateProfileStatus.UNSUPPORTED,
-                capture_started=False,
-                missing_fields=missing,
-                diagnosis="configured capture does not supply required fields",
-            )
-        if not self.profile_results:
-            return CandidateProfile(
-                revision=revision,
-                status=CandidateProfileStatus.FAILED,
-                failure="no profiler agent is provisioned",
-            )
-        result = self.profile_results.pop(0)
-        if isinstance(result, BaseException):
-            raise result
-        return CandidateProfile.model_validate(
-            {**result.model_dump(mode="json"), "revision": revision}
-        )
-
-    def record_agent_evaluation(self, workspace: Workspace, evaluation: AgentEvaluation) -> None:
-        """Record that an agent's evaluation of ``workspace`` reached ``evaluation``'s state."""
-        self._agent_evaluations.setdefault(workspace.id, []).append(evaluation)
-        if self.current_receipt_context is None and evaluation.trusted_evidence:
-            self.current_receipt_context = evaluation.trusted_evidence[0].fingerprints
-
-    async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
-        """Return the evaluations recorded for ``workspace``'s identity, oldest first."""
-        return tuple(self._agent_evaluations.get(workspace.id, ()))
-
-    def settlements(self) -> EvaluationSettlements:
-        """Expose the explicitly injected, ownership-validating settlement interface."""
-        if self.settlement_observations is None:
-            message = "agent evaluation settlements are unavailable"
-            raise RuntimeContractError(message)
-        return self.settlement_observations
-
-    def current_time(self) -> float:
-        """Read an explicit logical UTC clock without wall-clock time."""
-        return self.deadline_time
-
-    def advance_time(self, seconds: float) -> None:
-        """Advance host time and release every reached deadline barrier."""
-        self.deadline_time += seconds
-        for deadline, barrier in self._deadline_waiters:
-            if self.deadline_time >= deadline:
-                barrier.set()
-
-    async def wait_until(self, deadline_at_s: float) -> None:
-        """Wait on an explicit barrier; tests control every advance."""
-        if self.deadline_time >= deadline_at_s:
-            return
-        barrier = asyncio.Event()
-        waiter = (deadline_at_s, barrier)
-        self._deadline_waiters.append(waiter)
-        self.deadline_wait_started.set()
-        try:
-            await barrier.wait()
-        finally:
-            self._deadline_waiters.remove(waiter)
-
-    async def validate_wait(
-        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
-    ) -> None:
-        """Use the production service's authority over the shared Fake settlement store."""
-        if self.wait_authorization is not None:
-            await self.wait_authorization(handles, scope_id=scope_id, principal_id=principal_id)
-            return
-        settlements = self.settlements()
-        if not isinstance(settlements, FakeEvaluationSettlements):
-            message = "injected settlements require explicit wait_authorization"
-            raise RuntimeContractError(message)
-        state = (
-            settlements.namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
-            or EvaluationAgentState()
-        )
-        generation = next(
-            (
-                item.generation
-                for item in ScopeLifecycleStore(settlements.namespace).snapshot().scopes
-                if item.scope_id == scope_id
-            ),
-            0,
-        )
-        validate_evaluation_wait(
-            state,
-            handles=handles,
-            scope_id=scope_id,
-            principal_id=principal_id,
-            generation=generation,
-        )
-
-    def _require_profiler(self) -> ProfilerAgentService:
-        if self.profiler_service is None:
-            raise EvaluationAgentAccessError(AccessErrorCode.PROFILER_DENIED)
-        return self.profiler_service
-
-    async def profiler_operation(
-        self, operation_id: str, *, principal_id: str, scope_id: str | None
-    ) -> ProfilerOperation:
-        """Read through the same owned profiler service used by production."""
-        return (
-            await self._require_profiler().status(operation_id, principal_id, scope_id)
-        ).operation
-
-    async def wait_profiler(
-        self, operation_id: str, *, principal_id: str, scope_id: str | None
-    ) -> ProfilerOperation:
-        """Suspend on the provision-controlled completion barrier."""
-        return await self._require_profiler().wait_result(operation_id, principal_id, scope_id)
-
-    async def cancel_profiler(
-        self, operation_id: str, *, principal_id: str, scope_id: str | None
-    ) -> None:
-        """Cancel through the authoritative lifecycle service."""
-        await self._require_profiler().cancel(operation_id, principal_id, scope_id)
-
-    async def validate_profiler_wait(
-        self, handles: tuple[str, ...], *, principal_id: str, scope_id: str | None
-    ) -> None:
-        """Apply the production profiler principal-ownership checks."""
-        for handle in handles:
-            try:
-                await self.profiler_operation(handle, principal_id=principal_id, scope_id=scope_id)
-            except (ProfilerAgentAccessError, KeyError) as error:
-                raise EvaluationAgentAccessError(
-                    AccessErrorCode.HANDLE_DENIED, str(error)
-                ) from error
-
-    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
-        """Read the scripted requester generation after checking recorded association history."""
-        await self._validate_requester_history(handle_id, scope_id)
-        if (scope_id, handle_id) not in self.submitted_generations:
-            message = f"evaluation {handle_id!r} has no submitted generation"
-            raise RuntimeContractError(message)
-        return self.submitted_generations[scope_id, handle_id]
-
-    async def _validate_requester_history(self, handle_id: str, scope_id: str) -> None:
-        history = await self.settlements().submission_history(scope_id)
-        if handle_id not in {record.handle_id for record in history}:
-            message = f"evaluation {handle_id!r} has no requester history in scope {scope_id!r}"
-            raise RuntimeContractError(message)
-
-    async def submitted_deadline(self, handle_id: str) -> float:
-        """Read the scripted immutable deadline, rejecting missing capture."""
-        if handle_id not in self.submitted_deadlines:
-            message = f"evaluation {handle_id!r} has no submitted deadline"
-            raise RuntimeContractError(message)
-        return self.submitted_deadlines[handle_id]
-
-    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
-        """Record cancellation of a known submitted evaluation."""
-        await self.submitted_generation(handle_id, scope_id=scope_id)
-        if self.association_cancellation is not None:
-            await self.association_cancellation(handle_id, scope_id)
-        elif isinstance(self.settlement_observations, FakeEvaluationSettlements):
-            await self.settlement_observations.cancel_association(handle_id, scope_id)
-        else:
-            message = (
-                "injected settlement observations require an explicit association_cancellation port"
-            )
-            raise RuntimeContractError(message)
-        self.cancelled_submissions.append(handle_id)
-
-    async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
-        """Return the recorded backend-accepted IDs for one exact handle."""
-        return self.accepted_evidence.get(handle_id, ())
-
-    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
-        """Validate the configured canonical record as strictly as production."""
-        await self._validate_requester_history(handle_id, scope_id)
-        if handle_id not in self.submitted_reports:
-            message = f"evaluation {handle_id!r} has no submitted report"
-            raise RuntimeContractError(message)
-        return StoredEvaluation.model_validate_json(
-            self.submitted_reports[handle_id]
-        ).model_dump_json()
-
-    async def receipt_matches_current_context(
-        self, revision: str, evidence: TrustedEvidence
-    ) -> bool:
-        """Compare recorded captures with the explicitly scripted canonical context."""
-        current = self.current_receipt_context
-        if current is None:
-            return False
-        recorded = any(
-            row.revision == revision and evidence in row.trusted_evidence
-            for history in self._agent_evaluations.values()
-            for row in history
-        )
-        return recorded and all(
-            getattr(current, name) == getattr(evidence.fingerprints, name)
-            for name in ("evaluator", "workload", "environment")
-        )
-
-    async def evidence_revisions(self) -> dict[str, str]:
-        """Project only host-scripted capture identities, matching the production registry."""
-        revisions = {**self.submitted_revisions, **self.profiler_revisions}
-        for handle_id, evidence_ids in self.accepted_evidence.items():
-            revision = await self.submitted_revision(handle_id)
-            for evidence_id in evidence_ids:
-                revisions[evidence_id] = revision
-        return revisions
-
-    async def evidence_revision(self, reference: str) -> str | None:
-        """Resolve recorded captures without deriving attribution from agent text."""
-        revision = (await self.evidence_revisions()).get(reference)
-        if revision is None and reference.startswith("eval_"):
-            raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, reference)
-        return revision
-
-    async def submitted_revision(self, handle_id: str) -> str:
-        """Read the recorded exact capture, rejecting unrecorded handles."""
-        if handle_id not in self.submitted_revisions:
-            message = f"evaluation {handle_id!r} has no submitted revision"
-            raise RuntimeContractError(message)
-        return self.submitted_revisions[handle_id]
 
     def script_accuracy(self, *results: AccuracyEvaluation | BaseException) -> None:
         """Queue accuracy results or failures in call order."""
@@ -1856,100 +1040,6 @@ class FakeEvaluation:
         if self.local_validation_results:
             return self.local_validation_results.pop(0)
         return self.default_local_validation
-
-
-@dataclass(frozen=True, slots=True)
-class ObservationCall:
-    """One ordered call captured by :class:`FakeObservations`."""
-
-    kind: Literal["note", "warning"]
-    message: str
-
-
-class FakeObservations:
-    """In-memory observation capability preserving kind and call order."""
-
-    def __init__(self) -> None:
-        """Create an empty ordered observation log."""
-        self._calls: list[ObservationCall] = []
-
-    @property
-    def calls(self) -> tuple[ObservationCall, ...]:
-        """Return observation calls in publication order."""
-        return tuple(self._calls)
-
-    def note(self, message: str) -> None:
-        """Capture one informational note."""
-        self._calls.append(ObservationCall("note", message))
-
-    def warning(self, message: str) -> None:
-        """Capture one non-fatal warning."""
-        self._calls.append(ObservationCall("warning", message))
-
-
-class FakeRun(Run):
-    """In-memory run value with scriptable capabilities and owned cleanup."""
-
-    agents: FakeWorkspaceAgentSessions
-    workspaces: FakeWorkspaces
-    evaluation: FakeEvaluation
-    state: FakeState
-    control: FakeControl
-    commands: FakeCommands
-    skills: FakeSkills
-    observations: FakeObservations
-    _closed: bool
-
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-040117 [PLR0913]; these are independent fake inputs, and a fake-host options bundle would add a second public configuration shape solely to shorten this signature.
-        self,
-        plugin: OrchestrationPlugin,
-        *,
-        run_id: str = "test-run",
-        project_root: Path = Path(),
-        facts: RunFacts | None = None,
-        responder: TurnResponder = echo_responder,
-        agent_bindings: dict[str, AgentBinding] | None = None,
-        supported_extra_tools: Collection[str] | None = None,
-        supported_agent_capabilities: Collection[AgentCapability] | None = None,
-        supports_parallel_candidates: bool = False,
-    ) -> None:
-        """Create a run whose private role map derives from ``plugin.agents``."""
-        facts = (
-            RunFacts(domain_id="generic", objective="Test objective.") if facts is None else facts
-        )
-        agents = FakeWorkspaceAgentSessions(
-            plugin.agents,
-            responder=responder,
-            bindings=agent_bindings,
-            supported_extra_tools=supported_extra_tools,
-            supported_agent_capabilities=supported_agent_capabilities,
-        )
-        workspaces = FakeWorkspaces(
-            FakeWorkspace(path=project_root),
-            supports_parallel_candidates=supports_parallel_candidates,
-            sessions=agents,
-        )
-        super().__init__(
-            run_id=run_id,
-            facts=facts,
-            agents=agents,
-            workspaces=workspaces,
-            evaluation=FakeEvaluation(run_id=run_id),
-            state=FakeState(plugin.state, workspaces.root),
-            control=FakeControl(),
-            commands=FakeCommands(),
-            skills=FakeSkills(),
-            observations=FakeObservations(),
-        )
-        object.__setattr__(self, "_closed", False)
-
-    async def close(self) -> None:
-        """Close all run-owned resources idempotently."""
-        if self._closed:
-            return
-        object.__setattr__(self, "_closed", True)
-        self.workspaces.begin_close()
-        await self.workspaces.close()
 
 
 class FakeStopTimer:

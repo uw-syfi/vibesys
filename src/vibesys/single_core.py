@@ -188,7 +188,6 @@ def single_core_registration(
         agents=CORE_ROLES,
         options=options_type,
         core=single_core_policy(options_type),
-        memory_paths=ARTIFACT_DIRECTORIES,
     )
     return OrchestrationRegistration(
         plugin=plugin,

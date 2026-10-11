@@ -16,26 +16,15 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
-from vs_evaluation.api import (
-    AccessErrorCode,
-    EvaluationAgentAccessError,
-    ProfilerOperation,
-    TrustedEvidence,
-)
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
-    AgentEvaluation,
     BenchmarkEvaluation,
     BenchmarkFailureKind,
     BenchmarkObjective,
-    CandidateProfile,
-    CandidateProfileStatus,
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
-    ProfileField,
-    ReleasedJobs,
     RuntimeContractError,
     Workspace,
 )
@@ -51,14 +40,12 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     ValidationRecipe,
 )
-from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vibesys.inputs import InputBundle
     from vibesys.run.contracts import RunRequest
-    from vs_evaluation.api import EvaluationSettlements
     from vs_runtime.api import Workspace
     from vs_runtime.api.infrastructure import (
         RunEnvironmentSession,
@@ -66,8 +53,6 @@ if TYPE_CHECKING:
     )
 
 
-# The UTC timeline persisted deadlines are read against; the sleeps run on the event loop.
-_CLOCK = SystemClock()
 GATE_LOG_TAIL_CHARS = 1000
 GATE_FEEDBACK_TAIL_CHARS = 4000
 
@@ -229,7 +214,6 @@ class _EvaluationAdapter:
         self._events = events
         self._log = log
         self._identifiers = count(1)
-        self._released: set[str] = set()
 
     def _live_workspace(self, workspace: Workspace) -> Workspace:
         self._runtime_evaluation.spec(workspace)
@@ -355,153 +339,6 @@ class _EvaluationAdapter:
             workspace,
             recipe_artifact=recipe_artifact,
             report_location=report_location,
-        )
-
-    async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
-        """Return no history: without the evaluation tool, agents submit nothing."""
-        del workspace
-        return ()
-
-    def settlements(self) -> EvaluationSettlements:
-        """Fail explicitly when this run offers no agent evaluation tools."""
-        message = "agent evaluation settlements are unavailable"
-        raise RuntimeContractError(message)
-
-    def current_time(self) -> float:
-        """Use UTC time so persisted deadlines survive process restarts."""
-        return _CLOCK.now()
-
-    async def wait_until(self, deadline_at_s: float) -> None:
-        """Wait without agent calls, with cancellation releasing the timer."""
-        await _CLOCK.sleep(max(0.0, deadline_at_s - self.current_time()))
-
-    async def validate_wait(
-        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
-    ) -> None:
-        """A run without the agent evaluation service grants no wait authority."""
-        del handles, scope_id, principal_id
-        message = "agent evaluation tools are unavailable"
-        raise RuntimeContractError(message)
-
-    async def profiler_operation(
-        self, operation_id: str, *, principal_id: str, scope_id: str | None
-    ) -> ProfilerOperation:
-        del operation_id, principal_id, scope_id
-        raise EvaluationAgentAccessError(AccessErrorCode.PROFILER_DENIED)
-
-    async def wait_profiler(
-        self, operation_id: str, *, principal_id: str, scope_id: str | None
-    ) -> ProfilerOperation:
-        return await self.profiler_operation(
-            operation_id, principal_id=principal_id, scope_id=scope_id
-        )
-
-    async def cancel_profiler(
-        self, operation_id: str, *, principal_id: str, scope_id: str | None
-    ) -> None:
-        await self.profiler_operation(operation_id, principal_id=principal_id, scope_id=scope_id)
-
-    async def validate_profiler_wait(
-        self, handles: tuple[str, ...], *, principal_id: str, scope_id: str | None
-    ) -> None:
-        del handles, principal_id, scope_id
-        raise EvaluationAgentAccessError(AccessErrorCode.PROFILER_DENIED)
-
-    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
-        """No agent submission exists without the evaluation tool."""
-        del scope_id
-        message = f"evaluation {handle_id!r} has no submitted generation"
-        raise RuntimeContractError(message)
-
-    async def submitted_deadline(self, handle_id: str) -> float:
-        """No agent submission exists without the evaluation tool."""
-        message = f"evaluation {handle_id!r} has no submitted deadline"
-        raise RuntimeContractError(message)
-
-    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
-        """No agent submission exists without the evaluation tool."""
-        del scope_id
-        message = f"evaluation {handle_id!r} has no submitted evaluation"
-        raise RuntimeContractError(message)
-
-    async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
-        """No agent-submitted evidence exists without the evaluation tool."""
-        del handle_id
-        return ()
-
-    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
-        """No agent submission exists without the evaluation tool."""
-        del scope_id
-        message = f"evaluation {handle_id!r} has no submitted report"
-        raise RuntimeContractError(message)
-
-    async def receipt_matches_current_context(
-        self, revision: str, evidence: TrustedEvidence
-    ) -> bool:
-        """Without semantic capture authority, historical receipts cannot establish eligibility."""
-        del revision, evidence
-        return False
-
-    async def evidence_revisions(self) -> dict[str, str]:
-        """No agent-submitted captures exist without evaluation tools."""
-        return {}
-
-    async def evidence_revision(self, reference: str) -> str | None:
-        """Without agent tools only local artifact references have no captured revision."""
-        if reference.startswith("eval_"):
-            raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, reference)
-        return None
-
-    async def submitted_revision(self, handle_id: str) -> str:
-        """No agent submission exists without the evaluation tool."""
-        message = f"evaluation {handle_id!r} has no submitted revision"
-        raise RuntimeContractError(message)
-
-    async def can_profile(self) -> bool:
-        """Return False: without the evaluation tool the run provisions no profiler agent."""
-        return False
-
-    async def profile(
-        self,
-        revision: str,
-        request: str,
-        *,
-        member_id: str,
-        required_fields: tuple[ProfileField, ...] = (),
-    ) -> CandidateProfile:
-        """Fail typed: without the evaluation tool the run provisions no profiler agent."""
-        del request, member_id, required_fields
-        return CandidateProfile(
-            revision=revision,
-            status=CandidateProfileStatus.FAILED,
-            failure="no profiler agent is provisioned",
-        )
-
-    async def reopen_jobs(self, member_id: str) -> None:
-        """Reconcile a completed release and open a fresh generation for resumed work."""
-        self._released.discard(member_id)
-
-    async def jobs_released(self, member_id: str) -> bool:
-        """Project whether the member's durable scope refuses ordinary admission.
-
-        Closing and completed releases both fence new work. Recovery can
-        reconcile cleanup before opening a fresh scope generation.
-        """
-        return member_id in self._released
-
-    async def release_jobs(self, member_id: str) -> ReleasedJobs:
-        """Release nothing: without the evaluation tool, agents start no cluster jobs.
-
-        Its profiles already fail without starting, so only the first-release
-        record is kept.
-        """
-        first_release = member_id not in self._released
-        self._released.add(member_id)
-        return ReleasedJobs(
-            member_id=member_id,
-            evaluations=(),
-            profiler_operations=(),
-            first_release=first_release,
         )
 
     def _finish_accuracy(self, result: TrustedAccuracyResult) -> None:

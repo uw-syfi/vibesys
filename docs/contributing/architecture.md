@@ -96,7 +96,7 @@ package. The `vibesys` wheel still bundles every library's source, so each
 member dependency must also appear in the root `dependencies` with the same
 version constraint.
 
-The internal custom-policy execution contract and example are in
+The strategy and plugin contract is in
 [orchestration-runtime.md](orchestration-runtime.md).
 
 [//]: # (tach-graph:start)

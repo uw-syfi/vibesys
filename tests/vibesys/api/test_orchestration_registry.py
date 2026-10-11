@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
+from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.task_project import write_task
 
-from launch import LaunchSettings, built_in_orchestrations, create_session, open_run_store
+from launch import LaunchSettings, built_in_orchestrations, create_session
 from vibesys.api import (
     ComputeBackend,
     Config,
@@ -22,7 +23,7 @@ from vibesys.api import (
     RunView,
 )
 from vibesys.api.request import load_task
-from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData, RunStartedData
+from vibesys.events import CoreEvent, CoreEventType, RunStartedData
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.dynamic import PLUGIN as DYNAMIC_PLUGIN
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
@@ -45,14 +46,13 @@ from vibesys.orchestration.single import (
 from vibesys.plugin_catalog import OrchestrationRegistration
 from vibesys.run.contracts import RoundSummary
 from vibesys.run.core_services import CoreCompositionError
+from vs_agent.api import AgentCapabilities
+from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import (
     AgentRole,
-    OrchestrationPlugin,
     OrchestrationResumeDecision,
-    Run,
 )
-from vs_runtime.api import RunStatus as PluginRunStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,55 +62,28 @@ def _discard_event(event: CoreEvent) -> None:
     del event
 
 
+def _resumable_client(**_kwargs: object) -> FakeAgentClient:
+    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+
+
+_SETTINGS = LaunchSettings(
+    backend_factory=host_container_backend, agent_client_factory=_resumable_client
+)
+
+
 class _TeamOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     workers: int = Field(gt=0)
 
 
-_team_calls: list[str] = []
-
-
-async def _run_team(host: Run, options: BaseModel) -> PluginRunStatus:
-    _TeamOptions.model_validate(options)
-    _team_calls.append(host.run_id)
-    return PluginRunStatus.SUCCEEDED
-
-
-_TEAM_PLUGIN = OrchestrationPlugin(
-    id="team-search", agents=(), options=_TeamOptions, orchestrate=_run_team, config_version=2
-)
+_TEAM_PLUGIN = failing_plugin("team-search", options=_TeamOptions, config_version=2)
 
 
 class _PluginOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     max_rounds: int = Field(gt=0)
-
-
-class _PluginState(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    completed_rounds: int
-
-
-async def _run_plugin(host: Run, options: BaseModel) -> PluginRunStatus:
-    parsed = _PluginOptions.model_validate(options)
-    for completed_rounds in range(1, parsed.max_rounds + 1):
-        await host.state.commit(_PluginState(completed_rounds=completed_rounds))
-    return PluginRunStatus.SUCCEEDED
-
-
-def _project_plugin(state: BaseModel) -> PluginProjection:
-    parsed = _PluginState.model_validate(state)
-    return PluginProjection(
-        payload={"completed_rounds": parsed.completed_rounds},
-        rounds=tuple(
-            RoundSummary(number=number, status="completed", attempts=1, judge_verdict="pass")
-            for number in range(1, parsed.completed_rounds + 1)
-        ),
-        experiment_revision=parsed.completed_rounds,
-    )
 
 
 def _accept_resume(
@@ -123,17 +96,14 @@ def _project_max_rounds(options: BaseModel) -> int:
     return _PluginOptions.model_validate(options).max_rounds
 
 
-_SETUP_PLUGIN = OrchestrationPlugin(
-    id="setup-plugin",
+_SETUP_PLUGIN = failing_plugin(
+    "setup-plugin",
     agents=(AgentRole(id="worker", system_prompt="Complete the assigned work."),),
     options=_PluginOptions,
-    orchestrate=_run_plugin,
-    state=_PluginState,
-    memory_paths=(".vibesys-memory/progress.md",),
+    artifact_directories=(".vibesys-memory",),
 )
 _SETUP_REGISTRATION = OrchestrationRegistration(
     plugin=_SETUP_PLUGIN,
-    project=_project_plugin,
     resume_policy=_accept_resume,
     project_max_rounds=_project_max_rounds,
 )
@@ -179,15 +149,9 @@ def test_registry_rejects_duplicate_and_missing_ids() -> None:
 def test_registry_rejects_ids_outside_descriptor_envelope(invalid_id: str) -> None:
     registry = OrchestrationRegistry()
     with pytest.raises(ValueError, match="invalid orchestration plugin ID"):
-        registry.register_plugin(
-            OrchestrationPlugin(
-                id=invalid_id, agents=(), options=_TeamOptions, orchestrate=_run_team
-            )
-        )
+        registry.register_plugin(failing_plugin(invalid_id, options=_TeamOptions))
 
-    versioned = OrchestrationPlugin(
-        id="team.v2", agents=(), options=_TeamOptions, orchestrate=_run_team
-    )
+    versioned = failing_plugin("team.v2", options=_TeamOptions)
     registry.register_plugin(versioned)
     assert registry.resolve("team.v2").plugin is versioned
 
@@ -263,7 +227,7 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
         assert options.max_rounds == descriptor.options["max_rounds"]
         assert registration.project_max_rounds is not None
         assert registration.project_max_rounds(options) == 4
-        assert registration.plugin.memory_paths == paths
+        assert registration.plugin.core.artifact_directories == paths
         assert registration.resume_policy is None
 
     plain = OrchestrationDescriptor(
@@ -283,7 +247,7 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
     assert plain_options.max_rounds == plain.options["max_rounds"]
     assert registration.project_max_rounds is not None
     assert registration.project_max_rounds(plain_options) == 5
-    assert registration.plugin.memory_paths == ()
+    assert registration.plugin.core.artifact_directories == ()
     # A core run's limits are fixed in its committed state, so it resumes with exact options.
     assert registration.resume_policy is None
 
@@ -406,7 +370,6 @@ def test_evolve_plugin_resumes_with_its_exact_options() -> None:
 
 def test_session_executes_registered_policy_with_canonical_request(tmp_path: Path) -> None:
     request = _custom_request(tmp_path)
-    _team_calls.clear()
     registry = OrchestrationRegistry()
     registry.register_plugin(_TEAM_PLUGIN)
     events: list[CoreEvent] = []
@@ -418,111 +381,22 @@ def test_session_executes_registered_policy_with_canonical_request(tmp_path: Pat
         request,
         sink=record,
         registry=registry,
-        settings=LaunchSettings(backend_factory=host_container_backend),
+        settings=_SETTINGS,
     )
 
     session.start()
     result = asyncio.run(session.await_result())
     view = session.view()
 
-    assert _team_calls == [result.run_id]
     assert result.run_id.endswith("-custom-run")
     assert result.loop == "team-search"
-    assert result.succeeded
-    assert view.status is RunStatus.COMPLETED
+    assert not result.succeeded
+    assert view.status is RunStatus.FAILED
     assert view.projection is None
     started = next(event for event in events if event.type is CoreEventType.RUN_STARTED)
     assert isinstance(started.data, RunStartedData)
     assert started.data.outer_loop == "team-search"
     assert Project.open(request.project_root).state.load_run(result.run_id).schema_version == 5
-
-
-class _Evidence(BaseModel):
-    revision: int
-
-
-async def _run_evidence(host: Run, options: BaseModel) -> PluginRunStatus:
-    _TeamOptions.model_validate(options)
-    await host.state.commit(_Evidence(revision=4))
-    return PluginRunStatus.SUCCEEDED
-
-
-def _project_evidence(state: BaseModel) -> PluginProjection:
-    evidence = _Evidence.model_validate(state)
-    return PluginProjection(payload={"revision": evidence.revision})
-
-
-_EVIDENCE_PLUGIN = OrchestrationPlugin(
-    id="team-search",
-    agents=(),
-    options=_TeamOptions,
-    orchestrate=_run_evidence,
-    state=_Evidence,
-    config_version=2,
-)
-_EVIDENCE_REGISTRATION = OrchestrationRegistration(
-    plugin=_EVIDENCE_PLUGIN,
-    project=_project_evidence,
-)
-
-
-def test_projector_uses_same_committed_state_for_live_and_stored_views(tmp_path: Path) -> None:
-    request = _custom_request(tmp_path)
-    registry = OrchestrationRegistry()
-    registry.register(_EVIDENCE_REGISTRATION)
-    session = create_session(
-        request,
-        sink=_discard_event,
-        registry=registry,
-        settings=LaunchSettings(backend_factory=host_container_backend),
-    )
-    committed: list[RunView] = []
-    session.on_committed_view(lambda view, _keys: committed.append(view))
-
-    result = asyncio.run(session.await_result())
-    stored = open_run_store(Project.open(request.project_root), registry=registry).get_run(
-        result.run_id
-    )
-
-    assert len(committed) == 1
-    assert committed[0].projection == {"revision": 4}
-    assert session.view().projection == stored.projection == {"revision": 4}
-    assert stored.status is RunStatus.UNKNOWN
-
-
-def test_projector_rejects_non_product_projection() -> None:
-    class WrongProjection(BaseModel):
-        payload: dict[str, int]
-
-    class DerivedProjection(PluginProjection):
-        pass
-
-    invalid_results: tuple[BaseModel, ...] = (
-        WrongProjection(payload={"revision": 4}),
-        DerivedProjection(payload={"revision": 4}),
-    )
-    for index, invalid in enumerate(invalid_results):
-
-        def project_invalid(_state: BaseModel, *, result: BaseModel = invalid) -> PluginProjection:
-            return cast("PluginProjection", result)
-
-        plugin = OrchestrationPlugin(
-            id=f"wrong-projection-{index}",
-            agents=(),
-            options=_TeamOptions,
-            orchestrate=_run_team,
-            state=_Evidence,
-        )
-        registry = OrchestrationRegistry()
-        registry.register(OrchestrationRegistration(plugin=plugin, project=project_invalid))
-        projector = registry.resolve(plugin.id).projector
-        assert projector is not None
-
-        with pytest.raises(
-            TypeError,
-            match=(f"must return exactly PluginProjection, got {type(invalid).__name__}"),
-        ):
-            projector.project_committed(plugin.id, _Evidence(revision=4), run_id="run-1")
 
 
 def test_product_projection_contract_is_strict_and_immutable() -> None:
@@ -569,7 +443,7 @@ def test_constructor_rejects_invalid_descriptor_before_run_resources(tmp_path: P
             request,
             sink=_discard_event,
             registry=registry,
-            settings=LaunchSettings(backend_factory=host_container_backend),
+            settings=_SETTINGS,
         )
     assert _authored_tree(request.project_root) == authored
 
@@ -587,75 +461,26 @@ def test_public_session_applies_registered_plugin_metadata(tmp_path: Path) -> No
     registry = OrchestrationRegistry()
     registry.register(_SETUP_REGISTRATION)
     events: list[CoreEvent] = []
-    committed: list[RunView] = []
 
     def record(event: CoreEvent) -> None:
         events.append(event)
 
-    session = create_session(
-        request,
-        sink=record,
-        registry=registry,
-        settings=LaunchSettings(backend_factory=host_container_backend),
-    )
-    session.on_committed_view(lambda view, _keys: committed.append(view))
+    session = create_session(request, sink=record, registry=registry, settings=_SETTINGS)
     session.start()
 
-    result = asyncio.run(session.await_result())
+    asyncio.run(session.await_result())
 
-    assert result.succeeded
     started = next(event for event in events if event.type is CoreEventType.RUN_STARTED)
     assert isinstance(started.data, RunStartedData)
     assert started.data.max_rounds == 3
     assert started.data.expected_roles == ("worker",)
-    finished_rounds = [event for event in events if event.type is CoreEventType.ROUND_FINISHED]
-    assert [event.round_label for event in finished_rounds] == ["round-1", "round-2", "round-3"]
-    experiment_changes = [
-        event.data
-        for event in events
-        if event.type is CoreEventType.EXPERIMENTS_CHANGED
-        and isinstance(event.data, ExperimentsChangedData)
-        and event.data.reason != "project_attached"
-    ]
-    assert experiment_changes == [
-        ExperimentsChangedData(reason="round_persisted", revision=2),
-        ExperimentsChangedData(reason="round_persisted", revision=3),
-    ]
-    stored = (
-        Project.open(request.project_root)
-        .state.portable_namespace(result.run_id, _SETUP_PLUGIN.id)
-        .slot("state.json", _PluginState)
-        .load_optional()
-    )
-    assert stored == _PluginState(completed_rounds=3)
-    assert [view.experiment_revision for view in committed] == [1, 2, 3]
-    assert committed[-1] == RunView(
-        run_id=result.run_id,
-        loop=_SETUP_PLUGIN.id,
-        status=RunStatus.ACTIVE,
-        projection={"completed_rounds": 3},
-        rounds=tuple(
-            {
-                "number": number,
-                "status": "completed",
-                "attempts": 1,
-                "judge_verdict": "pass",
-            }
-            for number in range(1, 4)
-        ),
-        experiment_revision=3,
-    )
-    historical = open_run_store(Project.open(request.project_root), registry=registry).get_run(
-        result.run_id
-    )
-    assert historical.model_copy(update={"status": RunStatus.ACTIVE}) == committed[-1]
     registration = registry.resolve(_SETUP_PLUGIN.id)
     parsed = registration.parse_options(request.orchestration)
     assert registration.resume_policy is _accept_resume
     assert registration.project_max_rounds is not None
     assert registration.project_max_rounds(parsed) == 3
     assert tuple(role.id for role in registration.plugin.agents) == ("worker",)
-    assert registration.plugin.memory_paths == (".vibesys-memory/progress.md",)
+    assert registration.plugin.core.artifact_directories == (".vibesys-memory",)
 
 
 def test_registered_plugin_rejects_invalid_options_before_run_resources(tmp_path: Path) -> None:
@@ -677,7 +502,7 @@ def test_registered_plugin_rejects_invalid_options_before_run_resources(tmp_path
             request,
             sink=_discard_event,
             registry=registry,
-            settings=LaunchSettings(backend_factory=host_container_backend),
+            settings=_SETTINGS,
         )
 
     assert _authored_tree(request.project_root) == authored
@@ -692,33 +517,6 @@ def test_registered_plugin_derives_roles_from_declaration() -> None:
     assert tuple(role.id for role in registration.plugin.agents) == ("worker",)
 
 
-def test_plugin_registration_derives_projection_only_when_declared() -> None:
-    state_only = OrchestrationPlugin(
-        id="state-only",
-        agents=(),
-        options=_PluginOptions,
-        orchestrate=_run_plugin,
-        state=_PluginState,
-    )
-    stateless = OrchestrationPlugin(
-        id="stateless",
-        agents=(),
-        options=_PluginOptions,
-        orchestrate=_run_plugin,
-    )
-    registry = OrchestrationRegistry()
-
-    registry.register_plugin(state_only)
-    registry.register_plugin(stateless)
-
-    state_registration = registry.resolve(state_only.id)
-    assert state_registration.projector is None
-    assert state_registration.plugin.state is _PluginState
-    stateless_registration = registry.resolve(stateless.id)
-    assert stateless_registration.projector is None
-    assert stateless_registration.plugin.state is None
-
-
 class _OwnProjector:
     """A projector that reads durable state this registration does not declare."""
 
@@ -731,40 +529,10 @@ class _OwnProjector:
         return None
 
 
-def test_stateless_plugin_registers_its_own_projector() -> None:
-    plugin = OrchestrationPlugin(
-        id="own-projector",
-        agents=(),
-        options=_PluginOptions,
-        orchestrate=_run_plugin,
-    )
+def test_plugin_registers_its_own_projector() -> None:
+    plugin = failing_plugin("own-projector", options=_PluginOptions)
     projector = _OwnProjector()
 
     registration = OrchestrationRegistration(plugin=plugin, projector=projector)
 
     assert registration.projector is projector
-
-
-def test_registration_rejects_a_projection_and_a_projector_together() -> None:
-    plugin = OrchestrationPlugin(
-        id="two-sources",
-        agents=(),
-        options=_PluginOptions,
-        state=_PluginState,
-        orchestrate=_run_plugin,
-    )
-
-    with pytest.raises(ValueError, match="not both"):
-        OrchestrationRegistration(plugin=plugin, project=_project_plugin, projector=_OwnProjector())
-
-
-def test_registration_rejects_projection_without_declared_state() -> None:
-    plugin = OrchestrationPlugin(
-        id="stateless-projector",
-        agents=(),
-        options=_PluginOptions,
-        orchestrate=_run_plugin,
-    )
-
-    with pytest.raises(ValueError, match="projection requires a declared state model"):
-        OrchestrationRegistration(plugin=plugin, project=_project_plugin)

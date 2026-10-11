@@ -6,28 +6,21 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.docker_environment import (
-    fake_docker_environment,
-    host_container_backend,
-)
+from tests.support.core_host_world import open_core_host
+from tests.support.docker_environment import fake_docker_environment
 from tests.support.task_project import write_task
-from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
-from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import WorkspaceRestoreError
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-_PLUGIN = capability_plugin("workspace")
 
 
 def _write_project(root: Path) -> None:
@@ -63,14 +56,9 @@ def test_root_workspace_revision_restore_and_retention_contract(tmp_path: Path) 
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(
-            _request(project_root),
-            integration,
-            plugin=_PLUGIN,
-            backend_factory=host_container_backend,
-        ) as ctx:
-            assert ctx.facts.objective == "Improve the queue."
-            workspace = ctx.workspaces.root
+        async with open_core_host(_request(project_root), integration) as host:
+            assert host.services.state.run.facts.objective == "Improve the queue."
+            workspace = host.workspaces.root
             baseline = workspace.trusted_input_baseline
             assert baseline is not None
             assert workspace.revision is not None

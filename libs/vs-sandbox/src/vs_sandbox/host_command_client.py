@@ -1,19 +1,12 @@
-"""Run one command on Slurm GPUs, or one trusted gate, through the run's host broker.
+"""Run one command on Slurm GPUs through the run's host broker.
 
 Usage::
 
     vibesys-gpu [--gpus N] [--time MINUTES] -- COMMAND...
-    vibesys-gpu --gate accuracy|benchmark
 
 The agent's sandbox cannot reach the Slurm controller, so the request goes to
 the run's host-owned broker over a Unix socket (:data:`SOCKET_ENV`) with a
-per-run token (:data:`TOKEN_ENV`). The first form runs COMMAND confined in a
-new job. The second runs the framework's planned accuracy or benchmark gate;
-the agent gives a gate no arguments. The broker supplies the benchmark's result
-path itself, relays the result file back to this side of the socket under
-``/tmp``, and names that path in the gate's output. (The framework's own
-evaluation passes the result argument and path explicitly, which the broker
-validates.)
+per-run token (:data:`TOKEN_ENV`). The broker runs COMMAND confined in a new job.
 
 Output streams as the job produces it, and the exit status is the command's.
 Interrupting the client cancels the job, whether it is queued or running.
@@ -27,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import binascii
 import contextlib
 import json
 import os
@@ -52,7 +44,6 @@ TOKEN_ENV = "VIBESYS_COMMAND_BROKER_TOKEN"  # noqa: S105  # lint-waiver: LW-6100
 _USAGE_ERROR = 2
 _RECV_BYTES = 65_536
 _MAX_FRAME_BYTES = 16 * 1024 * 1024
-_GATE_KINDS = ("accuracy", "benchmark")
 _STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 _CONNECTION_CLOSED = "the command broker closed the connection"
 
@@ -160,30 +151,6 @@ class Stop:
         return None if self.signum is None else 128 + self.signum
 
 
-class MalformedFileError(ValueError):
-    """The broker relayed a result file this client cannot decode."""
-
-    def __init__(self) -> None:
-        """Describe the malformed file."""
-        super().__init__("the command broker sent a malformed file")
-
-
-def _deliver_file(frame: dict[str, object]) -> None:
-    """Write the result file the broker relays, atomically, at the path it names."""
-    path = frame.get("path")
-    data = frame.get("data")
-    if not isinstance(path, str) or not isinstance(data, str):
-        raise MalformedFileError
-    try:
-        content = base64.b64decode(data, validate=True)
-    except binascii.Error as error:
-        raise MalformedFileError from error
-    target = Path(path)
-    pending = target.with_name(f".{target.name}.{os.getpid()}.part")
-    pending.write_bytes(content)
-    pending.replace(target)
-
-
 def _relay(wire: Wire, call: dict[str, object]) -> int | None:
     """Send *call* and relay what comes back; the exit status, or ``None`` if the broker hung up."""
     # The broker may drop the connection before it reads the request: a send
@@ -196,8 +163,6 @@ def _relay(wire: Wire, call: dict[str, object]) -> int | None:
         frame = json.loads(line)
         if "output" in frame:
             _write(base64.b64decode(frame["output"]))
-        elif "file" in frame:
-            _deliver_file(frame["file"])
         elif "exit" in frame:
             return int(frame["exit"])
         elif "error" in frame:
@@ -207,7 +172,7 @@ def _relay(wire: Wire, call: dict[str, object]) -> int | None:
 
 
 def _request(call: dict[str, object], *, stop: Stop, dial: Callable[[str], Wire]) -> int:
-    """Send *call* to the run's broker and relay its output, files, and exit status."""
+    """Send *call* to the run's broker and relay its output and exit status."""
     call = {"token": os.environ[TOKEN_ENV], "cwd": str(Path.cwd()), **call}
     wire = dial(os.environ[SOCKET_ENV])
     try:
@@ -257,23 +222,8 @@ def run_brokered(
     )
 
 
-def run_gate(
-    kind: str,
-    arguments: Sequence[str],
-    *,
-    stop: Stop | None = None,
-    dial: Callable[[str], Wire] = _SocketWire,
-) -> int:
-    """Run the planned *kind* gate through the broker; return its exit status."""
-    return _request(
-        {"op": "gate", "kind": kind, "arguments": list(arguments)},
-        stop=stop or Stop(),
-        dial=dial,
-    )
-
-
 def main(argv: Sequence[str] | None = None) -> int:
-    """Parse the command line and run the command or gate through the broker."""
+    """Parse the command line and run the command through the broker."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     stop = Stop()
     previous = {signum: signal.signal(signum, stop.handle) for signum in _STOP_SIGNALS}
@@ -285,7 +235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def execute(arguments: list[str], *, stop: Stop, dial: Callable[[str], Wire] = _SocketWire) -> int:
-    """Run the command or gate *arguments* describe; the status :func:`main` exits with.
+    """Run the command *arguments* describe; the status :func:`main` exits with.
 
     Everything :func:`main` does except route the process's signals to *stop*.
     """
@@ -293,20 +243,10 @@ def execute(arguments: list[str], *, stop: Stop, dial: Callable[[str], Wire] = _
         _error(f"{SOCKET_ENV} is not set; no command broker is available")
         return _USAGE_ERROR
     try:
-        if arguments[:1] == ["--gate"]:
-            return _gate(arguments[1:], stop, dial)
         return _gpu(arguments, stop, dial)
     except (ValueError, OSError) as error:
         _error(str(error))
         return _USAGE_ERROR
-
-
-def _gate(arguments: list[str], stop: Stop, dial: Callable[[str], Wire]) -> int:
-    kind, rest = (arguments[0], arguments[1:]) if arguments else ("", [])
-    if kind not in _GATE_KINDS:
-        _error(f"--gate takes one of: {', '.join(_GATE_KINDS)}")
-        return _USAGE_ERROR
-    return run_gate(kind, rest[1:] if rest[:1] == ["--"] else rest, stop=stop, dial=dial)
 
 
 def _gpu(arguments: list[str], stop: Stop, dial: Callable[[str], Wire]) -> int:

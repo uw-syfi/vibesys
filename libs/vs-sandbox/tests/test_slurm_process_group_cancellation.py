@@ -1,4 +1,4 @@
-"""Slurm runners stop every local process that can retain their merged output pipe."""
+"""The agent GPU launcher stops every local process that can retain their merged output pipe."""
 
 from __future__ import annotations
 
@@ -11,10 +11,8 @@ from hypothesis import strategies as st
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
     AgentGpuLauncher,
-    GateKind,
     GpuCommand,
     GpuJobRequest,
-    SlurmCommandGateRunner,
 )
 from vs_sim.api import ProbeResult
 from vs_sim.api.testing import FakeMergedOutputProcessLauncher, SimThreads
@@ -175,48 +173,3 @@ def test_agent_gpu_does_not_signal_a_group_that_settles_during_scancel() -> None
 
     assert status == 0
     assert trace == ["scancel"]
-
-
-def test_gate_cancellation_kills_descendants_only_after_the_wrapper_scancels() -> None:
-    """The gate wrapper handles SIGTERM first; its pipe-holding descendant cannot hang run()."""
-    threads = SimThreads()
-    cancel = threads.event()
-    trace: list[str] = []
-    process = _DescendantHeldProcess(
-        threads,
-        term_survivors=1,
-        trace=trace,
-        on_term=lambda: trace.append("wrapper scancel"),
-    )
-    processes = FakeMergedOutputProcessLauncher(
-        lambda _argv, _cwd, _env: process,
-    )
-    runner = SlurmCommandGateRunner(
-        Path("plan.json"),
-        env={"CLUSTER": "test"},
-        wrapper=("gate-wrapper",),
-        processes=processes,
-        threads=threads,
-    )
-    output = bytearray()
-
-    status = threads.run(
-        lambda: runner.run(
-            GateKind.ACCURACY,
-            ("--case", "one"),
-            cwd=Path("workspace"),
-            write=lambda chunk: _cancel_on_ready(cancel, output, chunk),
-            cancel=cancel,
-        )
-    )
-
-    assert trace == ["SIGTERM", "wrapper scancel", "SIGKILL"]
-    assert status == 143
-    assert output == b"wrapper ready\n"
-    assert processes.started == [
-        (
-            ("gate-wrapper", "--plan", "plan.json", "accuracy", "--case", "one"),
-            Path("workspace"),
-            {"CLUSTER": "test"},
-        )
-    ]

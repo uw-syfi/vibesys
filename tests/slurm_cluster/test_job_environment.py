@@ -55,10 +55,8 @@ def test_the_host_secret_exists_in_the_test_process(gpu_run: OpenRun) -> None:
     assert gpu_run.workspace.exists()
 
 
-def test_a_gate_job_sees_none_of_the_hosts_environment(run: OpenRun) -> None:
-    run.set_mode("accuracy", "env")
-
-    result = run.gate("accuracy")
+def test_a_gpu_job_sees_none_of_the_hosts_environment(gpu_run: OpenRun) -> None:
+    result = gpu_run.agent('"$VIBESYS_GPU" -- env')
 
     assert result.exit_code == 0, result.output
     job = parse_env(result.output)
@@ -66,9 +64,7 @@ def test_a_gate_job_sees_none_of_the_hosts_environment(run: OpenRun) -> None:
     assert HOST_CANARY_VALUE not in result.output
 
 
-@pytest.mark.parametrize("kind", ["slurm-local", "slurm-local-gpu"])
-def test_a_host_that_is_itself_inside_a_slurm_allocation_still_runs_gates_as_new_jobs(
-    kind: str,
+def test_a_host_that_is_itself_inside_a_slurm_allocation_still_runs_jobs_as_new_jobs(
     slurm_cluster: SlurmCluster,
     workdir: Path,
     agent_image_id: str,
@@ -78,9 +74,9 @@ def test_a_host_that_is_itself_inside_a_slurm_allocation_still_runs_gates_as_new
     monkeypatch.setenv("SLURM_JOB_ID", "424242")
     monkeypatch.setenv("SLURM_JOBID", "424242")
     monkeypatch.setenv("SLURM_STEP_ID", "0")
-    with open_run(kind, slurm_cluster, workdir, agent_image_id) as run:
-        result = run.gate("accuracy")
+    with open_run("slurm-local-gpu", slurm_cluster, workdir, agent_image_id) as run:
+        result = run.agent('"$VIBESYS_GPU" -- echo job-ran')
 
         assert result.exit_code == 0, result.output
-        assert "accuracy ok" in result.output
+        assert "job-ran" in result.output
         assert slurm_cluster.queue() == []

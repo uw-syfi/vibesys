@@ -12,7 +12,7 @@ from tests.support.container_credentials import set_container_cli_credentials
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
 from tests.support.task_project import write_task
-from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
+from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from vibesys.api._session import run_plugin
 from vibesys.config import Config
@@ -22,7 +22,7 @@ from vibesys.orchestration.profilers import ProfilerKind, ProfilerPreflightResul
 from vibesys.plugin_registration import OrchestrationRegistration
 from vibesys.run.contracts import RunRequest
 from vibesys.run.core_services import CoreCompositionError
-from vibesys.run.evaluation_backend import semantic_evaluation_identity
+from vibesys.run.evaluation_identity import semantic_evaluation_identity
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import AgentCapabilities
@@ -315,12 +315,9 @@ def test_registration_rejects_a_duplicate_operation_role(tmp_path: Path) -> None
         OrchestrationRegistration(plugin)
 
 
-def test_a_plugin_needs_exactly_one_of_orchestrate_and_core(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="exactly one of orchestrate and core"):
-        OrchestrationPlugin(id="neither", agents=(), options=EmptyOptions)
-    legacy = capability_plugin("legacy")
-    with pytest.raises(ValueError, match="exactly one of orchestrate and core"):
-        replace(legacy, core=_policy(tmp_path))
+def test_a_plugin_without_a_core_policy_is_refused() -> None:
+    with pytest.raises(TypeError, match="core"):
+        OrchestrationPlugin(id="neither", agents=(), options=EmptyOptions)  # type: ignore[call-arg]
 
 
 def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> None:

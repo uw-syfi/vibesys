@@ -48,7 +48,7 @@ from vs_faults.api import (
     injected_faults,
 )
 from vs_project.api import Project
-from vs_runtime.api import RunCleanupError, UnresolvedDispatchError
+from vs_runtime.api import RunCleanupError, RuntimeContractError
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import VirtualTimeLimitError
 
@@ -99,6 +99,10 @@ class Injected:
     cluster: frozenset[ClusterFault] = frozenset()
     #: The user's stop reached the run during it (not merely scheduled).
     stop_delivered: bool = False
+
+
+class UnresolvedDispatchError(RuntimeContractError):
+    """Stands in for a typed transport failure whose provider dispatch is unresolved."""
 
 
 #: Each way a run may raise instead of reporting, with the faults that can cause it. The

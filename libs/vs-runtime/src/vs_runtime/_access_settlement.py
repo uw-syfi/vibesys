@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from vs_core.api import Scope, WorkspaceRef
-from vs_runtime._agent_sessions import await_session_operation
+from vs_runtime._session_operation import await_session_operation
 from vs_runtime._workspace_access import AccessGrant, enforce_workspace_access
 from vs_runtime.contracts import RuntimeContractError
 

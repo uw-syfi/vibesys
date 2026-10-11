@@ -7,8 +7,8 @@ import os
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
+from tests.support.core_plugins import capability_plugin
 
 from launch import open_run_store
 from vibesys.api import OrchestrationRegistry
@@ -20,8 +20,6 @@ from vs_project.api import (
     RunEnvironmentRecord,
 )
 from vs_project.api.testing import run_execution_record
-from vs_runtime.api import OrchestrationPlugin, Run
-from vs_runtime.api import RunStatus as PluginRunStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -149,81 +147,6 @@ def test_unknown_v5_run_has_generic_history_view(tmp_path: Path) -> None:
     )
     assert open_run_store(project).get_record(manifest.run_id).history_documents() == ()
 
-    class EvidenceOptions(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-
-        workers: int
-
-    class EvidenceState(BaseModel):
-        revision: int = 0
-
-    async def run_evidence(host: Run, options: BaseModel) -> PluginRunStatus:
-        del host, options
-        return PluginRunStatus.SUCCEEDED
-
-    registry = OrchestrationRegistry()
-    registry.register_plugin(
-        OrchestrationPlugin(
-            id="team-search",
-            agents=(),
-            options=EvidenceOptions,
-            orchestrate=run_evidence,
-            state=EvidenceState,
-            config_version=2,
-        )
-    )
-    documents = (
-        open_run_store(project, registry=registry).get_record(manifest.run_id).history_documents()
-    )
-    assert [document.relative_path.name for document in documents] == ["notes.txt"]
-
-
-def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
-    project = Project.open(tmp_path)
-    project.state.create_project("profile project")
-    manifest = project.state.new_run_manifest(
-        "profile run",
-        run_id="profile-run",
-        branch="vibesys-runs/profile-run",
-        vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="docker"),
-        execution=run_execution_record(),
-        orchestration=OrchestrationDescriptor(id="team-search", config_version=1, options={}),
-        trusted_input_baseline="0" * 40,
-    )
-    project.state.create_run(manifest)
-    project.state.portable_namespace(manifest.run_id, "team-search").write_bytes(
-        "agent.json", b"{}"
-    )
-    project.state.portable_namespace(manifest.run_id, "plain").write_bytes("plain.json", b"{}")
-
-    class SearchOptions(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-
-    class SearchState(BaseModel):
-        revision: int = 0
-
-    async def run_search(host: Run, options: BaseModel) -> PluginRunStatus:
-        del host, options
-        return PluginRunStatus.SUCCEEDED
-
-    registry = OrchestrationRegistry()
-    registry.register_plugin(
-        OrchestrationPlugin(
-            id="team-search",
-            agents=(),
-            options=SearchOptions,
-            orchestrate=run_search,
-            state=SearchState,
-        )
-    )
-
-    documents = (
-        open_run_store(project, registry=registry).get_record(manifest.run_id).history_documents()
-    )
-
-    assert [document.relative_path.name for document in documents] == ["agent.json"]
-
 
 def test_workspace_changes_hide_the_registered_plugins_memory(tmp_path: Path) -> None:
     root = tmp_path / "project"
@@ -255,22 +178,9 @@ def test_workspace_changes_hide_the_registered_plugins_memory(tmp_path: Path) ->
     _git(root, "commit", "-q", "-m", "candidate")
     head = _git(root, "rev-parse", "HEAD")
 
-    class MemoryOptions(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-
-    async def run_memory(host: Run, options: BaseModel) -> PluginRunStatus:
-        del host, options
-        return PluginRunStatus.SUCCEEDED
-
     registry = OrchestrationRegistry()
     registry.register_plugin(
-        OrchestrationPlugin(
-            id="memory-policy",
-            agents=(),
-            options=MemoryOptions,
-            orchestrate=run_memory,
-            memory_paths=("private-memory",),
-        )
+        capability_plugin("memory-policy", artifact_directories=("private-memory",))
     )
 
     changes = (

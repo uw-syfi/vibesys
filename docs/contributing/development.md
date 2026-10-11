@@ -169,7 +169,7 @@ slurmdbd (so `sacct` works), sshd and a login node in a `head` container, and on
 slurmd with four fake GPUs (GRES backed by character devices, no real hardware)
 in a `node` container. No LLM agents run. The agent is a real Docker container
 that VibeSys creates exactly as in production, and the tests drive it with
-scripted commands (`vibesys-gpu`, `vibesys-gate`) through the session's sandbox.
+scripted commands (`vibesys-gpu`) through the session's sandbox.
 
 The test's run directory is mounted into both cluster containers at the same
 absolute path and stands in for the shared filesystem. `slurm` reaches the head
@@ -181,14 +181,13 @@ exactly the caller's environment, so the host installs nothing.
 
 | Kind | Configuration | Tests |
 |---|---|---|
-| `slurm` | SSH transport | gates, cancellation, session close, paths, job environment |
-| `slurm-local` | local transport, no agent GPU commands | the same |
-| `slurm-local-gpu` | local transport plus `[vibesys.agent_gpu]` | the same, plus GPU scheduling, confinement and `vibesys-gpu` |
-| `slurm-gpu-alias` | the deprecated `--run-environment slurm-gpu` file | smoke: its deprecation notice, gates and one GPU command |
+| `slurm` | SSH transport | opening and closing, the agent surface, sockets |
+| `slurm-local` | local transport, no agent GPU commands | the same, and that the container reaches no broker |
+| `slurm-local-gpu` | local transport plus `[vibesys.agent_gpu]` | the same, plus GPU scheduling, cancellation, paths, job environment, confinement and `vibesys-gpu` |
+| `slurm-gpu-alias` | the deprecated `--run-environment slurm-gpu` file | smoke: its deprecation notice and one GPU command |
 
-Each kind is opened as an older loop would (the agent has the gates, and the framework's
-own evaluation runs through them) and, in `test_agent_surface.py`, as the dynamic loop
-would (the agent has the evaluation tool, so no gate).
+Each kind is opened as a run would open it: the agents have the evaluation tool, so no gate,
+and `test_agent_surface.py` checks that no evaluation command reaches the container.
 
 The tier is marked `slurm_cluster` and skipped unless `VIBESYS_SLURM_CLUSTER=1`
 and Docker are available. CI runs it as the `real-tiers-slurm` job when the `real_tiers` change filter selects it, on every merge-queue entry, and nightly. The script sets the variable,
@@ -219,7 +218,7 @@ In each container it checks that:
   MCP `initialize` and lists its tools, started from the descriptor the run builds;
 - the profiler MCP server of the base's default profiler answers `initialize` and
   lists its tools;
-- `vibesys-gate` and `vibesys-gpu` run a gate and a command through a real host
+- `vibesys-gpu` runs a command through a real host
   broker (its `srun` is a local program);
 - the `agent` user has a group of its own name and the host's uid and gid.
 

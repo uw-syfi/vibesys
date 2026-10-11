@@ -4,16 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from vs_evaluation.api import EvaluationAgentRole, evaluation_principal
-from vs_evaluation.api.tools import evaluation_mcp_descriptor
 from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor
-from vs_runtime.api import AgentCapability
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vibesys.api.wiring import AgentToolContext
-    from vs_runtime.api import AgentToolBindingContext
 
 
 def profiler_server(tool_context: object) -> ToolServerDescriptor | None:
@@ -32,64 +28,6 @@ def profiler_server(tool_context: object) -> ToolServerDescriptor | None:
         args=(f"{support_name}/server.py",),
         env=context.profiler_env,
     )
-
-
-def _profiler_tool(
-    context: object, _binding: AgentToolBindingContext
-) -> tuple[ToolServerDescriptor, ...]:
-    """Bind the selected profiler's analysis server to one agent session."""
-    server = profiler_server(cast("AgentToolContext", context))
-    return () if server is None else (server,)
-
-
-def _evaluation_tool(
-    context: object, binding: AgentToolBindingContext
-) -> tuple[ToolServerDescriptor, ...]:
-    """Issue one role and logical-member scoped evaluation capability."""
-    resolved = cast("AgentToolContext", context)
-    service = resolved.evaluation_service
-    backend = resolved.evaluation_backend
-    if service is None or backend is None:
-        message = "evaluation agent service is not installed"
-        raise RuntimeError(message)
-    role = _EVALUATION_ROLES.get(binding.role.id)
-    if role is None:
-        message = f"agent role {binding.role.id!r} has no evaluation capability profile"
-        raise RuntimeError(message)
-    backend.bind(binding)
-    scope_id = binding.workspace.id
-    grant = service.grant(
-        principal_id=evaluation_principal(role, binding.member_id, scope_id),
-        role=role,
-        scope_id=scope_id,
-        run_observer=role is EvaluationAgentRole.RUN_OBSERVER,
-        evaluation_suspension=(
-            AgentCapability.DURABLE_TURN_CONTINUATION in binding.role.required_capabilities
-        ),
-    )
-    return (evaluation_mcp_descriptor(grant, binding.agent_path(service.socket_path)),)
-
-
-AGENT_TOOL_BINDINGS: Mapping[
-    str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]
-] = {
-    "evaluation": _evaluation_tool,
-    "profiler": _profiler_tool,
-}
-"""Built-in agent tools bound by product composition, not orchestration policy."""
-
-
-_EVALUATION_ROLES: Mapping[str, EvaluationAgentRole] = {
-    "dynamic-implementer": EvaluationAgentRole.IMPLEMENTER,
-    "dynamic-judge": EvaluationAgentRole.JUDGE,
-    "dynamic-orchestrator": EvaluationAgentRole.RUN_OBSERVER,
-    "dynamic-profiler": EvaluationAgentRole.PROFILER,
-    "implementer": EvaluationAgentRole.IMPLEMENTER,
-    "judge": EvaluationAgentRole.JUDGE,
-    "orchestrator": EvaluationAgentRole.ORCHESTRATOR,
-    "portfolio_dispatch": EvaluationAgentRole.PORTFOLIO_DISPATCH,
-    "profiler": EvaluationAgentRole.PROFILER,
-}
 
 
 STATELESS_TOOL_SERVERS: Mapping[str, Callable[[object], ToolServerDescriptor | None]] = {

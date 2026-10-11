@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.slurm import (
     SlurmCapturePlan,
-    SlurmEvaluationPlan,
     read_slurm_capture_plan,
-    read_slurm_evaluation_plan,
     write_slurm_capture_plan,
-    write_slurm_evaluation_plan,
 )
 from vs_sim.api.testing import file_size_limit
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_capture_plan_interrupted_at_every_byte_remains_readable(tmp_path: Path) -> None:
@@ -29,18 +29,6 @@ def test_capture_plan_interrupted_at_every_byte_remains_readable(tmp_path: Path)
         with file_size_limit(interruption), pytest.raises(OSError, match="File too large"):
             write_slurm_capture_plan(path, new)
         assert read_slurm_capture_plan(path) == old
-        assert not list(path.parent.glob(".*.tmp"))
-
-
-def test_evaluation_plan_interrupted_at_every_byte_remains_readable(tmp_path: Path) -> None:
-    path = tmp_path / "evaluation.json"
-    old = SlurmEvaluationPlan(config_path=Path("config.toml"), accuracy_command=("true",))
-    new = old.model_copy(update={"benchmark_command": ("echo", "new command")})
-    for interruption in range(len(new.model_dump_json().encode()) + 1):
-        write_slurm_evaluation_plan(path, old)
-        with file_size_limit(interruption), pytest.raises(OSError, match="File too large"):
-            write_slurm_evaluation_plan(path, new)
-        assert read_slurm_evaluation_plan(path) == old
         assert not list(path.parent.glob(".*.tmp"))
 
 

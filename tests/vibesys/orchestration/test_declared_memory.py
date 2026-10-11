@@ -1,15 +1,9 @@
-"""Plugin-declared memory paths are preserved automatically by the run.
+"""Artifact directories declared by a plugin's core policy are preserved by the run.
 
-A strategy used to pass ``preserve_paths=self._memory_paths()`` on every
-``workspace.restore()`` call (rollback, isolation revert, final-candidate
-selection). It now declares its memory paths once on its plugin, and the
-run (``_Workspaces._with_declared_memory``) merges them into every
-``adopt``/``restore`` call automatically, whether or not the
-caller names them explicitly.
-
-Covers the two call paths agent strategies use: a bare ``workspace.restore()``
-(what a rollback -- and, after lane A's turns.py migrates, a role-isolation
-revert boils down to).
+A strategy declares the workspace paths its artifacts live in once, as the core policy's
+``artifact_directories``, and the run merges them into every ``adopt``/``restore`` call
+automatically, whether or not the caller names them explicitly. This covers a bare
+``workspace.restore()``, which is what a rollback boils down to.
 """
 
 from __future__ import annotations
@@ -19,10 +13,8 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.docker_environment import (
-    fake_docker_environment,
-    host_container_backend,
-)
+from tests.support.core_host_world import open_core_host
+from tests.support.docker_environment import fake_docker_environment
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import capability_plugin
 
@@ -34,7 +26,6 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import load_task
-from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 
 if TYPE_CHECKING:
@@ -43,7 +34,7 @@ if TYPE_CHECKING:
     import pytest
 
 
-_PLUGIN = capability_plugin("memory-preserving", memory_paths=("progress.md",))
+_PLUGIN = capability_plugin("memory-preserving", artifact_directories=("progress.md",))
 
 
 def _write_project(root: Path) -> None:
@@ -79,12 +70,7 @@ def _run_restore(request: RunRequest, code: str, memory: str) -> None:
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(
-            request,
-            integration,
-            plugin=_PLUGIN,
-            backend_factory=host_container_backend,
-        ) as run:
+        async with open_core_host(request, integration, plugin=_PLUGIN) as run:
             root = run.workspaces.root
             (root.path / "code.py").write_text("VALUE = 1\n")
             (root.path / "progress.md").write_text("round 1: baseline\n")

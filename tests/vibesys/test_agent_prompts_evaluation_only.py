@@ -1,10 +1,9 @@
-"""What the agent is told about trusted evaluation depends on its loop (#1649).
+"""What the agent is told about trusted evaluation (#1649).
 
-Every loop is on the core path (dynamic, single, multi, plain/issue queue and evolve) and gives
-its agents the evaluation tool, so their prompts describe evaluation only through that tool: no
-``vibesys-gate``, no ``--gate``, and ``vibesys-gpu`` only as ``-- COMMAND`` where the agent's own
-GPU commands are on. The shell gate remains only until the legacy runtime is deleted (roadmap
-#1952, phase 6), so the older loops' notes are unchanged.
+Every loop runs on the core path (dynamic, single, multi, plain/issue queue and evolve) and
+gives its agents the evaluation tool, so their prompts describe evaluation only through that
+tool: no ``vibesys-gate``, no ``--gate``, and ``vibesys-gpu`` only as ``-- COMMAND`` where the
+agent's own GPU commands are on.
 """
 
 from __future__ import annotations
@@ -24,15 +23,11 @@ from tests.vibesys.orchestration.dynamic.core_policy.test_environment_notes impo
 )
 from tests.vibesys.orchestration.dynamic.core_policy.test_prompt_templates import _CONTEXTS
 
-from vibesys.api import catalog
 from vibesys.orchestration.dynamic.strategy.api import PromptTemplate
 from vibesys.prompts import PROMPTS_DIR, render_template
-from vibesys.run.host import offers_evaluation_tool
 
 if TYPE_CHECKING:
     from hypothesis.strategies import DataObject
-
-    from vibesys.plugin_registration import OrchestrationRegistration
 
 
 _ENVIRONMENTS = PROMPTS_DIR / "environments"
@@ -40,32 +35,16 @@ _ENVIRONMENTS = PROMPTS_DIR / "environments"
 _GPU_FACTS = SimpleNamespace(max_gpus=4, max_time_minutes=90, read_only_paths=(), tool_paths=())
 # What the evaluation-tool surface may say about vibesys-gpu: the command form, or the name.
 _GPU_USE = re.compile(r"vibesys-gpu(`| --gpus N --time MINUTES -- COMMAND| -- COMMAND)")
-_LOOPS = {
-    "dynamic": catalog.DYNAMIC,
-    "agent-multi": catalog.MULTI,
-    "agent-single": catalog.SINGLE,
-    "profile-guided-multi": catalog.PROFILE_GUIDED_MULTI,
-    "profile-guided-single": catalog.PROFILE_GUIDED_SINGLE,
-    "plain": catalog.ISSUE_QUEUE,
-    "evolve": catalog.EVOLVE,
-}
-_GATES = ("accuracy", "benchmark")
 
 
-def _notes(name: str, *, evaluation_tool: bool) -> str:
-    """The Slurm environment's notes for a run whose loop does or does not have the tool.
-
-    The facts are what ``SlurmEnvironment.prepare`` reports for the two modes.
-    """
+def _notes(name: str) -> str:
+    """The Slurm environment's notes, with the facts ``SlurmEnvironment.prepare`` reports."""
     gpu = name == "slurm+gpu"
-    client = "vibesys-gpu" if gpu else "vibesys-gate"
     return render_template(
         "slurm/prompt_notes.j2",
         template_dir=_ENVIRONMENTS,
         service_command="python serve.py" if gpu else "",
-        evaluation_tool=evaluation_tool,
-        gate_client=client if gpu or not evaluation_tool else "",
-        gates=() if evaluation_tool else _GATES,
+        gpu_client="vibesys-gpu" if gpu else "",
         agent_gpu=_GPU_FACTS if gpu else None,
         read_only_paths=["/data"] if gpu else [],
     )
@@ -80,43 +59,11 @@ def _assert_evaluation_tool_only(text: str, *, gpu: bool) -> None:
     assert ("only the evaluation tool scores the candidate" in text) is gpu
 
 
-@pytest.mark.parametrize("loop", _LOOPS)
-def test_only_the_core_loops_have_the_evaluation_tool(loop: str) -> None:
-    registration: OrchestrationRegistration = _LOOPS[loop]
-
-    assert offers_evaluation_tool(registration.plugin) is (
-        loop
-        in {
-            "dynamic",
-            "plain",
-            "agent-single",
-            "profile-guided-single",
-            "agent-multi",
-            "profile-guided-multi",
-            "evolve",
-        }
-    )
-
-
 @pytest.mark.parametrize("environment", ["slurm", "slurm+gpu"])
 def test_the_dynamic_loops_environment_notes_describe_evaluation_only_through_the_tool(
     environment: str,
 ) -> None:
-    _assert_evaluation_tool_only(
-        _notes(environment, evaluation_tool=True), gpu=environment == "slurm+gpu"
-    )
-
-
-@pytest.mark.parametrize("environment", ["slurm", "slurm+gpu"])
-def test_an_older_loops_environment_notes_still_name_the_gates_and_make_no_tool_claim(
-    environment: str,
-) -> None:
-    text = _notes(environment, evaluation_tool=False)
-    client = "vibesys-gpu" if environment == "slurm+gpu" else "vibesys-gate"
-
-    for gate in _GATES:
-        assert f"`{client} --gate {gate}`" in text
-    assert "evaluation tool" not in text
+    _assert_evaluation_tool_only(_notes(environment), gpu=environment == "slurm+gpu")
 
 
 @pytest.mark.parametrize("environment", ["slurm", "slurm+gpu"])
@@ -129,7 +76,7 @@ def test_the_dynamic_loops_prompts_offer_the_evaluation_tool_only(
     text = _render(
         template,
         data.draw(_CONTEXTS[template]),
-        _plan_variables(tmp_path, _notes(environment, evaluation_tool=True)),
+        _plan_variables(tmp_path, _notes(environment)),
     )
 
     _assert_evaluation_tool_only(text, gpu=environment == "slurm+gpu")
@@ -138,10 +85,10 @@ def test_the_dynamic_loops_prompts_offer_the_evaluation_tool_only(
         assert "validate_evaluation_wait" in text
 
 
-def test_the_dynamic_loops_own_templates_never_name_a_shell_gate() -> None:
-    dynamic = Path(__file__).resolve().parents[2] / "src" / "vibesys" / "orchestration" / "dynamic"
+def test_no_template_names_a_shell_gate() -> None:
+    source_root = Path(__file__).resolve().parents[2] / "src" / "vibesys"
 
-    for path in sorted(dynamic.rglob("*.j2")):
+    for path in sorted(source_root.rglob("*.j2")):
         source = path.read_text(encoding="utf-8")
         assert "vibesys-gate" not in source, path
         assert "--gate" not in source, path

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_agent.api import NULL_AGENT_EVENT_SINK
 from vs_runtime.api import RuntimeContractError
 from vs_runtime.api.infrastructure import (
     AgentExecutionScope,
@@ -19,12 +18,9 @@ from vs_runtime.api.infrastructure import (
     TrustedBenchmarkResult,
     WorkspaceEvaluationSpec,
     WorkspaceRuntime,
-    create_run_control_channel,
     create_workspace_runtime,
 )
 from vs_runtime.api.testing import (
-    FakeAgentExecutionLifecycleSink,
-    FakeRunControlEventSink,
     FakeWorkspace,
 )
 from vs_sandbox.api import CommandResult
@@ -237,16 +233,7 @@ def _runtime(provider: _Provider, runner: GatedBlockingRunner | None = None) -> 
         pytest.fail("workspace-only test opened an agent client")
 
     return create_workspace_runtime(
-        (),
-        workspace_resources=provider,
-        resolve_configuration=unexpected_execution,
-        session_store=lambda: None,
-        control=create_run_control_channel(FakeRunControlEventSink()),
-        lifecycle_events=FakeAgentExecutionLifecycleSink(),
-        agent_events=NULL_AGENT_EVENT_SINK,
-        route_message=lambda message, _steering: message,
-        blocking=BlockingOperations(runner),
-        client_factory=unexpected_client,
+        workspace_resources=provider, blocking=BlockingOperations(runner)
     )
 
 

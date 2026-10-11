@@ -6,9 +6,8 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import BaseModel
 from tests.entrypoints.test_launch_frontends import _request
-from tests.vibesys.orchestration.plugin import EmptyOptions
+from tests.support.core_plugins import failing_plugin
 
 from launch import (
     LaunchSettings,
@@ -19,10 +18,9 @@ from launch import (
 )
 from launch.agents import BuiltInSessionAgents
 from vibesys.api import AuxiliaryAgentLaunch, OrchestrationRegistry, RunReady
-from vs_agent.api import AgentClient
-from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeProvider
+from vs_agent.api import AgentCapabilities, AgentSessionKey
+from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_project.api import Project
-from vs_runtime.api import AgentCapability, AgentRole, OrchestrationPlugin, Run, RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
@@ -30,7 +28,7 @@ if TYPE_CHECKING:
 
     from vibesys.api import AuxiliaryAgents, ManagedAgent
     from vibesys.api.wiring import RunResources
-    from vs_agent.api import AgentEventSink, AgentInvocationStore, AgentSessionKey
+    from vs_agent.api import AgentEventSink, AgentInvocationStore
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment
     from vs_sandbox.api import HostResource
 
@@ -53,7 +51,9 @@ class FalseyFakeAgentFactory:
         return False
 
     def __call__(self, **_kwargs: object) -> FakeAgentClient:
-        client = FakeAgentClient(session_reuse=True).set_text(None, "selected fake")
+        client = FakeAgentClient(
+            session_reuse=True, capabilities=AgentCapabilities(provider_session_resume=True)
+        ).set_text(None, "selected fake")
         self.clients.append(client)
         return client
 
@@ -103,22 +103,9 @@ class FalseyFakeSessionAgents:
         return self.implementation.create_agent(launch, resources, agent_events)
 
 
-_ROLE = AgentRole(id="falsey-test", system_prompt="Return the scripted answer.")
-
-
-async def _exercise(run: Run, _options: BaseModel) -> RunStatus:
-    session = await run.agents.create_session(_ROLE, workspace=run.workspaces.root)
-    assert await session.turn("A fake turn") == "selected fake"
-    return RunStatus.SUCCEEDED
-
-
 def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> None:
     registry = FalseyOrchestrationRegistry()
-    registry.register_plugin(
-        OrchestrationPlugin(
-            id="launch-test", agents=(_ROLE,), options=EmptyOptions, orchestrate=_exercise
-        )
-    )
+    registry.register_plugin(failing_plugin("launch-test"))
     request = _request(tmp_path / "project")
     agents_factory = FalseyFakeAgentFactory()
     backend_factory = FalseyFakeBackendFactory()
@@ -152,13 +139,11 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
         handle.session.on_ready(ready)
         try:
             result = await handle.result()
-            assert result.succeeded
             assert backend_factory.calls == 1
             assert agents.calls == 1
+            # The auxiliary agent's client, then the run's own: each from the injected factory.
             assert len(agents_factory.clients) == 2
             assert not agents_factory.clients[0].closed
-            assert agents_factory.clients[0].calls == []
-            assert len(agents_factory.clients[1].calls) == 1
             assert agents_factory.clients[1].closed
             assert (
                 open_run_store(Project.open(request.project_root), registry=registry)
@@ -172,10 +157,6 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
         assert all(client.closed for client in agents_factory.clients)
 
     asyncio.run(execute())
-
-
-class DurableReply(BaseModel):
-    value: str
 
 
 class FalseyInvocationStoreFactory:
@@ -193,35 +174,15 @@ class FalseyInvocationStoreFactory:
 
 @pytest.mark.parametrize("injected", [False, True])
 def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool) -> None:
-    role = AgentRole(
-        id="durable-launch-test",
-        system_prompt="Return the scripted answer.",
-        required_capabilities=frozenset({AgentCapability.DURABLE_TURN_CONTINUATION}),
-    )
     factory = FalseyInvocationStoreFactory()
-
-    async def exercise(run: Run, _options: BaseModel) -> RunStatus:
-        session = await run.agents.create_session(
-            role, workspace=run.workspaces.root, member_id="durable-member"
-        )
-        assert await session.turn("Initial turn", response=DurableReply) == DurableReply(
-            value="ready"
-        )
-        assert session.checkpoint().session_key == "member:durable-launch-test:durable-member"
-        return RunStatus.SUCCEEDED
-
     registry = OrchestrationRegistry()
-    registry.register_plugin(
-        OrchestrationPlugin(
-            id="launch-test", agents=(role,), options=EmptyOptions, orchestrate=exercise
-        )
-    )
+    registry.register_plugin(failing_plugin("launch-test"))
     request = _request(tmp_path / "project")
     runs = default_runs(
         LaunchSettings(
             registry=registry,
-            agent_client_factory=lambda **_kwargs: AgentClient(
-                FakeProvider(answer={"value": "ready"})
+            agent_client_factory=lambda **_kwargs: FakeAgentClient(
+                capabilities=AgentCapabilities(provider_session_resume=True)
             ),
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
             invocation_store_factory=factory if injected else None,
@@ -230,8 +191,9 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool
 
     async def execute() -> None:
         result = await runs.start(request).result()
-        assert result.succeeded
+        assert result.loop == "launch-test"
         if injected:
-            assert len(factory.keys) == 1
+            # One run-scoped journal serves every core session.
+            assert factory.keys == [AgentSessionKey.for_member("core", "run")]
 
     asyncio.run(execute())

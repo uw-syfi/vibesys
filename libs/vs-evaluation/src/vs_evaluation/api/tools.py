@@ -7,11 +7,6 @@ from vs_evaluation.agent_core_mcp import (
     build_core_evaluation_tools,
     core_evaluation_mcp_descriptor,
 )
-from vs_evaluation.agent_mcp import (
-    build_evaluation_tools,
-    evaluation_mcp_descriptor,
-    evaluation_tool_names,
-)
 from vs_evaluation.agent_wire import EvaluationServiceClientError
 
 __all__ = [
@@ -20,8 +15,5 @@ __all__ = [
     "VALIDATE_WAIT_TOOL",
     "EvaluationServiceClientError",
     "build_core_evaluation_tools",
-    "build_evaluation_tools",
     "core_evaluation_mcp_descriptor",
-    "evaluation_mcp_descriptor",
-    "evaluation_tool_names",
 ]

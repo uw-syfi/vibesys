@@ -18,10 +18,8 @@ from vs_runtime._container_runtime_policy import reject_docker_in_docker
 from vs_runtime._host_command_bridge import (
     agent_paths,
     bridge_editor_extras,
-    bridged_agent_paths,
     cluster_editor_extras,
     new_broker_socket_path,
-    planned_gates,
     write_client_launcher,
 )
 from vs_runtime._job_tools import TOOLKIT_BIN_PATTERNS, find_job_tool, off_path_tools
@@ -48,14 +46,11 @@ from vs_runtime._trusted_evaluation_preparation import (
 )
 from vs_sandbox.api import HostResource, HostResourceAccess, SandboxSession
 from vs_sandbox.api.slurm import (
-    DEFAULT_WRAPPER,
     AgentGpuConfig,
-    Gates,
     GpuCommands,
     HostCommandBroker,
     RunRoots,
     SlurmCapturePlan,
-    SlurmCommandGateRunner,
     SlurmEvaluationPlan,
     SlurmExecutionPolicy,
     SlurmOperatorSettings,
@@ -66,12 +61,11 @@ from vs_sandbox.api.slurm import (
     render_slurm_operator_toml,
     trusted_profile_command,
     write_slurm_capture_plan,
-    write_slurm_evaluation_plan,
 )
 from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping
 
     from vs_agent.api.images import DockerBuildRunner
     from vs_project.api import RunResourceRequest
@@ -79,7 +73,6 @@ if TYPE_CHECKING:
     from vs_sandbox.api import DockerCli
     from vs_sandbox.api.slurm import JobConfinement
 
-_GATE_LAUNCHER = "vibesys-gate"
 _REMOTE_PROFILER_IDS = frozenset({"auto", "none", "rocprof"})
 _NO_PROFILER_IDS = frozenset({"auto", "none"})
 
@@ -93,14 +86,13 @@ class _Mode(Protocol):
     """How the agent profiles and reaches GPUs, derived once from the operator settings.
 
     Every choice that depends on whether the agent runs its own GPU commands
-    (which gate client it is given, which profilers it may select, whether
-    the run offers parallel candidates) is read from here, so none re-tests
-    the capability.
+    (which profilers it may select, whether the run offers parallel candidates)
+    is read from here, so none re-tests the capability.
     """
 
     @property
-    def gate_client(self) -> str:
-        """The program the agent runs for gates (and GPU commands)."""
+    def gpu_client(self) -> str:
+        """The program the agent runs for its own GPU commands, or empty without them."""
         ...
 
     @property
@@ -140,7 +132,7 @@ class _Mode(Protocol):
     def gpu_commands(
         self, request: RunEnvironmentRequest, confinement: JobConfinement | None
     ) -> GpuCommands | None:
-        """What the gate broker offers as GPU commands, if anything."""
+        """What the host command broker offers as GPU commands, if anything."""
         ...
 
     def editor_env(self, launcher: Path) -> dict[str, str] | None:
@@ -149,8 +141,8 @@ class _Mode(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class _ClusterGates:
-    """Gates only. Profiling is a remote capture over SSH, and unavailable otherwise.
+class _ClusterOnly:
+    """The agent has no host commands. Profiling is a remote capture over SSH, and unavailable otherwise.
 
     The capture's profiler server reaches the cluster through a second host
     broker that exists only for the SSH transport; without it the profiler
@@ -158,7 +150,7 @@ class _ClusterGates:
     """
 
     remote_capture: bool
-    gate_client = _GATE_LAUNCHER
+    gpu_client = ""
     agent_gpu_facts = None
     materialize_local_model_weights = False
     requires_local_profiler_preflight = False
@@ -198,7 +190,7 @@ class _AgentGpuMode:
     #: The ``PATH`` a job inherits (the host's), and where the CUDA tools live besides it.
     job_path: str = field(default_factory=lambda: os.environ.get("PATH", ""))
     toolkit_patterns: tuple[str, ...] = TOOLKIT_BIN_PATTERNS
-    gate_client = AGENT_GPU_LAUNCHER
+    gpu_client = AGENT_GPU_LAUNCHER
     remote_capture = False
     materialize_local_model_weights = True
     default_profiler_id = "nsys"
@@ -258,14 +250,13 @@ def _mode(settings: SlurmOperatorSettings) -> _Mode:
     shell_command = settings.agent_gpu_shell_command
     if settings.agent_gpu is not None and shell_command is not None:
         return _AgentGpuMode(settings.agent_gpu, shell_command)
-    return _ClusterGates(remote_capture=isinstance(settings.config.transport, SlurmSshTransport))
+    return _ClusterOnly(remote_capture=isinstance(settings.config.transport, SlurmSshTransport))
 
 
 @dataclass(frozen=True, slots=True)
 class _ClusterPlans:
     """The evaluation and capture plans the run wrote, and the paths they name."""
 
-    evaluator: Path
     #: ``None`` when profiling is the agent's own GPU command, not a remote capture.
     capture: Path | None
     #: The evaluation plan as written, for consumers of the environment's facts.
@@ -274,22 +265,21 @@ class _ClusterPlans:
     config_path: Path
     state_root: Path
     support_paths: Mapping[str, Path]
-    has_accuracy: bool
-    has_benchmark: bool
 
 
 class SlurmEnvironment(_NoopWorkspaceRecovery):
-    """Edit in a local Docker container while trusted gates and ROCprof run through Slurm.
+    """Edit in a local Docker container while trusted evaluation and ROCprof run through Slurm.
 
-    The agent never runs on the host. The host owns two brokers whose sockets
-    the container reaches: one runs the trusted accuracy and benchmark gates
-    (``vs_sandbox.slurm_command``, which stages to the cluster), and, for an
-    SSH cluster, one carries the profiler server's transport.
+    The agent never runs on the host. Trusted accuracy and benchmark work is not
+    brokered to the container: the framework runs it through the cluster executor, and
+    the agent requests it through the evaluation tool. For an SSH cluster the host owns
+    one broker whose socket the container reaches, which carries the profiler server's
+    transport.
 
     The operator may also let the agent run its own GPU commands as Slurm jobs
-    (``[vibesys.agent_gpu]`` in the operator file, local transport only). The
-    same gate broker then offers them, and the agent profiles through its own
-    commands instead of through a remote capture.
+    (``[vibesys.agent_gpu]`` in the operator file, local transport only). A second
+    broker then offers them, and the agent profiles through its own commands instead
+    of through a remote capture.
     """
 
     isolated = False
@@ -299,7 +289,6 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         self,
         settings: SlurmOperatorSettings,
         docker: DockerEnvironmentConfig | None = None,
-        gate_wrapper: Sequence[str] = DEFAULT_WRAPPER,
         job_confinement: JobConfinement | None = None,
         deprecation: str | None = None,
     ) -> None:
@@ -308,15 +297,12 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         *settings* is the operator file as ``load_slurm_operator_settings`` read
         it (or the translation of the deprecated ``slurm-gpu`` file). Every
         later read in the run uses it, so the facts cannot change mid-run.
-        *docker* configures the editor container. *gate_wrapper* is the program
-        that runs one trusted gate against the cluster; tests substitute a fake
-        that stands in for it. *job_confinement* is how an agent GPU job is
+        *docker* configures the editor container. *job_confinement* is how an agent GPU job is
         confined; the default is the host sandbox.
         """
         self._settings = settings
         self._mode = _mode(settings)
         self._docker = DockerEnvironment(docker or DockerEnvironmentConfig())
-        self._gate_wrapper = tuple(gate_wrapper)
         self._job_confinement = job_confinement
         self._deprecation = deprecation
 
@@ -391,7 +377,6 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         resources: RunResourceRequest | None,
         *,
         docker: DockerEnvironmentConfig | None = None,
-        gate_wrapper: Sequence[str] = DEFAULT_WRAPPER,
         job_confinement: JobConfinement | None = None,
     ) -> SlurmEnvironment:
         """Open the deprecated ``slurm-gpu`` selection: its file, translated once.
@@ -412,7 +397,6 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         return cls(
             settings,
             docker=docker,
-            gate_wrapper=gate_wrapper,
             job_confinement=job_confinement,
             deprecation=(
                 f"--run-environment slurm-gpu is deprecated: use --run-environment slurm with "
@@ -429,17 +413,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         return _PreparedRunEnvironment(
             SlurmEnvironmentFacts(
                 service_command=_slurm_service_command(self._settings.policy),
-                evaluation_tool=request.evaluation_tool,
-                gate_client=(
-                    self._mode.gate_client
-                    if self._mode.agent_gpu_facts is not None or not request.evaluation_tool
-                    else ""
-                ),
-                gates=(
-                    ()
-                    if request.evaluation_tool
-                    else planned_gates(request.accuracy_command, request.benchmark_command)
-                ),
+                gpu_client=self._mode.gpu_client,
                 agent_gpu=self._mode.agent_gpu_facts,
             ),
             partial(self._open, request),
@@ -462,7 +436,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 profiler_tree=profiler_tree,
                 workload_timeout_seconds=request.profile_timeout_seconds,
             )
-        # The gates run on the host, so their tools are installed there.
+        # The trusted evaluation runs on the host, so its tools are installed there.
         if request.evaluator_requirements.tools:
             _make_host_sandbox(request, ephemeral=True)
         plans = self._write_plans(
@@ -474,31 +448,20 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             transport_env, transport_resources = _start_transport_broker(
                 config, request, plans, brokers
             )
-            launcher: Path | None = None
-            if request.evaluation_tool and gpu is None:
+            if gpu is None:
                 # Nothing for a broker to answer: the agent has no host command at all.
                 extras = cluster_editor_extras()
             else:
-                commands = self._start_command_broker(request, plans, gpu)
+                commands = self._start_command_broker(request, gpu)
                 brokers.append(commands)
-                launcher = write_client_launcher(request.log_dir / "slurm-gate", mode.gate_client)
+                launcher = write_client_launcher(request.log_dir / "slurm-gpu", mode.gpu_client)
                 extras = bridge_editor_extras(commands, launcher, env=mode.editor_env(launcher))
             sandbox = self._docker.build_editor(request, extras)
             profiler_mcp = _remote_profiler_mcp(plans, transport_env, transport_resources)
             session = SandboxSession.start(
                 sandbox,
                 RunEnvironmentView(
-                    paths=(
-                        agent_paths(sandbox, request)
-                        if request.evaluation_tool or launcher is None
-                        else bridged_agent_paths(
-                            sandbox,
-                            request,
-                            launcher,
-                            accuracy=plans.has_accuracy,
-                            benchmark=plans.has_benchmark,
-                        )
-                    ),
+                    paths=agent_paths(sandbox, request),
                     prompt_notes=presentation.prompt_notes,
                     isolated=True,
                     cli_sandboxed=True,
@@ -561,7 +524,6 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         state_root.mkdir(parents=True, exist_ok=True)
         config_path = request.log_dir / "slurm-operator.toml"
         config_path.write_text(render_slurm_operator_toml(self._settings), encoding="utf-8")
-        evaluator_plan_path = request.log_dir / "slurm-evaluation-plan.json"
         capture_plan_path = (
             request.log_dir / "slurm-capture-plan.json" if remote_profiling else None
         )
@@ -590,7 +552,6 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 else None
             ),
         )
-        write_slurm_evaluation_plan(evaluator_plan_path, evaluation_plan)
         if capture_plan_path is not None:
             write_slurm_capture_plan(
                 capture_plan_path,
@@ -602,41 +563,23 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 ),
             )
         return _ClusterPlans(
-            evaluator=evaluator_plan_path,
             capture=capture_plan_path,
             plan=evaluation_plan,
             config_path=config_path,
             state_root=state_root,
             support_paths=support_paths,
-            has_accuracy=accuracy is not None,
-            has_benchmark=benchmark is not None,
         )
 
     def _start_command_broker(
-        self, request: RunEnvironmentRequest, plans: _ClusterPlans, gpu: GpuCommands | None
+        self, request: RunEnvironmentRequest, gpu: GpuCommands
     ) -> HostCommandBroker:
-        """Start the host broker the container reaches; it answers gates only for a gate run.
-
-        A run whose agents have the evaluation tool gets a broker with GPU commands and
-        no gate runner, so the ``gate`` operation is refused.
-        """
-        gates = (
-            None
-            if request.evaluation_tool
-            else Gates(
-                SlurmCommandGateRunner(
-                    plans.evaluator, env=dict(os.environ), wrapper=self._gate_wrapper
-                ),
-                benchmark_output_argument=request.benchmark_output_argument,
-            )
-        )
+        """Start the host broker the container reaches for the agent's own GPU commands."""
         broker = HostCommandBroker(
             new_broker_socket_path(),
             # Only this session's own workspace: with parallel candidates each session has
             # its own broker, and none may run a command in another candidate's worktree.
             roots=RunRoots((request.workspace,)),
             gpu=gpu,
-            gates=gates,
         )
         broker.start()
         return broker

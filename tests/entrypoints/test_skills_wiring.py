@@ -21,7 +21,6 @@ from vibesys.orchestration.skill_selection import (
     validate_platform_layout,
 )
 from vibesys.run.skill_sources import resolve_skill_source_dirs, validate_skill_tree
-from vs_runtime.api import SkillResourceRequest
 from vs_runtime.api.infrastructure import (
     SkillMetadataError as RuntimeSkillMetadataError,
 )
@@ -29,7 +28,6 @@ from vs_runtime.api.infrastructure import (
     build_skill_catalog,
     discover_skill_dirs,
     load_skill_frontmatter,
-    resolve_skill_resources,
 )
 
 if TYPE_CHECKING:
@@ -545,121 +543,6 @@ def test_serving_systems_internal_links_resolve() -> None:
                 broken.append(f"{rel} -> {target}")
 
     assert not broken, "broken internal links:\n" + "\n".join(broken)
-
-
-def test_skill_selection_resolves_zero_to_many_resources_with_stable_deduplication(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "skills"
-    skill = _write_skill(root, "portable")
-    references = skill / "references"
-    references.mkdir()
-    references.joinpath("design.md").write_text("design\n")
-    scripts = skill / "scripts"
-    scripts.mkdir()
-    scripts.joinpath("probe.sh").write_text("#!/bin/sh\n")
-
-    catalog = build_skill_catalog([root])
-    result = resolve_skill_resources(
-        (
-            SkillResourceRequest(
-                name="portable",
-                resource_paths=("references/design.md", "references/design.md"),
-                purpose="Design the change.",
-            ),
-            SkillResourceRequest(
-                name="portable",
-                resource_paths=("scripts/probe.sh", "SKILL.md"),
-                purpose="Run the probe.",
-            ),
-        ),
-        catalog,
-    )
-
-    assert result.diagnostics == ()
-    resolved = result.resolved
-    assert len(resolved) == 1
-    assert resolved[0].router_path == "portable/SKILL.md"
-    assert resolved[0].resource_paths == (
-        "portable/references/design.md",
-        "portable/scripts/probe.sh",
-    )
-    assert resolved[0].purpose == "Design the change."
-    assert resolve_skill_resources((), catalog).resolved == ()
-
-
-def test_skill_selection_omits_unknown_skills_and_unsafe_resources(tmp_path: Path) -> None:
-    root = tmp_path / "skills"
-    skill = _write_skill(root, "portable")
-    references = skill / "references"
-    references.mkdir()
-    references.joinpath("valid.md").write_text("valid\n")
-    (skill / "repos").mkdir()
-    (skill / "repos" / "hidden.md").write_text("hidden\n")
-
-    catalog = build_skill_catalog([root])
-    result = resolve_skill_resources(
-        (
-            SkillResourceRequest(
-                name="missing",
-                purpose="Not installed.",
-            ),
-            SkillResourceRequest(
-                name="portable",
-                resource_paths=(
-                    "references/valid.md",
-                    "../outside.md",
-                    "/absolute.md",
-                    "references",
-                    "references/missing.md",
-                    "repos/hidden.md",
-                    "references\\valid.md",
-                ),
-                purpose="Keep valid siblings.",
-            ),
-        ),
-        catalog,
-    )
-
-    resolved = result.resolved
-    diagnostics = result.diagnostics
-    assert len(resolved) == 1
-    assert resolved[0].resource_paths == ("portable/references/valid.md",)
-    assert len(diagnostics) == 7
-    assert "unknown installed skill" in diagnostics[0]
-    assert any("stay within" in diagnostic for diagnostic in diagnostics)
-    assert any("must identify a file" in diagnostic for diagnostic in diagnostics)
-    assert any("does not exist" in diagnostic for diagnostic in diagnostics)
-    assert any("excluded" in diagnostic for diagnostic in diagnostics)
-    assert any("POSIX separators" in diagnostic for diagnostic in diagnostics)
-
-
-def test_skill_selection_rejects_symlink_escape(tmp_path: Path) -> None:
-    root = tmp_path / "skills"
-    skill = _write_skill(root, "portable")
-    references = skill / "references"
-    references.mkdir()
-    outside = tmp_path / "outside.md"
-    outside.write_text("outside\n")
-    references.joinpath("escape.md").symlink_to(outside)
-
-    result = resolve_skill_resources(
-        (
-            SkillResourceRequest(
-                name="portable",
-                resource_paths=("references/escape.md",),
-                purpose="Attempt escape.",
-            ),
-        ),
-        build_skill_catalog([root]),
-    )
-
-    resolved = result.resolved
-    diagnostics = result.diagnostics
-    assert len(resolved) == 1
-    assert resolved[0].resource_paths == ()
-    assert len(diagnostics) == 1
-    assert "escapes the skill root" in diagnostics[0]
 
 
 def test_skill_catalog_matches_materialization_last_writer_wins(tmp_path: Path) -> None:

@@ -10,31 +10,29 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.docker_environment import host_container_backend
+from tests.support.skeleton_strategy import BaselineProbeStrategy
 from tests.support.task_project import write_task
-from tests.vibesys.orchestration.plugin import capability_plugin
+from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
 
+from vibesys.api._session import run_plugin
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
-from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
-from vs_agent.api.testing import FakeDockerBuildRunner
+from vs_agent.api import AgentCapabilities
+from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDockerBuildRunner
 from vs_project.api import OrchestrationDescriptor
-from vs_runtime.api.infrastructure import RunEnvironmentSpec
+from vs_runtime.api.core import RunTiming
+from vs_runtime.api.infrastructure import RunEnvironmentSpec, RunStopped
+from vs_sim.api import SystemClock
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_runtime.api import Run
-
-_PLUGIN = capability_plugin("slurm-exit")
-
-
-class _OrchestrationFailedError(RuntimeError):
-    """The orchestration's own failure, raised while a benchmark is pending."""
+_PLUGIN = capability_plugin("slurm-exit", strategy=BaselineProbeStrategy())
 
 
 def _write_slurm_config(path: Path, state: Path, transport: str) -> None:
@@ -90,7 +88,7 @@ def _request(project_root: Path, config_path: Path) -> RunRequest:
 
 
 @pytest.mark.parametrize("transport", ["connector", "ssh"])
-def test_an_orchestration_failure_cancels_a_pending_benchmark_job(
+def test_a_stopped_run_cancels_a_pending_benchmark_job(
     tmp_path: Path, transport: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The agent container needs the credential its CLI would start with.
@@ -104,36 +102,34 @@ def test_an_orchestration_failure_cancels_a_pending_benchmark_job(
     _write_project(project_root)
     integration = LocalRunIntegration()
     submitted_ids: list[str] = []
-    pending_evaluations: list[asyncio.Task[object]] = []
 
-    async def orchestrate(run: Run) -> None:
-        # A background benchmark the orchestration never awaits, like an
-        # input-baseline measurement, still queued when the orchestration fails.
-        pending = asyncio.create_task(run.evaluation.benchmark(run.workspaces.root))
-        pending_evaluations.append(pending)
+    async def exercise() -> None:
+        run = asyncio.create_task(
+            run_plugin(
+                _request(project_root, config_path),
+                integration,
+                _PLUGIN,
+                EmptyOptions(),
+                agent_client_factory=lambda **_: FakeAgentClient(
+                    capabilities=AgentCapabilities(provider_session_resume=True)
+                ),
+                backend_factory=host_container_backend,
+                stop_timer=asyncio.sleep,
+                timing=RunTiming(SystemClock(), 60.0),
+                invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+            )
+        )
+        # The run's input-baseline measurement is queued on the held cluster; stopping the run
+        # must cancel it there instead of leaving it to the cluster's time limit.
         submitted = await asyncio.to_thread((state / SUBMITTED_FILE).read_text, encoding="utf-8")
         assert submitted.isdigit()
         submitted_ids.append(submitted)
-        assert not pending.done()
-        raise _OrchestrationFailedError
-
-    async def exercise() -> None:
-        try:
-            async with open_product_run_host(
-                _request(project_root, config_path),
-                integration,
-                plugin=_PLUGIN,
-                backend_factory=host_container_backend,
-            ) as run:
-                await orchestrate(run)
-        finally:
-            # The orchestration intentionally leaves its measurement unawaited;
-            # the test harness drains the stopped task after host teardown.
-            await asyncio.gather(*pending_evaluations, return_exceptions=True)
+        integration.control.request_stop()
+        with pytest.raises(RunStopped):
+            await run
 
     try:
-        with pytest.raises(_OrchestrationFailedError):
-            asyncio.run(exercise())
+        asyncio.run(exercise())
     finally:
         integration.close()
 

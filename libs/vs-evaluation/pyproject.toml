@@ -9,7 +9,6 @@ description = "Evaluation lifecycle, evidence and agent-facing evaluation tools"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2",
-    "vs-async-ops",
     "vs-evaluator-protocol",
     "vs-mcp",
     "vs-project",
@@ -23,7 +22,6 @@ where = ["src"]
 vs_evaluation = ["py.typed"]
 
 [tool.uv.sources]
-vs-async-ops = { workspace = true }
 vs-evaluator-protocol = { workspace = true }
 vs-mcp = { workspace = true }
 vs-project = { workspace = true }

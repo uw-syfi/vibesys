@@ -7,19 +7,17 @@ binding describes it.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.minimal_container.stdio import StdioJsonProcess, mcp_initialize, mcp_tool_names
 
-from launch.composition import AGENT_TOOL_BINDINGS
+from launch.composition import profiler_server
 from vibesys.api.wiring import AgentToolContext
 from vs_mcp.api import StdioServerDescriptor
 
 if TYPE_CHECKING:
     from tests.minimal_container.editor import Editor
-
-    from vs_runtime.api import AgentToolBindingContext
 
 pytestmark = pytest.mark.minimal_container
 
@@ -28,10 +26,8 @@ INCLUDE_STAND_INS = True
 
 
 def test_the_profiler_server_initializes_and_lists_tools(editor: Editor) -> None:
-    # The profiler binding reads only the context's profiler id, not the session binding.
-    (descriptor,) = AGENT_TOOL_BINDINGS["profiler"](
-        AgentToolContext(profiler_id=editor.profiler_support_name.removesuffix("_profiler")),
-        cast("AgentToolBindingContext", None),
+    descriptor = profiler_server(
+        AgentToolContext(profiler_id=editor.profiler_support_name.removesuffix("_profiler"))
     )
     assert isinstance(descriptor, StdioServerDescriptor)
 

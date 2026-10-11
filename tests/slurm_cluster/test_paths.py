@@ -51,17 +51,6 @@ def test_a_file_the_agent_names_by_absolute_path_is_the_same_file_in_the_job(
     assert written.read_text(encoding="utf-8") == "agent-wrote\njob-appended\n"
 
 
-@pytest.mark.parametrize("elsewhere", ["/home/agent", "/"])
-def test_a_request_from_outside_the_workspace_is_refused_and_starts_no_job(
-    run: OpenRun, slurm_cluster: SlurmCluster, elsewhere: str
-) -> None:
-    gate = run.agent(f"cd {elsewhere} && {run.launcher()} --gate accuracy")
-
-    assert gate.exit_code == 2, gate.output
-    assert "inside the run's workspace" in gate.output
-    assert slurm_cluster.queue() == []
-
-
 def test_a_gpu_request_from_a_shared_directory_that_is_not_the_workspace_is_refused(
     gpu_run: OpenRun, slurm_cluster: SlurmCluster
 ) -> None:

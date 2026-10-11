@@ -8,41 +8,30 @@ from typing import Any, cast
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, Json, ValidationError
 
-from vs_agent.api import AgentOutputSchemaError
-from vs_project.api import ProjectStateError
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
-    AgentBinding,
     AgentCapability,
-    AgentEvaluation,
-    AgentEvaluationStatus,
     AgentRole,
-    AgentTool,
     AgentTurnTimeoutError,
     BenchmarkEvaluation,
     BenchmarkObjective,
     CommandResult,
+    CorePlan,
+    CorePolicy,
+    CoreRunContext,
     LocalValidationEvaluation,
     MetricDirection,
     OrchestrationPlugin,
     ProfileExecution,
-    Run,
     RunFacts,
-    RunStatus,
     RuntimeContractError,
-    SessionClosedError,
-    SkillCatalogError,
-    SkillResourceRequest,
-    StateModelError,
-    StructuredResponseError,
-    UnknownAgentRoleError,
     WorkspaceAccess,
     WorkspaceRestoreError,
     WorkspaceSourceFact,
     validate_workspace_writable_paths,
 )
-from vs_runtime.api.testing import FakeEvaluation, FakeRun, FakeWorkspace, ObservationCall
+from vs_runtime.api.testing import FakeCommands, FakeEvaluation, FakeWorkspace, FakeWorkspaces
 
 
 class _Options(BaseModel):
@@ -86,18 +75,38 @@ def _role(role_id: str = "implementer") -> AgentRole:
     )
 
 
-async def _orchestrate(_host: Run, _options: BaseModel) -> RunStatus:
-    return RunStatus.SUCCEEDED
+def _policy() -> CorePolicy:
+    def plan(_context: CoreRunContext) -> CorePlan:
+        raise AssertionError
+
+    return CorePolicy(plan=plan, operations=(), retention_label="selected", prompt_templates=Path())
 
 
-def _plugin(*agents: AgentRole, state: type[BaseModel] | None = None) -> OrchestrationPlugin:
-    return OrchestrationPlugin(
-        id="test-plugin",
-        agents=agents,
-        options=_Options,
-        orchestrate=_orchestrate,
-        state=state,
-    )
+def _plugin(*agents: AgentRole) -> OrchestrationPlugin:
+    return OrchestrationPlugin(id="test-plugin", agents=agents, options=_Options, core=_policy())
+
+
+class _Run:
+    """The fake capabilities a contract test drives, over one fake root workspace."""
+
+    def __init__(
+        self,
+        *,
+        run_id: str = "test-run",
+        project_root: Path = Path(),
+        supports_parallel_candidates: bool = False,
+    ) -> None:
+        self.run_id = run_id
+        self.workspaces = FakeWorkspaces(
+            FakeWorkspace(path=project_root),
+            supports_parallel_candidates=supports_parallel_candidates,
+        )
+        self.commands = FakeCommands()
+        self.evaluation = FakeEvaluation(run_id=run_id)
+
+    async def close(self) -> None:
+        self.workspaces.begin_close()
+        await self.workspaces.close()
 
 
 def _workspace() -> FakeWorkspace:
@@ -134,7 +143,7 @@ def test_agent_turn_timeout_error_preserves_the_policy_budget() -> None:
     assert isinstance(error, RuntimeError)
 
 
-def test_run_facts_are_strict_immutable_and_configurable_on_fake_host() -> None:
+def test_run_facts_are_strict_and_immutable() -> None:
     facts = RunFacts(
         domain_id="llm_serving",
         objective="Increase serving throughput.",
@@ -142,11 +151,8 @@ def test_run_facts_are_strict_immutable_and_configurable_on_fake_host() -> None:
         profile_execution=ProfileExecution.REMOTE,
         workspace_sources=(WorkspaceSourceFact(name="runtime", dest="src/runtime"),),
     )
-    run = FakeRun(_plugin(), facts=facts)
-
-    assert run.facts is facts
     with pytest.raises(ValidationError):
-        run.facts.__setattr__("domain_id", "generic")
+        facts.__setattr__("domain_id", "generic")
     with pytest.raises(ValidationError):
         RunFacts.model_validate({"domain_id": "generic", "backend": "modal"})
     with pytest.raises(ValidationError):
@@ -155,67 +161,6 @@ def test_run_facts_are_strict_immutable_and_configurable_on_fake_host() -> None:
         facts.workspace_sources[0].__setattr__("dest", "other")
     with pytest.raises(ValidationError):
         RunFacts(domain_id="generic", objective="Improve the candidate.", objective_location="")
-
-
-def test_fake_run_facts_have_a_policy_neutral_default() -> None:
-    run = FakeRun(_plugin())
-
-    assert run.facts == RunFacts(domain_id="generic", objective="Test objective.")
-    assert run.facts.objective == "Test objective."
-    assert run.facts.objective_location == "OBJECTIVE.md"
-    assert run.facts.reference_location == "."
-    assert run.facts.profiler_id == "none"
-
-
-def test_run_is_a_fixed_value_with_typed_ordered_observations() -> None:
-    run = FakeRun(_plugin())
-
-    assert isinstance(run, Run)
-    assert not hasattr(Run, "log")
-    assert not hasattr(Run, "close")
-
-    run.observations.note("round started")
-    run.observations.warning("candidate was restored")
-    run.observations.note("round continued")
-
-    assert run.observations.calls == (
-        ObservationCall("note", "round started"),
-        ObservationCall("warning", "candidate was restored"),
-        ObservationCall("note", "round continued"),
-    )
-
-
-def test_limited_session_grants_are_validated_and_fixed() -> None:
-    async def scenario() -> None:
-        role = AgentRole(
-            id="writer",
-            system_prompt="Write only in the granted paths.",
-            workspace_access=WorkspaceAccess.LIMITED,
-        )
-        regular_role = _role()
-        run = FakeRun(_plugin(role, regular_role))
-        session = await run.agents.create_session(
-            role,
-            workspace=_workspace(),
-            writable_paths=("memory", "evidence/report.json"),
-        )
-
-        assert session.writable_paths == ("memory", "evidence/report.json")
-        writable_paths_attribute = "writable_paths"
-        with pytest.raises(AttributeError):
-            setattr(session, writable_paths_attribute, ("elsewhere",))
-
-        with pytest.raises(ValueError, match="requires writable_paths"):
-            await run.agents.create_session(role, workspace=_workspace())
-        with pytest.raises(ValueError, match="cannot declare writable_paths"):
-            await run.agents.create_session(
-                regular_role,
-                workspace=_workspace(),
-                writable_paths=("memory",),
-            )
-        await run.close()
-
-    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize(
@@ -237,236 +182,6 @@ def test_writable_path_grants_reject_noncanonical_or_escaping_paths(
 ) -> None:
     with pytest.raises(ValueError, match="writable path"):
         validate_workspace_writable_paths(WorkspaceAccess.LIMITED, (path,))
-
-
-def test_same_session_continues_and_second_creation_is_fresh() -> None:
-    observed_history_lengths: list[int] = []
-
-    def respond(
-        _role: AgentRole,
-        history: tuple[str, ...],
-        message: str,
-        response: type[BaseModel] | None,
-    ) -> object:
-        observed_history_lengths.append(len(history))
-        return message if response is None else {"answer": message}
-
-    async def scenario() -> None:
-        role = _role()
-        run = FakeRun(
-            _plugin(role),
-            responder=respond,
-            supported_agent_capabilities={
-                AgentCapability.PROVIDER_SESSION_RESUME,
-                AgentCapability.SESSION_REUSE,
-            },
-        )
-        workspace = _workspace()
-        first = await run.agents.create_session(role, workspace=workspace, member_id="candidate-1")
-        assert await first.turn("one") == "one"
-        assert await first.turn("two", response=_Reply) == _Reply(answer="two")
-        second = await run.agents.create_session(role, workspace=_workspace())
-        assert await second.turn("fresh") == "fresh"
-        assert first.role == role
-        assert first.workspace is workspace
-        assert first.member_id == "candidate-1"
-        assert first.binding == AgentBinding(backend="fake", provider="fake")
-        await run.close()
-
-    asyncio.run(scenario())
-    assert observed_history_lengths == [0, 1, 0]
-
-
-def test_fake_session_reports_invalid_structured_output_as_production_does() -> None:
-    replies: list[object] = [
-        AgentOutputSchemaError("answer: provider gave up"),
-        {"answer": 3},
-        {"answer": "fixed"},
-    ]
-    observed_history_lengths: list[int] = []
-
-    def respond(
-        _role: AgentRole,
-        history: tuple[str, ...],
-        _message: str,
-        _response: type[BaseModel] | None,
-    ) -> object:
-        observed_history_lengths.append(len(history))
-        reply = replies.pop(0)
-        if isinstance(reply, BaseException):
-            raise reply
-        return reply
-
-    async def scenario() -> None:
-        role = _role()
-        run = FakeRun(_plugin(role), responder=respond)
-        session = await run.agents.create_session(role, workspace=run.workspaces.root)
-        with pytest.raises(StructuredResponseError) as provider:
-            await session.turn("one", response=_Reply)
-        assert provider.value.detail == "answer: provider gave up"
-        with pytest.raises(StructuredResponseError) as invalid:
-            await session.turn("two", response=_Reply)
-        assert invalid.value.detail.startswith("answer: ")
-        assert await session.turn("three", response=_Reply) == _Reply(answer="fixed")
-        await run.close()
-
-    asyncio.run(scenario())
-    # Failed structured turns stay in the conversation, as in production.
-    assert observed_history_lengths == [0, 1, 2]
-
-
-def test_fake_read_write_turns_snapshot_input_and_completed_output() -> None:
-    async def scenario() -> None:
-        role = _role()
-        run = FakeRun(_plugin(role))
-        workspace = run.workspaces.root
-        initial = workspace.revision
-        session = await run.agents.create_session(role, workspace=workspace)
-
-        assert await session.turn("write") == "write"
-        assert workspace.revision != initial
-        assert workspace.revision == "fake-revision-2"
-
-    asyncio.run(scenario())
-
-
-def test_fake_binding_is_explicitly_configurable_and_immutable() -> None:
-    async def scenario() -> None:
-        role = _role()
-        binding = AgentBinding(
-            backend="cli",
-            provider="codex",
-            model="gpt-6-sol",
-            reasoning_effort="high",
-        )
-        run = FakeRun(_plugin(role), agent_bindings={role.id: binding})
-        session = await run.agents.create_session(role, workspace=_workspace())
-
-        assert session.binding is binding
-        with pytest.raises(ValidationError):
-            binding.__setattr__("model", "other")
-
-    asyncio.run(scenario())
-
-
-def test_fake_session_creation_failures_are_scriptable_without_leaking_sessions() -> None:
-    async def scenario() -> None:
-        role = _role()
-        run = FakeRun(_plugin(role))
-        run.agents.script_creation(RuntimeError("construction failed"), None)
-
-        with pytest.raises(RuntimeError, match="construction failed"):
-            await run.agents.create_session(role, workspace=run.workspaces.root)
-        assert run.agents.sessions == ()
-
-        session = await run.agents.create_session(role, workspace=run.workspaces.root)
-        assert run.agents.sessions == (session,)
-
-    asyncio.run(scenario())
-
-
-def test_factory_rejects_role_not_declared_by_plugin() -> None:
-    async def scenario() -> None:
-        run = FakeRun(_plugin(_role()))
-        with pytest.raises(UnknownAgentRoleError, match="reviewer"):
-            await run.agents.create_session(_role("reviewer"), workspace=_workspace())
-
-    asyncio.run(scenario())
-
-
-def test_fake_session_factory_enforces_configured_tools_and_capabilities() -> None:
-    async def scenario() -> None:
-        role = AgentRole(
-            id="worker",
-            system_prompt="Use the board.",
-            extra_tools=(AgentTool(id="board"),),
-            required_capabilities=frozenset({AgentCapability.PROVIDER_SESSION_RESUME}),
-        )
-        plugin = _plugin(role)
-        unsupported_tool = FakeRun(plugin)
-        with pytest.raises(RuntimeContractError, match="unsupported extra agent tools: board"):
-            await unsupported_tool.agents.create_session(
-                role,
-                workspace=unsupported_tool.workspaces.root,
-            )
-
-        unsupported_capability = FakeRun(
-            plugin,
-            supported_extra_tools=frozenset({"board"}),
-            supported_agent_capabilities=frozenset({AgentCapability.MCP_SERVERS}),
-        )
-        with pytest.raises(RuntimeContractError, match="provider_session_resume"):
-            await unsupported_capability.agents.create_session(
-                role,
-                workspace=unsupported_capability.workspaces.root,
-            )
-
-        supported = FakeRun(
-            plugin,
-            supported_extra_tools=frozenset({"board"}),
-            supported_agent_capabilities=frozenset(
-                {
-                    AgentCapability.MCP_SERVERS,
-                    AgentCapability.PROVIDER_SESSION_RESUME,
-                }
-            ),
-        )
-        session = await supported.agents.create_session(
-            role,
-            workspace=supported.workspaces.root,
-            member_id="durable-worker",
-        )
-        assert session.role is role
-        await unsupported_tool.close()
-        await unsupported_capability.close()
-        await supported.close()
-
-    asyncio.run(scenario())
-
-
-def test_run_owner_closes_sessions_and_closed_turn_fails() -> None:
-    async def scenario() -> None:
-        role = _role()
-        run = FakeRun(_plugin(role))
-        session = await run.agents.create_session(role, workspace=_workspace())
-        await run.close()
-        await run.close()
-        assert session.closed
-        with pytest.raises(SessionClosedError):
-            await session.turn("late")
-
-    asyncio.run(scenario())
-
-
-def test_fake_retains_discarded_workspace_sessions_for_observation() -> None:
-    async def scenario() -> None:
-        role = _role()
-        run = FakeRun(_plugin(role), supports_parallel_candidates=True)
-        candidate = await run.workspaces.create_candidate()
-        session = await run.agents.create_session(role, workspace=candidate)
-
-        await candidate.discard()
-
-        assert session.closed
-        assert run.agents.sessions == (session,)
-        with pytest.raises(SessionClosedError):
-            await session.turn("late")
-        await run.close()
-
-    asyncio.run(scenario())
-
-
-def test_session_can_close_early_idempotently() -> None:
-    async def scenario() -> None:
-        role = _role()
-        run = FakeRun(_plugin(role))
-        session = await run.agents.create_session(role, workspace=_workspace())
-        await session.close()
-        await session.close()
-        assert session.closed
-        await run.close()
-
-    asyncio.run(scenario())
 
 
 def test_plugin_agents_tuple_is_unique_source_of_truth() -> None:
@@ -509,11 +224,7 @@ def test_fake_workspace_models_root_revision_operations() -> None:
 
 def test_fake_candidate_workspaces_are_isolated_retained_and_run_owned() -> None:
     async def scenario() -> None:
-        run = FakeRun(
-            _plugin(),
-            project_root=Path("/project"),
-            supports_parallel_candidates=True,
-        )
+        run = _Run(project_root=Path("/project"), supports_parallel_candidates=True)
         root_revision = run.workspaces.root.revision
         assert root_revision is not None
         assert run.workspaces.supports_parallel_candidates
@@ -562,7 +273,7 @@ def test_fake_candidate_workspaces_are_isolated_retained_and_run_owned() -> None
 
 def test_fake_candidate_creation_rejects_unsupported_runs() -> None:
     async def scenario() -> None:
-        run = FakeRun(_plugin(), supports_parallel_candidates=False)
+        run = _Run(supports_parallel_candidates=False)
         assert not run.workspaces.supports_parallel_candidates
         with pytest.raises(RuntimeContractError, match="does not support"):
             await run.workspaces.create_candidate()
@@ -570,32 +281,9 @@ def test_fake_candidate_creation_rejects_unsupported_runs() -> None:
     asyncio.run(scenario())
 
 
-def test_fake_candidate_discard_invalidates_bound_sessions() -> None:
-    async def scenario() -> None:
-        role = _role()
-        run = FakeRun(_plugin(role), supports_parallel_candidates=True)
-        candidate = await run.workspaces.create_candidate()
-        candidate_sessions = (
-            await run.agents.create_session(role, workspace=candidate),
-            await run.agents.create_session(role, workspace=candidate),
-        )
-        root_session = await run.agents.create_session(role, workspace=run.workspaces.root)
-
-        await candidate.discard()
-        await candidate.discard()
-
-        assert not root_session.closed
-        for session in candidate_sessions:
-            assert session.closed
-            with pytest.raises(SessionClosedError):
-                await session.turn("too late")
-
-    asyncio.run(scenario())
-
-
 def test_fake_commands_are_argv_based_scriptable_and_recorded() -> None:
     async def scenario() -> None:
-        run = FakeRun(_plugin(_role()))
+        run = _Run()
         workspace = run.workspaces.root
         expected = CommandResult(output="profile data", exit_code=7, truncated=True)
         run.commands.script(expected)
@@ -645,7 +333,7 @@ def test_fake_commands_reject_invalid_requests_before_recording(
     argv: tuple[str, ...], timeout_seconds: int | None
 ) -> None:
     async def scenario() -> None:
-        run = FakeRun(_plugin(_role()))
+        run = _Run()
         with pytest.raises(ValueError, match="command"):
             await run.commands.run(
                 argv,
@@ -657,25 +345,13 @@ def test_fake_commands_reject_invalid_requests_before_recording(
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("member_id", ["", "   ", "member\nline", "0 ", " H1", "a\u200bb"])
-def test_session_rejects_invalid_member_id_before_creation(member_id: str) -> None:
-    async def scenario() -> None:
-        role = _role()
-        run = FakeRun(_plugin(role))
-        with pytest.raises(ValueError, match="invalid agent member ID"):
-            await run.agents.create_session(role, workspace=_workspace(), member_id=member_id)
-        assert run.agents.sessions == ()
-
-    asyncio.run(scenario())
-
-
 def test_plugin_rejects_invalid_id() -> None:
     with pytest.raises(ValueError, match="invalid orchestration plugin ID"):
         OrchestrationPlugin(
             id="Invalid Plugin",
             agents=(_role(),),
             options=_Options,
-            orchestrate=_orchestrate,
+            core=_policy(),
         )
 
 
@@ -686,60 +362,13 @@ def test_plugin_requires_concrete_options_model(invalid_options: object) -> None
             id="invalid-options",
             agents=(),
             options=cast("Any", invalid_options),
-            orchestrate=_orchestrate,
+            core=_policy(),
         )
-
-
-@pytest.mark.parametrize("invalid_state", [int, _State(), BaseModel, _AbstractModel])
-def test_plugin_requires_concrete_state_model(invalid_state: object) -> None:
-    with pytest.raises(ValueError, match="state must be a concrete BaseModel subclass"):
-        OrchestrationPlugin(
-            id="invalid-state",
-            agents=(),
-            options=_Options,
-            orchestrate=_orchestrate,
-            state=cast("Any", invalid_state),
-        )
-
-
-def test_agent_evaluations_are_kept_per_workspace_identity_and_in_order() -> None:
-    async def scenario() -> None:
-        run = FakeRun(_plugin(_role()), supports_parallel_candidates=True)
-        first = await run.workspaces.create_candidate(member_id="cache")
-        other = await run.workspaces.create_candidate(member_id="other")
-        failed = AgentEvaluation(
-            revision="r1", kinds=("accuracy",), status=AgentEvaluationStatus.FAILED, failure="boom"
-        )
-        passed = AgentEvaluation(
-            revision="r2", kinds=("accuracy",), status=AgentEvaluationStatus.PASSED
-        )
-        run.evaluation.record_agent_evaluation(first, failed)
-        run.evaluation.record_agent_evaluation(first, passed)
-        await first.discard()
-        # A later candidate of the same member has the same identity and history.
-        again = await run.workspaces.create_candidate(member_id="cache")
-
-        assert await run.evaluation.agent_evaluations(again) == (failed, passed)
-        assert await run.evaluation.agent_evaluations(other) == ()
-
-    asyncio.run(scenario())
-
-
-def test_agent_evaluation_has_a_failure_exactly_when_it_failed() -> None:
-    for status in AgentEvaluationStatus:
-        failed = status is AgentEvaluationStatus.FAILED
-        AgentEvaluation(
-            revision="r", kinds=("accuracy",), status=status, failure="x" if failed else None
-        )
-        with pytest.raises(ValidationError, match="failure"):
-            AgentEvaluation(
-                revision="r", kinds=("accuracy",), status=status, failure=None if failed else "x"
-            )
 
 
 def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
     async def scenario() -> None:
-        run = FakeRun(_plugin(_role()))
+        run = _Run()
         workspace = run.workspaces.root
         objective = BenchmarkObjective(name="tokens_per_second", direction=MetricDirection.MAXIMIZE)
         accuracy = AccuracyEvaluation(executed=True)
@@ -779,7 +408,7 @@ def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
 
         serialized = accuracy_result.receipt.model_dump_json()
         restored = AccuracyReceipt.model_validate_json(serialized)
-        resumed_host = FakeRun(_plugin(_role()), run_id=run.run_id, project_root=workspace.path)
+        resumed_host = _Run(run_id=run.run_id, project_root=workspace.path)
         reused = await resumed_host.evaluation.accuracy(
             resumed_host.workspaces.root, reuse=restored
         )
@@ -816,7 +445,7 @@ def test_fake_local_validation_reports_unusable_recipe_references_as_input_error
     path: str,
 ) -> None:
     async def scenario() -> None:
-        run = FakeRun(_plugin(_role()))
+        run = _Run()
         result = await run.evaluation.validate_local(
             run.workspaces.root,
             recipe_artifact=path,
@@ -833,7 +462,7 @@ def test_fake_local_validation_reports_unusable_recipe_references_as_input_error
 
 def test_fake_local_validation_rejects_a_noncanonical_report_location() -> None:
     async def scenario() -> None:
-        run = FakeRun(_plugin(_role()))
+        run = _Run()
         with pytest.raises(ValueError, match="writable path"):
             await run.evaluation.validate_local(
                 run.workspaces.root,
@@ -846,7 +475,7 @@ def test_fake_local_validation_rejects_a_noncanonical_report_location() -> None:
 
 def test_fake_evaluation_rejects_duplicate_objective_names() -> None:
     async def scenario() -> None:
-        run = FakeRun(_plugin(_role()))
+        run = _Run()
         objective = BenchmarkObjective(name="latency", direction=MetricDirection.MINIMIZE)
         with pytest.raises(ValueError, match="objective names must be unique"):
             await run.evaluation.benchmark(
@@ -856,190 +485,3 @@ def test_fake_evaluation_rejects_duplicate_objective_names() -> None:
         assert run.evaluation.benchmark_calls == []
 
     asyncio.run(scenario())
-
-
-def test_fake_skills_resolve_partial_selections_and_merge_in_order() -> None:
-    async def scenario() -> None:
-        run = FakeRun(_plugin(_role()))
-        run.skills.installed_resources = {
-            "profiling": ("SKILL.md", "guide.md", "references/metrics.md"),
-        }
-        result = await run.skills.resolve(
-            (
-                SkillResourceRequest(
-                    name="profiling",
-                    resource_paths=(
-                        "SKILL.md",
-                        "guide.md",
-                        "guide.md",
-                        "missing.md",
-                        "../outside.md",
-                    ),
-                    purpose="inspect the profiler",
-                ),
-                SkillResourceRequest(
-                    name="unknown",
-                    purpose="not installed",
-                ),
-                SkillResourceRequest(
-                    name="profiling",
-                    resource_paths=("references/metrics.md",),
-                    purpose="later duplicate purpose is ignored",
-                ),
-            )
-        )
-
-        assert len(result.resolved) == 1
-        resolved = result.resolved[0]
-        assert resolved.name == "profiling"
-        assert resolved.router_path == "profiling/SKILL.md"
-        assert resolved.resource_paths == (
-            "profiling/guide.md",
-            "profiling/references/metrics.md",
-        )
-        assert resolved.purpose == "inspect the profiler"
-        assert len(result.diagnostics) == 3
-        assert "resource file does not exist" in result.diagnostics[0]
-        assert "must be relative" in result.diagnostics[1]
-        assert "unknown installed skill" in result.diagnostics[2]
-
-    asyncio.run(scenario())
-
-
-def test_fake_skills_no_catalog_and_catalog_errors_are_distinct() -> None:
-    async def scenario() -> None:
-        request = SkillResourceRequest(name="profiling", purpose="inspect profiling")
-        run = FakeRun(_plugin(_role()))
-        absent = await run.skills.resolve((request,))
-        assert absent.resolved == ()
-        assert absent.diagnostics == ("no skill sources are installed",)
-
-        run.skills.catalog_error = "invalid catalog"
-        no_requests = await run.skills.resolve(())
-        assert no_requests.resolved == ()
-        assert no_requests.diagnostics == ()
-
-        with pytest.raises(SkillCatalogError, match="invalid catalog"):
-            await run.skills.resolve((request,))
-
-    asyncio.run(scenario())
-
-
-def test_fake_state_is_plugin_bound_and_stores_detached_values() -> None:
-    async def scenario() -> None:
-        run = FakeRun(_plugin(_role(), state=_State))
-        assert await run.state.load(_State) is None
-
-        value = _State(values=[1])
-        await run.state.commit(value, label="state only")
-        value.values.append(2)
-
-        assert await run.state.load(_State) == _State(values=[1])
-        assert run.state.commits[0].value == _State(values=[1])
-        assert run.state.commits[0].workspace is None
-
-        await run.state.commit(
-            _State(values=[3]),
-            workspace=run.workspaces.root,
-            label="with workspace",
-        )
-        assert run.state.commits[-1].workspace is run.workspaces.root
-
-        with pytest.raises(StateModelError, match="requires _State, got _OtherState"):
-            await run.state.load(_OtherState)
-        with pytest.raises(StateModelError, match="requires _State, got _OtherState"):
-            await run.state.commit(_OtherState(value=1))
-        with pytest.raises(RuntimeError, match="live root workspace"):
-            await run.state.commit(_State(), workspace=_workspace())
-
-    asyncio.run(scenario())
-
-
-def test_fake_state_rejects_operations_when_plugin_declares_none() -> None:
-    async def scenario() -> None:
-        run = FakeRun(_plugin(_role()))
-        with pytest.raises(StateModelError, match="does not declare durable state"):
-            await run.state.load(_State)
-        with pytest.raises(StateModelError, match="does not declare durable state"):
-            await run.state.commit(_State())
-
-    asyncio.run(scenario())
-
-
-def test_fake_state_preserves_round_trip_pydantic_values() -> None:
-    async def scenario() -> None:
-        run = FakeRun(_plugin(state=_JsonState))
-        value = _JsonState(value='{"nested":[1,2]}')
-
-        await run.state.commit(value)
-
-        assert await run.state.load(_JsonState) == value
-        assert run.state.commits[0].value == value
-
-    asyncio.run(scenario())
-
-
-def test_fake_state_scripts_commit_failures_without_replacing_durable_value() -> None:
-    async def scenario() -> None:
-        run = FakeRun(_plugin(state=_State))
-        await run.state.commit(_State(values=[1]))
-        run.state.script_commit(None, RuntimeError("storage unavailable"))
-
-        await run.state.commit(_State(values=[2]))
-        with pytest.raises(RuntimeError, match="storage unavailable"):
-            await run.state.commit(_State(values=[3]))
-
-        assert await run.state.load(_State) == _State(values=[2])
-        assert [commit.value for commit in run.state.commits] == [
-            _State(values=[1]),
-            _State(values=[2]),
-        ]
-
-    asyncio.run(scenario())
-
-
-def test_fake_control_records_checkpoints_and_propagates_stop() -> None:
-    class _Stopped(BaseException):
-        pass
-
-    async def scenario() -> None:
-        run = FakeRun(_plugin())
-        await run.control.checkpoint()
-        assert run.control.checkpoints == 1
-
-        run.control.fail_with(_Stopped())
-        with pytest.raises(_Stopped):
-            await run.control.checkpoint()
-        assert run.control.checkpoints == 2
-
-    asyncio.run(scenario())
-
-
-def test_host_state_namespaces_retain_detached_models_and_isolate_names() -> None:
-    host = FakeRun(plugin=_plugin(state=_State))
-    first = host.state.namespace("attempts")
-    first.save("cursor.json", _State(values=[1]))
-    assert host.state.namespace("attempts").load_optional("cursor.json", _State) == _State(
-        values=[1]
-    )
-    assert host.state.namespace("other-attempts").load_optional("cursor.json", _State) is None
-    assert host.state.commits == ()
-
-
-@pytest.mark.parametrize("name", ["", "../outside", "nested/name", "/absolute"])
-def test_host_state_namespace_rejects_invalid_names(name: str) -> None:
-    host = FakeRun(plugin=_plugin(state=_State))
-    with pytest.raises(ProjectStateError):
-        host.state.namespace(name)
-
-
-@pytest.mark.asyncio
-async def test_fake_evaluation_default_has_empty_owned_submission_history() -> None:
-    evaluation = FakeEvaluation()
-    assert await evaluation.settlements().submission_history("candidate") == ()
-
-
-def test_fake_evaluation_explicitly_unavailable_settlements_remain_typed() -> None:
-    evaluation = FakeEvaluation(settlement_observations=None)
-    with pytest.raises(RuntimeContractError, match="settlements are unavailable"):
-        evaluation.settlements()
