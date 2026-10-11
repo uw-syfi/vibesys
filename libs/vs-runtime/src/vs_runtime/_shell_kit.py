@@ -71,7 +71,7 @@ from vs_runtime.api.core import (
     drive_core,
     start_core,
 )
-from vs_runtime.api.infrastructure import RunStopped, create_run_control_channel
+from vs_runtime.api.infrastructure import create_run_control_channel
 from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -244,8 +244,7 @@ class ScriptedExecutors:
             accepted=accepted,
             terminal=terminal,
             released=terminal,
-            # An accepted submission reports its job complete as a child, as production does.
-            children_complete=terminal or (accepted and isinstance(request, SubmitMeasurement)),
+            children_complete=terminal,
             resource_id=(
                 answer.resource_id
                 if isinstance(answer, Succeeded | Running | InvalidReply)
@@ -410,8 +409,6 @@ class Run:
     # The loop gave up on the run: its dispatch cap was hit (it never went idle) or it
     # stalled (open work and nothing to wake it).
     halted: DispatchCapExceededError | RunStalledError | None = None
-    # An operator stop interrupted the run: it stays open for a resume (`RunStopped`).
-    stopped: bool = False
 
 
 LEASE = 1000.0
@@ -484,11 +481,8 @@ def drive_shell[S: StrategyState](
     )
     start_core(host, config)
     halted = None
-    stopped = False
     try:
         run_virtual(clock, drive_core(host, config))
-    except RunStopped:
-        stopped = True
     except (DispatchCapExceededError, RunStalledError) as error:
         # These are the loop's backstops. Return the run so the liveness check names the
         # invariant it broke and the requests that led there.
@@ -499,7 +493,6 @@ def drive_shell[S: StrategyState](
         decisions=decisions,
         journal=journal,
         halted=halted,
-        stopped=stopped,
     )
 
 
