@@ -77,8 +77,8 @@ stop), `RunEnded`.
 | `CaptureCommand` operation (profile-guided attribution, B14) | contract and owner built; no strategy uses it yet | 3 |
 | Immutable hypothesis state, or the JSON-field bridge (8.4) | unbuilt | 3 |
 | `single` and `profile-guided single` strategy | unbuilt | 3 |
-| Issue-tracker operations and `FakeIssueTracker` contract suite | unbuilt | 3 |
-| `issue_queue` strategy | unbuilt | 3 |
+| Issue-tracker operations and `FakeIssueTracker` contract suite | built (`vs_issue_tracker.api`: `ReadBoard`, `ApplyIssueChanges`, `LogProgress`, keyed writes, `FakeIssueTracker`; owner `vs_runtime.IssueBoardOwner`) | 3 |
+| `issue_queue` strategy | built (section 7.8) | 3 |
 | `ValidateLocal` operation, `multi` strategy (stateless tool admission, B15, is built) | unbuilt | 4 |
 | Immutable population state, `ExportPatch` operation, `evolve` strategy | unbuilt | 5 |
 | Removal of the legacy loop runtime and evaluation service | unbuilt | 6 |
@@ -680,6 +680,50 @@ stronger than today, where the attempt event is written to the board before the 
 and `_resume_point` guesses from the last history entry. `board` is a cache: after a restart
 the first `decide` issues `ReadBoard` before trusting it. GitHub is the case that needs a
 contract test: a created issue carries its key in a hidden marker so `inspect` can find it.
+
+### 7.8 Phase 3 outcome
+
+`issue_queue` runs on core as built. The mapping in 7.2 held; these are the places where the
+build differs from it, and why.
+
+- **Adoption needs a trusted accuracy proof.** Core adopts a retained candidate only when the
+  ledger holds an accepted accuracy proof for exactly that revision (`vs_core/_adoption.py`,
+  `_ineligible`). 7.4 assumed the judge's assessment was enough. Before it proposes the winner
+  the strategy therefore measures the final tip once with the accuracy stage
+  (`Measure(purpose=official)`, run scope). A run without an accuracy gate, or whose tip fails
+  it, adopts nothing and ends in failure naming the reason, even when the board drained.
+- **Reads, not snapshot echo.** A write makes the board cache stale and the strategy reads it
+  again before any decision that depends on it, so a decision is never made from a board older
+  than the last write (property Q3). `ApplyIssueChanges` therefore returns only where each
+  change landed, not a snapshot. A blocked board request is sent again under a new decision
+  identity and the same keys, read from the view (`OperationView.phase`), because a blocked
+  intent names its request, not its decision.
+- **Progress is fire and forget.** `LogProgress` is proposed beside the write it records and its
+  result is not awaited; replay is safe because the owner appends once per key.
+- **Idempotence lives in the tracker records.** `IssueTracker.create`, `update_status` and
+  `increment_attempts` take a `key` stored with the issue or event (GitHub also writes the
+  create key into a hidden body marker). `IssueBoardOwner.inspect` reports a batch applied only
+  when every key is recorded, and `execute` skips a change whose key is recorded.
+- **Board text through the owner.** The bootstrap issue's body and the progress entries are
+  rendered by the board owner from the strategy's templates (`BoardTexts`), because Python must
+  not build agent-bound text. The human-readable Markdown mirror of the board moved from the
+  workspace root to the run's portable state.
+- **One workspace mode.** Jobs run in isolated child workspaces; an environment that cannot
+  open them is refused with `require_candidate_sandboxes`, as `dynamic` does. The
+  `EXCLUSIVE_ROOT` choice of 4.4 is the `single` port's to make.
+- **No profiler tool.** The evaluator keeps `CONTINUATION` but not the stateless profiler
+  server: core admits such a server (B15), but no production host provides one yet, so the
+  evaluator's prompt says no profiler is available. Following up needs the launch to pass
+  `stateless_tool_servers`.
+- **Core-protocol templates are copied.** The correction, resume and wait templates are
+  duplicated from `dynamic` until B13 is built.
+- **Reply contracts changed (Q10).** Replies no longer echo `issue_id`; the judge and the
+  evaluator file issues in `new_issues` (a type `bug` list capped at one, and a list capped at
+  `--max-issues-per-perf-eval`) instead of calling the `issue-board` tool, which is gone with
+  its server and policy file. The judge is read-only.
+- **Q3.** A larger `--max-rounds` on resume is refused (exact options). Core's limits are fixed
+  in the committed state; the core issue for a validated limits-extension control event is
+  #2013.
 
 ## 8. Hard cases and alternatives
 
