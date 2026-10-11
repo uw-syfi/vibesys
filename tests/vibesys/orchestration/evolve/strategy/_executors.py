@@ -107,7 +107,11 @@ class Executors:
     accuracy: Callable[[str], bool] = lambda _commit: True
     # True for a measurement whose job ends without any evidence (its infrastructure failed).
     infrastructure_failure: Callable[[MeasurementPlan], bool] = lambda _plan: False
+    # How many times the evaluator reports a candidate's job still running before it ends, so a
+    # test can make children complete in any order.
+    polls: Callable[[str], int] = lambda _commit: 0
     jobs: int = 0
+    observed: Counter[str] = field(default_factory=Counter)
     seen: list[Request] = field(default_factory=list)
     readings: dict[EvidenceId, EvidenceReading] = field(default_factory=dict)
     retained: Counter[str] = field(default_factory=Counter)
@@ -195,6 +199,9 @@ class Executors:
         if self.infrastructure_failure(plan):
             return Failed(accepted=True)
         commit = plan.candidate.revision_id.root
+        self.observed[request.resource_id.root] += 1
+        if self.observed[request.resource_id.root] <= self.polls(commit):
+            return Running(resource_id=request.resource_id)
         refs: list[EvidenceRef] = []
         stages: list[EvaluationStageResult] = []
         for stage in plan.stages:
