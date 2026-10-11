@@ -25,7 +25,7 @@ jobs = ["tui"]
 [cases.collections]
 native_languages = []
 native_targets = []
-pnpm_packages = ["@vibesys/app-web", "@vibesys/core-state", "@vibesys/desktop", "@vibesys/entities", "@vibesys/feature-gateway-connect", "@vibesys/feature-replay", "@vibesys/feature-run-view", "@vibesys/ipc", "@vibesys/tui"]
+pnpm_packages = ["@vibesys/app-desktop-renderer", "@vibesys/app-web", "@vibesys/core-state", "@vibesys/desktop", "@vibesys/entities", "@vibesys/feature-gateway-connect", "@vibesys/feature-hosts", "@vibesys/feature-recent-runs", "@vibesys/feature-replay", "@vibesys/feature-run-control", "@vibesys/feature-run-view", "@vibesys/feature-start-run", "@vibesys/ipc", "@vibesys/tui"]
 
 [[cases]]
 name = "evaluator SDK changes reach consumers"
@@ -61,7 +61,7 @@ native_targets = [
   "resources/evaluators/unordered-map/native_runner",
   "sdk/vs-evaluator/vseval",
 ]
-pnpm_packages = ["@vibesys/app-web", "@vibesys/contracts", "@vibesys/core-state", "@vibesys/desktop", "@vibesys/entities", "@vibesys/feature-gateway-connect", "@vibesys/feature-replay", "@vibesys/feature-run-view", "@vibesys/ipc", "@vibesys/transport", "@vibesys/transport-node", "@vibesys/tui", "@vibesys/ui"]
+pnpm_packages = ["@vibesys/app-desktop-renderer", "@vibesys/app-web", "@vibesys/contracts", "@vibesys/core-state", "@vibesys/desktop", "@vibesys/entities", "@vibesys/feature-gateway-connect", "@vibesys/feature-hosts", "@vibesys/feature-recent-runs", "@vibesys/feature-replay", "@vibesys/feature-run-control", "@vibesys/feature-run-view", "@vibesys/feature-start-run", "@vibesys/ipc", "@vibesys/transport", "@vibesys/transport-node", "@vibesys/tui", "@vibesys/ui"]
 
 [[cases]]
 name = "test isolation policy changes reach Python and TypeScript checks"
