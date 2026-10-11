@@ -727,7 +727,7 @@ def test_discard_reports_release_and_is_idempotent(tmp_path: Path) -> None:
         asyncio.run(exercise(workspaces))
 
 
-def test_discard_of_the_exclusive_root_is_rejected(tmp_path: Path) -> None:
+def test_discard_of_the_exclusive_root_releases_the_hold_and_keeps_the_root(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
         attempt = _attempt()
@@ -739,8 +739,9 @@ def test_discard_of_the_exclusive_root_is_rejected(tmp_path: Path) -> None:
             executor,
             DiscardWorkspace(**_common(attempt, "discard-root"), attempt=attempt),
         )
-        assert result.observation.observation.status is ObservationStatus.REJECTED
-        assert not result.observation.observation.released
+        assert result.observation.observation.status is ObservationStatus.SUCCEEDED
+        assert result.observation.observation.released
+        assert workspaces.root.path.is_dir()
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))

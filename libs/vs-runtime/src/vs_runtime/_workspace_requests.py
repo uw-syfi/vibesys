@@ -422,10 +422,17 @@ class RuntimeWorkspaceRequests:
         if base is None:
             return _rejected("base revision is not a revision of this run")
         if plan.mode is WorkspaceMode.EXCLUSIVE_ROOT:
-            return self._ensure_root(request)
+            return await self._ensure_root(request, base=base)
         return await self._ensure_candidate(request, existing, base, resumed=resumed)
 
-    def _ensure_root(self, request: EnsureWorkspace) -> _Facts:
+    async def _ensure_root(self, request: EnsureWorkspace, *, base: str) -> _Facts:
+        """Grant the root, and make its tree the plan's base before the attempt may use it.
+
+        The restore runs before the binding is stored, so a crash anywhere in between
+        leaves no binding and the repeated ensure grants the same generation again and
+        restores again. A bound attempt is re-ensured without a restore: its edits are
+        the work it is doing.
+        """
         attempt = request.attempt
         resource_id = ResourceId(root=f"workspace-root:{attempt_key(attempt)}")
         match self._receipts.acquire_root(attempt):
@@ -433,9 +440,17 @@ class RuntimeWorkspaceRequests:
                 return _unknown("the exclusive root is held by another attempt")
             case RootGrant.SUPERSEDED:
                 return _rejected("a newer generation of this attempt holds the exclusive root")
+            case RootGrant.RELEASED:
+                return _rejected("this attempt generation already released the exclusive root")
             case RootGrant.GRANTED:
                 pass
-        self._bind(attempt, request, resource_id, None)
+        if self._receipts.load_binding(attempt) is None:
+            root = self._workspaces.root
+            if not await root.matches_revision(base):
+                failure = await self._materialize(root, base, resource_id=resource_id)
+                if failure is not None:
+                    return failure
+            self._bind(attempt, request, resource_id, None)
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
@@ -588,8 +603,14 @@ class RuntimeWorkspaceRequests:
         self, request: DiscardWorkspace, binding: AttemptBinding, *, resumed: bool
     ) -> _Facts:
         if binding.workspace_id is None:
-            return _rejected(
-                "the exclusive root workspace is run-owned and cannot be discarded",
+            # The root is run-owned and stays; ending the attempt ends only its hold. A
+            # stale generation is not the holder, so its discard changes nothing.
+            self._receipts.release_root(request.attempt)
+            return _Facts(
+                ObservationStatus.SUCCEEDED,
+                accepted=True,
+                released=True,
+                children_complete=True,
                 resource_id=binding.resource_id,
             )
         member = candidate_member_id(request.attempt)

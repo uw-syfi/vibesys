@@ -121,13 +121,14 @@ class WorkspaceEnv:
 
 
 @contextmanager
-def open_workspace_env(
+def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; each option is an independent world setting and a bundling options type would only rename the keywords every caller passes.
     tmp_path: Path,
     *,
     git: GitKind = GitKind.FAKE,
     backend: ComputeBackendImpl | None = None,
     open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession] | None = None,
     owns_candidate_worktrees: bool = False,
+    memory_paths: tuple[str, ...] = (),
 ) -> Iterator[WorkspaceEnv]:
     """A fresh run with one started host. The caller closes ``env.hosts`` (async) before exit.
 
@@ -192,7 +193,7 @@ def open_workspace_env(
                 project,
                 environment,
                 evaluation_plan=TrustedEvaluationPlan(),
-                memory_paths=(),
+                memory_paths=memory_paths,
                 skill_source_dirs=(),
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),

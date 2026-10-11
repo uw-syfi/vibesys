@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.support.session_world import dispatch_request, ensure_request
 from tests.support.workspace_world import open_workspace_env
 
@@ -56,11 +55,6 @@ def test_the_roadmap_written_by_one_designer_turn_is_there_at_the_next(tmp_path:
             asyncio.run(workspaces.close())
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="A4 gap (exclusive-root hosts): restoring the root to a revision deletes the "
-    "untracked roadmap, and an exclusive-root attempt restores the root to its base",
-)
 def test_the_roadmap_survives_a_restore_of_the_root_between_two_designer_turns(
     tmp_path: Path,
 ) -> None:
@@ -76,7 +70,7 @@ def test_the_roadmap_survives_a_restore_of_the_root_between_two_designer_turns(
         await world.root.restore(baseline)
         assert (world.root.path / ROADMAP).read_text(encoding="utf-8") == "step 1\n"
 
-    with open_workspace_env(tmp_path) as env:
+    with open_workspace_env(tmp_path, memory_paths=("roadmap",)) as env:
         world = AccessWorld(env)
         asyncio.run(run(world))
         for workspaces in env.hosts:

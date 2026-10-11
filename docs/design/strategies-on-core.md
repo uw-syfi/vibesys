@@ -68,9 +68,9 @@ stop), `RunEnded`.
 | Core lifecycle, attempts, settlement, adoption, suspension, exclusive root, `wip` retention | built (`vs-core`) | n/a |
 | Agent evaluation tool bridge, per-candidate budgets, the `waiting_for_evaluation` reply (declared privately in `dynamic`) | built (`docs/design/core-agent-evaluation-bridge.md`) | n/a |
 | `dynamic` on core, its scenario, recovery-matrix, liveness, chaos and smoke tests | built | n/a |
-| Tests of assumptions A1 to A4 (section 11) | built; A2 is false, A3 and A4 are partly open (section 11.1) | 2 |
+| Tests of assumptions A1 to A4 (section 11) | built; A2 and A4 hold since B16, A3 is feasible and unbuilt (section 11.1) | 2 |
 | Decision transcript test of `dynamic` (3.4) | built (`test_decision_transcript.py`, 96 scenarios) | 2 |
-| Exclusive-root executor fixes (B16, section 3.1) | unbuilt; prerequisite of every port that runs without candidate sandboxes | 2 |
+| Exclusive-root executor fixes (B16, section 3.1) | built (`test_exclusive_root_attempts.py`); prerequisite of every port that runs without candidate sandboxes | 2 |
 | Shared building blocks B1 to B15 (section 3) | unbuilt; `dynamic` holds private copies; extraction waits for the decision in 11.1 | 2 |
 | Strategy conformance suite and the promoted runtime shell test kit (T1, T2 in 3.1) | unbuilt; `dynamic` holds a private shell harness | 2 |
 | `CaptureCommand` operation (profile-guided attribution) | unbuilt | 3 |
@@ -881,8 +881,8 @@ and before dispatch, and after dispatch and before the observation is committed.
 
 ### 9.7 Phase 2 acceptance
 
-Status: the A1 to A4 spikes and the transcript test are merged; A2 is false, so extraction
-(everything below except those two) is paused for the decision in 11.1.
+Status: the A1 to A4 spikes, the transcript test and B16 are merged; extraction of B1 to B15
+is unblocked.
 
 `dynamic`'s whole suite passes unchanged; the transcript test (3.4) shows identical decision
 ids and payload digests; `scripts/check_tach.py`, `check_purity.py` (no baseline entry for
@@ -973,11 +973,11 @@ until the next designer turn.
 | # | Result | Test | Consequence |
 |---|---|---|---|
 | A1 | true | `tests/vibesys/orchestration/test_serial_strategy_assumptions.py` (real core and shell, both workspace modes, `candidate` and `wip`); `libs/vs-runtime/tests/test_serial_strategy_workspaces.py::test_a_retained_candidate_is_a_base_for_the_next_attempt` (real Git) | none: the cadence design in 4.4 stands, and the `wip` fallback also works |
-| A2 | **false** in `vs_runtime`, two gaps | `libs/vs-runtime/tests/test_serial_strategy_workspaces.py`, two strict expected failures | add B16 (below); until it lands no port may use `EXCLUSIVE_ROOT` |
+| A2 | true since B16 (it was false: two gaps) | `libs/vs-runtime/tests/test_serial_strategy_workspaces.py`, `test_exclusive_root_attempts.py` | none: B16 is built |
 | A3 | feasible, not yet built | `tests/vibesys/run/test_core_stateless_tools.py` | B15 as designed: the session resolver already takes any `ToolServerSource`, and the only gate is `_refuse_unbridged_tools`; the issue board stays refused (pinned by the second test in that file) |
-| A4 | true with isolated children, false across a root restore | `libs/vs-runtime/tests/test_run_scoped_artifacts.py` | the roadmap written by a `WRITE_ARTIFACTS` run-scoped turn is kept and is visible at the next designer turn; a restore of the root to a revision deletes it, so B16's restore must preserve the artifact directories |
+| A4 | true, including across a root restore that declares its artifact directories (`memory_paths`) | `libs/vs-runtime/tests/test_run_scoped_artifacts.py` | the roadmap written by a `WRITE_ARTIFACTS` run-scoped turn is kept and is visible at the next designer turn; the root restore keeps the plugin's declared `memory_paths` (`roadmap`, `progress`), and B16's grant restore uses it |
 
-**A2 gaps.** (1) Core ends every settled attempt with a `DiscardWorkspace` request and
+**A2 gaps (fixed by B16).** (1) Core ends every settled attempt with a `DiscardWorkspace` request and
 documents that, for an exclusive-root attempt, it releases the hold on the root. The executor
 rejects that request (`_discard` in `_workspace_requests.py`: "the exclusive root workspace is
 run-owned and cannot be discarded") and nothing else clears the holder recorded by
