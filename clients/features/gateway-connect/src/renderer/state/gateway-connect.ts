@@ -11,7 +11,7 @@ import {
   type GatewayBootstrapTarget,
   type GatewayConnection,
   targetFromCapability,
-} from '../../../entities/gateway.js';
+} from './gateway.js';
 
 const CANCELLED_ERROR = 'Gateway connection cancelled. Retry when ready.';
 

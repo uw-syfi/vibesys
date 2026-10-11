@@ -4,7 +4,7 @@
  * and goes live.
  */
 import {createStore, type Store} from '@vibesys/core-state';
-import type {GatewayBootstrapTarget, GatewayConnection} from '../../../entities/gateway.js';
+import type {GatewayBootstrapTarget, GatewayConnection} from '../state/gateway.js';
 import {
   type GatewayConnectAction,
   type GatewayConnectState,
