@@ -46,8 +46,9 @@ const MANIFEST_FILE = 'package.json';
 const ARCHITECTURE_TSCONFIG = 'tsconfig.architecture.json';
 const SOURCE_DIRECTORY = 'src';
 const TYPESCRIPT_SUFFIX = '.ts';
-// A stylesheet export (`./tokens.css`) is an asset: its source is the file itself.
-const STYLESHEET_SUFFIX = '.css';
+// An export's source: TypeScript (a `.cts` preload included), or, for a stylesheet export
+// (`./tokens.css`), the stylesheet itself.
+const EXPORT_SOURCE = /\.(?:[cm]?ts|tsx|css)$/;
 // The export condition every workspace export names its TypeScript source with; see
 // docs/contributing/clients-architecture.md (Build model).
 const SOURCE_CONDITION = '@vibesys/source';
@@ -220,11 +221,7 @@ function expectedArchitecturePaths(layout) {
 function exportSourcePath(directory, subpath, target) {
   const source =
     typeof target === 'object' && target !== null ? target[SOURCE_CONDITION] : undefined;
-  if (
-    typeof source !== 'string' ||
-    !source.startsWith('./') ||
-    !(source.endsWith(TYPESCRIPT_SUFFIX) || source.endsWith(STYLESHEET_SUFFIX))
-  ) {
+  if (typeof source !== 'string' || !source.startsWith('./') || !EXPORT_SOURCE.test(source)) {
     throw new Error(
       `${directory}/${MANIFEST_FILE}: the "${subpath}" export must name its TypeScript source ` +
         `(or, for a stylesheet, the stylesheet itself) ` +

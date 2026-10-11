@@ -109,12 +109,11 @@ const NODE_BUILTINS = {runtimes: ['node']};
 /**
  * Packages that predate the per-entry layout, with the rules they skip until the item named in
  * the migration table moves them. The per-entry project rules (`entry-projects` stands for all
- * three) cannot apply to their single tsconfig per package; desktop's one `node` entry also holds
- * its React welcome view, which the external-dependency rule would reject. Every other rule
- * applies. This table only shrinks.
+ * three) cannot apply to their single tsconfig per package. Every other rule applies. This table
+ * only shrinks.
  */
 export const LEGACY_EXEMPTIONS = {
-  '@vibesys/desktop': new Set(['entry-projects', 'external-dependencies']),
+  '@vibesys/desktop': new Set(['entry-projects']),
   '@vibesys/tui': new Set(['entry-projects']),
   '@vibesys/web': new Set(['entry-projects']),
 };

@@ -133,9 +133,9 @@ const VALID_FILES = {
   'scripts/check.mjs': "import 'node:fs';\nimport 'declared-package';\n",
   // The desktop app's processes and slices, each reaching only down: the composition enters each
   // slice through its index, a slice's shell owns its processes and drives its pure state, and the
-  // renderer and main share only `common/`.
+  // renderer and main share only workspace packages (`@vibesys/entities`, `@vibesys/ipc`).
   'desktop/src/main/app/main.ts':
-    "import '../features/runs/index.js';\nimport '../platform/link/index.js';\nimport '../../common/ids.js';\n",
+    "import '../features/runs/index.js';\nimport '../platform/link/index.js';\n",
   'desktop/src/main/features/runs/index.ts':
     "import './runs.js';\nimport '../../entities/listing.js';\n",
   'desktop/src/main/features/runs/runs.ts': "import '../../platform/link/index.js';\n",
@@ -145,11 +145,10 @@ const VALID_FILES = {
     "import 'node:child_process';\nimport '../state/machine.js';\n",
   'desktop/src/main/platform/link/state/machine.ts': "import type {} from '@vibesys/transport';\n",
   'desktop/src/main/platform/link/testing/fake.ts': "import '../state/machine.js';\n",
-  'desktop/src/common/ids.ts': "import type {} from '@vibesys/transport';\n",
   'desktop/src/renderer/welcome/main.tsx':
-    "import './effects/stores.js';\nimport './ui/view.js';\nimport '../../common/ids.js';\n",
+    "import './effects/stores.js';\nimport './ui/view.js';\n",
   'desktop/src/renderer/welcome/effects/stores.ts': "import '../state/store.js';\n",
-  'desktop/src/renderer/welcome/state/store.ts': "import '../../../common/ids.js';\n",
+  'desktop/src/renderer/welcome/state/store.ts': '',
   'desktop/src/renderer/welcome/ui/view.ts': "import '../state/store.js';\n",
 };
 
@@ -182,14 +181,6 @@ const RULE_CASES = [
   {
     rule: 'desktop-main-does-not-import-renderer',
     files: {'desktop/src/main/app/main.ts': "import '../../renderer/welcome/state/store.js';\n"},
-  },
-  {
-    rule: 'desktop-common-is-pure',
-    files: {'desktop/src/common/ids.ts': "import '@vibesys/transport';\n"},
-  },
-  {
-    rule: 'desktop-common-has-no-node-runtime',
-    files: {'desktop/src/common/ids.ts': "import 'node:path';\n"},
   },
   {
     rule: 'desktop-state-is-pure',
