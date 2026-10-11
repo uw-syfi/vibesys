@@ -11,8 +11,10 @@ offers:
   compute node, where the agent's container does not exist, so the broker
   confines it by an explicit policy rather than by whatever the agent runs in.
 * ``gate``: run the framework's planned accuracy or benchmark gate through a
-  :class:`GateRunner`. The agent names only which gate and, for a benchmark,
-  where the result goes; it never supplies a command.
+  :class:`GateRunner`. The agent names only which gate; it never supplies a
+  command or an argument. For a benchmark that declares a result argument the
+  broker supplies the result path itself and relays the file back to the
+  caller, so nothing task-specific is part of what the agent types.
 
 The agent's workspace is mounted in its container at the same path as on the
 host, so the working directory a request names is a path the host can check
@@ -39,11 +41,6 @@ from vs_sandbox.agent_gpu import (
     AgentGpuConfig,
     GpuCommand,
     GpuLauncher,
-)
-from vs_sandbox.benchmark_output import (
-    OUTPUT_ARGUMENT_COUNT,
-    BenchmarkOutputKind,
-    classify_benchmark_output,
 )
 from vs_sandbox.host_command_client import SOCKET_ENV, TOKEN_ENV
 from vs_sim.api import Network, OsThreads, Threads, UnixNetwork
@@ -149,7 +146,6 @@ class GateCall(BaseModel):
     op: Literal["gate"]
     token: str
     kind: GateKind
-    arguments: tuple[str, ...] = ()
     cwd: str = Field(min_length=1)
 
 
@@ -174,11 +170,6 @@ class HostCommandBrokerError(PermissionError):
     def unsupported(cls, operation: str) -> HostCommandBrokerError:
         """Reject an operation this run does not offer."""
         return cls(f"this run does not offer the {operation} operation")
-
-    @classmethod
-    def invalid_gate_arguments(cls, kind: GateKind) -> HostCommandBrokerError:
-        """Reject gate arguments that differ from the plan."""
-        return cls(f"invalid arguments for the {kind.value} gate")
 
 
 class GateRunner(Protocol):
@@ -280,7 +271,11 @@ def _send(connection: Connection, payload: Mapping[str, object]) -> None:
 
 
 def _relay_file(connection: Connection, host_file: Path, caller_path: str) -> None:
-    """Send the result a gate wrote at *host_file*, to be written at *caller_path*."""
+    """Send the result a gate wrote at *host_file*, to be written at *caller_path*.
+
+    The output that follows tells the caller where the file is, because the
+    caller did not choose the path.
+    """
     content = _read_owned_file(host_file)
     if content is None:
         return
@@ -288,6 +283,8 @@ def _relay_file(connection: Connection, host_file: Path, caller_path: str) -> No
         connection,
         {"file": {"path": caller_path, "data": base64.b64encode(content).decode()}},
     )
+    note = f"benchmark result file: {caller_path}\n".encode()
+    _send(connection, {"output": base64.b64encode(note).decode()})
 
 
 def _read_owned_file(path: Path) -> bytes | None:
@@ -307,13 +304,18 @@ def _read_owned_file(path: Path) -> bytes | None:
         return handle.read()
 
 
+def _framework_result_path() -> str:
+    """Return a fresh, unguessable framework result path under ``/tmp``."""
+    return f"{_FRAMEWORK_TMP}/vibesys-framework-benchmark-{secrets.token_hex(16)}.json"
+
+
 def _reserve_result_file() -> Path:
     """Create an empty, private result file under the host's ``/tmp``.
 
     The name is unguessable and the file is created exclusively and without
     following links, so nothing else can claim it before the gate writes it.
     """
-    path = Path(f"{_FRAMEWORK_TMP}/vibesys-framework-benchmark-{secrets.token_hex(16)}.json")
+    path = Path(_framework_result_path())
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     os.close(descriptor)
     return path
@@ -536,29 +538,18 @@ class HostCommandBroker:
     def _gate_arguments(
         call: GateCall, gates: Gates
     ) -> tuple[tuple[str, ...], tuple[Path, str] | None]:
-        """Validate a gate's arguments against the plan; return them and any file to relay.
+        """Return the arguments the gate runs with, and any file to relay.
 
-        An accuracy gate takes none. A benchmark takes none, or its declared
-        result argument and one allowed result path. A result under the
-        caller's ``/tmp`` is redirected to a private file of the broker's
-        and relayed back when the gate ends, because the caller's ``/tmp`` is
-        not the gate host's.
+        The agent supplies none. A benchmark that declares a result argument
+        gets it with a private file of the broker's, relayed to a fresh
+        framework path in the caller's ``/tmp`` when the gate ends, because the
+        caller's ``/tmp`` is not the gate host's. Every other gate takes none.
         """
-        arguments = call.arguments
         output_argument = gates.benchmark_output_argument
         if call.kind is GateKind.ACCURACY or output_argument is None:
-            if arguments:
-                raise HostCommandBrokerError.invalid_gate_arguments(call.kind)
             return (), None
-        if len(arguments) != OUTPUT_ARGUMENT_COUNT or arguments[0] != output_argument:
-            raise HostCommandBrokerError.invalid_gate_arguments(call.kind)
-        kind = classify_benchmark_output(arguments[1])
-        if kind is None:
-            raise HostCommandBrokerError.invalid_gate_arguments(call.kind)
-        if kind is BenchmarkOutputKind.WORKSPACE:
-            return arguments, None
         host_file = _reserve_result_file()
-        return (output_argument, str(host_file)), (host_file, arguments[1])
+        return (output_argument, str(host_file)), (host_file, _framework_result_path())
 
     def _workspace_for(self, cwd: Path) -> Path:
         for workspace in self._workspaces:

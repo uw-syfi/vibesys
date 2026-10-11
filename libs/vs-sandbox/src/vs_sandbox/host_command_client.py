@@ -3,14 +3,15 @@
 Usage::
 
     vibesys-gpu [--gpus N] [--time MINUTES] -- COMMAND...
-    vibesys-gpu --gate accuracy|benchmark [ARGUMENT...]
+    vibesys-gpu --gate accuracy|benchmark
 
 The agent's sandbox cannot reach the Slurm controller, so the request goes to
 the run's host-owned broker over a Unix socket (:data:`SOCKET_ENV`) with a
 per-run token (:data:`TOKEN_ENV`). The first form runs COMMAND confined in a
 new job. The second runs the framework's planned accuracy or benchmark gate;
-the broker accepts only the arguments the plan allows, and relays the result
-file a benchmark writes under ``/tmp`` back to this side of the socket.
+a gate takes no arguments. The broker supplies the benchmark's result path
+itself, relays the result file back to this side of the socket under ``/tmp``,
+and names that path in the gate's output.
 
 Output streams as the job produces it, and the exit status is the command's.
 Interrupting the client cancels the job, whether it is queued or running.
@@ -256,14 +257,13 @@ def run_brokered(
 
 def run_gate(
     kind: str,
-    arguments: Sequence[str],
     *,
     stop: Stop | None = None,
     dial: Callable[[str], Wire] = _SocketWire,
 ) -> int:
     """Run the planned *kind* gate through the broker; return its exit status."""
     return _request(
-        {"op": "gate", "kind": kind, "arguments": list(arguments)},
+        {"op": "gate", "kind": kind},
         stop=stop or Stop(),
         dial=dial,
     )
@@ -303,7 +303,10 @@ def _gate(arguments: list[str], stop: Stop, dial: Callable[[str], Wire]) -> int:
     if kind not in _GATE_KINDS:
         _error(f"--gate takes one of: {', '.join(_GATE_KINDS)}")
         return _USAGE_ERROR
-    return run_gate(kind, rest[1:] if rest[:1] == ["--"] else rest, stop=stop, dial=dial)
+    if rest:
+        _error(f"invalid arguments for the {kind} gate: a gate takes none")
+        return _USAGE_ERROR
+    return run_gate(kind, stop=stop, dial=dial)
 
 
 def _gpu(arguments: list[str], stop: Stop, dial: Callable[[str], Wire]) -> int:

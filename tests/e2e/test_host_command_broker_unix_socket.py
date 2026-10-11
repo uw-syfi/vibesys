@@ -113,7 +113,6 @@ def test_hanging_up_cancels_a_running_gate() -> None:
             "op": "gate",
             "token": broker.token,
             "kind": "accuracy",
-            "arguments": [],
             "cwd": str(directory / "workspace"),
         }
         client.sendall(json.dumps(call).encode() + b"\n")

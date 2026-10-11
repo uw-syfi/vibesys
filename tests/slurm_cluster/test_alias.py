@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import secrets
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.slurm_cluster.harness import CONTAINER_TMP, parse_env
+from tests.slurm_cluster.harness import parse_env
 
 if TYPE_CHECKING:
     from tests.slurm_cluster.cluster import SlurmCluster
@@ -41,11 +40,12 @@ def test_the_aliass_gates_run_as_jobs_staged_into_its_stage_root(
 
 def test_the_aliass_benchmark_result_is_relayed_to_the_agents_tmp(alias_run: OpenRun) -> None:
     alias_run.set_mode("benchmark", "pass")
-    result_path = f"{CONTAINER_TMP}/vibesys-framework-benchmark-{secrets.token_hex(8)}.json"
 
-    gate = alias_run.gate("benchmark", "--output", result_path)
+    gate = alias_run.gate("benchmark")
 
     assert gate.exit_code == 0, gate.output
+    (line,) = [x for x in gate.output.splitlines() if x.startswith("benchmark result file: ")]
+    result_path = line.removeprefix("benchmark result file: ")
     assert json.loads(alias_run.agent(f"cat {result_path}").output)["score"] == 42
 
 

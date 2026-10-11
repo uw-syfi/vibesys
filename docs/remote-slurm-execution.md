@@ -21,8 +21,10 @@ per-run token. The agent runs a gate as `vibesys-gate --gate accuracy` or
 environment notes in the agent's prompts name it and the gates the task plans. The
 broker runs the planned gate with the
 cluster wrapper (`vs_sandbox.slurm_command`), which stages the workspace, runs
-the job, and copies the result back. The agent names only the gate and, for a
-benchmark, a result path; it cannot supply a command. Interrupting the client or
+the job, and copies the result back. The agent names only the gate and supplies no
+arguments; the broker passes the benchmark's declared result argument itself,
+relays the result file into the container's `/tmp`, and names it in the gate's
+output. Interrupting the client or
 dropping the connection cancels the job.
 
 The ROCprof server runs in the container and reaches the cluster through a
