@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.minimal_container.stdio import StdioJsonProcess, mcp_initialize, mcp_tool_names
+from tests.support.owed_submissions import owed_in
 from tests.support.skeleton_strategy import ATTEMPT, DIGEST
 
 from vs_core.api import ArtifactId, ArtifactRef, Scope
@@ -53,7 +54,9 @@ class _NoWorkspaces:
 def test_the_core_evaluation_server_initializes_and_lists_its_tools(
     editor: Editor, tmp_path: Path
 ) -> None:
-    bridge = AgentEvaluationBridge(tmp_path / "evaluation.sock", _POLICY, _NoWorkspaces())
+    bridge = AgentEvaluationBridge(
+        tmp_path / "evaluation.sock", _POLICY, _NoWorkspaces(), owed_in(tmp_path / "owed")
+    )
     role = AgentRole(
         id="implementer", system_prompt="implement", extra_tools=(AgentTool(id=EVALUATION_TOOL_ID),)
     )

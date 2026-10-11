@@ -39,6 +39,7 @@ from vs_runtime.api.core import (
     EVALUATION_TOOL_ID,
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
+    OwedSubmissions,
     ReceiptStore,
     ScopeWorkspaces,
     StoreWorkspaceReceipts,
@@ -188,6 +189,7 @@ async def scenario(
             tmp_path / "evaluation.sock",
             POLICY,
             ScopeWorkspaces(workspaces, StoreWorkspaceReceipts(ReceiptStore(receipts))),
+            OwedSubmissions(ReceiptStore(receipts)),
         )
         resolvers[0].bridge = bridge
         bridges.append(bridge)

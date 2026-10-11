@@ -33,10 +33,17 @@ changed since the wait was validated, ends the turn without suspending.
 A submission the agent has not learned of is never lost. The reply that carries a handle
 may not reach the agent (its tool deadline expired while the host snapshotted the workspace
 behind a busy lock, or the agent's process died). Core has already charged the budget, so a
-submission stays *unacknowledged* until its reply is written to a live connection. The next
+submission stays *owed* until the client confirms it read the reply. The next
 ``submit_evaluation`` for the same candidate content, in this turn or a later one, returns
 that handle and charges nothing; ``unacknowledged`` lists what is still owed, for the
 run loop's stall report.
+
+What is owed is durable (``OwedSubmissions``, keyed by scope, candidate revision and
+policy), so a host restart keeps the promise. The entry is written before the charge, with
+the ``call_id`` the charge will carry; core's committed state says whether the charge
+happened. A retry finds the entry, asks core for that ``call_id``, and either returns the
+handle of the charge core holds or, when the charge never committed, charges under a new
+entry. Core admits a ``call_id`` once, so one entry is never charged twice.
 
 The yield is held in memory until the turn is reported. A host restart in that window
 loses it; the turn then ends without suspending and its measurement result reaches the
@@ -53,7 +60,7 @@ import hmac
 import os
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -70,6 +77,7 @@ from vs_core.api import (
     InvocationRef,
     MeasurementPlan,
     MeasurementRecipe,
+    RequestId,
     ResourceId,
     RevisionRef,
     Scope,
@@ -98,6 +106,7 @@ from vs_evaluation.api.tools import (
 from vs_runtime._agent_tool_errors import ToolRefusal, ToolRefusedError, render_tool_refusal
 from vs_runtime._core_loop import AdmissionBusyError
 from vs_runtime._evaluation_jobs import handle_for
+from vs_runtime._owed_submissions import OwedKey, OwedSubmission, OwedSubmissions
 from vs_runtime._workspace_lookup import find_scope_workspace
 from vs_runtime._workspace_requests import revision_ref
 
@@ -290,13 +299,6 @@ class AdmissionShell(Protocol):
         ...
 
 
-class _Pending(NamedTuple):
-    """A charged submission whose handle has not yet reached the agent."""
-
-    revision: str
-    deadline_at: float
-
-
 def _nothing() -> None:
     """The acknowledgement of an answer that carries no handle."""
 
@@ -311,11 +313,6 @@ class _Scoped:
     submitted: dict[str, float] = field(default_factory=dict)
     """Handle to the measurement's deadline, for each submission of ``turn`` not yet yielded."""
     waits: tuple[str, ...] = ()
-    unacknowledged: dict[str, _Pending] = field(default_factory=dict)
-    """Handle to its candidate and deadline, for each submission whose reply was not delivered.
-
-    Unlike ``submitted`` this survives the turn: the agent that never learned a handle
-    asks again, possibly in its next turn, and must be given this one."""
 
     def begin(self, turn: InvocationId | None) -> None:
         """Join ``turn``; a handle or wait of an earlier turn is not this turn's to use."""
@@ -338,15 +335,20 @@ class AgentEvaluationBridge:
         socket_path: Path,
         policy: AgentEvaluationPolicy,
         workspaces: AgentWorkspaces,
+        owed: OwedSubmissions,
         diagnostics: Callable[[str], None] = _ignore_diagnostic,
     ) -> None:
-        """Bind the socket path, the host's plan policy, the workspace lookup and a log sink.
+        """Bind the socket path, the plan policy, the workspace lookup, the owed record and a log sink.
 
         ``diagnostics`` hears one line for each call refused as busy, for the run's journal.
         """
         self._socket_path = socket_path
         self._policy = policy
         self._workspaces = workspaces
+        self._owed = owed
+        self._policy_digest = hashlib.sha256(
+            f"{policy.purpose}\n{policy.measurement.model_dump_json()}".encode()
+        ).hexdigest()
         self._diagnostics = diagnostics
         self._secret = os.urandom(32)
         self._shell: AdmissionShell | None = None
@@ -458,12 +460,21 @@ class AgentEvaluationBridge:
         return reply, acknowledge
 
     def unacknowledged(self) -> tuple[str, ...]:
-        """One line per charged submission whose handle never reached its agent."""
-        return tuple(
-            f"{handle} (candidate {pending.revision[:12]}, scope {key})"
-            for key, scoped in self._scopes.items()
-            for handle, pending in scoped.unacknowledged.items()
-        )
+        """One line per charged submission whose handle never reached its agent.
+
+        An owed entry is charged only if core holds its ``call_id``; one core does not know
+        was never charged (the host died first) and is not listed.
+        """
+        shell, _ = self._bound()
+        lines: list[str] = []
+        for item in self._owed.all():
+            charged = self._charge_of(shell, item)
+            if charged is not None:
+                lines.append(
+                    f"{handle_for(charged)} (candidate {item.key.revision[:12]}, "
+                    f"scope {item.key.scope.model_dump_json()})"
+                )
+        return tuple(lines)
 
     @staticmethod
     def _failure(reason: ToolRefusal, error: ToolRefusedError | None = None) -> bytes:
@@ -490,36 +501,57 @@ class AgentEvaluationBridge:
                 raise ToolRefusedError(ToolRefusal.WORKSPACE_GONE)
             scoped = self._scoped(scope)
             revision = await self._revision(workspace, scoped)
-            owed = next(
-                (h for h, pending in scoped.unacknowledged.items() if pending.revision == revision),
-                None,
-            )
-            if owed is not None:
-                # A retry of a submission whose reply was lost: the same one, not a second.
-                scoped.submitted[owed] = scoped.unacknowledged[owed].deadline_at
-                return SubmittedReply(handle_id=owed), self._acknowledger(scoped, owed)
+            key = OwedKey(scope=scope, revision=revision, policy=self._policy_digest)
+            owed = self._owed.find(key)
+            charged = None if owed is None else self._charge_of(shell, owed)
+            if owed is not None and charged is not None:
+                # A retry of a submission whose reply was lost, possibly before a restart:
+                # the same one, not a second.
+                handle = handle_for(charged)
+                scoped.submitted[handle] = self._deadline(shell, owed)
+                return SubmittedReply(handle_id=handle), self._acknowledger(owed)
             now = clock.now()
-            call_id = f"agent:{uuid.uuid4().hex}"
-            event = AgentMeasurementRequested(
-                scope=scope,
-                plan=self._policy.plan(revision_ref(revision), now_at=now),
-                call_id=call_id,
-            )
-            transition = self._admit(shell, event, now)
-            request = next(
-                (r for r in transition.requests if isinstance(r, SubmitMeasurement)), None
-            )
-            if request is None or request.request_id is None:
-                return self._refusal(transition, call_id), _nothing
+            # Intent first: if the host dies after the charge commits, the entry names it.
+            owed = OwedSubmission(key=key, call_id=f"agent:{uuid.uuid4().hex}", submitted_at=now)
+            self._owed.record(owed)
+            try:
+                event = AgentMeasurementRequested(
+                    scope=scope,
+                    plan=self._policy.plan(revision_ref(revision), now_at=now),
+                    call_id=owed.call_id,
+                )
+                transition = self._admit(shell, event, now)
+                request = next(
+                    (r for r in transition.requests if isinstance(r, SubmitMeasurement)), None
+                )
+                if request is None or request.request_id is None:
+                    reply = self._refusal(transition, owed.call_id)
+                    self._owed.clear(key, owed.call_id)
+                    return reply, _nothing
+            except BaseException:
+                self._owed.clear(key, owed.call_id)
+                raise
             handle = handle_for(request.request_id)
             scoped.submitted[handle] = request.deadline_at
-            scoped.unacknowledged[handle] = _Pending(revision, request.deadline_at)
-            return SubmittedReply(handle_id=handle), self._acknowledger(scoped, handle)
+            return SubmittedReply(handle_id=handle), self._acknowledger(owed)
 
     @staticmethod
-    def _acknowledger(scoped: _Scoped, handle: str) -> Callable[[], None]:
+    def _charge_of(shell: AdmissionShell, owed: OwedSubmission) -> RequestId | None:
+        """The submission core charged under this entry, or None when core holds none."""
+        call = next(
+            (c for c in shell.admitted_core.evaluation.agent_calls if c.call_id == owed.call_id),
+            None,
+        )
+        return None if call is None else call.request_id
+
+    def _deadline(self, shell: AdmissionShell, owed: OwedSubmission) -> float:
+        """The deadline core gave the entry's measurement: its plan's, bounded by the run's."""
+        plan = self._policy.plan(revision_ref(owed.key.revision), now_at=owed.submitted_at)
+        return min(plan.deadline_at, shell.admitted_core.run.deadline_at)
+
+    def _acknowledger(self, owed: OwedSubmission) -> Callable[[], None]:
         def acknowledge() -> None:
-            scoped.unacknowledged.pop(handle, None)
+            self._owed.clear(owed.key, owed.call_id)
 
         return acknowledge
 
