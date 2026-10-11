@@ -560,6 +560,213 @@ def test_chat_thread_uses_snapshotted_provider_support_and_free_text_model(
     assert auxiliary.closed
 
 
+def test_chat_thread_transcript_stays_in_the_project_chat_namespace(tmp_path: Path) -> None:
+    project, run_id = _project_run(tmp_path / "project")
+
+    class FakeManagedAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            assert message == "what changed?"
+            assert invocation_id
+            return "The benchmark improved."
+
+        def close(self) -> None:
+            pass
+
+    parts = build_server_parts(chat_agent_builder=lambda _request: FakeManagedAgent())
+    auxiliary = _attach_test_run(
+        parts,
+        project,
+        run_id,
+        AgentSelection(provider="codex", model="gpt-test"),
+        project.state.log_directory(run_id),
+    )
+
+    created = parts.api.execute(ChatThreadCreateQuery())
+    assert created.chat_thread is not None
+    parts.api.execute(ChatQuery(text="what changed?", thread_id=created.chat_thread.thread_id))
+
+    chat_namespace = project.state.local_namespace(run_id, "server").external_directory("chat")
+    transcript = chat_namespace / "threads" / created.chat_thread.thread_id / "conversation.jsonl"
+    assert transcript.resolve().is_relative_to(chat_namespace.resolve())
+    assert json.loads(transcript.read_text()) == {
+        "question": "what changed?",
+        "answer": "The benchmark improved.",
+    }
+    parts.integration.close()
+    assert auxiliary.closed
+
+
+def test_chat_thread_rejects_a_symlinked_transcript_parent(tmp_path: Path) -> None:
+    project, run_id = _project_run(tmp_path / "project")
+    chat_namespace = project.state.local_namespace(run_id, "server").external_directory("chat")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (chat_namespace / "threads").symlink_to(outside, target_is_directory=True)
+    built_agents = 0
+
+    class FakeManagedAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            del message, invocation_id
+            return "answer"
+
+        def close(self) -> None:
+            pass
+
+    def build_agent(_request: ChatAgentBuildRequest) -> FakeManagedAgent:
+        nonlocal built_agents
+        built_agents += 1
+        return FakeManagedAgent()
+
+    parts = build_server_parts(chat_agent_builder=build_agent)
+    auxiliary = _attach_test_run(
+        parts,
+        project,
+        run_id,
+        AgentSelection(provider="codex", model="gpt-test"),
+        project.state.log_directory(run_id),
+    )
+
+    with pytest.raises(ValueError, match="symlink"):
+        parts.api.execute(ChatThreadCreateQuery())
+
+    assert built_agents == 1
+    assert list(outside.iterdir()) == []
+    parts.integration.close()
+    assert auxiliary.closed
+
+
+def test_chat_thread_first_write_does_not_follow_a_late_transcript_parent_symlink(
+    tmp_path: Path,
+) -> None:
+    project, run_id = _project_run(tmp_path / "project")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    class FakeManagedAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            del message, invocation_id
+            return "answer"
+
+        def close(self) -> None:
+            pass
+
+    parts = build_server_parts(chat_agent_builder=lambda _request: FakeManagedAgent())
+    auxiliary = _attach_test_run(
+        parts,
+        project,
+        run_id,
+        AgentSelection(provider="codex", model="gpt-test"),
+        project.state.log_directory(run_id),
+    )
+    created = parts.api.execute(ChatThreadCreateQuery())
+    assert created.chat_thread is not None
+    chat_namespace = project.state.local_namespace(run_id, "server").external_directory("chat")
+    threads = chat_namespace / "threads"
+    assert not threads.exists()
+    threads.symlink_to(outside, target_is_directory=True)
+
+    response = parts.api.execute(
+        ChatQuery(text="what changed?", thread_id=created.chat_thread.thread_id)
+    )
+
+    assert response.chat is not None
+    assert response.chat.answer == "answer"
+    assert list(outside.rglob("*")) == []
+    parts.integration.close()
+    assert auxiliary.closed
+
+
+def test_new_chat_thread_retains_the_attached_project_namespace_after_replacement(
+    tmp_path: Path,
+) -> None:
+    project, run_id = _project_run(tmp_path / "project")
+
+    class FakeManagedAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            del message, invocation_id
+            return "answer"
+
+        def close(self) -> None:
+            pass
+
+    parts = build_server_parts(chat_agent_builder=lambda _request: FakeManagedAgent())
+    auxiliary = _attach_test_run(
+        parts,
+        project,
+        run_id,
+        AgentSelection(provider="codex", model="gpt-test"),
+        project.state.log_directory(run_id),
+    )
+    server_namespace = project.state.local_namespace(run_id, "server").external_directory()
+    retained_namespace = tmp_path / "retained-server-namespace"
+    server_namespace.rename(retained_namespace)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    server_namespace.symlink_to(outside, target_is_directory=True)
+
+    created = parts.api.execute(ChatThreadCreateQuery())
+    assert created.chat_thread is not None
+    response = parts.api.execute(
+        ChatQuery(text="what changed?", thread_id=created.chat_thread.thread_id)
+    )
+
+    assert response.chat is not None
+    assert response.chat.answer == "answer"
+    assert list(outside.rglob("*")) == []
+    transcript = (
+        retained_namespace
+        / "chat"
+        / "threads"
+        / created.chat_thread.thread_id
+        / "conversation.jsonl"
+    )
+    assert json.loads(transcript.read_text(encoding="utf-8")) == {
+        "question": "what changed?",
+        "answer": "answer",
+    }
+    parts.integration.close()
+    assert auxiliary.closed
+
+
+def test_chat_thread_append_does_not_follow_a_transcript_file_symlink(tmp_path: Path) -> None:
+    project, run_id = _project_run(tmp_path / "project")
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text("outside\n", encoding="utf-8")
+
+    class FakeManagedAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            del message, invocation_id
+            return "answer"
+
+        def close(self) -> None:
+            pass
+
+    parts = build_server_parts(chat_agent_builder=lambda _request: FakeManagedAgent())
+    auxiliary = _attach_test_run(
+        parts,
+        project,
+        run_id,
+        AgentSelection(provider="codex", model="gpt-test"),
+        project.state.log_directory(run_id),
+    )
+    created = parts.api.execute(ChatThreadCreateQuery())
+    assert created.chat_thread is not None
+    chat_namespace = project.state.local_namespace(run_id, "server").external_directory("chat")
+    state_dir = chat_namespace / "threads" / created.chat_thread.thread_id
+    state_dir.mkdir(parents=True)
+    (state_dir / "conversation.jsonl").symlink_to(outside)
+
+    response = parts.api.execute(
+        ChatQuery(text="what changed?", thread_id=created.chat_thread.thread_id)
+    )
+
+    assert response.chat is not None
+    assert response.chat.answer == "answer"
+    assert outside.read_text(encoding="utf-8") == "outside\n"
+    parts.integration.close()
+    assert auxiliary.closed
+
+
 def test_close_is_idempotent(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.integration.close()

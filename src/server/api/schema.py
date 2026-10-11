@@ -9,9 +9,10 @@ from __future__ import annotations
 import copy
 import json
 import math
+import re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Never
 
 from pydantic import BaseModel
 
@@ -48,7 +49,10 @@ _RESPONSE_DESCRIPTOR_KEYWORDS = frozenset(
         "enum",
         "format",
         "items",
+        "maxLength",
         "minimum",
+        "minLength",
+        "pattern",
         "properties",
         "required",
         "title",
@@ -62,6 +66,8 @@ _RUN_EVENT_DESCRIPTOR_KEYWORDS = _RESPONSE_DESCRIPTOR_KEYWORDS | {
 _RESPONSE_DESCRIPTOR_TYPES = frozenset(
     {"array", "boolean", "integer", "null", "number", "object", "string"}
 )
+_CLIENT_PATTERN_GROUP_PREFIXES = frozenset({"?:", "?=", "?!"})
+_CLIENT_PATTERN_SIMPLE_ESCAPES = frozenset(r"\.^$*+?{}[]()|/sSdDwWbBfnrtv")
 
 
 class UnsupportedResponsePayloadSchemaError(ValueError):
@@ -469,6 +475,43 @@ def _require_supported_response_number_keywords(
 def _require_supported_response_string_keywords(
     node: dict[object, object], path: str, schema_type: object
 ) -> None:
+    string_constraints = {"minLength", "maxLength", "pattern"}
+    if set(node) & string_constraints and schema_type != "string":
+        raise UnsupportedResponsePayloadSchemaError(
+            path, "response payload string constraints require type 'string'"
+        )
+    for keyword in ("minLength", "maxLength"):
+        value = node.get(keyword)
+        if keyword in node and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+            raise UnsupportedResponsePayloadSchemaError(
+                path,
+                f"response payload schema {keyword} must be a nonnegative integer",
+            )
+    minimum_length = node.get("minLength")
+    maximum_length = node.get("maxLength")
+    if (
+        isinstance(minimum_length, int)
+        and not isinstance(minimum_length, bool)
+        and isinstance(maximum_length, int)
+        and not isinstance(maximum_length, bool)
+        and minimum_length > maximum_length
+    ):
+        raise UnsupportedResponsePayloadSchemaError(
+            path, "response payload schema minLength cannot exceed maxLength"
+        )
+    pattern = node.get("pattern")
+    if "pattern" in node:
+        if not isinstance(pattern, str):
+            raise UnsupportedResponsePayloadSchemaError(
+                path, "response payload schema pattern must be a string"
+            )
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise UnsupportedResponsePayloadSchemaError(
+                path, "response payload schema pattern must be a valid regular expression"
+            ) from exc
+        _require_portable_client_pattern(pattern, path)
     schema_format = node.get("format")
     if "format" in node and (schema_type != "string" or schema_format != "date-time"):
         raise UnsupportedResponsePayloadSchemaError(
@@ -484,6 +527,136 @@ def _require_supported_response_string_keywords(
         raise UnsupportedResponsePayloadSchemaError(
             path, "response payload schema enum must contain one or more strings"
         )
+
+
+def _require_portable_client_pattern(pattern: str, path: str) -> None:
+    """Restrict patterns to syntax shared by Python and ECMAScript Unicode regexes."""
+    _reject_quantified_client_assertions(pattern, path)
+    index = 0
+    in_character_class = False
+    while index < len(pattern):
+        character = pattern[index]
+        if character == "\\":
+            index = _portable_client_escape_end(
+                pattern,
+                index,
+                path,
+                in_character_class=in_character_class,
+            )
+            continue
+        if in_character_class:
+            in_character_class = character != "]"
+            index += 1
+            continue
+        index, in_character_class = _portable_client_expression_token_end(pattern, index, path)
+
+
+def _reject_quantified_client_assertions(pattern: str, path: str) -> None:
+    """Reject lookaheads quantified only by legacy, non-Unicode ECMAScript."""
+    groups: list[bool] = []
+    index = 0
+    in_character_class = False
+    while index < len(pattern):
+        character = pattern[index]
+        if character == "\\":
+            index += 2
+            continue
+        if in_character_class:
+            in_character_class = character != "]"
+            index += 1
+            continue
+        if character == "[":
+            in_character_class = True
+        elif character == "(":
+            groups.append(pattern[index + 1 : index + 3] in {"?=", "?!"})
+        elif character == ")":
+            assertion = groups.pop()
+            following = pattern[index + 1 : index + 2]
+            if assertion and (
+                following in {"*", "+", "?"}
+                or (
+                    following == "{"
+                    and _portable_client_quantifier_end(pattern, index + 1) is not None
+                )
+            ):
+                _raise_nonportable_client_pattern(path)
+        index += 1
+
+
+def _portable_client_expression_token_end(
+    pattern: str,
+    index: int,
+    path: str,
+) -> tuple[int, bool]:
+    """Validate one token outside a character class."""
+    character = pattern[index]
+    if character == "[":
+        return index + 1, True
+    if character in "]}":
+        _raise_nonportable_client_pattern(path)
+    if character == "{":
+        quantifier_end = _portable_client_quantifier_end(pattern, index)
+        if quantifier_end is None or pattern[quantifier_end : quantifier_end + 1] == "+":
+            _raise_nonportable_client_pattern(path)
+        return quantifier_end, False
+    if (
+        character == "("
+        and pattern[index + 1 : index + 2] == "?"
+        and pattern[index + 1 : index + 3] not in _CLIENT_PATTERN_GROUP_PREFIXES
+    ):
+        _raise_nonportable_client_pattern(path)
+    if character in "*+?" and pattern[index + 1 : index + 2] == "+":
+        # Python's possessive quantifiers are not part of the Node 20 RegExp
+        # grammar used by the generated client.
+        _raise_nonportable_client_pattern(path)
+    return index + 1, False
+
+
+def _portable_client_quantifier_end(pattern: str, index: int) -> int | None:
+    """Return the position after one shared ``{m,n}`` quantifier."""
+    cursor = index + 1
+    digit_start = cursor
+    while pattern[cursor : cursor + 1].isdigit():
+        cursor += 1
+    if cursor == digit_start:
+        return None
+    if pattern[cursor : cursor + 1] == ",":
+        cursor += 1
+        while pattern[cursor : cursor + 1].isdigit():
+            cursor += 1
+    if pattern[cursor : cursor + 1] != "}":
+        return None
+    return cursor + 1
+
+
+def _portable_client_escape_end(
+    pattern: str,
+    index: int,
+    path: str,
+    *,
+    in_character_class: bool,
+) -> int:
+    escaped = pattern[index + 1 : index + 2]
+    if escaped in {"x", "u"}:
+        width = 2 if escaped == "x" else 4
+        digits = pattern[index + 2 : index + 2 + width]
+        if len(digits) != width or any(
+            character not in "0123456789abcdefABCDEF" for character in digits
+        ):
+            _raise_nonportable_client_pattern(path)
+        return index + 2 + width
+    if escaped == "-" and in_character_class:
+        return index + 2
+    if escaped not in _CLIENT_PATTERN_SIMPLE_ESCAPES:
+        _raise_nonportable_client_pattern(path)
+    return index + 2
+
+
+def _raise_nonportable_client_pattern(path: str) -> Never:
+    raise UnsupportedResponsePayloadSchemaError(
+        path,
+        "response payload schema pattern must use the portable client regular-expression dialect",
+    )
 
 
 def _require_supported_response_constant(
