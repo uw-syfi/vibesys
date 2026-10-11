@@ -395,7 +395,7 @@ depends_on = ["vs_sandbox"]
 [[modules]]
 path = "vibesys.run.core_services"
 layer = "orchestration_host"
-depends_on = ["vibesys.run.evaluation_socket", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime", "vs_sim.api"]
+depends_on = ["vibesys.run.evaluation_socket", "vs_agent", "vs_core", "vs_mcp", "vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.run.measurement_events"

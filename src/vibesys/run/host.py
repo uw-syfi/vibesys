@@ -172,6 +172,7 @@ class _ProductHostFactory:
         | None
     )
     options: BaseModel | None = None
+    stateless_tool_servers: Mapping[str, ToolServerDescriptor] | None = None
     core_services: CoreServices | None = field(default=None, init=False)
     evaluation_backend: SemanticEvaluationBackend | None = field(default=None, init=False)
     evaluation_service: EvaluationAgentService | None = field(default=None, init=False)
@@ -603,6 +604,7 @@ class _ProductHostFactory:
                 clock=self.timing.clock,
                 agent_lifecycle=self.integration.agent_execution_event,
                 evaluation_diagnostics=self._evaluation_diagnostic,
+                stateless_tool_servers=dict(self.stateless_tool_servers or {}),
                 measurement_observer=CoreMeasurementEvents(self.integration.events),
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id
@@ -860,6 +862,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     timing: RunTiming,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
     | None = None,
+    stateless_tool_servers: Mapping[str, ToolServerDescriptor] | None = None,
 ) -> AsyncIterator[CoreHost]:
     """Open the host of a plugin whose ``core`` policy the runtime drives.
 
@@ -885,6 +888,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
         timing=timing,
         resume_policy=resume_policy,
         options=options,
+        stateless_tool_servers=stateless_tool_servers,
     )
     async with _open_factory_host(factory, integration, stop_timer) as run:
         services = factory.core_services

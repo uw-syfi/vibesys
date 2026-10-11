@@ -199,6 +199,7 @@ from vs_runtime._session_resolver import (
     open_session_requests,
     session_executors,
 )
+from vs_runtime._tool_servers import CombinedToolServers, StatelessToolServers
 from vs_runtime._turn_lifecycle import LifecycleReportingExecutor, report_turns
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
@@ -241,6 +242,7 @@ __all__ = [
     "BlockDiagnostic",
     "CancellableOwner",
     "Cancelled",
+    "CombinedToolServers",
     "CommitObserver",
     "Conflict",
     "ContinuationBinding",
@@ -355,6 +357,7 @@ __all__ = [
     "StageSettled",
     "StageStarted",
     "StallNotes",
+    "StatelessToolServers",
     "SteerArtifacts",
     "StoreWorkspaceReceipts",
     "ToolServerSource",

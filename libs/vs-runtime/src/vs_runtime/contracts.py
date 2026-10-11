@@ -189,6 +189,13 @@ class AgentTool(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    stateless: bool = False
+    """Whether the tool's server holds no run state (it only reads or analyses).
+
+    A core run admits a tool only if it is the bridged evaluation tool or is stateless and
+    served: any other tool may record into run state, which would be a second writer beside
+    core. The default is the safe one.
+    """
 
 
 class Workspace(Protocol):

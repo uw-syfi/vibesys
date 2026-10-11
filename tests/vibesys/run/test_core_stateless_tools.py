@@ -1,10 +1,11 @@
 """Assumption A3 of the strategy port design: a core session can be offered a stateless tool.
 
 `multi`, `evolve` and `issue_queue` give a role the profiler diagnostics server, an MCP server
-that analyses captured profiles and holds no run state. Composition refuses every tool but the
-bridged `evaluation` tool today (`_refuse_unbridged_tools`), because a tool that records into
-legacy state would be a second writer of run state beside core. The refusal is right for the
-issue board and for any tool that writes run state; it is too wide for a stateless tool.
+that analyses captured profiles and holds no run state. Composition admits the bridged
+`evaluation` tool and a tool declared `stateless` whose server the host provides
+(`_refuse_unbridged_tools`), and refuses every other tool, because a tool that records into run
+state would be a second writer beside core. A stateless tool nobody serves is refused too,
+never silently dropped.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from vibesys.run.core_services import CoreCompositionError
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.testing import FakeAgentInvocationStore
+from vs_mcp.api import StdioServerDescriptor
 from vs_runtime.api import AgentRole, AgentTool, OrchestrationPlugin
 from vs_runtime.api.core import RunTiming
 from vs_sim.api.testing import VirtualClock, run_virtual
@@ -33,8 +35,10 @@ from vs_sim.api.testing import VirtualClock, run_virtual
 if TYPE_CHECKING:
     from pathlib import Path
 
+SERVER = StdioServerDescriptor(name="profiler", command="true")
 
-def _compose(tmp_path: Path, tool: str) -> None:
+
+def _compose(tmp_path: Path, tool: str, *, stateless: bool = False, served: bool = False) -> None:
     project_root = tmp_path / "project"
     templates = tmp_path / "templates"
     templates.mkdir()
@@ -43,7 +47,9 @@ def _compose(tmp_path: Path, tool: str) -> None:
         id="core-test",
         agents=(
             AgentRole(
-                id="implementer", system_prompt="Implement.", extra_tools=(AgentTool(id=tool),)
+                id="implementer",
+                system_prompt="Implement.",
+                extra_tools=(AgentTool(id=tool, stateless=stateless),),
             ),
         ),
         options=EmptyOptions,
@@ -63,6 +69,7 @@ def _compose(tmp_path: Path, tool: str) -> None:
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+                stateless_tool_servers={tool: SERVER} if served else None,
             ):
                 return
         finally:
@@ -71,13 +78,21 @@ def _compose(tmp_path: Path, tool: str) -> None:
     run_virtual(clock, exercise())
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=CoreCompositionError,
-    reason="A3 gap: composition refuses every tool but `evaluation`, including the stateless profiler",
-)
-def test_a_role_with_the_stateless_profiler_tool_composes(tmp_path: Path) -> None:
-    _compose(tmp_path, "profiler")
+def test_a_role_with_a_served_stateless_tool_composes(tmp_path: Path) -> None:
+    _compose(tmp_path, "profiler", stateless=True, served=True)
+
+
+def test_a_stateless_tool_nobody_serves_is_refused_not_silently_dropped(tmp_path: Path) -> None:
+    with pytest.raises(CoreCompositionError, match="no server") as raised:
+        _compose(tmp_path, "profiler", stateless=True, served=False)
+    assert raised.value.resource == "agent role 'implementer' tool 'profiler'"
+
+
+def test_a_tool_not_declared_stateless_is_refused_even_when_a_server_exists(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(CoreCompositionError, match="may write run state"):
+        _compose(tmp_path, "profiler", stateless=False, served=True)
 
 
 def test_a_role_with_a_tool_that_writes_run_state_is_refused_naming_it(tmp_path: Path) -> None:

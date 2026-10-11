@@ -29,6 +29,7 @@ from vs_runtime.api import ArtifactStore, CorePlan, CoreRunContext
 from vs_runtime.api.core import (
     EVALUATION_TOOL_ID,
     AgentEvaluationBridge,
+    CombinedToolServers,
     CoreStartup,
     IgnoreCommits,
     IgnoreMeasurement,
@@ -40,6 +41,7 @@ from vs_runtime.api.core import (
     ResolverInputs,
     ScopeWorkspaces,
     SessionServices,
+    StatelessToolServers,
     StoreWorkspaceReceipts,
     build_operation_catalog,
     commit_of,
@@ -56,6 +58,7 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
     from vs_core.api import CoreState, LifecycleCapability, Strategy
+    from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import Project, StateNamespace, StateStore
     from vs_runtime.api import AgentRole, CorePolicy, RunFacts
     from vs_runtime.api.core import (
@@ -145,6 +148,8 @@ class CoreResources:
     """Receives the start and end of each provider turn, for the host's event stream."""
     evaluation_diagnostics: Callable[[str], None] = ignore_diagnostic
     """Receives one line for each agent evaluation call the run refused as busy."""
+    stateless_tool_servers: Mapping[str, ToolServerDescriptor] = field(default_factory=dict)
+    """The server of each stateless tool a role may declare, keyed by tool id."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,7 +193,10 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     try:
         plan = policy.plan(_context(resources, artifacts))
         _validate_plan(plan)
-        _refuse_unbridged_tools(resources.roles, bridged=plan.agent_evaluation is not None)
+        stateless = StatelessToolServers(resources.stateless_tool_servers)
+        _refuse_unbridged_tools(
+            resources.roles, bridged=plan.agent_evaluation is not None, stateless=stateless.tool_ids
+        )
         bridge = _agent_bridge(plan, resources, receipt_store)
         catalog = _catalog(policy, plan, resources, artifacts, ReceiptEvidenceLedger(receipt_store))
         catalog.require_owned(plan.strategy.declaration)
@@ -202,7 +210,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
                 configuration=resources.configuration,
                 session_spec=resources.session_spec,
                 artifact_directories=policy.artifact_directories,
-                tool_servers=bridge,
+                tool_servers=CombinedToolServers(*(() if bridge is None else (bridge,)), stateless),
             )
         )
         state = _initial_state(plan, resources, catalog, suspendable=bridge is not None)
@@ -302,22 +310,30 @@ def _lifecycle(resources: CoreResources, *, suspendable: bool) -> frozenset[Life
     return offered | suspend
 
 
-def _refuse_unbridged_tools(roles: Iterable[AgentRole], *, bridged: bool) -> None:
-    """Agent tools other than the bridged evaluation tool are not served to core sessions.
+def _refuse_unbridged_tools(
+    roles: Iterable[AgentRole], *, bridged: bool, stateless: frozenset[str]
+) -> None:
+    """Admit only the bridged evaluation tool and stateless tools that are served.
 
-    Any other tool talks to a legacy service that records into legacy state, so handing
-    one to a core session would leave the run with two writers. The evaluation tool is
-    bridged to core events when the plan carries an ``AgentEvaluationPolicy``.
+    Any other tool may record into run state, so handing one to a core session could leave
+    the run with two writers. The evaluation tool is bridged to core events when the plan
+    carries an ``AgentEvaluationPolicy``. A tool declared stateless is admitted when the host
+    provides its server; one nobody serves is refused rather than silently left out.
     """
     for role in roles:
         for tool in role.extra_tools:
             if bridged and tool.id == EVALUATION_TOOL_ID:
                 continue
-            detail = (
-                "agent tools are not yet bridged to core requests, so a core run "
-                "cannot give this role the tool"
-            )
             resource = f"agent role {role.id!r} tool {tool.id!r}"
+            if tool.stateless:
+                if tool.id in stateless:
+                    continue
+                detail = "the tool is declared stateless but the host provided no server for it"
+                raise CoreCompositionError(resource, detail)
+            detail = (
+                "agent tools that may write run state are not bridged to core requests, "
+                "so a core run cannot give this role the tool"
+            )
             raise CoreCompositionError(resource, detail)
 
 
