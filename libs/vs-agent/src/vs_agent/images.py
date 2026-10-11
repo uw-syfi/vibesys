@@ -399,7 +399,7 @@ def agent_image(
             final=FinalImage(
                 user=AGENT_USER, workdir=AGENT_WORKDIR, image_repository=_AGENT_IMAGE_REPOSITORY
             ),
-            command_runner=_SandboxRunner(runner),
+            command_runner=_BuildCommandRunner(runner),
             timeout=timeout,
         )
     except FeatureImageBuildError as exc:
@@ -407,7 +407,7 @@ def agent_image(
     return built.image_id
 
 
-class _SandboxRunner:
+class _BuildCommandRunner:
     """Present a :class:`DockerBuildRunner` to the image mechanism, which reports timeouts as ``TimeoutError``."""
 
     def __init__(self, runner: DockerBuildRunner) -> None:
