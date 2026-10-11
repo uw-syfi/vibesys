@@ -1,0 +1,23 @@
+{
+  "id": "host-helper",
+  "description": "Host helper scenarios replayed over one channel each: in process against the helper core and shell on simulated I/O (tests/conformance/test_host_helper.py), and over stdio against a real helper command, python -m entrypoints.host_helper or VIBESYS_HOST_HELPER_COMMAND (tests/e2e/test_host_helper.py). Every scenario assumes an empty registry and no project at the paths it names.",
+  "groups": {
+    "handshake": [
+      "helper-handshake",
+      "helper-handshake-required",
+      "helper-incompatible",
+      "helper-invalid-request",
+      "helper-feature-gated"
+    ],
+    "registry": [
+      "helper-instances-empty",
+      "helper-instances-watch",
+      "helper-run-stop-not-running",
+      "helper-run-connect-gone"
+    ],
+    "host-paths": [
+      "helper-project-missing",
+      "helper-paths-missing"
+    ]
+  }
+}

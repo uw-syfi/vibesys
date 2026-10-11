@@ -54,11 +54,10 @@ function packagePaths(packages) {
   ];
 }
 
-// Every package above the two shared libraries is a peer frontend. Deriving that set means a new
-// frontend starts isolated from its peers instead of requiring another pair of hand-written rules.
-const FRONTEND_PACKAGES = layout.packages.filter(
-  ({directory}) => directory !== 'backend-client' && directory !== 'core-state',
-);
+// The app-layer packages (`vibesys.layer` in each manifest) are peer frontends. Deriving the set
+// means a new app starts isolated from its peers instead of requiring another pair of hand-written
+// rules; `scripts/check_package_graph.mjs` owns the layer rules between manifests.
+const FRONTEND_PACKAGES = layout.packages.filter(({manifest}) => manifest.vibesys?.layer === 'app');
 
 function frontendPeerRules() {
   return FRONTEND_PACKAGES.flatMap(frontend => {
@@ -210,7 +209,7 @@ export default {
     ...frontendPeerRules(),
     {
       // `tui/dev/` is the development replay harness. It is kept out of
-      // `dist` by `rootDir: "src"`, but `tsconfig.check.json` widens the root so
+      // `dist` by `rootDir: "src"`, but `tui/tsconfig.check.json` widens the root so
       // the harness itself is typechecked, and that widening makes a src -> dev
       // import typecheck cleanly. The build still rejects it (TS6059); this says
       // so at the layer that owns the rule rather than leaving it to a later step.
@@ -330,8 +329,8 @@ export default {
       // Applies to the tooling too (harness, benchmarks, end-to-end specs, scripts): they must
       // declare what they import, though they may import any public workspace export.
       from: {
-        path: `^[^/]+/src/|${TOOLING}`,
-        pathNot: '^[^/]+/src/.*\\.test\\.[cm]?[jt]sx?$',
+        path: `${PACKAGE_SOURCES}|${TOOLING}`,
+        pathNot: `${PACKAGE_SOURCES}.*${TEST_FILE}`,
       },
       to: {dependencyTypes: ['npm-no-pkg', 'npm-unknown']},
     },

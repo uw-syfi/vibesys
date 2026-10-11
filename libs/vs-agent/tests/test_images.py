@@ -25,7 +25,7 @@ from vs_agent.api.testing import DockerResult, docker_result
 from vs_sandbox.api import LocalFeature
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 _TASK_IMAGE_ID = "sha256:" + "a" * 64
 _AGENT_IMAGE_ID = "sha256:" + "b" * 64
@@ -68,7 +68,9 @@ class _FakeRunner:
         *,
         cwd: Path,
         timeout: float,
+        on_stderr_line: Callable[[str], None] | None = None,
     ) -> DockerResult:
+        del on_stderr_line
         normalized = tuple(argv)
         self.calls.append((normalized, cwd, timeout))
         if normalized[1] == "build" and any(a.startswith("vibesys-agent-build:") for a in argv):

@@ -1,0 +1,68 @@
+{
+  "id": "helper-feature-gated",
+  "protocol": "host-helper",
+  "title": "A gated method needs its feature",
+  "description": "After a hello that negotiated no features, instances.watch and paths.complete are answered feature_not_negotiated.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": []
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "instances.watch",
+        "request_id": "w",
+        "deadline_ms": 10000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "w",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "paths.complete",
+        "request_id": "c",
+        "deadline_ms": 10000,
+        "prefix": "/"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "c",
+        "code": "feature_not_negotiated"
+      }
+    }
+  ]
+}

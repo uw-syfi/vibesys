@@ -1,9 +1,12 @@
 {
-  "extends": "./tsconfig.json",
+  // `scripts/run_node_tests.mjs` compiles production and test sources together into a temporary
+  // directory and runs them under the shipping Node runtime, so this is not a build project.
+  "extends": "./tsconfig.lib.json",
   "compilerOptions": {
+    "composite": false,
+    "incremental": false,
     "declaration": false,
     "rootDir": ".",
-    "skipLibCheck": true,
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],

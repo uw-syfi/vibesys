@@ -298,3 +298,11 @@ def test_chat_thread_wire_shapes_round_trip() -> None:
     )
     assert response.chat_thread is not None
     assert response.chat_thread.thread_id == "thread-1"
+
+
+@pytest.mark.parametrize("thread_id", ["../outside", "con"])
+def test_chat_query_rejects_a_nonportable_thread_identity(thread_id: str) -> None:
+    with pytest.raises(ValueError, match="invalid experiment chat thread identity") as error:
+        ChatQuery(text="why?", thread_id=thread_id)
+
+    assert repr(thread_id) in str(error.value)

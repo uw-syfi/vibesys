@@ -76,6 +76,30 @@
   {
     "agent_kind": null,
     "data": {
+      "kind": "run_startup_progress",
+      "progress": null,
+      "stage": "building_image"
+    },
+    "round_label": null,
+    "status": "active",
+    "text": "",
+    "type": "run_startup_progress"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "kind": "run_startup_progress",
+      "progress": null,
+      "stage": "starting_container"
+    },
+    "round_label": null,
+    "status": "active",
+    "text": "",
+    "type": "run_startup_progress"
+  },
+  {
+    "agent_kind": null,
+    "data": {
       "baseline": null,
       "commit": "<SHA>",
       "excluded_paths": [],

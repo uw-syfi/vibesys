@@ -1,36 +1,8 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client", "node"],
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "jsx": "react-jsx",
-    "strict": true,
-    "exactOptionalPropertyTypes": true,
-    "forceConsistentCasingInFileNames": true,
-    "isolatedModules": true,
-    "moduleDetection": "force",
-    "noEmitOnError": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-    "noPropertyAccessFromIndexSignature": true,
-    "noUncheckedIndexedAccess": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "skipLibCheck": true,
-    "verbatimModuleSyntax": true,
-    "noEmit": true,
-    "baseUrl": ".",
-    "paths": {
-      "@vibesys/backend-client": ["../backend-client/src/index.ts"],
-      "@vibesys/backend-client/testing": ["../backend-client/src/testing/index.ts"],
-      "@vibesys/backend-client/node": ["../backend-client/src/node/index.ts"],
-      "@vibesys/backend-client/websocket": ["../backend-client/src/websocket.ts"],
-      "@vibesys/core-state": ["../core-state/src/index.ts"],
-      "@vibesys/core-state/testing": ["../core-state/src/testing/index.ts"]
-    }
-  },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "vite.browser.config.ts", "vite.desktop.config.ts", "playwright.config.ts"]
+  "files": [],
+  "references": [
+    {"path": "./tsconfig.app.json"},
+    {"path": "./tsconfig.test.json"},
+    {"path": "./tsconfig.node.json"}
+  ]
 }

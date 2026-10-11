@@ -5,14 +5,17 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "vibesys": {
+    "layer": "app",
+    "entries": {
+      ".": "node"
+    }
+  },
   "main": "dist/main.js",
   "exports": {},
   "scripts": {
-    "prebuild": "pnpm --filter @vibesys/desktop^... build",
-    "build": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\" && tsc -p tsconfig.json && vite build --config vite.welcome.config.ts && pnpm --filter @vibesys/web build:desktop && node scripts/copy-ui.mjs",
-    "precheck": "pnpm --filter @vibesys/desktop^... build",
-    "check": "tsc -p tsconfig.check.json && tsc -p tsconfig.welcome.json",
-    "pretest": "pnpm --filter @vibesys/desktop^... build",
+    "build": "tsc -b tsconfig.main.json && vite build --config vite.welcome.config.ts && node scripts/copy-ui.mjs",
+    "check": "tsc -b && tsc -p tsconfig.welcome.json",
     "test": "node ../scripts/run_bun_tests.mjs ./src",
     "start": "pnpm build && electron ."
   },

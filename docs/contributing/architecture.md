@@ -53,6 +53,9 @@ for durable intent, recovery, and tests.
 Execution environments, command runners, and agent confinement have separate
 owners; see [Sandboxing and confinement](sandboxing.md).
 
+The TypeScript clients under `clients/` have their own package graph, layers, and
+build model; see [Clients architecture](clients-architecture.md).
+
 `vibesys.orchestration` owns built-in orchestration policy. Explicit plugins,
 including the issue queue, live under the singular
 `vibesys.orchestration.<plugin>` namespace; `launch` assembles their built-in
@@ -124,6 +127,7 @@ graph TD
     launch --> vs_sandbox
     launch --> vs_slurm
     server --> vibesys
+    server --> vs_project
     server --> vs_prompts
     server --> vs_sim
     vibesys --> vs_agent

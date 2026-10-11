@@ -42,6 +42,7 @@ from vs_sandbox.skypilot_recovery import (
     deterministic_job_name,
 )
 from vs_sandbox.skypilot_runner import (
+    CancellableOutputSink,
     ClusterInfo,
     ClusterStatus,
     CommandRunner,
@@ -69,6 +70,7 @@ __all__ = [
     "ArtifactFrame",
     "ArtifactRecord",
     "AttemptResourcesRecord",
+    "CancellableOutputSink",
     "ClusterInfo",
     "ClusterProfileError",
     "ClusterProfilesFile",

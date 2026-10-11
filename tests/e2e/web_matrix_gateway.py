@@ -66,6 +66,8 @@ def main() -> int:
     ).start()
 
     def live_run() -> None:
+        # What a run session reports once its resources are up: the run is running.
+        runtime.controller.ready()
         runtime.executions.publish_agent_output(f"{arguments.marker}\n")
         stopped.wait()
 

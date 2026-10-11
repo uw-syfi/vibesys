@@ -1,0 +1,74 @@
+{
+  "id": "helper-run-connect-gone",
+  "protocol": "host-helper",
+  "title": "Connect to a run that is gone",
+  "description": "run.connect naming an id no live server holds is answered run_gone, and the channel stays a request channel.",
+  "role": "run",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "run.connect",
+        "request_id": "c",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab",
+        "role": "subscribe"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "c",
+        "code": "run_gone"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "ping",
+        "request_id": "p",
+        "deadline_ms": 10000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "ping",
+        "request_id": "p"
+      }
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "id": "helper-run-stop-not-running",
+  "protocol": "host-helper",
+  "title": "Stop a server that is not live",
+  "description": "run.stop of an id no live server holds returns the stop result not_running with nothing sent.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "run.stop",
+        "request_id": "s",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "run.stop",
+        "request_id": "s",
+        "result": {
+          "id": "0123456789ab",
+          "outcome": "not_running",
+          "route": null
+        }
+      }
+    }
+  ]
+}

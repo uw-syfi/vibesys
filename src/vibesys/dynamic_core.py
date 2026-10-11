@@ -18,9 +18,9 @@ from vibesys.orchestration.dynamic.core_policy.api import (
     PolicyInputs,
     RunBounds,
     build_core_policy,
-    planner_reply_example,
     project_strategy_state,
     prompts,
+    run_prompt_variables,
 )
 from vibesys.orchestration.dynamic.models import DynamicOptions
 from vibesys.orchestration.dynamic.strategy.api import (
@@ -193,11 +193,11 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         facts=policy.facts,
         limits=policy.limits,
         deadline_seconds=policy.deadline_at,
-        prompt_variables={
-            "objective": policy.facts.objective,
-            "agent_evaluation": True,
-            "plan_example": planner_reply_example(),
-        },
+        prompt_variables=run_prompt_variables(
+            objective=policy.facts.objective,
+            environment_notes=context.facts.environment_notes,
+            agent_evaluation=True,
+        ),
         requirements=policy.requirements,
         agent_evaluation=_agent_evaluation(policy),
     )

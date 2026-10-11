@@ -64,21 +64,13 @@ language = "typescript"
 directory = "clients"
 collection = "pnpm_packages"
 timeout_seconds = 1200
-# The fallback when the change filter selects no package: `-r` covers every workspace member, so
-# this does not go stale when one is added. One package at a time because a package's `build` is
-# `rm -rf dist && tsc`, and every dependent package declares hooks that run it for its
-# dependencies: `core-state`'s `prebuild`/`precheck`/`pretest` rebuild `backend-client`, `tui`'s
-# rebuild both `backend-client` and `core-state`, whose `dist` it resolves through
-# `tui/node_modules/@vibesys/*` (it declares no tsconfig `paths`), and `web` rebuilds both before
-# build, check, and test as well. `pnpm -r` starts independent members in the same instant, so
-# without the flag a
-# sibling task can read a `dist` that is being deleted. The flag only orders the packages inside
-# one `pnpm` invocation; a second `pnpm` running elsewhere in the same checkout can still delete
-# the same `dist` mid-suite, which this flag cannot prevent and which remains unfixed.
-# `scripts/run_bun_tests.mjs` is what keeps that from passing silently: it fails the suite, naming
-# the files, when the run collects fewer test files than the package holds.
-commands = [["pnpm", "-r", "--workspace-concurrency=1", "run", "test"]]
-package_commands = [["pnpm", "--filter", "{package}", "test"]]
+# The fallback when the change filter selects no package: Turborepo runs every workspace member's
+# `test`, so this does not go stale when one is added. Tests resolve workspace packages to their
+# source (the `@vibesys/source` export condition), so they need no dependency `dist` and run in
+# parallel; `turbo` builds first only what a package's `turbo.json` says its tests need. A selected
+# package runs through the same task graph, so it gets that preparation too.
+commands = [["pnpm", "turbo", "run", "test"]]
+package_commands = [["pnpm", "turbo", "run", "test", "--filter", "{package}"]]
 always_commands = [
   ["pnpm", "test:ts-architecture"],
   ["pnpm", "test:conformance"],
@@ -97,7 +89,7 @@ commands = [
   ["pnpm", "check:ts-architecture"],
   ["pnpm", "check:knip"],
   ["pnpm", "--dir", "backend-client", "generate:protocol"],
-  ["git", "diff", "--exit-code", "--", "backend-client/src/generated/protocol.schema.json", "backend-client/src/generated/protocol.generated.ts"],
+  ["git", "diff", "--exit-code", "--", "backend-client/src/generated/protocol.schema.json", "backend-client/src/generated/protocol.generated.ts", "backend-client/src/generated/host-helper.schema.json", "backend-client/src/generated/host-helper.generated.ts"],
   ["pnpm", "check:clients"],
 ]
 

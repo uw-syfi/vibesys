@@ -25,7 +25,7 @@ interface LiveInstance {
   readonly vibesysVersion: string;
   /** The VibeSys checkout the server runs from; null for an install, or a server too old to say. */
   readonly vibesysRoot: string | null;
-  /** The run's lifecycle phase (record version 3); null from an older host. */
+  /** The run's lifecycle phase (record version 3 and later); null from an older host. */
   readonly phase: RunPhase | null;
   /** When the server exited, for an ended record; null while it lives. */
   readonly endedAt: number | null;
@@ -42,11 +42,22 @@ const RUN_STATUSES = [
   'failed',
 ] as const;
 
-/** `RunPhase` in `src/server/host_api.py`: the run's status with its stage or failure reason. */
+/**
+ * `RunPhase` in `src/server/host_api.py`: the run's status with its stage (and, from record
+ * version 4, the stage's progress) or failure reason.
+ */
 interface RunPhase {
   readonly status: (typeof RUN_STATUSES)[number];
   readonly stage: string | null;
+  readonly progress: StartupProgress | null;
   readonly reason: {readonly code: string; readonly stage: string; readonly message: string} | null;
+}
+
+/** `StartupProgress` in `src/server/host_api.py`: `done` of `total` steps, now on `label`. */
+interface StartupProgress {
+  readonly done: number;
+  readonly total: number | null;
+  readonly label: string;
 }
 
 /** What one record says: a server this client can read, or one that speaks another protocol. */
@@ -127,7 +138,7 @@ export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRe
     };
   }
   const version = recordVersion(record, path);
-  onlyKeys(record, version === 3 ? [...RECORD_KEYS, ...RECORD_V3_KEYS] : RECORD_KEYS, path);
+  onlyKeys(record, version >= 3 ? [...RECORD_KEYS, ...RECORD_V3_KEYS] : RECORD_KEYS, path);
   const id = instanceId(record['id'], `${path}.id`);
   const status = record['status'];
   if (status !== 'starting' && status !== 'serving') {
@@ -159,43 +170,64 @@ export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRe
   };
 }
 
+type RecordVersion = 1 | 2 | 3 | 4;
+
 /**
  * Version 2 names its run from the first write; version 1 (an older host) may not yet. Version 3
- * adds the run's phase, the server's log, and, once it exited, `ended_at`.
+ * adds the run's phase, the server's log, and, once it exited, `ended_at`. Version 4 adds the
+ * startup stages past `resolving` and their progress.
  */
-function recordVersion(record: Record<string, unknown>, path: string): 1 | 2 | 3 {
+function recordVersion(record: Record<string, unknown>, path: string): RecordVersion {
   const version = record['version'];
-  if (version !== 1 && version !== 2 && version !== 3) {
-    throw new RecordError(`${path}.version must be 1, 2 or 3`);
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
+    throw new RecordError(`${path}.version must be 1, 2, 3 or 4`);
   }
   return version;
 }
 
 function lifecycle(
   record: Record<string, unknown>,
-  version: 1 | 2 | 3,
+  version: RecordVersion,
   path: string,
 ): Pick<LiveInstance, 'phase' | 'endedAt'> {
-  if (version !== 3) return {phase: null, endedAt: null};
+  if (version < 3) return {phase: null, endedAt: null};
   const endedAt = record['ended_at'] == null ? null : number(record, 'ended_at', path);
-  return {phase: runPhase(record['phase'], `${path}.phase`), endedAt};
+  return {phase: runPhase(record['phase'], version, `${path}.phase`), endedAt};
 }
 
 const RECORD_V3_KEYS = ['phase', 'log_path', 'ended_at'] as const;
 
-function runPhase(value: unknown, path: string): RunPhase {
+const PHASE_KEYS = ['status', 'stage', 'reason'] as const;
+
+function runPhase(value: unknown, version: RecordVersion, path: string): RunPhase {
   const phase = object(value, path);
-  onlyKeys(phase, ['status', 'stage', 'reason'], path);
+  onlyKeys(phase, version >= 4 ? [...PHASE_KEYS, 'progress'] : PHASE_KEYS, path);
   const status = phase['status'];
   if (!RUN_STATUSES.some(known => known === status)) {
     throw new RecordError(`${path}.status must be a run status`);
   }
   const reason = phase['reason'] ?? null;
+  const progress = phase['progress'] ?? null;
   return {
     status: status as RunPhase['status'],
     stage: nullableString(phase, 'stage', path),
+    progress: progress === null ? null : startupProgress(progress, `${path}.progress`),
     reason: reason === null ? null : failureReason(reason, `${path}.reason`),
   };
+}
+
+function startupProgress(value: unknown, path: string): StartupProgress {
+  const progress = object(value, path);
+  onlyKeys(progress, ['done', 'total', 'label'], path);
+  const done = number(progress, 'done', path);
+  if (!Number.isInteger(done) || done < 0) {
+    throw new RecordError(`${path}.done must be a non-negative integer`);
+  }
+  const total = progress['total'] == null ? null : number(progress, 'total', path);
+  if (total !== null && (!Number.isInteger(total) || total < 1)) {
+    throw new RecordError(`${path}.total must be a positive integer`);
+  }
+  return {done, total, label: string(progress, 'label', path)};
 }
 
 function failureReason(value: unknown, path: string): NonNullable<RunPhase['reason']> {
@@ -212,8 +244,9 @@ function failureReason(value: unknown, path: string): NonNullable<RunPhase['reas
 export function parseInstanceList(value: unknown): InstanceListing {
   const listing = object(value, 'listing');
   onlyKeys(listing, ['version', 'instances', 'ended', 'unreadable', 'unverified'], 'listing');
-  if (listing['version'] !== 1 && listing['version'] !== 2 && listing['version'] !== 3) {
-    throw new RecordError('listing.version must be 1, 2 or 3');
+  const version = listing['version'];
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
+    throw new RecordError('listing.version must be 1, 2, 3 or 4');
   }
   const ended = listing['ended'] ?? [];
   if (!Array.isArray(ended)) throw new RecordError('listing.ended must be a list');

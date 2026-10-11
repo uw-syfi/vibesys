@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, NonNegativeInt
 
 import vs_agent.api as _agent_api
 
@@ -21,6 +21,7 @@ from vs_agent.api import (
     TodoItemData,
     ToolResultPayload,
 )
+from vs_runtime.api.infrastructure import EnvironmentStartupStage
 
 CommandResultPayload = _agent_api.CommandResultPayload
 JsonResultPayload = _agent_api.JsonResultPayload
@@ -30,6 +31,7 @@ class CoreEventType(StrEnum):
     """Closed set of observations produced by a core run."""
 
     RUN_STARTED = "run_started"
+    RUN_STARTUP_PROGRESS = "run_startup_progress"
     EXPERIMENTS_CHANGED = "experiments_changed"
     RUN_FINISHED = "run_finished"
     RUN_FAILED = "run_failed"
@@ -204,6 +206,26 @@ class RunStartedData(EventPayload):
     # Policy-owned role hints let frontends seed per-round placeholders.
     # Empty when the policy does not declare roles.
     expected_roles: tuple[str, ...] = ()
+
+
+class StartupProgressData(EventPayload):
+    """How far a startup stage has come: ``done`` of ``total`` steps, now on ``label``."""
+
+    done: NonNegativeInt
+    total: int | None = Field(default=None, ge=1)
+    label: str = ""
+
+
+class RunStartupProgressData(EventPayload):
+    """A starting run reached ``stage``, or progressed within it.
+
+    Emitted while the run environment opens, before the run is ready;
+    ``progress`` is present when the stage reports it (an image build's steps).
+    """
+
+    kind: Literal["run_startup_progress"] = "run_startup_progress"
+    stage: EnvironmentStartupStage
+    progress: StartupProgressData | None = None
 
 
 class RunFailureKind(StrEnum):
@@ -528,6 +550,7 @@ CoreEventData = Annotated[
     | AgentExecutionActivityData
     | AgentExecutionFinishedData
     | RunStartedData
+    | RunStartupProgressData
     | RunFailedData
     | ExperimentsChangedData
     | PhaseData

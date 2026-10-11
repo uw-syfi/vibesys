@@ -1,10 +1,10 @@
 import {fileURLToPath} from 'node:url';
-import {defineConfig} from 'vite';
-import {workspaceSourceAliases} from './workspace-source-aliases.js';
+import {defaultClientConditions, defineConfig} from 'vite';
 
 export default defineConfig({
   resolve: {
-    alias: workspaceSourceAliases(),
+    // Workspace packages resolve to their TypeScript source, so no dependency needs a build.
+    conditions: ['@vibesys/source', ...defaultClientConditions],
   },
   build: {
     emptyOutDir: true,

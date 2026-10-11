@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "check": {
+      // The deprecated TUI keeps its own `tsc -p` check, which emits nothing.
+      "outputs": []
+    }
+  }
+}

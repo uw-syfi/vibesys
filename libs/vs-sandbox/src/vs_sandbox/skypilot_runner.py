@@ -4,25 +4,35 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import shlex
-import subprocess
 import tempfile
 import uuid
-from contextlib import contextmanager
+from collections import deque
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import yaml
 
-from vs_sim.api import OsThreads, Threads
+from vs_sim.api import (
+    OsThreads,
+    PipedProcess,
+    PipedProcessLauncher,
+    ProcessTimeoutError,
+    SubprocessPipedProcessLauncher,
+    Threads,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
+    from io import TextIOBase
 
     from vs_sandbox.skypilot_config import ResolvedSkyPilotResources
+    from vs_sim.api import Condition, Lock, Worker
 
 _CLUSTER_COMPONENT = re.compile(r"[^a-z0-9-]+")
 _MAX_CLUSTER_NAME = 28
@@ -32,6 +42,8 @@ _SKY_JOB_FAILED = 100
 _SKY_JOB_NOT_FINISHED = 101
 _SKY_JOB_NOT_FOUND = 102
 _SKY_JOB_CANCELLED = 103
+_PROCESS_CLEANUP_TIMEOUT_SECONDS = 5.0
+_MAX_PENDING_OUTPUT_SEGMENTS = 1
 
 
 class SkyPilotCLIError(RuntimeError):
@@ -197,16 +209,58 @@ class CommandRunner(Protocol):
         stdout_sink: Callable[[str], None] | None = None,
         stderr_sink: Callable[[str], None] | None = None,
     ) -> ProcessResult:
-        """Run one command and return its captured result."""
+        """Run one command and return its captured result.
+
+        A sink that implements :class:`CancellableOutputSink` receives output
+        concurrently and is cancelled during process cleanup. An ordinary
+        callable receives captured output synchronously after successful
+        process and pipe completion, so the runner never abandons a callback
+        in a background worker.
+        """
+        ...
+
+
+@runtime_checkable
+class CancellableOutputSink(Protocol):
+    """A stream callback whose active delivery can be stopped during cleanup."""
+
+    def __call__(self, data: str) -> None:
+        """Deliver one output segment."""
+        ...
+
+    def cancel(self) -> None:
+        """Return promptly and cause any active callback invocation to return."""
         ...
 
 
 class SubprocessCommandRunner:
-    """Run one process without a shell while forwarding both output streams."""
+    """Run one owned POSIX process group while forwarding both output streams.
 
-    def __init__(self, threads: Threads | None = None) -> None:
-        """Drain the output pipes on *threads* (operating-system threads by default)."""
+    A failed wait kills every process remaining in the group, then reaps the
+    leader and joins both pipe drains against one shared cleanup budget (five
+    seconds by default). After a normal leader exit, drains receive one cleanup
+    budget. If a descendant still holds a pipe, its process group is killed and
+    receives one bounded post-kill cleanup budget. Pipe drains never invoke
+    output sinks. Cancellable sinks stream from a one-segment bounded queue;
+    cancellation releases its backpressure so a slow consumer cannot retain an
+    owned pipe past cleanup. Ordinary callables are replayed synchronously
+    after successful pipe completion.
+    """
+
+    def __init__(
+        self,
+        threads: Threads | None = None,
+        *,
+        processes: PipedProcessLauncher | None = None,
+        cleanup_timeout: float = _PROCESS_CLEANUP_TIMEOUT_SECONDS,
+    ) -> None:
+        """Bind output threads, process ownership, and *cleanup_timeout* seconds of cleanup."""
+        if not math.isfinite(cleanup_timeout) or cleanup_timeout < 0:
+            message = "cleanup_timeout must be finite and nonnegative"
+            raise ValueError(message)
         self._threads: Threads = threads or OsThreads()
+        self._processes: PipedProcessLauncher = processes or SubprocessPipedProcessLauncher()
+        self._cleanup_timeout = cleanup_timeout
 
     def run(
         self,
@@ -219,57 +273,267 @@ class SubprocessCommandRunner:
     ) -> ProcessResult:
         """Run one command while optionally forwarding output."""
         normalized = tuple(str(part) for part in argv)
-        process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-009052 [S603]; execute the caller's argv directly with no shell at the external CLI adapter boundary.
-            normalized,
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        stdout_parts: list[str] = []
-        stderr_parts: list[str] = []
+        process = self._processes.start(normalized, cwd=cwd)
         sink_errors: list[Exception] = []
         sink_errors_lock = self._threads.lock()
-
-        def forward(
-            stream: IO[str],
-            parts: list[str],
-            sink: Callable[[str], None] | None,
-        ) -> None:
-            while line := stream.readline():
-                parts.append(line)
-                if sink is not None:
-                    try:
-                        sink(line)
-                    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009053 [BLE001]; a sink callback must not stop draining either subprocess pipe.
-                        with sink_errors_lock:
-                            if not sink_errors:
-                                sink_errors.append(exc)
-
-        if process.stdout is None or process.stderr is None:
-            raise AssertionError
         stdout = process.stdout
         stderr = process.stderr
-        stdout_thread = self._threads.spawn(
-            lambda: forward(stdout, stdout_parts, stdout_sink), name="sky-stdout", daemon=True
+        outputs = (
+            _StreamOutput(
+                self._threads,
+                stdout,
+                stdout_sink,
+                sink_errors=sink_errors,
+                sink_errors_lock=sink_errors_lock,
+            ),
+            _StreamOutput(
+                self._threads,
+                stderr,
+                stderr_sink,
+                sink_errors=sink_errors,
+                sink_errors_lock=sink_errors_lock,
+            ),
         )
-        stderr_thread = self._threads.spawn(
-            lambda: forward(stderr, stderr_parts, stderr_sink), name="sky-stderr", daemon=True
-        )
+        drain_workers: list[Worker] = []
+        delivery_workers: list[Worker] = []
         try:
+            for name, output in zip(("stdout", "stderr"), outputs, strict=True):
+                drain_workers.append(
+                    self._threads.spawn(output.drain, name=f"sky-{name}", daemon=True)
+                )
+                if output.has_delivery_worker:
+                    delivery_workers.append(
+                        self._threads.spawn(
+                            output.deliver,
+                            name=f"sky-{name}-sink",
+                            daemon=True,
+                        )
+                    )
             returncode = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+        except BaseException as failure:
+            self._cleanup_failed_run(
+                process,
+                outputs,
+                (drain_workers, delivery_workers),
+                (stdout, stderr),
+                failure,
+            )
             raise
-        finally:
-            stdout_thread.join()
-            stderr_thread.join()
+        if not self._join_workers(drain_workers):
+            self._cancel_deliveries(outputs)
+            deadline = self._threads.now() + self._cleanup_timeout
+            try:
+                self._stop_and_drain(process, drain_workers, deadline=deadline)
+            finally:
+                self._join_workers(delivery_workers, deadline=deadline)
+                self._close_if_drained((stdout, stderr), drain_workers)
+            message = (
+                "SkyPilot command output did not close within "
+                f"{self._cleanup_timeout} seconds after its process exited; "
+                "the process group was killed and given the same bounded cleanup period"
+            )
+            raise SkyPilotCLIError(message)
+        stdout.close()
+        stderr.close()
+        if not self._join_workers(delivery_workers):
+            self._cancel_deliveries(outputs)
+            if not self._join_workers(delivery_workers):
+                message = (
+                    "SkyPilot output delivery did not stop within "
+                    f"{self._cleanup_timeout} seconds after cancellation"
+                )
+                raise SkyPilotCLIError(message)
+            message = (
+                "SkyPilot output delivery exceeded "
+                f"{self._cleanup_timeout} seconds and was cancelled"
+            )
+            raise SkyPilotCLIError(message)
+        for output in outputs:
+            output.deliver_captured()
         if sink_errors:
             raise sink_errors[0]
-        return ProcessResult(normalized, returncode, "".join(stdout_parts), "".join(stderr_parts))
+        return ProcessResult(normalized, returncode, outputs[0].text(), outputs[1].text())
+
+    def _cleanup_failed_run(
+        self,
+        process: PipedProcess,
+        outputs: Sequence[_StreamOutput],
+        workers: tuple[Sequence[Worker], Sequence[Worker]],
+        streams: tuple[TextIOBase, TextIOBase],
+        failure: BaseException,
+    ) -> None:
+        """Settle owned resources and surface a failed group signal over *failure*."""
+        drain_workers, delivery_workers = workers
+        self._cancel_deliveries(outputs)
+        deadline = self._threads.now() + self._cleanup_timeout
+        cleanup_error: OSError | None = None
+        try:
+            self._stop_and_drain(process, drain_workers, deadline=deadline)
+        except OSError as exc:
+            cleanup_error = exc
+        finally:
+            self._join_workers(delivery_workers, deadline=deadline)
+            self._close_if_drained(streams, drain_workers)
+        if cleanup_error is not None:
+            raise cleanup_error from failure
+
+    def _stop_and_drain(
+        self,
+        process: PipedProcess,
+        workers: Sequence[Worker],
+        *,
+        deadline: float,
+    ) -> None:
+        """Kill the group, cancel pipe reads, then settle within one cleanup bound."""
+        cleanup_error: OSError | None = None
+        try:
+            process.kill_group()
+        except OSError as exc:
+            cleanup_error = exc
+        try:
+            process.cancel_output()
+        except OSError as exc:
+            cleanup_error = cleanup_error or exc
+        try:
+            with suppress(OSError, ProcessTimeoutError):
+                process.wait(timeout=self._remaining(deadline))
+        finally:
+            self._join_workers(workers, deadline=deadline)
+        if cleanup_error is not None:
+            raise cleanup_error
+
+    @staticmethod
+    def _close_if_drained(
+        streams: tuple[TextIOBase, TextIOBase], workers: Sequence[Worker]
+    ) -> None:
+        """Close owned pipes only after no worker can still be reading them."""
+        if not any(worker.is_alive() for worker in workers):
+            for stream in streams:
+                stream.close()
+
+    @staticmethod
+    def _cancel_deliveries(outputs: Sequence[_StreamOutput]) -> None:
+        for output in outputs:
+            output.cancel_delivery()
+
+    def _join_workers(
+        self,
+        workers: Sequence[Worker],
+        *,
+        deadline: float | None = None,
+    ) -> bool:
+        """Join workers against one shared finite deadline."""
+        effective_deadline = (
+            self._threads.now() + self._cleanup_timeout if deadline is None else deadline
+        )
+        for worker in workers:
+            worker.join(self._remaining(effective_deadline))
+        return not any(worker.is_alive() for worker in workers)
+
+    def _remaining(self, deadline: float) -> float:
+        return max(0.0, deadline - self._threads.now())
+
+
+class _StreamOutput:
+    """Capture one pipe and deliver its segments without blocking the drain."""
+
+    def __init__(
+        self,
+        threads: Threads,
+        stream: TextIOBase,
+        sink: Callable[[str], None] | None,
+        *,
+        sink_errors: list[Exception],
+        sink_errors_lock: Lock,
+    ) -> None:
+        self._stream = stream
+        self._sink = sink
+        self._parts: list[str] = []
+        self._pending: deque[str] = deque()
+        self._condition: Condition = threads.condition()
+        self._input_closed = False
+        self._delivery_cancelled = False
+        self._sink_errors = sink_errors
+        self._sink_errors_lock = sink_errors_lock
+
+    @property
+    def has_delivery_worker(self) -> bool:
+        """Whether this stream has a cancellable concurrent sink."""
+        return isinstance(self._sink, CancellableOutputSink)
+
+    def drain(self) -> None:
+        """Own the pipe read and publish complete segments to the delivery queue."""
+        try:
+            while True:
+                if self.has_delivery_worker:
+                    with self._condition:
+                        self._condition.wait_for(
+                            lambda: (
+                                self._delivery_cancelled
+                                or len(self._pending) < _MAX_PENDING_OUTPUT_SEGMENTS
+                            )
+                        )
+                line = self._stream.readline()
+                if not line:
+                    break
+                with self._condition:
+                    self._parts.append(line)
+                    if self.has_delivery_worker and not self._delivery_cancelled:
+                        self._pending.append(line)
+                    self._condition.notify_all()
+        finally:
+            with self._condition:
+                self._input_closed = True
+                self._condition.notify_all()
+
+    def deliver(self) -> None:
+        """Forward captured segments until input ends or cleanup cancels delivery."""
+        sink = self._sink
+        if sink is None:
+            return
+        while True:
+            with self._condition:
+                self._condition.wait_for(
+                    lambda: self._delivery_cancelled or bool(self._pending) or self._input_closed
+                )
+                if self._delivery_cancelled:
+                    return
+                if not self._pending:
+                    return
+                data = self._pending.popleft()
+                self._condition.notify_all()
+            self._deliver(sink, data)
+
+    def deliver_captured(self) -> None:
+        """Replay successful output to an ordinary callback in the calling thread."""
+        sink = self._sink
+        if sink is None or self.has_delivery_worker:
+            return
+        for data in self._parts:
+            self._deliver(sink, data)
+
+    def _deliver(self, sink: Callable[[str], None], data: str) -> None:
+        try:
+            sink(data)
+        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009053 [BLE001]; a sink failure must not stop pipe ownership or later deliveries.
+            with self._sink_errors_lock:
+                if not self._sink_errors:
+                    self._sink_errors.append(exc)
+
+    def cancel_delivery(self) -> None:
+        """Discard queued delivery and interrupt a cancellable active sink."""
+        with self._condition:
+            self._delivery_cancelled = True
+            self._pending.clear()
+            self._condition.notify_all()
+        sink = self._sink
+        if isinstance(sink, CancellableOutputSink):
+            with suppress(Exception):
+                sink.cancel()
+
+    def text(self) -> str:
+        """Return all captured stream text after the drain has completed."""
+        return "".join(self._parts)
 
 
 @dataclass(frozen=True)
@@ -625,7 +889,7 @@ class SkyPilotJobRunner:
             )
         except FileNotFoundError as exc:
             raise SkyPilotCLIError.executable_not_found(self._executable) from exc
-        except subprocess.TimeoutExpired as exc:
+        except ProcessTimeoutError as exc:
             raise SkyPilotTimeoutError.command_timed_out(timeout) from exc
 
     @staticmethod

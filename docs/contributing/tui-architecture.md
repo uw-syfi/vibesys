@@ -184,10 +184,13 @@ $XDG_RUNTIME_DIR/vibesys/            (else /tmp/vibesys-<uid>/), mode 0700
   runs/<id>/server.log               the server's stdout and stderr
 ```
 
-A record (version 3) always names its `run_id` and its run's `phase`: the `RunStatus` with the
-startup `stage` while `starting`, or the failure `reason` (`code`, `stage`, `message`) once
-`failed`. The server folds the phase from the `run_status_changed` events and the diagnostic of
-the failure event it journals, and rewrites its record atomically on each change. `log_path` is the
+A record (version 4) always names its `run_id` and its run's `phase`: the `RunStatus` with the
+startup `stage` (`resolving`, `building_image`, `starting_container`) and the stage's `progress`
+(`done`, `total`, `label`) while `starting`, or the failure `reason` (`code`, `stage`, `message`)
+once `failed`. The server folds the phase from the `run_status_changed` and `run_startup_progress`
+events and the diagnostic of the failure event it journals, and rewrites its record atomically on
+each change, writing a change of progress alone at most once a second. A reader upgrades a
+version 3 record, whose phase is a version 4 phase. `log_path` is the
 server's log. `vibesys_root` is the absolute path of the VibeSys source checkout the server runs
 from (the directory whose `pyproject.toml` declares the `vibesys` project), or `null` for a server
 run from an installed distribution. The desktop app uses it to suggest the checkout to run

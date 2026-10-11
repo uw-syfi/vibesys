@@ -1,31 +1,8 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "types": ["node"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "strict": true,
-    "allowUnreachableCode": false,
-    "allowUnusedLabels": false,
-    "declaration": true,
-    "esModuleInterop": true,
-    "exactOptionalPropertyTypes": true,
-    "forceConsistentCasingInFileNames": true,
-    "isolatedModules": true,
-    "moduleDetection": "force",
-    "noEmitOnError": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-    "noPropertyAccessFromIndexSignature": true,
-    "noUncheckedIndexedAccess": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "skipLibCheck": false,
-    "verbatimModuleSyntax": true,
-    "outDir": "dist",
-    "rootDir": "src"
-  },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test-helper.ts", "src/test-support/**/*.ts"]
+  "files": [],
+  "references": [
+    {"path": "./tsconfig.lib.json"},
+    {"path": "./tsconfig.browser.json"},
+    {"path": "./tsconfig.test.json"}
+  ]
 }

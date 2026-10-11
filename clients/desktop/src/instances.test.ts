@@ -142,12 +142,44 @@ describe('registry records', () => {
     expect(record?.kind === 'compatible' && record.instance.phase).toEqual({
       status: 'failed',
       stage: null,
+      progress: null,
       reason: {code: 'x', stage: 'run', message: 'boom'},
     });
     expect(record?.kind === 'compatible' && record.instance.endedAt).toBe(1_700_000_100);
     expect(() => parseInstanceRecord({...failed, phase: {status: 'gone'}})).toThrow(
       'record.phase.status',
     );
+  });
+
+  test('a version 4 record carries its startup stage and progress', () => {
+    const building = {
+      ...fakeRecord(ID, SOCKET),
+      version: 4,
+      run_id: 'run-7',
+      log_path: '/run/server.log',
+      ended_at: null,
+      phase: {
+        status: 'starting',
+        stage: 'building_image',
+        progress: {done: 3, total: 14, label: 'RUN npm install'},
+        reason: null,
+      },
+    };
+    const listing = parseInstanceList({version: 4, instances: [building]});
+    const [record] = listing.records;
+    expect(record?.kind === 'compatible' && record.instance.phase).toEqual({
+      status: 'starting',
+      stage: 'building_image',
+      progress: {done: 3, total: 14, label: 'RUN npm install'},
+      reason: null,
+    });
+    const progress = {done: -1, total: 14, label: 'x'};
+    expect(() => parseInstanceRecord({...building, phase: {...building.phase, progress}})).toThrow(
+      'record.phase.progress.done',
+    );
+    expect(() =>
+      parseInstanceRecord({...building, version: 3, phase: {...building.phase}}),
+    ).toThrow('record.phase');
   });
 
   test('a version 2 record always names its run, and a listing reports records it cannot read', () => {

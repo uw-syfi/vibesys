@@ -1,0 +1,11 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      // The conformance suite reads the shared corpus in ../tests/conformance, outside the
+      // workspace Turborepo hashes, so a cached result could miss a corpus change.
+      "cache": false
+    }
+  }
+}

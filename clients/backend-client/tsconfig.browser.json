@@ -1,9 +1,11 @@
 {
-  "extends": "./tsconfig.json",
+  // The browser contract of the default entry: everything outside `src/node/` compiles with no
+  // Node types. A check only, so it emits nothing.
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "noEmit": true,
-    "skipLibCheck": true,
-    "types": []
+    "tsBuildInfoFile": ".tsbuild/browser.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts", "src/node/**/*.ts", "src/test-support/**/*.ts"]

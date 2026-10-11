@@ -1,0 +1,10 @@
+{
+  // Unit tests and the Playwright specs, with the page sources they import.
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "types": ["vite/client", "bun"],
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts", "build-inputs.ts"],
+  "exclude": []
+}

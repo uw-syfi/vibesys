@@ -23,7 +23,7 @@ from vs_agent.api.images import (
 from vs_agent.api.testing import DockerResult, docker_result, docker_timed_out
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
 _IMAGE_ID = "sha256:" + "c" * 64
@@ -73,8 +73,9 @@ class _FakeRegistryRunner:
         *,
         cwd: Path,
         timeout: float,
+        on_stderr_line: Callable[[str], None] | None = None,
     ) -> DockerResult:
-        del cwd, timeout
+        del cwd, timeout, on_stderr_line
         normalized = tuple(argv)
         self.calls.append(normalized)
         for marker, exc in self.raise_on.items():

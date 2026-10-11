@@ -1,0 +1,57 @@
+{
+  "id": "helper-handshake",
+  "protocol": "host-helper",
+  "title": "Negotiate and ping",
+  "description": "hello with the helper's own version range returns protocol version 1 and every feature the client named that the helper knows; a ping on the negotiated channel is answered with its request id.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "instances_watch",
+          "paths_complete",
+          "from_the_future"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "ping",
+        "request_id": "p",
+        "deadline_ms": 10000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "ping",
+        "request_id": "p"
+      }
+    }
+  ]
+}

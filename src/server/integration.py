@@ -248,6 +248,7 @@ class RunIntegrationAdapter:
         can read the run history.
         """
         self.attach(ready.log_directory, run_id=ready.record.run_id, record=ready.record)
+        self.controller.ready()
         attachment = RunAttachment(
             chat_state_dir=ready.frontend_state_directory / "chat",
             agent_defaults=AgentSelection(

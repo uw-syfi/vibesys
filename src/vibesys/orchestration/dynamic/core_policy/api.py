@@ -14,7 +14,11 @@ from vibesys.orchestration.dynamic.core_policy._policy import (
     requirements_for,
 )
 from vibesys.orchestration.dynamic.core_policy._projection import project_strategy_state
-from vibesys.orchestration.dynamic.core_policy._replies import planner_reply_example, reply_schemas
+from vibesys.orchestration.dynamic.core_policy._replies import (
+    planner_reply_example,
+    reply_schemas,
+    run_prompt_variables,
+)
 
 __all__ = [
     "UNBOUNDED_DEADLINE_AT",
@@ -29,4 +33,5 @@ __all__ = [
     "reply_schemas",
     "requirements_for",
     "run_deadline_at",
+    "run_prompt_variables",
 ]

@@ -58,6 +58,12 @@ runs:
       working-directory: clients
       run: pnpm install --frozen-lockfile
 
+    # The workspace scripts run through Turborepo; CI keeps no Turborepo cache
+    # between runs and sends it no telemetry.
+    - name: Disable Turborepo telemetry
+      shell: bash
+      run: echo "TURBO_TELEMETRY_DISABLED=1" >> "$GITHUB_ENV"
+
     - name: Set up Go for repoctl
       uses: actions/setup-go@v5
       with:

@@ -1,7 +1,6 @@
 import {fileURLToPath} from 'node:url';
 import react from '@vitejs/plugin-react';
-import {defineConfig} from 'vite';
-import {workspaceSourceAliases} from './workspace-source-aliases.js';
+import {defaultClientConditions, defineConfig} from 'vite';
 
 // The UI bundle the desktop app ships (`clients/desktop` copies `.desktop-dist` into its build).
 // Relative asset URLs, because the app serves it from its own `app://` origin, not a server root.
@@ -9,7 +8,7 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   resolve: {
-    alias: workspaceSourceAliases(),
+    conditions: ['@vibesys/source', ...defaultClientConditions],
   },
   build: {
     emptyOutDir: true,

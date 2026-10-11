@@ -1,5 +1,7 @@
 packages:
   - "*"
+  - "features/*"
+  - "apps/*"
 
 injectWorkspacePackages: true
 nodeLinker: hoisted

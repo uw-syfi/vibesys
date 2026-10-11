@@ -11,6 +11,12 @@
     "url": "https://github.com/uw-syfi/vibesys/issues"
   },
   "type": "module",
+  "vibesys": {
+    "layer": "app",
+    "entries": {
+      ".": "node"
+    }
+  },
   "engines": {
     "node": ">=20"
   },
@@ -24,12 +30,9 @@
     "README.md"
   ],
   "scripts": {
-    "prebuild": "pnpm --filter @vibesys/tui^... build",
     "build": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\" && tsc -p tsconfig.json",
-    "precheck": "pnpm --filter @vibesys/tui^... build",
     "check": "tsc -p tsconfig.check.json",
     "prepack": "pnpm run build",
-    "pretest": "pnpm --filter @vibesys/tui^... build",
     "test": "node ../scripts/run_bun_tests.mjs ./src ./dev"
   },
   "dependencies": {

@@ -78,3 +78,26 @@ it('enforces generated scalar constraints on direct unknown input', () => {
     'Invalid server run event.timestamp: must be a date-time',
   );
 });
+
+it('rejects nonportable chat thread identities from the generated schema', () => {
+  for (const threadId of [
+    '',
+    '../outside',
+    'nested/thread',
+    String.raw`nested\thread`,
+    'C:drive',
+    'con',
+    'nul.txt',
+    'trailing.',
+    'trailing ',
+    'trailing\n',
+    'a'.repeat(129),
+  ]) {
+    expect(() => validateRunEvent({...event(null), chat_thread_id: threadId})).toThrow(
+      'Invalid server run event.chat_thread_id',
+    );
+  }
+
+  const value = {...event(null), chat_thread_id: 'thread-1.name'};
+  expect(validateRunEvent(value)).toBe(value);
+});

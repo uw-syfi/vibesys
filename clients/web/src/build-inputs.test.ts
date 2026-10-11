@@ -22,15 +22,15 @@ describe('webBuildInputs', () => {
         'clients/package.json',
         'clients/pnpm-lock.yaml',
         'clients/pnpm-workspace.yaml',
+        'clients/tsconfig.base.json',
         'clients/web/build-inputs.ts',
         'clients/web/build-manifest.ts',
         'clients/web/index.html',
         'clients/web/package.json',
         'clients/web/src',
+        'clients/web/tsconfig.app.json',
         'clients/web/tsconfig.json',
         'clients/web/vite.config.ts',
-        'clients/web/workspace-source-aliases.json',
-        'clients/web/workspace-source-aliases.ts',
       ].sort(),
     );
   });

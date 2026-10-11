@@ -36,7 +36,8 @@ from vs_sandbox.api import (
 from vs_sandbox.api.testing import FakeDockerEngine
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
+    from pathlib import Path
 
     from vs_sandbox.api import CommandRunner, HostResource
 
@@ -56,9 +57,14 @@ class _RecordingBuildRunner:
         self.selected_features: list[str] = []
 
     def run(
-        self, argv: Sequence[str], *, cwd: Path, timeout: float
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path,
+        timeout: float,
+        on_stderr_line: Callable[[str], None] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        del cwd, timeout
+        del cwd, timeout, on_stderr_line
         self.argvs.append(tuple(argv))
         if argv[1] == "build":
             dockerfile = Path(argv[list(argv).index("--file") + 1]).read_text()

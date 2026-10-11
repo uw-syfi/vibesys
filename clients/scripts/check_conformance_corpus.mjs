@@ -5,13 +5,19 @@
 // only biome, dependency-cruiser, and knip, so this check hand-rolls the structural validation it
 // needs rather than pulling in a JSON-schema library. Message shape is not hand-encoded here: the
 // event envelope (its fields and which are required) is read from the generated schema, the single
-// source protocol codegen owns (see #850). See tests/conformance/README.md and FORMAT.md.
+// source protocol codegen owns (see #850). Host helper scenarios (`"protocol": "host-helper"`) are
+// checked against the generated helper schema instead, and every helper request must be sent by one.
+// See tests/conformance/README.md and FORMAT.md.
 
 import {readdir, readFile} from 'node:fs/promises';
 import {basename, dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const SCHEMA_RELATIVE = 'backend-client/src/generated/protocol.schema.json';
+const HELPER_SCHEMA_RELATIVE = 'backend-client/src/generated/host-helper.schema.json';
+const HELPER_PROTOCOL = 'host-helper';
+const HELPER_ROLES = new Set(['control', 'run']);
+const HELPER_TRANSPORTS = new Set(['stdio']);
 const CONTRACT_RELATIVE = 'docs/contributing/wire-protocol.md';
 const CORPUS_RELATIVE = 'tests/conformance';
 const RUNNERS_RELATIVE = 'runners';
@@ -60,6 +66,13 @@ function frameTypes(schema) {
     if (!kinds.has(value)) frames.add(value);
   }
   return frames;
+}
+
+/** The helper's request and message tags, read from the generated helper schema's tagged unions. */
+function helperTypes(schema) {
+  const tags = section =>
+    new Set(Object.keys(schema.properties?.[section]?.discriminator?.mapping ?? {}));
+  return {requests: tags('request'), messages: tags('message')};
 }
 
 /** Decision tokens declared as `### WP-...:` headings in the wire contract. */
@@ -218,15 +231,85 @@ function scenarioStepErrors(data, label, frames) {
   return errors;
 }
 
-function checkScenario(scenario, decisions, frames) {
+function helperStepErrors(step, index, label, helper) {
+  const where = `${label} step ${index}`;
+  const errors = [];
+  const sent = step?.dir === 'c2s';
+  if (!STEP_DIRECTIONS.has(step?.dir)) errors.push(`${where}: "dir" must be one of c2s, s2c`);
+  const message = sent ? step?.frame : step?.expect;
+  if ((step?.frame === undefined) === (step?.expect === undefined) || message === undefined) {
+    errors.push(`${where}: a c2s step needs "frame" and an s2c step needs "expect"`);
+    return errors;
+  }
+  const known = sent ? helper.requests : helper.messages;
+  if (typeof message?.type !== 'string') {
+    errors.push(`${where}: message needs a string "type"`);
+  } else if (!known.has(message.type)) {
+    errors.push(
+      `${where}: unknown host helper ${sent ? 'request' : 'message'} type "${message.type}"`,
+    );
+  }
+  return errors;
+}
+
+function helperShapeErrors(data, label) {
+  const errors = [];
+  if (!HELPER_ROLES.has(data?.role)) errors.push(`${label}: "role" must be one of control, run`);
+  const transports = Array.isArray(data?.transports) ? data.transports : [];
+  if (transports.length === 0 || !transports.every(transport => HELPER_TRANSPORTS.has(transport))) {
+    errors.push(`${label}: "transports" must be ["stdio"]`);
+  }
+  for (const field of ['decisions', 'clients']) {
+    if (data?.[field] !== undefined)
+      errors.push(`${label}: a host helper scenario has no "${field}"`);
+  }
+  return errors;
+}
+
+function checkHelperScenario(data, label, helper) {
+  const errors = helperShapeErrors(data, label);
+  const sent = [];
+  if (!Array.isArray(data?.steps) || data.steps.length === 0) {
+    errors.push(`${label}: "steps" must be a non-empty array`);
+  } else {
+    for (const [index, step] of data.steps.entries()) {
+      errors.push(...helperStepErrors(step, index, label, helper));
+      if (step?.dir === 'c2s' && typeof step?.frame?.type === 'string') sent.push(step.frame.type);
+    }
+  }
+  return {errors, used: [], sent};
+}
+
+function checkHelperCoverage(helper, sent) {
+  return [...helper.requests]
+    .sort()
+    .filter(type => !sent.has(type))
+    .map(type => `host-helper.schema.json: request "${type}" is sent by no host helper scenario`);
+}
+
+function checkScenario(scenario, decisions, frames, helper) {
   const label = `scenarios/${scenario.name}`;
   if (scenario.parseError) {
-    return {errors: [`${label}: invalid JSON: ${scenario.parseError}`], used: []};
+    return {errors: [`${label}: invalid JSON: ${scenario.parseError}`], used: [], sent: []};
+  }
+  if (scenario.data?.protocol === HELPER_PROTOCOL) {
+    const result = checkHelperScenario(scenario.data, label, helper);
+    if (scenario.data.id !== scenario.stem) {
+      result.errors.push(`${label}: "id" must equal the filename stem "${scenario.stem}"`);
+    }
+    return result;
+  }
+  if (scenario.data?.protocol !== undefined) {
+    return {
+      errors: [`${label}: unknown "protocol" "${scenario.data.protocol}"`],
+      used: [],
+      sent: [],
+    };
   }
   const {errors, used} = scenarioShapeErrors(scenario.data, scenario.stem, label, decisions);
   errors.push(...scenarioClientErrors(scenario.data, label));
   errors.push(...scenarioStepErrors(scenario.data, label, frames));
-  return {errors, used};
+  return {errors, used, sent: []};
 }
 
 function runnerMetadataErrors(data, stem, label) {
@@ -340,6 +423,14 @@ export async function corpusErrors(root) {
   const allowedFields = runEventFields(schema);
   const requiredFields = runEventRequiredFields(schema);
   const frames = frameTypes(schema);
+  let helper;
+  try {
+    helper = helperTypes(
+      JSON.parse(await readFile(join(root, 'clients', HELPER_SCHEMA_RELATIVE), 'utf8')),
+    );
+  } catch (error) {
+    return [`cannot read generated host helper schema: ${error.message}`];
+  }
 
   let decisions;
   try {
@@ -370,11 +461,14 @@ export async function corpusErrors(root) {
     for (const scenario of result.executed) executed.add(scenario);
   }
   const referenced = new Set();
+  const sent = new Set();
   for (const scenario of scenarios.files) {
-    const result = checkScenario(scenario, decisions, frames);
+    const result = checkScenario(scenario, decisions, frames, helper);
     errors.push(...result.errors);
     for (const token of result.used) referenced.add(token);
+    for (const type of result.sent) sent.add(type);
   }
+  errors.push(...checkHelperCoverage(helper, sent));
   errors.push(...checkExecutionPartition(scenarios.files, executed));
   errors.push(...checkDecisionCoverage(decisions, referenced));
   return errors;

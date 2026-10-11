@@ -16,7 +16,10 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
-from vibesys.orchestration.dynamic.core_policy.api import planner_reply_example
+from vibesys.orchestration.dynamic.core_policy.api import (
+    planner_reply_example,
+    run_prompt_variables,
+)
 from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan, PortfolioPlan
 from vibesys.orchestration.dynamic.strategy.api import (
     EvidenceCitation,
@@ -132,9 +135,9 @@ def _variables(context: BaseModel, *, agent_evaluation: bool = False) -> dict[st
     variables = {name: getattr(context, name) for name in type(context).model_fields}
     variables.pop("template")
     return {
-        "objective": _OBJECTIVE,
-        "agent_evaluation": agent_evaluation,
-        "plan_example": planner_reply_example(),
+        **run_prompt_variables(
+            objective=_OBJECTIVE, environment_notes="", agent_evaluation=agent_evaluation
+        ),
         **variables,
     }
 

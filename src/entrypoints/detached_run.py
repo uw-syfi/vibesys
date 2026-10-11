@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from functools import partial
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -30,6 +31,7 @@ from server.host_api import (
     LiveInstanceRecord,
     RunPhase,
     RunStatus,
+    StartupFact,
     StartupStage,
 )
 from server.registry import (
@@ -42,10 +44,10 @@ from server.registry import (
     parse_instance_id,
 )
 from vs_project.api import ProjectStateError, validate_run_id
-from vs_sim.api import SystemClock
+from vs_sim.api import OsThreads, SystemClock
 
 if TYPE_CHECKING:
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Threads
 
 SERVER_EXITED = FailureReason(
     code="server_exited",
@@ -54,40 +56,96 @@ SERVER_EXITED = FailureReason(
 )
 """The reason a tombstone records when the run never reached an ended phase."""
 
+PROGRESS_WRITE_INTERVAL_SECONDS = 1.0
+"""Least time between two record writes that change only a stage's progress.
+
+A stage change, and every other phase change, is written at once; progress
+within a stage (an image build's steps) is written at most once per interval,
+so a fast build does not rewrite the record per step.
+"""
+
 
 class RecordPublisher:
     """Keep a held instance's record current, and leave it as the tombstone.
 
     The record's phase is folded here (``RunPhase.advance``) from the facts the
-    server reports; ``end`` writes the final record.
+    server reports; ``end`` writes the final record. A change of startup
+    progress alone is written at most once per
+    ``PROGRESS_WRITE_INTERVAL_SECONDS``: one arriving sooner is held, and a
+    worker on ``threads`` writes the latest held phase when the interval ends,
+    unless another write carried it first.
     """
 
-    def __init__(self, hold: InstanceHold, record: LiveInstanceRecord, clock: Clock) -> None:
-        """Publish ``record`` through ``hold`` now; ``clock`` stamps the tombstone."""
+    def __init__(
+        self,
+        hold: InstanceHold,
+        record: LiveInstanceRecord,
+        clock: Clock,
+        threads: Threads | None = None,
+    ) -> None:
+        """Publish ``record`` through ``hold`` now; ``clock`` stamps the tombstone.
+
+        ``threads`` paces progress writes; it defaults to the operating system's.
+        """
         self._hold = hold
         self._record = record
         self._clock = clock
+        self._threads = threads or OsThreads()
+        self._lock = self._threads.lock()
+        self._held: RunPhase | None = None
+        self._flush_scheduled = False
+        self._written_at = self._threads.now()
         hold.publish(record)
 
     def listening(self) -> None:
         """The control socket accepts connections."""
-        self._publish(status=InstanceStatus.SERVING)
+        with self._lock:
+            self._publish(status=InstanceStatus.SERVING)
 
     def observe(
-        self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+        self,
+        *,
+        status: RunStatus | None = None,
+        failure: FailureReason | None = None,
+        startup: StartupFact | None = None,
     ) -> None:
         """Fold one lifecycle fact into the record's phase, publishing a change."""
-        phase = self._record.phase.advance(status=status, failure=failure)
-        if phase != self._record.phase:
+        with self._lock:
+            current = self._held or self._record.phase
+            phase = current.advance(status=status, failure=failure, startup=startup)
+            if phase == current:
+                return
+            written = self._record.phase
+            progress_only = phase.status is written.status and phase.stage is written.stage
+            wait = self._written_at + PROGRESS_WRITE_INTERVAL_SECONDS - self._threads.now()
+            if progress_only and wait > 0:
+                self._held = phase
+                if not self._flush_scheduled:
+                    self._flush_scheduled = True
+                    self._threads.spawn(partial(self._flush, wait), name="record-progress")
+                return
             self._publish(phase=phase)
 
     def end(self) -> None:
         """Write the tombstone: the phase the run ended in, or ``SERVER_EXITED``."""
         self.observe(failure=SERVER_EXITED)
-        self._publish(ended_at=self._clock.now())
+        with self._lock:
+            self._publish(ended_at=self._clock.now())
+
+    def _flush(self, wait: float) -> None:
+        self._threads.sleep(wait)
+        with self._lock:
+            self._flush_scheduled = False
+            if self._held is not None:
+                self._publish(phase=self._held)
 
     def _publish(self, **update: object) -> None:
+        """Write the record with ``update``; the caller holds ``self._lock``."""
+        if "phase" not in update and self._held is not None:
+            update["phase"] = self._held
+        self._held = None
         self._record = LiveInstanceRecord.model_validate({**self._record.model_dump(), **update})
+        self._written_at = self._threads.now()
         self._hold.publish(self._record)
 
 

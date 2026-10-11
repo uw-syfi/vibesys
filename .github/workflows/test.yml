@@ -183,9 +183,8 @@ jobs:
 
   # The TUI work is four jobs, one per independent check group, so its wall time
   # is the slowest leg rather than the sum (issue #1678). Each job has its own
-  # checkout, which is what makes that safe: a package's `build` is
-  # `rm -rf dist && tsc`, and two pnpm runs in one checkout race on `dist` (see
-  # `tui_tests` in .repoctl/checks.toml). Required PR CI lists all four.
+  # checkout, so the `build` and `check` task graphs never share a `dist`.
+  # Required PR CI lists all four.
   tui-quality:
     needs: changes
     if: needs.changes.outputs.tui == 'true'

@@ -6,7 +6,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
 DEFAULT_IMAGE_ID = "sha256:" + "a" * 64
@@ -18,9 +18,11 @@ type DockerResult = subprocess.CompletedProcess[str]
 class FakeDockerBuildRunner:
     """Answer image builds and ``docker image inspect`` from scripted results.
 
-    A build (``docker build``, or ``docker run`` of the containerized
-    devcontainer CLI) succeeds and inspection reports ``image_id`` unless a result (or an
-    exception to raise) is scripted. Every call is recorded in ``calls``.
+    A build succeeds and inspection reports ``image_id`` unless a result (or an
+    exception to raise) is scripted. Every call is recorded in ``calls``. Like
+    the real runner, a command streams each line of its result's ``stderr``
+    to ``on_stderr_line`` before returning; a script's build ``stderr`` is
+    where Docker's progress output goes.
     """
 
     def __init__(
@@ -41,6 +43,7 @@ class FakeDockerBuildRunner:
         *,
         cwd: Path,
         timeout: float,
+        on_stderr_line: Callable[[str], None] | None = None,
     ) -> DockerResult:
         """Record the command and return the scripted outcome for its kind."""
         normalized = tuple(argv)
@@ -48,6 +51,9 @@ class FakeDockerBuildRunner:
         result = self.build_result if normalized[1] in ("build", "run") else self.inspect_result
         if isinstance(result, BaseException):
             raise result
+        if on_stderr_line is not None:
+            for line in result.stderr.splitlines():
+                on_stderr_line(line)
         return result
 
 
