@@ -14,7 +14,6 @@ from launch import open_run_store
 from vibesys.api import OrchestrationRegistry
 from vibesys.api.contracts import RunStatus
 from vibesys.orchestration.evolve.models import EvolveState
-from vibesys.orchestration.issue_queue import IssueQueueState
 from vs_project.api import (
     OrchestrationDescriptor,
     Project,
@@ -102,11 +101,8 @@ def test_plain_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
         trusted_input_baseline="0" * 40,
     )
     project.state.create_run(manifest)
-    expected = IssueQueueState(round_idx=1, bootstrap_done=True)
-    project.state.portable_namespace(manifest.run_id, "plain").slot(
-        "state.json", IssueQueueState
-    ).save(expected)
-
+    # A plain run is a core run: its state is the runtime record, and a run that committed none
+    # is listed with its identity and no projection.
     store = open_run_store(project)
     direct = store.get_run(manifest.run_id)
     listed = store.list_runs()
@@ -115,7 +111,7 @@ def test_plain_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
     assert type(direct.loop) is str
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
-    assert direct.projection == expected.model_dump(mode="json")
+    assert not direct.projection
     assert len(listed) == 1
     assert listed[0] == direct
     assert store.get_record(manifest.run_id).facts().model_dump() == {

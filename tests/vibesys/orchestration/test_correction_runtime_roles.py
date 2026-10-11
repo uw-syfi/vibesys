@@ -23,13 +23,6 @@ from vibesys.orchestration.evolve.models import (
 from vibesys.orchestration.evolve.models import (
     MutatorResponse,
 )
-from vibesys.orchestration.issue_queue import agents as issue_queue
-from vibesys.orchestration.issue_queue.models import (
-    IssueImplementerResponse,
-    IssueJudgeResponse,
-    IssuePerfEvalResponse,
-    PerfMetrics,
-)
 from vibesys.orchestration.multi import agents as multi
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
@@ -184,27 +177,6 @@ CASES = (
         evolve.PROFILER,
         ProfilerSummary(analysis="Measured", bottlenecks="CPU", suggestions="Batch"),
         id="evolve-profiler",
-    ),
-    pytest.param(
-        issue_queue.IMPLEMENTER,
-        IssueImplementerResponse(issue_id=1, summary="Implemented", self_check="Passed"),
-        id="issue-implementer",
-    ),
-    pytest.param(
-        issue_queue.JUDGE,
-        IssueJudgeResponse(issue_id=1, analysis="Reviewed", feedback="", verdict="pass"),
-        id="issue-judge",
-    ),
-    pytest.param(
-        issue_queue.PERF_EVALUATOR,
-        IssuePerfEvalResponse(
-            analysis="Measured",
-            metrics=PerfMetrics(load_levels=()),
-            evaluator_feedback=(),
-            throughput_trend="improved",
-            latency_trend="mixed",
-        ),
-        id="issue-performance",
     ),
 )
 

@@ -1,37 +1,39 @@
 Run performance evaluation 1.
 
+Reference: reference/model.py
+Objective: Maximize measured token throughput without losing correctness.
 Accuracy command: uv run check-accuracy
 Benchmark command: uv run benchmark
 Runtime notes: Use CUDA with bfloat16.
-Objective: Maximize measured token throughput without losing correctness.
-Reference: reference/model.py
-No profiler is configured; do not attempt a profile.
+No profiler tool is available in this run; do not attempt a profile.
 Configured load levels: "discover a low, medium, high, and saturation workload"
-Prior performance records: []
+Prior performance records:
+none yet
 
 Use the configured loads as a starting ladder. If they do not expose saturation,
 increase request rate until throughput plateaus, latency rises sharply, or
 requests fail. Add one or two prompt-length or output-length workloads when the
 shape could change the ceiling. Save and read structured benchmark output for
-every run. Diagnose the limiting resource separately at low, medium, and
-saturation load. Compare with both the immediately prior result and the best
-recorded result.
+every run (write files only under `perf/` in the workspace). Diagnose the limiting
+resource separately at low, medium, and saturation load. Compare with both the
+immediately prior result and the best recorded result. Always stop any server process
+that this turn started, including after benchmark failure.
 
-Profiling is optional, limited to one run, and must answer a specific unresolved
-bottleneck question. Do not attempt profiling when profiler is `none`. Always
-stop any server process that this turn started, including after benchmark or
-profiling failure.
+The board below lists every issue. Before filing, check it for the same work. File at
+most 3 non-duplicate issues in `new_issues`, ranked by impact over effort.
+Each issue background must cite code_evidence or metric_evidence and name expected_impact,
+effort, and scope. Each description must contain `## Background`, `## Acceptance criteria`,
+and `## Notes`.
 
-Before filing, call list_issues for open work and search relevant keywords.
-File at most 3 non-duplicate issues. Rank them
-by impact over effort. Each issue background must cite code_evidence,
-metric_evidence, or profile_evidence and name expected_impact, effort, and scope.
-Each description must contain `## Background`, `## Acceptance criteria`, and
-`## Notes`.
+Board:
+- #7 [feature] [in_progress] Implement streaming
+- #8 [bug] [open] Health route 500s
+- #9 [perf] [closed] Batch prefill
+
 
 Return exactly one JSON object with this schema:
 {
-  "analysis": "trend comparison, saturation, resource diagnosis, and profiling decision",
+  "analysis": "trend comparison, saturation, resource diagnosis",
   "metrics": {
     "load_levels": [{
       "target_rate": 1.0, "actual_rate": 1.0,
@@ -45,7 +47,7 @@ Return exactly one JSON object with this schema:
     "extra": {}
   },
   "evaluator_feedback": ["measurement guidance for the next evaluator"],
-  "new_issue_ids": [],
+  "new_issues": [{"type": "bug" | "feature" | "perf", "title": "...", "description": "..."}],
   "throughput_trend": "improved" | "regressed" | "mixed",
   "latency_trend": "improved" | "regressed" | "mixed"
 }
