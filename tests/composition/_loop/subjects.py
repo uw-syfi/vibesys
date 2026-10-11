@@ -462,7 +462,7 @@ SUBJECTS = {
             "evolve",
             evolve_config(max_generations=1, children_per_generation=1, bootstrap_max_attempts=2),
             sweeps_crashes=False,
-            ci_stride=4,
+            ci_stride=8,
         ),
         # Concurrent children: the crash sweep covers a run whose slots overlap.
         evolve_subject(
@@ -477,8 +477,8 @@ SUBJECTS = {
                 profiler_mcp_name="vibesys-linux-cpu-profiler",
             ),
             sweeps_crashes=False,
-            # 400 commits of overlapping slots: CI samples every 8th, the slow sweep takes all.
-            ci_stride=8,
+            # 400 commits of overlapping slots: CI samples every 16th, the slow sweep takes all.
+            ci_stride=16,
         ),
         evolve_subject(
             "evolve-generations",

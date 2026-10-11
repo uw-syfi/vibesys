@@ -188,16 +188,41 @@ def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
         vibesys_version="test",
         run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
-        orchestration=OrchestrationDescriptor(id="plain", config_version=1, options={}),
+        orchestration=OrchestrationDescriptor(id="team-search", config_version=1, options={}),
         trusted_input_baseline="0" * 40,
     )
     project.state.create_run(manifest)
-    project.state.portable_namespace(manifest.run_id, "evolve").write_bytes("agent.json", b"{}")
+    project.state.portable_namespace(manifest.run_id, "team-search").write_bytes(
+        "agent.json", b"{}"
+    )
     project.state.portable_namespace(manifest.run_id, "plain").write_bytes("plain.json", b"{}")
 
-    documents = open_run_store(project).get_record(manifest.run_id).history_documents()
+    class SearchOptions(BaseModel):
+        model_config = ConfigDict(extra="forbid")
 
-    assert [document.relative_path.name for document in documents] == ["plain.json"]
+    class SearchState(BaseModel):
+        revision: int = 0
+
+    async def run_search(host: Run, options: BaseModel) -> PluginRunStatus:
+        del host, options
+        return PluginRunStatus.SUCCEEDED
+
+    registry = OrchestrationRegistry()
+    registry.register_plugin(
+        OrchestrationPlugin(
+            id="team-search",
+            agents=(),
+            options=SearchOptions,
+            orchestrate=run_search,
+            state=SearchState,
+        )
+    )
+
+    documents = (
+        open_run_store(project, registry=registry).get_record(manifest.run_id).history_documents()
+    )
+
+    assert [document.relative_path.name for document in documents] == ["agent.json"]
 
 
 def test_workspace_changes_hide_the_registered_plugins_memory(tmp_path: Path) -> None:
