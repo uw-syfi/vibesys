@@ -3,8 +3,8 @@
  * `RunControlBridge` and its reply dispatched back with the command's token.
  */
 
-import {createStore, type Store} from '@vibesys/core-state';
 import {settled, type WelcomeResult} from '@vibesys/ipc';
+import {createStore, type Store} from '@vibesys/store';
 import {
   type RunCommand,
   type RunControlBridge,

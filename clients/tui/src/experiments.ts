@@ -4,13 +4,13 @@ import type {
   HypothesisEntry,
   HypothesisRound,
 } from '@vibesys/contracts';
+import {hasRunEnded} from '@vibesys/run-state';
 import {
   type AgentPhase,
   hypothesisRoundNumbers as coreHypothesisRoundNumbers,
   experimentForRound,
-  hasRunEnded,
   planningStageForPhase,
-} from '@vibesys/core-state';
+} from '@vibesys/run-state/rounds';
 import type {
   ExperimentIndexItem,
   ExperimentLogState,

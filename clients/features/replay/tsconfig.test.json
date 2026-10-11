@@ -22,7 +22,7 @@
       "path": "../../contracts/tsconfig.testing.json"
     },
     {
-      "path": "../../core-state/tsconfig.testing.json"
+      "path": "../../store/tsconfig.testing.json"
     }
   ]
 }

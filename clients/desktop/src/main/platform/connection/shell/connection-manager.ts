@@ -7,7 +7,7 @@
  * every link, once. Runs are detached and keep going.
  */
 
-import {type HostId, type HostKey, hostKey} from '@vibesys/entities';
+import {type HostId, type HostKey, hostKey} from '@vibesys/hosts';
 import {DEFAULT_RECONNECT_DELAYS_MS, type ScheduleTimeout} from '@vibesys/transport';
 import type {ConnectionConfig} from '../state/host-connection.js';
 import {HostConnection} from './host-connection.js';

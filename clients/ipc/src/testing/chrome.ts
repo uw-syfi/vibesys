@@ -3,9 +3,10 @@
  * title strip, the host panel, the run controls), drawn from a `Seeded` generator.
  */
 
-import type {Seeded} from '@vibesys/core-state/testing';
-import {type ConnectionStatus, type StopView, stopKey} from '@vibesys/entities';
+import type {ConnectionStatus} from '@vibesys/hosts';
 import type {ChromeState} from '@vibesys/ipc';
+import {type StopView, stopKey} from '@vibesys/runs';
+import type {Seeded} from '@vibesys/store/testing';
 
 const CONNECTIONS: readonly ConnectionStatus[] = [
   {kind: 'connecting'},

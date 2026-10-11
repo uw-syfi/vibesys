@@ -12,8 +12,10 @@
     {"path": "../transport/tsconfig.lib.json"},
     {"path": "../transport/tsconfig.testing.json"},
     {"path": "../contracts/tsconfig.lib.json"},
-    {"path": "../core-state/tsconfig.testing.json"},
-    {"path": "../entities/tsconfig.lib.json"},
+    {"path": "../store/tsconfig.testing.json"},
+    {"path": "../hosts/tsconfig.lib.json"},
+    {"path": "../runs/tsconfig.lib.json"},
+    {"path": "../features/start-run/tsconfig.state.json"},
     {"path": "../ipc/tsconfig.lib.json"}
   ]
 }

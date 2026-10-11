@@ -4,7 +4,7 @@
  * them into the run view).
  */
 import type {RunEvent} from '@vibesys/contracts';
-import {createStore, type Store} from '@vibesys/core-state';
+import {createStore, type Store} from '@vibesys/store';
 import {REPLAY_IDLE, type ReplayAction, type ReplayState, replayStep} from '../../state/replay.js';
 
 /** Load a replay fixture's validated events; rejects with the reason the page shows. */

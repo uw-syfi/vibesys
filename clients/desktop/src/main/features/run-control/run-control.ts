@@ -21,13 +21,12 @@ import {
   hostKey,
   hostLabel,
   liveRecord,
-  type ResumeRunId,
-  type StopView,
-} from '@vibesys/entities';
+} from '@vibesys/hosts';
 import type {ChromeState, StartOutcome} from '@vibesys/ipc';
+import type {ResumeRunId, StopView} from '@vibesys/runs';
 import {connectionStatus} from '../../entities/connection.js';
 import type {HostConnection, Phase} from '../../platform/connection/index.js';
-import type {RecentRun} from '../../platform/settings/index.js';
+import type {StoredRecentRun} from '../../platform/settings/index.js';
 import {type RelayPort, relay} from './relay.js';
 import {StopController} from './stop-controller.js';
 
@@ -46,7 +45,7 @@ export interface RunControlDeps {
   /** Ask the user; resolves true on "yes". */
   confirm(text: string): Promise<boolean>;
   /** Record a run the user opened (the settings store is the one writer). */
-  remember(run: RecentRun): Promise<void>;
+  remember(run: StoredRecentRun): Promise<void>;
   /** The window's state changed: send it again. */
   changed(): void;
   readonly log: (message: string) => void;
@@ -292,7 +291,7 @@ export class RunControl {
     this.#deps.changed();
   }
 
-  async #remember(run: RecentRun): Promise<void> {
+  async #remember(run: StoredRecentRun): Promise<void> {
     try {
       await this.#deps.remember(run);
     } catch (error) {

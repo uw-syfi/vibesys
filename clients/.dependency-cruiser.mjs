@@ -17,7 +17,7 @@ const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
 const TRANSPORT_TEST_ONLY =
   '^(?:transport|transport-node|contracts)/src/(?:test-support/|testing/)';
-const CORE_STATE_TEST_ONLY = '^core-state/src/testing/';
+const STORE_TEST_ONLY = '^store/src/testing/';
 // A package's own test-support directory (`desktop/src/testing/`): Fakes that only tests import.
 const PACKAGE_TEST_SUPPORT = '^[^/]+/src/testing/';
 // The replay harness is tooling, but it has its own rule below, with the reason it exists; the
@@ -56,7 +56,7 @@ function featureRules() {
   return [
     {
       // The functional core does no I/O: no React, no renderer, no transport runtime values.
-      // Generated types and core-state are the inputs it folds. Group 1 is the importer's own
+      // Generated types and the run fold are the inputs it reads. Group 1 is the importer's own
       // feature, whose renderer its state never reaches. A core that needs a DOM global (the
       // gateway form parses with `URL`) sits in `renderer/state/` and is held to the same rule.
       name: 'feature-state-is-pure',
@@ -132,7 +132,7 @@ function webAppRules() {
 // - `src/renderer/preload/` holds the sandboxed preloads, the renderers' only way to the main
 //   process. The renderers themselves are `apps/desktop-renderer` (the welcome view) and
 //   `apps/web` (the run page).
-// - The two processes share only workspace packages: the models in `@vibesys/entities` and the
+// - The two processes share only workspace packages: the models in `@vibesys/hosts` and `@vibesys/runs` and the
 //   typed messages in `@vibesys/ipc`, whose `neutral` runtime the package-graph checker holds.
 const DESKTOP = '^desktop/src/';
 const DESKTOP_MAIN = `${DESKTOP}main/`;
@@ -321,17 +321,18 @@ export default {
       // that shipping code must not reach. Keep them reachable only from test files.
       name: 'production-code-does-not-import-transport-test-support',
       severity: 'error',
-      // Test support may build on itself, e.g. the testing entry re-exporting its Fakes.
-      from: {path: SCANNED, pathNot: [TEST_FILE, TRANSPORT_TEST_ONLY]},
+      // Test support may build on test support, e.g. the testing entry re-exporting its Fakes, or
+      // another package's harness building on the protocol fixtures.
+      from: {path: SCANNED, pathNot: [TEST_FILE, TRANSPORT_TEST_ONLY, PACKAGE_TEST_SUPPORT]},
       to: {path: TRANSPORT_TEST_ONLY},
     },
     {
       // The store model checker and its seeded generator are test support for every frontend's
       // screen stores; only tests and other test support reach them.
-      name: 'production-code-does-not-import-core-state-test-support',
+      name: 'production-code-does-not-import-store-test-support',
       severity: 'error',
       from: {path: SCANNED, pathNot: [TEST_FILE, PACKAGE_TEST_SUPPORT]},
-      to: {path: CORE_STATE_TEST_ONLY},
+      to: {path: STORE_TEST_ONLY},
     },
     {
       name: 'workspace-packages-use-public-exports',
@@ -442,7 +443,7 @@ export default {
       to: {
         path: [
           '^tui/src/(?!launcher\\.ts$|theme\\.ts$)',
-          '^(?:transport|transport-node|contracts|core-state)/',
+          '^(?:transport|transport-node|contracts|run-state|store)/',
           '@opentui[+/]',
         ],
       },

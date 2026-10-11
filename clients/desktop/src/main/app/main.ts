@@ -6,7 +6,7 @@
 import {homedir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import type {HostId} from '@vibesys/entities';
+import type {HostId} from '@vibesys/hosts';
 import {WELCOME_EVENTS} from '@vibesys/ipc';
 import {app, Menu, net, powerMonitor} from 'electron';
 import {Hosts} from '../features/hosts/index.js';

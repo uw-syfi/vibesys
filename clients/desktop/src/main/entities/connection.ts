@@ -1,5 +1,5 @@
 /** The connection manager's `Phase`, as the views word a host connection. */
-import type {ConnectionStatus} from '@vibesys/entities';
+import type {ConnectionStatus} from '@vibesys/hosts';
 import type {Phase} from '../platform/connection/index.js';
 
 /** How a host connection's phase reads in the views. */

@@ -1,9 +1,10 @@
 import {describe, expect, test} from 'bun:test';
-import {type ConnectionStatus, exactResumeRunId} from '@vibesys/entities';
+import type {ConnectionStatus} from '@vibesys/hosts';
+import {exactResumeRunId} from '@vibesys/runs';
 import {FakeClock} from '@vibesys/transport/testing';
 import {DEFAULT_CONNECTION_CONFIG, HostConnection} from '../../platform/connection/index.js';
 import {FakeLink, record} from '../../platform/connection/testing/fake-helper.js';
-import type {RecentRun} from '../../platform/settings/index.js';
+import type {StoredRecentRun} from '../../platform/settings/index.js';
 import {RunControl} from './run-control.js';
 
 /** A RunControl over one FakeHelper host, with the pages it opened and the runs it remembered. */
@@ -18,7 +19,7 @@ function world() {
     scheduleTimeout: new FakeClock().scheduleTimeout,
     log: () => {},
   });
-  const remembered: RecentRun[] = [];
+  const remembered: StoredRecentRun[] = [];
   const pages = {opened: 0, closed: 0, woken: 0, confirms: 0};
   const runs = new RunControl({
     connection: async () => connection,

@@ -38,7 +38,7 @@
   "dependencies": {
     "@opentui/core": "0.4.3",
     "@vibesys/contracts": "workspace:*",
-    "@vibesys/core-state": "workspace:*",
+    "@vibesys/run-state": "workspace:*",
     "@vibesys/transport": "workspace:*",
     "@vibesys/transport-node": "workspace:*",
     "highlight.js": "11.11.2",
@@ -46,7 +46,7 @@
   },
   "bundledDependencies": [
     "@vibesys/contracts",
-    "@vibesys/core-state",
+    "@vibesys/run-state",
     "@vibesys/transport",
     "@vibesys/transport-node"
   ],

@@ -36,14 +36,16 @@
   },
   "dependencies": {
     "@vibesys/contracts": "workspace:*",
-    "@vibesys/entities": "workspace:*",
+    "@vibesys/feature-start-run": "workspace:*",
+    "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
+    "@vibesys/runs": "workspace:*",
     "@vibesys/transport": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
     "@types/node": "^24.0.0",
-    "@vibesys/core-state": "workspace:*",
+    "@vibesys/store": "workspace:*",
     "electron": "44.6.0",
     "typescript": "^5.8.3"
   }

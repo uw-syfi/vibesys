@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {checkModel} from '@vibesys/core-state/testing';
+import {checkModel} from '@vibesys/store/testing';
 import {
   type GatewayConnectAction,
   type GatewayConnectRequest,

@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
-import {exactResumeRunId, type HostKey, type HostListing, type RecentRun} from '@vibesys/entities';
+import type {HostKey, HostListing} from '@vibesys/hosts';
 import type {ChromeState, WelcomeBridge, WelcomeResult} from '@vibesys/ipc';
+import {exactResumeRunId, type RecentRun} from '@vibesys/runs';
 import {welcomeStores} from './stores.js';
 
 const CHROME: ChromeState = {mode: 'welcome', attached: null, stops: {}};

@@ -4,11 +4,12 @@
  * `(host, runId)`, recorded from the run's record when the app starts or attaches to it, never
  * later and never guessed; its status comes from the host's registry, never from this file.
  */
-import {type HostKey, hostFromKey, isRunId, isTaskName, validHostPath} from '@vibesys/entities';
+import {type HostKey, hostFromKey, validHostPath} from '@vibesys/hosts';
+import {isRunId, isTaskName} from '@vibesys/runs';
 import {object, onlyKeys, SettingsError} from './parse.js';
 
-/** One run the user opened. */
-export interface RecentRun {
+/** One run the user opened, as `recent.json` stores it (the welcome view lists `RecentRun`). */
+export interface StoredRecentRun {
   readonly host: HostKey;
   /** The run's project directory on the host. */
   readonly project: string;
@@ -21,7 +22,7 @@ export interface RecentRun {
 
 export interface RecentFile {
   readonly version: 2;
-  readonly runs: readonly RecentRun[];
+  readonly runs: readonly StoredRecentRun[];
 }
 
 export const EMPTY_RECENT: RecentFile = {version: 2, runs: []};
@@ -43,7 +44,7 @@ function matching(
 }
 
 /** Validate one entry, rejecting unknown keys. */
-function parseRun(value: unknown, path: string, keys: readonly string[]): RecentRun {
+function parseRun(value: unknown, path: string, keys: readonly string[]): StoredRecentRun {
   const record = object(value, path);
   onlyKeys(record, keys, path);
   const host = record['host'];
@@ -89,7 +90,7 @@ export function parseRecent(value: unknown): RecentFile {
   };
 }
 
-function sameRun(a: RecentRun, b: RecentRun): boolean {
+function sameRun(a: StoredRecentRun, b: StoredRecentRun): boolean {
   return a.host === b.host && a.runId === b.runId;
 }
 
@@ -97,9 +98,9 @@ function sameRun(a: RecentRun, b: RecentRun): boolean {
  * `file` with `run` first: an entry for the same run is replaced (keeping its task when `run`
  * does not know one), and the list keeps the `limit` most recent runs.
  */
-export function remember(file: RecentFile, run: RecentRun, limit = RECENT_LIMIT): RecentFile {
+export function remember(file: RecentFile, run: StoredRecentRun, limit = RECENT_LIMIT): RecentFile {
   const previous = file.runs.find(entry => sameRun(entry, run));
-  const merged: RecentRun = {...run, task: run.task ?? previous?.task ?? null};
+  const merged: StoredRecentRun = {...run, task: run.task ?? previous?.task ?? null};
   const rest = file.runs.filter(entry => !sameRun(entry, run));
   return {version: 2, runs: [merged, ...rest].slice(0, Math.max(0, limit))};
 }

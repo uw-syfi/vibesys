@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
-import {Seeded} from '@vibesys/core-state/testing';
-import {isInstanceId, isRunId, isTaskName} from '@vibesys/entities';
 import {WELCOME_CHANNELS} from '@vibesys/ipc';
+import {isInstanceId, isRunId, isTaskName} from '@vibesys/runs';
+import {Seeded} from '@vibesys/store/testing';
 import {parseWelcomeRequest, type WelcomeRequest} from './welcome-ipc.js';
 
 const VALUES: readonly unknown[] = [

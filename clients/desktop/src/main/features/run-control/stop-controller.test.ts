@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {stopKey} from '@vibesys/entities';
+import {stopKey} from '@vibesys/runs';
 import {FakeClock} from '@vibesys/transport/testing';
 import {DEFAULT_CONNECTION_CONFIG, HostConnection} from '../../platform/connection/index.js';
 import {FakeLink, record} from '../../platform/connection/testing/fake-helper.js';

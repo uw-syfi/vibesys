@@ -7,12 +7,15 @@ import {fileURLToPath} from 'node:url';
 export const WEB_BUNDLE_PACKAGES = [
   'apps/web',
   'contracts',
-  'core-state',
-  'entities',
   'features/gateway-connect',
   'features/replay',
   'features/run-view',
+  'hosts',
   'ipc',
+  'run-session',
+  'run-state',
+  'runs',
+  'store',
   'transport',
   'ui',
 ] as const;

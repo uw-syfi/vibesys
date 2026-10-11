@@ -9,7 +9,8 @@
  * in step.
  */
 import electron = require('electron');
-import type {HostKey, HostListing, HostSummary, RecentRun, ResumeRunId} from '@vibesys/entities';
+import type {HostKey, HostListing, HostSummary} from '@vibesys/hosts';
+import type {RecentRun, ResumeRunId} from '@vibesys/runs';
 import type {ChromeState, PathCompletion, StartOutcome, WelcomeBridge, WelcomeOverview, WelcomeResult} from '@vibesys/ipc';
 
 type Channels = typeof import('@vibesys/ipc').WELCOME_CHANNELS;

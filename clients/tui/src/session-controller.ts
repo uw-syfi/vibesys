@@ -6,12 +6,9 @@ import {
   ServerError,
   type ServerMessage,
 } from '@vibesys/contracts';
-import {
-  DEFAULT_CHAT_THREAD_ID,
-  hasRunEnded,
-  projectPerformance,
-  recordsBenchmark,
-} from '@vibesys/core-state';
+import {hasRunEnded} from '@vibesys/run-state';
+import {projectPerformance, recordsBenchmark} from '@vibesys/run-state/performance';
+import {DEFAULT_CHAT_THREAD_ID} from '@vibesys/run-state/transcript';
 import {
   DEFAULT_RECONNECT_DELAYS_MS,
   PersistentEventStream,

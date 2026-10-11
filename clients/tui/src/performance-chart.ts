@@ -1,5 +1,5 @@
 import type {ProtocolResponse} from '@vibesys/contracts';
-import type {PerformanceDirection, PerformanceProjection} from '@vibesys/core-state';
+import type {PerformanceDirection, PerformanceProjection} from '@vibesys/run-state/performance';
 
 type PerformanceContext = NonNullable<ProtocolResponse['performance_context']>;
 

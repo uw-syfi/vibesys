@@ -25,13 +25,13 @@
       "path": "./tsconfig.state.json"
     },
     {
-      "path": "../../core-state/tsconfig.lib.json"
-    },
-    {
-      "path": "../../entities/tsconfig.lib.json"
-    },
-    {
       "path": "../../ipc/tsconfig.lib.json"
+    },
+    {
+      "path": "../../runs/tsconfig.lib.json"
+    },
+    {
+      "path": "../../store/tsconfig.lib.json"
     },
     {
       "path": "../../ui/tsconfig.lib.json"

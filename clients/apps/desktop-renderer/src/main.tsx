@@ -4,8 +4,8 @@
  * (`ui/`) with each store's state and dispatcher.
  */
 
-import type {Store} from '@vibesys/core-state';
 import type {WelcomeBridge} from '@vibesys/ipc';
+import type {Store} from '@vibesys/store';
 import {type JSX, StrictMode, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
 import {WelcomeView} from './ui/welcome-view.js';

@@ -1,7 +1,9 @@
 /** The settings files' shared parsing: objects with known keys only, failing with the path. */
-import {SettingsError} from '@vibesys/entities';
 
-export {SettingsError};
+/** A settings file that cannot be read as this version writes it; the message names the path. */
+export class SettingsError extends Error {
+  override name = 'SettingsError';
+}
 
 export function object(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {

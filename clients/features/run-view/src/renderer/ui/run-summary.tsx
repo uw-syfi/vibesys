@@ -1,4 +1,4 @@
-import type {CoreState} from '@vibesys/core-state';
+import type {CoreState} from '@vibesys/run-state';
 import type {JSX} from 'react';
 
 /** The run's counters: sequence, rounds, and transcript length. */

@@ -4,7 +4,7 @@
  * state it is given and reports events; it performs no I/O.
  */
 
-import type {HostKey} from '@vibesys/entities';
+import type {HostKey} from '@vibesys/hosts';
 import {Combobox} from '@vibesys/ui';
 import type {InputHTMLAttributes, JSX} from 'react';
 import {

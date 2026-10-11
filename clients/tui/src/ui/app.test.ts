@@ -12,7 +12,8 @@ import {
 } from '@opentui/core';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
 import type {ChatOptions, DesignRound, HypothesisEntry, ProtocolResponse} from '@vibesys/contracts';
-import {type CoreRunStatus, DEFAULT_CHAT_THREAD_ID} from '@vibesys/core-state';
+import type {CoreRunStatus} from '@vibesys/run-state';
+import {DEFAULT_CHAT_THREAD_ID} from '@vibesys/run-state/transcript';
 import {
   chatMenuCustomModel,
   closeChatMenu,

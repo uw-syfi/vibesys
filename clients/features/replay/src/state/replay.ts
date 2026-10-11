@@ -4,7 +4,7 @@
  * token; a reply for any other load is dropped, so a superseded load never folds its events.
  */
 import type {RunEvent} from '@vibesys/contracts';
-import {only, type Step} from '@vibesys/core-state';
+import {only, type Step} from '@vibesys/store';
 
 export const DEFAULT_REPLAY_FIXTURE_URL = '/__vibesys/fixtures/framework-events.jsonl';
 

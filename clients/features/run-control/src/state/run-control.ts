@@ -7,9 +7,10 @@
  * to an earlier action is dropped, so a slow attach cannot overwrite what a later resume says.
  */
 
-import {only, type Step} from '@vibesys/core-state';
-import type {HostKey, ResumeRunId} from '@vibesys/entities';
+import type {HostKey} from '@vibesys/hosts';
 import type {ChromeState, WelcomeResult} from '@vibesys/ipc';
+import type {ResumeRunId} from '@vibesys/runs';
+import {only, type Step} from '@vibesys/store';
 
 interface Banner {
   readonly text: string;

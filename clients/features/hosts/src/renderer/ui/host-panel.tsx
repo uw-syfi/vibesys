@@ -3,7 +3,7 @@
  * pushes them, and "Start a run…"; or why the host cannot be reached, with Sign in.
  */
 
-import type {HostKey, HostListing, HostRun, HostSummary} from '@vibesys/entities';
+import type {HostKey, HostListing, HostRun, HostSummary} from '@vibesys/hosts';
 import {Button} from '@vibesys/ui';
 import type {FormEvent, JSX, KeyboardEvent, ReactNode} from 'react';
 import type {CompletionAction, CompletionState} from '../../state/completion.js';

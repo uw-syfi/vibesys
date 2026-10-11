@@ -11,10 +11,10 @@ import {
   serializeBrowserSession,
   webSocketUrlWithSession,
 } from '@vibesys/feature-gateway-connect/renderer';
-import {WebSession} from '@vibesys/feature-run-view/renderer';
+import {connectRun, WebSession} from '@vibesys/run-session';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {connectRun, openTransport} from '../platform/backend.js';
+import {openTransport} from '../platform/backend.js';
 import {markDesktopShell} from '../platform/desktop-shell.js';
 import {GatewaySessionStore} from '../platform/gateway-storage.js';
 import {browserLifecycle} from '../platform/lifecycle.js';

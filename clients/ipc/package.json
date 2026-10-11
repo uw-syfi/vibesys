@@ -32,11 +32,12 @@
     "test": "node ../scripts/run_bun_tests.mjs ./src"
   },
   "devDependencies": {
-    "@vibesys/core-state": "workspace:*",
     "@types/bun": "1.4.2",
+    "@vibesys/store": "workspace:*",
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@vibesys/entities": "workspace:*"
+    "@vibesys/hosts": "workspace:*",
+    "@vibesys/runs": "workspace:*"
   }
 }

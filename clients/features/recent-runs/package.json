@@ -37,8 +37,9 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@vibesys/core-state": "workspace:*",
-    "@vibesys/entities": "workspace:*",
+    "@vibesys/hosts": "workspace:*",
+    "@vibesys/runs": "workspace:*",
+    "@vibesys/store": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1"
   }

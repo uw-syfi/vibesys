@@ -2,7 +2,9 @@
  * The run page: header, connectivity banners, summary, and activity. Presentational: it renders
  * the run and the session it is given and reports clicks through its callbacks.
  */
-import type {CoreState} from '@vibesys/core-state';
+
+import type {WebSessionState} from '@vibesys/run-session';
+import type {CoreState} from '@vibesys/run-state';
 import type {JSX} from 'react';
 import {
   connectionBanners,
@@ -10,7 +12,6 @@ import {
   pageHeader,
   REPLAY_SESSION,
 } from '../../state/banners.js';
-import type {WebSessionState} from '../../state/connection.js';
 import {Banners} from './banners.js';
 import {Activity, RunSummary} from './run-summary.js';
 

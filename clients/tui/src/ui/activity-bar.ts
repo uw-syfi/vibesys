@@ -3,7 +3,7 @@ import {
   type ActiveAgentExecution,
   type ExecutionStatus,
   executionStatusFor,
-} from '@vibesys/core-state';
+} from '@vibesys/run-state';
 import {agentRuntimeLabel} from '../agent-runtime-label.js';
 import type {SessionState} from '../session-model.js';
 import {visibleActiveExecutions} from '../session-model.js';

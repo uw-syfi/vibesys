@@ -10,15 +10,8 @@
  * Host data reaches the view as pushes (`listing`), folded from the host helper's
  * `instances.watch`: there is no refresh request to forget, and no timer.
  */
-import type {
-  ConnectionStatus,
-  HostKey,
-  HostListing,
-  HostSummary,
-  RecentRun,
-  ResumeRunId,
-  StopView,
-} from '@vibesys/entities';
+import type {ConnectionStatus, HostKey, HostListing, HostSummary} from '@vibesys/hosts';
+import type {RecentRun, ResumeRunId, StopView} from '@vibesys/runs';
 
 export const WELCOME_CHANNELS = {
   overview: 'vibesys:welcome:overview',

@@ -6,7 +6,6 @@
  * the host). While a run fills the window only the title strip shows, and the sheets wait closed.
  */
 
-import {type HostKey, stopKey, suggestProjects} from '@vibesys/entities';
 import {HostPanel, HostPicker, PathInput} from '@vibesys/feature-hosts/renderer';
 import type {
   CompletionAction,
@@ -22,6 +21,8 @@ import {type Dispatch, StopControls, TitleStrip} from '@vibesys/feature-run-cont
 import type {WelcomeAction, WelcomeState} from '@vibesys/feature-run-control/state';
 import {type ProjectField, StartSheet} from '@vibesys/feature-start-run/renderer';
 import type {StartAction, StartState} from '@vibesys/feature-start-run/state';
+import type {HostKey} from '@vibesys/hosts';
+import {stopKey, suggestProjects} from '@vibesys/runs';
 import {Button} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {WORDMARK} from './welcome-banner.js';

@@ -9,9 +9,9 @@
  * the welcome view.
  */
 
-import {only, type Step} from '@vibesys/core-state';
-import type {HostKey} from '@vibesys/entities';
+import type {HostKey} from '@vibesys/hosts';
 import type {StartOutcome, WelcomeResult} from '@vibesys/ipc';
+import {only, type Step} from '@vibesys/store';
 
 interface SheetHost {
   readonly key: HostKey;

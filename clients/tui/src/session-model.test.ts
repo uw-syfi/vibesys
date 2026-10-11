@@ -1,7 +1,7 @@
 import {describe, expect, it, test} from 'bun:test';
 import type {RunEvent, RunSnapshot, RunStatus} from '@vibesys/contracts';
 import {chatEvent as fixtureChatEvent, event as fixtureEvent} from '@vibesys/contracts/testing';
-import {hasRunEnded} from '@vibesys/core-state';
+import {hasRunEnded} from '@vibesys/run-state';
 import {
   enterExperimentDrilldown,
   enterExperimentRound,

@@ -7,17 +7,10 @@
  * wrong. `bindWelcomeIpc` answers the channels only for the welcome view's own web contents.
  */
 
-import {
-  exactResumeRunId,
-  type HostId,
-  hostFromKey,
-  isInstanceId,
-  isTaskName,
-  type ResumeRunId,
-  shellWords,
-  validHostPath,
-} from '@vibesys/entities';
+import {shellWords} from '@vibesys/feature-start-run/state';
+import {type HostId, hostFromKey, validHostPath} from '@vibesys/hosts';
 import {WELCOME_CHANNELS, type WelcomeResult} from '@vibesys/ipc';
+import {exactResumeRunId, isInstanceId, isTaskName, type ResumeRunId} from '@vibesys/runs';
 import type {IpcMain, IpcMainInvokeEvent} from 'electron';
 import {ConnectionError} from '../platform/connection/index.js';
 

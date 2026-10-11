@@ -1,0 +1,276 @@
+/**
+ * The typed event-data handlers: which part of the run fold each `RunEvent['data']` kind updates,
+ * and the run status and lifecycle transitions.
+ */
+import type {RunEvent} from '@vibesys/contracts';
+import {benchmarkRecordFromEvent} from './benchmark.js';
+import {
+  applyAgentExecutionActivityData,
+  applyAgentExecutionFinishedData,
+  applyAgentExecutionStartedData,
+  applyAgentStatusData,
+  applyTerminalExecutionStatus,
+  reconcileStartedExecutionStatus,
+  removeFinishedExecutionStatus,
+  updateTodos,
+} from './executions.js';
+import {
+  type CoreRunStatus,
+  type CoreState,
+  cloneCoreStateWith,
+  type EndedRunStatus,
+  endedRunStatus,
+  hasRunEnded,
+  type MutableCoreState,
+  type QuotaState,
+} from './state.js';
+import {appendTranscript, eventToTranscriptEntry, RUN_TRANSCRIPT} from './transcript-fold.js';
+import type {TranscriptFolder} from './transcript-folder.js';
+
+type RunEventData = NonNullable<RunEvent['data']>;
+
+type EventDataKind = RunEventData['kind'];
+type EventDataHandler = (state: CoreState, event: RunEvent, sequence: number) => CoreState;
+interface EventDataHandlers {
+  readonly execution: EventDataHandler;
+  readonly run: EventDataHandler;
+}
+
+const ignoreEventData: EventDataHandler = state => state;
+const ignoredEventData: EventDataHandlers = {
+  execution: ignoreEventData,
+  run: ignoreEventData,
+};
+
+function runEventData(run: EventDataHandler): EventDataHandlers {
+  return {execution: ignoreEventData, run};
+}
+
+function executionEventData(
+  execution: EventDataHandler,
+  run: EventDataHandler = ignoreEventData,
+): EventDataHandlers {
+  return {execution, run};
+}
+
+/** Applies execution bookkeeping before chat events branch to their transcript. */
+export function applyExecutionEventData(
+  state: CoreState,
+  event: RunEvent,
+  sequence: number,
+  handlers: EventDataHandlers | null | undefined,
+): CoreState {
+  if (handlers === null) {
+    return cloneCoreStateWith(state, {unknownEventKinds: state.unknownEventKinds + 1});
+  }
+  return handlers?.execution(state, event, sequence) ?? state;
+}
+
+/** Applies facts owned by the run after chat-session events have branched. */
+export function applyRunEventData(
+  state: CoreState,
+  event: RunEvent,
+  sequence: number,
+  handlers: EventDataHandlers | null | undefined,
+): CoreState {
+  return handlers?.run(state, event, sequence) ?? applyTerminalExecutionStatus(state, event);
+}
+
+function composeEventDataHandlers(...handlers: readonly EventDataHandler[]): EventDataHandler {
+  return (state, event, sequence) =>
+    handlers.reduce((current, handler) => handler(current, event, sequence), state);
+}
+
+/**
+ * One exhaustive dispatch table for every generated event-data kind.
+ *
+ * `satisfies` makes a protocol kind addition a compile error here. At runtime
+ * #869 permits a newer server's unknown string through the wire boundary, so
+ * `eventDataHandlers` reports that separate forward-compatibility case.
+ */
+const EVENT_DATA_HANDLERS = {
+  chat: ignoredEventData,
+  chat_thread_created: ignoredEventData,
+  invocation_started: ignoredEventData,
+  invocation_finished: ignoredEventData,
+  agent_execution_started: executionEventData(
+    applyAgentExecutionStartedData,
+    reconcileStartedExecutionStatus,
+  ),
+  agent_execution_activity_changed: executionEventData(applyAgentExecutionActivityData),
+  agent_execution_finished: executionEventData(
+    applyAgentExecutionFinishedData,
+    removeFinishedExecutionStatus,
+  ),
+  output: ignoredEventData,
+  server_ready: ignoredEventData,
+  run_started: ignoredEventData,
+  run_startup_progress: ignoredEventData,
+  run_failed: runEventData(applyTerminalExecutionStatus),
+  run_interrupted: runEventData(applyTerminalExecutionStatus),
+  run_status_changed: runEventData(
+    composeEventDataHandlers(applyTerminalExecutionStatus, applyRunStatusData),
+  ),
+  experiments_changed: runEventData(applyExperimentsChangedData),
+  configuration_failed: runEventData(applyTerminalExecutionStatus),
+  phase: ignoredEventData,
+  agent_output_chunk: runEventData(applyAgentStatusData),
+  subprocess_output: ignoredEventData,
+  judge_result: ignoredEventData,
+  benchmark_result: runEventData(applyBenchmarkData),
+  round_finished: ignoredEventData,
+  tool_call: runEventData(composeEventDataHandlers(applyAgentStatusData, applyTypedToolData)),
+  tool_result: runEventData(applyTypedToolData),
+  todo_update: runEventData(applyTodoData),
+  usage_update: runEventData(applyUsageData),
+  rate_limit_update: ignoredEventData,
+  quota_paused: runEventData(applyQuotaData),
+  quota_resumed: runEventData(applyQuotaData),
+  quota_abandoned: runEventData(applyQuotaData),
+  provider_switched: runEventData(applyQuotaData),
+  gate_started: ignoredEventData,
+  gate_finished: runEventData(applyBenchmarkData),
+  workspace_snapshot: ignoredEventData,
+  run_configured: ignoredEventData,
+  framework_warning: ignoredEventData,
+} satisfies Record<EventDataKind, EventDataHandlers>;
+
+export function eventDataHandlers(data: RunEvent['data']): EventDataHandlers | null | undefined {
+  if (data === undefined || data === null) return undefined;
+  return isKnownEventDataKind(data.kind) ? EVENT_DATA_HANDLERS[data.kind] : null;
+}
+
+function isKnownEventDataKind(kind: string): kind is EventDataKind {
+  return Object.hasOwn(EVENT_DATA_HANDLERS, kind);
+}
+
+function applyTypedToolData(state: CoreState): CoreState {
+  return state.typedToolEvents ? state : cloneCoreStateWith(state, {typedToolEvents: true});
+}
+
+function applyTodoData(state: CoreState, event: RunEvent): CoreState {
+  return cloneCoreStateWith(state, {todos: updateTodos(state.todos, event)});
+}
+
+function applyUsageData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'usage_update') return state;
+  return cloneCoreStateWith(state, {
+    usage: {
+      inputTokens: data.input_tokens,
+      contextWindow: data.context_window ?? null,
+      model: data.model ?? null,
+    },
+  });
+}
+
+function applyQuotaData(state: CoreState, event: RunEvent, sequence: number): CoreState {
+  const quota = quotaFromEvent(state.quota, event, sequence);
+  return quota === state.quota ? state : cloneCoreStateWith(state, {quota});
+}
+
+function applyBenchmarkData(state: CoreState, event: RunEvent, sequence: number): CoreState {
+  const benchmark = benchmarkRecordFromEvent(event, sequence);
+  return benchmark === null
+    ? state
+    : cloneCoreStateWith(state, {benchmarks: [...state.benchmarks, benchmark]});
+}
+
+function applyExperimentsChangedData(
+  state: CoreState,
+  _event: RunEvent,
+  sequence: number,
+): CoreState {
+  return cloneCoreStateWith(state, {experimentsRevision: sequence});
+}
+
+function applyRunStatusData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'run_status_changed') return state;
+  // The backend owns the run's lifecycle and publishes every move through it,
+  // so the projection folds the status it is told rather than inferring one.
+  return applyRunStatus(state, data.status);
+}
+
+/** The quota state after `event`: a pause sets it, any event that settles the stop clears it. */
+function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): QuotaState {
+  const data = event.data;
+  switch (data?.kind) {
+    case 'quota_paused':
+      return {
+        sequence,
+        pause: {
+          provider: data.provider,
+          condition: data.condition,
+          detail: data.detail,
+          resetsAt: data.resets_at ?? null,
+          resumesAt: data.resumes_at ?? null,
+          policy: data.policy ?? null,
+          fallback:
+            data.fallback_provider == null
+              ? null
+              : {provider: data.fallback_provider, model: data.fallback_model ?? null},
+        },
+      };
+    case 'quota_resumed':
+    case 'quota_abandoned':
+    case 'provider_switched':
+      return {sequence, pause: null};
+    default:
+      return quota;
+  }
+}
+
+export function applyRunTranscript(
+  state: CoreState,
+  event: RunEvent,
+  folder: TranscriptFolder | null,
+): CoreState {
+  const data = event.data;
+  const legacyToolChunk =
+    data?.kind === 'agent_output_chunk' && data.channel === 'tool' && state.typedToolEvents;
+  if (legacyToolChunk) return state;
+  const entry = eventToTranscriptEntry(event);
+  if (entry === null) return state;
+  if (folder === null)
+    (state as MutableCoreState).transcript = appendTranscript(state.transcript, entry);
+  else folder.buffer(RUN_TRANSCRIPT, state.transcript).append(entry);
+  return state;
+}
+
+export function applyRunLifecycle(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (event.type === 'run_started') {
+    const mutable = state as MutableCoreState;
+    mutable.status = 'running';
+    if (data?.kind === 'run_started') mutable.maxRounds = data.max_rounds ?? null;
+  }
+  if (event.type === 'configuration_failed') return terminate(state, 'failed');
+  if (event.type === 'run_finished') return terminate(state, 'completed');
+  if (event.type === 'run_failed') return terminate(state, 'failed');
+  if (event.type === 'run_interrupted') return terminate(state, 'interrupted');
+  return state;
+}
+
+/** Folds one backend-published status, ending the run when that status has. */
+function applyRunStatus(state: CoreState, status: CoreRunStatus): CoreState {
+  const ended = endedRunStatus(status);
+  return ended === null ? cloneCoreStateWith(state, {status}) : terminate(state, ended);
+}
+
+/**
+ * Ends the run, unless it already has.
+ *
+ * A recorded run_interrupted is followed by a run_failed for the same
+ * boundary (the backend's coarse RunStatus has no `interrupted` member, so it
+ * also reports the generic failure for anything that only understands that
+ * one); folding both must not let the second, less specific event overwrite
+ * the first. `closePhase` in `run-map.ts` holds the same line for per-phase
+ * status, by leaving an already-closed phase alone. This is the run-level
+ * counterpart: once a status a run never leaves is written, `terminate` no
+ * longer has anything to write.
+ */
+function terminate(state: CoreState, status: EndedRunStatus): CoreState {
+  if (hasRunEnded(state)) return state;
+  return cloneCoreStateWith(state, {status, activeExecutions: {}});
+}

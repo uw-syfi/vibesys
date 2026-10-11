@@ -3,7 +3,7 @@
  * renders the run's stop flow and reports the stop asked for.
  */
 
-import type {StopView} from '@vibesys/entities';
+import type {StopView} from '@vibesys/runs';
 import {Button} from '@vibesys/ui';
 import type {JSX} from 'react';
 

@@ -16,13 +16,14 @@
     "test": "node ../../scripts/run_bun_tests.mjs ./src"
   },
   "dependencies": {
-    "@vibesys/core-state": "workspace:*",
-    "@vibesys/entities": "workspace:*",
     "@vibesys/feature-hosts": "workspace:*",
     "@vibesys/feature-recent-runs": "workspace:*",
     "@vibesys/feature-run-control": "workspace:*",
     "@vibesys/feature-start-run": "workspace:*",
+    "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
+    "@vibesys/runs": "workspace:*",
+    "@vibesys/store": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
     "react-dom": "19.1.1"

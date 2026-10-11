@@ -4,8 +4,6 @@
  * fold them. This is the only module of the app that talks to the bridge.
  */
 
-import type {Store} from '@vibesys/core-state';
-import type {HostKey} from '@vibesys/entities';
 import {
   createCompletionStore,
   createHostStore,
@@ -25,7 +23,9 @@ import {type Confirm, createRunControlStore} from '@vibesys/feature-run-control/
 import type {WelcomeAction, WelcomeState} from '@vibesys/feature-run-control/state';
 import {createStartStore} from '@vibesys/feature-start-run/renderer';
 import type {StartAction, StartState} from '@vibesys/feature-start-run/state';
+import type {HostKey} from '@vibesys/hosts';
 import type {WelcomeBridge} from '@vibesys/ipc';
+import type {Store} from '@vibesys/store';
 
 export interface WelcomeStores {
   readonly welcome: Store<WelcomeState, WelcomeAction>;

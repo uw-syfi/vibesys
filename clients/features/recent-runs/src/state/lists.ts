@@ -5,14 +5,9 @@
  * Each recent run's status is derived from its host's listing (`recentStatus`).
  */
 
-import {only, type Step} from '@vibesys/core-state';
-import {
-  type HostKey,
-  type HostListing,
-  type RecentRun,
-  type RecentStatus,
-  recentStatus,
-} from '@vibesys/entities';
+import type {HostKey, HostListing} from '@vibesys/hosts';
+import {type RecentRun, type RecentStatus, recentStatus} from '@vibesys/runs';
+import {only, type Step} from '@vibesys/store';
 
 export interface ListsState {
   readonly runs: readonly RecentRun[];
