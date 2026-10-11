@@ -3,7 +3,7 @@
 VibeSys input bundle: maximize serving throughput of `Qwen/Qwen3.5-9B` (bf16)
 on 1x AMD MI210, measured by replaying an agentic multi-turn coding-session
 trace with Request Factory's `session_runner`. See
-[`OBJECTIVE.md`](OBJECTIVE.md) for the objective, hardware facts, and
+[`OBJECTIVE.md`](.vibesys/tasks/default/OBJECTIVE.md) for the objective, hardware facts, and
 interface contract.
 
 ## Layout
@@ -62,8 +62,8 @@ progress line, that record's `partial` field holds the achieved warmup output
 rate, the rate that finishes within 180 s, and rounds completed out of 72.
 
 `pyproject.toml` pulls torch from the PyTorch ROCm 6.4 wheel index on Linux.
-See [`reference/README.md`](reference/README.md) and
-[`accuracy_checker/README.md`](accuracy_checker/README.md) for the engine
+See [`reference/README.md`](.vibesys/tasks/default/reference/README.md) and
+[`accuracy_checker/README.md`](.vibesys/tasks/default/accuracy_checker/README.md) for the engine
 surface and the gate policy.
 
 ## Benchmark inputs

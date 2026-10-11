@@ -9,7 +9,7 @@ reference's transcripts.
 This is the offline-batch counterpart to `moonshine-streaming` (streaming TTFT):
 the algorithmic wins here are cross-attention K/V caching, continuous batching of
 the decoder across requests, and batching the fixed-shape encoder — not per-chunk
-incremental encoding. See [`OBJECTIVE.md`](OBJECTIVE.md).
+incremental encoding. See [`OBJECTIVE.md`](.vibesys/tasks/default/OBJECTIVE.md).
 
 ## Layout
 
