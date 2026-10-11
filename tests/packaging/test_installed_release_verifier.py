@@ -140,14 +140,14 @@ marker.write_text("renderer initialized; control protocol exchanged\\n")
 normalized_arguments = list(arguments)
 normalized_arguments[input_index + 1] = "<temporary-input>"
 normalized_arguments[runs_index + 1] = "<temporary-runs>"
-manifest = tomllib.loads((input_root / "vibesys.input.toml").read_text())
+manifest = tomllib.loads((input_root / ".vibesys/tasks/default/vibesys.input.toml").read_text())
 record = {
     "normalized_argv": normalized_arguments,
     "configless": not (input_root / "agent.toml").exists(),
     "manifest_commands": [manifest["accuracy"]["command"], manifest["benchmark"]["command"]],
 }
 record["runs_share_smoke_root"] = runs_root.parent == input_root.parent
-record["input_files"] = sorted(path.name for path in input_root.iterdir())
+record["input_files"] = sorted(path.relative_to(input_root).as_posix() for path in input_root.rglob("*") if path.is_file())
 record["ttys"] = [os.isatty(fd) for fd in (0, 1, 2)]
 observed_path = Path(os.environ["VIBESYS_TEST_OBSERVED"])
 observed = json.loads(observed_path.read_text()) if observed_path.exists() else []
@@ -198,7 +198,11 @@ observed_path.write_text(json.dumps(observed))
             "normalized_argv": common_arguments,
             "configless": True,
             "runs_share_smoke_root": True,
-            "input_files": ["OBJECTIVE.md", "candidate.py", "vibesys.input.toml"],
+            "input_files": [
+                ".vibesys/tasks/default/OBJECTIVE.md",
+                ".vibesys/tasks/default/vibesys.input.toml",
+                "candidate.py",
+            ],
             "manifest_commands": valid_commands,
             "ttys": [True, True, True],
         },

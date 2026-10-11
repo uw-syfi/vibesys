@@ -10,25 +10,13 @@ from pathlib import Path
 from vs_project.api import Project
 from vs_sandbox.api import ProjectPathPolicy
 
-LEGACY_TRUSTED_PROJECT_INPUT_PATHS: tuple[str, ...] = (
-    "OBJECTIVE.md",
-    "vibesys.input.toml",
-    "objectives.toml",
-    "reference",
-    "accuracy_checker",
-    "benchmark",
-    "_input_libs",
-    "_evaluator",
-)
-
 
 def _authored_project_input_paths(root: Path) -> tuple[Path, ...]:
-    """Return trusted inputs for the project's active authoring model."""
+    """Return the task inputs the project authors: everything under ``.vibesys/tasks``."""
     project = Project.open(root)
-    if project.is_initialized():
-        paths = {project.tasks_root().path.relative_to(root)}
-        return _minimal_paths(paths)
-    return tuple(Path(value) for value in LEGACY_TRUSTED_PROJECT_INPUT_PATHS)
+    if not project.is_initialized():
+        return ()
+    return (project.tasks_root().path.relative_to(root),)
 
 
 def build_project_path_policy(

@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {Duplex} from 'node:stream';
 import {HostError, type HostErrorKind} from './host.js';
 import {LocalHost} from './local-host.js';
-import {checkoutProblem, PROBED_DIRECTORIES, SshHost, shellPath} from './ssh-host.js';
+import {checkoutProblem, PROBED_DIRECTORIES, SshHost} from './ssh-host.js';
 import type {CommandResult} from './testing/fake-host.js';
 import {fakeLocalSystem} from './testing/fake-local-system.js';
 import {fakeRecord} from './testing/fake-record.js';
@@ -244,12 +244,6 @@ describe('SshHost', () => {
     await home.host.dial((await home.host.startServer([])).endpoint);
     expect(home.ssh.ran).toContain(`'${FAKE_UV_PATH}' run --project "$HOME"/'src/vibesys' python`);
     await home.host.close();
-  });
-
-  test('a checkout path is one sh word whatever it contains', () => {
-    expect(shellPath("/srv/it's here")).toBe(`'/srv/it'\\''s here'`);
-    expect(shellPath('~')).toBe('"$HOME"');
-    expect(shellPath('~/a b')).toBe(`"$HOME"/'a b'`);
   });
 
   test('verifyCheckout resolves the physical checkout or names what is missing', async () => {

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from entrypoints.run import supervise
@@ -22,7 +23,7 @@ from headless import run as render_run
 from launch import LaunchSettings, default_runs
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.inputs import load_input_bundle
+from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.contracts import ResumeRef, RunRequest
@@ -73,12 +74,13 @@ class _DaemonBackend(HostExecutedContainerBackend):
 
 def _project(root: Path) -> None:
     root.mkdir()
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n'
-        '[benchmark]\ncommand = ["run-benchmark"]\nresult_protocol = 2\n'
+        '[benchmark]\ncommand = ["run-benchmark"]\nresult_protocol = 2\n',
+        objective="Improve the queue.\n",
     )
 
 
@@ -173,7 +175,7 @@ def _execute(
         project_root=root,
         orchestration=OrchestrationDescriptor(id=_PLUGIN_ID, config_version=1, options={}),
         config=Config.model_validate({"model": {"name": _PLUGIN_ID}}),
-        input_bundle=load_input_bundle(root),
+        input_bundle=load_task(root),
         objective="Improve the queue.",
         exp_name=_PLUGIN_ID,
         agent_backend="cli",

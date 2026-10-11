@@ -6,11 +6,7 @@ import os
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.slurm_cluster.conftest import (
-    HOST_CANARY_ENV,
-    HOST_CANARY_VALUE,
-    expect_failure_for,
-)
+from tests.slurm_cluster.conftest import HOST_CANARY_ENV, HOST_CANARY_VALUE
 from tests.slurm_cluster.harness import open_run, parse_env
 
 if TYPE_CHECKING:
@@ -59,10 +55,7 @@ def test_the_host_secret_exists_in_the_test_process(gpu_run: OpenRun) -> None:
     assert gpu_run.workspace.exists()
 
 
-def test_a_gate_job_sees_none_of_the_hosts_environment(
-    run: OpenRun, request: pytest.FixtureRequest
-) -> None:
-    expect_failure_for(request, run, "slurm-gpu", 1602)
+def test_a_gate_job_sees_none_of_the_hosts_environment(run: OpenRun) -> None:
     run.set_mode("accuracy", "env")
 
     result = run.gate("accuracy")
@@ -73,7 +66,9 @@ def test_a_gate_job_sees_none_of_the_hosts_environment(
     assert HOST_CANARY_VALUE not in result.output
 
 
+@pytest.mark.parametrize("kind", ["slurm-local", "slurm-local-gpu"])
 def test_a_host_that_is_itself_inside_a_slurm_allocation_still_runs_gates_as_new_jobs(
+    kind: str,
     slurm_cluster: SlurmCluster,
     workdir: Path,
     agent_image_id: str,
@@ -83,7 +78,7 @@ def test_a_host_that_is_itself_inside_a_slurm_allocation_still_runs_gates_as_new
     monkeypatch.setenv("SLURM_JOB_ID", "424242")
     monkeypatch.setenv("SLURM_JOBID", "424242")
     monkeypatch.setenv("SLURM_STEP_ID", "0")
-    with open_run("slurm-gpu", slurm_cluster, workdir, agent_image_id) as run:
+    with open_run(kind, slurm_cluster, workdir, agent_image_id) as run:
         result = run.gate("accuracy")
 
         assert result.exit_code == 0, result.output

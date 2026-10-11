@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.task_project import write_task
 
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from entrypoints.headless import main as headless_main
@@ -31,10 +32,11 @@ _CODE = "dynamic_legacy_resume_unsupported"
 
 def _project(root: Path) -> Path:
     root.mkdir()
-    (root / "OBJECTIVE.md").write_text("Make the queue faster.\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Make the queue faster.\n",
     )
     return root
 

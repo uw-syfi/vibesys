@@ -134,6 +134,7 @@ if TYPE_CHECKING:
         DockerCli,
         WorkspaceSandbox,
     )
+    from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
 
 
 @dataclass(frozen=True)
@@ -171,7 +172,7 @@ class RunEnvironmentView:
     share_agent_session: bool = False
     host_device_reselect: bool = True
     # Coarse environment label for diagnostics and adapter selection:
-    # ``"host"`` | ``"docker"`` | ``"modal"`` | ``"skypilot"`` | ``"slurm"`` | ``"slurm-gpu"``.
+    # ``"host"`` | ``"docker"`` | ``"modal"`` | ``"skypilot"`` | ``"slurm"``.
     env_kind: str = "host"
     # Where a profiler must execute to observe the production hot path. Prompt
     # templates branch on this capability rather than on a concrete provider.
@@ -190,6 +191,8 @@ class RunEnvironmentView:
     framework_setup_timeout_seconds: int = 0
     profiler_mcp_env: tuple[tuple[str, str], ...] = ()
     profiler_mcp_resources: tuple[HostResource, ...] = ()
+    # Set when trusted evaluation runs as Slurm jobs; ``None`` otherwise.
+    cluster_evaluation: ClusterEvaluationFacts | None = None
 
     @property
     def parallel_candidate_obstacle(self) -> str | None:
@@ -233,6 +236,39 @@ class DockerEnvironmentFacts:
 
 
 @dataclass(frozen=True)
+class ClusterEvaluationFacts:
+    """What an environment whose trusted evaluation runs on a Slurm cluster reports.
+
+    ``settings`` is the operator file as the run parsed it once, and ``plan`` the
+    evaluation plan the run wrote. Consumers read the cluster's capacity and the
+    executor's inputs here instead of re-reading either file.
+    """
+
+    settings: SlurmOperatorSettings
+    plan: SlurmEvaluationPlan
+
+    @property
+    def evaluation_capacity(self) -> int:
+        """How many evaluations the cluster runs at once."""
+        return self.settings.config.evaluation_capacity
+
+    @property
+    def captures_profile(self) -> bool:
+        """Whether the cluster runs a profile capture for this run."""
+        return self.plan.profile_command is not None
+
+
+@dataclass(frozen=True)
+class AgentGpuFacts:
+    """The limits of the agent's own GPU jobs, as the agent is told them."""
+
+    max_gpus: int
+    max_time_minutes: int
+    #: Host paths the jobs may read besides the workspace and system directories.
+    read_only_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class SlurmEnvironmentFacts:
     """Presentation facts for a local editor with remote trusted execution.
 
@@ -241,12 +277,14 @@ class SlurmEnvironmentFacts:
     from the candidate root, or empty when the operator configured none.
     ``gate_client`` is the name the agent runs, on its ``PATH``, to request a
     trusted gate (``gate_client --gate KIND``), and ``gates`` the kinds the
-    task plans.
+    task plans. ``agent_gpu`` is set when the agent may also run its own GPU
+    commands as Slurm jobs through that same client.
     """
 
     service_command: tuple[str, ...] = ()
     gate_client: str = ""
     gates: tuple[str, ...] = ()
+    agent_gpu: AgentGpuFacts | None = None
 
 
 @dataclass(frozen=True)
@@ -267,22 +305,10 @@ class ModalEnvironmentFacts:
     runtime_container_path: str = "/opt/vibesys-runtime/environment.md"
 
 
-@dataclass(frozen=True)
-class SlurmGpuEnvironmentFacts:
-    """Presentation facts for an agent whose GPU processes run as Slurm jobs."""
-
-    launcher: str
-    max_gpus: int
-    max_time_minutes: int
-    gate_gpus: int
-    gates: tuple[str, ...] = ()
-
-
 RunEnvironmentPresentationFacts = (
     HostEnvironmentFacts
     | DockerEnvironmentFacts
     | SlurmEnvironmentFacts
-    | SlurmGpuEnvironmentFacts
     | SkyPilotEnvironmentFacts
     | ModalEnvironmentFacts
 )
@@ -483,12 +509,38 @@ class _PreparedRunEnvironment:
 class RunEnvironment(Protocol):
     """Environment policy for run execution and candidate evaluation."""
 
-    isolated: bool
-    materialize_local_model_weights: bool
-    default_profiler_id: str
-    supported_profiler_ids: frozenset[str] | None
-    backend_image: str | None
-    requires_local_profiler_preflight: bool
+    # Read-only members: an environment may fix them or derive them from its
+    # operator configuration.
+
+    @property
+    def isolated(self) -> bool:
+        """Whether candidates run in isolated worktrees of their own."""
+        ...
+
+    @property
+    def materialize_local_model_weights(self) -> bool:
+        """Whether external model-weight symlinks are copied into the workspace."""
+        ...
+
+    @property
+    def default_profiler_id(self) -> str:
+        """The profiler a run uses when none is requested."""
+        ...
+
+    @property
+    def supported_profiler_ids(self) -> frozenset[str] | None:
+        """The profilers a run may select, or ``None`` when any is allowed."""
+        ...
+
+    @property
+    def backend_image(self) -> str | None:
+        """The image the environment pins for the compute backend, if any."""
+        ...
+
+    @property
+    def requires_local_profiler_preflight(self) -> bool:
+        """Whether the profiler's tool must exist on this host."""
+        ...
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve environment facts without starting owned resources."""
@@ -624,7 +676,6 @@ def _make_host_sandbox(request: RunEnvironmentRequest, *, ephemeral: bool = Fals
         log_path=None,
         bind_mounts=[],
         extra_env={},
-        extra_init_commands=[],
         lifecycle_hooks=hooks,
         ephemeral=ephemeral,
     )

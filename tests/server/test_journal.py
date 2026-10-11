@@ -10,13 +10,14 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.server.support import build_server_parts
+from tests.server.support import HARNESS_RUN_ID, build_server_parts
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from pathlib import Path
 
 from server.diagnostics import (
+    Diagnostic,
     DiagnosticRetryability,
     DiagnosticScope,
     DiagnosticSeverity,
@@ -25,6 +26,7 @@ from server.events import (
     AgentExecutionActivityData,
     AgentExecutionFinishedData,
     AgentExecutionStartedData,
+    ConfigurationFailedData,
     EventData,
     EventStatus,
     EventType,
@@ -36,6 +38,8 @@ from server.events import (
     RunEvent,
     make_event,
 )
+from server.host_api import FailureReason
+from server.runtime import failure_reason
 
 
 def _events(path: Path) -> list[dict[str, object]]:
@@ -454,25 +458,35 @@ _EXAMPLES = itertools.count()
     socket_parent=st.sampled_from(["runs", "T", "tmp", "vibesys-session-x"]),
     early_events=st.integers(min_value=0, max_value=4),
 )
-def test_events_before_the_run_is_known_claim_no_run_identity(
+def test_every_event_names_the_run_from_the_first(
     tmp_path: Path, socket_parent: str, early_events: int
 ) -> None:
-    # A server first journals into its control-socket directory and learns the
-    # run id only when the run is ready. A client latches the first nonempty
-    # run id it folds and ignores every later event that names another one, so
-    # an early event must not name a run the server invented from a path.
+    # Regression: a detached server journaled into its control-socket directory
+    # before its run was ready and stamped those events with that directory's
+    # parent name. A client latches the first run id it folds, so it ignored
+    # every event the run sent later. The server now knows its run from the
+    # start, so no event can name another one, whatever the socket's path.
     case = tmp_path / str(next(_EXAMPLES))
     current = build_server_parts(case / socket_parent / "instance")
     for _ in range(early_events):
         current.journal.record(EventType.SERVER_READY, status=EventStatus.ACTIVE)
-    folded = current.journal.read()
 
-    current.journal.attach(case / "run-logs", run_id="run-1")
+    current.journal.attach(case / "run-logs", run_id=HARNESS_RUN_ID)
     current.journal.record(EventType.RUN_STARTED, status=EventStatus.ACTIVE)
-    delivered = folded + current.journal.read(after_sequence=folded[-1].sequence)
 
-    assert {event.run_id for event in folded} == {""}
-    assert {event.run_id for event in delivered} - {""} == {"run-1"}
+    assert {event.run_id for event in current.journal.read()} == {HARNESS_RUN_ID}
+
+
+@pytest.mark.parametrize(
+    ("run_id", "message"), [(None, "must name"), ("", "must name"), ("other", "cannot continue")]
+)
+def test_a_writable_journal_never_drops_or_changes_its_run(
+    tmp_path: Path, run_id: str | None, message: str
+) -> None:
+    current = build_server_parts(tmp_path / "instance")
+
+    with pytest.raises(ValueError, match=message):
+        current.journal.attach(tmp_path / "run-logs", run_id=run_id)
 
 
 def test_unknown_event_envelope_keys_stay_rejected() -> None:
@@ -482,3 +496,33 @@ def test_unknown_event_envelope_keys_stay_rejected() -> None:
                 '"sequence"', '"driver": "agentshim", "sequence"', 1
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "data", "stage"),
+    [
+        (EventType.RUN_FAILED, None, "run"),
+        (EventType.RUN_INTERRUPTED, None, "run"),
+        (
+            EventType.CONFIGURATION_FAILED,
+            ConfigurationFailedData(code="c", stage="resume_resolution", message="m", exit_code=2),
+            "resume_resolution",
+        ),
+    ],
+)
+def test_the_event_a_run_failed_with_names_its_reason(
+    tmp_path: Path, event_type: EventType, data: ConfigurationFailedData | None, stage: str
+) -> None:
+    current = build_server_parts(tmp_path / "instance")
+    diagnostic = Diagnostic(
+        code="sandbox_start_failed", summary="no GPU", scope=DiagnosticScope.RUN
+    )
+    current.journal.record(event_type, status=EventStatus.FAILED, data=data, diagnostic=diagnostic)
+    current.journal.record(EventType.OUTPUT, data=None)
+
+    *_, failed, output = current.journal.read()
+
+    assert failure_reason(failed) == FailureReason(
+        code="sandbox_start_failed", stage=stage, message="no GPU"
+    )
+    assert failure_reason(output) is None

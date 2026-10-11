@@ -193,7 +193,6 @@ from vs_runtime._run_environment import (
     SkyPilotEnvironment,
     SkyPilotEnvironmentFacts,
     SlurmEnvironmentFacts,
-    SlurmGpuEnvironmentFacts,
     open_run_environment_resources,
     open_workspace_environment_resources,
 )
@@ -202,6 +201,7 @@ from vs_runtime._run_environment_selection import (
     build_run_environment,
     make_run_environment_spec,
     resolve_run_environment_spec,
+    run_environment_deprecation,
     run_environment_record,
     validate_run_environment_profile,
 )
@@ -233,7 +233,6 @@ from vs_runtime._skills import (
     resolve_skill_resources,
 )
 from vs_runtime._slurm_environment import SlurmEnvironment
-from vs_runtime._slurm_gpu_environment import SlurmGpuEnvironment
 from vs_runtime._state import CommittedStateObserver, create_state
 from vs_runtime._trusted_evaluation import (
     ProtocolBenchmarkContract,
@@ -586,8 +585,6 @@ __all__ = [
     "SkyPilotEnvironmentFacts",
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
-    "SlurmGpuEnvironment",
-    "SlurmGpuEnvironmentFacts",
     "StageFailureText",
     "SteerTarget",
     "StopGraceError",
@@ -668,6 +665,7 @@ __all__ = [
     "resolve_run_environment_spec",
     "resolve_sdk_source",
     "resolve_skill_resources",
+    "run_environment_deprecation",
     "run_environment_record",
     "run_local_validation",
     "signal_of",

@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {readdir, readFile, writeFile} from 'node:fs/promises';
+import {readdir, readFile, stat, writeFile} from 'node:fs/promises';
 import {join, relative, resolve, sep} from 'node:path';
 import type {Plugin, ResolvedConfig} from 'vite';
 
@@ -7,7 +7,7 @@ export const WEB_BUILD_MANIFEST = '.vibesys-web-build.json';
 
 interface BuildManifestOptions {
   workspaceRoot: string;
-  sourceRoots: string[];
+  buildInputs: readonly string[];
 }
 
 interface ManifestSource {
@@ -25,7 +25,7 @@ interface WebBuildManifest {
 
 type SourceManifest = Omit<WebBuildManifest, 'assets' | 'build_id'>;
 
-/** Emit the source inventory that lets the gateway reject a stale bundle. */
+/** Emit the build-input inventory that lets the gateway reject a stale bundle. */
 export function webBuildManifest(options: BuildManifestOptions): Plugin {
   let config: ResolvedConfig | undefined;
   let sourceManifest: SourceManifest | undefined;
@@ -74,12 +74,12 @@ async function createManifest(
 ): Promise<SourceManifest> {
   const workspaceRoot = resolve(options.workspaceRoot);
   const sources = await Promise.all(
-    options.sourceRoots.map(async (sourceRoot): Promise<ManifestSource> => {
-      const resolvedSource = resolve(sourceRoot);
-      const sourcePath = workspacePath(workspaceRoot, resolvedSource);
+    options.buildInputs.map(async (buildInput): Promise<ManifestSource> => {
+      const resolvedInput = resolve(buildInput);
+      const inputPath = workspacePath(workspaceRoot, resolvedInput);
       return {
-        path: sourcePath,
-        files: await snapshotFiles(resolvedSource),
+        path: inputPath,
+        files: await snapshotFiles(resolvedInput),
       };
     }),
   );
@@ -101,30 +101,35 @@ async function snapshotFiles(
       const digest = createHash('sha256')
         .update(await readFile(path))
         .digest('hex');
-      return [portablePath(relative(root, path)), digest];
+      const relativePath = relative(root, path);
+      return [relativePath === '' ? '.' : portablePath(relativePath), digest];
     }),
   );
   return Object.fromEntries(entries.filter(([path]) => !ignored.has(path)));
 }
 
-async function sourceFiles(directory: string): Promise<string[]> {
-  const entries = await readdir(directory, {withFileTypes: true});
+async function sourceFiles(path: string): Promise<string[]> {
+  const metadata = await stat(path);
+  if (metadata.isFile()) return [path];
+  if (!metadata.isDirectory()) return [];
+
+  const entries = await readdir(path, {withFileTypes: true});
   const paths: string[] = [];
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    const path = resolve(directory, entry.name);
+    const child = resolve(path, entry.name);
     if (entry.isDirectory()) {
-      paths.push(...(await sourceFiles(path)));
+      paths.push(...(await sourceFiles(child)));
     } else if (entry.isFile()) {
-      paths.push(path);
+      paths.push(child);
     }
   }
   return paths;
 }
 
-function workspacePath(workspaceRoot: string, sourceRoot: string): string {
-  const path = relative(workspaceRoot, sourceRoot);
+function workspacePath(workspaceRoot: string, buildInput: string): string {
+  const path = relative(workspaceRoot, buildInput);
   if (path === '..' || path.startsWith(`..${sep}`) || path === '') {
-    throw new Error(`Web build source must be a child of the workspace: ${sourceRoot}`);
+    throw new Error(`Web build input must be a child of the workspace: ${buildInput}`);
   }
   return portablePath(path);
 }

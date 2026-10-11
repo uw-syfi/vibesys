@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from server.host_api import FailureReason, RunStatus
+
 
 def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
     tmp_path: Path,
@@ -42,11 +44,17 @@ def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
         def listening(self) -> None:
             milestones.append("listening")
 
-        def run_ready(self, run_id: str) -> None:
-            milestones.append(run_id)
+        def observe(
+            self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+        ) -> None:
+            milestones.append(str(status or failure))
 
     runtime = ServerRuntime(
-        runs=default_runs(), socket_path=socket_path, detach=True, observer=Observer()
+        run_id="run-1",
+        runs=default_runs(),
+        socket_path=socket_path,
+        detach=True,
+        observer=Observer(),
     )
     started = threading.Event()
     finish = runtime.threads.event()
@@ -62,7 +70,7 @@ def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
     # A detached run's callback starts only once the transport accepts clients.
     assert started.wait(timeout=DEADLOCK_GUARD_S)
     assert runtime.transport_listening.is_set()
-    assert milestones == ["listening"]
+    assert milestones == ["running", "listening"]
 
     # A client that attaches mid-run is served through the reconnect bootstrap.
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -114,6 +122,7 @@ def test_detached_runtime_unwinds_callback_failures_without_shutdown(
     merge-base runtime from its old detached wait in ``finally``.
     """
     runtime = ServerRuntime(
+        run_id="run-1",
         runs=default_runs(),
         socket_path=tmp_path / "control.sock",
         detach=True,

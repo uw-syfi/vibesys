@@ -1,0 +1,33 @@
+version = 1
+
+[agent]
+domain = "llm-serving"
+
+[evaluator]
+name = "vibesys-evaluator-request-factory"
+version = "0.1.0"
+
+[accuracy]
+command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py"]
+timeout_seconds = 300
+
+[benchmark]
+entrypoint = "request-factory-engine"
+args = [
+  "--trace", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/requests.jsonl",
+  "--input-file-format", "multimodal-independent-v1",
+  "--base-url", "http://localhost:8000/v1",
+  "--model", "whisper-large-v3",
+  "--backend", "openai-transcriptions",
+  "--dialect", "openai",
+  "--temperature", "0",
+  "--arrival-mode", "saturated",
+  "--max-concurrency", "8",
+  "--request-log", "false",
+  "--timeline", "false",
+]
+timeout_seconds = 600
+
+[benchmark.result]
+json_argument = "--summary-path"
+metric = "request_throughput_per_s"

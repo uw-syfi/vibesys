@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.support.task_project import write_task
 
 from vs_sim.api.testing import HANG_GUARD_S
 from vs_slurm.fake_connector import JOB_ID, POLLED_FILE, SUBMITTED_FILE, recorded_commands
@@ -51,13 +52,13 @@ def _write_input(base: Path, transport: str) -> tuple[Path, Path, Path]:
     )
     project = base / "project"
     project.mkdir()
-    (project / "OBJECTIVE.md").write_text("Improve the queue.\n", encoding="utf-8")
     (project / "queue.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (project / "vibesys.input.toml").write_text(
+    write_task(
+        project,
         'version = 1\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n'
         '[benchmark]\ncommand = ["run-benchmark"]\nresult_protocol = 2\n',
-        encoding="utf-8",
+        objective="Improve the queue.\n",
     )
     return cluster, config, project
 

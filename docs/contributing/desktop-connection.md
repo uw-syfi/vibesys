@@ -94,9 +94,10 @@ New modules and edges, all downward; no module gains an edge to `vibesys.*`:
 | `server.host_api` | none (pydantic only) |
 | `server.registry` | `server.host_api`, `vs_sim.api` |
 | `server.host_helper` | `server.host_api`, `server.registry`, `server.stdio_bridge`, `vs_project`, `vs_sim.api` |
-| `server.instances` | `server.registry`, `server.host_api`, `server.api`, `vs_sim.api` (loses `server.transport`) |
+| `server.instances` | `server.api`, `vs_sim.api` (loses `server.transport`; keeps only the stop requester) |
+| `server.api` | adds `server.host_api` (`PROTOCOL_VERSION` is defined there) |
 | `server.transport` | adds `server.registry` (discovery's lock primitives move there) |
-| `entrypoints` | adds `server.host_helper`; drops `server.stdio_bridge_report` when the bridge entrypoint is deleted |
+| `entrypoints` | adds `server.host_api` and `server.registry` (phase 1), `server.host_helper` (phase 4); drops `server.stdio_bridge_report` when the bridge entrypoint is deleted |
 
 Tach edges are module granular and `server.api` is one module, so tach alone cannot keep the helper
 light. The [import-closure guard](#guards) is the check that does.
@@ -451,6 +452,8 @@ Deleted when the corresponding phase lands:
   (phase 2).
 - The bounded wait for a first client after an early failure (phase 3, superseded by tombstones).
 - Imperative welcome DOM and hand-rolled focus code (phase 6).
+- The legacy gateway window: `VIBESYS_DESKTOP_URL`, `launch-url.ts`, and `scripts/run-desktop.sh`
+  with its `--demo` (phase 6; the bundled app covers every use, and `--demo` has no replacement).
 
 ### Phases
 
@@ -475,13 +478,13 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Detached runs, live registry, stop and resume | built |
 | Stdio relay core | built (entrypoint to be replaced) |
 | Pure supervisor core | built (check to be replaced) |
-| Light host commands and import guard (phase 1) | not built (#1829) |
-| Explicit run identity (phase 2) | not built |
-| Lifecycle phases, progress, tombstones (phase 3) | not built |
-| Control envelope split (phase 4, step one) | not built |
+| Light host commands and import guard (phase 1) | built |
+| Explicit run identity (phase 2) | built (server side; the desktop app still keeps its id inference until phase 5 or 6 removes it) |
+| Lifecycle phases, progress, tombstones (phase 3) | built: phases with failure reason in the record, tombstones; not built: startup stages past `resolving` and image-build progress (`run_startup_progress`) |
+| Control envelope split (phase 4, step one) | built (`server.control_envelope`) |
 | Host helper and its contract (phase 4) | not built |
 | Connection manager (phase 5) | not built |
-| Screen stores and app lifecycle (phase 6) | not built |
+| Screen stores and app lifecycle (phase 6) | built (#1832) |
 
 ## Decisions and alternatives
 

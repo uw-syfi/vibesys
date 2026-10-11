@@ -9,7 +9,9 @@
  * identity.
  */
 import type {HostKey} from './host-settings.js';
+import type {ResumeRunId} from './resume-run.js';
 import type {StopView} from './stop-run.js';
+import type {ConnectionStatus} from './supervisor.js';
 
 export const WELCOME_CHANNELS = {
   overview: 'vibesys:welcome:overview',
@@ -21,6 +23,7 @@ export const WELCOME_CHANNELS = {
   tasks: 'vibesys:welcome:tasks',
   attach: 'vibesys:welcome:attach',
   start: 'vibesys:welcome:start',
+  cancelStart: 'vibesys:welcome:cancel-start',
   resume: 'vibesys:welcome:resume',
   showRun: 'vibesys:welcome:show-run',
   showWelcome: 'vibesys:welcome:show-welcome',
@@ -28,8 +31,15 @@ export const WELCOME_CHANNELS = {
   stop: 'vibesys:welcome:stop',
 } as const;
 
-/** The one event the main process sends the welcome view: the window's state changed. */
-export const CHROME_CHANNEL = 'vibesys:welcome:chrome';
+/** The events the main process sends the welcome view. */
+export const WELCOME_EVENTS = {
+  /** The window's state changed (`ChromeState`). */
+  chrome: 'vibesys:welcome:chrome',
+  /** The recent runs changed (`WelcomeRecent[]`): the settings store wrote them. */
+  recent: 'vibesys:welcome:recent',
+  /** Show a host's panel (`HostKey`): a launch or a second launch asked for it. */
+  showHost: 'vibesys:welcome:show-host',
+} as const;
 
 /** What the window shows, for the welcome view's title strip. */
 export interface ChromeState {
@@ -43,13 +53,8 @@ export interface ChromeState {
     readonly instanceId: string | null;
     readonly runId: string | null;
     readonly project: string;
-    /** A short status (`connected`, `reconnecting (attempt 2)`, ...). */
-    readonly status: string;
-    readonly detail: string;
-    /** True when the connection stopped trying: offer Retry, unless the run ended. */
-    readonly stuck: boolean;
-    /** True when the run is no longer running: offer Resume, not Retry. */
-    readonly ended: boolean;
+    /** The supervisor's view of the run's connection; the strip words it. */
+    readonly connection: ConnectionStatus;
   } | null;
   /** The stop flows past idle, by `stopKey` (host, newline, instance id). */
   readonly stops: Readonly<Record<string, StopView>>;
@@ -71,6 +76,8 @@ export interface WelcomeOverview {
   readonly settingsProblem: string | null;
   readonly recent: readonly WelcomeRecent[];
   readonly chrome: ChromeState;
+  /** The host whose panel to show first (a launch may name one). */
+  readonly host: HostKey;
 }
 
 /** A recent run's refreshed status (`recent.ts`'s `RecentStatus`). */
@@ -85,7 +92,7 @@ export interface WelcomeRun {
   readonly runId: string | null;
   readonly status: string;
   readonly startedAt: number;
-  /** Null when the app can attach; otherwise why not (a version mismatch). */
+  /** Null when the app can attach; otherwise why lifecycle actions are unsafe. */
   readonly blocked: string | null;
 }
 
@@ -97,12 +104,48 @@ export interface WelcomeHost {
   readonly checkout: string | null;
   /** A checkout to pre-fill, from the host's live records; null when none says. */
   readonly suggestedCheckout: string | null;
-  /** The live runs; empty until a checkout is set. */
+  /** The registry's live and unverified run entries; empty until a checkout is set. */
   readonly runs: readonly WelcomeRun[];
   /** Project directories to offer when starting a run. */
   readonly projects: readonly string[];
 }
 
+/** How a start the welcome view asked for ended: attached, or cancelled (and its run stopped). */
+export type StartOutcome = 'started' | 'cancelled';
+
 export type WelcomeResult<T> =
   | {readonly ok: true; readonly value: T}
   | {readonly ok: false; readonly error: string; readonly authNeeded: boolean};
+
+/**
+ * What the welcome preload exposes to the welcome view (`window.vibesysWelcome`): one function per
+ * request channel, and one subscription per event. The main process validates every argument.
+ */
+export interface WelcomeBridge {
+  readonly platform: string;
+  overview(): Promise<WelcomeResult<WelcomeOverview>>;
+  recentStatus(host: HostKey): Promise<WelcomeResult<Record<string, WelcomeRecentStatus>>>;
+  hosts(): Promise<WelcomeResult<string[]>>;
+  host(host: HostKey): Promise<WelcomeResult<WelcomeHost>>;
+  setCheckout(host: HostKey, path: string): Promise<WelcomeResult<string>>;
+  signIn(host: HostKey): Promise<WelcomeResult<null>>;
+  tasks(host: HostKey, project: string): Promise<WelcomeResult<string[]>>;
+  attach(host: HostKey, instance: string): Promise<WelcomeResult<null>>;
+  /** Start `task`; `start` names this start so that `cancelStart` can cancel it. */
+  start(
+    host: HostKey,
+    project: string,
+    task: string,
+    args: string,
+    start: number,
+  ): Promise<WelcomeResult<StartOutcome>>;
+  cancelStart(start: number): Promise<WelcomeResult<null>>;
+  resume(host: HostKey, project: string, run: ResumeRunId): Promise<WelcomeResult<null>>;
+  showRun(): Promise<WelcomeResult<null>>;
+  showWelcome(): Promise<WelcomeResult<null>>;
+  retry(): Promise<WelcomeResult<null>>;
+  stop(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
+  onChrome(listener: (state: ChromeState) => void): void;
+  onRecent(listener: (recent: readonly WelcomeRecent[]) => void): void;
+  onShowHost(listener: (host: HostKey) => void): void;
+}

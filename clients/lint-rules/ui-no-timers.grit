@@ -1,0 +1,15 @@
+// Timers are effects: they schedule work outside the render and need teardown. Presentational
+// ui/ code gets time as an input (a tick prop or an injected clock) and the shell owns the timer.
+language js;
+
+or {
+  `setTimeout($args)`,
+  `setInterval($args)`,
+  `requestAnimationFrame($args)`
+} as $call where {
+  register_diagnostic(
+    span = $call,
+    message = "ui/ code must not schedule timers. Take time as an input (tick prop or injected clock); the shell owns the timer.",
+    severity = "error"
+  )
+}

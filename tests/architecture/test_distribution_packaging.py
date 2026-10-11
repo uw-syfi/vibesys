@@ -418,7 +418,7 @@ def test_built_distribution_caps_dependencies_without_current_intel_macos_wheels
 def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path: Path) -> None:
     manifest = (PROJECT_ROOT / "MANIFEST.in").read_text().splitlines()
     assert "graft resources/evaluators" in manifest
-    assert "prune resources/evaluators/queue/native_runner/target" in manifest
+    assert "prune resources/evaluators/*/native_runner/target" in manifest
     assert "graft clients" not in manifest
 
     run_test_command(

@@ -24,10 +24,11 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.support.task_project import write_task
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.inputs import load_input_bundle
+from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
 from vibesys.run.evaluation import create_evaluation
@@ -164,14 +165,15 @@ def _unexpected_resume(_manifest: OrchestrationRunManifest) -> OrchestrationResu
 
 def _write_project(root: Path) -> None:
     root.mkdir(parents=True)
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
     (root / "benchmark.py").write_text("print('unused: the sandbox is a Fake')\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
         f"[accuracy]\ncommand = {json.dumps([_ACCURACY])}\n"
         f"[benchmark]\ncommand = {json.dumps(_BENCHMARK.split())}\n"
-        '[benchmark.result]\njson_argument = "--output-json"\nmetric = "throughput"\n'
+        '[benchmark.result]\njson_argument = "--output-json"\nmetric = "throughput"\n',
+        objective="Improve the queue.\n",
     )
 
 
@@ -180,7 +182,7 @@ def _run_request(root: Path) -> RunRequest:
         project_root=root,
         orchestration=OrchestrationDescriptor(id="evaluation", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "evaluation"}}),
-        input_bundle=load_input_bundle(root),
+        input_bundle=load_task(root),
         objective="Improve the queue.",
         exp_name="evaluation",
         cli_provider="claude",
@@ -226,13 +228,13 @@ def _measure_with_lost_command(
         project_root=root,
         run_id=_RUN_ID,
         display_name="lost stage",
-        task_name=None,
+        task_name="default",
         existing=False,
         framework_version="1.2.3",
         run_environment=RunEnvironmentRecord(name="local"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="evaluation", config_version=1, options={}),
-        trusted_input_paths=("benchmark.py", "vibesys.input.toml"),
+        trusted_input_paths=(".vibesys/tasks",),
     )
     effects = ProjectRunEffects(
         git_events=NullGitTrackerEvents(), log_emit=_emit, on_log_ready=lambda _path: None

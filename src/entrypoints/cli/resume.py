@@ -292,6 +292,19 @@ def _switch_project_resume_branch(project_root: Path, run_id: str) -> None:
         )
 
 
+def _requested_resume(args: argparse.Namespace, *, direct: bool) -> str | None:
+    """The run a resume names, or pins with ``--run-id``; ``None`` selects the current run."""
+    if direct and args.resume != "latest":
+        if args.run_id not in (None, args.resume):
+            _configuration_error(
+                f"--run-id {args.run_id} names another run than --resume {args.resume}",
+                code="invalid_arguments",
+                stage="argument_parsing",
+            )
+        return str(args.resume)
+    return None if args.run_id is None else str(args.run_id)
+
+
 def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
     if args.resume is None:
         return
@@ -314,12 +327,9 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
     )
     try:
         store = Project.open(project_root).state
-        if direct and args.resume != "latest":
-            run_id = args.resume
-        else:
-            run_id = store.current_run_id()
-            if run_id is None:
-                run_id = store.resolve_run().run_id
+        run_id = _requested_resume(args, direct=direct)
+        if run_id is None:
+            run_id = store.current_run_id() or store.resolve_run().run_id
         _switch_project_resume_branch(project_root, run_id)
         manifest = store.load_run(run_id)
     except ProjectStateError as exc:
@@ -341,6 +351,7 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
         )
     validate_descriptor(manifest.orchestration)
     args.resume = run_id
+    args.run_id = run_id
     args.exp_name = run_id
     args.input = project_root
     if manifest.task_name is not None:

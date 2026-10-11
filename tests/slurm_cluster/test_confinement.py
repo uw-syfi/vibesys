@@ -7,7 +7,12 @@ import secrets
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.slurm_cluster.harness import CONTAINER_TMP
+from tests.slurm_cluster.harness import (
+    CONTAINER_TMP,
+    OPERATOR_TOOL_FILE,
+    OPERATOR_TOOL_TEXT,
+    operator_tools,
+)
 
 if TYPE_CHECKING:
     from tests.slurm_cluster.cluster import SlurmCluster
@@ -45,11 +50,12 @@ def test_a_write_outside_the_workspace_never_reaches_the_shared_filesystem(
 def test_a_job_sees_its_workspace_and_none_of_the_shared_directory_around_it(
     gpu_run: OpenRun, slurm_cluster: SlurmCluster
 ) -> None:
-    result = gpu_run.agent(f'"$VIBESYS_GPU" -- ls {slurm_cluster.root}')
+    result = gpu_run.agent(f'"$VIBESYS_GPU" -- ls -1 {slurm_cluster.root}')
 
     assert result.exit_code == 0, result.output
     visible = result.output.splitlines()[1:]  # after the launcher's header line
-    assert visible == [gpu_run.workspace.name]
+    # Only the workspace, and the read-only directory the operator exposed on purpose.
+    assert visible == sorted([gpu_run.workspace.name, operator_tools(slurm_cluster).name])
 
 
 def test_a_job_writes_to_a_private_tmp_that_the_node_never_sees(
@@ -76,3 +82,23 @@ def test_a_job_runs_as_the_unprivileged_host_user_in_its_own_pid_namespace(
     assert int(uid) == os.getuid()
     # Only the confinement's own few processes, not the node's.
     assert int(processes) < 10
+
+
+def test_a_job_reads_the_operators_read_only_tools_outside_its_workspace_and_cannot_write_them(
+    gpu_run: OpenRun, slurm_cluster: SlurmCluster
+) -> None:
+    """Regression: an interpreter outside the workspace was invisible to the job (exit 127)."""
+    tool = operator_tools(slurm_cluster) / OPERATOR_TOOL_FILE
+    other = slurm_cluster.root / "not-exposed"
+    other.mkdir(exist_ok=True)
+    (other / "secret.txt").write_text("hidden\n", encoding="utf-8")
+
+    read = gpu_run.agent(f'"$VIBESYS_GPU" -- cat {tool}')
+    write = gpu_run.agent(f"\"$VIBESYS_GPU\" -- sh -c 'echo x > {tool}'")
+    hidden = gpu_run.agent(f'"$VIBESYS_GPU" -- cat {other}/secret.txt')
+
+    assert read.exit_code == 0, read.output
+    assert read.output.endswith(OPERATOR_TOOL_TEXT)
+    assert write.exit_code != 0
+    assert tool.read_text(encoding="utf-8") == OPERATOR_TOOL_TEXT
+    assert hidden.exit_code != 0

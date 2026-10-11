@@ -22,7 +22,7 @@ from headless import run as render_run
 from launch import LaunchSettings, default_runs
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.inputs import load_input_bundle
+from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.contracts import RunRequest
@@ -65,7 +65,7 @@ def main(project_root: Path, slurm_config: Path) -> None:
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id=PLUGIN_ID, config_version=1, options={}),
         config=Config.model_validate({"model": {"name": PLUGIN_ID}}),
-        input_bundle=load_input_bundle(project_root),
+        input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name=PLUGIN_ID,
         agent_backend="cli",

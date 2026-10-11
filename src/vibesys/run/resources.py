@@ -104,6 +104,7 @@ from vs_runtime.api.infrastructure import (
     open_run_environment_resources,
     prepare_trusted_evaluator,
     resolve_run_environment_spec,
+    run_environment_deprecation,
     run_environment_record,
 )
 from vs_sandbox.api import (
@@ -245,6 +246,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 log=buffered_logs.append,
             )
             environment = build_run_environment(run_environment_spec)
+            # Reported once here: the environment is opened again for every candidate.
+            if (deprecation := run_environment_deprecation(environment)) is not None:
+                buffered_logs.append(f"[environment] {deprecation}")
             input_path_str = _coerce_dir_path(input_path, "--input")
             input_dir = Path(input_path_str)
             run_id = (
@@ -356,17 +360,13 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 log=buffered_logs.append,
             )
             if copied_project:
-                source_reference = (task_root or input_dir) / "reference"
+                source_reference = task_root / "reference"
                 model_artifacts = prepare_domain_model_artifacts(
                     bundle.domain,
                     ModelArtifactRequest(
                         reference_dir=source_reference,
                         model_cache_dir=collection_root / ".cache" / "huggingface",
-                        runtime_artifact_dir=(
-                            source_reference
-                            if task_name is None
-                            else collection_root / ".cache" / "llm-serving" / run_id
-                        ),
+                        runtime_artifact_dir=collection_root / ".cache" / "llm-serving" / run_id,
                         log=buffered_logs.append,
                     ),
                     isolated=environment.isolated,
@@ -378,14 +378,16 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     spec=ProjectProvisioningSpec(
                         materializer=workspace_files,
                         workspace_sources=workspace_sources,
-                        evaluator_source=evaluator_source,
                         task_name=task_name,
                         input_project_dir=input_project_dir,
                         input_excludes=model_artifacts.copy_excludes,
                     ),
                 )
                 if evaluator_source is not None:
-                    evaluator_source = project_root / "_evaluator" / evaluator_source.name
+                    # A task-local evaluator source is copied with its task.
+                    evaluator_source = project_root / evaluator_source.resolve().relative_to(
+                        input_dir.resolve()
+                    )
             else:
                 workspace_files.create()
 
@@ -494,8 +496,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
             project_ref_dir = (
                 project_root / task_root.relative_to(input_dir) / "reference"
-                if task_root is not None and copied_project
-                else (task_root or project_root) / "reference"
+                if copied_project
+                else task_root / "reference"
             )
             ref_dir = project_ref_dir if project_ref_dir.is_dir() else None
             if ref_dir is not None:

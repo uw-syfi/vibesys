@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -16,7 +17,14 @@ from pydantic import (
     field_validator,
 )
 
-from vs_slurm.api import PORT_PLACEHOLDER, SlurmService
+from vs_sandbox.agent_gpu import AgentGpuConfig
+from vs_slurm.api import (
+    PORT_PLACEHOLDER,
+    SlurmConfig,
+    SlurmLocalTransport,
+    SlurmService,
+    load_slurm_config,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -39,9 +47,22 @@ class SlurmPolicyError(ValueError):
             detail = type(error).__name__
         return cls(f"Could not load VibeSys Slurm policy at {path}: {detail}")
 
+    @classmethod
+    def agent_gpu_needs_local_transport(cls, transport_kind: str) -> SlurmPolicyError:
+        """Name the table and the transport that cannot offer it."""
+        return cls(
+            'vibesys.agent_gpu needs slurm.transport kind = "local": the agent\'s GPU jobs '
+            "run through this host's srun on a filesystem it shares with the compute nodes, "
+            f"not through a {transport_kind!r} transport"
+        )
+
 
 class SlurmExecutionPolicy(BaseModel):
-    """Commands and setup selected by VibeSys for jobs on a remote cluster."""
+    """Commands and setup selected by VibeSys for jobs on a remote cluster.
+
+    ``agent_gpu``, when present, lets the agent run its own GPU commands as
+    Slurm jobs (see :func:`agent_gpu_capability`).
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -51,6 +72,7 @@ class SlurmExecutionPolicy(BaseModel):
     service: SlurmService | None = None
     accuracy_arguments: tuple[str, ...] = ()
     benchmark_arguments: tuple[str, ...] = ()
+    agent_gpu: AgentGpuConfig | None = None
 
     @field_validator("remote_python")
     @classmethod
@@ -128,6 +150,60 @@ def load_slurm_policy(path: Path) -> SlurmExecutionPolicy:
         return _SlurmOperatorDocument.model_validate(document, strict=True).vibesys
     except (OSError, tomllib.TOMLDecodeError, ValidationError) as exc:
         raise SlurmPolicyError.load_failed(config_path, exc) from exc
+
+
+def agent_gpu_capability(
+    config: SlurmConfig, policy: SlurmExecutionPolicy
+) -> AgentGpuConfig | None:
+    """Return the agent GPU limits the run offers, or ``None`` when the operator configured none.
+
+    The capability runs ``srun`` on this host, so it needs the local transport.
+    """
+    if policy.agent_gpu is None:
+        return None
+    if not isinstance(config.transport, SlurmLocalTransport):
+        raise SlurmPolicyError.agent_gpu_needs_local_transport(config.transport.kind)
+    return policy.agent_gpu
+
+
+@dataclass(frozen=True, slots=True)
+class SlurmOperatorSettings:
+    """Everything the operator's Slurm file says, parsed and checked once.
+
+    The cluster (``[slurm]``), the VibeSys policy (``[vibesys]``), and, through
+    the policy, the agent GPU limits. Construction rejects a combination the
+    run could not honor (agent GPU commands without the local transport), so
+    holding a value means the file is usable and no later read can differ.
+    """
+
+    config: SlurmConfig
+    policy: SlurmExecutionPolicy
+
+    def __post_init__(self) -> None:
+        """Reject agent GPU limits that the cluster transport cannot serve."""
+        agent_gpu_capability(self.config, self.policy)
+
+    @property
+    def agent_gpu(self) -> AgentGpuConfig | None:
+        """The agent's GPU limits, or ``None`` when the capability is off."""
+        return self.policy.agent_gpu
+
+    @property
+    def agent_gpu_shell_command(self) -> tuple[str, ...] | None:
+        """How the agent's GPU jobs reach Slurm: the local transport's shell, or ``None``.
+
+        It is ``None`` exactly when the capability is off, since construction
+        guarantees the capability has a local transport.
+        """
+        transport = self.config.transport
+        if self.policy.agent_gpu is None or not isinstance(transport, SlurmLocalTransport):
+            return None
+        return transport.shell_command
+
+
+def load_slurm_operator_settings(path: Path) -> SlurmOperatorSettings:
+    """Parse the operator file once; failures name the file and the offending fields."""
+    return SlurmOperatorSettings(load_slurm_config(path), load_slurm_policy(path))
 
 
 def _is_python(executable: str) -> bool:

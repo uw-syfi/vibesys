@@ -6,9 +6,10 @@ import json
 from typing import TYPE_CHECKING
 
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.task_project import write_task
 
 from vibesys.api import ComputeBackend, Config, ProfilerKind, RunRequest
-from vibesys.api.request import load_input_bundle
+from vibesys.api.request import load_task
 from vibesys.dynamic_core import ResolvedRun
 from vibesys.orchestration.dynamic import PLUGIN, REGISTRATION
 from vibesys.orchestration.dynamic.core_policy.api import RunBounds
@@ -29,12 +30,13 @@ COMMIT = "0123456789abcdef0123456789abcdef01234567"
 
 def write_project(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "OBJECTIVE.md").write_text("Make the queue faster.\n")
     (root / "benchmark.py").write_text("print('ok')\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n'
-        f"[benchmark]\ncommand = {json.dumps(['python', 'benchmark.py'])}\n"
+        f"[benchmark]\ncommand = {json.dumps(['python', 'benchmark.py'])}\n",
+        objective="Make the queue faster.\n",
     )
 
 
@@ -62,7 +64,7 @@ def run_request(
             options={**OPTIONS, **(options or {})},
         ),
         config=Config.model_validate({"model": {"name": "test"}, **(config or {})}),
-        input_bundle=load_input_bundle(root),
+        input_bundle=load_task(root),
         objective="Make the queue faster.",
         exp_name="policy",
         cli_provider="claude",

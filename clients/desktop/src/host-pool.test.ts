@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import {HostError} from './host.js';
 import {type CheckedHost, HostPool} from './host-pool.js';
 import type {HostId} from './host-settings.js';
+import {SettingsStore} from './settings-store.js';
 import {FakeHost} from './testing/fake-host.js';
 import {fakeRecord} from './testing/fake-record.js';
 
@@ -20,6 +21,12 @@ function pool(
     readonly broken?: ReadonlySet<string>;
     readonly roots?: readonly string[];
     readonly rootsError?: HostError;
+    /** What `vibesys tasks` prints on stderr when it fails; it succeeds when absent. */
+    readonly tasksStderr?: string;
+    readonly listing?: {
+      readonly instances: readonly object[];
+      readonly unverified: readonly string[];
+    };
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), 'vsd-pool-'));
@@ -29,31 +36,39 @@ function pool(
   const built: Built[] = [];
   const hosts = new HostPool({
     sshConfigPath: join(directory, 'config'),
-    settingsPath: join(directory, 'hosts.json'),
-    recentPath: join(directory, 'recent.json'),
+    settings: new SettingsStore({
+      settingsPath: join(directory, 'hosts.json'),
+      recentPath: join(directory, 'recent.json'),
+      log: message => logged.push(message),
+    }),
     localCheckout: '/Users/me/src/vibesys',
     factory: async (id, checkout) => {
       built.push({id, checkout});
       const host = new FakeHost({
         command: argv =>
-          argv[0] === 'tasks'
-            ? {
-                code: 0,
-                stdout: JSON.stringify({
-                  version: 1,
-                  project_root: argv[1],
-                  tasks: [{name: 'mpmc'}, {name: 'spsc'}],
-                }),
-                stderr: '',
-              }
-            : {
-                code: 0,
-                stdout: JSON.stringify({
-                  version: 1,
-                  instances: [{...fakeRecord('0123456789ab', '/run/s', 1), vibesys_root: checkout}],
-                }),
-                stderr: '',
-              },
+          argv[0] === 'tasks' && options.tasksStderr !== undefined
+            ? {code: 1, stdout: '', stderr: options.tasksStderr}
+            : argv[0] === 'tasks'
+              ? {
+                  code: 0,
+                  stdout: JSON.stringify({
+                    version: 1,
+                    project_root: argv[1],
+                    tasks: [{name: 'mpmc'}, {name: 'spsc'}],
+                  }),
+                  stderr: '',
+                }
+              : {
+                  code: 0,
+                  stdout: JSON.stringify({
+                    version: 1,
+                    instances: options.listing?.instances ?? [
+                      {...fakeRecord('0123456789ab', '/run/s', 1), vibesys_root: checkout},
+                    ],
+                    unverified: options.listing?.unverified ?? [],
+                  }),
+                  stderr: '',
+                },
       });
       return Object.assign(host, {
         verifyCheckout: async () => {
@@ -132,6 +147,59 @@ describe('HostPool', () => {
     const {hosts} = pool('', null);
     expect(await hosts.tasks({kind: 'local'}, '/tmp/queue-rs')).toEqual(['mpmc', 'spsc']);
     await expect(hosts.tasks({kind: 'local'}, '-x')).rejects.toThrow('cannot start with "-"');
+  });
+
+  test('regression: a failed task listing reads as plain language, not a command line', async () => {
+    const {hosts, logged} = pool('', null, {
+      tasksStderr: 'vibesys tasks: Project root does not exist: /x',
+    });
+    const listing = hosts.tasks({kind: 'local'}, '/x');
+    await expect(listing).rejects.toThrow(
+      'Could not read the tasks of /x: Project root does not exist: /x',
+    );
+    await listing.catch((error: Error) => expect(error.message).not.toContain('--json'));
+    expect(logged.join('\n')).toContain('exited with 1');
+  });
+
+  test('regression: preserves unverified registry entries and blocks their lifecycle actions', async () => {
+    const id = 'ba9876543210';
+    const {hosts} = pool('', null, {listing: {instances: [], unverified: [id]}});
+    const listing = await hosts.records({kind: 'local'});
+    expect(listing).toEqual({records: [], unverified: [id]});
+    expect(await hosts.runs({kind: 'local'}, listing)).toEqual([
+      {
+        id,
+        projectRoot: '',
+        runId: null,
+        status: 'unverified',
+        startedAt: 0,
+        blocked: 'The host could not confirm whether this run is still running.',
+      },
+    ]);
+  });
+
+  test('compatible rows win overlaps; remaining unverified rows are unique and sorted', async () => {
+    const compatible = '0123456789ab';
+    const uncertainA = 'aaaaaaaaaaaa';
+    const uncertainB = 'ba9876543210';
+    const {hosts} = pool('', null, {
+      listing: {
+        instances: [
+          fakeRecord(compatible, '/run/compatible'),
+          fakeRecord(uncertainB, '/run/incompatible', 2),
+        ],
+        unverified: [uncertainB, uncertainA, compatible, uncertainB],
+      },
+    });
+    const listing = await hosts.records({kind: 'local'});
+    const rows = await hosts.runs({kind: 'local'}, listing);
+    expect(
+      rows.map(row => ({id: row.id, status: row.status, blocked: row.blocked !== null})),
+    ).toEqual([
+      {id: compatible, status: 'serving', blocked: false},
+      {id: uncertainA, status: 'unverified', blocked: true},
+      {id: uncertainB, status: 'unverified', blocked: true},
+    ]);
   });
 
   test('remembers attached runs, most recent first', async () => {

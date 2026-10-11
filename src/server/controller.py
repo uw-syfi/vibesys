@@ -49,13 +49,14 @@ class RunController:
         self,
         log_dir: Path,
         *,
+        run_id: str,
         record: RunRecord | None = None,
     ) -> None:
-        """Attach durable presentation storage and an optional run record."""
+        """Attach durable presentation storage for ``run_id`` and an optional run record."""
         with self._condition:
             if record is not None:
                 self._attached_run = record
-            self._journal.attach(log_dir, run_id=record.run_id if record is not None else None)
+            self._journal.attach(log_dir, run_id=run_id)
             self._apply_locked(RunTrigger.ATTACHED)
 
     def attach_read_only(self, log_dir: Path, *, run_id: str | None = None) -> None:

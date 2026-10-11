@@ -5,7 +5,7 @@
  * the caller reports what it sees and is told, through `changed`, when a view must be redrawn.
  */
 import type {HostKey} from './host-settings.js';
-import type {StopResult} from './instances.js';
+import type {InstanceListing, StopResult} from './instances.js';
 import {
   confirmText,
   IDLE,
@@ -74,13 +74,18 @@ export class StopController {
   }
 
   /**
-   * The registry of `host` lists exactly the runs `liveIds`; every accepted stop there whose run
-   * is not among them is over.
+   * Every accepted stop absent from `host`'s complete registry observation is over. An unverified
+   * entry is not proof of liveness, but it is also not proof that the run ended.
    */
-  observeRegistry(host: HostKey, liveIds: ReadonlySet<string>): void {
+  observeRegistry(host: HostKey, listing: InstanceListing): void {
+    const observedIds = new Set(listing.unverified);
+    for (const record of listing.records) {
+      const id = record.kind === 'compatible' ? record.instance.id : record.id;
+      if (id !== null) observedIds.add(id);
+    }
     for (const [key, state] of [...this.#states]) {
       const [stopHost, instanceId = ''] = key.split('\n');
-      if (stopHost !== host || liveIds.has(instanceId)) continue;
+      if (stopHost !== host || observedIds.has(instanceId)) continue;
       if (state.phase === 'stopping' && state.accepted) this.#step(key, {type: 'ended'});
     }
   }

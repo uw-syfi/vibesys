@@ -1,0 +1,17 @@
+// A presentational React component is props in, events out. Effect hooks run subscriptions,
+// fetches, and timers, which belong in the shell and are fed back as state.
+language js;
+
+or {
+  `useEffect($args)`,
+  `useLayoutEffect($args)`,
+  `useInsertionEffect($args)`,
+  `React.useEffect($args)`,
+  `React.useLayoutEffect($args)`
+} as $call where {
+  register_diagnostic(
+    span = $call,
+    message = "ui/ components must not run effects (useEffect, useLayoutEffect). Move the effect into the shell and pass its result in as props.",
+    severity = "error"
+  )
+}

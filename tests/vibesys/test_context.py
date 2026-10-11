@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
 from tests.support.docker_environment import fake_docker_environment
 from tests.support.host_environment import unconfined_host_spec
+from tests.support.task_project import task_path, write_task
 
 from launch import built_in_orchestrations, open_run_store
 from vibesys.composition import resolve_agent_specs
@@ -23,8 +24,7 @@ from vibesys.events import CoreEventType
 from vibesys.inputs import (
     WorkspaceInput,
     WorkspaceSource,
-    load_input_bundle,
-    load_project_task,
+    load_task,
 )
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
@@ -95,29 +95,31 @@ class _CreateContextOptions(TypedDict, total=False):
 
 
 def _write_project(root: Path, *, evaluator_name: str = "checker") -> Path:
+    """Write a one-task project; return the task's evaluator source directory."""
     root.mkdir()
-    (root / "OBJECTIVE.md").write_text("Make the queue faster.\n")
-    evaluator = root / evaluator_name
-    evaluator.mkdir()
-    (evaluator / "check.py").write_text("print('ok')\n")
-    (root / "queue.py").write_text("VALUE = 1\n")
-    (root / "vibesys.input.toml").write_text(
-        """\
+    task = write_task(
+        root,
+        f"""\
 version = 1
 
 [agent]
 domain = "generic"
 
 [accuracy]
-command = ["python", "_evaluator/checker/check.py"]
+command = ["python", "_evaluator/{evaluator_name}/check.py"]
 
 [benchmark]
-command = ["python", "_evaluator/checker/check.py"]
+command = ["python", "_evaluator/{evaluator_name}/check.py"]
 
 [evaluator]
-source = "checker"
-"""
+source = "{evaluator_name}"
+""",
+        objective="Make the queue faster.\n",
     )
+    evaluator = task / evaluator_name
+    evaluator.mkdir()
+    (evaluator / "check.py").write_text("print('ok')\n")
+    (root / "queue.py").write_text("VALUE = 1\n")
     return evaluator
 
 
@@ -162,17 +164,10 @@ def _create_context(
     project: Path,
     **options: Unpack[_CreateContextOptions],
 ) -> AbstractContextManager[_PreparedRun]:
-    task_root = options.get("task_root")
     evaluator = options.get("evaluator")
     evaluator_package_root = options.get("evaluator_package_root")
     workspace_sources = options.get("workspace_sources", ())
-    if task_root is not None:
-        selected_project = Project.open(project)
-        bundle = load_project_task(
-            selected_project, selected_project.select_task(options.get("task_name"))
-        )
-    else:
-        bundle = load_input_bundle(project)
+    bundle = load_task(project, options.get("task_name"))
     updates: dict[str, object] = {}
     if evaluator is not None:
         updates["evaluator_path"] = evaluator
@@ -389,7 +384,7 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
 
     tools_root = Project.open(project).state.machine_cache_directory("evaluator-tools")
     for name, spec in package.metadata.tools.items():
-        tool_install_root(tools_root, name, spec).mkdir(parents=True)
+        tool_install_root(tools_root, name, spec).mkdir(parents=True, exist_ok=True)
 
     with _create_context(
         project,
@@ -427,7 +422,7 @@ def test_evaluator_tools_built_for_one_project_are_reused_by_another(tmp_path: P
         tool_install_root(built, name, spec) for name, spec in package.metadata.tools.items()
     }
     for root in built_roots:
-        root.mkdir(parents=True)
+        root.mkdir(parents=True, exist_ok=True)
 
     project = tmp_path / "queue"
     _write_project(project)
@@ -662,10 +657,9 @@ def test_copied_run_provisions_self_contained_project_in_collection(tmp_path: Pa
         assert ctx.environment_resources.request.workspace == project
         assert (project / "queue.py").is_file()
         assert not (project / "checker").exists()
-        assert (project / "_evaluator" / "checker" / "check.py").is_file()
-        manifest_text = (project / "vibesys.input.toml").read_text()
-        assert 'source = "_evaluator/checker"' in manifest_text
-        assert "[workspace]" not in manifest_text
+        assert (task_path(project) / "checker" / "check.py").is_file()
+        assert not (project / "vibesys.input.toml").exists()
+        assert (task_path(project) / "vibesys.input.toml").is_file()
         assert ctx.environment_resources.request.log_dir == (
             ctx.project_resources.project.state.log_directory(run_id)
         )
@@ -761,7 +755,7 @@ def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path: Path) ->
     with _create_context(
         project,
         runs_dir=runs_dir,
-        evaluator=project / "_evaluator" / "checker",
+        evaluator=task_path(project) / "checker",
         exp_name=run_id,
         existing=True,
     ):
@@ -795,7 +789,7 @@ def test_collection_resume_accepts_declared_workspace_sources(tmp_path: Path) ->
     with _create_context(
         project,
         runs_dir=runs_dir,
-        evaluator=project / "_evaluator" / "checker",
+        evaluator=task_path(project) / "checker",
         exp_name=run_id,
         existing=True,
         workspace_sources=(library,),
@@ -949,7 +943,7 @@ def test_cli_backend_accepts_active_profiler_configuration(
     monkeypatch.setenv("OPENAI_API_KEY", "synthetic-openai-key")
     project = tmp_path / "queue"
     evaluator = _write_project(project)
-    manifest = project / "vibesys.input.toml"
+    manifest = task_path(project) / "vibesys.input.toml"
     manifest.write_text(
         manifest.read_text().replace('domain = "generic"', 'domain = "microservices"')
     )

@@ -115,6 +115,7 @@ export class DetachedHost implements Host {
       throw new HostError(
         'failed',
         `vibesys ${argv.join(' ')} exited with ${output.code ?? 'a signal'}: ${output.stderr.trim()}`,
+        {stderr: output.stderr.trim()},
       );
     }
     try {

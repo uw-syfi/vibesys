@@ -10,9 +10,12 @@ job's argv. Nothing here knows about the agent's container.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import cache
+from pathlib import PurePath
 from typing import TYPE_CHECKING, Protocol
 
+from vs_sandbox.host_sandbox import HostSandbox
 from vs_sandbox.host_sandbox import build as build_host_sandbox
 
 if TYPE_CHECKING:
@@ -43,6 +46,11 @@ class HostJobConfinement:
     workspace it was asked to run in, with the project path policy applied
     exactly as for an agent on the host. Enforcement is required, so a host
     without the mechanism refuses the job.
+
+    The job runs on another machine, so the prefix names bubblewrap by its
+    program name and the job's own ``PATH`` finds it there. The submit host
+    proves only that its own copy works; the absolute path it found (a copy
+    in the operator's home, say) need not exist on a compute node.
     """
 
     def __init__(
@@ -73,5 +81,7 @@ class HostJobConfinement:
         if sandbox is None:  # require_enforcement raises instead
             message = "brokered jobs require host confinement"
             raise RuntimeError(message)
+        if isinstance(sandbox, HostSandbox):
+            sandbox = replace(sandbox, bwrap_path=PurePath(sandbox.bwrap_path).name)
         # Everything before the placeholder argv is the confinement prefix.
         return sandbox.wrap([])

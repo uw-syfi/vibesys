@@ -9,19 +9,24 @@
   "exports": {},
   "scripts": {
     "prebuild": "pnpm --filter @vibesys/desktop^... build",
-    "build": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\" && tsc -p tsconfig.json && pnpm --filter @vibesys/web build:desktop && node scripts/copy-ui.mjs",
+    "build": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\" && tsc -p tsconfig.json && vite build --config vite.welcome.config.ts && pnpm --filter @vibesys/web build:desktop && node scripts/copy-ui.mjs",
     "precheck": "pnpm --filter @vibesys/desktop^... build",
-    "check": "tsc -p tsconfig.check.json",
+    "check": "tsc -p tsconfig.check.json && tsc -p tsconfig.welcome.json",
     "pretest": "pnpm --filter @vibesys/desktop^... build",
     "test": "node ../scripts/run_bun_tests.mjs ./src",
     "start": "pnpm build && electron ."
   },
   "dependencies": {
-    "@vibesys/backend-client": "workspace:*"
+    "@vibesys/backend-client": "workspace:*",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
     "@types/node": "^24.0.0",
+    "@types/react": "19.1.13",
+    "@types/react-dom": "19.1.9",
+    "@vitejs/plugin-react": "5.0.4",
     "electron": "44.6.0",
     "typescript": "^5.8.3"
   }

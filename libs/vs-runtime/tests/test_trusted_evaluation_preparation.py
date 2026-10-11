@@ -341,3 +341,19 @@ def test_rootless_rust_setup_does_not_mask_download_failure(tmp_path: Path) -> N
     assert result.returncode != 0
     assert "failed to download evaluator Rust toolchain" in result.stderr
     assert "cargo 1.92.0 (fake)" not in result.stdout
+
+
+def test_rootless_setup_never_runs_the_package_manager_for_declared_packages(
+    tmp_path: Path,
+) -> None:
+    tool = _tool().model_copy(update={"system_packages": ("libssl-dev",)})
+    commands = evaluator_container_setup(
+        TrustedEvaluatorRequirements(
+            package_root=tmp_path / "evaluator-package",
+            tools={"check-tool": tool},
+            tools_root=tmp_path / "tools",
+        ),
+        rootless=True,
+    )
+
+    assert not any("apt-get" in command for command in commands)

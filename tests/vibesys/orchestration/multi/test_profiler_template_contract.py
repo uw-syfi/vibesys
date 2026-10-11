@@ -25,7 +25,7 @@ Caught two live bugs so far:
 - ``linux_cpu.j2`` silently dropped ``modality``, orphaning
   ``_modality/kv_store/profiler.j2`` (RESP2-specific py-spy/perf/strace
   guidance) even though LINUX_CPU is exactly the profiler kind
-  ``examples/kv-store`` pairs with that modality — fixed the same way.
+  ``examples/database/kv-store`` pairs with that modality — fixed the same way.
 
 Every other gap this test would otherwise flag is marked skipped with a
 reason tracing back to why: mostly that ``profile_execution`` can only ever

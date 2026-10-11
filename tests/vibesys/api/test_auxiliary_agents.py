@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.task_project import write_task
 
 from launch import LaunchSettings, create_session, default_runs
 from launch.agents import BuiltInSessionAgents
@@ -22,7 +23,7 @@ from vibesys.api import (
     RunReady,
     RunRequest,
 )
-from vibesys.api.request import load_input_bundle
+from vibesys.api.request import load_task
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.plugin_catalog import OrchestrationRegistry
@@ -141,15 +142,16 @@ def _request(tmp_path: Path) -> tuple[RunRequest, OrchestrationRegistry]:
     )
     input_root = tmp_path / "input"
     input_root.mkdir()
-    (input_root / "OBJECTIVE.md").write_text("Test auxiliary agents.\n")
-    (input_root / "vibesys.input.toml").write_text(
+    write_task(
+        input_root,
         'version = 1\n[agent]\ndomain = "generic"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Test auxiliary agents.\n",
     )
     request = RunRequest(
         run_environment=fake_docker_environment(),
         project_root=input_root,
-        input_bundle=load_input_bundle(input_root),
+        input_bundle=load_task(input_root),
         orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "gpt-test"}, "agent": {"backend": "stub"}}),
         exp_name="auxiliary-test",

@@ -18,11 +18,19 @@ import pytest
 from websockets.sync.client import connect
 
 from launch import default_runs
-from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
-from server.api.service import RunApi
+from server.api.protocol import (
+    PauseCommand,
+    ResumeCommand,
+    SnapshotQuery,
+    SteerCommand,
+    StopCommand,
+    SubscribeRequest,
+)
+from server.api.service import RunApi, RunControlUnavailableError
 from server.chat.manager import ChatManager
 from server.controller import RunController
 from server.execution import ExecutionTracker
+from server.host_api import FailureReason, RunStatus
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.runtime import ServerRuntime
@@ -36,7 +44,6 @@ from vs_runtime.api.infrastructure import RunControlChannel
 if TYPE_CHECKING:
     from websockets.typing import Origin
 
-    from vibesys.api import RunSession
 
 # The one line `ServerRuntime.run` prints for a web launch, and the only place
 # the minted capability token leaves the process.
@@ -58,12 +65,13 @@ class _SessionControlStub:
 
     Mirrors what `vibesys.api._session._LocalRunSession`'s `steer`/`pause`/
     `resume`/`stop` methods do in production, so a bare `runtime.run(...)`
-    callback (which never goes through `ServerRuntime.drive`) can still stand
-    in as the live session `runtime.api`'s `session_provider` reads.
+    callback (which never goes through `ServerRuntime.drive`) can install the
+    same control role that a live session provides.
     """
 
     def __init__(self, control: RunControlChannel) -> None:
         self._control = control
+        self.stop_calls = 0
 
     def steer(self, text: str) -> None:
         self._control.queue_steer(text)
@@ -78,6 +86,7 @@ class _SessionControlStub:
         self._control.resume_with_fallback()
 
     def stop(self) -> None:
+        self.stop_calls += 1
         self._control.request_stop()
 
 
@@ -222,7 +231,9 @@ def _error_chain(error: BaseException) -> tuple[BaseException, ...]:
 
 
 def test_runtime_explicitly_composes_server_components(tmp_path: Path) -> None:
-    runtime = ServerRuntime(runs=default_runs(), socket_path=tmp_path / "control.sock")
+    runtime = ServerRuntime(
+        run_id="run-1", runs=default_runs(), socket_path=tmp_path / "control.sock"
+    )
 
     assert isinstance(runtime.journal, WireJournal)
     assert isinstance(runtime.executions, ExecutionTracker)
@@ -237,7 +248,7 @@ def test_runtime_explicitly_composes_server_components(tmp_path: Path) -> None:
 
 def test_runtime_streams_success_before_client_disconnect(tmp_path: Path) -> None:
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
+    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
     received: list[dict] = []
     subscriber = threading.Thread(
         target=_collect_until,
@@ -262,7 +273,7 @@ def test_runtime_waits_for_reconnected_subscriber_before_teardown(tmp_path: Path
     treat that as "the client is gone" while the second subscription is live.
     """
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
+    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
     release_run = threading.Event()
     order: list[str] = []
 
@@ -303,7 +314,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path: Path) -> None:
     `run_finished`, `run_failed`, or `run_interrupted` event follows it.
     """
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
+    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
     received: list[dict] = []
 
     def collect_until_stopped() -> None:
@@ -325,19 +336,14 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path: Path) -> None:
     integration.events.subscribe(runtime.integration.project_event)
 
     def run() -> str:
-        with runtime.condition:
-            # `_SessionControlStub` implements only the `RunControl` slice of
-            # `RunSession`, which is all this path exercises: `runtime.run`
-            # (unlike `ServerRuntime.drive`) never calls the query/workspace/
-            # agent-host methods on `runtime.session`, only `session_provider`
-            # (itself typed `RunControl | None`, see `server.api.service
-            # .RunApi`). The cast documents that narrower real contract
-            # instead of widening `_SessionControlStub` to satisfy every
-            # `RunSession` member.
-            runtime.session = cast("RunSession", _SessionControlStub(integration.control))
-        runtime.api.execute(StopCommand())
-        integration.control.raise_if_stopped()
-        return "unreachable"
+        control = _SessionControlStub(integration.control)
+        runtime.controls.install(control)
+        try:
+            runtime.api.execute(StopCommand())
+            integration.control.raise_if_stopped()
+            return "unreachable"
+        finally:
+            runtime.controls.release(control)
 
     try:
         value = runtime.run(run)
@@ -356,9 +362,93 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path: Path) -> None:
     assert not socket_path.exists()
 
 
+def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: Path) -> None:
+    """A stop accepted from ``listening`` survives until session installation."""
+    integration = LocalRunIntegration()
+    control = _SessionControlStub(integration.control)
+
+    class Observer:
+        def listening(self) -> None:
+            response = runtime.api.execute(StopCommand())
+            assert response.ack is not None
+            assert (response.ack.action, response.ack.status) == ("stop", "pending")
+
+        def observe(
+            self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+        ) -> None:
+            del status, failure
+
+    runtime = ServerRuntime(
+        run_id="run-1",
+        runs=default_runs(),
+        socket_path=tmp_path / "control.sock",
+        detach=True,
+        observer=Observer(),
+    )
+
+    def run() -> bool:
+        runtime.controls.install(control)
+        try:
+            return integration.control.stop_requested()
+        finally:
+            runtime.controls.release(control)
+
+    try:
+        stop_reached_session = runtime.run(run)
+    finally:
+        integration.close()
+
+    assert stop_reached_session is True
+    assert control.stop_calls == 1
+    with pytest.raises(RunControlUnavailableError, match="after the run session ends"):
+        runtime.api.execute(StopCommand())
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(PauseCommand(), id="pause"),
+        pytest.param(ResumeCommand(), id="resume"),
+        pytest.param(ResumeCommand(fallback=True), id="resume-with-fallback"),
+        pytest.param(SteerCommand(text="inspect startup"), id="steer"),
+    ],
+)
+def test_startup_rejects_commands_that_require_an_active_session(
+    tmp_path: Path,
+    command: PauseCommand | ResumeCommand | SteerCommand,
+) -> None:
+    """No mutating command is acknowledged unless its effect can be retained."""
+
+    class Observer:
+        failure: RunControlUnavailableError | None = None
+
+        def listening(self) -> None:
+            with pytest.raises(RunControlUnavailableError) as raised:
+                runtime.api.execute(command)
+            self.failure = raised.value
+
+        def observe(
+            self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+        ) -> None:
+            del status, failure
+
+    observer = Observer()
+    runtime = ServerRuntime(
+        run_id="run-1",
+        runs=default_runs(),
+        socket_path=tmp_path / "control.sock",
+        detach=True,
+        observer=observer,
+    )
+
+    assert runtime.run(lambda: "ran") == "ran"
+    assert observer.failure is not None
+    assert observer.failure.diagnostic_code == "run_control_unavailable"
+
+
 def test_runtime_does_not_duplicate_core_terminal_event(tmp_path: Path) -> None:
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
+    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
     received: list[dict] = []
     subscriber = threading.Thread(
         target=_collect_until,
@@ -385,7 +475,7 @@ def test_runtime_does_not_duplicate_core_terminal_event(tmp_path: Path) -> None:
 
 def test_runtime_streams_configuration_failure_without_run_failure(tmp_path: Path) -> None:
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
+    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
     received: list[dict] = []
     subscriber = threading.Thread(
         target=_collect_until,
@@ -434,7 +524,11 @@ def test_a_web_only_subscriber_decides_a_web_runs_whole_lifetime(tmp_path: Path)
     socket_path = tmp_path / "control.sock"
     instance_path = tmp_path / "state" / "web-gateway.json"
     runtime = ServerRuntime(
-        runs=default_runs(), socket_path=socket_path, web=True, instance_path=instance_path
+        run_id="run-1",
+        runs=default_runs(),
+        socket_path=socket_path,
+        web=True,
+        instance_path=instance_path,
     )
     printed = _PrintedLines()
     received: list[dict] = []
@@ -488,6 +582,7 @@ def test_the_web_gateway_receives_its_assets_origins_and_instance_path(tmp_path:
     instance_path = tmp_path / "state" / "web-gateway.json"
     declared_origin = "http://vibesys.test:4173"
     runtime = ServerRuntime(
+        run_id="run-1",
         runs=default_runs(),
         socket_path=socket_path,
         web=True,
@@ -552,6 +647,7 @@ def test_the_runtime_composes_no_web_gateway_unless_web_is_requested(tmp_path: P
     socket_path = tmp_path / "control.sock"
     instance_path = tmp_path / "state" / "web-gateway.json"
     runtime = ServerRuntime(
+        run_id="run-1",
         runs=default_runs(),
         socket_path=socket_path,
         web_assets=tmp_path / "web-dist",
@@ -602,6 +698,7 @@ def test_the_web_gateway_binds_the_configured_port(tmp_path: Path) -> None:
 
     with socket.create_server(("127.0.0.1", 0)) as held:
         runtime = ServerRuntime(
+            run_id="run-1",
             runs=default_runs(),
             socket_path=socket_path,
             web=True,

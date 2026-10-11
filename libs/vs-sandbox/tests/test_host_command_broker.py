@@ -27,6 +27,7 @@ from vs_sandbox.api.slurm import (
     COMMAND_BROKER_SOCKET_ENV,
     COMMAND_BROKER_TOKEN_ENV,
     HOST_COMMAND_CLIENT,
+    AgentGpuConfig,
     BenchmarkOutputKind,
     BrokerTransport,
     GateKind,
@@ -36,7 +37,6 @@ from vs_sandbox.api.slurm import (
     GpuJobRequest,
     HostCommandBroker,
     RunRoots,
-    SlurmGpuConfig,
     classify_benchmark_output,
 )
 
@@ -117,14 +117,14 @@ class _PrefixConfinement:
         return ["confine", str(workspace), *argv]
 
 
-def _config(**updates: object) -> SlurmGpuConfig:
+def _config(**updates: object) -> AgentGpuConfig:
     values: dict[str, object] = {
         "partitions": ("main",),
         "max_gpus": 8,
         "max_time_minutes": 120,
     }
     values.update(updates)
-    return SlurmGpuConfig.model_validate(values)
+    return AgentGpuConfig.model_validate(values)
 
 
 @pytest.fixture

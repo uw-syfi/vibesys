@@ -58,8 +58,6 @@ def _parser() -> argparse.ArgumentParser:
         prog="python -m entrypoints.stdio_bridge",
         description="Relay stdin and stdout to a VibeSys run's Unix control socket.",
     )
-    # One target per invocation. A later ``--instance ID`` (resolved through the live
-    # run registry) joins this group.
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--socket", help="path of the run's Unix control socket")
     return parser

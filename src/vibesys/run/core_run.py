@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from vibesys.run.integration import LocalRunIntegration
     from vs_core.api import ArtifactRef
     from vs_runtime.api import ArtifactStore
-    from vs_runtime.api.core import ExecutorRefusal
+    from vs_runtime.api.core import AgentEvaluationBridge, ExecutorRefusal, StallNotes
 
 _STOP_RESULT = RunResultProposal(outcome="cancelled", reason="stop requested by the operator")
 _DEADLINE_RESULT = RunResultProposal(outcome="cancelled", reason="run deadline reached")
@@ -146,7 +146,7 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         bridge.attach(shell, services.clock)
         await bridge.serve()
     try:
-        outcome = await drive_core(loop, config)
+        outcome = await drive_core(loop, config, stall_notes=_unacknowledged_notes(bridge))
     finally:
         try:
             if bridge is not None:
@@ -161,6 +161,18 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     return RunEnd(
         status, _failure_of(outcome.result, shell) if status is RunStatus.FAILED else None
     )
+
+
+def _unacknowledged_notes(bridge: AgentEvaluationBridge | None) -> StallNotes:
+    """A stalled run's report names submissions whose handle never reached their agent."""
+
+    def notes() -> tuple[str, ...]:
+        owed = () if bridge is None else bridge.unacknowledged()
+        if not owed:
+            return ()
+        return ("charged submissions the agent never learned of: " + ", ".join(owed),)
+
+    return notes
 
 
 def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatus:

@@ -8,7 +8,7 @@
  */
 
 /** `--page-background` in `clients/web/src/styles.css`. */
-export const PAGE_BACKGROUND = '#0c1018';
+const PAGE_BACKGROUND = '#0c1018';
 /** The web UI's `color` on `:root`; used for the Windows/Linux control glyphs. */
 const PAGE_FOREGROUND = '#e9edf5';
 /** `--desktop-titlebar-height` in `clients/web/src/styles.css`. */

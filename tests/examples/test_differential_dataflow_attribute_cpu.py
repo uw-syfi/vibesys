@@ -1,6 +1,6 @@
 """Tests for the callgrind attribution parser (example profiler capability).
 
-``examples/database/differential-dataflow/profiler/attribute_cpu.py`` turns
+``examples/database/differential-dataflow/.vibesys/tasks/default/profiler/attribute_cpu.py`` turns
 ``callgrind_annotate`` output into a ranked, fixed-vocabulary component list that
 drives the profile-guided policy. The heavy part, running valgrind, is not
 exercised here; instead we feed a captured, trimmed real ``callgrind_annotate``
@@ -24,7 +24,15 @@ if TYPE_CHECKING:
     from types import ModuleType
 _REPO = Path(__file__).resolve().parents[2]
 _ATTR_PY = (
-    _REPO / "examples" / "database" / "differential-dataflow" / "profiler" / "attribute_cpu.py"
+    _REPO
+    / "examples"
+    / "database"
+    / "differential-dataflow"
+    / ".vibesys"
+    / "tasks"
+    / "default"
+    / "profiler"
+    / "attribute_cpu.py"
 )
 _SAMPLE = Path(__file__).with_name("fixtures") / "callgrind_annotate_sample.txt"
 

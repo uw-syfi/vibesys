@@ -10,6 +10,7 @@ the application ``backend_factory`` seam.
 
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,8 +19,11 @@ from vs_sandbox.api import (
     BeforeReadyContext,
     ComputeBackendImpl,
     CudaBackend,
+    LocalBackend,
+    RocmBackend,
     SandboxKind,
     SandboxLifecycleHooks,
+    TrainiumBackend,
 )
 from vs_sandbox.api.testing import FakeComputeBackend
 
@@ -91,3 +95,21 @@ class TestComputeBackendContract:
         )
 
         assert hooks.sandbox is sandbox
+
+
+@pytest.mark.parametrize(
+    "backend_class", [CudaBackend, RocmBackend, TrainiumBackend, LocalBackend, FakeComputeBackend]
+)
+def test_make_sandbox_promises_nothing_an_implementation_would_drop(
+    backend_class: type[ComputeBackendImpl],
+) -> None:
+    """`extra_init_commands` was accepted and ignored by every backend; it must stay gone.
+
+    Root-only setup in a started container is the caller's explicit
+    `execute_as_root`, which works the same on every backend.
+    """
+    parameters = inspect.signature(backend_class.make_sandbox).parameters
+    protocol = inspect.signature(ComputeBackendImpl.make_sandbox).parameters
+
+    assert "extra_init_commands" not in parameters
+    assert set(parameters) == set(protocol)

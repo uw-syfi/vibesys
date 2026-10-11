@@ -1,14 +1,19 @@
 # GPU commands through Slurm
 
-`--run-environment slurm-gpu` runs the agent in a local Docker container on the
-Slurm submit host and sends only GPU processes to Slurm. The agent holds no
-GPUs while it reads, edits, or thinks. Each GPU command gets its own job, sized and timed for that
-command.
+The agent can run its own GPU commands as Slurm jobs. It runs in a local Docker
+container on the Slurm submit host and holds no GPUs while it reads, edits, or
+thinks. Each GPU command gets its own job, sized and timed for that command.
 
-Use it on a host that is also a Slurm submit node with a shared view of the
-project, for example a single-node cluster whose controller runs on the GPU
-host. For remote clusters, use `--run-environment skypilot` (see
-[Remote Slurm execution](remote-slurm-execution.md)).
+This is an optional capability of `--run-environment slurm`: add a
+`[vibesys.agent_gpu]` table to the operator file (see
+[Operator configuration](#operator-configuration)). It needs a host that is also
+a Slurm submit node with a shared view of the project, so the file must set
+`[slurm.transport] kind = "local"`; any other transport is rejected with an
+error naming `vibesys.agent_gpu`. For remote clusters, use `--run-environment
+skypilot` (see [Remote Slurm execution](remote-slurm-execution.md)).
+
+`--run-environment slurm-gpu` is a deprecated alias; see
+[The deprecated slurm-gpu alias](#the-deprecated-slurm-gpu-alias).
 
 ## Agent view
 
@@ -42,48 +47,121 @@ compute nodes. A host-owned broker therefore sits between them:
 - A GPU job runs on a compute node under the host sandbox (bubblewrap on Linux,
   Seatbelt on macOS), confined to the workspace. The job environment is the
   host's baseline allowlist plus the variables the agent passed, minus the
-  container's identity, its device variables and any `SLURM_*` variable.
+  container's identity, its device variables and any `SLURM_*` variable. The
+  job sees the workspace (writable), the host's system directories, and the
+  paths named by `read_only_paths` (read-only, never writable); nothing else,
+  so an interpreter or package in the operator's home directory is invisible
+  unless it is listed (see [Operator configuration](#operator-configuration)). The
+  submit host checks that it can confine a job, but the job names `bwrap` by
+  program, so the node's own `PATH` finds it: install bubblewrap on the compute
+  nodes, not only on the submit host.
 
 The trusted accuracy and benchmark gates are host commands that the framework
 planned. The agent runs them as `vibesys-gpu --gate accuracy` or
-`vibesys-gpu --gate benchmark`; the broker runs the planned command unconfined
-through the same `srun` launcher. Each uses the task's `[resources]` accelerator
-count, or `gate_gpus` when the task declares none, and the time limit
-`gate_time_minutes`. A benchmark's result file under `/tmp` is written on the
-host, so the broker relays it back into the container.
+`vibesys-gpu --gate benchmark`. The container gets exactly one client: with the
+capability on, `vibesys-gpu` carries both the GPU commands and the gates; without
+it, `vibesys-gate` carries the gates only. The gates stay on the `sbatch` path
+(`vs_sandbox.slurm_command`) whether or not the agent may run GPU commands, and
+are sized by `sbatch_arguments` and the task's resources. A benchmark's result
+file under `/tmp` is written on the host, so the broker relays it back into the
+container.
 
 ## Operator configuration
 
-The configuration is machine-local. The default path is
-`~/.config/vibesys/slurm-gpu.toml`; `--slurm-config PATH` overrides it.
+The configuration is machine-local. For `--run-environment slurm` the table is
+`[vibesys.agent_gpu]` in `~/.config/vibesys/slurm.toml`, beside `[slurm]`:
 
 ```toml
-[slurm_gpu]
+[slurm]
+name = "local-cluster"
+remote_workspace_root = "/shared/vibesys"   # shared with the compute nodes
+
+[slurm.transport]
+kind = "local"
+# How this host reaches Slurm. The agent's srun and scancel, and the gates'
+# sbatch, all run through it. A login-container wrapper may precede the shell.
+shell_command = ["bash", "-c"]
+
+[vibesys.agent_gpu]
 # Preference order. With windows_command set, the first partition whose window
 # starts the job now is used; otherwise the first whose time limit fits.
 partitions = ["main", "priority"]
 max_gpus = 8
 max_time_minutes = 120
 default_time_minutes = 30   # when the agent omits --time
-gate_gpus = 1               # when the task declares no [resources]
-gate_time_minutes = 60
 windows_command = ["slurm-windows", "--json"]
 srun_arguments = []         # extra site arguments, for example ["--account=lab"]
+# Host paths the agent's GPU jobs may read besides the workspace and the system
+# directories, for example the Python environment with torch. Read-only always.
+read_only_paths = ["/home/operator/venvs/torch"]
 ```
+
+`read_only_paths` entries must be absolute, normalized paths (no `..`, `.`,
+repeated or trailing slashes, and not `/`), must exist on the submit host when
+the run starts, and must be visible at the same path on the compute nodes. A
+symlink inside an exposed path is followed only if its target is also exposed,
+so list the interpreter's own installation directory too (a venv's `python`
+usually links to a Python installed elsewhere). The same list applies to the
+Linux (bubblewrap) and macOS (Seatbelt) confinement. The agent's prompt says
+that GPU commands run in the host's environment, not the container's, and
+names these paths.
+
+Unknown keys and out-of-range limits are rejected at launch, naming the key.
+`gate_gpus` and `gate_time_minutes` are not accepted here: gates are sized by
+`[slurm] sbatch_arguments`. `srun_command` and `scancel_command` are not accepted
+either: the Slurm binaries are reached through `[slurm.transport] shell_command`,
+the one place that says how. The file is parsed once when the run starts, and the
+run keeps its own rendering of it in `logs/slurm-operator.toml`.
 
 Every job carries `--partition`, `--gres=gpu:N`, `--time`, and a
 `vibesys-gpu-*` job name. A misconfigured or missing `windows_command` falls
 back to the first configured partition.
 
+## Profiling
+
+With the capability on, the agent profiles through `vibesys-gpu` (`nsys` by
+default; `ncu` or `rocprof` as the backend dictates), and the run does not
+plan a remote ROCprof capture. Without it, the `slurm` environment keeps its
+remote ROCprof capture over the SSH transport. With the local transport and no
+agent GPU commands there is no transport for the capture, so the run offers no
+profiler (`--profiler none` is the only choice).
+
 ## Launch
 
 ```bash
 vibesys --project /path/to/project --task TASK \
-  --run-environment slurm-gpu --slurm-config ~/.config/vibesys/slurm-gpu.toml
+  --run-environment slurm --slurm-config ~/.config/vibesys/slurm.toml
 ```
 
 On resume, the recorded environment is restored. Pass `--slurm-config` again
 when the configuration is not at the default path.
+
+## The deprecated slurm-gpu alias
+
+`--run-environment slurm-gpu` still works. It reads the old `[slurm_gpu]` table
+(default `~/.config/vibesys/slurm-gpu.toml`, or `--slurm-config`), translates it
+once to the settings above, reports one deprecation warning when the run starts (not once per environment open), and opens the `slurm`
+environment. A run recorded as `slurm-gpu` resumes the same way. The
+translation is a pure function; a key it cannot carry over is rejected by name.
+
+| Old key | Becomes |
+|---|---|
+| `partitions`, `max_gpus`, `max_time_minutes`, `default_time_minutes`, `windows_command`, `job_name_prefix`, `srun_arguments` | the same keys of `[vibesys.agent_gpu]` (`read_only_paths` too); `srun_arguments` reach the agent's jobs only, never the gates (`--pty` is invalid for `sbatch`) |
+| `srun_command`, `scancel_command` | `[slurm.transport] shell_command` only: whatever precedes `srun` (a login-container wrapper) becomes the prefix of `shell_command`, through which `srun`, `scancel` and `sbatch` all run. Both commands must end in `srun` / `scancel` and carry the same wrapper, or the file is rejected |
+| `gate_gpus`, or the task's `[resources]` accelerators per node | gate `--gres=gpu:N`; a task needing more than `max_gpus` is rejected |
+| `gate_time_minutes` | gate `--time=M`; the job timeout is that plus a one hour queue allowance |
+| `partitions` (for gates) | gate `--partition=A,B,...`: the scheduler picks the partition that starts earliest, not the first in order |
+| (none) | `transport.kind = "local"`, `remote_workspace_root = ~/.cache/vibesys/slurm-gpu-stage` |
+
+Two behaviors differ from the old environment, because the gates now use the
+`sbatch` stack: they stage a copy of the workspace into
+`~/.cache/vibesys/slurm-gpu-stage` (the old gates ran in the workspace itself),
+so that directory must be shared with the compute nodes; and they run the
+evaluator through the configured remote Python (`python3`). To change either,
+move to a `slurm.toml` as above. A site flag the gates need (such as
+`--account=lab`) is likewise set there, as `sbatch_arguments`. Concurrent runs
+share the stage directory safely: each gate stages into its own
+`slurm-gpu/<invocation id>` subdirectory and gets a unique scheduler job name.
 
 ## Limits
 
