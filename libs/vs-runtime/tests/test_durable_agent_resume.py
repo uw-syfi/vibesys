@@ -117,8 +117,8 @@ class WorkspaceResource:
         del revision
         return True
 
-    def matches_revision(self, revision: str) -> bool:
-        del revision
+    def matches_revision(self, revision: str, *, exact: bool = False) -> bool:
+        del revision, exact
         return True
 
     def find_snapshot(self, label: str) -> str | None:
@@ -138,8 +138,9 @@ class WorkspaceResource:
         clean: bool,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
+        exact: bool = False,
     ) -> bool:
-        del clean, preserve_paths, preserve_memory
+        del clean, preserve_paths, preserve_memory, exact
         return revision == self.revision
 
     def try_restore(self, revision: str, *, clean: bool) -> bool:

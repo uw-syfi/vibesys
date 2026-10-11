@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import AttemptRef, Request, RevisionRef
+    from vs_project.api import GitRepository
     from vs_runtime.api.infrastructure import RuntimeWorkspace
 
 _ROOT = WorkspaceMode.EXCLUSIVE_ROOT
@@ -320,7 +321,9 @@ def _play(
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(path / "operator-state"))
     crash = RestoreCrash()
     with open_workspace_env(
-        path, memory_paths=(_ARTIFACT_DIR,), wrap_git=lambda git: CrashingGit(git, crash)
+        path,
+        memory_paths=(_ARTIFACT_DIR,),
+        wrap_git=lambda git: cast("GitRepository", CrashingGit(git, crash)),
     ) as env:
         asyncio.run(_attempts(env, rounds, crash))
         for workspaces in env.hosts:
@@ -469,7 +472,9 @@ def test_an_ended_generation_is_never_granted_again_and_a_stale_release_never_re
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(path / "operator-state"))
     crash = RestoreCrash()
     with open_workspace_env(
-        path, memory_paths=(_ARTIFACT_DIR,), wrap_git=lambda git: CrashingGit(git, crash)
+        path,
+        memory_paths=(_ARTIFACT_DIR,),
+        wrap_git=lambda git: cast("GitRepository", CrashingGit(git, crash)),
     ) as env:
         asyncio.run(_replay(env, ops, crash))
         for workspaces in env.hosts:
@@ -494,7 +499,9 @@ def test_a_replayed_ensure_of_an_ended_generation_is_refused_after_a_later_holde
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(path / "operator-state"))
     crash = RestoreCrash()
     with open_workspace_env(
-        path, memory_paths=(_ARTIFACT_DIR,), wrap_git=lambda git: CrashingGit(git, crash)
+        path,
+        memory_paths=(_ARTIFACT_DIR,),
+        wrap_git=lambda git: cast("GitRepository", CrashingGit(git, crash)),
     ) as env:
         asyncio.run(_replay(env, ops, crash))
         for workspaces in env.hosts:
