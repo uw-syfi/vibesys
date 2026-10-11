@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# The VibeSys agent layer as a Dev Container Feature. Mirrors the base steps of
-# the former agent.Dockerfile: Node from the nodejs.org tarball, the four provider CLIs,
+# The VibeSys agent layer as a Dev Container Feature: Node from the nodejs.org tarball, the four provider CLIs,
 # uv, VibeSys's uv-managed Python with `mcp`, and the non-root `agent` user.
 # Self-contained: installs every package it uses and depends on no other Feature.
 set -euo pipefail

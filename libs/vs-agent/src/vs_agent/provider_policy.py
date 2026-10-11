@@ -112,8 +112,8 @@ def cli_mcp_config_files() -> tuple[str, ...]:
 
 # --- Agent image ------------------------------------------------------------
 #
-# Versions baked into ``vs_agent/images/agent.Dockerfile`` as build args
-# (see ``vs_agent.api.images.agent_image``). Pinned rather than left
+# Versions baked into the agent image's Dev Container Features as options
+# (see ``vs_agent.api.images.devcontainer_config``). Pinned rather than left
 # to float so the container CLI matches the feature set VibeSys prompts were
 # validated against, and so a rebuild with unchanged pins resolves to the same
 # image from Docker's layer cache.

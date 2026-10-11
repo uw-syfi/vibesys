@@ -1,10 +1,11 @@
 # Composing run images from Dev Container Features
 
-This page records the design and the phase 1 spike for roadmap
-[#1837](https://github.com/uw-syfi/vibesys/issues/1837) (spike issue
-[#1842](https://github.com/uw-syfi/vibesys/issues/1842)). Nothing here changes
-how a run builds its image: `agent_image` still builds
-`libs/vs-agent/src/vs_agent/images/agent.Dockerfile`.
+This page records the design for roadmap
+[#1837](https://github.com/uw-syfi/vibesys/issues/1837): the phase 1 spike
+([#1842](https://github.com/uw-syfi/vibesys/issues/1842)) and phase 2
+([#1873](https://github.com/uw-syfi/vibesys/issues/1873)), where
+`vs_agent.api.images.agent_image` builds every run's editor image from Features
+and `agent.Dockerfile` is gone.
 
 ## Design
 
@@ -22,6 +23,9 @@ VibeSys's layers become repo-local Features under
 | --- | --- |
 | `vibesys-agent` | Node, the four provider CLIs, uv, VibeSys's Python with `mcp`, the non-root `agent` user (uid 1000), `/workspace` |
 | `vibesys-rust` | rustup and the pinned Rust toolchain in `/opt/rustup` and `/opt/cargo`, plus `PATH` for plain and login shells |
+| `vibesys-go` | The pinned Go toolchain in `/usr/local/go` |
+| `vibesys-container-runtime` | A static Docker engine, the compose plugin, kind, kubectl, and the `docker` group, for container-topology tasks |
+| `vibesys-pip-extras` | Extra pip requirements a run environment needs in the editor container (the Modal client) |
 
 Rules every Feature follows:
 
@@ -41,19 +45,62 @@ The layout under `features/` is the one `devcontainer features test` expects:
 checks run against whatever base is passed with `-i`, so one command covers
 each base family.
 
-A generated `devcontainer.json` for a run looks like this (the spike generator
-filled `image` and the options from `provider_policy`):
+## How `agent_image` uses them
+
+`vs_agent.devcontainer.devcontainer_config(base, toolchains, pip_extras)` is a
+pure function from the run's selection to a `devcontainer.json`. The agent
+Feature is always present; `rust`, `go`, and `container-runtime` in `toolchains`
+each add their Feature, and a non-empty `pip_extras` adds `vibesys-pip-extras`.
+Selections are deduplicated and sorted, an unknown toolchain name is an error,
+and every pin comes from `provider_policy`. For `toolchains=("rust",)` on the
+CPU base:
 
 ```json
 {
   "image": "python:3.12-bookworm",
   "features": {
-    "./features/vibesys-agent": {"node_version": "24.21.0", "claude_version": "2.1.268"},
+    "./features/vibesys-agent": {"node_version": "24.21.0", "claude_version": "2.1.268", "supplementary_groups": ""},
     "./features/vibesys-rust": {"rust_version": "1.92.0"}
   },
+  "overrideFeatureInstallOrder": ["./features/vibesys-agent", "./features/vibesys-rust"],
   "containerUser": "agent"
 }
 ```
+
+(The real file lists every option.) Without `overrideFeatureInstallOrder` the
+CLI orders Features alphabetically, which would put the toolchains that change
+most often ahead of the agent layer; the generator fixes the order, least often
+changed first.
+
+`agent_image` then:
+
+1. Resolves the base: a task image (built from the task's `Dockerfile`, as
+   before) or the backend image, tagged locally if it was given as a bare ID.
+2. Builds the devcontainer CLI image from
+   `images/devcontainer-cli/Dockerfile` (tag keyed by the file's hash, so an
+   unchanged one is a layer-cache hit of about a second).
+3. Writes the `devcontainer.json`, the Feature sources, and a three-line
+   finishing Dockerfile into a temporary workspace, and runs
+   `docker run --rm -v /var/run/docker.sock:... -v <ws>:<ws> <cli image> build`.
+   **The workspace is mounted at the same absolute path** inside the CLI
+   container: the CLI passes that path to the host's Docker daemon as the build
+   context, so a different path inside the container would name a directory the
+   daemon cannot see.
+4. Builds the finishing stage `FROM <features image>` with `WORKDIR /workspace`
+   and `USER agent`, because the CLI keeps the base's `USER` and `WORKDIR`
+   (`containerUser` only reaches the `devcontainer.metadata` label). It tags the
+   result with a unique local tag and returns its immutable image ID, exactly
+   as the Dockerfile build did, and then drops the intermediate tag.
+
+The image ID is content-addressed: rebuilding the same selection on the same
+base resolves to the same ID from the layer cache, even though the temporary
+workspace has a different path each time. `push_agent_image` keys its GHCR tag
+off that ID as before.
+
+Ordering between Features is never load-bearing for correctness: the
+container-runtime Feature only creates the `docker` group and the agent Feature
+adds the `agent` user to it when the generator passes
+`supplementary_groups=docker`, so neither names the other.
 
 ## Choosing how to invoke the devcontainer CLI
 

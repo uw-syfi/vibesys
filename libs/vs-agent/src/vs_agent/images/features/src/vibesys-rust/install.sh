@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# The Rust toolchain as a Dev Container Feature. Mirrors the rust branch of
-# agent.Dockerfile. Self-contained: installs the packages it needs (curl to
+# The Rust toolchain as a Dev Container Feature. Self-contained: installs the packages it needs (curl to
 # fetch rustup, a C linker for cargo) and depends on no other Feature.
 set -euo pipefail
 

@@ -165,7 +165,7 @@ job = "real_tiers"
 #   - vs-sandbox: the Slurm executor, host command broker and its client, gate
 #     runners, process execution, signal relay and the Docker sandbox they drive;
 #   - vs-slurm: the cluster connector and runner behind the `slurm` environment;
-#   - vs-agent: the agent image (agent.Dockerfile, built by both tiers) and the
+#   - vs-agent: the agent image (the Features and devcontainer CLI image, built by both tiers) and the
 #     containerized in-container servers;
 #   - vs-runtime and vs-evaluation: run environments, trusted evaluation and the
 #     evaluation tool server started in the editor container;

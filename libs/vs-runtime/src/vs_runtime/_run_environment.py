@@ -806,8 +806,8 @@ class DockerEnvironment:
             provider, cli_provider_env = resolved_cli
             auth_files = auth_copy_paths(provider)
         cli_provider_env.setdefault("UV_CACHE_DIR", f"{workspace_root}/.cache/uv")
-        # The agent image's baked toolchain root is read-only (agent.Dockerfile
-        # chmods /opt/cargo a+rX, deliberately: an agent cannot apt/cargo
+        # The agent image's baked toolchain root is read-only (the vibesys-rust
+        # Feature chmods /opt/cargo a+rX, deliberately: an agent cannot apt/cargo
         # install mid-round). A Cargo invocation that needs a crate the image
         # did not prebuild -- an evaluator's own trusted-runner build, most
         # commonly -- still has to create its registry cache somewhere, so
