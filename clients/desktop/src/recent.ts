@@ -139,6 +139,25 @@ export function launchedRunId(launch: RunLaunch, reported: string | null): strin
   return launch.run;
 }
 
+/**
+ * The run id a live record reports for the attached server `instanceId`, when the attachment does
+ * not know one yet (`known` is null): a run started or resumed from the app is attached before its
+ * server reports the id. Null when there is nothing new to learn.
+ */
+export function learnedRunId(
+  known: string | null,
+  instanceId: string | null,
+  records: readonly InstanceRecord[],
+): string | null {
+  if (known !== null || instanceId === null) return null;
+  for (const record of records) {
+    if (record.kind === 'compatible' && record.instance.id === instanceId) {
+      return record.instance.runId;
+    }
+  }
+  return null;
+}
+
 /** What the welcome view says about a recent run after asking its host. */
 export type RecentStatus =
   /** A live server drives it; attach to `instanceId`. */

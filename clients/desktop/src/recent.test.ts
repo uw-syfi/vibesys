@@ -3,6 +3,7 @@ import {parseInstanceRecord} from './instances.js';
 import {
   EMPTY_RECENT,
   launchedRunId,
+  learnedRunId,
   parseRecent,
   RECENT_LIMIT,
   type RecentRun,
@@ -123,6 +124,21 @@ describe('parseRecent', () => {
       [{version: 1, runs: [run({attachedAt: -1})]}, 'runs[0].attachedAt'],
     ];
     for (const [value, message] of cases) expect(() => parseRecent(value)).toThrow(message);
+  });
+});
+
+describe('learnedRunId', () => {
+  test('regression: an attached run learns its run id from a live record once its server reports it', () => {
+    const records = [
+      parseInstanceRecord({...fakeRecord('0123456789ab', '/run/a'), run_id: null}),
+      parseInstanceRecord({...fakeRecord('ba9876543210', '/run/b'), run_id: 'run-7'}),
+    ];
+    expect(learnedRunId(null, 'ba9876543210', records)).toBe('run-7');
+    // Nothing to learn: not reported yet, already known, not attached by id, or not listed.
+    expect(learnedRunId(null, '0123456789ab', records)).toBeNull();
+    expect(learnedRunId('run-7', 'ba9876543210', records)).toBeNull();
+    expect(learnedRunId(null, null, records)).toBeNull();
+    expect(learnedRunId(null, 'aaaaaaaaaaaa', records)).toBeNull();
   });
 });
 

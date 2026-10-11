@@ -63,7 +63,7 @@ import {type InstanceRecord, versionSkewMessage} from './instances.js';
 import {type LaunchPlan, parseLaunch} from './launch-args.js';
 import {isAllowedRequest, isAppUrl, type LaunchTarget, originOf} from './launch-url.js';
 import {QuitGate} from './quit-gate.js';
-import {launchedRunId, type RunLaunch, recentStatus} from './recent.js';
+import {launchedRunId, learnedRunId, type RunLaunch, recentStatus} from './recent.js';
 import {type RelayPort, relay} from './relay.js';
 import {shellWords} from './shell-words.js';
 import {StopController} from './stop-controller.js';
@@ -268,7 +268,9 @@ interface RunBinding {
   readonly supervisor: ConnectionSupervisor;
   readonly project: string;
   readonly hostId: HostId;
-  readonly runId: string | null;
+  /** Null until the run's server reports it (`#observe`); a new run is attached before then. */
+  runId: string | null;
+  readonly task: string | null;
   status: ConnectionStatus;
 }
 
@@ -401,6 +403,7 @@ class DesktopApp {
     instanceId: string | null,
     project: string,
     runId: string | null,
+    task: string | null,
   ): Promise<void> {
     const host = await this.#pool.host(id);
     const hostName = hostLabel(id);
@@ -438,6 +441,7 @@ class DesktopApp {
       project,
       hostId: id,
       runId,
+      task,
       status: {kind: 'connecting'},
     };
     this.#window.contentView.addChildView(runView);
@@ -469,7 +473,14 @@ class DesktopApp {
     }
     const {instance} = record;
     await this.#remember(id, instance.projectRoot, task, instance.id, instance.runId);
-    await this.openRun(id, instance.socketPath, instanceId, instance.projectRoot, instance.runId);
+    await this.openRun(
+      id,
+      instance.socketPath,
+      instanceId,
+      instance.projectRoot,
+      instance.runId,
+      task,
+    );
   }
 
   /** Start a detached run of `task` on `id` in `project` and attach to it. */
@@ -520,7 +531,14 @@ class DesktopApp {
     );
     const runId = launchedRunId(launch, instance.runId);
     await this.#remember(id, instance.projectRoot, task, instance.id, runId);
-    await this.openRun(id, server.endpoint.socketPath, instance.id, instance.projectRoot, runId);
+    await this.openRun(
+      id,
+      server.endpoint.socketPath,
+      instance.id,
+      instance.projectRoot,
+      runId,
+      task,
+    );
   }
 
   async #remember(
@@ -730,6 +748,15 @@ class DesktopApp {
 
   /** Tell the stop flows of `host` which runs its registry lists. */
   #observe(host: HostKey, records: readonly InstanceRecord[]): void {
+    const run = this.#run;
+    if (run !== null && hostKey(run.hostId) === host) {
+      const runId = learnedRunId(run.runId, run.run.instanceId, records);
+      if (runId !== null && run.run.instanceId !== null) {
+        run.runId = runId;
+        void this.#remember(run.hostId, run.project, run.task, run.run.instanceId, runId);
+        this.#sendChrome();
+      }
+    }
     this.#stops.observeRegistry(
       host,
       new Set(
@@ -823,7 +850,7 @@ async function openPlan(
       await desktop.startRun({kind: 'local'}, plan.project, null, plan.runArgs);
       return;
     case 'attach':
-      await desktop.openRun({kind: 'local'}, plan.socketPath, null, '', null);
+      await desktop.openRun({kind: 'local'}, plan.socketPath, null, '', null, null);
       return;
   }
 }
