@@ -18,5 +18,5 @@ You work in your own checkout of the accumulated candidate; earlier closed issue
 already in it. Inspect the accuracy checker and benchmark interface before changing their
 integration points. Make the minimum sufficient change, then run the relevant pytest,
 accuracy, benchmark, and streaming checks. Return exactly one JSON object matching:
-{"summary": "...", "files_touched": ["..."], "self_check": "..."}
+{"reply":{"summary": "...", "files_touched": ["..."], "self_check": "..."}}
 {% include 'agent_evaluation.j2' %}

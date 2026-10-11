@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, RootModel
-
 from vibesys.orchestration.dynamic.models import (
-    ImplementerReply,
+    ImplementerResult,
     ImplementPortfolioPlan,
-    JudgeReply,
     PortfolioPlan,
+    ReviewResult,
 )
 from vibesys.orchestration.dynamic.strategy.api import (
     IMPLEMENTER_REPLY,
@@ -18,19 +16,22 @@ from vibesys.orchestration.dynamic.strategy.api import (
     PLANNER_REPLY,
     PROFILER_REPLY,
 )
+from vs_core.api import WaitableReply
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from pydantic import BaseModel
 
     from vibesys.orchestration.dynamic.strategy.api import DynamicConfig
     from vs_core.api import SchemaRef
 
 
-class ImplementerReplyModel(RootModel[ImplementerReply]):
+class ImplementerReplyModel(WaitableReply[ImplementerResult]):
     """An implementer or profiler turn ends with a result or a wait for evaluations."""
 
 
-class JudgeReplyModel(RootModel[JudgeReply]):
+class JudgeReplyModel(WaitableReply[ReviewResult]):
     """A judge turn ends with a verdict or a wait for evaluations."""
 
 

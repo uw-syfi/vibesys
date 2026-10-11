@@ -29,8 +29,8 @@ none yet
 
 
 Return exactly one JSON object matching:
-{"analysis": "...", "feedback": "...", "verdict": "pass" | "fail",
- "new_issues": [{"type": "bug", "title": "...", "description": "..."}]}
+{"reply":{"analysis": "...", "feedback": "...", "verdict": "pass" | "fail",
+ "new_issues": [{"type": "bug", "title": "...", "description": "..."}]}}
 Feedback must be empty on pass.
 
 You may measure your own workspace before you reply: call `submit_evaluation` on the
@@ -42,6 +42,6 @@ the call returns that evaluation's handle (`"repeat": true`) and charges nothing
 reply with an `outcome` is an evaluation that has already ended, and lists its `evidence`
 ids as a resume would: do not wait for it. A successful call returns a handle. To wait for the
 result, call `validate_evaluation_wait` with every handle you need, then finish the
-turn with only `{"kind":"waiting_for_evaluation","handles":["<handle>"]}`. Do not
+turn with only `{"reply":{"kind":"waiting_for_evaluation","handles":["<handle>"]}}`. Do not
 poll: the host resumes this same session once every listed measurement is terminal.
 A waiting turn uses no new attempt.

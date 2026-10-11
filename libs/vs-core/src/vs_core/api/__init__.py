@@ -98,6 +98,7 @@ from vs_core._turn_chain import (
 )
 from vs_core._waitable import (
     Waitable,
+    WaitableReply,
     WaitingForDependency,
     WaitingForEvaluation,
 )
@@ -931,6 +932,7 @@ __all__ = [
     "Wait",
     "WaitKind",
     "Waitable",
+    "WaitableReply",
     "WaitingForDependency",
     "WaitingForEvaluation",
     "WaitingPhase",

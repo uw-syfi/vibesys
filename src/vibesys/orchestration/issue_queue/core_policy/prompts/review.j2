@@ -27,7 +27,7 @@ Board:
 {{ board_list(board) }}
 
 Return exactly one JSON object matching:
-{"analysis": "...", "feedback": "...", "verdict": "pass" | "fail",
- "new_issues": [{"type": "bug", "title": "...", "description": "..."}]}
+{"reply":{"analysis": "...", "feedback": "...", "verdict": "pass" | "fail",
+ "new_issues": [{"type": "bug", "title": "...", "description": "..."}]}}
 Feedback must be empty on pass.
 {% include 'agent_evaluation.j2' %}

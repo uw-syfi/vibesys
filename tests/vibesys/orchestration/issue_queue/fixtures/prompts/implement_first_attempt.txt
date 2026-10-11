@@ -19,7 +19,7 @@ You work in your own checkout of the accumulated candidate; earlier closed issue
 already in it. Inspect the accuracy checker and benchmark interface before changing their
 integration points. Make the minimum sufficient change, then run the relevant pytest,
 accuracy, benchmark, and streaming checks. Return exactly one JSON object matching:
-{"summary": "...", "files_touched": ["..."], "self_check": "..."}
+{"reply":{"summary": "...", "files_touched": ["..."], "self_check": "..."}}
 
 You may measure your own workspace before you reply: call `submit_evaluation` on the
 `evaluation` tool. The framework decides whether the submission is admitted and counts
@@ -30,6 +30,6 @@ the call returns that evaluation's handle (`"repeat": true`) and charges nothing
 reply with an `outcome` is an evaluation that has already ended, and lists its `evidence`
 ids as a resume would: do not wait for it. A successful call returns a handle. To wait for the
 result, call `validate_evaluation_wait` with every handle you need, then finish the
-turn with only `{"kind":"waiting_for_evaluation","handles":["<handle>"]}`. Do not
+turn with only `{"reply":{"kind":"waiting_for_evaluation","handles":["<handle>"]}}`. Do not
 poll: the host resumes this same session once every listed measurement is terminal.
 A waiting turn uses no new attempt.

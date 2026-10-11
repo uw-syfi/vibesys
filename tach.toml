@@ -337,7 +337,7 @@ depends_on = ["vibesys.prompts", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.profiler_agent"
 layer = "orchestration_host"
-depends_on = ["vibesys.prompts", "vibesys.orchestration.structured_turn", "vibesys.run.validated_turn", "vs_evaluation.api", "vs_runtime"]
+depends_on = ["vibesys.prompts", "vibesys.orchestration.structured_turn", "vibesys.run.validated_turn", "vs_core", "vs_evaluation.api", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.skill_selection"

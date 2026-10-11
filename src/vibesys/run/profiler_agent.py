@@ -5,13 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
-
-from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
+from typing import TYPE_CHECKING
 
 from vibesys.orchestration.structured_turn import structured_turn
 from vibesys.prompts import render_template
 from vibesys.run.validated_turn import validated_turn
+from vs_core.api import WaitableReply, WaitingForEvaluation
 from vs_evaluation.api import (
     EvaluationAgentAccessError,
     EvaluationAgentRole,
@@ -43,27 +42,7 @@ if TYPE_CHECKING:
 
 
 _CLEANUP_FAILURE = "profiler conversation cleanup failed"
-
-
-class _WaitingForEvaluation(BaseModel):
-    """Profiler wire reply yielding owned captures to host settlement."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    kind: Literal["waiting_for_evaluation"]
-    handles: tuple[str, ...] = Field(min_length=1)
-
-    @field_validator("handles")
-    @classmethod
-    def unique_handles(cls, handles: tuple[str, ...]) -> tuple[str, ...]:
-        if len(set(handles)) != len(handles) or any(
-            not handle.strip() or handle != handle.strip() for handle in handles
-        ):
-            message = "evaluation handles must be nonblank, trimmed and unique"
-            raise ValueError(message)
-        return handles
-
-
-_ProfilerReply = RootModel[ProfilerAgentResult | _WaitingForEvaluation]
+_ProfilerReply = WaitableReply[ProfilerAgentResult]
 
 
 @dataclass(slots=True)
@@ -150,14 +129,14 @@ class RuntimeProfilerTurnProvision:
                 return await structured_turn(conversation.session, prompt, ProfilerAgentResult)
 
             async def validate(reply: _ProfilerReply) -> None:
-                if isinstance(reply.root, _WaitingForEvaluation):
+                if isinstance(reply.reply, WaitingForEvaluation):
                     access = self._evaluation
                     workspace_id = conversation.workspace.id
                     if access is None or workspace_id is None:
                         message = "profiler wait requires owned evaluation authority"
                         raise RuntimeContractError(message)
                     await access.validate_wait(
-                        reply.root.handles,
+                        reply.reply.handles,
                         scope_id=workspace_id,
                         principal_id=evaluation_principal(
                             EvaluationAgentRole.PROFILER,
@@ -174,9 +153,9 @@ class RuntimeProfilerTurnProvision:
                     invocation_id=operation_id,
                     validate_response=validate,
                 )
-            ).root
+            ).reply
             continuation = 0
-            while isinstance(reply, _WaitingForEvaluation):
+            while isinstance(reply, WaitingForEvaluation):
                 reports = await self._settle(conversation, reply)
                 continuation += 1
                 resumed = await conversation.session.resume(
@@ -204,7 +183,7 @@ class RuntimeProfilerTurnProvision:
                         invocation_id=f"{operation_id}/evaluation/{continuation}/wait-correction",
                         validate_response=validate,
                     )
-                reply = parsed.root
+                reply = parsed.reply
         except asyncio.CancelledError:
             await self._drop(session_id)
             raise
@@ -213,7 +192,7 @@ class RuntimeProfilerTurnProvision:
         return reply
 
     async def _settle(
-        self, conversation: _Conversation, reply: _WaitingForEvaluation
+        self, conversation: _Conversation, reply: WaitingForEvaluation
     ) -> tuple[dict[str, object], ...]:
         access = self._evaluation
         if access is None or conversation.workspace.id is None:

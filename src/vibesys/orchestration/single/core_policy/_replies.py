@@ -4,20 +4,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, RootModel
-
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.single.strategy.api import IMPLEMENTER_REPLY, PLANNER_REPLY
-from vs_core.api import Waitable
+from vs_core.api import WaitableReply
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from pydantic import BaseModel
+
     from vs_core.api import SchemaRef
 
 
-class ImplementerReplyModel(RootModel[Waitable[SingleAgentRoundResponse]]):
+class ImplementerReplyModel(WaitableReply[SingleAgentRoundResponse]):
     """The combined turn ends with a result or a wait for evaluations."""
 
 

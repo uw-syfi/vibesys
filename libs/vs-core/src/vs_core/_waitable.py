@@ -9,9 +9,18 @@ scope's own admitted submissions (`AgentEvaluationBridge`); this module owns onl
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal, Self, override
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    Tag,
+    ValidationError,
+    field_validator,
+)
+from pydantic.json_schema import GenerateJsonSchema
 
 
 class WaitingForDependency(BaseModel):
@@ -51,3 +60,127 @@ type Waitable[R] = Annotated[
 
 A result carries no ``kind`` of its own (or any value other than ``waiting_for_evaluation``).
 """
+
+
+def _use_any_of(value: object) -> None:
+    """Rewrite Pydantic's tagged unions into the supported JSON Schema form."""
+    if isinstance(value, dict):
+        members = value.pop("oneOf", None)
+        if members is not None:
+            value["anyOf"] = members
+        for child in value.values():
+            _use_any_of(child)
+    elif isinstance(value, list):
+        for child in value:
+            _use_any_of(child)
+
+
+class WaitableReply[R](BaseModel):
+    """Object-rooted agent wire envelope for a result or evaluation wait.
+
+    Native provider schemas require an object at the root and reject a root
+    union. The union therefore lives under ``reply``. Validation also accepts
+    the historical bare result/wait form so an in-flight turn from an older
+    process can settle after an upgrade; serialization always emits the
+    canonical envelope.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reply: Waitable[R]
+
+    @classmethod
+    @override
+    def model_validate(
+        cls,
+        obj: Any,
+        *,
+        strict: bool | None = None,
+        extra: Literal["allow", "ignore", "forbid"] | None = None,
+        from_attributes: bool | None = None,
+        context: Any | None = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> Self:
+        """Validate canonical Python input first, then the historical bare shape."""
+        try:
+            return super().model_validate(
+                obj,
+                strict=strict,
+                extra=extra,
+                from_attributes=from_attributes,
+                context=context,
+                by_alias=by_alias,
+                by_name=by_name,
+            )
+        except ValidationError as canonical_error:
+            try:
+                return super().model_validate(
+                    {"reply": obj},
+                    strict=strict,
+                    extra=extra,
+                    from_attributes=from_attributes,
+                    context=context,
+                    by_alias=by_alias,
+                    by_name=by_name,
+                )
+            except ValidationError:
+                raise canonical_error from None
+
+    @classmethod
+    @override
+    def model_validate_json(
+        cls,
+        json_data: Any,
+        *,
+        strict: bool | None = None,
+        extra: Literal["allow", "ignore", "forbid"] | None = None,
+        context: Any | None = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> Self:
+        """Validate canonical JSON first, then the historical bare JSON shape."""
+        try:
+            return super().model_validate_json(
+                json_data,
+                strict=strict,
+                extra=extra,
+                context=context,
+                by_alias=by_alias,
+                by_name=by_name,
+            )
+        except ValidationError as canonical_error:
+            raw = json_data.encode() if isinstance(json_data, str) else bytes(json_data)
+            try:
+                return super().model_validate_json(
+                    b'{"reply":' + raw + b"}",
+                    strict=strict,
+                    extra=extra,
+                    context=context,
+                    by_alias=by_alias,
+                    by_name=by_name,
+                )
+            except ValidationError:
+                raise canonical_error from None
+
+    @classmethod
+    @override
+    def model_json_schema(
+        cls,
+        by_alias: bool = True,
+        ref_template: str = "#/$defs/{model}",
+        schema_generator: type[GenerateJsonSchema] = GenerateJsonSchema,
+        mode: Literal["validation", "serialization"] = "validation",
+        *,
+        union_format: Literal["any_of", "primitive_type_array"] = "any_of",
+    ) -> dict[str, object]:
+        """Expose an object root and a nested ``anyOf`` result/wait choice."""
+        schema = super().model_json_schema(
+            by_alias=by_alias,
+            ref_template=ref_template,
+            schema_generator=schema_generator,
+            mode=mode,
+            union_format=union_format,
+        )
+        _use_any_of(schema)
+        return schema

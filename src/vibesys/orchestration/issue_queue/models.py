@@ -3,23 +3,16 @@
 Replies are the only way an agent changes the board. A judge may file at most one bug and
 the performance evaluator at most ``max_issues_per_perf_eval`` issues, of types the reply
 schema lists, so a reply that exceeds either is not a valid reply. A role that evaluates
-answers with its result or with a wait for its evaluations (`Waitable`).
+answers with its result or with a wait for its evaluations (`WaitableReply`).
 """
 
 import math
 from functools import cache
 from typing import Annotated, Literal
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    JsonValue,
-    RootModel,
-    field_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
-from vs_core.api import Waitable
+from vs_core.api import WaitableReply
 from vs_issue_tracker.api import IssueTrackerConfig
 
 PositiveInt = Annotated[int, Field(gt=0)]
@@ -172,11 +165,11 @@ class IssuePerfEvalResult(_StrictModel):
     latency_trend: PerformanceTrend
 
 
-class ImplementerReplyModel(RootModel[Waitable[IssueImplementerResult]]):
+class ImplementerReplyModel(WaitableReply[IssueImplementerResult]):
     """An implementer turn ends with its result or a wait for evaluations."""
 
 
-class JudgeReplyModel(RootModel[Waitable[IssueJudgeResult]]):
+class JudgeReplyModel(WaitableReply[IssueJudgeResult]):
     """A judge turn ends with its verdict or a wait for evaluations."""
 
 
