@@ -90,7 +90,6 @@ from vs_runtime.api import (
 )
 from vs_runtime.api.infrastructure import (
     EnvironmentStartup,
-    EnvironmentStartupSink,
     ModelArtifactRequest,
     ProjectRunBaselineMissingError,
     ProjectRunDirtyResumeError,
@@ -546,6 +545,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             )
             workspace_files.materialize(plan, existing=True)
 
+        startup = _StartupReporter(integration.events)
         with boot_trace.span("environment_plan"):
             # Allocate the run-owned local root before deriving confinement.
             # Candidate creation must not change the durable session policy
@@ -609,12 +609,15 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 project_path_policy=project_path_policy,
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
                 docker_in_docker=bundle.docker_in_docker,
-                startup=_startup_reporter(integration.events),
+                startup=startup.report,
             )
         environment_resources = open_run_environment_resources(
             run_environment_request,
             lambda request: open_run_environment(environment, request),
         )
+        # Later containers (candidates, auxiliary agents) reuse this request;
+        # their builds are not the run's startup.
+        startup.finish()
         ownership.callback(environment_resources.close)
         session = environment_resources.session
 
@@ -672,12 +675,19 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     return result
 
 
-def _startup_reporter(events: CoreEventWriter) -> EnvironmentStartupSink:
-    """Publish each startup observation of the run environment as a core event."""
+class _StartupReporter:
+    """Publish the run environment's startup observations as core events, until it is open."""
 
-    def report(startup: EnvironmentStartup) -> None:
+    def __init__(self, events: CoreEventWriter) -> None:
+        self._events = events
+        self._finished = False
+
+    def report(self, startup: EnvironmentStartup) -> None:
+        """Emit ``startup`` as a ``run_startup_progress`` event while the run is starting."""
+        if self._finished:
+            return
         progress = startup.progress
-        events.emit(
+        self._events.emit(
             CoreEventType.RUN_STARTUP_PROGRESS,
             status=EventStatus.ACTIVE,
             data=RunStartupProgressData(
@@ -690,7 +700,9 @@ def _startup_reporter(events: CoreEventWriter) -> EnvironmentStartupSink:
             ),
         )
 
-    return report
+    def finish(self) -> None:
+        """The run environment is open: later observations are not the run's startup."""
+        self._finished = True
 
 
 def _run_facts(
