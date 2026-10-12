@@ -84,8 +84,24 @@ function TranscriptRow({
         <span>{title}</span>
         <span>{entry.roundNumber === undefined ? 'Run' : `Round ${entry.roundNumber}`}</span>
       </div>
-      {toolArguments !== null && <pre className="tool-arguments">{toolArguments}</pre>}
-      <pre className="transcript-content">{entry.content || 'Waiting for tool output…'}</pre>
+      {toolArguments !== null && (
+        <section
+          className="tool-arguments"
+          aria-label={`${title} tool arguments`}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: This named region owns clipped overflow and must receive keyboard scrolling; a textarea would invent editing semantics, while details would hide run evidence.
+          tabIndex={0}
+        >
+          <pre>{toolArguments}</pre>
+        </section>
+      )}
+      <section
+        className="transcript-content"
+        aria-label={`${title} output`}
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: This named region owns clipped overflow and must receive keyboard scrolling; a textarea would invent editing semantics, while details would hide run evidence.
+        tabIndex={0}
+      >
+        <pre>{entry.content || 'Waiting for tool output…'}</pre>
+      </section>
       {entry.truncated === true && (
         <span className="event-truncated">Event payload truncated at the server's size bound.</span>
       )}

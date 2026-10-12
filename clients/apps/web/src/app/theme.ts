@@ -1,7 +1,11 @@
-/** Web token names deliberately match the server's eight TUI theme names. The browser owns only
+/** Web token names deliberately match the server's TUI theme names. The browser owns only
  * its token set, not the TUI renderer or its implementation details. */
 
-export const WEB_THEME_NAMES = [
+import type {TuiDefaults} from '@vibesys/contracts';
+
+export type WebThemeName = TuiDefaults['theme'];
+
+const WEB_THEME_NAME_VALUES = [
   'dark',
   'light',
   'solarized-dark',
@@ -10,9 +14,14 @@ export const WEB_THEME_NAMES = [
   'catppuccin-latte',
   'high-contrast-dark',
   'high-contrast-light',
-] as const;
+] as const satisfies readonly WebThemeName[];
 
-export type WebThemeName = (typeof WEB_THEME_NAMES)[number];
+type ExhaustiveThemeNames<Names extends readonly WebThemeName[]> =
+  Exclude<WebThemeName, Names[number]> extends never ? Names : never;
+
+/** Runtime order for the generated protocol's exhaustive theme union. */
+export const WEB_THEME_NAMES: ExhaustiveThemeNames<typeof WEB_THEME_NAME_VALUES> =
+  WEB_THEME_NAME_VALUES;
 
 export interface WebThemeTokens {
   readonly pageBackground: string;

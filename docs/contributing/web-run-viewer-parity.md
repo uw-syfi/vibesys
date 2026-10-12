@@ -14,7 +14,7 @@ the same `@vibesys/run-state` projection. Web presentation state stays in `featu
 | Evidence and diagnostic drill-downs | Deferred | #789 |
 | Annotations | Deferred | #805 |
 | Multi-run navigation | Deferred | #816 |
-| Server-selected theme tokens | Implemented as complete contrast-checked palettes for all eight `tui-defaults` theme names. A Web theme picker and user overrides remain deferred. | TUI theme picker |
+| Server-selected theme tokens | Implemented as complete contrast-checked palettes for every `tui-defaults` theme. A Web theme picker and local overrides remain deferred to #2168. | TUI theme picker, #2168 |
 
 The viewer must not recreate session or reducer policy in React. A new shared semantic projection
 belongs in `@vibesys/run-state`; a Web-only view state belongs in `@vibesys/feature-run-view`.

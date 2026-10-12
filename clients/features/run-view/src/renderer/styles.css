@@ -52,6 +52,8 @@ h2 { font-size: 16px; margin: 0; }
 .transcript-tool { border-left: 3px solid var(--accent); padding-left: 10px; }
 .transcript-failure { border-left-color: var(--failure); }
 .transcript-content, .tool-arguments { font: inherit; margin: 0; min-width: 0; overflow-wrap: anywhere; overflow-y: auto; white-space: pre-wrap; }
+.transcript-content:focus-visible, .tool-arguments:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.transcript-content pre, .tool-arguments pre { font: inherit; margin: 0; white-space: pre-wrap; }
 .tool-arguments { background: var(--field-background); color: var(--subtle); font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; max-height: 52px; padding: 5px; }
 .event-truncated { color: var(--warning); font-size: 0.875rem; }
 @media (max-width: 760px) { .shell { width: min(100% - 28px, 1120px); padding-top: 28px; } .summary { grid-template-columns: repeat(2, 1fr); } .run-layout { grid-template-columns: 1fr; } .round-rail { position: static; } }

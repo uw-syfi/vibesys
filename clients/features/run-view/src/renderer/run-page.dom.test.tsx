@@ -154,6 +154,51 @@ test('round rail buttons are keyboard-focusable navigation into the transcript',
   await unmount(mounted);
 });
 
+test('clipped tool arguments and output are named keyboard reading regions', async () => {
+  const run = runStep(initialCoreState(), {
+    type: 'events',
+    events: [
+      event(1, 'tool_call', {
+        invocation_id: 'turn-1',
+        data: {
+          kind: 'tool_call',
+          tool: 'read_file',
+          call_id: 'call-1',
+          args: {path: `src/${'nested/'.repeat(30)}main.py`},
+        },
+      }),
+      event(2, 'tool_result', {
+        invocation_id: 'turn-1',
+        data: {
+          kind: 'tool_result',
+          tool: 'read_file',
+          call_id: 'call-1',
+          content: Array.from({length: 40}, (_, index) => `line ${index + 1}`).join('\n'),
+        },
+      }),
+    ],
+  }).state;
+  const mounted = await mountRun(run);
+  const argumentsRegion = mounted.container.querySelector<HTMLElement>(
+    'section[aria-label="read_file tool arguments"]',
+  );
+  const outputRegion = mounted.container.querySelector<HTMLElement>(
+    'section[aria-label="read_file output"]',
+  );
+  if (argumentsRegion === null || outputRegion === null) {
+    throw new Error('tool reading regions missing');
+  }
+
+  expect(argumentsRegion.tabIndex).toBe(0);
+  expect(outputRegion.tabIndex).toBe(0);
+  argumentsRegion.focus();
+  expect(document.activeElement).toBe(argumentsRegion);
+  outputRegion.focus();
+  expect(document.activeElement).toBe(outputRegion);
+  expect(outputRegion.textContent).toContain('line 40');
+  await unmount(mounted);
+});
+
 interface DeferredReply {
   readonly promise: Promise<RunCommandOutcome>;
   readonly resolve: (response: RunCommandOutcome) => void;
