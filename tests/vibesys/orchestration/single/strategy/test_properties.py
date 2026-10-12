@@ -17,6 +17,8 @@ from tests.vibesys.orchestration.single.strategy._executors import Executors
 from tests.vibesys.orchestration.single.strategy._replies import combined, plan_reply
 from tests.vibesys.orchestration.single.strategy._run import FACTS, run_shell
 
+from vibesys.hypothesis import rounds
+from vibesys.orchestration.single.strategy.api import SingleStrategyState
 from vs_core.api import ProposeWinner, RequestTurn, Settle, StartAttempt, Stop, Withdraw
 
 if TYPE_CHECKING:
@@ -65,13 +67,30 @@ def test_s1_a_round_the_cadence_skipped_is_never_a_winner_and_is_the_next_base()
     parent that can never be adopted, and round 2 starts on it."""
     executors = Executors(
         planner=deque([plan_reply("h1"), plan_reply("h2"), plan_reply("h3")]),
-        implementer=deque(combined() for _ in range(6)),
+        implementer=deque(
+            [
+                combined(
+                    candidate_disposition="pareto_frontier",
+                    candidate_metrics={"throughput": 75.0},
+                    candidate_evaluation_artifact="agent-profile.json",
+                    candidate_retention_reason="agent reports a tradeoff",
+                ),
+                *(combined() for _ in range(5)),
+            ]
+        ),
     )
     run = run_shell(executors, max_rounds=3, official_eval_every=2)
     first = _settles(run)[0]
+    state = SingleStrategyState.model_validate(run.state)
+    ledger = rounds.decode(rounds.EncodedLedger(state.search_json, state.carry_json))
+    first_record = ledger.records[0]
+
     assert (first.eligible, first.retention) == (False, "candidate")
     assert first.candidate is not None
     assert _starts(run)[1].workspace.base == first.candidate
+    assert first_record.candidate_disposition == "pareto_frontier"
+    assert first_record.candidate_retention_reason == "agent reports a tradeoff"
+    assert first_record.candidate_retained is False
     winner = next(item for item in run.decisions if isinstance(item, ProposeWinner))
     if winner.selection.kind == "retained_candidate":
         assert winner.selection.revision != first.candidate
@@ -167,3 +186,23 @@ def test_the_retained_checkpoint_of_a_failed_round_is_work_in_progress(*, passed
     if not passed:
         assert settle.retention in {"wip", "discard"}
         assert not settle.eligible
+
+
+@PURE
+@given(exit_code=st.integers(1, 255), output=st.text(max_size=40))
+def test_a_failed_attribution_command_names_the_command_and_where_it_runs(
+    exit_code: int, output: str
+) -> None:
+    """The run ends at the baseline attribution, saying what ran, where, and why it failed."""
+    run = run_shell(
+        Executors(attribution=output, attribution_exit_code=exit_code),
+        max_rounds=2,
+        attribution={"command": ("bash", "attribute.sh"), "timeout_seconds": 10},
+    )
+    assert isinstance(run.state, SingleStrategyState)
+    error = run.state.planner.last_error
+    assert error is not None
+    assert "`bash attribute.sh`" in error
+    assert f"exited with code {exit_code}" in error
+    assert "command environment" in error
+    assert ("Exit code 127 means" in error) == (exit_code == 127)

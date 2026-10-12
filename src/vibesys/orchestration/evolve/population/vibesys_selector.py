@@ -52,7 +52,7 @@ def _headline_reading(individual: Individual, headline: MetricSpace) -> Measurem
     primary = headline.primary
     if primary is None:
         return None
-    value = individual.metrics.get(primary.name, individual.perf_metric)
+    value = individual.metric_map().get(primary.name, individual.perf_metric)
     if value is None:
         return None
     return Measurement(metric=primary.name, value=value)
@@ -76,8 +76,8 @@ def frontier(individuals: Sequence[Individual], space: MetricSpace) -> list[Indi
     """Return the Pareto-non-dominated subset of passed individuals."""
     passed = passed_individuals(individuals)
     return space.frontier(
-        [individual for individual in passed if space.complete(individual.metrics)],
-        lambda individual: individual.metrics,
+        [individual for individual in passed if space.complete(individual.metric_map())],
+        lambda individual: individual.metric_map(),
     )
 
 
@@ -145,7 +145,7 @@ def _select_inspirations(  # noqa: PLR0913  # LW-040059 [PLR0913]; the parameter
         front_ids = {i.id for i in frontier(individuals, space) if i.id != parent_id}
         front_pool = [i for i in pool if i.id in front_ids]
         front_pool.sort(
-            key=lambda i: primary.signed(i.metrics.get(primary.name, float("-inf"))),
+            key=lambda i: primary.signed(i.metric_map().get(primary.name, float("-inf"))),
             reverse=True,
         )
         top = front_pool[:k_top]

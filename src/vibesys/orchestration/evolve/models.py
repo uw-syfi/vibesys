@@ -6,42 +6,9 @@ from typing import Annotated, Literal, Self, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from vibesys.metrics import MetricSpace, Objective
-from vibesys.orchestration.evolve.population import (
-    Individual,
-    OpenEvolveSelectorConfig,
-    PopulationState,
-)
+from vibesys.metrics import MetricSpace
+from vibesys.orchestration.evolve.population import OpenEvolveSelectorConfig
 from vibesys.orchestration.review import Verdict
-
-
-class MutatorContext(BaseModel):
-    """Inputs for one evolve mutation turn."""
-
-    model_config = ConfigDict(frozen=True)
-
-    accuracy_command: str | None
-    benchmark_command: str | None
-    domain_implementer: str
-    failed_lessons: list[str]
-    inspirations: list[Individual]
-    interface: str
-    is_cold_start: bool
-    modality: str | None
-    num_failed_attempts: int
-    objective: str
-    objectives: list[Objective] | None
-    parent: Individual | None
-    reference_path: str
-    repair_seed: bool
-    runtime_notes: str
-
-    @model_validator(mode="after")
-    def _require_parent_unless_cold_start(self) -> Self:
-        if not self.is_cold_start and self.parent is None:
-            message = "parent is required unless is_cold_start is True"
-            raise ValueError(message)
-        return self
 
 
 class MutatorResponse(BaseModel):
@@ -59,21 +26,6 @@ class MutatorResponse(BaseModel):
     expected_behavior: str = Field(description="Observable change a reviewer should expect.")
 
 
-class CandidateJudgeContext(BaseModel):
-    """Inputs for one independent evolve candidate review."""
-
-    model_config = ConfigDict(frozen=True)
-
-    accuracy_command: str | None
-    benchmark_command: str | None
-    domain_judge: str
-    interface: str
-    modality: str | None
-    objective: str | None
-    pass_criteria: str
-    runtime_notes: str
-
-
 class JudgeResponse(BaseModel):
     """Review decision for one evolve candidate."""
 
@@ -82,23 +34,6 @@ class JudgeResponse(BaseModel):
         description="Specific actionable feedback for the mutator. Empty string if passing."
     )
     verdict: Verdict = Field(description="PASS if all criteria are met, FAIL otherwise.")
-
-
-class CandidateProfilerContext(BaseModel):
-    """Inputs shared by all evolve candidate profiler kinds."""
-
-    model_config = ConfigDict(frozen=True)
-
-    benchmark_command: str | None
-    domain_profiler: str
-    modality: str | None
-    objective: str | None
-    objectives: list[Objective]
-    profile_execution: str
-    profile_focus: str
-    profiler_mcp_name: str
-    profiler_support_name: str
-    runtime_notes: str
 
 
 class OpenEvolveOverrides(TypedDict, total=False):
@@ -177,6 +112,7 @@ class EvolveOptions(BaseModel):
     bootstrap_max_attempts: Annotated[int, Field(gt=0)]
     keep_deployments: Literal[False]
     max_parallelism: Annotated[int, Field(gt=0)]
+    turn_drop_backoff_seconds: Annotated[float, Field(gt=0, le=600)] = 5.0
     metric_space: MetricSpace = Field(default_factory=MetricSpace)
 
     @model_validator(mode="after")
@@ -212,47 +148,9 @@ class EvolveOptions(BaseModel):
         )
 
 
-BOOTSTRAP_MEMBER = "bootstrap"
-"""The attempt-budget member that owns every cold-start attempt of a campaign."""
-
-
-class RecordedBootstrapAttempt(BaseModel):
-    """Durable proof that one cold-start attempt's outcome was admitted (generation 0).
-
-    Unlike the single and multi plugins, evolve has no durable commit before an attempt's
-    turn, so an attempt interrupted before it was admitted leaves no trace and is re-run.
-    What the budget bounds is attempts recorded across restarts, whatever else the
-    population holds.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    round_number: Literal[0] = 0
-    member_id: Literal["bootstrap"] = BOOTSTRAP_MEMBER
-    turn_number: Annotated[int, Field(gt=0)]
-
-
-class EvolveState(BaseModel):
-    """Complete crash-recoverable evolutionary-search aggregate."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    population: PopulationState
-    metric_space: MetricSpace = Field(default_factory=MetricSpace)
-    generation_start: PopulationState | None = None
-    admitted_slots: int = Field(default=0, ge=0)
-    last_recorded_bootstrap: RecordedBootstrapAttempt | None = None
-
-
 __all__ = [
-    "BOOTSTRAP_MEMBER",
-    "CandidateJudgeContext",
-    "CandidateProfilerContext",
     "EvolveOptions",
-    "EvolveState",
     "JudgeResponse",
-    "MutatorContext",
     "MutatorResponse",
-    "RecordedBootstrapAttempt",
     "resolve_openevolve_options",
 ]

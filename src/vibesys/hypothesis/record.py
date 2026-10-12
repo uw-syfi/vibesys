@@ -11,11 +11,11 @@ from vibesys.hypothesis.transitions import (
     ResolutionEvidence,
     metric_baseline,
     pareto_archive_dominators,
-    provisional_candidate_retained,
     record_metric_value,
     resolve_hypothesis_outcome,
     scalar_candidate_retained,
     trusted_perf_provenance,
+    unmeasured_candidate_retained,
 )
 from vibesys.metrics import Measurement
 
@@ -185,7 +185,7 @@ def _candidate_retained(
     reviewed: bool,
 ) -> bool | None:
     if not reviewed:
-        return provisional_candidate_retained(CandidateDisposition(candidate.disposition))
+        return unmeasured_candidate_retained(CandidateDisposition(candidate.disposition))
     if not data.attempt.passed:
         return False
     if (
@@ -220,7 +220,7 @@ def _candidate_retained(
             else None
         )
         return scalar_candidate_retained(data.state.metrics.compare_to_best(reading, prior))
-    return provisional_candidate_retained(CandidateDisposition(candidate.disposition))
+    return unmeasured_candidate_retained(CandidateDisposition(candidate.disposition))
 
 
 def build_round_record(data: RecordInput) -> RoundRecord:

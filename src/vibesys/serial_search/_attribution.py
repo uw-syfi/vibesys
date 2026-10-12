@@ -8,6 +8,7 @@ hypothesis ledger, shared by every strategy that offers the preset.
 
 from __future__ import annotations
 
+import shlex
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -51,6 +52,38 @@ def focus_policy(attribution: AttributionConfig | None) -> ProfileFocus | None:
             min_relative_improvement=attribution.min_relative_improvement,
         )
     )
+
+
+_OUTPUT_TAIL_CHARS = 1000
+_COMMAND_NOT_FOUND = 127
+
+
+def capture_failure(
+    command: tuple[str, ...], *, exit_code: int | None, detail: str, output: str
+) -> str:
+    """Why the attribution command did not produce a result, naming what ran and where.
+
+    The command runs in a throwaway candidate in the run's own command environment (for the
+    `slurm` run environment that is the editor container), not in a Slurm job and not on the
+    operator's host, so an interpreter or package that exists only there is absent. Exit 127
+    is the shell's "program not found", the usual symptom of that.
+    """
+    ran = shlex.join(command)
+    reason = detail or f"exited with code {exit_code}"
+    parts = [
+        f"the attribution command `{ran}` {reason}.",
+        "It runs in the run's command environment (the editor container under the slurm "
+        "run environment), where only the workspace and the image's tools exist.",
+    ]
+    if exit_code == _COMMAND_NOT_FOUND:
+        parts.append(
+            "Exit code 127 means a program or script it calls was not found there; make the "
+            "command self-contained in the workspace or use tools the image provides."
+        )
+    tail = output.strip()[-_OUTPUT_TAIL_CHARS:]
+    if tail:
+        parts.append(f"Output tail: {tail}")
+    return " ".join(parts)
 
 
 def bottlenecks_of(output: str) -> tuple[ProfileBottleneck, ...]:

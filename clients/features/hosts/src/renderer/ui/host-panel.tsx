@@ -64,31 +64,40 @@ function RunTable(props: {
         {listing.unreadable.length} run(s) on {data.label} belong to another VibeSys version.
       </p>
     );
-  if (listing.live.length === 0) {
-    return (
-      <>
-        <p className="muted">No live runs on {data.label}.</p>
-        {unreadable}
-      </>
+  const unverified =
+    listing.unverified.length === 0 ? null : (
+      <p className="muted">
+        {listing.unverified.length} run(s) on {data.label} could not be confirmed (their lock could
+        not be read).
+      </p>
     );
-  }
+  const runs =
+    listing.live.length === 0 ? (
+      <p className="muted">No live runs on {data.label}.</p>
+    ) : (
+      <table>
+        <thead>
+          <tr>
+            <th>Run</th>
+            <th>Project</th>
+            <th>Status</th>
+            <th>Started</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {listing.live.map(run => (
+            <RunRow key={run.id} run={run} host={data.key} actions={actions} />
+          ))}
+        </tbody>
+      </table>
+    );
   return (
-    <table>
-      <thead>
-        <tr>
-          <th>Run</th>
-          <th>Project</th>
-          <th>Status</th>
-          <th>Started</th>
-          <th />
-        </tr>
-      </thead>
-      <tbody>
-        {listing.live.map(run => (
-          <RunRow key={run.id} run={run} host={data.key} actions={actions} />
-        ))}
-      </tbody>
-    </table>
+    <>
+      {runs}
+      {unreadable}
+      {unverified}
+    </>
   );
 }
 

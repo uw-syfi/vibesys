@@ -19,6 +19,7 @@ from vibesys.orchestration.profilers import (
     preflight_profiler_kind,
     profiler_definition,
     require_domain_name,
+    resolve_profiler_choice,
     resolve_profiler_kind,
 )
 
@@ -177,6 +178,15 @@ def test_cuda_kernel_writing_does_not_select_ncu_when_environment_lacks_it() -> 
     )
 
 
+def _expected_generic_auto(backend: ComputeBackend) -> ProfilerKind:
+    if backend is not ComputeBackend.CPU:
+        return ProfilerKind.NONE
+    return {
+        "Darwin": ProfilerKind.MACOS_CPU,
+        "Linux": ProfilerKind.LINUX_CPU,
+    }.get(platform.system(), ProfilerKind.NONE)
+
+
 def _expected_resolved(
     requested: ProfilerKind,
     *,
@@ -189,11 +199,7 @@ def _expected_resolved(
             raise ValueError
         return requested
     if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
-        system = platform.system()
-        return {
-            "Darwin": ProfilerKind.MACOS_CPU,
-            "Linux": ProfilerKind.LINUX_CPU,
-        }.get(system, ProfilerKind.NONE)
+        return _expected_generic_auto(backend)
     if domain is DomainName.MICROSERVICES:
         return ProfilerKind.NONE
     if domain is DomainName.KERNEL_WRITING:
@@ -336,7 +342,9 @@ def test_profiler_resolution_invariants(
     assert resolved in allowed
     if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
         system = platform.system()
-        if system == "Darwin":
+        if backend is not ComputeBackend.CPU:
+            expected = ProfilerKind.NONE
+        elif system == "Darwin":
             expected = ProfilerKind.MACOS_CPU
         elif system == "Linux":
             expected = ProfilerKind.LINUX_CPU
@@ -478,7 +486,7 @@ def test_generic_auto_falls_back_to_supported_environment_default(
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.GENERIC,
-            backend=ComputeBackend.CUDA,
+            backend=ComputeBackend.CPU,
             environment_default_profiler_kind=ProfilerKind.MACOS_CPU,
             environment_supported_profiler_kinds=frozenset(
                 {ProfilerKind.MACOS_CPU, ProfilerKind.NSYS}
@@ -499,7 +507,7 @@ def test_generic_auto_errors_when_environment_supports_no_generic_profiler(
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.GENERIC,
-            backend=ComputeBackend.CUDA,
+            backend=ComputeBackend.CPU,
             environment_default_profiler_kind=ProfilerKind.NSYS,
             environment_supported_profiler_kinds=frozenset({ProfilerKind.NSYS}),
         )
@@ -550,3 +558,35 @@ def test_macos_cpu_preflight_reports_tool_availability(
         "xctrace_path=missing",
         f"sample_path={sample_path or 'missing'}",
     )
+
+
+@given(
+    domain=st.sampled_from(tuple(DomainName)),
+    backend=st.sampled_from(tuple(ComputeBackend)),
+    supported=st.sampled_from(
+        (None, frozenset({ProfilerKind.NONE}), frozenset({ProfilerKind.NONE, ProfilerKind.NCU}))
+    ),
+)
+def test_auto_picks_a_profiler_that_fits_the_backend_or_says_why_it_picked_none(
+    domain: DomainName,
+    backend: ComputeBackend,
+    supported: frozenset[ProfilerKind] | None,
+) -> None:
+    """Regression: auto picked linux_cpu on a CUDA run, whose profiler step then had no data."""
+    try:
+        choice = resolve_profiler_choice(
+            ProfilerKind.AUTO,
+            domain=domain,
+            backend=backend,
+            environment_default_profiler_kind=ProfilerKind.NONE,
+            environment_supported_profiler_kinds=supported,
+        )
+    except ValueError:
+        return
+    assert choice.kind in allowed_profiler_kinds(domain, backend)
+    assert (choice.kind is ProfilerKind.NONE) == (choice.reason is not None)
+    if supported is not None:
+        assert choice.kind in supported
+    native = {ProfilerKind.LINUX_CPU, ProfilerKind.MACOS_CPU}
+    if backend is not ComputeBackend.CPU:
+        assert choice.kind not in native

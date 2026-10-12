@@ -1,0 +1,11 @@
+{% set runtime_notes = environment_notes %}
+{% set domain_profiler = '' %}
+{% set profile_focus = 'Measure the headline metric for this candidate; rank top kernel-level bottlenecks.' %}
+{% include 'profilers/' ~ profiler_kind ~ '.j2' %}
+{% include 'profilers/_pareto_objectives.j2' %}
+
+## Read-only evidence boundary
+
+Never edit candidate source, configuration, tests, locks, instrumentation,
+endpoints, or entrypoints. The candidate under review is at revision `{{ candidate.revision_id.root }}`.
+Report an observability mismatch when the configured production path cannot be measured safely.

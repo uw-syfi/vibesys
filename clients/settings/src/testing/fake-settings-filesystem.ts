@@ -51,6 +51,7 @@ export class FakeSettingsFilesystem implements SettingsFilesystem {
   readonly operations: SettingsFilesystemOperation[] = [];
   readonly #files = new Map<string, string>();
   readonly #readFailures = new Map<string, unknown[]>();
+  readonly #replaceFailures = new Map<string, unknown[]>();
   #nextWrite: WriteGate | null = null;
   #nextReplace: WriteGate | null = null;
 
@@ -62,6 +63,13 @@ export class FakeSettingsFilesystem implements SettingsFilesystem {
     const failures = this.#readFailures.get(path) ?? [];
     failures.push(error);
     this.#readFailures.set(path, failures);
+  }
+
+  /** Make the next `replace()` targeting `path` throw `error` instead of committing. */
+  failNextReplace(path: string, error: unknown): void {
+    const failures = this.#replaceFailures.get(path) ?? [];
+    failures.push(error);
+    this.#replaceFailures.set(path, failures);
   }
 
   /** Hold the next staged write until the test releases it. */
@@ -112,6 +120,9 @@ export class FakeSettingsFilesystem implements SettingsFilesystem {
 
   async replace(staging: string, target: string): Promise<void> {
     this.operations.push({kind: 'replace', staging, target});
+    const failures = this.#replaceFailures.get(target);
+    const failure = failures?.shift();
+    if (failure !== undefined) throw failure;
     const text = this.text(staging);
     this.#files.set(target, text);
     this.#files.delete(staging);

@@ -59,12 +59,19 @@ class Scenario:
     parents: bool = False
     roles: tuple[str, ...] = ("implementer", "judge")
     """The roles whose turns may wait."""
+    submit_only: tuple[str, ...] = ()
+    """The roles whose turns submit an evaluation and end plainly, leaving it running."""
     unchanged_after_first_retain: bool = False
     """Whether a resumed turn leaves the worktree as it was (retains nothing of its own)."""
 
 
 def run_waiting(root: Path, scenario: Scenario) -> Run:
     """A whole run whose turns wait as the scenario says."""
+    return run_scripted(root, scenario)[0]
+
+
+def run_scripted(root: Path, scenario: Scenario) -> tuple[Run, WaitingTurns]:
+    """A whole run whose turns wait as the scenario says, and the script that played its agents."""
     bridge = new_bridge(root)
     entries = {
         round_: [
@@ -88,6 +95,7 @@ def run_waiting(root: Path, scenario: Scenario) -> Run:
         delay=lambda n: scenario.delays[n % len(scenario.delays)],
         polls=list(scenario.polls),
         roles=scenario.roles,
+        submit_only=scenario.submit_only,
         unchanged_after_first_retain=scenario.unchanged_after_first_retain,
         benchmark=lambda commit: scenario.throughput[
             int(commit[:4], 16) % len(scenario.throughput)
@@ -100,9 +108,10 @@ def run_waiting(root: Path, scenario: Scenario) -> Run:
         controlled=True,
         lifecycle=frozenset({"suspend"}),
     )
-    return run_shell(
+    finished = run_shell(
         script, host=host, max_rounds=scenario.rounds, max_in_flight=scenario.in_flight
     )
+    return finished, script
 
 
 SCENARIOS = st.builds(

@@ -3,12 +3,15 @@
   "compilerOptions": {
     "lib": [
       "ES2022",
+      "DOM",
+      "DOM.Iterable",
       "esnext.disposable"
     ],
     "types": [
       "bun",
       "node"
     ],
+    "jsx": "react-jsx",
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
   },

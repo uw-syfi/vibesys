@@ -17,6 +17,7 @@ from vs_agent.api import (
     AgentSessionSpec,
     AgentTurnRequest,
     SessionScope,
+    native_schema_problems,
 )
 from vs_agent.api.testing import FakeAgentSessions, FakeProvider
 from vs_evaluation.api import (
@@ -71,6 +72,11 @@ def _runtime(
     return agents, workspaces
 
 
+def _assert_native_profiler_reply(response_type: type[BaseModel] | None) -> None:
+    assert response_type is not None
+    assert native_schema_problems(response_type, "codex") == []
+
+
 @pytest.mark.asyncio
 async def test_runtime_profiler_reuses_conversation_on_requested_snapshots() -> None:
     role = AgentRole(id="profiler", system_prompt="Investigate performance.")
@@ -121,6 +127,67 @@ async def test_runtime_profiler_reuses_conversation_on_requested_snapshots() -> 
     assert agents.sessions[0].closed
     assert workspaces.candidates[0].discarded
     await provision.close()
+
+
+@pytest.mark.asyncio
+async def test_durable_runtime_profiler_exposes_a_native_waitable_schema(tmp_path: Path) -> None:
+    role = AgentRole(
+        id="profiler",
+        system_prompt="Investigate performance.",
+        required_capabilities=frozenset(
+            {AgentCapability.PROVIDER_SESSION_RESUME, AgentCapability.DURABLE_TURN_CONTINUATION}
+        ),
+    )
+    response = ProfilerAgentResult(
+        outcome=ProfilerResultOutcome.OBSERVED,
+        narrative="The launch path dominates.",
+        evidence_ids=("a" * 64,),
+    )
+
+    def respond(
+        _role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        response_type: type[BaseModel] | None,
+    ) -> object:
+        _assert_native_profiler_reply(response_type)
+        return response.model_dump()
+
+    agents, workspaces = _runtime(role, responder=respond)
+    namespace = InMemoryEvaluationNamespace()
+    digest = ContentDigest.sha256(b"native profiler schema")
+    backend = SemanticEvaluationBackend(
+        FakeEvaluation(),
+        workspaces,
+        namespace,
+        SemanticEvaluationIdentity(evaluator=digest, workload=digest, environment=digest),
+        executor=_OwnedFakeExecutor(clock=ManualClock()),
+    )
+    service = EvaluationAgentService(backend, namespace, tmp_path / "native-schema.sock")
+    provision = RuntimeProfilerTurnProvision(
+        role,
+        agents,
+        workspaces,
+        evaluation=ProfilerEvaluationAccess(
+            backend=backend,
+            settlements=service.settlements(),
+            requester_generation=service.requester_generation,
+            validate_wait=service.validate_wait,
+            cancel_associations=lambda scope: _cancel_associations(backend, service, scope),
+        ),
+    )
+    try:
+        result = await provision.run_turn(
+            session_id="conversation-1",
+            operation_id="operation-1",
+            request="Find the bottleneck.",
+            scope_id="candidate-1",
+            candidate_snapshot_id="snapshot-a",
+        )
+        assert result == response
+    finally:
+        await provision.close()
+        await backend.close()
 
 
 @pytest.mark.asyncio
@@ -178,8 +245,9 @@ async def test_profiler_yields_pending_evaluation_and_resumes_once(
         _role: AgentRole,
         _history: tuple[str, ...],
         message: str,
-        _response: type[BaseModel] | None,
+        response_type: type[BaseModel] | None,
     ) -> object:
+        _assert_native_profiler_reply(response_type)
         turns.append(message)
         handle = await _submit_profile(
             role, workspaces.candidates[-1], backend, service, reopened=reopened

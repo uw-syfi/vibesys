@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from itertools import pairwise
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from server.registry import FLOCK_AVAILABLE, LockState, probe_lock, try_lock, unlock
 from vs_sim.api import PidfdProcessSignaller
@@ -143,6 +143,30 @@ class WebPortInspector:
             raise ProcessLookupError(listener.pid)
 
 
+class WebHealthProbe(Protocol):
+    """One bounded observation of whether a published gateway can serve clients now."""
+
+    def healthy(self, record: WebInstanceRecord) -> bool:
+        """Return whether ``record`` answers the authenticated health request."""
+        ...
+
+
+class UrlWebHealthProbe:
+    """Probe a published gateway through its loopback health endpoint."""
+
+    def healthy(self, record: WebInstanceRecord) -> bool:
+        """Return whether the bounded health request answers with the exact success body."""
+        health = f"http://127.0.0.1:{record.port}/health?token={record.token}"
+        try:
+            with urllib.request.urlopen(health, timeout=0.4) as response:  # noqa: S310  # lint-waiver: LW-101049 [S310]; probe only the loopback health URL recorded by this process
+                return response.status == 200 and response.read() == b"vibesys-ok\n"  # noqa: PLR2004  # lint-waiver: LW-101050 [PLR2004]; compare the fixed health response status required by the protocol
+        except (OSError, urllib.error.URLError):
+            return False
+
+
+_WEB_HEALTH_PROBE = UrlWebHealthProbe()
+
+
 @dataclass(frozen=True)
 class WebInstanceRecord:
     """The capability and liveness facts for one local gateway."""
@@ -156,16 +180,26 @@ class WebInstanceRecord:
     web_build_id: str | None = None
 
     @classmethod
-    def discover(cls, path: Path, *, cleanup_stale: bool = True) -> WebInstanceRecord | None:
-        """Return a live record, removing malformed or dead state if requested."""
+    def discover(
+        cls,
+        path: Path,
+        *,
+        cleanup_stale: bool = True,
+        probe: WebHealthProbe = _WEB_HEALTH_PROBE,
+    ) -> WebInstanceRecord | None:
+        """Return a usable live record, removing a definitively dead owner's state if requested."""
         record = _read_record(path)
         if record is None:
             return None
-        if _pid_alive(record.pid) and _probe(record):
-            return record
-        if cleanup_stale:
-            record.remove_if_owner(path)
-        return None
+        if not _pid_alive(record.pid):
+            if cleanup_stale:
+                record.remove_if_owner(path)
+            return None
+        # A failed health request is not death evidence. The gateway may be alive but temporarily
+        # unable to answer before the bounded probe expires, so consuming its record here would
+        # make a later discovery unable to recover. A dead PID above is definitive and remains
+        # eligible for cleanup.
+        return record if probe.healthy(record) else None
 
     @classmethod
     def read(cls, path: Path) -> WebInstanceRecord | None:
@@ -639,15 +673,6 @@ def _pid_alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
-
-
-def _probe(record: WebInstanceRecord) -> bool:
-    health = f"http://127.0.0.1:{record.port}/health?token={record.token}"
-    try:
-        with urllib.request.urlopen(health, timeout=0.4) as response:  # noqa: S310  # lint-waiver: LW-101049 [S310]; probe only the loopback health URL recorded by this process
-            return response.status == 200 and response.read() == b"vibesys-ok\n"  # noqa: PLR2004  # lint-waiver: LW-101050 [PLR2004]; compare the fixed health response status required by the protocol
-    except (OSError, urllib.error.URLError):
-        return False
 
 
 def _positive_int(value: object) -> int:

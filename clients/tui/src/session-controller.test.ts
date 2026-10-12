@@ -1508,6 +1508,143 @@ describe('session controller', () => {
     expect(transport.designRequests).toBe(1);
   });
 
+  it('orders a newer supplemental design refresh after an older pane request', async () => {
+    const transport = new CrossOwnedDesignTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await transport.settleDesign('success');
+
+    transport.design = [designRound(1)];
+    const pane = controller.openPane('design');
+    transport.design = [designRound(1), designRound(2)];
+    transport.emitExperimentChange(1);
+    await settlePromiseEffects();
+
+    // The invalidation is retained behind the older pane request instead of
+    // starting another owner that can publish before it.
+    expect(transport.designRequests).toBe(2);
+    await transport.settleDesign('success');
+    await settlePromiseEffects();
+    expect(transport.designRequests).toBe(3);
+    expect(controller.state.layout.right).toMatchObject({view: 'design', pending: true});
+
+    await transport.settleDesign('success');
+    await pane;
+    await settlePromiseEffects();
+    expect(controller.state.designLog?.map(round => round.round)).toEqual([1, 2]);
+    expect(controller.state.layout.right).toMatchObject({view: 'design', pending: false});
+  });
+
+  it('orders a newer design-pane request after an older supplemental refresh', async () => {
+    const transport = new CrossOwnedDesignTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await transport.settleDesign('success');
+
+    transport.design = [designRound(1)];
+    transport.emitExperimentChange(1);
+    await settlePromiseEffects();
+    expect(transport.designRequests).toBe(2);
+
+    transport.design = [designRound(1), designRound(2)];
+    const pane = controller.openPane('design');
+    // Opening the pane retains a follow-up behind the older supplemental
+    // request instead of racing it with a second publisher.
+    expect(transport.designRequests).toBe(2);
+    await transport.settleDesign('success');
+    await settlePromiseEffects();
+    expect(transport.designRequests).toBe(3);
+    expect(controller.state.layout.right).toMatchObject({view: 'design', pending: true});
+
+    await transport.settleDesign('success');
+    await pane;
+    await settlePromiseEffects();
+    expect(controller.state.designLog?.map(round => round.round)).toEqual([1, 2]);
+    expect(controller.state.layout.right).toMatchObject({view: 'design', pending: false});
+  });
+
+  it('keeps a joined design pane pending until its authoritative follow-up settles', async () => {
+    const transport = new CrossOwnedDesignTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await transport.settleDesign('success');
+
+    transport.design = [designRound(1)];
+    transport.emitExperimentChange(1);
+    await settlePromiseEffects();
+    expect(transport.designRequests).toBe(2);
+
+    transport.design = [designRound(1), designRound(2)];
+    let paneSettled = false;
+    const pane = controller.openPane('design').then(() => {
+      paneSettled = true;
+    });
+    expect(transport.designRequests).toBe(2);
+
+    await transport.settleDesign('success');
+    await settlePromiseEffects();
+    expect(transport.designRequests).toBe(3);
+    expect(controller.state.layout.right).toMatchObject({view: 'design', pending: true});
+    expect(paneSettled).toBe(false);
+
+    await transport.settleDesign('success');
+    await pane;
+    expect(controller.state.designLog?.map(round => round.round)).toEqual([1, 2]);
+    expect(controller.state.layout.right).toMatchObject({view: 'design', pending: false});
+    expect(paneSettled).toBe(true);
+  });
+
+  it('does not surface a failed design request after another pane replaces it', async () => {
+    const transport = new CrossOwnedDesignTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await transport.settleDesign('success');
+
+    const design = controller.openPane('design');
+    const performance = controller.openPane('perf');
+    await transport.settleDesign('failure');
+    await Promise.all([design, performance]);
+    await settlePromiseEffects();
+
+    expect(controller.state.layout.right).toMatchObject({view: 'perf', pending: false});
+    expect(controller.state.errorBanner).toBeNull();
+  });
+
+  for (const supersededOutcome of ['success', 'failure'] as const) {
+    it(`reports the final failure after a ${supersededOutcome} superseded design refresh`, async () => {
+      const transport = new CrossOwnedDesignTransport();
+      const controller = new SocketSessionController(transport);
+      await controller.start();
+      await transport.settleDesign('success');
+
+      transport.emitExperimentChange(1);
+      await settlePromiseEffects();
+      const pane = controller.openPane('design');
+      await transport.settleDesign(supersededOutcome);
+      await settlePromiseEffects();
+
+      // The joined request was superseded by the pane's retained follow-up, so
+      // its outcome cannot discharge failure ownership while the authoritative
+      // attempt is still pending.
+      expect(transport.designRequests).toBe(3);
+      expect(controller.state.errorBanner).toBeNull();
+      await transport.settleDesign('failure');
+      await pane;
+      await settlePromiseEffects();
+
+      expect(controller.state.layout.right).toMatchObject({
+        view: 'design',
+        pending: false,
+        error: 'design query failed',
+      });
+      expect(controller.state.errorBanner).toMatchObject({
+        scope: 'request',
+        message: 'design query failed',
+        count: 1,
+      });
+    });
+  }
+
   it('opens the selected hypothesis with /open-round', async () => {
     const transport = new FakeTransport();
     transport.experiments = [
@@ -4021,6 +4158,84 @@ class InvalidatedDesignTransport implements ServerTransport {
   }
 }
 
+/** Holds both design-query call sites so their publication order is explicit. */
+class CrossOwnedDesignTransport implements ServerTransport {
+  design: NonNullable<ProtocolResponse['design']> = [];
+  designRequests = 0;
+  readonly #pendingDesign: Array<{
+    readonly response: Promise<ProtocolResponse>;
+    readonly resolve: (response: ProtocolResponse) => void;
+    readonly reject: (error: Error) => void;
+    readonly value: ProtocolResponse;
+  }> = [];
+  #message: ((message: ServerMessage) => void) | null = null;
+
+  request(input: RequestInput): Promise<ProtocolResponse> {
+    const base = {
+      protocol_version: 1 as const,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true as const,
+    };
+    if (input.type === 'query.snapshot') {
+      return Promise.resolve({...base, snapshot: {run_id: 'run', status: 'running', sequence: 0}});
+    }
+    if (input.type === 'query.experiments') {
+      return Promise.resolve({...base, experiments: [], experiments_ready: true});
+    }
+    if (input.type === 'query.performance') {
+      return Promise.resolve({...base, performance: [], events: []});
+    }
+    if (input.type !== 'query.design') return Promise.resolve(base);
+    this.designRequests += 1;
+    const value = {...base, design: [...this.design], design_ready: true};
+    let resolve!: (response: ProtocolResponse) => void;
+    let reject!: (error: Error) => void;
+    const response = new Promise<ProtocolResponse>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    this.#pendingDesign.push({response, resolve, reject, value});
+    return response;
+  }
+
+  async settleDesign(outcome: 'success' | 'failure'): Promise<void> {
+    const pending = this.#pendingDesign.shift();
+    if (pending === undefined) throw new Error('No pending design request');
+    if (outcome === 'success') pending.resolve(pending.value);
+    else pending.reject(new Error('design query failed'));
+    await pending.response.catch(() => undefined);
+    await settlePromiseEffects();
+  }
+
+  subscribe(
+    _afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    this.#message = onMessage;
+    onMessage({type: 'event_batch', events: [], history_after_sequence: 0});
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  emitExperimentChange(revision: number): void {
+    this.#message?.({
+      type: 'event',
+      event: {
+        sequence: revision,
+        run_id: 'run',
+        timestamp: '2026-01-01T00:00:00Z',
+        type: 'experiments_changed',
+        data: {kind: 'experiments_changed', reason: 'round_persisted', revision},
+      },
+    });
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 /**
  * A backend whose design query the test holds open, so a slow /design can
  * overlap the next pane command the way the live git-backed query does.
@@ -4457,6 +4672,15 @@ function patchRequests(transport: FakeTransport): RequestInput[] {
 
 function designQueries(transport: DeferredDesignTransport): number {
   return transport.requests.filter(request => request.type === 'query.design').length;
+}
+
+function designRound(round: number): NonNullable<ProtocolResponse['design']>[number] {
+  return {
+    round,
+    base: `base-${round}`,
+    commit: `commit-${round}`,
+    files: [{path: `src/round-${round}.ts`, change: 'modified'}],
+  };
 }
 
 /** Drain promise continuations only, without wall-clock time or scheduler ordering. */

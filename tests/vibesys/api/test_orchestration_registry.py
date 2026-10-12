@@ -14,7 +14,6 @@ from launch import LaunchSettings, built_in_orchestrations, create_session, open
 from vibesys.api import (
     ComputeBackend,
     Config,
-    ConfigurationError,
     OrchestrationRegistry,
     PluginProjection,
     ProfilerKind,
@@ -367,7 +366,7 @@ def test_builtin_plugin_parsing_preserves_strict_tuples_from_persisted_json(
     if plugin_id == "plain":
         return
     compare = registration.resume_policy
-    if plugin_id == "multi-agent":
+    if plugin_id in {"multi-agent", "evolve"}:
         assert compare is None  # a core strategy resumes with exact options
         return
     assert compare is not None
@@ -379,7 +378,8 @@ def test_the_issue_queue_resumes_with_exact_options_until_core_can_extend_its_li
     assert built_in_orchestrations().resolve("plain").resume_policy is None
 
 
-def test_evolve_plugin_resume_allows_only_increased_generation_budget() -> None:
+def test_evolve_plugin_resumes_with_its_exact_options() -> None:
+    """Core limits are fixed in the committed state (design Q3), so no budget may change."""
     registry = built_in_orchestrations()
     options: dict[str, JsonValue] = {
         "max_generations": 2,
@@ -392,32 +392,16 @@ def test_evolve_plugin_resume_allows_only_increased_generation_budget() -> None:
         "keep_deployments": False,
         "max_parallelism": 2,
     }
-    recorded = OrchestrationDescriptor(
-        id="evolve",
-        config_version=1,
-        options=options,
-    )
+    recorded = OrchestrationDescriptor(id="evolve", config_version=1, options=options)
     registration = registry.resolve("evolve")
-    plugin = registration.plugin
-    compare = registration.resume_policy
-    assert compare is not None
+    assert registration.resume_policy is None
     assert registration.project_max_rounds is not None
-    assert registration.project_max_rounds(plugin.options.model_validate(recorded.options)) == 2
-
-    assert compare(recorded, recorded).descriptor is None
-    increased = recorded.model_copy(update={"options": {**recorded.options, "max_generations": 3}})
-    decision = compare(recorded, increased)
-    assert decision.descriptor == increased
-    assert decision.requires_clean_workspace
-
-    changed_policy = recorded.model_copy(
-        update={"options": {**recorded.options, "children_per_generation": 3}}
+    assert (
+        registration.project_max_rounds(
+            registration.plugin.options.model_validate(recorded.options)
+        )
+        == 2
     )
-    with pytest.raises(ConfigurationError, match="children_per_generation"):
-        compare(recorded, changed_policy)
-    decreased = recorded.model_copy(update={"options": {**recorded.options, "max_generations": 1}})
-    with pytest.raises(ConfigurationError, match=r"max_generations.*cannot decrease"):
-        compare(recorded, decreased)
 
 
 def test_session_executes_registered_policy_with_canonical_request(tmp_path: Path) -> None:

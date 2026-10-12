@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 from vs_core.api import (
     CaptureCommandBase,
     EvidenceReadingsBase,
+    ExportPatchBase,
     InterpretEvidenceBase,
     RenderRoleArtifactsBase,
     RetainVerifiedRevisionBase,
@@ -59,9 +60,20 @@ class Validate(ValidateLocalBase):
     kind: Literal["demo.validate_local"] = "demo.validate_local"
 
 
+class Export(ExportPatchBase):
+    kind: Literal["demo.export_patch"] = "demo.export_patch"
+
+
 def test_an_optional_capture_maps_to_its_own_role_and_is_refused_without_a_runner() -> None:
     operations = StrategyOperations(
-        "demo", Render, Verify, Interpret, Retain, capture=Capture, validate_local=Validate
+        "demo",
+        Render,
+        Verify,
+        Interpret,
+        Retain,
+        capture=Capture,
+        validate_local=Validate,
+        export_patch=Export,
     )
     roles = operation_roles(operations)
     assert list(roles) == list(OperationRole)

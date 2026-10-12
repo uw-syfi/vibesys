@@ -94,7 +94,7 @@ def test_a_bug_the_judge_found_is_worked_before_the_round_ends() -> None:
     trace = run_shell(executors)
     assert _stop(trace).result.outcome == "success"
     assert _titles(executors) == [
-        "Build inference server for the reference model",
+        "serve the model",
         "streaming drops tokens",
     ]
     assert _board(executors) == {1: ("closed", 1), 2: ("closed", 1)}

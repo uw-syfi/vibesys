@@ -56,7 +56,7 @@ serving; the kernel-writing domain's profiler guidance and the
 Add `<kind>.j2` under `src/vibesys/prompts/shared/profilers/`. `multi` (and
 `profile-guided-multi-agent`, a preset of it) renders it through its `profiler.j2`, which includes
 `profilers/<kind>.j2` for the run's profiler and adds where to write bounded evidence; `evolve` has
-its own wrapper under `src/vibesys/orchestration/evolve/prompts/profilers/` that includes the same
+its own `profiler.j2` under `src/vibesys/orchestration/evolve/core_policy/prompts/` that includes the same
 file. Explain how the agent should collect and interpret evidence, which limitations it must
 report, and how it should produce `ProfilerSummary`. The template receives `profile_focus`,
 `benchmark_command`, `modality`, `profile_execution`, `profiler_support_name`,

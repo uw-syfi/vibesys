@@ -1,217 +1,137 @@
-"""Reviewed snapshots of the final prompts emitted by the evolve plugin."""
+"""Every prompt the evolve strategy can request renders from the core policy's templates.
+
+The strategy sends a typed `PromptContext`; the render owner passes its fields (plus the
+run-level variables) to the template under strict undefined variables. A template that reads a
+name no context supplies fails the render, which ends the turn, so each template is exercised
+over its context space, and the profiler template over every runnable profiler.
+"""
 
 from __future__ import annotations
 
-import difflib
-import os
-from dataclasses import dataclass
 from pathlib import Path
 
-import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
-from vibesys.constants import DomainName
-from vibesys.domains.base import DomainRole
-from vibesys.domains.registry import resolve_domain
-from vibesys.domains.rendering import render_domain_section
-from vibesys.orchestration.evolve.models import (
-    CandidateJudgeContext,
-    CandidateProfilerContext,
-    MutatorContext,
-)
+import vibesys.orchestration.evolve.core_policy.prompts as templates
+from vibesys.orchestration.evolve.core_policy.api import run_prompt_variables
 from vibesys.orchestration.evolve.population import Individual
-from vibesys.orchestration.evolve.prompts import render_judge, render_mutator, render_profiler
-from vibesys.orchestration.profilers import ProfilerKind, profiler_definition
+from vibesys.orchestration.evolve.strategy.api import (
+    JudgePrompt,
+    MutatePrompt,
+    ObjectiveAxis,
+    ProfilerPrompt,
+    PromptTemplate,
+)
+from vibesys.orchestration.profilers import ACTIVE_PROFILER_KINDS
+from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
+from vs_core.api import RevisionId, RevisionRef, Value
+from vs_prompts.api import TemplateRenderer
 
-_SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompt_snapshots"
-_ROLES = ("mutator", "judge", "profiler")
-_CRITERIA = "The candidate passes correctness and improves the headline metric."
-
-
-@dataclass(frozen=True)
-class _Case:
-    domain: DomainName
-    phase: str
-    modality: str | None
-    profiler: ProfilerKind
-    objective: str
-    accuracy_command: str
-    benchmark_command: str
-
-
-_CASES = (
-    _Case(
-        domain=DomainName.GENERIC,
-        phase="cold-start",
-        modality=None,
-        profiler=ProfilerKind.LINUX_CPU,
-        objective="Maximize total_ops_per_sec for the bounded SPSC queue.",
-        accuracy_command="go run ./_evaluator/queue/cmd/accuracy --candidate ./queue-candidate.so",
-        benchmark_command=(
-            "go run ./_evaluator/queue/cmd/benchmark --candidate ./queue-candidate.so"
-        ),
-    ),
-    _Case(
-        domain=DomainName.GENERIC,
-        phase="offspring",
-        modality=None,
-        profiler=ProfilerKind.LINUX_CPU,
-        objective="Maximize total_ops_per_sec for the bounded SPSC queue.",
-        accuracy_command="go run ./_evaluator/queue/cmd/accuracy --candidate ./queue-candidate.so",
-        benchmark_command=(
-            "go run ./_evaluator/queue/cmd/benchmark --candidate ./queue-candidate.so"
-        ),
-    ),
-    _Case(
-        domain=DomainName.LLM_SERVING,
-        phase="cold-start",
-        modality="text_generation",
-        profiler=ProfilerKind.NSYS,
-        objective="Maximize median_tok_per_sec for the local causal-LM server.",
-        accuracy_command="uv run python accuracy_checker/checker.py",
-        benchmark_command="uv run python benchmark/benchmark.py",
-    ),
-    _Case(
-        domain=DomainName.LLM_SERVING,
-        phase="offspring",
-        modality="text_generation",
-        profiler=ProfilerKind.NSYS,
-        objective="Maximize median_tok_per_sec for the local causal-LM server.",
-        accuracy_command="uv run python accuracy_checker/checker.py",
-        benchmark_command="uv run python benchmark/benchmark.py",
-    ),
+_ROOT = Path(templates.__file__).parent
+_OBJECTIVE = "Raise queue throughput."
+_RENDERER = TemplateRenderer(_ROOT, fallback_roots=(CORE_PROTOCOL_DIR, PROMPTS_DIR / "shared"))
+_TEXT = st.text(alphabet="abcdefg hij", min_size=1, max_size=12)
+_MODALITIES = st.sampled_from((None, "text_generation", "kv_store"))
+_REVISIONS = st.sampled_from(("a1", "b2")).map(
+    lambda name: RevisionRef(revision_id=RevisionId(root=name), digest=f"git-commit:{name}")
+)
+_INDIVIDUALS = st.builds(
+    Individual,
+    id=st.integers(1, 9),
+    generation=st.integers(0, 4),
+    perf_metric=st.none() | st.floats(0, 1e6),
+    perf_unit=st.none() | _TEXT,
+    metrics=st.lists(st.tuples(_TEXT, st.floats(0, 1e6)), max_size=2).map(tuple),
+    passed=st.booleans().filter(bool),
+    summary=_TEXT,
+    feedback=st.text(max_size=12),
+)
+_COLD = st.builds(
+    MutatePrompt,
+    base_revision=_REVISIONS,
+    is_cold_start=st.booleans().filter(bool),
+    repair_seed=st.booleans(),
+    failed_lessons=st.lists(_TEXT, max_size=3).map(tuple),
+    num_failed_attempts=st.integers(0, 4),
+    modality=_MODALITIES,
+    reference_path=st.sampled_from((".", "reference")),
+)
+_CHILD = st.builds(
+    MutatePrompt,
+    base_revision=_REVISIONS,
+    is_cold_start=st.booleans().filter(lambda value: not value),
+    parent=_INDIVIDUALS,
+    inspirations=st.lists(_INDIVIDUALS, max_size=2).map(tuple),
+    modality=_MODALITIES,
+)
+_JUDGE = st.builds(JudgePrompt, candidate=_REVISIONS, modality=_MODALITIES)
+_PROFILER = st.builds(
+    ProfilerPrompt,
+    candidate=_REVISIONS,
+    profiler_kind=st.sampled_from(sorted(kind.value for kind in ACTIVE_PROFILER_KINDS)),
+    profile_execution=st.sampled_from(("local", "remote")),
+    benchmark_command=st.none() | _TEXT,
+    modality=_MODALITIES,
+    objectives=st.lists(
+        st.builds(ObjectiveAxis, name=_TEXT, direction=st.sampled_from(("max", "min"))),
+        max_size=2,
+        unique_by=lambda axis: axis.name,
+    ).map(tuple),
+    profiler_support_name=_TEXT,
+    profiler_mcp_name=_TEXT,
 )
 
 
-def _domain_context(case: _Case) -> dict[str, object]:
-    return {
-        "modality": case.modality,
-        "interface": "inprocess",
-        "reference_path": "/workspace/reference",
-        "benchmark_command": case.benchmark_command,
-        "accuracy_command": case.accuracy_command,
-        "runtime_notes": "Runtime note: local isolated workspace.",
-        "profile_execution": "local",
-        "workspace_sources": (),
-    }
-
-
-def _domain_section(case: _Case, role: DomainRole) -> str:
-    return render_domain_section(resolve_domain(case.domain), role, **_domain_context(case))
-
-
-def _parent() -> Individual:
-    return Individual(
-        id=7,
-        generation=2,
-        parent_id=3,
-        inspiration_ids=(5,),
-        commit="abc123",
-        perf_metric=125.0,
-        perf_unit="ops/s",
-        metrics={"total_ops_per_sec": 125.0},
-        passed=True,
-        summary="Reduced synchronization overhead in the steady-state path.",
-        feedback="All correctness gates passed.",
+def _render(template: PromptTemplate, context: Value, *, agent_evaluation: bool = True) -> str:
+    variables = {name: getattr(context, name) for name in type(context).model_fields}
+    variables.pop("template")
+    text = _RENDERER.render_template(
+        f"{template.value}.j2",
+        **run_prompt_variables(
+            objective=_OBJECTIVE, environment_notes="note", agent_evaluation=agent_evaluation
+        ),
+        **variables,
     )
+    assert text.strip()
+    return text
 
 
-def _inspiration() -> Individual:
-    return Individual(
-        id=5,
-        generation=1,
-        parent_id=1,
-        commit="def456",
-        perf_metric=118.0,
-        perf_unit="ops/s",
-        passed=True,
-        summary="Separated producer and consumer hot metadata.",
+@given(context=_COLD | _CHILD)
+def test_the_mutation_prompt_renders_for_every_context(context: MutatePrompt) -> None:
+    text = _render(PromptTemplate.MUTATE, context)
+    assert _OBJECTIVE in text
+    assert ("Bootstrap the first passing seed" in text) is context.is_cold_start
+    if context.parent is not None:
+        assert f"#{context.parent.id}" in text
+
+
+@given(context=_CHILD)
+def test_the_mutation_prompt_shows_every_inspiration(context: MutatePrompt) -> None:
+    text = _render(PromptTemplate.MUTATE, context)
+    for item in context.inspirations:
+        assert f"Individual #{item.id}" in text
+
+
+@given(context=_JUDGE)
+def test_the_review_prompt_renders_for_every_context(context: JudgePrompt) -> None:
+    assert context.candidate.revision_id.root in _render(PromptTemplate.JUDGE, context)
+
+
+@given(context=_PROFILER)
+def test_the_profiler_prompt_renders_for_every_runnable_profiler(context: ProfilerPrompt) -> None:
+    text = _render(PromptTemplate.PROFILER, context)
+    assert context.candidate.revision_id.root in text
+    for axis in context.objectives:
+        assert axis.name in text
+
+
+def test_the_evaluation_tool_is_explained_when_the_run_offers_it() -> None:
+    context = MutatePrompt(
+        base_revision=RevisionRef(revision_id=RevisionId(root="a1"), digest="git-commit:a1"),
+        is_cold_start=True,
     )
-
-
-def _render_prompt(case: _Case, role: str) -> str:
-    is_cold_start = case.phase == "cold-start"
-    if role == "mutator":
-        return render_mutator(
-            MutatorContext(
-                accuracy_command=case.accuracy_command,
-                benchmark_command=case.benchmark_command,
-                domain_implementer=_domain_section(case, DomainRole.IMPLEMENTER),
-                failed_lessons=(
-                    ["The prior candidate violated the documented ABI."] if is_cold_start else []
-                ),
-                inspirations=[] if is_cold_start else [_inspiration()],
-                interface="inprocess",
-                is_cold_start=is_cold_start,
-                modality=case.modality,
-                num_failed_attempts=1 if is_cold_start else 0,
-                objective=case.objective,
-                objectives=None,
-                parent=None if is_cold_start else _parent(),
-                reference_path="/workspace/reference",
-                repair_seed=False,
-                runtime_notes="Runtime note: local isolated workspace.",
-            )
-        )
-    if role == "judge":
-        return render_judge(
-            CandidateJudgeContext(
-                accuracy_command=case.accuracy_command,
-                benchmark_command=case.benchmark_command,
-                domain_judge=_domain_section(case, DomainRole.JUDGE),
-                interface="inprocess",
-                modality=case.modality,
-                objective=case.objective,
-                pass_criteria=_CRITERIA,
-                runtime_notes="Runtime note: local isolated workspace.",
-            )
-        )
-    if role == "profiler":
-        definition = profiler_definition(case.profiler)
-        return render_profiler(
-            case.profiler.value,
-            CandidateProfilerContext(
-                benchmark_command=case.benchmark_command,
-                domain_profiler=_domain_section(case, DomainRole.PROFILER),
-                modality=case.modality,
-                objective=case.objective,
-                objectives=[],
-                profile_execution="local",
-                profile_focus=("Measure the headline metric and identify the dominant bottleneck."),
-                profiler_mcp_name=definition.mcp_name,
-                profiler_support_name=definition.support_name,
-                runtime_notes="Runtime note: local isolated workspace.",
-            ),
-        )
-    message = f"unknown prompt role: {role}"
-    raise AssertionError(message)
-
-
-def _snapshot_path(case: _Case, role: str) -> Path:
-    return _SNAPSHOT_DIR / case.domain.value / case.phase / f"{role}.md"
-
-
-def _assert_matches_snapshot(case: _Case, role: str, rendered: str) -> None:
-    snapshot = _snapshot_path(case, role)
-    if os.environ.get("UPDATE_PROMPT_SNAPSHOTS") == "1":
-        snapshot.parent.mkdir(parents=True, exist_ok=True)
-        snapshot.write_text(rendered, encoding="utf-8")
-        return
-    expected = snapshot.read_text(encoding="utf-8")
-    if rendered == expected:
-        return
-    diff = "".join(
-        difflib.unified_diff(
-            expected.splitlines(keepends=True),
-            rendered.splitlines(keepends=True),
-            fromfile=str(snapshot),
-            tofile=str(Path("rendered") / case.domain.value / case.phase / f"{role}.md"),
-        )
+    assert "submit_evaluation" in _render(PromptTemplate.MUTATE, context)
+    assert "submit_evaluation" not in _render(
+        PromptTemplate.MUTATE, context, agent_evaluation=False
     )
-    pytest.fail(f"Rendered prompt changed: {snapshot}\n{diff}")
-
-
-@pytest.mark.parametrize("case", _CASES, ids=lambda case: f"{case.domain.value}-{case.phase}")
-@pytest.mark.parametrize("role", _ROLES)
-def test_evolve_prompt_snapshot(case: _Case, role: str) -> None:
-    rendered = _render_prompt(case, role).rstrip() + "\n"
-    _assert_matches_snapshot(case, role, rendered)

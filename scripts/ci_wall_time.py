@@ -77,13 +77,18 @@ def job_from_record(record: dict[str, object]) -> Job | None:
     """Build a Job from an API record, or None when it cost the run nothing.
 
     Skipped jobs report timestamps that do not describe real work, and a job
-    that is still running (the caller itself) has no completed_at.
+    that is still running (the caller itself) has no completed_at. On a partial
+    rerun, untouched jobs keep their earlier start and completion while GitHub
+    gives them the new attempt's creation time; that impossible chronology also
+    describes no work in the current attempt.
     """
     created = parse_moment(_text(record.get("created_at")))
     started = parse_moment(_text(record.get("started_at")))
     completed = parse_moment(_text(record.get("completed_at")))
     conclusion = _text(record.get("conclusion")) or ""
     if conclusion == "skipped" or created is None or started is None or completed is None:
+        return None
+    if started < created or completed < created:
         return None
     return Job(_text(record.get("name")) or "", conclusion, created, started, completed)
 
@@ -105,7 +110,7 @@ def analyze(jobs: list[Job], epsilon: float = READY_EPSILON_SECONDS) -> Report |
             for job in jobs
             # Strictly earlier completion also guarantees the walk terminates.
             if job.completed_at < current.completed_at
-            and (job.completed_at - ready).total_seconds() <= epsilon
+            and abs((job.completed_at - ready).total_seconds()) <= epsilon
         ]
         if not predecessors:
             break
@@ -139,11 +144,11 @@ def render(report: Report, warn: float, error: float) -> tuple[str, str, int]:
             f"| {job.name} | {job.conclusion or 'n/a'} | {job.runner_wait:.0f} | {job.ran:.0f}"
             f" | {finished:.0f} | {marker} |"
         )
-    last = report.critical_path[-1]
+    long_pole = max(report.critical_path, key=lambda job: job.ran)
     detail = (
         f"Elapsed {report.elapsed:.0f}s = {report.queue:.0f}s runner queue +"
-        f" {report.execution:.0f}s execution. Long pole: {last.name}"
-        f" ({last.runner_wait:.0f}s queued, {last.ran:.0f}s running)."
+        f" {report.execution:.0f}s execution. Long pole: {long_pole.name}"
+        f" ({long_pole.runner_wait:.0f}s queued, {long_pole.ran:.0f}s running)."
     )
     if report.execution > error:
         message = (

@@ -45,6 +45,7 @@ INTERPRET_SUFFIX = "interpret_evidence"
 RETAIN_SUFFIX = "retain_verified_revision"
 CAPTURE_SUFFIX = "capture_command"
 VALIDATE_LOCAL_SUFFIX = "validate_local"
+EXPORT_PATCH_SUFFIX = "export_patch"
 
 
 class RenderedArtifacts(Value):
@@ -193,6 +194,27 @@ class ValidateLocalBase(OperationRequest):
     """Workspace-relative path of the recipe file in the revision, as the agent reported it."""
 
 
+class PatchExport(Value):
+    """A revision's canonical patch against the run's trusted baseline."""
+
+    status: Status
+    patch: str = ""
+    detail: str = ""
+
+
+class ExportPatchBase(OperationRequest):
+    """Export a retained revision as a canonical multi-file patch against the baseline.
+
+    A population policy that compares candidates by their code (OpenEvolve's novelty and
+    diversity features) needs the text the revision's tree differs by. The export reads a
+    retained revision and changes nothing, so a replay may run it again.
+    """
+
+    lifecycle: Literal[LifecycleClass.QUERY] = LifecycleClass.QUERY
+    outcome_model: ClassVar[type[BaseModel]] = PatchExport
+    revision: RevisionRef
+
+
 class OperationKindError(ValueError):
     """A strategy's operation does not carry the kind its namespace prescribes."""
 
@@ -214,6 +236,8 @@ class StrategyOperations:
     """The optional command capture a profile-guided strategy declares."""
     validate_local: type[ValidateLocalBase] | None = None
     """The optional validation of an agent-authored recipe file a reviewing strategy declares."""
+    export_patch: type[ExportPatchBase] | None = None
+    """The optional patch export a strategy that ranks candidates by their code declares."""
 
     def __post_init__(self) -> None:
         for suffix, model in self._by_suffix():
@@ -235,7 +259,10 @@ class StrategyOperations:
             if self.validate_local is not None
             else ()
         )
-        return (*required, *capture, *validate)
+        export = (
+            ((EXPORT_PATCH_SUFFIX, self.export_patch),) if self.export_patch is not None else ()
+        )
+        return (*required, *capture, *validate, *export)
 
     def registration_of(self, suffix: str) -> OperationRegistration | None:
         """The registration of the operation with this suffix, or None when not declared."""

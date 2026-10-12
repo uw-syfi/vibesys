@@ -7,7 +7,7 @@
 import {type CoreState, hasRunEnded, initialCoreState} from '@vibesys/run-state';
 import {createStore, type Store} from '@vibesys/store';
 import {isSnapshotStoreReplaced, type WebSessionState} from './connection.js';
-import type {BrowserLifecycle, RunConnection, TransportHooks} from './ports.js';
+import type {BrowserLifecycle, RunConnection, RunStreamHandlers, TransportHooks} from './ports.js';
 import {type RunAction, runStep} from './run.js';
 import {
   type Reachability,
@@ -16,6 +16,7 @@ import {
   type SessionRequest,
   type SessionState,
   type SnapshotResult,
+  sessionAcceptsSnapshot,
   sessionStartupSettled,
   sessionStep,
 } from './session.js';
@@ -40,6 +41,13 @@ export function createRunStore(): RunStore {
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+/** The new foreign-run rejection produced by one run-fold transition, if any. */
+function runIdentityRejection(previous: CoreState, current: CoreState): Error | null {
+  const before = previous.diagnostics.find(item => item.id === 'core-state:run-identity-mismatch');
+  const rejected = current.diagnostics.find(item => item.id === 'core-state:run-identity-mismatch');
+  return rejected === undefined || rejected === before ? null : new Error(rejected.summary);
 }
 
 export class WebSession {
@@ -123,14 +131,22 @@ export class WebSession {
 
   #offline = (): void => this.#core.dispatch({type: 'offline', runEnded: this.#runEnded()});
 
-  #applySnapshot(request: Extract<SessionRequest, {kind: 'apply-snapshot'}>): void {
-    const {snapshot} = request;
-    this.store.dispatch({type: 'snapshot', snapshot});
+  /** Fold one still-owned snapshot and translate projection rejection into a failed load. */
+  #foldSnapshot(
+    slot: 'refresh' | 'replacement',
+    token: number,
+    result: SnapshotResult,
+  ): SnapshotResult {
+    if (!result.ok || !sessionAcceptsSnapshot(this.#core.getState(), slot, token)) return result;
+    const previous = this.store.getState();
+    this.store.dispatch({type: 'snapshot', snapshot: result.snapshot});
+    const rejection = runIdentityRejection(previous, this.store.getState());
+    if (rejection !== null) return {ok: false, error: rejection};
     // A snapshot carries a journal position but no events, so it must not advance the event
-    // cursor. Retain that position only when core-state accepted its run identity. Within one
-    // stream-store generation the evidence is monotone: core-state can reject a stale same-run
-    // snapshot's liveness, and that response must not erase a newer known journal position.
-    if (this.store.getState().runId !== snapshot.run_id) return;
+    // cursor. Within one stream-store generation the evidence is monotone: core-state can reject a
+    // stale same-run snapshot's liveness, and that response must not erase a newer known journal
+    // position.
+    const {snapshot} = result;
     const current = this.#snapshotWatermark;
     this.#snapshotWatermark = {
       runId: snapshot.run_id,
@@ -139,7 +155,37 @@ export class WebSession {
           ? Math.max(current.sequence, snapshot.sequence)
           : snapshot.sequence,
     };
+    return result;
   }
+
+  #foldBatch: RunStreamHandlers['onBatch'] = (message, reconciliation, context): void => {
+    const storeId = message.store_id ?? '';
+    const previousStoreId = this.#streamStoreId;
+    const boundary = this.#freshBoundaryAfterConnection;
+    const requestedFreshGeneration =
+      boundary !== undefined &&
+      !context.resumed &&
+      (boundary === null || context.connectionGeneration > boundary);
+    const firstGeneration = previousStoreId === null;
+    const storeReplaced = previousStoreId !== null && storeId !== previousStoreId;
+    const previousRun = this.store.getState();
+    this.store.dispatch({type: 'batch', message, reconciliation});
+    const rejection = runIdentityRejection(previousRun, this.store.getState());
+    this.#streamStoreId = storeId;
+    if (storeReplaced) {
+      // Store identity, not connection or chunk identity, proves a replacement. Retire old
+      // evidence, then query through the server's atomic store precondition.
+      this.#snapshotWatermark = null;
+    }
+    if (firstGeneration || requestedFreshGeneration || storeReplaced) {
+      this.#core.dispatch({type: 'stream-established', storeId});
+    }
+    if (requestedFreshGeneration) this.#freshBoundaryAfterConnection = undefined;
+    this.#lastBatchConnection = context.connectionGeneration;
+    if (rejection !== null) {
+      this.#core.dispatch({type: 'projection-rejected', error: rejection});
+    }
+  };
 
   #recoverStream(request: Extract<SessionRequest, {kind: 'recover-stream'}>): void {
     try {
@@ -165,39 +211,13 @@ export class WebSession {
   #perform(request: SessionRequest): void {
     const dispatch = this.#core.dispatch;
     switch (request.kind) {
-      case 'apply-snapshot':
-        this.#applySnapshot(request);
-        return;
       case 'subscribe': {
         const {token} = request;
         void this.#connection
           .subscribe({
             cursor: () => this.store.getState().sequence,
             shouldReconnect: () => this.#streamNeedsRecovery(),
-            onBatch: (message, reconciliation, context) => {
-              const storeId = message.store_id ?? '';
-              const previousStoreId = this.#streamStoreId;
-              const boundary = this.#freshBoundaryAfterConnection;
-              const requestedFreshGeneration =
-                boundary !== undefined &&
-                !context.resumed &&
-                (boundary === null || context.connectionGeneration > boundary);
-              const firstGeneration = previousStoreId === null;
-              const storeReplaced = previousStoreId !== null && storeId !== previousStoreId;
-              this.store.dispatch({type: 'batch', message, reconciliation});
-              this.#streamStoreId = storeId;
-              if (storeReplaced) {
-                // Store identity, not connection or chunk identity, proves a
-                // replacement. Retire old evidence, then query through the
-                // server's atomic store precondition.
-                this.#snapshotWatermark = null;
-              }
-              if (firstGeneration || requestedFreshGeneration || storeReplaced) {
-                this.#core.dispatch({type: 'stream-established', storeId});
-              }
-              if (requestedFreshGeneration) this.#freshBoundaryAfterConnection = undefined;
-              this.#lastBatchConnection = context.connectionGeneration;
-            },
+            onBatch: this.#foldBatch,
             onFault: error => dispatch({type: 'fault', error}),
             onConnectionState: state => dispatch({type: 'stream', state}),
           })
@@ -231,16 +251,25 @@ export class WebSession {
             dispatch({type: 'refresh-reply', token, outcome: {kind: 'ready'}}),
           );
         } else {
-          void this.#loadSnapshot(this.#streamStoreId ?? undefined).then(result =>
-            dispatch({type: 'refresh-reply', token, outcome: {kind: 'snapshot', result}}),
-          );
+          void this.#loadSnapshot(this.#streamStoreId ?? undefined).then(result => {
+            dispatch({
+              type: 'refresh-reply',
+              token,
+              outcome: {kind: 'snapshot', result: this.#foldSnapshot('refresh', token, result)},
+            });
+          });
         }
         return;
       }
       case 'load-replacement-snapshot': {
         const {token, storeId} = request;
         void this.#loadSnapshot(storeId).then(result => {
-          dispatch({type: 'replacement-snapshot-reply', token, storeId, result});
+          dispatch({
+            type: 'replacement-snapshot-reply',
+            token,
+            storeId,
+            result: this.#foldSnapshot('replacement', token, result),
+          });
           this.#settleStartup();
         });
         return;

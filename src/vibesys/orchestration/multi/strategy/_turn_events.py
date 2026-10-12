@@ -9,7 +9,7 @@ whether the attempt is repaired by another paid turn or goes on to validation an
 
 from typing import Literal
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 
 from vibesys.hypothesis import reviewed, rounds
 from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse
@@ -54,12 +54,12 @@ from vs_core.api import (
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
-    Waitable,
+    WaitableReply,
     WaitingForEvaluation,
 )
 
-_IMPLEMENTER = TypeAdapter(Waitable[ImplementerResponse])
-_JUDGE = TypeAdapter(Waitable[JudgeResponse])
+_IMPLEMENTER = WaitableReply[ImplementerResponse]
+_JUDGE = WaitableReply[JudgeResponse]
 _ROLE_NAMES: dict[Role, Literal["implementer", "judge"]] = {
     Role.IMPLEMENTER: "implementer",
     Role.JUDGE: "judge",
@@ -72,7 +72,7 @@ def _decode(
 ) -> ImplementerResponse | JudgeResponse | WaitingForEvaluation | str:
     adapter = _JUDGE if role is Role.JUDGE else _IMPLEMENTER
     try:
-        return adapter.validate_python(adapter.validate_json(payload))
+        return adapter.model_validate_json(payload).reply
     except ValidationError as error:
         return str(error)
 

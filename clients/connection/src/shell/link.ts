@@ -29,9 +29,12 @@ export interface Link {
   /**
    * Bring the link up; only an `interactive` attempt (the user's own action) may prompt. Rejects
    * with a `ConnectionError`: `auth` when the host refused the user, `link` when it is unreachable.
-   * Concurrent calls share one attempt.
+   * Concurrent calls share one attempt. Aborting one caller stops waiting for it; the attempt is
+   * stopped only when it has no callers left.
    */
-  establish(interactive: boolean): Promise<void>;
+  establish(interactive: boolean, signal?: AbortSignal): Promise<void>;
+  /** Forget in-flight evidence after a network change; the next `establish` starts fresh. */
+  networkChanged(): void;
   /** Start one helper on the host from `checkout`: a new channel. */
   spawnHelper(checkout: string): SpawnedProcess;
   /** A line a bootstrap printed before its helper answered; the link keeps what it reports. */
@@ -89,6 +92,8 @@ export class LocalLink implements Link {
 
   async establish(): Promise<void> {}
 
+  networkChanged(): void {}
+
   spawnHelper(checkout: string): SpawnedProcess {
     return this.#spawn('/bin/sh', localBootstrap(checkout, this.#uv), {});
   }
@@ -124,11 +129,21 @@ const SSH_FAILED = 255;
 const AUTH_FAILURE =
   /Permission denied|Too many authentication failures|Authentication failed|Host key verification failed/;
 
+interface EstablishAttempt {
+  process: SpawnedProcess | null;
+  cancelled: boolean;
+  readonly waiters: Set<object>;
+  promise: Promise<void>;
+}
+
 export class SshLink implements Link {
   readonly host: string;
   readonly #options: SshLinkOptions;
   readonly #spawn: Spawn;
-  #establishing: Promise<void> | null = null;
+  /** Every establishment subprocess that has not exited, including retired generations. */
+  readonly #attempts = new Set<EstablishAttempt>();
+  #establishing: EstablishAttempt | null = null;
+  #released = false;
   /** The `uv` a bootstrap on the host found, passed to the next one. */
   #uv: string | null = null;
 
@@ -139,11 +154,39 @@ export class SshLink implements Link {
   }
 
   /** Establish the master if it is down; one attempt at a time. */
-  establish(interactive: boolean): Promise<void> {
-    this.#establishing ??= this.#establish(interactive).finally(() => {
-      this.#establishing = null;
+  establish(interactive: boolean, signal?: AbortSignal): Promise<void> {
+    if (this.#released) return Promise.reject(this.#releasedError());
+    if (signal?.aborted === true) {
+      return Promise.reject(new ConnectionError('link', 'the connection attempt was abandoned'));
+    }
+    const attempt = this.#establishing ?? this.#begin(interactive);
+    const waiter = {};
+    attempt.waiters.add(waiter);
+    return new Promise((resolve, reject) => {
+      const stopWaiting = (): boolean => {
+        if (!attempt.waiters.delete(waiter)) return false;
+        signal?.removeEventListener('abort', aborted);
+        return true;
+      };
+      const aborted = (): void => {
+        if (!stopWaiting()) return;
+        reject(new ConnectionError('link', 'the connection attempt was abandoned'));
+        if (attempt.waiters.size === 0) this.#cancel(attempt);
+      };
+      signal?.addEventListener('abort', aborted, {once: true});
+      void attempt.promise.then(
+        () => {
+          if (stopWaiting()) resolve();
+        },
+        error => {
+          if (stopWaiting()) reject(error);
+        },
+      );
     });
-    return this.#establishing;
+  }
+
+  networkChanged(): void {
+    if (this.#establishing !== null) this.#cancel(this.#establishing);
   }
 
   spawnHelper(checkout: string): SpawnedProcess {
@@ -165,38 +208,75 @@ export class SshLink implements Link {
   }
 
   async release(): Promise<void> {
-    // An establish attempt owns the same master this release closes. Let a started attempt settle
-    // before sending `-O exit`, otherwise its master can come up after the exit command completed.
-    await this.#establishing?.catch(() => {});
+    // Every active or retired attempt owns the same master this release closes. Kill each attempt
+    // so quitting is not held hostage by ConnectTimeout, then wait for confirmed exits before
+    // `-O exit`; otherwise a retired process could still fork a master after exit completed.
+    this.#released = true;
+    for (const attempt of this.#attempts) this.#cancel(attempt);
+    await Promise.all([...this.#attempts].map(attempt => attempt.promise.catch(() => {})));
     await this.#finish(this.#ssh(['-O', 'exit', '--', this.#options.alias]));
   }
 
-  async #establish(interactive: boolean): Promise<void> {
-    const check = await this.#finish(this.#ssh(['-O', 'check', '--', this.#options.alias]));
+  #begin(interactive: boolean): EstablishAttempt {
+    const attempt: EstablishAttempt = {
+      process: null,
+      cancelled: false,
+      waiters: new Set(),
+      promise: Promise.resolve(),
+    };
+    this.#establishing = attempt;
+    attempt.promise = this.#establish(interactive, attempt).finally(() => {
+      this.#attempts.delete(attempt);
+      if (this.#establishing === attempt) this.#establishing = null;
+    });
+    this.#attempts.add(attempt);
+    return attempt;
+  }
+
+  #cancel(attempt: EstablishAttempt): void {
+    if (attempt.cancelled) return;
+    attempt.cancelled = true;
+    if (this.#establishing === attempt) this.#establishing = null;
+    attempt.process?.kill('SIGTERM');
+  }
+
+  async #establish(interactive: boolean, attempt: EstablishAttempt): Promise<void> {
+    const checkProcess = this.#ssh(['-O', 'check', '--', this.#options.alias]);
+    attempt.process = checkProcess;
+    const check = await this.#finish(checkProcess);
+    attempt.process = null;
+    this.#stillCurrent(attempt);
     if (check.code === 0) return;
     const env: Record<string, string> = interactive
       ? {SSH_ASKPASS: this.#options.askpass, SSH_ASKPASS_REQUIRE: 'force'}
       : {};
-    const master = await this.#finish(
-      this.#ssh(
-        [
-          ...(interactive ? [] : ['-o', 'BatchMode=yes']),
-          '-T',
-          '-o',
-          'ControlMaster=auto',
-          '-o',
-          'ControlPersist=30m',
-          '-o',
-          'ConnectTimeout=20',
-          '--',
-          this.#options.alias,
-          'true',
-        ],
-        undefined,
-        env,
-      ),
+    const masterProcess = this.#ssh(
+      [
+        ...(interactive ? [] : ['-o', 'BatchMode=yes']),
+        '-T',
+        '-o',
+        'ControlMaster=auto',
+        '-o',
+        'ControlPersist=30m',
+        '-o',
+        'ConnectTimeout=20',
+        '--',
+        this.#options.alias,
+        'true',
+      ],
+      undefined,
+      env,
     );
+    attempt.process = masterProcess;
+    const master = await this.#finish(masterProcess);
+    attempt.process = null;
+    this.#stillCurrent(attempt);
     if (master.code !== 0) throw this.#sshError(master.stderr);
+  }
+
+  #stillCurrent(attempt: EstablishAttempt): void {
+    if (attempt.cancelled)
+      throw new ConnectionError('link', 'the connection attempt was abandoned');
   }
 
   #ssh(
@@ -237,5 +317,9 @@ export class SshLink implements Link {
     if (AUTH_FAILURE.test(stderr))
       return new ConnectionError('auth', `ssh ${alias}: ${lastLine(stderr)}`);
     return new ConnectionError('link', `the connection to ${alias} is down: ${lastLine(stderr)}`);
+  }
+
+  #releasedError(): ConnectionError {
+    return new ConnectionError('link', `the connection to ${this.#options.alias} was released`);
   }
 }

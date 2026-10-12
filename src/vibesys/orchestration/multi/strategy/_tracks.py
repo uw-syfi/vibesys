@@ -511,11 +511,22 @@ def on_captured(
     protocol is a failure of the run, as it is for the legacy loop.
     """
     design = state.design
-    policy = serial.focus_policy(config.attribution)
-    if design.track is not Track.CAPTURE or design.step is not Step.AWAITING or policy is None:
+    attribution = config.attribution
+    policy = serial.focus_policy(attribution)
+    if (
+        design.track is not Track.CAPTURE
+        or design.step is not Step.AWAITING
+        or policy is None
+        or attribution is None
+    ):
         return state
     if outcome.status != "succeeded" or outcome.exit_code != 0:
-        detail = outcome.detail or f"the attribution command exited with code {outcome.exit_code}"
+        detail = serial.capture_failure(
+            attribution.command,
+            exit_code=outcome.exit_code,
+            detail=outcome.detail,
+            output=outcome.output,
+        )
         return _failed(state, f"profile-guided attribution failed: {detail}")
     try:
         bottlenecks = serial.bottlenecks_of(outcome.output)

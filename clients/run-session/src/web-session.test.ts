@@ -129,6 +129,58 @@ class FaultBeforeSnapshotConnection implements RunConnection {
 }
 
 describe('WebSession', () => {
+  test('keeps a foreign fenced snapshot from proving the streamed run healthy', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.snapshots.push(snapshotResponse({run_id: 'run-b', sequence: 1, status: 'completed'}));
+    transport.silentDials = 1;
+
+    const dialed = transport.nextSubscription();
+    const starting = session.start();
+    const initial = await dialed;
+    initial.onMessage(
+      eventBatch([event(1, 'server_ready', {run_id: 'run-a'})], {
+        store_id: 'store-1',
+        through_sequence: 1,
+        history_after_sequence: 0,
+      }),
+    );
+    await starting;
+
+    expect(session.store.getState()).toMatchObject({
+      runId: 'run-a',
+      sequence: 1,
+      diagnostics: [{code: 'run_identity_mismatch'}],
+    });
+    expect(session.getState()).toMatchObject({status: 'stale', hasSnapshot: false});
+
+    await session.close();
+  });
+
+  test('keeps a foreign same-store event batch stale after run-state rejects it', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.snapshots.push(snapshotResponse({run_id: 'run-a', sequence: 1}));
+    await session.start();
+
+    transport.subscriptions[0]?.onMessage(
+      eventBatch([event(2, 'server_ready', {run_id: 'run-b'})], {
+        through_sequence: 2,
+        store_id: 'store-1',
+        history_after_sequence: 0,
+      }),
+    );
+
+    expect(session.store.getState()).toMatchObject({
+      runId: 'run-a',
+      sequence: 1,
+      diagnostics: [{code: 'run_identity_mismatch'}],
+    });
+    expect(session.getState().status).toBe('stale');
+
+    await session.close();
+  });
+
   test('keeps a newer terminal watermark when a stale same-run refresh is rejected', async () => {
     const lifecycle = new FakeLifecycle();
     const scheduler = new FakeClock();

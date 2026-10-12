@@ -33,6 +33,14 @@ _BACKEND_PROFILERS: dict[ComputeBackend, ProfilerKind] = {
 }
 
 
+@dataclass(frozen=True)
+class ProfilerChoice:
+    """The resolved profiler, and why ``auto`` chose ``none`` when it did."""
+
+    kind: ProfilerKind
+    reason: str | None = None
+
+
 def default_profiler_for_backend(backend: ComputeBackend) -> ProfilerKind:
     """Return the application policy default for one compute stack."""
     return _BACKEND_PROFILERS[backend]
@@ -216,22 +224,36 @@ def _resolve_generic_profiler(
     allowed: frozenset[ProfilerKind],
     environment_default: ProfilerKind,
     environment_supported: frozenset[ProfilerKind] | None,
-) -> ProfilerKind:
-    """Pick a host-native profiler when the generic environment supports it."""
+    backend: ComputeBackend,
+) -> ProfilerChoice:
+    """Pick a host-native profiler when the backend and the environment fit it.
+
+    The native profilers (``perf``, Instruments) see CPU work only, so they fit the CPU
+    backend alone: on an accelerator backend the workload that matters runs on the device,
+    and a CPU profile of it is empty.
+    """
+    if backend is not ComputeBackend.CPU:
+        return ProfilerChoice(
+            ProfilerKind.NONE,
+            f"the generic domain's native CPU profilers do not fit the {backend.value} backend",
+        )
     system = platform.system()
     if system == "Darwin":
         candidate = ProfilerKind.MACOS_CPU
     elif system == "Linux":
         candidate = ProfilerKind.LINUX_CPU
     else:
-        candidate = ProfilerKind.NONE
+        return ProfilerChoice(ProfilerKind.NONE, f"no native CPU profiler exists for {system}")
     if environment_supported is None or candidate in environment_supported:
-        return candidate
+        return ProfilerChoice(candidate)
     # Remote or constrained environments may not expose a host profiler.
     if environment_default in allowed and environment_default in environment_supported:
-        return environment_default
+        return ProfilerChoice(environment_default)
     if ProfilerKind.NONE in environment_supported:
-        return ProfilerKind.NONE
+        return ProfilerChoice(
+            ProfilerKind.NONE,
+            f"the selected run environment does not support {candidate.value!r}",
+        )
     supported_values = ", ".join(sorted(kind.value for kind in environment_supported))
     message = (
         "No profiler supported by both the generic domain and selected run environment; "
@@ -248,7 +270,25 @@ def resolve_profiler_kind(
     environment_default_profiler_kind: ProfilerKind,
     environment_supported_profiler_kinds: frozenset[ProfilerKind] | None = None,
 ) -> ProfilerKind:
-    """Resolve ``--profiler`` into the effective profiler kind.
+    """Resolve ``--profiler`` into the effective profiler kind (see ``resolve_profiler_choice``)."""
+    return resolve_profiler_choice(
+        requested,
+        domain=domain,
+        backend=backend,
+        environment_default_profiler_kind=environment_default_profiler_kind,
+        environment_supported_profiler_kinds=environment_supported_profiler_kinds,
+    ).kind
+
+
+def resolve_profiler_choice(
+    requested: ProfilerKind,
+    *,
+    domain: DomainName,
+    backend: ComputeBackend,
+    environment_default_profiler_kind: ProfilerKind,
+    environment_supported_profiler_kinds: frozenset[ProfilerKind] | None = None,
+) -> ProfilerChoice:
+    """Resolve ``--profiler`` into the effective profiler kind and, for ``auto``, the reason for none.
 
     ``auto`` is domain-aware. Generic workloads pick a native CPU profiler when
     the host platform has one; kernel-writing runs pick NCU on CUDA and rocprof
@@ -276,15 +316,20 @@ def resolve_profiler_kind(
             )
             _exception_message_4 = f"Profiler {requested_kind.value!r} is not supported by the selected run environment; allowed: {supported_values}."
             raise ValueError(_exception_message_4)
-        return requested_kind
+        return ProfilerChoice(requested_kind)
 
-    return _resolve_auto_profiler(
+    choice = _resolve_auto_profiler(
         domain_name,
         backend,
         allowed,
         environment_default_profiler_kind,
         environment_supported_profiler_kinds,
     )
+    if choice.kind is ProfilerKind.NONE and choice.reason is None:
+        return ProfilerChoice(
+            ProfilerKind.NONE, "the selected run environment's default profiler is none"
+        )
+    return choice
 
 
 def _resolve_auto_profiler(
@@ -293,27 +338,40 @@ def _resolve_auto_profiler(
     allowed: frozenset[ProfilerKind],
     environment_default: ProfilerKind,
     environment_supported: frozenset[ProfilerKind] | None,
-) -> ProfilerKind:
+) -> ProfilerChoice:
     if domain is DomainName.GENERIC:
-        return _resolve_generic_profiler(allowed, environment_default, environment_supported)
+        return _resolve_generic_profiler(
+            allowed, environment_default, environment_supported, backend
+        )
 
     # OTel requires an instrumented input bundle; bare microservices use none.
     if domain is DomainName.MICROSERVICES:
-        return ProfilerKind.NONE
+        return ProfilerChoice(
+            ProfilerKind.NONE, "microservices profiling needs an instrumented input"
+        )
 
     if domain is DomainName.KERNEL_WRITING:
         candidate = _KERNEL_WRITING_PROFILERS.get(backend, ProfilerKind.NONE)
         if candidate in allowed and (
             environment_supported is None or candidate in environment_supported
         ):
-            return candidate
-        return ProfilerKind.NONE
+            return ProfilerChoice(candidate)
+        return ProfilerChoice(
+            ProfilerKind.NONE,
+            f"no kernel-writing profiler fits the {backend.value} backend in the selected "
+            "run environment",
+        )
 
     if allowed == frozenset({ProfilerKind.NONE}):
-        return ProfilerKind.NONE
+        return ProfilerChoice(
+            ProfilerKind.NONE,
+            f"the {domain.value} domain has no profiler for the {backend.value} backend",
+        )
 
-    return _resolve_environment_profiler(
-        domain, backend, allowed, environment_default, environment_supported
+    return ProfilerChoice(
+        _resolve_environment_profiler(
+            domain, backend, allowed, environment_default, environment_supported
+        )
     )
 
 
@@ -413,6 +471,7 @@ __all__ = [
     "CLI_PROFILER_CHOICES",
     "PROFILERS_COMMON_STAGED_NAME",
     "PROFILER_DEFINITIONS",
+    "ProfilerChoice",
     "ProfilerDefinition",
     "ProfilerKind",
     "ProfilerPreflightResult",
@@ -426,5 +485,6 @@ __all__ = [
     "profiler_support_extra",
     "require_domain_name",
     "require_profiler_kind",
+    "resolve_profiler_choice",
     "resolve_profiler_kind",
 ]

@@ -117,6 +117,9 @@ class Executors:
     infrastructure_failure: Callable[[MeasurementPlan], bool] = lambda _plan: False
     # What the attribution command prints (profile result protocol v1).
     attribution: str = ""
+    # How the attribution command ends; nonzero makes it fail, as a program missing in the
+    # command environment does (127).
+    attribution_exit_code: int = 0
     submit: Callable[[SubmitMeasurement], Answer] | None = None
     # True for an implementer that measures its workspace through the evaluation tool during
     # its turn: the production bridge's `AgentMeasurementRequested`, admitted by core.
@@ -376,7 +379,10 @@ class Executors:
         if isinstance(typed, CaptureCommand):
             return Succeeded(
                 outcome=CommandCapture(
-                    status="succeeded", exit_code=0, output=self.attribution, truncated=False
+                    status="succeeded",
+                    exit_code=self.attribution_exit_code,
+                    output=self.attribution,
+                    truncated=False,
                 )
             )
         assert isinstance(typed, RenderRoleArtifacts)

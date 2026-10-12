@@ -311,8 +311,9 @@ multi-file project.
 | `--openevolve-migration-interval` | `50` | Per-island admitted generations between migrations. |
 | `--openevolve-migration-rate` | `0.1` | Fraction of island elites copied during migration. |
 
-OpenEvolve state is stored under
-`.vibesys/state/runs/<run-id>/evolve/openevolve/` and loaded on resume. See
+OpenEvolve state is part of the run's committed strategy state (the database's programs, with
+each passing child's patch text, so that state grows with the patches the database keeps) and is
+loaded on resume. See
 [`docs/contributing/openevolve.md`](contributing/openevolve.md) for the adapter boundary and metric
 semantics. On resume the policy and saved settings are restored when these
 flags are omitted; partial explicit settings are merged with the saved values,
@@ -521,6 +522,11 @@ supported by this CLI.
 | `macos_cpu` | Instruments Time Profiler with a supported `/usr/bin/sample` fallback. |
 | `linux_cpu` | Linux `perf` profiler for native and mixed-language CPU workloads. |
 
+When `auto` selects a host-native profiler that fails its local capability
+preflight, VibeSys logs the diagnostic and continues with `none`. An explicit
+`macos_cpu` or `linux_cpu` request remains a configuration error when its
+preflight fails.
+
 `--modal --profiler nsys` is rejected by the CLI because Modal runs must use the
 torch profiler path.
 
@@ -556,6 +562,13 @@ The result is JSON with `version = 1`, a `cost_unit`, and ranked `components`.
 Each component has `name`, nonnegative `cost`, `share` between zero and one, and
 an optional `evidence` string list. This configuration is task capability, not
 a modality. Other loops ignore it.
+
+The command runs in the run's own command environment: under `--run-environment
+slurm` that is the editor container, not a Slurm job, so a Python environment that
+exists only on the host (or is exposed to GPU jobs through `read_only_paths`) is not
+there. Make the command self-contained in the workspace. When it fails, the run stops
+at the first capture and the error names the command, where it ran, and the output tail
+(exit code 127 means a program it calls was not found).
 
 `[agent].domain` in `vibesys.input.toml` supplies cross-cutting problem-space
 context for the agent and evolve loops. Registered domains include:

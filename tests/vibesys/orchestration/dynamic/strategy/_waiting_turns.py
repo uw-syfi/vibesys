@@ -107,6 +107,11 @@ class WaitingTurns(Executors):
     delayed: int = 0
     submitted: int = 0
     waiting: set[str] = field(default_factory=set)
+    submit_only: tuple[str, ...] = ()
+    """Roles whose fresh turns submit an evaluation and end plainly, leaving it running."""
+    submitting: set[str] = field(default_factory=set)
+    asked: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
+    """(attempt, role, reply) of every submit the tool server answered, errors included."""
     running: dict[str, int] = field(default_factory=dict)
     clock: VirtualClock | None = None
     """The run's simulated clock, bound by `attach_for` once the run exists."""
@@ -133,7 +138,10 @@ class WaitingTurns(Executors):
 
     def _turn(self, request: DispatchTurn | ResumeSessionTurn) -> Answer:
         role = request.turn.session.role_id.root
-        if isinstance(request, DispatchTurn) and role.endswith(self.roles):
+        if isinstance(request, DispatchTurn) and role.endswith(self.submit_only):
+            assert request.request_id is not None
+            self.submitting.add(request.request_id.root)
+        elif isinstance(request, DispatchTurn) and role.endswith(self.roles):
             ordinal = self.started
             self.started += 1
             if self.decide(ordinal):
@@ -168,13 +176,24 @@ def translator_for(script: WaitingTurns, bridge: AgentEvaluationBridge) -> type[
                 # test-isolation: yields the event loop, no time passes
                 await asyncio.sleep(0)
             script.delayed += 1
-            if request.request_id.root not in script.waiting:
+            if request.request_id.root not in script.waiting | script.submitting:
                 return result
             (descriptor,) = bridge.servers(_ROLE, request.scope)
             token = dict(descriptor.runtime_env)["VS_EVALUATION_TOKEN"]
-            reply, _ = await bridge.answer(SubmitCall(token=token).model_dump_json().encode())
-            handle = json.loads(reply).get("result", {}).get("handle_id")
-            if handle is not None:
+            reply, acknowledge = await bridge.answer(
+                SubmitCall(token=token).model_dump_json().encode()
+            )
+            acknowledge()  # the scripted agent read the reply
+            parsed = json.loads(reply)
+            script.asked.append(
+                (
+                    request.scope.owner.root,
+                    request.turn.session.role_id.root,
+                    parsed.get("result", parsed),
+                )
+            )
+            handle = parsed.get("result", {}).get("handle_id")
+            if handle is not None and request.request_id.root in script.waiting:
                 # The loop runs the submission while the agent works: it owns its job by now.
                 assert script.clock is not None
                 await script.clock.sleep(3.0)

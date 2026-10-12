@@ -90,6 +90,9 @@ export class ConnectionManager implements AsyncDisposable {
 
   /** The machine woke, or the network came back: every connection checks what it waits on. */
   wake(): void {
+    // One link can serve several shown and replaced connections. Retire its stale attempt once,
+    // before any connection starts the fresh operation that all of them may share.
+    for (const link of this.#links.values()) link.networkChanged();
     for (const {connection} of this.#shown.values()) connection.dispatch({type: 'wake'});
     for (const connection of this.#replaced) connection.dispatch({type: 'wake'});
   }

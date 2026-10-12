@@ -156,3 +156,25 @@ def test_issue_queue_prompt_matches_its_golden(name: str) -> None:
 @pytest.mark.parametrize("role", CORE_ROLES, ids=lambda role: role.id)
 def test_issue_queue_system_prompt_matches_its_golden(role: AgentRole) -> None:
     assert_exact_text(_SNAPSHOT_DIR / f"system_{role.id}.txt", role.system_prompt)
+
+
+_SERVING_ONLY_TERMS = (
+    "VibeServeModel",
+    "/v1/completions",
+    "/health",
+    "inference server",
+    "inference-server",
+)
+
+
+@pytest.mark.parametrize("name", [n for n in sorted(_CASES) if n.startswith("bootstrap")])
+def test_the_first_issue_text_names_no_kind_of_task_but_the_runs_own(name: str) -> None:
+    context, facts = _CASES[name]
+    text = _render(context, facts)
+    assert facts.objective in text
+    assert not [term for term in _SERVING_ONLY_TERMS if term in text]
+
+
+@pytest.mark.parametrize("role", CORE_ROLES, ids=lambda role: role.id)
+def test_no_issue_queue_system_prompt_assumes_a_serving_task(role: AgentRole) -> None:
+    assert not [term for term in _SERVING_ONLY_TERMS if term in role.system_prompt]

@@ -69,6 +69,7 @@ from vs_core._step import (
 )
 from vs_core._strategy_operations import (
     CAPTURE_SUFFIX,
+    EXPORT_PATCH_SUFFIX,
     INTERPRET_SUFFIX,
     RENDER_SUFFIX,
     RETAIN_SUFFIX,
@@ -77,10 +78,12 @@ from vs_core._strategy_operations import (
     CaptureCommandBase,
     CommandCapture,
     EvidenceReadingsBase,
+    ExportPatchBase,
     InterpretEvidenceBase,
     LocalValidationReport,
     OperationKindError,
     ParentVerification,
+    PatchExport,
     RenderedArtifacts,
     RenderRoleArtifactsBase,
     RetainVerifiedRevisionBase,
@@ -95,6 +98,7 @@ from vs_core._turn_chain import (
 )
 from vs_core._waitable import (
     Waitable,
+    WaitableReply,
     WaitingForDependency,
     WaitingForEvaluation,
 )
@@ -520,6 +524,7 @@ __all__ = [
     "DEFAULT_MAX_MEASUREMENT_SUBMISSIONS",
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
+    "EXPORT_PATCH_SUFFIX",
     "INTERPRET_SUFFIX",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
     "RENDER_SUFFIX",
@@ -663,6 +668,7 @@ __all__ = [
     "EvidenceRequirement",
     "EvidenceRequirements",
     "ExecuteRegisteredOperation",
+    "ExportPatchBase",
     "Generation",
     "HistoricalSubmissionReceipt",
     "HostFence",
@@ -761,6 +767,7 @@ __all__ = [
     "OwnershipSettled",
     "ParentVerification",
     "Park",
+    "PatchExport",
     "PoolCapacity",
     "PoolId",
     "PreparedSubmissionReceipt",
@@ -925,6 +932,7 @@ __all__ = [
     "Wait",
     "WaitKind",
     "Waitable",
+    "WaitableReply",
     "WaitingForDependency",
     "WaitingForEvaluation",
     "WaitingPhase",

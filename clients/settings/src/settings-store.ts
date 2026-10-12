@@ -213,6 +213,12 @@ async function writeJson(
     await filesystem.remove(staging);
     return 'cancelled';
   }
-  await filesystem.replace(staging, path);
+  try {
+    await filesystem.replace(staging, path);
+  } catch (error) {
+    // Best effort: a failed cleanup must not hide the reason the replace itself failed.
+    await filesystem.remove(staging).catch(() => {});
+    throw error;
+  }
   return 'committed';
 }

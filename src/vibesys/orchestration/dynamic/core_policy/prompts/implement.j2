@@ -69,7 +69,8 @@ rerun a local check on files that already passed it. When a check output is long
 it to a file and read the file, instead of rerunning the check to see another part of it.
 After a failure, change the code before you run the check again.
 
-Return only schema-valid JSON: `summary`, `outcome` (use `nominated` only when the
-candidate is ready for independent review and framework gates), `evidence` and, when
-the outcome is `implementation_failed`, `next_step`.
+Return only schema-valid JSON with one `reply` object. In that object, set
+`summary`, `outcome` (use `nominated` only when the candidate is ready for independent
+review and framework gates), `evidence` and, when the outcome is
+`implementation_failed`, `next_step`.
 {% include 'agent_evaluation.j2' %}

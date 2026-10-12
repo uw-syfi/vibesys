@@ -10,8 +10,9 @@ Flow of one turn that waits on its measurements:
 
 1. ``submit_evaluation``: snapshot the caller's workspace, build the plan from the
    host's ``AgentEvaluationPolicy``, admit the event. Core allocates one
-   ``SubmitMeasurement`` (or refuses, with a typed reason). The reply is the handle,
-   which is the id core and the executor give the measurement's job.
+   ``SubmitMeasurement``, names the one the scope already holds for this candidate, or
+   refuses with a typed reason. The reply is the handle, which is the id core and the
+   executor give the measurement's job.
 2. ``validate_evaluation_wait``: the handles must be this scope's own admitted
    submissions, and core must accept a suspension for the scope now
    (``suspension_refusal``: no earlier resume owed, scope active). Otherwise the agent
@@ -30,20 +31,29 @@ Every failure of a call is a ``ToolRefusal`` answered to the agent; none reaches
 shell's commit. ``yielded`` asks core again when the turn is reported and, if the scope
 changed since the wait was validated, ends the turn without suspending.
 
+One evaluation per candidate and scope. A call for a candidate its scope already evaluates
+(same content and measurement policy, so the same ``MeasurementIdentity``) is answered with
+that evaluation's handle, with its ``outcome`` and evidence ids once it has ended, and
+charges nothing. Core decides this (``AgentCall.repeat``): the scope's submission budget is
+the one record of "this candidate's evaluation", and this bridge keeps none of its own. The
+scope is a workstream's attempt, so the roles that hold it (an implementer, then the judge
+reviewing its candidate) read the same evaluation; another attempt, even with identical
+content, has its own, because its evidence and budget are its own. Only a released,
+retryable infrastructure failure lets the next call start a new submission.
+
 A submission the agent has not learned of is never lost. The reply that carries a handle
 may not reach the agent (its tool deadline expired while the host snapshotted the workspace
-behind a busy lock, or the agent's process died). Core has already charged the budget, so a
-submission stays *owed* until the client confirms it read the reply. The next
-``submit_evaluation`` for the same candidate content, in this turn or a later one, returns
-that handle and charges nothing; ``unacknowledged`` lists what is still owed, for the
-run loop's stall report.
+behind a busy lock, or the agent's process died). A submission stays *owed* until the client
+confirms it read the reply: the next ``submit_evaluation`` for the same candidate content,
+in this turn or a later one, returns that handle, repeat or not. ``unacknowledged`` lists
+what is still owed, for the run loop's stall report.
 
 What is owed is durable (``OwedSubmissions``, keyed by scope, candidate revision and
-policy), so a host restart keeps the promise. The entry is written before the charge, with
-the ``call_id`` the charge will carry; core's committed state says whether the charge
-happened. A retry finds the entry, asks core for that ``call_id``, and either returns the
-handle of the charge core holds or, when the charge never committed, charges under a new
-entry. Core admits a ``call_id`` once, so one entry is never charged twice.
+policy), so a host restart keeps the promise. The entry is written before the call, with
+the ``call_id`` the call will carry; core's committed state says whether the call happened.
+A retry finds the entry, asks core for that ``call_id``, and either returns the answer core
+holds or, when the call never committed, makes it under a new entry. Core admits a
+``call_id`` once, so one entry is never answered twice.
 
 The yield is held in memory until the turn is reported. A host restart in that window
 loses it; the turn then ends without suspending and its measurement result reaches the
@@ -65,6 +75,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from pydantic import TypeAdapter, ValidationError
 
 from vs_core.api import (
+    AgentCall,
     AgentMeasurementRequested,
     AgentRejection,
     ArtifactRef,
@@ -77,13 +88,12 @@ from vs_core.api import (
     InvocationRef,
     MeasurementPlan,
     MeasurementRecipe,
-    RequestId,
+    PreparedSubmissionReceipt,
     ResourceId,
     RevisionRef,
     Scope,
     SessionPhase,
     StageBudget,
-    SubmitMeasurement,
     SuspensionRefusal,
     Transition,
     suspension_refusal,
@@ -114,7 +124,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vs_core.api import CoreEvent, CoreState
+    from vs_core.api import CoreEvent, CoreState, RequestId
     from vs_mcp.api import ToolServerDescriptor
     from vs_runtime._workspace_receipts import WorkspaceReceipts
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
@@ -177,6 +187,16 @@ def _continuation(
         deadline_at=min(deadlines[handle] for handle in handles),
         phase=ContinuationPhase.WAITING,
     )
+
+
+def _outcome(core: CoreState, request_id: RequestId) -> str | None:
+    """How the submission ended per core's budget receipt, or None while it has not."""
+    for budget in core.evaluation.submission_budgets:
+        for receipt in budget.receipts:
+            if isinstance(receipt, PreparedSubmissionReceipt) and receipt.request_id == request_id:
+                seen = receipt.observation
+                return seen.status.value if seen is not None and seen.terminal else None
+    return None
 
 
 def _ignore_diagnostic(line: str) -> None:
@@ -462,9 +482,9 @@ class AgentEvaluationBridge:
         lines: list[str] = []
         for item in self._owed.all():
             charged = self._charge_of(shell, item)
-            if charged is not None:
+            if charged is not None and charged.request_id is not None:
                 lines.append(
-                    f"{handle_for(charged)} (candidate {item.key.revision[:12]}, "
+                    f"{handle_for(charged.request_id)} (candidate {item.key.revision[:12]}, "
                     f"scope {item.key.scope.model_dump_json()})"
                 )
         return tuple(lines)
@@ -479,8 +499,10 @@ class AgentEvaluationBridge:
     async def _submit(
         self, scope: Scope
     ) -> tuple[SubmittedReply | RunStoppingReply, Callable[[], None]]:
-        """Admit the caller's candidate, or hand back the handle it was never told.
+        """Admit the caller's candidate, or hand back the handle of its evaluation.
 
+        Core decides whether the call is a new submission or a repeat of one the scope
+        already holds (see ``AgentCall.repeat``); the reply carries the handle either way.
         The second value acknowledges the handle once its reply reached the agent.
         """
         shell, clock = self._bound()
@@ -498,11 +520,9 @@ class AgentEvaluationBridge:
             owed = self._owed.find(key)
             charged = None if owed is None else self._charge_of(shell, owed)
             if owed is not None and charged is not None:
-                # A retry of a submission whose reply was lost, possibly before a restart:
-                # the same one, not a second.
-                handle = handle_for(charged)
-                scoped.submitted[handle] = self._deadline(shell, owed)
-                return SubmittedReply(handle_id=handle), self._acknowledger(owed)
+                # A retry of a call whose reply was lost, possibly before a restart: the
+                # same answer, not a second call.
+                return self._answer(shell, scoped, charged), self._acknowledger(owed)
             now = clock.now()
             # Intent first: if the host dies after the charge commits, the entry names it.
             owed = OwedSubmission(key=key, call_id=f"agent:{uuid.uuid4().hex}", submitted_at=now)
@@ -514,33 +534,53 @@ class AgentEvaluationBridge:
                     call_id=owed.call_id,
                 )
                 transition = self._admit(shell, event, now)
-                request = next(
-                    (r for r in transition.requests if isinstance(r, SubmitMeasurement)), None
-                )
-                if request is None or request.request_id is None:
-                    reply = self._refusal(transition, owed.call_id)
+                call = self._call_of(transition.state, owed.call_id)
+                if call.request_id is None:
+                    reply = self._refusal(call)
                     self._owed.clear(key, owed.call_id)
                     return reply, _nothing
             except BaseException:
                 self._owed.clear(key, owed.call_id)
                 raise
-            handle = handle_for(request.request_id)
-            scoped.submitted[handle] = request.deadline_at
-            return SubmittedReply(handle_id=handle), self._acknowledger(owed)
+            return self._answer(shell, scoped, call), self._acknowledger(owed)
 
     @staticmethod
-    def _charge_of(shell: AdmissionShell, owed: OwedSubmission) -> RequestId | None:
-        """The submission core charged under this entry, or None when core holds none."""
+    def _answer(shell: AdmissionShell, scoped: _Scoped, call: AgentCall) -> SubmittedReply:
+        """The reply for a call core answered with a submission, which the turn may now wait on."""
+        if call.request_id is None or call.deadline_at is None:
+            message = "an answered agent call names its submission and deadline"
+            raise ContractError(("agent_calls",), message)
+        handle = handle_for(call.request_id)
+        scoped.submitted[handle] = call.deadline_at
+        outcome = _outcome(shell.admitted_core, call.request_id)
+        records = shell.admitted_core.evaluation.evidence if outcome is not None else ()
+        return SubmittedReply(
+            handle_id=handle,
+            repeat=call.repeat,
+            outcome=outcome,
+            evidence=tuple(
+                item.evidence_id.root for item in records if item.source_request == call.request_id
+            ),
+        )
+
+    @staticmethod
+    def _call_of(state: CoreState, call_id: str) -> AgentCall:
+        """Core's record of the call, which it made when it stepped the event."""
+        evaluation = state.evaluation
+        call = next((c for c in evaluation.agent_calls if c.call_id == call_id), None)
+        if call is None:
+            message = "core neither admitted nor refused the evaluation call"
+            raise ContractError(("agent_calls",), message)
+        return call
+
+    @staticmethod
+    def _charge_of(shell: AdmissionShell, owed: OwedSubmission) -> AgentCall | None:
+        """The call core answered with a submission under this entry, or None when it holds none."""
         call = next(
             (c for c in shell.admitted_core.evaluation.agent_calls if c.call_id == owed.call_id),
             None,
         )
-        return None if call is None else call.request_id
-
-    def _deadline(self, shell: AdmissionShell, owed: OwedSubmission) -> float:
-        """The deadline core gave the entry's measurement: its plan's, bounded by the run's."""
-        plan = self._policy.plan(revision_ref(owed.key.revision), now_at=owed.submitted_at)
-        return min(plan.deadline_at, shell.admitted_core.run.deadline_at)
+        return None if call is None or call.request_id is None else call
 
     def _acknowledger(self, owed: OwedSubmission) -> Callable[[], None]:
         def acknowledge() -> None:
@@ -597,11 +637,8 @@ class AgentEvaluationBridge:
         return revision
 
     @staticmethod
-    def _refusal(transition: Transition, call_id: str) -> RunStoppingReply:
-        call = next(
-            (c for c in transition.state.evaluation.agent_calls if c.call_id == call_id), None
-        )
-        if call is None or call.rejection is None:
+    def _refusal(call: AgentCall) -> RunStoppingReply:
+        if call.rejection is None:
             message = "core neither admitted nor refused the evaluation call"
             raise ContractError(("agent_calls",), message)
         if call.rejection is AgentRejection.RUN_STOPPING:

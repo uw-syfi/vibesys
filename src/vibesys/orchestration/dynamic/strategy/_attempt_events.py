@@ -8,16 +8,14 @@ matching awaiting record and leave the state unchanged.
 import hashlib
 from typing import Literal
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 
 from vibesys.candidates.api import STOPPED, stages
 from vibesys.hypothesis import HypothesisConfig, HypothesisOutcome
 from vibesys.hypothesis.cadence import keeps_hypothesis_active, review_due
 from vibesys.metrics import AcceptedReading, reading_of
 from vibesys.orchestration.dynamic.models import (
-    ImplementerReply,
     ImplementerResult,
-    JudgeReply,
     ReviewResult,
     WaitingForEvaluation,
 )
@@ -79,13 +77,14 @@ from vs_core.api import (
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
+    WaitableReply,
     ledger_refs,
     may_resubmit,
     trusted_keys,
 )
 
-_IMPLEMENTER_REPLY = TypeAdapter(ImplementerReply)
-_JUDGE_REPLY = TypeAdapter(JudgeReply)
+_IMPLEMENTER_REPLY = WaitableReply[ImplementerResult]
+_JUDGE_REPLY = WaitableReply[ReviewResult]
 _CORRECTION_ROLE: dict[Role, Literal["planner", "implementer", "judge", "profiler"]] = {
     Role.PLANNER: "planner",
     Role.IMPLEMENTER: "implementer",
@@ -620,7 +619,7 @@ def _decode(
 ) -> ImplementerResult | ReviewResult | WaitingForEvaluation | str:
     adapter = _JUDGE_REPLY if role is Role.JUDGE else _IMPLEMENTER_REPLY
     try:
-        return adapter.validate_json(payload)
+        return adapter.model_validate_json(payload).reply
     except ValidationError as error:
         return str(error)
 

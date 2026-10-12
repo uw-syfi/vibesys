@@ -444,9 +444,15 @@ def _drop_before_scheduler_acceptance() -> None:
 class _TombstonedSubmissionCluster(FakeCluster):
     """A lost dispatch whose tombstone lookup follows an exact public schedule."""
 
-    def __init__(self, schedule: tuple[str | None | ClusterUnknown, ...]) -> None:
+    def __init__(
+        self,
+        schedule: tuple[str | None | ClusterUnknown, ...],
+        *,
+        notify_after: int | None = None,
+    ) -> None:
         super().__init__()
         self._schedule = schedule
+        self._notify_after = len(schedule) if notify_after is None else notify_after
         self.cancelled_job_ids: list[str | None] = []
         self.schedule_consumed = Gate()
         self._index = 0
@@ -464,7 +470,7 @@ class _TombstonedSubmissionCluster(FakeCluster):
             self.cancelled_job_ids.append(reading)
             self._late_job_id = reading or self._late_job_id
             outcome = ClusterCancelRequested(operation_id=target, job_id=reading)
-        if self._index >= len(self._schedule):
+        if self._index >= self._notify_after:
             self.schedule_consumed.open()
         return outcome
 
@@ -1348,7 +1354,10 @@ async def test_unknown_during_absence_confirmation_keeps_ambiguous_submission_ow
     """Transport uncertainty cannot publish failure from incomplete absence evidence."""
     config = _config()
     unknown = ClusterUnknown(operation_id="eval-unknown", reason="scheduler lookup failed")
-    runner = _TombstonedSubmissionCluster((None, unknown))
+    runner = _TombstonedSubmissionCluster(
+        (None, unknown, None, None),
+        notify_after=2,
+    )
     runner.script("eval-unknown", on_dispatch=_drop_before_scheduler_acceptance)
     executor = SlurmEvaluationExecutor(
         config,
