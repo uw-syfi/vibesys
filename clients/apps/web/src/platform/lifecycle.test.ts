@@ -1,11 +1,11 @@
 import {describe, expect, test} from 'bun:test';
-import {disconnect, sessionWith} from '@vibesys/run-session/testing';
 import type {PageVisibility} from '@vibesys/run-session';
+import {disconnect, sessionWith} from '@vibesys/run-session/testing';
 import {
-  createBrowserLifecycle,
   type BrowserDocument,
   type BrowserNavigator,
   type BrowserWindow,
+  createBrowserLifecycle,
 } from './lifecycle.js';
 
 class FakeDocument implements BrowserDocument {
