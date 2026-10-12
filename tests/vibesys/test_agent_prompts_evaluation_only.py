@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 _ENVIRONMENTS = PROMPTS_DIR / "environments"
 # The limits the environment hands its notes template (``AgentGpuFacts`` in vs_runtime).
-_GPU_FACTS = SimpleNamespace(max_gpus=4, max_time_minutes=90, read_only_paths=())
+_GPU_FACTS = SimpleNamespace(max_gpus=4, max_time_minutes=90, read_only_paths=(), tool_paths=())
 # What the evaluation-tool surface may say about vibesys-gpu: the command form, or the name.
 _GPU_USE = re.compile(r"vibesys-gpu(`| --gpus N --time MINUTES -- COMMAND| -- COMMAND)")
 _LOOPS = {

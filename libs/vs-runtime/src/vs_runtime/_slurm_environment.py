@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
@@ -24,6 +24,7 @@ from vs_runtime._host_command_bridge import (
     planned_gates,
     write_client_launcher,
 )
+from vs_runtime._job_tools import TOOLKIT_BIN_PATTERNS, find_job_tool, off_path_tools
 from vs_runtime._run_environment import (
     AgentGpuFacts,
     ClusterEvaluationFacts,
@@ -194,6 +195,9 @@ class _AgentGpuMode:
     config: AgentGpuConfig
     #: How this host reaches Slurm: the local transport's shell.
     shell_command: tuple[str, ...]
+    #: The ``PATH`` a job inherits (the host's), and where the CUDA tools live besides it.
+    job_path: str = field(default_factory=lambda: os.environ.get("PATH", ""))
+    toolkit_patterns: tuple[str, ...] = TOOLKIT_BIN_PATTERNS
     gate_client = AGENT_GPU_LAUNCHER
     remote_capture = False
     materialize_local_model_weights = True
@@ -204,7 +208,12 @@ class _AgentGpuMode:
     @property
     def agent_gpu_facts(self) -> AgentGpuFacts:
         return AgentGpuFacts(
-            self.config.max_gpus, self.config.max_time_minutes, self.config.read_only_paths
+            self.config.max_gpus,
+            self.config.max_time_minutes,
+            self.config.read_only_paths,
+            tool_paths=off_path_tools(
+                _JOB_PROFILER_TOOLS, path_env=self.job_path, toolkit_patterns=self.toolkit_patterns
+            ),
         )
 
     def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
@@ -213,7 +222,15 @@ class _AgentGpuMode:
                 f"`{executable}` would run in the editor container, which ships no "
                 "profiling tools, and the workload runs in Slurm jobs, not in the container"
             )
-        return assumed_tool(executable)
+        command = find_job_tool(
+            executable, path_env=self.job_path, toolkit_patterns=self.toolkit_patterns
+        )
+        if command is None:
+            # The compute nodes' toolkit may live where this host cannot see it (a login
+            # node without CUDA), so an absent tool is the cluster's to provide, not a
+            # reason to refuse; the prompt then offers no path and the bare name stands.
+            return assumed_tool(executable)
+        return ToolLocation.found(command)
 
     def gpu_commands(
         self, request: RunEnvironmentRequest, confinement: JobConfinement | None
@@ -228,6 +245,10 @@ class _AgentGpuMode:
 
     def editor_env(self, launcher: Path) -> dict[str, str]:
         return agent_gpu_env(launcher)
+
+
+#: The profilers whose directories the agent is told when a job's PATH lacks them.
+_JOB_PROFILER_TOOLS = ("ncu", "nsys")
 
 
 def _mode(settings: SlurmOperatorSettings) -> _Mode:

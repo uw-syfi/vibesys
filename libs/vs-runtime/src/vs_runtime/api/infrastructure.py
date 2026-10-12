@@ -86,6 +86,7 @@ from vs_runtime._failure_classification import (
 from vs_runtime._fallback import FallbackTarget, ProviderFallback
 from vs_runtime._image_features import RUN_ENVIRONMENT_FEATURES_PROJECT, image_features
 from vs_runtime._input_project import InputDependency, materialize_input_project
+from vs_runtime._job_tools import TOOLKIT_BIN_PATTERNS, find_job_tool, off_path_tools
 from vs_runtime._linux_cpu_profiler import (
     Capability as LinuxProfilerCapability,
 )
@@ -472,6 +473,7 @@ __all__ = [
     "RESET_MARGIN_SECONDS",
     "RUN_ENVIRONMENT_FEATURES_PROJECT",
     "SANDBOX_EVALUATOR_TOOLS_ROOT",
+    "TOOLKIT_BIN_PATTERNS",
     "TOOL_TOKEN_PREFIX",
     "AgentConfigurationResolver",
     "AgentExecutionConfiguration",
@@ -649,6 +651,7 @@ __all__ = [
     "docker_evaluator_tools_root",
     "evaluator_agent_toolchains",
     "evaluator_container_setup",
+    "find_job_tool",
     "image_features",
     "job_failure",
     "load_evaluator_package",
@@ -657,6 +660,7 @@ __all__ = [
     "materialize_input_project",
     "materialize_objective_document",
     "migrate_recorded_run_environment",
+    "off_path_tools",
     "offered_skill_facts",
     "open_agent_execution_environment",
     "open_managed_conversation",

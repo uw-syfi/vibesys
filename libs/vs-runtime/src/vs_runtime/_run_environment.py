@@ -281,6 +281,9 @@ class AgentGpuFacts:
     max_time_minutes: int
     #: Host paths the jobs may read besides the workspace and system directories.
     read_only_paths: tuple[str, ...] = ()
+    #: ``(name, absolute path)`` of each profiler (``ncu``, ``nsys``) that exists on the host but
+    #: not on a job's ``PATH``: a bare ``ncu`` exits 127 in a job, so the agent names the path.
+    tool_paths: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
