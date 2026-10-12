@@ -517,6 +517,7 @@ __all__ = [
     "PlannerWorkstream",
     "PortfolioPlan",
     "ProfileDecision",
+    "ProfileField",
     "ProfileOffer",
     "ProfilePlan",
     "ReviewResult",

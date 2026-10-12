@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.orchestration.dynamic.core_policy._limits import limits_for, run_deadline_at
 from vibesys.orchestration.dynamic.core_policy._replies import reply_schemas
+from vibesys.orchestration.dynamic.models import ProfileField
 from vibesys.orchestration.dynamic.strategy.api import (
     JUDGE_REPLY,
     DynamicConfig,
@@ -24,7 +25,6 @@ from vs_core.api import (
     RevisionRef,
 )
 from vs_core.api import RunFacts as CoreRunFacts
-from vs_evaluator_protocol.api import ProfileField
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

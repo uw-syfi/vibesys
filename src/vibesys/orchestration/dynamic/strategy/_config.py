@@ -9,9 +9,8 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import Field
 
 from vibesys.candidates.api import CandidateConfig
-from vibesys.orchestration.dynamic.models import ProfileOffer
+from vibesys.orchestration.dynamic.models import ProfileField, ProfileOffer
 from vs_core.api import ArtifactRef
-from vs_evaluator_protocol.api import ProfileField
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.models import DynamicOptions
