@@ -48,6 +48,7 @@ function sessionState(
     hasSnapshot,
     status,
     error: status === 'stale' ? outage : null,
+    iterationError: null,
     controls:
       controls === 'up'
         ? {status: 'connected'}

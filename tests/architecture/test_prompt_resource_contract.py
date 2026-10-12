@@ -68,7 +68,7 @@ from vibesys.run.workspace_policy import (
     build_workspace_materialization_plan,
     skill_copy,
 )
-from vs_evaluation.api import EvaluationOperationSnapshot, EvaluationState, ProfileField
+from vs_evaluation.api import ProfileField
 from vs_issue_tracker.api import Issue, IssueStatus, IssueType
 from vs_project.api import Project
 from vs_prompts.api import resolve_free_variables
@@ -176,15 +176,14 @@ def representative_context() -> dict[str, object]:
         "domain_single_agent",
         "environment_notes",
         "error",
-        "evaluation_tool",
         "evidence",
         "exhaustion_entry",
         "feedback",
         "framework_revert_commit",
-        "gate_client",
         "gate_approved_evaluation_artifact",
         "gate_approved_perf_unit",
         "gpu",
+        "gpu_client",
         "handles",
         "history",
         "history_root",
@@ -319,13 +318,6 @@ def representative_context() -> dict[str, object]:
     )
     context.update(
         archive=ParetoArchiveView(axes=(), relative_noise=0.05, latest=None),
-        capture=EvaluationOperationSnapshot(
-            handle_id="profile-capture",
-            candidate_revision="fixture-candidate",
-            state=EvaluationState.SUCCEEDED,
-            evidence_recorded=True,
-            evidence_ids=("a" * 64,),
-        ),
         decision=PreRoundDecision(need_profile=True, profile_focus="queue", reasoning="Measure."),
         evaluation_suspension=True,
         exhaustion_info=ExhaustionNotice(round_number=1, attempts=2, feedback="Retry."),
@@ -414,7 +406,7 @@ def render_packaged_prompts(installed: Path) -> int:
         "tool_paths": (("ncu", "/usr/local/cuda/bin/ncu"),),
     }
     context["prompts"] = ("Review the candidate.",)
-    context["inputs"] = ({"mode": "steer", "text": "Focus on the cache."},)
+    context["steers"] = ({"mode": "steer", "text": "Focus on the cache."},)
     hidden = (
         build_project_path_policy(workspace, evaluator_source=None).resolve(workspace).hidden_paths
     )
@@ -634,15 +626,6 @@ def template_context(
         )
     if "response" in free:
         values["response"] = response_for(path)
-    if path.name == "profiler_resume_prompt.j2":
-        values["results"] = (
-            EvaluationOperationSnapshot(
-                handle_id="evaluation-1",
-                state=EvaluationState.FAILED,
-                evidence_recorded=False,
-                failure="Failed accuracy.",
-            ).model_dump(mode="json"),
-        )
     if path.parent.name == "profilers" and path.stem in {
         kind.value for kind in ACTIVE_PROFILER_KINDS
     }:

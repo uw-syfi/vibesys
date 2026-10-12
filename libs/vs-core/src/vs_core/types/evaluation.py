@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from .common import (
     ArtifactRef,
@@ -44,7 +44,33 @@ class SnapshotResultRef(Value):
     request_id: RequestId
 
 
-class MeasurementStage(Value):
+class StageRequirements(Value):
+    """A stage value that may name the outputs its evidence must contain.
+
+    ``required_outputs`` joined stages after runs had already stored digests of plans, intents
+    and receipts. A stage that requires nothing serializes exactly as it did before the field
+    existed, so every stored digest, submission budget key and recipe digest still matches and
+    a run started earlier resumes. Only a stage that requires something carries the field.
+    """
+
+    required_outputs: tuple[str, ...] = ()
+    """Named outputs the stage's evidence must contain, which the executor must be able to supply.
+
+    Names are the executor's own vocabulary; core only carries them and keys the measurement's
+    identity on them, because evidence that lacks a required output cannot stand for a
+    measurement that asked for it. An executor rejects a name it cannot supply.
+    """
+
+    @model_serializer(mode="wrap")
+    def omit_empty_requirements(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        """Serialize, leaving out ``required_outputs`` when it is empty."""
+        data: dict[str, object] = handler(self)
+        if not data.get("required_outputs"):
+            data.pop("required_outputs", None)
+        return data
+
+
+class MeasurementStage(StageRequirements):
     """Measurement stage lifecycle contract."""
 
     stage_id: str = Field(min_length=1)
@@ -330,7 +356,7 @@ class Continuation(Value):
         return self
 
 
-class MeasurementStageIdentity(Value):
+class MeasurementStageIdentity(StageRequirements):
     """Stage membership and dependencies, independent of execution budget."""
 
     stage_id: str = Field(min_length=1)
@@ -366,7 +392,11 @@ class MeasurementIdentity(Value):
             environment_digest=plan.environment_digest,
             recipe_digest=plan.recipe.digest,
             stages=tuple(
-                MeasurementStageIdentity(stage_id=stage.stage_id, depends_on=stage.depends_on)
+                MeasurementStageIdentity(
+                    stage_id=stage.stage_id,
+                    depends_on=stage.depends_on,
+                    required_outputs=tuple(sorted(set(stage.required_outputs))),
+                )
                 for stage in plan.stages
             ),
             accuracy_stage=plan.accuracy_stage,

@@ -3,6 +3,8 @@
  * process and the views: a host's identity and key, its label, the checkout and project path rules,
  * its registry listing, and what the window shows about its connection. No I/O.
  */
+
+export type {InstanceInspection} from '@vibesys/contracts/host-helper';
 export type {ConnectionStatus} from './connection-status.js';
 export {
   type HostId,
@@ -16,6 +18,7 @@ export {
   validAlias,
   validHostPath,
 } from './host.js';
+export {inspectionReply} from './inspection.js';
 export {
   type HostListing,
   type HostRun,

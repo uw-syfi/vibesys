@@ -89,8 +89,13 @@ class RecoverableExecutors(ScriptedExecutors):
             raise ContractError(("request_id",), "a dispatched request carries its identity")
         identity = request.request_id.root
         self._effects.executed.append(identity)
-        result = await super().execute(request, context)
+        result = await self._enacted(request, await super().execute(request, context))
         self._effects.sealed[identity] = result
+        return result
+
+    async def _enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
+        """What the shell is told once the effect's side effects on the host have played out."""
+        del request
         return result
 
     def _target(self, observed: RequestObserved) -> TargetObservation:

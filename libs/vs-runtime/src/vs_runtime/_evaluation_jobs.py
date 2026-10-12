@@ -54,6 +54,7 @@ from vs_evaluation.api import (
     failure_signature,
 )
 from vs_evaluation.api import EvidenceKind as StageKind
+from vs_evaluator_protocol.api import ProfileField
 from vs_runtime._failure_classification import job_failure
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 
@@ -73,6 +74,7 @@ class PlanRejection(StrEnum):
     UNKNOWN_STAGE = "stage id is not one of the executor's stages"
     BAD_DIGEST = "digest is not a sha256 content address"
     BAD_REVISION = "revision digest does not name its own git commit"
+    UNKNOWN_OUTPUT = "required output is not one the stage's executor can supply"
 
 
 class RejectedPlanError(ValueError):
@@ -138,6 +140,22 @@ def _ordered(plan: MeasurementPlan) -> tuple[str, ...]:
     return tuple(done)
 
 
+def _required_profile_fields(stage_id: str, plan: MeasurementPlan) -> tuple[ProfileField, ...]:
+    """The profile fields the plan's ``stage_id`` requires, or a typed rejection.
+
+    Only the profile stage has outputs to require; a name that is not a profile field is
+    refused before any executor contact, naming the field.
+    """
+    stage = next(item for item in plan.stages if item.stage_id == stage_id)
+    path = f"plan.stages.{stage_id}.required_outputs"
+    if stage.required_outputs and STAGE_KINDS[stage_id] is not StageKind.PROFILE:
+        raise RejectedPlanError(path, PlanRejection.UNKNOWN_OUTPUT)
+    try:
+        return tuple(ProfileField(name) for name in stage.required_outputs)
+    except ValueError as error:
+        raise RejectedPlanError(path, PlanRejection.UNKNOWN_OUTPUT) from error
+
+
 def measurement_request(plan: MeasurementPlan, scope: Scope, handle_id: str) -> EvaluationRequest:
     """The ordered semantic request for an accepted plan, or a typed rejection."""
     if not isinstance(plan.candidate, RevisionRef):
@@ -156,6 +174,7 @@ def measurement_request(plan: MeasurementPlan, scope: Scope, handle_id: str) -> 
         stage = SemanticEvaluationStage(
             snapshot=plan.candidate.revision_id.root,
             kind=kind,
+            required_profile_fields=_required_profile_fields(stage_id, plan),
             fingerprints=fingerprints,
             submitted_at_s=plan.submitted_at,
             deadline_at_s=plan.deadline_at,

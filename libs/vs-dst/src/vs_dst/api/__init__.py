@@ -26,7 +26,7 @@ from vs_dst._crash_points import (
 from vs_dst._effects import Effects, RecoverableExecutors
 from vs_dst._simulate import SimulatedRun, simulate
 from vs_dst._snapshots import NondeterministicWorldError, WorldNotCopyableError
-from vs_dst._world import RunSetup, World
+from vs_dst._world import Enact, HostedWorld, RunSetup, World
 
 __all__ = [
     "EVERY_POINT",
@@ -36,6 +36,8 @@ __all__ = [
     "CrashPoint",
     "CrashPointPolicy",
     "Effects",
+    "Enact",
+    "HostedWorld",
     "NondeterministicWorldError",
     "RecoverableExecutors",
     "RunSetup",

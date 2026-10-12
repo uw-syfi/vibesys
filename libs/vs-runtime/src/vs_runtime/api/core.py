@@ -203,6 +203,7 @@ from vs_runtime._session_resolver import (
     SessionExecutors,
     SessionSpecFactory,
     ToolServerSource,
+    TurnMessages,
     open_session_requests,
     session_executors,
 )
@@ -379,6 +380,7 @@ __all__ = [
     "ToolServerSource",
     "Transient",
     "TurnDispatcher",
+    "TurnMessages",
     "TurnYields",
     "ValidateLocalOwner",
     "VerifyRevisionOwner",

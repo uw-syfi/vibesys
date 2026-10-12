@@ -28,7 +28,16 @@ from server.host_helper_os import (
 )
 from server.host_helper_requests import HelperHost
 from server.instances import ControlSocketStopRequester
-from server.registry import FileInstanceStore, LiveRegistry, StopEffects, host_facts, instance_root
+from server.registry import (
+    FileInstanceLogs,
+    FileInstanceMetadataStore,
+    FileInstanceStore,
+    InstanceInspector,
+    LiveRegistry,
+    StopEffects,
+    host_facts,
+    instance_root,
+)
 from server.relay import FdSink, FdSource
 from vs_sim.api import (
     OsThreads,
@@ -51,8 +60,15 @@ _STDERR_FD = 2
 def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperHost:
     """This host as the helper sees it; ``PermissionError`` when the registry root is unsafe."""
     network = UnixNetwork()
+    root = instance_root(environ, uid)
+    store = FileInstanceStore(root)
     return HelperHost(
-        registry=LiveRegistry(FileInstanceStore(instance_root(environ, uid)), threads),
+        registry=LiveRegistry(store, threads),
+        inspector=InstanceInspector(
+            store,
+            FileInstanceLogs(root),
+            FileInstanceMetadataStore(root),
+        ),
         stop_effects=StopEffects(
             requester=ControlSocketStopRequester(network),
             signaller=PidfdProcessSignaller(),

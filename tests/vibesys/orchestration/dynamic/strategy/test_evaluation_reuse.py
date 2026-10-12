@@ -11,24 +11,18 @@ passed the candidate while saying so, and the round recorded no metric.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.strategy.test_judge_waits import (
     JUDGE_WAITS,
-    run_scripted,
+    waiting_world,
 )
 
 from vibesys.orchestration.dynamic.strategy.api import DynamicStrategyState
-from vs_core.api import AttemptPhase, RunStatus
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    import pytest
-
-    from vs_runtime.api.testing import Run
+from vs_core.api import AttemptPhase
+from vs_dst.api import SimulatedRun, simulate
 
 SHARED = replace(
     JUDGE_WAITS,
@@ -38,9 +32,12 @@ SHARED = replace(
 )
 
 
-def assert_one_evaluation_per_workstream(finished: Run, asked: list[tuple[str, str, dict]]) -> None:
+def assert_one_evaluation_per_workstream(
+    finished: SimulatedRun, asked: list[tuple[str, str, dict]]
+) -> None:
     """Every ask of a workstream got its first handle; the judges asked and were never refused."""
-    assert finished.core.run.status == RunStatus.TERMINAL
+    assert finished.finished
+    assert not finished.liveness_violations
     assert all(a.phase == AttemptPhase.TERMINAL for a in finished.core.attempts.attempts)
     assert all("handle_id" in reply for _, _, reply in asked), [r for *_, r in asked]
     by_attempt: dict[str, list[tuple[str, dict]]] = {}
@@ -52,7 +49,7 @@ def assert_one_evaluation_per_workstream(finished: Run, asked: list[tuple[str, s
         assert all(reply["repeat"] for _, reply in asks[1:])
 
 
-def assert_every_review_passed_round_has_its_metric(finished: Run) -> None:
+def assert_every_review_passed_round_has_its_metric(finished: SimulatedRun) -> None:
     """A round whose review passed was measured: no null metric, no failure."""
     state = finished.state
     assert isinstance(state, DynamicStrategyState)
@@ -64,12 +61,14 @@ def assert_every_review_passed_round_has_its_metric(finished: Run) -> None:
             assert record.metrics, "a passed review with no measured metric"
 
 
-def test_a_judge_asking_for_the_implementers_evaluation_gets_its_handle(tmp_path: Path) -> None:
-    finished, script = run_scripted(tmp_path, SHARED)
+def test_a_judge_asking_for_the_implementers_evaluation_gets_its_handle() -> None:
+    world = waiting_world(SHARED)
+    finished = simulate(world)
+    asked = world.hosting.asked
 
-    assert_one_evaluation_per_workstream(finished, script.asked)
+    assert_one_evaluation_per_workstream(finished, asked)
     assert_every_review_passed_round_has_its_metric(finished)
-    judge_asks = [reply for _, role, reply in script.asked if role.endswith("judge")]
+    judge_asks = [reply for _, role, reply in asked if role.endswith("judge")]
     assert judge_asks
     assert all(reply["repeat"] for reply in judge_asks)
 
@@ -88,9 +87,10 @@ _KNOBS = st.fixed_dictionaries(
 @settings(max_examples=10, deadline=None, derandomize=True, database=None)
 @given(knobs=_KNOBS)
 def test_judges_and_implementers_share_one_evaluation_whatever_runs_when(
-    tmp_path_factory: pytest.TempPathFactory, knobs: dict[str, Any]
+    knobs: dict[str, Any],
 ) -> None:
-    finished, script = run_scripted(tmp_path_factory.mktemp("reuse"), replace(SHARED, **knobs))
+    world = waiting_world(replace(SHARED, **knobs))
+    finished = simulate(world)
 
-    assert_one_evaluation_per_workstream(finished, script.asked)
+    assert_one_evaluation_per_workstream(finished, world.hosting.asked)
     assert_every_review_passed_round_has_its_metric(finished)

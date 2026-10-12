@@ -1,9 +1,19 @@
-import type {JSX, MouseEvent, ReactNode, SyntheticEvent} from 'react';
+import {type JSX, type MouseEvent, type ReactNode, type SyntheticEvent, useRef} from 'react';
 
 /** Make `dialog`'s native open state match `open`. */
 function syncDialog(dialog: HTMLDialogElement, open: boolean): void {
   if (open && !dialog.open) dialog.showModal();
   if (!open && dialog.open) dialog.close();
+}
+
+function activeElement(): HTMLElement | null {
+  return document.activeElement instanceof HTMLElement ? document.activeElement : null;
+}
+
+function restoreFocus(opener: HTMLElement | null, fallbackId: string | undefined): void {
+  const fallback = fallbackId === undefined ? null : document.getElementById(fallbackId);
+  if (opener?.isConnected === true) opener.focus();
+  else if (fallback?.isConnected === true) fallback.focus();
 }
 
 /**
@@ -20,9 +30,23 @@ export function Dialog(props: {
   readonly label: string;
   readonly dismiss: () => void;
   readonly children: ReactNode;
+  /** Stable focus target used when a redraw removes the element that opened the dialog. */
+  readonly focusFallbackId?: string;
 }): JSX.Element {
+  const opener = useRef<HTMLElement | null>(null);
+  const fallbackId = useRef<string | undefined>(undefined);
   const follow = (dialog: HTMLDialogElement | null): void => {
-    if (dialog !== null) syncDialog(dialog, props.open);
+    if (dialog === null) return;
+    if (props.open && !dialog.open) {
+      opener.current = activeElement();
+      fallbackId.current = props.focusFallbackId;
+      dialog.showModal();
+    } else if (!props.open && dialog.open) {
+      dialog.close();
+      restoreFocus(opener.current, fallbackId.current);
+      opener.current = null;
+      fallbackId.current = undefined;
+    }
   };
   const onCancel = (event: SyntheticEvent<HTMLDialogElement>): void => {
     event.preventDefault();

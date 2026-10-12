@@ -10,7 +10,7 @@ import {SEEDS, Seeded} from '@vibesys/store/testing';
 import type {BatchReconciliation, StreamMessageContext} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import {connectRun} from './connect.js';
-import type {RunConnection, RunStreamHandlers} from './ports.js';
+import type {RunCommandOutcome, RunConnection, RunStreamHandlers} from './ports.js';
 import {
   deferred,
   disconnect,
@@ -65,6 +65,12 @@ class PendingHandleConnection implements RunConnection {
     return 'current';
   }
   redialControls(): void {}
+  command(): Promise<RunCommandOutcome> {
+    return Promise.resolve({kind: 'rejected', message: null});
+  }
+  tuiDefaults(): Promise<null> {
+    return Promise.resolve(null);
+  }
   close(): Promise<void> {
     return Promise.resolve();
   }
@@ -115,6 +121,12 @@ class FaultBeforeSnapshotConnection implements RunConnection {
     return 'transitioning';
   }
   redialControls(): void {}
+  command(): Promise<RunCommandOutcome> {
+    return Promise.resolve({kind: 'rejected', message: null});
+  }
+  tuiDefaults(): Promise<null> {
+    return Promise.resolve(null);
+  }
   close(): Promise<void> {
     return Promise.resolve();
   }
@@ -183,6 +195,12 @@ class FailingRecoveryConnection implements RunConnection {
   redialControls(): void {
     const failure = this.redialFailures.shift();
     if (failure !== undefined) throw failure;
+  }
+  command(): Promise<RunCommandOutcome> {
+    return Promise.resolve({kind: 'rejected', message: null});
+  }
+  tuiDefaults(): Promise<null> {
+    return Promise.resolve(null);
   }
   close(): Promise<void> {
     this.closeCalls += 1;
@@ -362,6 +380,36 @@ describe('WebSession', () => {
     expect(session.store.getIterations().byId['generation:1']).toMatchObject({
       kind: 'generation',
       label: 'Generation 1',
+    });
+    await session.close();
+  });
+
+  test('delivers a lifecycle command through the session-owned control connection', async () => {
+    const {session, transport} = sessionWith(new FakeLifecycle());
+    transport.snapshots.push({
+      request_id: 'request-pause',
+      ok: true,
+      ack: {action: 'pause', status: 'pending'},
+    });
+
+    const outcome = await session.command({type: 'command.pause'});
+
+    expect(transport.requests).toEqual([{type: 'command.pause'}]);
+    expect(outcome).toEqual({kind: 'acknowledged', action: 'pause', status: 'pending'});
+    await session.close();
+  });
+
+  test('turns a rejected command response into the session command outcome', async () => {
+    const {session, transport} = sessionWith(new FakeLifecycle());
+    transport.snapshots.push({
+      request_id: 'request-stop',
+      ok: false,
+      error: 'run is read only',
+    });
+
+    await expect(session.command({type: 'command.stop'})).resolves.toEqual({
+      kind: 'rejected',
+      message: 'run is read only',
     });
     await session.close();
   });
@@ -658,7 +706,7 @@ describe('WebSession', () => {
     );
     const failed = waitForSession(
       session,
-      () => session.getState().error?.message === 'second iteration page failed',
+      () => session.getState().iterationError?.message === 'second iteration page failed',
     );
 
     transport.subscriptions[0]?.onMessage(
@@ -675,6 +723,7 @@ describe('WebSession', () => {
 
     expect(session.store.getIterations().revision).toBe('complete');
     expect(Object.keys(session.store.getIterations().byId)).toEqual(['generation:0']);
+    expect(session.getState()).toMatchObject({status: 'connected', error: null});
     await session.close();
   });
 
@@ -689,7 +738,8 @@ describe('WebSession', () => {
     );
     const failed = waitForSession(
       session,
-      () => session.getState().error?.message === 'iteration query repeated a paging cursor',
+      () =>
+        session.getState().iterationError?.message === 'iteration query repeated a paging cursor',
     );
 
     transport.subscriptions[0]?.onMessage(
@@ -706,7 +756,34 @@ describe('WebSession', () => {
 
     expect(session.store.getIterations().revision).toBe('complete');
     expect(Object.keys(session.store.getIterations().byId)).toEqual(['generation:0']);
+    expect(session.getState()).toMatchObject({status: 'connected', error: null});
     await session.close();
+  });
+
+  test('close aborts iteration paging before a late first page can request page two', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    const firstPage = deferred<ProtocolResponse>();
+    transport.iterations.push(firstPage.promise);
+
+    const starting = session.start();
+    await settle();
+    const requestIndex = transport.requests.findIndex(
+      request => request.type === 'query.iterations',
+    );
+    expect(requestIndex).toBeGreaterThanOrEqual(0);
+    const signal = transport.requestOptions[requestIndex]?.signal;
+    expect(signal?.aborted).toBe(false);
+
+    await session.close();
+    expect(signal?.aborted).toBe(true);
+    firstPage.resolve(iterationPageResponse('late', null, 0, 100, 'page-2'));
+    await starting;
+    await settle();
+
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      1,
+    );
   });
 
   test('falls back only when the initial iteration capability probe is rejected', async () => {
@@ -732,6 +809,15 @@ describe('WebSession', () => {
       1,
     );
     expect(session.getState()).toEqual(healthy());
+    await session.close();
+  });
+
+  test('reads presentation defaults through the same session-owned control connection', async () => {
+    const {session, transport} = sessionWith(new FakeLifecycle());
+
+    await session.tuiDefaults();
+
+    expect(transport.requests).toEqual([{type: 'query.tui_defaults'}]);
     await session.close();
   });
 
@@ -834,17 +920,14 @@ describe('WebSession', () => {
     const stale = deferred<ProtocolResponse>();
     transport.snapshots.push(stale.promise);
     transport.silentDials = 1;
+    const resumedDial = transport.nextSubscription();
     lifecycle.emit('online');
-    const refreshed = nextSessionChange(session);
     stale.resolve(snapshotResponse({sequence: 1, status: 'running'}));
-    await refreshed;
-    await Promise.resolve();
+    const resumed = await resumedDial;
 
     expect(session.store.getState()).toMatchObject({sequence: 1, status: 'completed'});
     expect(initial.closed).toBe(true);
     expect(transport.subscriptions).toHaveLength(2);
-    const resumed = transport.subscriptions[1];
-    if (resumed === undefined) throw new Error('Lifecycle recovery did not resume the stream');
     expect(resumed).toMatchObject({afterSequence: 1, options: {storeId: 'store-1'}});
 
     resumed.onDisconnect(disconnect('stream ended before the known tail'));

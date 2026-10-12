@@ -7,5 +7,10 @@ export {
   sshConfigHosts,
   withHostSettings,
 } from './host-settings.js';
-export {type RecentFile, remember, type StoredRecentRun} from './recent.js';
+export {
+  type RecentFile,
+  remember,
+  rememberInstance,
+  type StoredRecentRun,
+} from './recent.js';
 export {SettingsStore} from './settings-store.js';

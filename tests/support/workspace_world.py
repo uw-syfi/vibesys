@@ -11,7 +11,7 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
+from vs_agent.api import NULL_SKILL_SELECTION
 from vs_project.api import (
     NullGitTrackerEvents,
     OrchestrationDescriptor,
@@ -29,12 +29,10 @@ from vs_runtime.api.infrastructure import (
     RuntimeWorkspaces,
     TrustedEvaluationPlan,
     WorkspaceResourceFactory,
-    create_run_control_channel,
     create_workspace_runtime,
     open_project_run_resources,
     open_run_environment_resources,
 )
-from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink, FakeRunControlEventSink
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 
@@ -106,16 +104,7 @@ class WorkspaceEnv:
     def start_host(self) -> RuntimeWorkspaces:
         """Start another host over the same disk state, as after a process restart."""
         runtime = create_workspace_runtime(
-            (),
-            workspace_resources=self.factory,
-            resolve_configuration=_unexpected_execution,
-            session_store=lambda: None,
-            control=create_run_control_channel(FakeRunControlEventSink()),
-            lifecycle_events=FakeAgentExecutionLifecycleSink(),
-            agent_events=NULL_AGENT_EVENT_SINK,
-            route_message=lambda message, _steering: message,
-            blocking=BlockingOperations(),
-            client_factory=_unexpected_client,
+            workspace_resources=self.factory, blocking=BlockingOperations()
         )
         self.hosts.append(runtime.workspaces)
         return runtime.workspaces

@@ -86,7 +86,6 @@ _PATH = re.compile(r"(?<![\w.])/[\w.@+-][^\s`'\"<>()\[\]{},;]*")
 _RELATIVE = re.compile(
     r"`([\w@+-][\w.@+-]*(?:/[\w.@+-]+)*\.[A-Za-z]{1,5}|[\w.@+-]+(?:/[\w.@+-]+)+/?)`"
 )
-_SUBMITTED = "submitted"
 
 
 @dataclass(frozen=True)
@@ -405,18 +404,7 @@ def stop_bound(records: RunRecords, grace_s: float | None) -> list[Violation]:
     if not stops:
         return []
     stopped_at = _time(stops[0])
-    violations = [
-        Violation(
-            Invariant.EVALUATION_AFTER_STOP,
-            f"evaluation {_data(event).get('operation_id')} submitted after the stop request",
-        )
-        for event in records.events
-        if event.get("type") == "async_operation_lifecycle"
-        and _data(event).get("operation_kind") == "evaluation"
-        and _data(event).get("state") == _SUBMITTED
-        and _time(event) > stopped_at
-    ]
-    violations.extend(_core_evaluations_after(records, stopped_at))
+    violations = _core_evaluations_after(records, stopped_at)
     terminal = terminal_event(records)
     if grace_s is not None and terminal is not None:
         elapsed = (_time(terminal) - stopped_at).total_seconds()

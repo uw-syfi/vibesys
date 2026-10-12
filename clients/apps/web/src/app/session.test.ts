@@ -51,6 +51,7 @@ describe('the run page over a live session', () => {
       hasSnapshot: true,
       status: 'stale',
       error: parseFailure,
+      iterationError: null,
       controls: {status: 'connected'},
     });
     // The page says the transcript is short and offers the explicit recovery

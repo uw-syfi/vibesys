@@ -6,12 +6,14 @@
  * the host). While a run fills the window only the title strip shows, and the sheets wait closed.
  */
 
-import {HostPanel, HostPicker, PathInput} from '@vibesys/feature-hosts/renderer';
+import {HostPanel, HostPicker, InspectorSheet, PathInput} from '@vibesys/feature-hosts/renderer';
 import type {
   CompletionAction,
   CompletionState,
   HostAction,
   HostState,
+  InspectorAction,
+  InspectorState,
   PickerAction,
   PickerState,
 } from '@vibesys/feature-hosts/state';
@@ -21,8 +23,8 @@ import {type Dispatch, StopControls, TitleStrip} from '@vibesys/feature-run-cont
 import type {WelcomeAction, WelcomeState} from '@vibesys/feature-run-control/state';
 import {type ProjectField, StartSheet} from '@vibesys/feature-start-run/renderer';
 import type {StartAction, StartState} from '@vibesys/feature-start-run/state';
-import type {HostKey} from '@vibesys/hosts';
-import {stopKey, suggestProjects} from '@vibesys/runs';
+import type {HostKey, HostRun} from '@vibesys/hosts';
+import {type RecentRun, stopKey, suggestProjects} from '@vibesys/runs';
 import {Button} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {WORDMARK} from './welcome-banner.js';
@@ -34,6 +36,24 @@ interface WelcomeSenders {
   readonly start: (action: StartAction) => void;
   readonly picker: (action: PickerAction) => void;
   readonly completion: (action: CompletionAction) => void;
+  readonly inspector: (action: InspectorAction) => void;
+}
+
+type Attached = NonNullable<WelcomeState['chrome']['attached']>;
+
+function inspectAttached(inspect: WelcomeSenders['inspector'], attached: Attached): void {
+  inspect({
+    type: 'open',
+    target: {
+      host: attached.host,
+      hostLabel: attached.hostLabel,
+      instanceId: attached.instanceId,
+      task: null,
+      runId: attached.runId,
+      project: attached.project,
+      focusFallbackId: 'title-strip',
+    },
+  });
 }
 
 /** The view's whole input: each store's state, and where its events go. */
@@ -44,12 +64,17 @@ export interface WelcomeViewProps {
   readonly start: StartState;
   readonly picker: PickerState;
   readonly completion: CompletionState;
+  readonly inspector: InspectorState;
   readonly send: WelcomeSenders;
 }
 
 export function WelcomeView(props: WelcomeViewProps): JSX.Element {
-  const {welcome, lists, completion, send} = props;
-  const chrome = welcome.chrome;
+  const {
+    welcome: {chrome, banner},
+    lists,
+    completion,
+    send,
+  } = props;
   const visible = chrome.mode === 'welcome';
   const dispatch: Dispatch = command => send.welcome({type: 'command', command});
   const stopControls = (host: HostKey, instance: string): ReactNode => (
@@ -60,13 +85,43 @@ export function WelcomeView(props: WelcomeViewProps): JSX.Element {
   );
   const attach = (host: HostKey, instance: string): void =>
     dispatch({kind: 'attach', host, instance});
+  const inspectHostRun = (host: HostKey, hostLabel: string, run: HostRun): void =>
+    send.inspector({
+      type: 'open',
+      target: {
+        host,
+        hostLabel,
+        instanceId: run.id,
+        task: null,
+        runId: run.runId,
+        project: run.projectRoot,
+        focusFallbackId: 'host-panel',
+      },
+    });
+  const inspectRecent = (run: RecentRun, instanceId: string): void =>
+    send.inspector({
+      type: 'open',
+      target: {
+        host: run.host,
+        hostLabel: run.hostLabel,
+        instanceId,
+        task: run.task,
+        runId: run.runId,
+        project: run.project,
+        focusFallbackId: 'recent-section',
+      },
+    });
   const shownHost = props.host.host;
   const projectField: ProjectField = field => (
     <PathInput {...field} field="project" completion={completion} complete={send.completion} />
   );
   return (
     <div className={visible ? 'view' : 'view strip'}>
-      <TitleStrip chrome={chrome} dispatch={dispatch} />
+      <TitleStrip
+        chrome={chrome}
+        dispatch={dispatch}
+        inspect={attached => inspectAttached(send.inspector, attached)}
+      />
       <main>
         <div className="column">
           <div className="hero">
@@ -77,8 +132,8 @@ export function WelcomeView(props: WelcomeViewProps): JSX.Element {
               Attach to a run, or start a new one on this Mac or another host.
             </p>
           </div>
-          <p className={welcome.banner?.error === true ? 'status error' : 'status'} role="status">
-            {welcome.banner?.text ?? ''}
+          <p className={banner?.error === true ? 'status error' : 'status'} role="status">
+            {banner?.text ?? ''}
           </p>
           <RecentPanel
             lists={lists}
@@ -87,13 +142,14 @@ export function WelcomeView(props: WelcomeViewProps): JSX.Element {
               resume: (host, project, run) => dispatch({kind: 'resume', host, project, run}),
               stopControls,
               openHost: host => send.host({type: 'show', host}),
+              inspect: inspectRecent,
             }}
           />
           <HostPanel
             state={props.host}
             listing={lists.listings[shownHost]}
             completion={completion}
-            actions={{attach, stopControls}}
+            actions={{attach, stopControls, inspect: inspectHostRun}}
             send={{
               host: send.host,
               completion: send.completion,
@@ -121,6 +177,7 @@ export function WelcomeView(props: WelcomeViewProps): JSX.Element {
         start={send.start}
       />
       <HostPicker state={props.picker} visible={visible} picker={send.picker} />
+      <InspectorSheet state={props.inspector} send={send.inspector} />
     </div>
   );
 }

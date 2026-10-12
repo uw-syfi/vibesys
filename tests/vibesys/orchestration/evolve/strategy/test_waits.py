@@ -7,97 +7,61 @@ revision again, and that current invocation's checkpoint is authoritative.
 
 from __future__ import annotations
 
-import json
-from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.checkpoint_faults import CHECKPOINTS, with_checkpoints
-from tests.vibesys.orchestration.evolve.strategy._replies import mutated, reviewed
-from tests.vibesys.orchestration.evolve.strategy._run import run_shell
-from tests.vibesys.orchestration.evolve.strategy._waiting_turns import (
-    WaitingTurns,
-    attach_for,
-    new_bridge,
-    translator_for,
+from tests.support.checkpoint_faults import CHECKPOINTS
+from tests.vibesys.orchestration.evolve.strategy.world import (
+    ENDINGS,
+    Ending,
+    EvolveWorld,
+    run_to_end,
 )
 
-from vs_core.api import AttemptPhase, RunStatus, Settle, Withdraw
-from vs_runtime.api.testing import HostOptions, Run, Script
+from vs_core.api import AttemptPhase, Settle, Withdraw
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Mapping
 
-    import pytest
+    from vs_dst.api import SimulatedRun
+
+ROLES = (("mutator", "judge"), ("judge",), ("mutator",))
 
 
 def _world(
-    root: Path,
     *,
-    waits: tuple[bool | str, ...],
-    polls: tuple[int, ...],
-    roles: tuple[str, ...] = ("mutator", "judge"),
-    enveloped: bool = False,
-) -> tuple[WaitingTurns, HostOptions]:
-    """A run whose ``roles`` may wait; a lone mutator's resumed turn leaves the tree as it was."""
-    bridge = new_bridge(root)
-
-    def wrapped(reply: str) -> str:
-        return json.dumps({"reply": json.loads(reply)}) if enveloped else reply
-
-    script = WaitingTurns(
-        mutator=deque(wrapped(mutated()) for _ in range(40)),
-        judge=deque(wrapped(reviewed()) for _ in range(40)),
-        roles=roles,
-        decide=lambda n: bool(waits[n % len(waits)]),
-        ends=lambda n: "wait" if waits[n % len(waits)] is True else str(waits[n % len(waits)]),
-        polls=list(polls),
-        unchanged_after_first_retain=roles == ("mutator",),
-    )
-    host = HostOptions(
-        max_concurrent=2,
-        translator=translator_for(script, bridge),
-        attach=attach_for(script, bridge),
-        controlled=True,
-        lifecycle=frozenset({"suspend"}),
-    )
-    return script, host
-
-
-def _play(script: Script, host: HostOptions, parallelism: int) -> Run:
-    return run_shell(
-        script,
-        host=host,
-        max_generations=1,
-        children_per_generation=2,
-        max_parallelism=parallelism,
-    )
-
-
-def _run(
-    root: Path,
-    *,
-    waits: tuple[bool | str, ...],
+    waits: tuple[bool, ...],
     polls: tuple[int, ...],
     parallelism: int,
     roles: tuple[str, ...] = ("mutator", "judge"),
-) -> Run:
-    """A run whose ``roles`` may wait; a lone mutator's resumed turn leaves the tree as it was."""
-    script, host = _world(root, waits=waits, polls=polls, roles=roles)
-    return _play(script, host, parallelism)
+    options: Mapping[str, Any] | None = None,
+) -> EvolveWorld:
+    """A one-generation run whose ``roles`` may wait; ``options`` are further world options."""
+    return EvolveWorld(
+        waits=waits,
+        polls=polls,
+        wait_roles=roles,
+        max_generations=1,
+        children_per_generation=2,
+        max_parallelism=parallelism,
+        **(options or {}),
+    )
 
 
-def test_a_child_whose_turn_waited_adopts_the_candidate_it_checkpointed(tmp_path: Path) -> None:
-    finished = _run(tmp_path, waits=(True,), polls=(2,), parallelism=1, roles=("mutator",))
+def _every_attempt_closed(run: SimulatedRun) -> bool:
+    return all(attempt.phase == AttemptPhase.TERMINAL for attempt in run.core.attempts.attempts)
 
-    assert finished.core.run.status == RunStatus.TERMINAL
-    assert finished.core.run.result is not None
-    assert finished.core.run.result.outcome == "success"
-    assert finished.core.evaluation.continuations != ()
+
+def test_a_child_whose_turn_waited_adopts_the_candidate_it_checkpointed() -> None:
+    run = run_to_end(_world(waits=(True,), polls=(2,), parallelism=1, roles=("mutator",)))
+
+    assert run.result is not None
+    assert run.result.outcome == "success"
+    assert run.core.evaluation.continuations != ()
     settles = [
         item.disposition
-        for item in finished.decisions
+        for item in run.decisions
         if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
     ]
     assert settles
@@ -111,57 +75,44 @@ def test_a_child_whose_turn_waited_adopts_the_candidate_it_checkpointed(tmp_path
     parallelism=st.integers(1, 2),
 )
 def test_a_run_ends_whatever_its_turns_wait_for(
-    tmp_path_factory: pytest.TempPathFactory,
-    waits: tuple[bool, ...],
-    polls: tuple[int, ...],
-    parallelism: int,
+    waits: tuple[bool, ...], polls: tuple[int, ...], parallelism: int
 ) -> None:
-    finished = _run(
-        tmp_path_factory.mktemp("waits"), waits=waits, polls=polls, parallelism=parallelism
-    )
+    run = run_to_end(_world(waits=waits, polls=polls, parallelism=parallelism))
 
-    assert finished.core.run.status == RunStatus.TERMINAL
-    for attempt in finished.core.attempts.attempts:
-        assert attempt.phase == AttemptPhase.TERMINAL
+    assert _every_attempt_closed(run)
 
 
 @settings(max_examples=10, deadline=None, derandomize=True, database=None)
 @given(
-    ends=st.lists(
-        st.sampled_from(("wait", "wait_enveloped", "result", "invalid")), min_size=1, max_size=4
-    ).map(tuple),
+    ends=st.lists(st.sampled_from(ENDINGS), min_size=1, max_size=4).map(tuple),
     polls=st.integers(0, 8),
-    roles=st.sampled_from((("mutator", "judge"), ("judge",), ("mutator",))),
+    roles=st.sampled_from(ROLES),
 )
 def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
-    tmp_path_factory: pytest.TempPathFactory,
-    ends: tuple[str, ...],
-    roles: tuple[str, ...],
-    polls: int,
+    ends: tuple[Ending, ...], roles: tuple[str, ...], polls: int
 ) -> None:
     """Core holds a turn that validated a wait as suspended, so no reply may be accepted.
 
     A turn that ends with its final result or an invalid reply instead of the waiting reply
     must still yield: accepting or correcting it would request a turn core refuses, which
-    halts the run (`run_shell` raises the halt). So the strategy's decisions must not depend on
-    which reply the suspended turn ended with: they equal those of a run whose turns all end
-    with the waiting reply.
+    halts the run. So the strategy's decisions must not depend on which reply the suspended
+    turn ended with: they equal those of a run whose turns all end with the waiting reply.
     """
 
-    def run(chosen: tuple[str, ...]) -> Run:
-        return _run(
-            tmp_path_factory.mktemp("ends"),
-            waits=chosen,
-            polls=(polls,),
-            parallelism=2,
-            roles=roles,
+    def run(chosen: tuple[Ending, ...]) -> SimulatedRun:
+        return run_to_end(
+            _world(
+                waits=(True,),
+                polls=(polls,),
+                parallelism=2,
+                roles=roles,
+                options={"ends": chosen},
+            )
         )
 
     finished = run(ends)
 
-    assert finished.core.run.status == RunStatus.TERMINAL
-    for attempt in finished.core.attempts.attempts:
-        assert attempt.phase == AttemptPhase.TERMINAL
+    assert _every_attempt_closed(finished)
     if "invalid" not in ends:
         # Whether core records a wait on an invalid reply is core's own rule, so only the other
         # replies are compared.
@@ -169,19 +120,6 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
         assert [type(item).__name__ for item in finished.decisions] == [
             type(item).__name__ for item in run(("wait",)).decisions
         ]
-
-
-def _run_with_checkpoints(
-    root: Path,
-    checkpoints: tuple[str, ...],
-    polls: int,
-    *,
-    waits: tuple[bool, ...] = (True,),
-    roles: tuple[str, ...] = ("mutator",),
-) -> Run:
-    """A one-generation run whose turns find their checkpoints answered per ``checkpoints``."""
-    script, host = _world(root, waits=waits, polls=(polls,), roles=roles)
-    return _play(with_checkpoints(script, checkpoints), host, 1)
 
 
 @settings(max_examples=10, deadline=None, derandomize=True, database=None)
@@ -192,37 +130,42 @@ def _run_with_checkpoints(
     roles=st.sampled_from((("mutator",), ("mutator", "judge"))),
 )
 def test_a_run_ends_whatever_the_checkpoint_of_a_turn_does(
-    tmp_path_factory: pytest.TempPathFactory,
-    checkpoints: tuple[str, ...],
-    polls: int,
-    waits: tuple[bool, ...],
-    roles: tuple[str, ...],
+    checkpoints: tuple[str, ...], polls: int, waits: tuple[bool, ...], roles: tuple[str, ...]
 ) -> None:
     """A turn that asked to wait is suspended or failed with a reason, never left waiting.
 
     Core publishes the suspension only once the turn's workspace is checkpointed. Whether
     the turn waits or not, and whether the executor retains the workspace or fails the
     checkpoint, the run must reach terminal with every attempt closed and no wait left
-    without something to end it (`run_shell` asserts the last). A role that depends on the
-    write turn (the judge) is never started on a workspace core did not retain (#2167).
+    without something to end it (the liveness check). A role that depends on the write turn
+    (the judge) is never started on a workspace core did not retain (#2167).
     """
-    finished = _run_with_checkpoints(
-        tmp_path_factory.mktemp("checkpoints"), checkpoints, polls, waits=waits, roles=roles
+    run = run_to_end(
+        _world(
+            waits=waits,
+            polls=(polls,),
+            parallelism=1,
+            roles=roles,
+            options={"checkpoints": checkpoints},
+        )
     )
 
-    assert finished.core.run.status == RunStatus.TERMINAL
-    for attempt in finished.core.attempts.attempts:
-        assert attempt.phase == AttemptPhase.TERMINAL
+    assert _every_attempt_closed(run)
 
 
-def test_a_declined_checkpoint_fails_the_waiting_turn_instead_of_stalling_the_run(
-    tmp_path: Path,
-) -> None:
+def test_a_declined_checkpoint_fails_the_waiting_turn_instead_of_stalling_the_run() -> None:
     """Every checkpoint fails: the turn cannot be suspended, and the run still ends."""
-    finished = _run_with_checkpoints(tmp_path, ("failed",), 1)
+    run = run_to_end(
+        _world(
+            waits=(True,),
+            polls=(1,),
+            parallelism=1,
+            roles=("mutator",),
+            options={"checkpoints": ("failed",)},
+        )
+    )
 
-    assert finished.core.run.status == RunStatus.TERMINAL
-    assert finished.core.evaluation.continuations == ()
+    assert run.core.evaluation.continuations == ()
 
 
 @settings(max_examples=6, deadline=None, derandomize=True, database=None)
@@ -232,31 +175,23 @@ def test_a_declined_checkpoint_fails_the_waiting_turn_instead_of_stalling_the_ru
     ends=st.sampled_from(("wait", "wait_enveloped")),
 )
 def test_a_role_may_answer_in_the_bare_or_the_enveloped_form(
-    tmp_path_factory: pytest.TempPathFactory,
-    *,
-    enveloped: bool,
-    waits: tuple[bool, ...],
-    ends: str,
+    *, enveloped: bool, waits: tuple[bool, ...], ends: Ending
 ) -> None:
     """The shared prompt tells agents to wrap waits in ``reply``; results may be wrapped too.
 
     Both forms of a wait or a final result are the same reply: the run's decisions equal those
     of a run whose agents answer in the bare form, and no offspring is discarded for a schema error.
     """
-
-    def run(*, wrap: bool, end: str) -> Run:
-        script, host = _world(
-            tmp_path_factory.mktemp("forms"),
-            waits=tuple(end if w else False for w in waits),
+    run = run_to_end(
+        _world(
+            waits=waits,
             polls=(1,),
-            enveloped=wrap,
+            parallelism=2,
+            options={"ends": (ends,), "enveloped": enveloped},
         )
-        return _play(script, host, 2)
+    )
+    baseline = run_to_end(_world(waits=waits, polls=(1,), parallelism=2))
 
-    finished = run(wrap=enveloped, end=ends)
-    baseline = run(wrap=False, end="wait")
-
-    assert finished.core.run.status == RunStatus.TERMINAL
-    assert [type(item).__name__ for item in finished.decisions] == [
+    assert [type(item).__name__ for item in run.decisions] == [
         type(item).__name__ for item in baseline.decisions
     ]

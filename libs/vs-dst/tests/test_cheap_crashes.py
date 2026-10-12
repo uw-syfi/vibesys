@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 def test_a_cheap_crash_equals_rerunning_from_the_start_at_every_crash_point(
     items: int, concurrent: int
 ) -> None:
-    normal = simulate(TinyWorld(items), max_concurrent=concurrent)
+    normal = simulate(TinyWorld(items, concurrent))
     with using_crash_point_policy(EVERY_POINT):
         points = normal.crash_points()
     assert len(points) == 2 * normal.commits

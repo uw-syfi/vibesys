@@ -21,36 +21,8 @@ NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 _OWNED = "the producer is a task owned inside the code under test; the test holds no handle"
 
 ALLOWED: dict[str, tuple[int, str]] = {
-    "tests/vibesys/api/test_runs.py": (
-        1,
-        _OWNED,
-    ),
-    "tests/vibesys/run/test_evaluation_backend.py": (
-        2,
-        _OWNED,
-    ),
-    "tests/vibesys/run/test_evaluation_measurement_identity.py": (
-        2,
-        _OWNED,
-    ),
-    "tests/vibesys/run/test_evaluation_report_history.py": (
-        1,
-        _OWNED,
-    ),
-    "tests/vibesys/run/test_evidence_producer_contract.py": (
-        1,
-        _OWNED,
-    ),
-    "tests/vibesys/run/test_evidence_producer_failures.py": (
-        1,
-        _OWNED,
-    ),
     "libs/vs-async-ops/tests/test_lifecycle.py": (
         6,
-        _OWNED,
-    ),
-    "libs/vs-evaluation/tests/test_agent_service.py": (
-        2,
         _OWNED,
     ),
     "libs/vs-runtime/tests/test_runs_contract.py": (

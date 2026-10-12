@@ -101,6 +101,10 @@ def _project_scope(project_root: Path) -> str:
 class ServerLifecycleObserver(Protocol):
     """Told the facts a registry record advertises: the server's milestones and its run's phase."""
 
+    def resolved(self, *, project_root: Path, task: str) -> None:
+        """The invocation resolved its authoritative project and selected task."""
+        ...
+
     def listening(self) -> None:
         """The control socket accepts connections."""
         ...

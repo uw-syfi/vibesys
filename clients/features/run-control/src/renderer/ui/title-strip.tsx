@@ -34,8 +34,9 @@ function RunButtons(props: {
   readonly attached: Attached;
   readonly controls: StripControls;
   readonly dispatch: Dispatch;
+  readonly inspect: (attached: Attached) => void;
 }): JSX.Element {
-  const {attached, controls, dispatch} = props;
+  const {attached, controls, dispatch, inspect} = props;
   const instance = attached.instanceId;
   const stop = (force: boolean): void => {
     if (instance !== null) dispatch({kind: 'stop', host: attached.host, instance, force});
@@ -47,6 +48,14 @@ function RunButtons(props: {
   const decision = controls.resume;
   return (
     <>
+      <Button
+        onClick={() => {
+          if (!controls.back) dispatch({kind: 'show-welcome'});
+          inspect(attached);
+        }}
+      >
+        Inspect
+      </Button>
       {controls.stop ? <Button onClick={() => stop(false)}>Stop run</Button> : null}
       {controls.force ? <Button onClick={() => stop(true)}>Force stop</Button> : null}
       {decision?.kind === 'available' ? (
@@ -70,14 +79,15 @@ function RunButtons(props: {
 export function TitleStrip(props: {
   readonly chrome: ChromeState;
   readonly dispatch: Dispatch;
+  readonly inspect: (attached: Attached) => void;
 }): JSX.Element {
-  const {chrome, dispatch} = props;
+  const {chrome, dispatch, inspect} = props;
   const attached = chrome.attached;
   const controls = stripControls(chrome);
   const conn = attached === null ? '' : connectionText(attached);
   const inRun = chrome.mode === 'run';
   return (
-    <header>
+    <header id="title-strip" tabIndex={-1}>
       <span className="brand">VibeSys</span>
       {attached === null ? null : (
         <StatusChip
@@ -99,7 +109,7 @@ export function TitleStrip(props: {
       </span>
       <span className="grow" />
       {attached === null ? null : (
-        <RunButtons attached={attached} controls={controls} dispatch={dispatch} />
+        <RunButtons attached={attached} controls={controls} dispatch={dispatch} inspect={inspect} />
       )}
     </header>
   );

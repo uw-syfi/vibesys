@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     )
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import GitRepositoryFactory, StateStoreFactory
-    from vs_runtime.api import AgentToolBindingContext
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment, StopTimer
     from vs_sandbox.api import ComputeBackendImpl, HostResource
@@ -71,10 +70,6 @@ class SessionImplementations:
     stop_timer: StopTimer
     timing: RunTiming
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
-    agent_tool_bindings: (
-        Mapping[str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]]
-        | None
-    ) = None
     stateless_tool_servers: Mapping[str, Callable[[object], ToolServerDescriptor | None]] | None = (
         None
     )

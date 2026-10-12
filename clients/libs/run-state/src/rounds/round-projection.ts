@@ -1,6 +1,8 @@
 import type {HypothesisEntry, HypothesisRound} from '@vibesys/contracts';
 import type {RoundState} from '../run-map.js';
 
+export {roundsWithPlan} from '../round-plan.js';
+
 export type RoundOutcome = 'done' | 'fail' | 'skipped' | 'live' | 'planned';
 
 /** One run-map round joined to its numeric experiment owner, when it has one. */
@@ -13,27 +15,6 @@ export interface RoundExperiment {
 export interface RoundExperimentOwner {
   hypothesis: HypothesisEntry;
   record: HypothesisRound | null;
-}
-
-/**
- * Includes the backend's planned numeric rounds without dropping unnumbered
- * fallback rounds. Label-keyed rounds remain in first-observed fold order.
- */
-export function roundsWithPlan(
-  rounds: readonly RoundState[],
-  maxRounds: number | null,
-): RoundState[] {
-  const numeric = rounds.flatMap(round =>
-    round.key.kind === 'number' ? [{round, number: round.key.number}] : [],
-  );
-  const unnumbered = rounds.filter(round => round.key.kind === 'label');
-  const highest = Math.max(maxRounds ?? 0, ...numeric.map(item => item.number), 0);
-  const known = new Map(numeric.map(item => [item.number, item.round]));
-  const planned: RoundState[] = Array.from({length: highest}, (_, index) => {
-    const number = index + 1;
-    return known.get(number) ?? {key: {kind: 'number' as const, number}, number, status: 'planned'};
-  });
-  return [...planned, ...unnumbered];
 }
 
 /** Ordered numeric round identities claimed by a hypothesis. */

@@ -21,7 +21,7 @@ The graph is acyclic and `tach.toml` forbids cycles.
 
 Every direct subfolder of `src/vibesys/orchestration/` is one orchestration
 strategy: `dynamic`, `evolve`, `issue_queue`, `multi`, or `single`. Shared
-policy and resources (`domains`, `hypothesis`, `profile_focus`, `steering`,
+policy and resources (`domains`, `hypothesis`, `profile_focus`,
 `prompts`, and `metrics`) live beside `orchestration` under `src/vibesys/` and
 never import it. Domain templates live in their domain package; strategy
 templates live in their strategy package. The shared `prompts` package owns
@@ -96,7 +96,7 @@ package. The `vibesys` wheel still bundles every library's source, so each
 member dependency must also appear in the root `dependencies` with the same
 version constraint.
 
-The internal custom-policy execution contract and example are in
+The strategy and plugin contract is in
 [orchestration-runtime.md](orchestration-runtime.md).
 
 [//]: # (tach-graph:start)
@@ -154,7 +154,6 @@ graph TD
     vs_dst --> vs_project
     vs_dst --> vs_runtime
     vs_dst --> vs_sim
-    vs_evaluation --> vs_async_ops
     vs_evaluation --> vs_evaluator_protocol
     vs_evaluation --> vs_mcp
     vs_evaluation --> vs_project

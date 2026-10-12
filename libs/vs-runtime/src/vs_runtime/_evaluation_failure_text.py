@@ -19,13 +19,6 @@ if TYPE_CHECKING:
 _RENDERER = TemplateRenderer(Path(__file__).with_name("prompts"))
 
 
-def render_rejected_evidence(
-    rejected: Sequence[tuple[str | None, EvidenceKind]],
-) -> RenderedPrompt:
-    """One line per rejected ``(semantic summary, kind)``: the summary, else ``<kind> failed``."""
-    return _RENDERER.render_template("rejected_evidence.j2", rejected=rejected)
-
-
 def render_evaluation_failure(
     record_failure: str | None, stage_failure: str | None
 ) -> RenderedPrompt:

@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
     implemented,
@@ -16,31 +14,23 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
     profile,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
+from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
 from vibesys.orchestration.dynamic.core_policy.api import run_prompt_variables
-from vibesys.orchestration.dynamic.strategy.api import (
-    PlannerPrompt,
-    RenderRoleArtifacts,
-    dynamic_operation_registry,
-)
+from vibesys.orchestration.dynamic.strategy.api import PlannerPrompt, RenderRoleArtifacts
 from vibesys.prompts import CORE_PROTOCOL_DIR
-from vs_core.api import ExecuteRegisteredOperation
+from vs_core.api import Operation
+from vs_dst.api import simulate
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api.testing import HostOptions
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.strategy.api import ProfileHistoryRow
+    from vs_dst.api import SimulatedRun
 
 
-def _planner_prompts(executors: Executors) -> list[PlannerPrompt]:
-    registry = dynamic_operation_registry()
-    renders = [
-        registry.decode(item.operation)
-        for item in executors.seen
-        if isinstance(item, ExecuteRegisteredOperation)
-    ]
+def _planner_prompts(run: SimulatedRun) -> list[PlannerPrompt]:
+    renders = [item.request for item in run.decisions if isinstance(item, Operation)]
     return [
         item.context
         for item in renders
@@ -74,36 +64,33 @@ def _text(prompt: PlannerPrompt) -> str:
 def test_the_next_plan_receives_a_completed_profiles_intent_and_trusted_outcome(
     reading: tuple[bool, str], status: str, detail: str
 ) -> None:
-    executors = Executors(
-        planner=deque(
-            [
-                plan_reply(implement("A")),
-                plan_reply(
-                    profile(
-                        "prof-A",
-                        target_hypothesis_id="A",
-                        question="Where does queue_step spend device time?",
-                        decision_impact="Optimize queue_step if it dominates.",
-                    )
-                ),
-                plan_reply(implement("after-profile")),
-            ]
-        ),
-        profiler=deque([implemented()]),
-        implementer=deque([implemented(), implemented()]),
-        judge=deque([reviewed(), reviewed()]),
-        profile_reading=lambda _commit: reading,
-    )
-
-    run_shell(
-        executors,
+    world = DynamicWorld(
+        planner=[
+            plan_reply(implement("A")),
+            plan_reply(
+                profile(
+                    "prof-A",
+                    target_hypothesis_id="A",
+                    question="Where does queue_step spend device time?",
+                    decision_impact="Optimize queue_step if it dominates.",
+                )
+            ),
+            plan_reply(implement("after-profile")),
+        ],
+        profiler=[implemented()],
+        implementer=[implemented(), implemented()],
+        judge=[reviewed(), reviewed()],
+        profile_reading=reading,
+        lifecycle={"profile-capture"},
         max_rounds=3,
         profiling=True,
         profile_measurement=True,
-        host=HostOptions(lifecycle=frozenset({"profile-capture"})),
     )
+    run = simulate(world)
 
-    prompts = _planner_prompts(executors)
+    assert run.finished
+    assert not run.liveness_violations
+    prompts = _planner_prompts(run)
     assert len(prompts) == 3
     profiles = [row for row in prompts[2].history if getattr(row, "kind", None) == "profile"]
     assert len(profiles) == 1

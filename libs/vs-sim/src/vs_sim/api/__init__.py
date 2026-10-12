@@ -34,6 +34,7 @@ from vs_sim.processes import (
 from vs_sim.randomness import RandomSource, SeededRandom, SystemRandomSource, derive_seed
 from vs_sim.signals import LoopSignalSource, PidfdProcessSignaller, ProcessSignaller, SignalSource
 from vs_sim.streaming import StreamingCommand, SubprocessStreamingCommand
+from vs_sim.sync import sync_descriptor
 
 __all__ = [
     "BlockingRunner",
@@ -86,4 +87,5 @@ __all__ = [
     "Worker",
     "derive_seed",
     "run_foreground",
+    "sync_descriptor",
 ]

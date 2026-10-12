@@ -16,7 +16,7 @@ from vibesys.plugin_registration import OrchestrationRegistration
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _SOURCE_ROOT = _REPOSITORY_ROOT / "src"
 _ORCHESTRATION = _SOURCE_ROOT / "vibesys" / "orchestration"
-_SHARED_PACKAGES = ("domains", "hypothesis", "profile_focus", "steering", "prompts", "metrics")
+_SHARED_PACKAGES = ("domains", "hypothesis", "profile_focus", "prompts", "metrics")
 
 
 def test_every_direct_orchestration_folder_registers_a_strategy() -> None:
@@ -33,12 +33,10 @@ def test_every_direct_orchestration_folder_registers_a_strategy() -> None:
         assert registry.resolve(registration.plugin.id) is registration, (
             f"{registration.plugin.id} must be registered in the built-in catalog"
         )
-        plugin = registration.plugin
-        if plugin.core is not None:
-            # A core policy has no orchestrate function; its prompt templates name its owner.
-            owned = folder.resolve() in Path(plugin.core.prompt_templates).resolve().parents
-        else:
-            owned = plugin.orchestrate.__module__.startswith(f"{module.__name__}.")
+        # A strategy's prompt templates name its owner.
+        owned = (
+            folder.resolve() in Path(registration.plugin.core.prompt_templates).resolve().parents
+        )
         assert owned, f"{folder.name} must own its registered orchestration strategy"
 
 

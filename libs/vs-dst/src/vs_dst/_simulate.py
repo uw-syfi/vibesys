@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any
 
 from vs_core.api import RunStatus
+from vs_core.api.testing import Budget, liveness
 from vs_dst._crash_points import CrashKind, CrashPoint, crash_point_policy
 from vs_dst._effects import Effects, RecoverableExecutors
 from vs_dst._snapshots import (
@@ -15,6 +16,7 @@ from vs_dst._snapshots import (
     Snapshot,
     Snapshots,
 )
+from vs_dst._world import HostedWorld
 from vs_runtime.api.testing import (
     LEASE,
     FakePublicationDelivery,
@@ -29,14 +31,39 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import CoreState, Decision, OperationRegistry, SchemaRef, StrategyState
-    from vs_core.api.testing import Journal
-    from vs_dst._world import World
-    from vs_runtime.api.core import DispatchCapExceededError, RunStalledError
+    from vs_core.api import (
+        CoreState,
+        Decision,
+        OperationRegistry,
+        Request,
+        RunResultProposal,
+        SchemaRef,
+        StrategyState,
+    )
+    from vs_core.api.testing import Journal, Violation
+    from vs_dst._world import Enact, World
+    from vs_runtime.api.core import (
+        CoreRuntime,
+        DispatchCapExceededError,
+        ExecutionResult,
+        RunStalledError,
+    )
     from vs_runtime.api.testing import Script
+    from vs_sim.api.testing import VirtualClock
 
 FIRST_HOST_STARTS_AT = 1.0
 """The virtual time the first host starts at."""
+
+
+@dataclass(frozen=True)
+class Start:
+    """Where a run's first host started within the whole run: all of it for a first host."""
+
+    clock_at: float = FIRST_HOST_STARTS_AT
+    commits: int = 0
+    """How many commits earlier hosts made."""
+    decisions: tuple[Decision, ...] = ()
+    """What earlier hosts decided."""
 
 
 class SimulatedRun:
@@ -47,19 +74,19 @@ class SimulatedRun:
         run: Run,
         outside: OutsideWorld,
         options: HostOptions,
-        pristine: OutsideWorld | None,
-        earlier_decisions: tuple[Decision, ...] = (),
+        pristine: OutsideWorld,
+        started: Start | None = None,
     ) -> None:
         """Wrap a finished host's ``run`` over the ``outside`` world it left.
 
-        ``pristine`` is a copy of the outside world from before the run, which crash cases are
-        taken from; a recovered run has none.
+        ``pristine`` is the outside world as this run's first host found it, which crash cases
+        are taken from; ``started`` says where in the whole run that was.
         """
         self._run = run
         self._outside = outside
         self._options = options
         self._pristine = pristine
-        self._earlier_decisions = earlier_decisions
+        self._started = Start() if started is None else started
         self._snapshots: dict[CrashPoint, Snapshot] = {}
 
     @property
@@ -68,9 +95,18 @@ class SimulatedRun:
         return self._run.core
 
     @property
-    def result(self) -> object:
+    def result(self) -> RunResultProposal | None:
         """The run's result: its outcome, once it has one."""
         return self._run.core.run.result
+
+    @property
+    def world(self) -> World:
+        """The world as this run left it: what it handed out and what it did to the far side.
+
+        A recovered run has a world of its own (a copy of the outside world at its crash
+        point), so a test reads what a crash left behind from it.
+        """
+        return self._outside.world
 
     @property
     def state(self) -> StrategyState:
@@ -80,7 +116,7 @@ class SimulatedRun:
     @property
     def decisions(self) -> tuple[Decision, ...]:
         """Every decision any host of the run proposed, in order."""
-        return (*self._earlier_decisions, *self._run.decisions)
+        return (*self._started.decisions, *self._run.decisions)
 
     @property
     def journal(self) -> Journal:
@@ -96,6 +132,16 @@ class SimulatedRun:
     def halted(self) -> DispatchCapExceededError | RunStalledError | None:
         """Why the loop gave up on the run (dispatch cap, stall), or None."""
         return self._run.halted
+
+    @property
+    def liveness_violations(self) -> tuple[Violation, ...]:
+        """The liveness invariants this run broke (`vs_core.testing.liveness`); none when live.
+
+        The run's journal is checked against its final core state with the retry budget of the
+        world's limits, expecting the run to end in its terminal state.
+        """
+        budget = Budget(retries=self._outside.world.setup.harness.limits.max_retries)
+        return tuple(liveness(self._run.journal, self._run.core, budget))
 
     @property
     def stopped(self) -> bool:
@@ -122,11 +168,14 @@ class SimulatedRun:
 
         A sample on pull requests, every boundary under ``--dst-crash-points=all``. ``kind``
         keeps one kind of point (a suite splits a long sweep that way). A run that started from a
-        crash has none of its own. Choosing costs nothing: the run only counted its commits.
+        crash offers the commits its own hosts made, so it can be crashed again. Choosing costs
+        nothing: the run only counted its commits.
         """
-        if self._pristine is None:
-            return ()
-        points = crash_point_policy().choose(self.commits)
+        first = self._started.commits
+        points = tuple(
+            replace(point, commit=point.commit + first)
+            for point in crash_point_policy().choose(self.commits - first)
+        )
         return points if kind is None else tuple(p for p in points if p.kind is kind)
 
     def rerun_with_crash(self, point: CrashPoint) -> SimulatedRun:
@@ -140,8 +189,11 @@ class SimulatedRun:
         every point `crash_points()` offers (it raises `NondeterministicWorldError` if that run
         makes a different number of commits). A point the policy did not offer, but that is
         within the run, gets a run of its own; a point outside the run raises `ValueError`.
+
+        A recovered run can be crashed in turn: its points are those of its own hosts, and the
+        run it results in reports the decisions of every host so far.
         """
-        if self._pristine is None or not 0 <= point.commit < self.commits:
+        if not self._started.commits <= point.commit < self.commits:
             message = f"{point} is not a crash point of this run"
             raise ValueError(message)
         if point not in self._snapshots:
@@ -150,26 +202,26 @@ class SimulatedRun:
         snapshot = self._snapshots[point]
         outside = snapshot.outside.copy()
         # The next host starts after the dead one's lease has expired.
-        run = _run_host(outside, self._options, FIRST_HOST_STARTS_AT + LEASE + 1, None)
-        return SimulatedRun(
-            run,
-            outside,
-            self._options,
-            pristine=None,
-            earlier_decisions=tuple(self._run.decisions[: snapshot.decisions]),
+        clock_at = self._started.clock_at + LEASE + 1
+        run = _run_host(outside, self._options, clock_at, None)
+        started = Start(
+            clock_at=clock_at,
+            commits=snapshot.outside.store.commits,
+            decisions=(*self._started.decisions, *self._run.decisions[: snapshot.decisions]),
         )
+        return SimulatedRun(run, outside, self._options, snapshot.outside, started)
 
     def _take_snapshots(self, pristine: OutsideWorld, wanted: frozenset[CrashPoint]) -> None:
         """Run the world again from its start, copying the outside world at the ``wanted`` points."""
         outside = pristine.copy()
         snapshots = Snapshots(outside, wanted)
-        _run_host(outside, self._options, FIRST_HOST_STARTS_AT, snapshots)
+        _run_host(outside, self._options, self._started.clock_at, snapshots)
         if outside.store.commits != self.commits:
             raise NondeterministicWorldError(outside.world, self.commits, outside.store.commits)
         self._snapshots.update(snapshots.by_point)
 
 
-def simulate(world: World, *, max_concurrent: int = 1, controlled: bool = False) -> SimulatedRun:
+def simulate(world: World) -> SimulatedRun:
     """Run ``world``'s strategy to the end of its run on the production shell and loop.
 
     The loop, the lease, the fence, the clock, the durable commit and the owner-event queue
@@ -178,10 +230,11 @@ def simulate(world: World, *, max_concurrent: int = 1, controlled: bool = False)
     of the initial world; `rerun_with_crash` runs the world once more to take the copies a crash
     sweep needs. A world that cannot be deep-copied raises `WorldNotCopyableError`.
 
-    ``max_concurrent`` is how many requests the loop executes at once; ``controlled`` gives it an
-    idle run-control channel, as a product run has.
+    How the host is arranged (its concurrency, a run-control channel) is the world's
+    `RunSetup`; a `HostedWorld` also hears each host's shell and clock.
     """
-    options = HostOptions(max_concurrent=max_concurrent, controlled=controlled)
+    setup = world.setup
+    options = HostOptions(max_concurrent=setup.max_concurrent, controlled=setup.controlled)
     store = RecordingStore()
     outside = OutsideWorld(store, FakePublicationDelivery(store), Effects(), world)
     pristine = outside.copy()  # also fails now, naming the world, if it cannot be copied
@@ -193,13 +246,17 @@ def _run_host(
     outside: OutsideWorld, options: HostOptions, clock_at: float, snapshots: Snapshots | None
 ) -> Run:
     """A new host (shell, strategy instance, executors) over ``outside``, run to the end."""
-    setup = outside.world.setup
+    world = outside.world
+    setup = world.setup
+    enactment = _Enactment(world)
     host = scripted_host(
         setup.new_strategy(),
-        outside.world,
+        world,
         setup.harness,
         setup.schemas,
-        replace(options, translator=_translator(outside.effects)),
+        replace(
+            options, translator=_translator(outside.effects, enactment), attach=enactment.attach
+        ),
         store=outside.store,
         delivery=outside.delivery,
         clock_at=clock_at,
@@ -209,8 +266,28 @@ def _run_host(
     return host.run()
 
 
-def _translator(effects: Effects) -> TranslatorFactory:
-    """Executors that record into, and answer inspections from, the shared ``effects`` ledger."""
+class _Enactment:
+    """How one host's executed requests are enacted: the world's say, once the host exists."""
+
+    def __init__(self, world: World) -> None:
+        self._world = world
+        self._enact: Enact | None = None
+
+    def attach(self, shell: CoreRuntime[Any], clock: VirtualClock) -> None:
+        """Let a `HostedWorld` bind this host's shell and clock."""
+        if isinstance(self._world, HostedWorld):
+            self._enact = self._world.attach(shell, clock)
+
+    async def __call__(self, request: Request, result: ExecutionResult) -> ExecutionResult:
+        """The result the shell is told for ``request``."""
+        return result if self._enact is None else await self._enact(request, result)
+
+
+def _translator(effects: Effects, enactment: _Enactment) -> TranslatorFactory:
+    """Executors that record into, and answer inspections from, the shared ``effects`` ledger.
+
+    What each request does on the host (see `HostedWorld`) passes through ``enactment``.
+    """
 
     def build(
         script: Script,
@@ -219,6 +296,10 @@ def _translator(effects: Effects) -> TranslatorFactory:
         schemas: Mapping[SchemaRef, type[BaseModel]],
         journal: Journal,
     ) -> RecoverableExecutors:
-        return RecoverableExecutors(script, core, registry, schemas, journal, effects)
+        class HostExecutors(RecoverableExecutors):
+            async def _enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
+                return await enactment(request, result)
+
+        return HostExecutors(script, core, registry, schemas, journal, effects)
 
     return build

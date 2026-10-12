@@ -9,21 +9,14 @@ tests guard (LIVE-2: the judge said no evidence was provided after the implement
 
 from __future__ import annotations
 
-from collections import deque
 from pathlib import Path
 
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
-    implement,
-    implemented,
-    plan_reply,
-    reviewed,
-)
-from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
+from tests.vibesys.orchestration.dynamic.strategy._replies import reviewed
 from tests.vibesys.orchestration.dynamic.strategy._views import empty_view, evidence_ref, revision
+from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
 from vibesys.orchestration.dynamic.core_policy.api import run_prompt_variables
@@ -43,7 +36,6 @@ from vibesys.orchestration.dynamic.strategy.api import (
     RenderRoleArtifacts,
     ReviewEvaluation,
     ReviewPrompt,
-    dynamic_operation_registry,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import (
@@ -51,34 +43,25 @@ from vs_core.api import (
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
-    ExecuteRegisteredOperation,
     ObservationStatus,
+    Operation,
     RevisionRef,
     RunView,
     Scope,
 )
+from vs_dst.api import SimulatedRun, simulate
 from vs_prompts.api import TemplateRenderer
 
 
-def _executors(**changes: object) -> Executors:
-    executors = Executors(
-        planner=deque([plan_reply(implement("h1"))]),
-        implementer=deque([implemented()]),
-        # A rejected candidate is never measured again, so only the agent's own evaluation exists.
-        judge=deque([reviewed(passed=False)]),
+def _world(*, agent_evaluation: bool = False, throughput: float | None = 100.0) -> DynamicWorld:
+    # A rejected candidate is never measured again, so only the agent's own evaluation exists.
+    return DynamicWorld(
+        judge=[reviewed(passed=False)], agent_evaluation=agent_evaluation, throughputs=(throughput,)
     )
-    for name, value in changes.items():
-        setattr(executors, name, value)
-    return executors
 
 
-def _review_prompts(executors: Executors) -> list[ReviewPrompt]:
-    registry = dynamic_operation_registry()
-    renders = [
-        registry.decode(item.operation)
-        for item in executors.seen
-        if isinstance(item, ExecuteRegisteredOperation)
-    ]
+def _review_prompts(run: SimulatedRun) -> list[ReviewPrompt]:
+    renders = [item.request for item in run.decisions if isinstance(item, Operation)]
     return [
         item.context
         for item in renders
@@ -103,10 +86,11 @@ def _text(prompt: ReviewPrompt, *, agent_evaluation: bool = True) -> str:
 
 
 def test_the_judge_is_given_the_evidence_id_verdicts_and_metric_of_an_accepted_evaluation() -> None:
-    executors = _executors(agent_evaluation=True, benchmark=lambda _commit: 123.0)
-    run_shell(executors)
+    run = simulate(_world(agent_evaluation=True, throughput=123.0))
 
-    (prompt,) = _review_prompts(executors)
+    assert run.finished
+    assert not run.liveness_violations
+    (prompt,) = _review_prompts(run)
     assert {item.kind for item in prompt.evaluations} == {EvidenceKind.LOCAL_VALIDATION}
     by_kind = {
         EvidenceKind(item.evidence_id.root.split(":")[0].replace("accuracy", "correctness")): item
@@ -128,10 +112,11 @@ def test_the_judge_is_given_the_evidence_id_verdicts_and_metric_of_an_accepted_e
 
 
 def test_a_failed_benchmark_reaches_the_judge_with_what_it_measured() -> None:
-    executors = _executors(agent_evaluation=True, benchmark=lambda _commit: None)
-    run_shell(executors)
+    run = simulate(_world(agent_evaluation=True, throughput=None))
 
-    (prompt,) = _review_prompts(executors)
+    assert run.finished
+    assert not run.liveness_violations
+    (prompt,) = _review_prompts(run)
     benchmark = next(
         item for item in prompt.evaluations if item.evidence_id.root.startswith("benchmark:")
     )
@@ -144,10 +129,11 @@ def test_a_failed_benchmark_reaches_the_judge_with_what_it_measured() -> None:
 
 
 def test_the_judge_is_told_when_no_evaluation_exists() -> None:
-    executors = _executors()
-    run_shell(executors)
+    run = simulate(_world())
 
-    (prompt,) = _review_prompts(executors)
+    assert run.finished
+    assert not run.liveness_violations
+    (prompt,) = _review_prompts(run)
     assert prompt.evaluations == ()
     assert "no trusted evaluation of this candidate exists yet" in _text(prompt)
 
@@ -177,9 +163,11 @@ def _candidate() -> RevisionRef:
 
 
 def test_every_evaluation_of_the_candidate_is_listed_oldest_first() -> None:
-    executors = _executors(agent_evaluation=True)
-    run_shell(executors)
-    (prompt,) = _review_prompts(executors)
+    run = simulate(_world(agent_evaluation=True))
+
+    assert run.finished
+    assert not run.liveness_violations
+    (prompt,) = _review_prompts(run)
     ids = [item.evidence_id.root for item in prompt.evaluations]
     assert ids == sorted(ids, key=lambda name: name.startswith("benchmark"))
     assert all(isinstance(item, ReviewEvaluation) for item in prompt.evaluations)

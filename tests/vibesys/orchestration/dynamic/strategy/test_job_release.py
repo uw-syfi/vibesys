@@ -9,46 +9,46 @@ state: attempt `closing`, release dependency on the job, settlement `pending`, n
 
 from __future__ import annotations
 
-from collections import Counter, deque
-from dataclasses import dataclass, field
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
-    implement,
-    implemented,
-    plan_reply,
-    reviewed,
-)
-from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
+from tests.vibesys.orchestration.dynamic.strategy._replies import implemented, reviewed
+from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 
-from vs_core.api import (
-    AttemptPhase,
-    ObserveOwnedJob,
-    OwnedJob,
-    ResourceId,
-    RunStatus,
-    SubmitMeasurement,
-)
+from vs_core.api import AttemptPhase, ObserveOwnedJob, OwnedJob
 from vs_core.testing.drive import Failed, Running
+from vs_dst.api import simulate
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from vs_core.api import CoreState, Request
     from vs_core.testing.drive import Answer
 
 
-@dataclass
-class SlowCandidateJobs(Executors):
-    """Candidate jobs keep running for ``running_polls`` polls, then end as the script says.
+class SlowCandidateJobs(DynamicWorld):
+    """Candidate jobs keep running for ``running_polls`` polls, then end as the world says.
 
     The input's own measurement is never slow, so the run starts as any run does.
     """
 
-    running_polls: int = 0
-    ends_failed: bool = False
-    polls: Counter[str] = field(default_factory=Counter)
+    def __init__(
+        self,
+        *,
+        running_polls: int,
+        ends_failed: bool,
+        agent_evaluation: bool,
+        implementer: Sequence[str],
+        judge: Sequence[str],
+    ) -> None:
+        super().__init__(
+            polls=(0,), agent_evaluation=agent_evaluation, implementer=implementer, judge=judge
+        )
+        self._running_polls = running_polls
+        self._ends_failed = ends_failed
+        self._polled: Counter[str] = Counter()
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
         if isinstance(request, ObserveOwnedJob):
@@ -58,18 +58,12 @@ class SlowCandidateJobs(Executors):
                 if isinstance(item, OwnedJob) and item.resource_id == request.resource_id
             )
             if job.plan.purpose != "baseline":
-                self.seen.append(request)
-                self.polls[request.resource_id.root] += 1
-                if self.polls[request.resource_id.root] <= self.running_polls:
+                self._polled[request.resource_id.root] += 1
+                if self._polled[request.resource_id.root] <= self._running_polls:
                     return Running(resource_id=request.resource_id)
-                if self.ends_failed:
+                if self._ends_failed:
                     return Failed(accepted=True)
         return super().__call__(request, core)
-
-
-def _submit(request: SubmitMeasurement) -> Answer:
-    assert request.request_id is not None
-    return Running(resource_id=ResourceId(root=f"job:{request.request_id.root}"))
 
 
 @settings(max_examples=16, deadline=None, derandomize=True, database=None)
@@ -82,20 +76,19 @@ def _submit(request: SubmitMeasurement) -> Answer:
 def test_a_candidate_settled_over_a_running_measurement_job_still_settles(
     *, running_polls: int, ends_failed: bool, agent_evaluation: bool, passed: bool
 ) -> None:
-    executors = SlowCandidateJobs(
-        planner=deque([plan_reply(implement("h1"))]),
-        implementer=deque(implemented() for _ in range(6)),
-        judge=deque(reviewed(passed=passed) for _ in range(6)),
+    world = SlowCandidateJobs(
+        implementer=[implemented() for _ in range(6)],
+        judge=[reviewed(passed=passed) for _ in range(6)],
         agent_evaluation=agent_evaluation,
-        submit=_submit,
         running_polls=running_polls,
         ends_failed=ends_failed,
     )
 
-    finished = run_shell(executors)
+    finished = simulate(world)
 
     assert finished.halted is None
-    assert finished.core.run.status == RunStatus.TERMINAL
+    assert finished.finished
+    assert not finished.liveness_violations
     for attempt in finished.core.attempts.attempts:
         assert attempt.phase == AttemptPhase.TERMINAL
         assert attempt.release_dependencies == ()

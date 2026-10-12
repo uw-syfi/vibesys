@@ -18,7 +18,6 @@ import {DEFAULT_CHAT_THREAD_ID} from '@vibesys/run-state/transcript';
 import {
   closeStreamAndTransport,
   DEFAULT_RECONNECT_DELAYS_MS,
-  LatestQueryOwner,
   PersistentEventStream,
   type ScheduleTimeout,
   type ServerTransport,
@@ -75,6 +74,7 @@ import {
   setDesignLog,
   setExperiments,
 } from './experiments.js';
+import {LatestQueryOwner} from './latest-query-owner.js';
 import {type NoteIdentity, readNote, writeNote} from './notes-store.js';
 import {
   activeCommandSurface,

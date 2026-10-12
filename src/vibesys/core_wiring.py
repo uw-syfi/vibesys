@@ -16,7 +16,7 @@ from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_sections
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.run.evaluation_backend import semantic_evaluation_identity
+from vibesys.run.evaluation_identity import semantic_evaluation_identity
 from vs_core.api import ArtifactId, ArtifactRef
 from vs_runtime.api.core import (
     AgentEvaluationPolicy,

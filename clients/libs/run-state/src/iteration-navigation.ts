@@ -4,6 +4,7 @@ import type {
   IterationSummary,
   IterationUnavailable,
 } from '@vibesys/contracts';
+import {roundsWithPlan} from './round-plan.js';
 import type {CoreState} from './state.js';
 
 export interface IterationNavigationState {
@@ -125,7 +126,11 @@ export function iterationChildren(
 
 /** Compatibility projection for clients while policies migrate away from round-only navigation. */
 export function iterationRootsForCore(state: CoreState): readonly IterationSummary[] {
-  return state.rounds.map((round, index) => ({
+  return iterationRootsForRounds(roundsWithPlan(state.rounds, state.maxRounds));
+}
+
+function iterationRootsForRounds(rounds: CoreState['rounds']): readonly IterationSummary[] {
+  return rounds.map((round, index) => ({
     id:
       round.key.kind === 'number' ? `round:${round.key.number}` : `round-label:${round.key.label}`,
     parent_id: null,
@@ -153,7 +158,9 @@ export function iterationRoots(
   const compatibility = iterationRootsForCore(state);
   if (navigation.revision === null) return compatibility;
   const queried = iterationChildren(navigation, null);
-  if (queried.length === 0) return compatibility;
+  // An authoritative empty projection may be non-round. Retain only rounds proven by events;
+  // configured future rounds are compatibility data and must not invent policy semantics.
+  if (queried.length === 0) return iterationRootsForRounds(state.rounds);
   if (!queried.every(node => node.kind === 'round')) return queried;
   const queriedIds = new Set(queried.map(node => node.id));
   return [...queried, ...compatibility.filter(node => !queriedIds.has(node.id))].sort(

@@ -28,8 +28,23 @@ function run(index: number) {
     project: '/p',
     task: null,
     runId: `run-${index}`,
+    instanceId: index.toString(16).padStart(12, '0'),
     attachedAt: index,
   };
+}
+
+function version2Run(index: number) {
+  return {
+    host: 'local',
+    project: '/p',
+    task: null,
+    runId: `run-${index}`,
+    attachedAt: index,
+  };
+}
+
+function migratedVersion2Run(index: number) {
+  return {...version2Run(index), instanceId: null};
 }
 
 describe('SettingsStore', () => {
@@ -84,7 +99,7 @@ describe('SettingsStore', () => {
     const path = join(directory, 'recent.json');
     const invalidFiles = [
       '{"version":2,"runs":[{"host":"local","project":"/old"}]',
-      JSON.stringify({version: 2, runs: [{...run(1), runId: null}]}),
+      JSON.stringify({version: 2, runs: [{...version2Run(1), runId: null}]}),
     ];
 
     for (const invalid of invalidFiles) {
@@ -106,10 +121,14 @@ describe('SettingsStore', () => {
       expect(filesystem.operations.map(operation => operation.kind)).toEqual(['read', 'read']);
       expect(logged).toHaveLength(2);
 
-      await filesystem.writePrivateText(path, `${JSON.stringify({version: 2, runs: [run(1)]})}\n`);
+      await filesystem.writePrivateText(
+        path,
+        `${JSON.stringify({version: 2, runs: [version2Run(1)]})}\n`,
+      );
       await settings.updateRecent(current => remember(current, run(2)));
-      expect(JSON.parse(filesystem.text(path))).toEqual({version: 2, runs: [run(2), run(1)]});
-      expect(heard).toEqual([{version: 2, runs: [run(2), run(1)]}]);
+      const expected = {version: 3 as const, runs: [run(2), migratedVersion2Run(1)]};
+      expect(JSON.parse(filesystem.text(path))).toEqual(expected);
+      expect(heard).toEqual([expected]);
     }
   });
 
@@ -131,7 +150,7 @@ describe('SettingsStore', () => {
       version: 2,
       hosts: {'ssh:one': {checkout: '/one'}, 'ssh:two': {checkout: '/two'}},
     });
-    expect(await settings.recent()).toEqual({version: 2, runs: [run(2), run(1)]});
+    expect(await settings.recent()).toEqual({version: 3, runs: [run(2), run(1)]});
   });
 
   test('regression: a host-settings read failure cannot replace the existing file', async () => {
@@ -185,7 +204,7 @@ describe('SettingsStore', () => {
   test('regression: a recent-runs read failure cannot replace the existing file', async () => {
     const directory = '/settings';
     const path = join(directory, 'recent.json');
-    const existing = {version: 2, runs: [run(1)]};
+    const existing = {version: 2, runs: [version2Run(1)]};
     const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
     const {settings, logged} = store(filesystem, directory);
     filesystem.failNextRead(path, fileError('EIO', path));
@@ -202,7 +221,10 @@ describe('SettingsStore', () => {
     expect(JSON.parse(filesystem.text(path))).toEqual(existing);
 
     await settings.updateRecent(current => remember(current, run(2)));
-    expect(JSON.parse(filesystem.text(path))).toEqual({version: 2, runs: [run(2), run(1)]});
+    expect(JSON.parse(filesystem.text(path))).toEqual({
+      version: 3,
+      runs: [run(2), migratedVersion2Run(1)],
+    });
     expect(filesystem.operations.map(operation => operation.kind)).toEqual([
       'read',
       'read',
@@ -239,7 +261,7 @@ describe('SettingsStore', () => {
     const directory = '/settings';
     const path = join(directory, 'recent.json');
     const staging = `${path}.${process.pid}.tmp`;
-    const existing = {version: 2, runs: [run(1)]};
+    const existing = {version: 3 as const, runs: [run(1)]};
     const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
     const {settings} = store(filesystem, directory);
     const heard: RecentFile[] = [];

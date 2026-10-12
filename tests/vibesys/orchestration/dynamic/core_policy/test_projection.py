@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue
+from tests.support.core_plugins import failing_plugin
 from tests.vibesys.orchestration.dynamic.strategy._harness import envelope
 
 from vibesys.dynamic_core import dynamic_projector
@@ -24,8 +25,6 @@ from vibesys.run.contracts import RunStatus, RunView
 from vs_core.api import AttemptId, EventCursor, HostFence, HostId, RunEnvelope
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record
-from vs_runtime.api import OrchestrationPlugin, Run
-from vs_runtime.api import RunStatus as RuntimeStatus
 from vs_runtime.api.core import RuntimeRecord
 
 if TYPE_CHECKING:
@@ -34,10 +33,6 @@ if TYPE_CHECKING:
 
 class _Options(BaseModel):
     pass
-
-
-async def _never(_run: Run, _options: BaseModel) -> RuntimeStatus:
-    raise AssertionError
 
 
 _row = st.builds(
@@ -220,10 +215,10 @@ def test_a_just_committed_record_projects_without_reading_disk(tmp_path: Path) -
     assert projector.project_committed("dynamic", _state(), run_id=run_id) is None
 
 
-def test_a_plugin_without_a_state_model_registers_the_projector(tmp_path: Path) -> None:
+def test_a_plugin_registers_the_projector(tmp_path: Path) -> None:
     project, run_id = _project_with_run(tmp_path)
     _commit(project, run_id, _state())
-    plugin = OrchestrationPlugin(id="dynamic", agents=(), options=_Options, orchestrate=_never)
+    plugin = failing_plugin("dynamic", options=_Options)
 
     registration = OrchestrationRegistration(plugin=plugin, projector=dynamic_projector())
     view = project_run(

@@ -36,12 +36,14 @@ function Root({stores}: {readonly stores: WelcomeStores}): JSX.Element {
       start={useStore(stores.start)}
       picker={useStore(stores.picker)}
       completion={useStore(stores.completion)}
+      inspector={useStore(stores.inspector)}
       send={{
         welcome: stores.welcome.dispatch,
         host: stores.host.dispatch,
         start: stores.start.dispatch,
         picker: stores.picker.dispatch,
         completion: stores.completion.dispatch,
+        inspector: stores.inspector.dispatch,
       }}
     />
   );
@@ -50,7 +52,11 @@ function Root({stores}: {readonly stores: WelcomeStores}): JSX.Element {
 async function load(root: HTMLElement, bridge: WelcomeBridge): Promise<void> {
   document.documentElement.dataset['platform'] = bridge.platform;
   const reactRoot = createRoot(root);
-  const loaded = await loadWelcomeStores(bridge, question => window.confirm(question));
+  const loaded = await loadWelcomeStores(
+    bridge,
+    question => window.confirm(question),
+    value => navigator.clipboard.writeText(value),
+  );
   if (!loaded.ok) {
     reactRoot.render(<p className="status error">{loaded.error}</p>);
     return;

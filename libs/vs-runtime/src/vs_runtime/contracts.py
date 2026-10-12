@@ -14,23 +14,20 @@ from pathlib import (
     PurePosixPath,
     PureWindowsPath,
 )  # Pydantic resolves WorkspaceRef at runtime.
-from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar, overload
+from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from vs_core.api import EvidenceRequirements
-from vs_evaluation.api import EvidenceFailureKind, ProfileField, TrustedEvidence
+from vs_evaluation.api import EvidenceFailureKind
 from vs_evaluator_protocol.api import PartialMeasurement
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Callable
 
-    from vs_agent.api import AgentSessionCheckpoint, AgentSessionKey, InvocationOutcome
     from vs_core.api import Limits, OperationRegistration, RevisionRef, SchemaRef, Strategy
     from vs_core.api import RunFacts as CoreRunFacts
-    from vs_evaluation.api import EvaluationSettlements, ProfilerOperation
-    from vs_project.api import OrchestrationDescriptor, Project, StateModels
-    from vs_prompts.api import RenderedPrompt
+    from vs_project.api import OrchestrationDescriptor, Project
     from vs_runtime._agent_evaluation import AgentEvaluationPolicy
     from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._operation_catalog import OperationEntry
@@ -54,10 +51,6 @@ def _is_concrete_model_class(value: object) -> bool:
 
 class RuntimeContractError(RuntimeError):
     """Base class for typed runtime operation failures."""
-
-
-class UnresolvedDispatchError(RuntimeContractError):
-    """A provider turn was dispatched and its outcome is unknown; it needs reconciliation."""
 
 
 class SessionTransportUnavailableError(RuntimeContractError):
@@ -143,18 +136,6 @@ class UnknownAgentRoleError(RuntimeContractError):
     def __init__(self, role_id: str) -> None:
         """Name the role not owned by the active plugin."""
         super().__init__(f"agent role {role_id!r} is not declared by this orchestration")
-
-
-class StateModelError(RuntimeContractError):
-    """A state operation did not use the plugin's exact declared model."""
-
-    def __init__(self, expected: type[BaseModel] | None, actual: type[BaseModel]) -> None:
-        """Name the declared and requested state models."""
-        if expected is None:
-            message = "this orchestration does not declare durable state"
-        else:
-            message = f"orchestration state requires {expected.__name__}, got {actual.__name__}"
-        super().__init__(message)
 
 
 class WorkspaceAccess(StrEnum):
@@ -303,191 +284,6 @@ class AgentRole(BaseModel):
     required_capabilities: frozenset[AgentCapability] = frozenset()
 
 
-@dataclass(frozen=True, slots=True)
-class AgentToolBindingContext:
-    """Session identity available while resolving one declared agent tool.
-
-    The runtime supplies the exact declared role, selected workspace, and
-    optional durable member identity. Product composition can therefore issue
-    a least-authority capability without exposing provider or backend details
-    to orchestration policy.
-    """
-
-    role: AgentRole
-    workspace: Workspace
-    member_id: str | None
-    agent_path: Callable[[Path], str]
-
-
-class AgentBinding(BaseModel):
-    """Immutable runtime choices resolved for one role session."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    backend: str = Field(min_length=1)
-    provider: str | None = None
-    model: str | None = None
-    reasoning_effort: str | None = None
-
-
-class AgentConversationOpenError(RuntimeContractError):
-    """Conversation setup failed before any provider turn was dispatched."""
-
-
-@dataclass(frozen=True)
-class AgentConversationRequest:
-    """In-process binding inputs, not a competing kernel SessionSpec or TurnSpec.
-
-    Actual role and workspace handles bind immutable policy authority without
-    allocating provider resources; kernel lifecycle intent remains authoritative.
-    """
-
-    role: AgentRole
-    workspace: Workspace
-    member_id: str
-    generation: int | None = None
-    invocation_id: str | None = None
-    writable_paths: tuple[str, ...] = ()
-
-
-class InvocationRelease(BaseModel):
-    """Durable policy authorizes releasing this invocation after cancellation drains."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    invocation_id: str = Field(min_length=1)
-
-
-class AgentConversation(Protocol):
-    """Bound conversation without initialized harness or checkpoint guarantees.
-
-    Inspection works before opening. Turns own setup and cancellation drain;
-    close is idempotent even before opening. Generic cancellation preserves Unknown.
-    """
-
-    @property
-    def role(self) -> AgentRole:
-        """Return the immutable role bound before opening."""
-        ...
-
-    @property
-    def workspace(self) -> Workspace:
-        """Return the fixed workspace handle."""
-        ...
-
-    @property
-    def member_id(self) -> str | None:
-        """Return the durable policy identity, if one was bound."""
-        ...
-
-    @property
-    def closed(self) -> bool:
-        """Return whether further turns are rejected."""
-        ...
-
-    @property
-    def session_key(self) -> AgentSessionKey:
-        """Return the stable conversation identity before or after opening."""
-        ...
-
-    @property
-    def invocation_id(self) -> str | None:
-        """Return the immutable bound invocation, or None for an unbound conversation."""
-        ...
-
-    def inspect(self, invocation_id: str) -> InvocationOutcome:
-        """Read evidence without treating unknown acceptance as replay authority."""
-        ...
-
-    async def resume(
-        self,
-        message: RenderedPrompt,
-        invocation_id: str,
-        *,
-        response: type[BaseModel] | None = None,
-    ) -> InvocationOutcome:
-        """Continue the bound conversation and retain its durable acceptance fence."""
-        ...
-
-    @overload
-    async def turn(
-        self, message: str, *, response: None = None, invocation_id: str | None = None
-    ) -> str: ...
-
-    @overload
-    async def turn(
-        self, message: str, *, response: type[ResponseT], invocation_id: str | None = None
-    ) -> ResponseT: ...
-
-    async def close(self) -> None:
-        """Drain owned operations and close resources once, including before opening."""
-        ...
-
-
-class PreparedConversation(AgentConversation, Protocol):
-    """Deferred conversation that accepts durable release authority after drain."""
-
-    def authorize_release(self, authority: InvocationRelease) -> None:
-        """Bind live policy authority; apply it only after runtime cancellation drains."""
-        ...
-
-
-class AgentSession(AgentConversation, Protocol):
-    """Initialized conversation with fixed grants and resolved harness attribution."""
-
-    @property
-    def writable_paths(self) -> tuple[str, ...]:
-        """Return the fixed workspace-relative write grants for this session."""
-        ...
-
-    @property
-    def binding(self) -> AgentBinding:
-        """Return immutable harness and model attribution resolved by the runtime."""
-        ...
-
-    def checkpoint(self) -> AgentSessionCheckpoint:
-        """Return provider checkpoint identity or a typed session error."""
-        ...
-
-    def release_interrupted(self, invocation_id: str) -> None:
-        """Permit a new turn after an explicitly interrupted turn has drained."""
-        ...
-
-
-class WorkspaceAgentSessions(Protocol):
-    """Run-owned factory and lifetime owner for agent conversations."""
-
-    def prepare_conversation(self, request: AgentConversationRequest) -> PreparedConversation:
-        """Bind fixed policy inputs without opening a provider conversation."""
-        ...
-
-    def inspect_invocation(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
-        """Inspect the authoritative journal before opening provider resources."""
-        ...
-
-    async def create_session(
-        self,
-        role: AgentRole,
-        *,
-        workspace: Workspace,
-        member_id: str | None = None,
-        generation: int | None = None,
-        writable_paths: tuple[str, ...] = (),
-    ) -> AgentSession:
-        """Create a conversation with fixed write grants.
-
-        ``member_id`` enables durable provider-session resume. A positive
-        ``generation`` gives that member a separate durable conversation.
-        Omitting it preserves its existing stable conversation. ``writable_paths``
-        is required only for ``LIMITED`` roles and is forbidden for the other
-        access modes.
-        """
-        ...
-
-    async def close(self) -> None:
-        """Close every owned session in reverse creation order."""
-        ...
-
-
 class Workspaces(Protocol):
     """Run-owned access to the root and isolated candidate workspaces."""
 
@@ -599,53 +395,6 @@ class Commands(Protocol):
         ...
 
 
-class SkillResourceRequest(BaseModel):
-    """Policy-neutral request to resolve resources from one installed skill."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
-
-    name: str = Field(min_length=1)
-    resource_paths: tuple[str, ...] = ()
-    purpose: str = Field(min_length=1)
-
-
-class ResolvedSkillResources(BaseModel):
-    """Agent-visible paths resolved for one installed skill request."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
-
-    name: str = Field(min_length=1)
-    router_path: str = Field(min_length=1)
-    resource_paths: tuple[str, ...] = ()
-    purpose: str = Field(min_length=1)
-
-
-class SkillResolution(BaseModel):
-    """Resolved skill resources and non-fatal selection diagnostics."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    resolved: tuple[ResolvedSkillResources, ...] = ()
-    diagnostics: tuple[str, ...] = ()
-
-
-class SkillCatalogError(RuntimeContractError):
-    """The installed skill catalog could not be read or validated."""
-
-
-class Skills(Protocol):
-    """Run-owned resolution of policy-selected installed skill resources."""
-
-    async def resolve(self, requests: tuple[SkillResourceRequest, ...]) -> SkillResolution:
-        """Resolve valid requests, preserving partial success and diagnostics.
-
-        Raises :class:`SkillCatalogError` when the installed catalog cannot be
-        built. Invalid individual skill names or resources are instead omitted
-        from ``resolved`` and described in ``diagnostics``.
-        """
-        ...
-
-
 def validate_workspace_writable_paths(
     access: WorkspaceAccess,
     writable_paths: tuple[str, ...],
@@ -691,40 +440,6 @@ def validate_workspace_writable_paths(
             raise ValueError(message)
         seen.add(value)
     return writable_paths
-
-
-class State(Protocol):
-    """Typed opaque policy-state durability bound to one plugin declaration."""
-
-    def namespace(self, name: str) -> StateModels:
-        """Open a strict machine-local host subsystem namespace for this run.
-
-        These subsystem records do not enlarge the plugin snapshot contract.
-        Invalid names raise ProjectStateError; stored models validate strictly on reads. The run host fence owns mutations.
-        """
-        ...
-
-    async def load(self, model: type[ResponseT]) -> ResponseT | None:
-        """Load state only when ``model`` is the plugin's exact declared type."""
-        ...
-
-    async def commit(
-        self,
-        value: BaseModel,
-        *,
-        workspace: Workspace | None = None,
-        label: str | None = None,
-    ) -> None:
-        """Durably replace state, optionally atomically including the root workspace."""
-        ...
-
-
-class Control(Protocol):
-    """Cooperative operator-control boundary for plugin control flow."""
-
-    async def checkpoint(self) -> None:
-        """Land a pending stop or wait for a pending pause to resume."""
-        ...
 
 
 class ProfileExecution(StrEnum):
@@ -895,183 +610,8 @@ class LocalValidationEvaluation(BaseModel):
         return self
 
 
-class AgentEvaluationStatus(StrEnum):
-    """Lifecycle of one evaluation an agent submitted through its evaluation tool."""
-
-    PENDING = "pending"
-    PASSED = "passed"
-    FAILED = "failed"
-    CANCELED = "canceled"
-
-
-class AgentEvaluationStageOutcome(StrEnum):
-    """Trusted conclusion of one finished stage of an agent-submitted evaluation."""
-
-    PASSED = "passed"
-    FAILED = "failed"
-    # The stage recorded measurements without a pass or fail verdict.
-    OBSERVED = "observed"
-
-
-class AgentEvaluationMetric(BaseModel):
-    """One measurement a finished stage recorded."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: str = Field(min_length=1)
-    value: FiniteFloat
-    unit: str | None = None
-    direction: MetricDirection | None = None
-
-
-class AgentEvaluationStage(BaseModel):
-    """The trusted outcome of one finished stage (accuracy, benchmark, ...)."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    kind: str = Field(min_length=1)
-    outcome: AgentEvaluationStageOutcome
-    metrics: tuple[AgentEvaluationMetric, ...] = ()
-    # What a failed stage measured before it stopped, as its evaluator reported it.
-    partial_measurement: PartialMeasurement | None = None
-
-
-class AgentEvaluation(BaseModel):
-    """One trusted evaluation an agent submitted from a workspace.
-
-    The host runs it, so its outcome is trusted even though an agent chose
-    when to submit. ``failure`` is the complete failure text, present exactly
-    when the evaluation failed. ``stages`` holds the outcome of each stage that
-    finished with trusted evidence, in stage order; a stage still running, or
-    one that crashed without evidence, has no entry.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    handle_id: str | None = Field(default=None, min_length=1)
-    submission_index: int = Field(default=0, ge=0)
-    trusted_evidence: tuple[TrustedEvidence, ...] = ()
-    revision: str = Field(min_length=1, description="The workspace snapshot that was evaluated.")
-    kinds: tuple[str, ...] = Field(min_length=1, description="Evaluated evidence kinds.")
-    status: AgentEvaluationStatus
-    stages: tuple[AgentEvaluationStage, ...] = ()
-    content_digest: str | None = Field(
-        default=None,
-        pattern=r"^[0-9a-f]{64}$",
-        description=(
-            "SHA-256 of the evaluated revision's patch as Workspaces.export_patch returns it: "
-            "two revisions with this digest hold the same candidate content."
-        ),
-    )
-    failure: str | None = Field(default=None, min_length=1)
-    signature: str | None = Field(
-        default=None,
-        min_length=1,
-        description=(
-            "Exception type and innermost source line of the failure, when it holds a "
-            "traceback. Failures with equal signatures are the same defect."
-        ),
-    )
-
-    @model_validator(mode="after")
-    def _failure_iff_failed(self) -> AgentEvaluation:
-        if (self.status is AgentEvaluationStatus.FAILED) != (self.failure is not None):
-            message = "a failed agent evaluation requires its failure, and only it has one"
-            raise ValueError(message)
-        if self.signature is not None and self.failure is None:
-            message = "only a failed agent evaluation has a failure signature"
-            raise ValueError(message)
-        return self
-
-
-class CandidateProfileStatus(StrEnum):
-    """How one policy-requested profile of a candidate revision ended."""
-
-    # The profiler observed the candidate and reported a diagnosis.
-    OBSERVED = "observed"
-    # The profiler ran but reported that it cannot profile this candidate.
-    UNSUPPORTED = "unsupported"
-    # No report: the profiler turn failed, was canceled or interrupted, or no
-    # profiler is provisioned for the run.
-    FAILED = "failed"
-
-
-class CandidateProfileComponent(BaseModel):
-    """The share of observed cost the profiler attributed to one component."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: str = Field(min_length=1)
-    share: FiniteFloat = Field(ge=0, le=1)
-
-
-class CandidateProfile(BaseModel):
-    """The trusted outcome of one profile that policy requested for a revision.
-
-    ``operation_id`` names the host-owned profiler operation, the same record
-    agents read through their trusted operations, and is ``None`` only when no
-    operation started. ``failure`` is the framework's account of a failure and
-    is present exactly when the profile failed; ``diagnosis`` is the profiler's
-    report and is absent then.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    revision: str = Field(min_length=1)
-    status: CandidateProfileStatus
-    operation_id: str | None = Field(default=None, min_length=1)
-    # Framework-owned provenance. None means unknown (including older saved
-    # outcomes), which must retain the scheduling charge. A report's lack of
-    # citations does not prove that no capture ran.
-    capture_started: bool | None = None
-    diagnosis: str | None = None
-    missing_fields: tuple[ProfileField, ...] = ()
-    components: tuple[CandidateProfileComponent, ...] = ()
-    evidence_ids: tuple[str, ...] = ()
-    failure: str | None = Field(default=None, min_length=1)
-
-    @property
-    def unsupported_before_capture(self) -> bool:
-        """Prove unsupported was decided before capture from framework provenance."""
-        return self.status is CandidateProfileStatus.UNSUPPORTED and self.capture_started is False
-
-    @model_validator(mode="after")
-    def _failure_iff_failed(self) -> CandidateProfile:
-        if self.capture_started is False and self.evidence_ids:
-            message = "profile evidence requires a capture to have started"
-            raise ValueError(message)
-        if self.missing_fields and self.status is not CandidateProfileStatus.UNSUPPORTED:
-            message = "missing profile fields require unsupported status"
-            raise ValueError(message)
-        failed = self.status is CandidateProfileStatus.FAILED
-        if failed != (self.failure is not None):
-            message = "a failed candidate profile requires its failure, and only it has one"
-            raise ValueError(message)
-        if failed and (self.diagnosis is not None or self.components or self.evidence_ids):
-            message = "a failed candidate profile carries no report"
-            raise ValueError(message)
-        return self
-
-
-class ReleasedJobs(BaseModel):
-    """What one :meth:`Evaluation.release_jobs` call cancelled for a member.
-
-    ``evaluations`` and ``profiler_operations`` name the queued and running
-    evaluation handles and profiler operations whose cancellation this call
-    requested. ``first_release`` is False when the member's jobs were already
-    released; that call cancelled nothing and both tuples are empty.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    member_id: str
-    evaluations: tuple[str, ...]
-    profiler_operations: tuple[str, ...]
-    first_release: bool
-
-
 class Evaluation(Protocol):
-    """Trusted candidate evaluation effects available to policy."""
+    """Trusted candidate evaluation effects a local run measures through."""
 
     async def accuracy(
         self,
@@ -1101,203 +641,12 @@ class Evaluation(Protocol):
         """Run audited candidate-authored recipes without permitting workspace mutation."""
         ...
 
-    async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
-        """Return the evaluations agents submitted from ``workspace``, oldest first.
-
-        A candidate workspace keeps its identity across the attempts of one
-        member, so the history spans them. Empty when the run offers agents no
-        evaluation tool.
-        """
-        ...
-
-    def settlements(self) -> EvaluationSettlements:
-        """Return owned host observations without invoking an agent.
-
-        Runs without agent evaluation tools raise RuntimeContractError.
-        Cancelling an observation preserves evaluation jobs and ownership.
-        """
-        ...
-
-    def current_time(self) -> float:
-        """Return UTC logical time used by durable evaluation deadlines."""
-        ...
-
-    async def wait_until(self, deadline_at_s: float) -> None:
-        """Suspend the host until absolute time reaches a recorded deadline."""
-        ...
-
-    async def validate_wait(
-        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
-    ) -> None:
-        """Reject foreign, inactive, or non-evaluation handles with EvaluationAgentAccessError."""
-        ...
-
-    async def profiler_operation(
-        self, operation_id: str, *, principal_id: str, scope_id: str | None
-    ) -> ProfilerOperation:
-        """Read an owned profiler operation from durable host state."""
-        ...
-
-    async def wait_profiler(
-        self, operation_id: str, *, principal_id: str, scope_id: str | None
-    ) -> ProfilerOperation:
-        """Suspend until terminal completion; cancellation preserves the operation."""
-        ...
-
-    async def cancel_profiler(
-        self, operation_id: str, *, principal_id: str, scope_id: str | None
-    ) -> None:
-        """Cancel an owned profiler operation idempotently."""
-        ...
-
-    async def validate_profiler_wait(
-        self, handles: tuple[str, ...], *, principal_id: str, scope_id: str | None
-    ) -> None:
-        """Reject unknown operations and other principals' operations."""
-        ...
-
-    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
-        """Read the latest recorded requester generation, including withdrawn waits."""
-        ...
-
-    async def submitted_deadline(self, handle_id: str) -> float:
-        """Read the absolute epoch deadline captured by the submitted plan."""
-        ...
-
-    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
-        """Withdraw only this scope's requester association, preserving other requesters."""
-        ...
-
-    async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
-        """Read only backend-accepted semantic evidence for this exact handle."""
-        ...
-
-    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
-        """Read the canonical immutable record, including retired generations.
-
-        The backend validates requester history and captured identity before serializing.
-        This historical read grants no observation, dispatch or resume authority.
-        """
-        ...
-
-    async def receipt_matches_current_context(
-        self, revision: str, evidence: TrustedEvidence
-    ) -> bool:
-        """Check exact captured identity against the canonical evaluator's current context.
-
-        Missing canonical context returns False; history and adoption authority
-        remain unchanged.
-        """
-        ...
-
-    async def evidence_revisions(self) -> dict[str, str]:
-        """Return immutable captured revisions keyed by handles and accepted evidence aliases."""
-        ...
-
-    async def evidence_revision(self, reference: str) -> str | None:
-        """Resolve a host evaluation handle, accepted evidence ID, or profiler operation.
-
-        Return None for an unregistered local artifact reference. Unknown eval_
-        handles raise EvaluationAgentAccessError; infrastructure errors remain errors.
-        """
-        ...
-
-    async def submitted_revision(self, handle_id: str) -> str:
-        """Read the immutable submitted capture, separately from retained WIP.
-
-        An absent or inconsistent capture raises a typed contract error.
-        """
-        ...
-
-    async def can_profile(self) -> bool:
-        """Return whether :meth:`profile` can produce trusted profile evidence in this run.
-
-        True only when the run provisions a profiler agent and its evaluation
-        executor produces profile evidence. Policy offers profiling only when
-        this holds; otherwise every profile ends unsupported or failed.
-        """
-        ...
-
-    async def profile(
-        self,
-        revision: str,
-        request: str,
-        *,
-        member_id: str,
-        required_fields: tuple[ProfileField, ...] = (),
-    ) -> CandidateProfile:
-        """Profile ``revision`` through the run's profiler agent and wait for its outcome.
-
-        The profile is a host-owned profiler operation recorded under
-        ``member_id``, so it is listed with the run's trusted operations.
-        Every way the profile can end, including a run without a provisioned
-        profiler, is a typed outcome. It raises only when the run, not the
-        profile, ends the operation: on cancellation, and with ``RunStopped``
-        when a stop or the host closing interrupts it. Such a profile has no
-        outcome and runs again on resume.
-        """
-        ...
-
-    async def reopen_jobs(self, member_id: str) -> None:
-        """Reconcile a completed release and open a fresh generation for resumed work."""
-        ...
-
-    async def jobs_released(self, member_id: str) -> bool:
-        """Project whether the member's durable scope refuses ordinary admission.
-
-        Closing and completed releases both fence new work. Recovery can
-        reconcile cleanup before opening a fresh scope generation.
-        """
-        ...
-
-    async def release_jobs(self, member_id: str) -> ReleasedJobs:
-        """Cancel ``member_id``'s cluster jobs and refuse its new ones.
-
-        After it returns, the member's queued and running cluster jobs are
-        cancelled: the evaluations its agents submitted from its workspace
-        scope, its agents' profiler operations, and the profiles
-        :meth:`profile` runs for it. New evaluation submissions and profiler
-        dispatches from the member's scope, and new :meth:`profile` calls for
-        it, are refused with a typed reply or outcome. Release is cleanup, so
-        it works after a stop. Idempotent: a retry reconciles unfinished cleanup;
-        ``first_release`` reports whether this call created the release intent.
-        """
-        ...
-
 
 class RunStatus(StrEnum):
     """Terminal status returned by orchestration policy."""
 
     SUCCEEDED = "succeeded"
     FAILED = "failed"
-
-
-class Observations(Protocol):
-    """Publish plugin-authored live observations outside durable policy state."""
-
-    def note(self, message: str) -> None:
-        """Publish one informational note for the run operator."""
-        ...
-
-    def warning(self, message: str) -> None:
-        """Publish one non-fatal policy warning for the run operator."""
-        ...
-
-
-@dataclass(frozen=True, slots=True)
-class Run:
-    """One runtime-created capability value passed to orchestration policy."""
-
-    run_id: str
-    facts: RunFacts
-    agents: WorkspaceAgentSessions
-    workspaces: Workspaces
-    evaluation: Evaluation
-    state: State
-    control: Control
-    commands: Commands
-    skills: Skills
-    observations: Observations
 
 
 @dataclass(frozen=True, slots=True)
@@ -1412,17 +761,6 @@ class CorePolicy:
     """
 
 
-async def core_driven(run: Run, options: BaseModel) -> RunStatus:
-    """The ``orchestrate`` of a plugin whose ``core`` policy the runtime drives.
-
-    Awaiting it is a bug: the product host runs such a plugin through the core run
-    loop and never calls ``orchestrate``.
-    """
-    del run, options
-    message = "this plugin is driven by its core policy and has no orchestrate"
-    raise RuntimeContractError(message)
-
-
 @dataclass(frozen=True, slots=True)
 class OrchestrationPlugin:
     """One validated orchestration and every policy value it owns.
@@ -1430,20 +768,15 @@ class OrchestrationPlugin:
     ``agents`` is the sole role catalog. Runtime implementations may construct
     a private lookup from it, but no second public registry can disagree.
 
-    A plugin is driven one of two ways, never both: ``orchestrate`` is the legacy
-    async policy that receives the run's capabilities, and ``core`` is declarative
-    data for a run whose loop the runtime owns (see ``CorePolicy``). A core plugin
-    leaves ``orchestrate`` at ``core_driven``, which fails if it is ever awaited.
+    A plugin is declarative data for a run whose loop the runtime owns (see
+    ``CorePolicy``): the runtime drives the plan, and the plugin has no loop of its own.
     """
 
     id: str
     agents: tuple[AgentRole, ...]
     options: type[BaseModel]
-    orchestrate: Callable[[Run, BaseModel], Awaitable[RunStatus]] = core_driven
+    core: CorePolicy
     config_version: int = 1
-    state: type[BaseModel] | None = None
-    memory_paths: tuple[str, ...] = ()
-    core: CorePolicy | None = None
 
     def __post_init__(self) -> None:
         """Reject duplicate role IDs before any run resources open."""
@@ -1453,17 +786,8 @@ class OrchestrationPlugin:
         if self.config_version < 1:
             message = "orchestration plugin config version must be positive"
             raise ValueError(message)
-        if (self.orchestrate is core_driven) == (self.core is None):
-            message = (
-                f"orchestration plugin {self.id!r} needs exactly one of orchestrate and core, "
-                f"got {'neither' if self.core is None else 'both'}"
-            )
-            raise ValueError(message)
         if not _is_concrete_model_class(self.options):
             message = "orchestration plugin options must be a concrete BaseModel subclass"
-            raise ValueError(message)
-        if self.state is not None and not _is_concrete_model_class(self.state):
-            message = "orchestration plugin state must be a concrete BaseModel subclass"
             raise ValueError(message)
         seen: set[str] = set()
         duplicates: set[str] = set()

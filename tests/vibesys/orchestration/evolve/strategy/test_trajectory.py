@@ -17,9 +17,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.evolve import world
-from tests.vibesys.orchestration.evolve.strategy._executors import Executors, commit_of
-from tests.vibesys.orchestration.evolve.strategy._replies import mutated, profiled, reviewed
-from tests.vibesys.orchestration.evolve.strategy._run import run_shell
+from tests.vibesys.orchestration.evolve.strategy.world import EvolveWorld, commit_of, run_to_end
 
 from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.evolve.population import (
@@ -29,7 +27,7 @@ from vibesys.orchestration.evolve.population import (
     PopulationState,
     Proposal,
 )
-from vibesys.orchestration.evolve.strategy.api import EvolveStrategyState, MetricRow
+from vibesys.orchestration.evolve.strategy.api import EvolveStrategyState
 from vs_core.api import component
 
 GOLDEN = json.loads(
@@ -43,36 +41,6 @@ def _names() -> list[str]:
         *(world.bootstrap_name(number) for number in range(1, ATTEMPTS + 1)),
         *world.generation_names(GENERATIONS, CHILDREN),
     ]
-
-
-def _commits(seed: int) -> dict[str, world.Child]:
-    """The world's children by the commit the scripted workspace retains for them."""
-    return {commit_of(f"attempt:{component(name)}:1"): world.child(seed, name) for name in _names()}
-
-
-def scripted(seed: int, *, delays: tuple[int, ...] = (0,)) -> Executors:
-    """The executors of the world with this seed; ``delays`` reorders when jobs complete."""
-    children = _commits(seed)
-
-    def replies(role: str, key: str, serial: int) -> str:
-        del serial
-        child = world.child(seed, key)
-        if role == "mutator":
-            return mutated(child.summary)
-        if role == "judge":
-            return reviewed(
-                passed=child.judge_passes, feedback="" if child.judge_passes else f"fails {key}"
-            )
-        return profiled(metrics={"cache_hit": child.cache_hit})
-
-    return Executors(
-        replies=replies,
-        benchmark=lambda commit: children[commit].throughput,
-        extra_metrics=lambda commit: (
-            MetricRow(name="ttft_ms", value=children[commit].ttft_ms, direction="min"),
-        ),
-        job_polls=lambda commit: delays[int(commit, 16) % len(delays)],
-    )
 
 
 def _population(state: object) -> list[dict[str, object]]:
@@ -106,10 +74,18 @@ def _space(key: str) -> MetricSpace:
     return MetricSpace(objectives=objectives)
 
 
-def _run(key: str, *, parallelism: int, delays: tuple[int, ...]) -> list[dict[str, object]]:
+def _scripted(
+    key: str,
+    *,
+    parallelism: int,
+    delays: tuple[int, ...],
+    selector: Literal["vibesys", "openevolve"] = "vibesys",
+) -> EvolveWorld:
+    """The world of the golden run ``key``; ``delays`` reorders when its jobs complete."""
     seed_world, seed_rng, _ = _expected(key)
-    trace = run_shell(
-        scripted(seed_world, delays=delays),
+    return EvolveWorld(
+        population_seed=seed_world,
+        polls=delays,
         max_generations=GENERATIONS,
         children_per_generation=CHILDREN,
         bootstrap_max_attempts=ATTEMPTS,
@@ -121,8 +97,13 @@ def _run(key: str, *, parallelism: int, delays: tuple[int, ...]) -> list[dict[st
         profiler_id="linux_cpu",
         profiler_support_name="linux_cpu_profiler",
         profiler_mcp_name="linux-cpu-profiler",
+        selector=selector,
     )
-    return _population(trace.state)
+
+
+def _run(key: str, *, parallelism: int, delays: tuple[int, ...]) -> list[dict[str, object]]:
+    run = run_to_end(_scripted(key, parallelism=parallelism, delays=delays))
+    return _population(run.state)
 
 
 @pytest.mark.parametrize("key", sorted(GOLDEN["runs"])[::2])
@@ -231,20 +212,6 @@ def test_e3_both_selectors_propose_what_the_legacy_use_of_the_policy_proposes(
     seed_world, seed_rng = 2, 7
     key = "world=2,seed=7,objectives=one"
     expected = _reference_population(seed_world, seed_rng, _space(key), selector)
-    trace = run_shell(
-        scripted(seed_world, delays=(0, 3, 1)),
-        max_generations=GENERATIONS,
-        children_per_generation=CHILDREN,
-        bootstrap_max_attempts=ATTEMPTS,
-        k_top_inspirations=1,
-        k_random_inspirations=1,
-        seed=seed_rng,
-        selector=selector,
-        metric_space=_space(key),
-        max_parallelism=2,
-        profiler_id="linux_cpu",
-        profiler_support_name="linux_cpu_profiler",
-        profiler_mcp_name="linux-cpu-profiler",
-    )
-    assert isinstance(trace.state, EvolveStrategyState)
-    assert trace.state.population == expected
+    run = run_to_end(_scripted(key, parallelism=2, delays=(0, 3, 1), selector=selector))
+    assert isinstance(run.state, EvolveStrategyState)
+    assert run.state.population == expected

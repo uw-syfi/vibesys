@@ -76,12 +76,27 @@ if TYPE_CHECKING:
     from .types.sessions import Invocation, SessionsEvent, SessionsState
 
 
+def _run_scope(context: SessionsContext) -> Scope:
+    return Scope(owner=context.run.run_id, generation=context.run.generation)
+
+
+def _addressed_to_run(item: SessionInput, context: SessionsContext) -> bool:
+    target = item.target
+    return isinstance(target, ScopeInputTarget) and target.scope == _run_scope(context)
+
+
 def _matches(item: SessionInput, invocation: Invocation, context: SessionsContext) -> bool:
     target = item.target
     if isinstance(target, InvocationInputTarget):
         return target.invocation == invocation.invocation
     if isinstance(target, ScopeInputTarget):
-        return target.scope == invocation.scope
+        # The run is the ancestor of every attempt scope, so an input addressed to the run
+        # reaches whichever of its invocations reserves first.
+        if target.scope == invocation.scope:
+            return True
+        # A registered operation is a mechanical turn the strategy decided on, not the next
+        # conversational turn the operator addressed, so run-wide input waits for a session turn.
+        return target.scope == _run_scope(context) and invocation.registered_operation is None
     owner = attempt_for(context, invocation.scope)
     return owner is not None and owner.item_id == target.item_id
 
@@ -264,6 +279,10 @@ def _release_record(
 ) -> tuple[InputRecord, InputDropped | None]:
     if isinstance(record.input.target, InvocationInputTarget):
         return _drop(record, InputDropReason.INVOCATION_TERMINAL, at)
+    if _addressed_to_run(record.input, context):
+        # The run outlives the attempt whose turn reserved it, and any later invocation can
+        # take it, so a cancelled or ended reserver never consumes it: it waits again.
+        return record.model_copy(update={"reserved_to": None}), None
     owner = attempt_for(context, invocation.scope)
     closure = current_closure(owner, owner.closure if owner is not None else None)
     if isinstance(closure, Proven) and closure.value.disposition != "park":

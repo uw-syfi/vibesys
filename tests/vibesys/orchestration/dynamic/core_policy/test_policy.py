@@ -37,7 +37,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     PROFILER_REPLY,
     DynamicStrategy,
 )
-from vibesys.run.evaluation_backend import semantic_evaluation_identity
+from vibesys.run.evaluation_identity import semantic_evaluation_identity
 from vs_core.api import (
     AssessmentKind,
     Capabilities,

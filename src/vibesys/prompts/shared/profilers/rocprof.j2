@@ -71,6 +71,8 @@ differences. This template covers only the ROCm-specific mechanics below.
 
 If the `{{ profiler_mcp_name }}` MCP server is attached to this round, call its tools directly (argument names shown). Without it, run the equivalent `rocprofv3`/`rocprof-compute` command yourself (see the ROCm profiling notes in your skills, if any, for exact flags) and shell out to the matching drill-down subcommand on `python {{ profiler_support_name }}/<module>.py` against its output.
 
+The server lists its capture tools (`profiling_capabilities`, every `profile_*`, `start_target`, `stop_target`, `targets`, and the capture-job tools `capture_status`, `await_capture`, `cancel_capture`) only when the editor has a GPU, because they run `rocprofv3` inside the server. When they are absent, the editor has no GPU: capture inside your own GPU job instead, for example `vibesys-gpu --gpus 1 --time 20 -- rocprofv3 <flags> -d <output dir under the workspace> -- <command>` (use the exact client name and absolute tool paths from your environment notes; a job's `PATH` may lack the ROCm tools), skip `profiling_capabilities` and check the ROCm version and GPU architecture in that same kind of job, and read the output with the drill-down tools that remain (`kernels`, `families`, `idle_gaps`, `cpu_overhead`, `memory`, `graphs`, `host_idle`, `query`, `counter_report`, `counter_triage`, `compute_analyze`, `att_hotspots`, `summary`, `compare`), passing the output path.
+
 ### System trace: `profile_timeline` + drill-downs (`analyze_rocprof.py`)
 
 `profile_timeline` runs an `rocprofv3` system-trace capture end to end

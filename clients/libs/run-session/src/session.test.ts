@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {BackendClientError, type RunSnapshot} from '@vibesys/contracts';
 import {checkMachine, type Live, type MachineAction} from '@vibesys/machine/testing';
+import {type IterationNavigationState, initialIterationNavigation} from '@vibesys/run-state';
 import type {Seeded} from '@vibesys/store/testing';
 import type {ControlChannelState} from '@vibesys/transport';
 import {initialTransition, transition} from 'xstate';
@@ -12,6 +13,7 @@ import {
   type SnapshotResult,
   sessionInvariants,
   sessionMachine,
+  sessionStartupSettled,
 } from './session.js';
 
 const ERRORS = [new Error('snapshot failed'), new Error('socket closed'), new Error('parse')];
@@ -39,6 +41,10 @@ function snapshotOf(issue: number): RunSnapshot {
 
 function loaded(issue: number): SnapshotResult {
   return {ok: true, snapshot: snapshotOf(issue)};
+}
+
+function navigation(revision: string): IterationNavigationState {
+  return {...initialIterationNavigation(), runId: 'run-1', revision};
 }
 
 const REPLACED: SnapshotResult = {
@@ -81,6 +87,8 @@ function settleOne(random: Seeded, live: Live, snapshot: SessionSnapshot): Event
         return [live.done(operation, refreshOutcome(random, recovery.issue)), failed];
       case 'loadReplacementSnapshot':
         return [live.done(operation, snapshotResult(random, replacement.issue)), failed];
+      case 'loadIterations':
+        return [live.done(operation, navigation(`revision-${random.int(4)}`)), failed];
       default:
         return [failed];
     }
@@ -88,7 +96,7 @@ function settleOne(random: Seeded, live: Live, snapshot: SessionSnapshot): Event
 }
 
 function plainEvent(random: Seeded): SessionEvent {
-  switch (random.int(13)) {
+  switch (random.int(14)) {
     case 0:
       return {type: 'start'};
     case 1:
@@ -116,6 +124,8 @@ function plainEvent(random: Seeded): SessionEvent {
       return {type: 'reconnect-controls'};
     case 11:
       return {type: 'projection-rejected', error: random.pick(ERRORS)};
+    case 12:
+      return {type: 'iterations-refresh', storeId: `store-${random.int(4) + 1}`};
     default:
       // Rare, so most sequences stay open long enough to interleave.
       return random.int(4) === 0 ? {type: 'close'} : {type: 'start'};
@@ -267,6 +277,8 @@ type Request =
   | {readonly kind: 'subscribe'}
   | {readonly kind: 'refresh'; readonly mode: string}
   | {readonly kind: 'load-replacement-snapshot'; readonly storeId: string}
+  | {readonly kind: 'load-iterations'; readonly storeId: string}
+  | {readonly kind: 'publish-iterations'; readonly navigation: IterationNavigationState}
   | {readonly kind: 'apply-snapshot'; readonly snapshot: RunSnapshot}
   | {readonly kind: 'recover-stream'; readonly mode: string}
   | {readonly kind: 'reevaluate-stream'}
@@ -277,6 +289,7 @@ interface ActionParams {
   readonly snapshot?: RunSnapshot | null;
   readonly mode?: string;
   readonly applied?: boolean;
+  readonly navigation?: IterationNavigationState | null;
 }
 
 /** The operation an `xstate.spawnChild` started, as the request the shell performs. */
@@ -288,6 +301,8 @@ function started(after: SessionSnapshot, id: string | undefined): Request[] {
       return [{kind: 'refresh', mode: after.context.recovery.intent}];
     case 'loadReplacementSnapshot':
       return [{kind: 'load-replacement-snapshot', storeId: after.context.replacement.storeId}];
+    case 'loadIterations':
+      return [{kind: 'load-iterations', storeId: after.context.iterations.loadingStoreId}];
     default:
       return [];
   }
@@ -306,6 +321,10 @@ function requestsOf(after: SessionSnapshot, actions: readonly MachineAction[]): 
         return [{kind: 'recover-stream', mode: params.mode ?? ''}];
       case 'reevaluateStream':
         return params.applied === true ? [{kind: 'reevaluate-stream'}] : [];
+      case 'publishIterations':
+        return params.navigation === null || params.navigation === undefined
+          ? []
+          : [{kind: 'publish-iterations', navigation: params.navigation}];
       case 'closeShell':
         return [{kind: 'close'}];
       default:
@@ -339,6 +358,10 @@ function refreshDone(outcome: RefreshOutcome): Event {
   return {type: 'xstate.done.actor.refresh', output: outcome};
 }
 
+function iterationsDone(outcome: IterationNavigationState | null): Event {
+  return {type: 'xstate.done.actor.loadIterations', output: outcome};
+}
+
 describe('session machine', () => {
   test('model: holds its invariants, fences snapshots, and orders stale causes', () => {
     checkMachine(
@@ -369,6 +392,101 @@ describe('session machine', () => {
     expect(live.state.context.view.hasSnapshot).toBe(true);
     expect(live.state.context.view.status).toBe('connected');
     expect(live.state.matches({open: {startup: 'done'}})).toBe(true);
+  });
+
+  test('coalesces iteration invalidations and publishes only the authoritative follow-up', () => {
+    const first = step(initialTransition(sessionMachine)[0], {
+      type: 'iterations-refresh',
+      storeId: 'store-a',
+    });
+    expect(first.requests).toEqual([{kind: 'load-iterations', storeId: 'store-a'}]);
+
+    const queued = step(first.state, {type: 'iterations-refresh', storeId: 'store-b'});
+    expect(queued.requests).toEqual([]);
+    expect(queued.state.context.iterations.pendingStoreId).toBe('store-b');
+
+    const stale = step(queued.state, iterationsDone(navigation('stale')));
+    expect(stale.requests).toEqual([{kind: 'load-iterations', storeId: 'store-b'}]);
+
+    const current = navigation('current');
+    const published = step(stale.state, iterationsDone(current));
+    expect(published.requests).toEqual([{kind: 'publish-iterations', navigation: current}]);
+    expect(published.state.matches({open: {iterations: 'ready'}})).toBe(true);
+  });
+
+  test('suppresses a superseded iteration failure and retires late output after close', () => {
+    const first = step(initialTransition(sessionMachine)[0], {
+      type: 'iterations-refresh',
+      storeId: 'store-a',
+    });
+    const queued = step(first.state, {type: 'iterations-refresh', storeId: 'store-b'});
+    const supersededFailure = step(queued.state, {
+      type: 'xstate.error.actor.loadIterations',
+      error: new Error('stale failure'),
+    });
+    expect(supersededFailure.requests).toEqual([{kind: 'load-iterations', storeId: 'store-b'}]);
+    expect(supersededFailure.state.context.view.error).toBeNull();
+
+    const closed = step(supersededFailure.state, {type: 'close'});
+    expect(closed.requests).toEqual([{kind: 'close'}]);
+    const late = step(closed.state, iterationsDone(navigation('late')));
+    expect(late).toEqual({state: closed.state, requests: []});
+  });
+
+  test('start-up settles only after the initial iteration query settles', () => {
+    let state = steps([
+      {type: 'start'},
+      {type: 'stream-established', storeId: 'store-a'},
+      {type: 'iterations-refresh', storeId: 'store-a'},
+      subscribed,
+      replacementDone(loaded(1)),
+    ]);
+    expect(state.matches({open: {startup: 'done', iterations: 'loading'}})).toBe(true);
+    expect(sessionStartupSettled(state)).toBe(false);
+
+    state = step(state, iterationsDone(navigation('initial'))).state;
+    expect(sessionStartupSettled(state)).toBe(true);
+  });
+
+  test('an iteration fault leaves a healthy stream connected and a successful retry clears it', () => {
+    const iterationFailure = new Error('iteration RPC failed');
+    let state = steps([
+      {type: 'start'},
+      {type: 'stream-established', storeId: 'store-a'},
+      {type: 'iterations-refresh', storeId: 'store-a'},
+      subscribed,
+      replacementDone(loaded(1)),
+      iterationsDone(navigation('initial')),
+    ]);
+    expect(state.context.view).toMatchObject({
+      status: 'connected',
+      error: null,
+      iterationError: null,
+    });
+
+    state = steps(
+      [
+        {type: 'iterations-refresh', storeId: 'store-a'},
+        {type: 'xstate.error.actor.loadIterations', error: iterationFailure},
+      ],
+      state,
+    );
+    expect(state.context.streamConnected).toBe(true);
+    expect(state.context.view).toMatchObject({
+      status: 'connected',
+      error: null,
+      iterationError: iterationFailure,
+    });
+
+    state = steps(
+      [{type: 'iterations-refresh', storeId: 'store-a'}, iterationsDone(navigation('recovered'))],
+      state,
+    );
+    expect(state.context.view).toMatchObject({
+      status: 'connected',
+      error: null,
+      iterationError: null,
+    });
   });
 
   test('a failed start-up snapshot keeps the page stale after the stream subscribes', () => {
@@ -564,5 +682,17 @@ describe('session machine', () => {
     });
     expect(loadFailed.state.matches({open: {replacement: 'none', startup: 'done'}})).toBe(true);
     expect(loadFailed.state.context.view).toMatchObject({status: 'stale', error: failure});
+
+    const iterationLoading = steps([{type: 'iterations-refresh', storeId: 'store-a'}]);
+    const iterationFailed = step(iterationLoading, {
+      type: 'xstate.error.actor.loadIterations',
+      error: failure,
+    });
+    expect(iterationFailed.state.matches({open: {iterations: 'ready'}})).toBe(true);
+    expect(iterationFailed.state.context.view).toMatchObject({
+      status: 'connecting',
+      error: null,
+      iterationError: failure,
+    });
   });
 });

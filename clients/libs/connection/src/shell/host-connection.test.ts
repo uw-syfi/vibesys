@@ -9,7 +9,7 @@ import {ECHO_SERVER, FakeHelper, FakeLink, record} from '../testing/fake-helper.
 import {deferredKillProcess, fakeProcess} from '../testing/fake-process.js';
 import {hostConnectionContract, phaseReached} from '../testing/host-connection-contract.js';
 import {ConnectionManager} from './connection-manager.js';
-import {ConnectionError, type HelperRequestError} from './helper-channel.js';
+import {ConnectionError, HelperRequestError} from './helper-channel.js';
 import {HostConnection} from './host-connection.js';
 import {LocalLink, nodeSpawn, type Spawn, SshLink} from './link.js';
 
@@ -41,6 +41,37 @@ function fakeManager(linkFor: () => FakeLink | SshLink, clock = new FakeClock())
     log: () => {},
     config: CONFIG,
   });
+}
+
+class HeldReleaseLink extends FakeLink {
+  readonly releaseStarted: Promise<void>;
+  readonly #started: () => void;
+  readonly #finished: Promise<void>;
+  readonly #finish: () => void;
+
+  constructor() {
+    super();
+    let started = (): void => {};
+    let finish = (): void => {};
+    this.releaseStarted = new Promise(resolve => {
+      started = resolve;
+    });
+    this.#finished = new Promise(resolve => {
+      finish = resolve;
+    });
+    this.#started = started;
+    this.#finish = finish;
+  }
+
+  override async release(): Promise<void> {
+    this.released += 1;
+    this.#started();
+    await this.#finished;
+  }
+
+  finishRelease(): void {
+    this.#finish();
+  }
 }
 
 async function rejection(promise: Promise<unknown>): Promise<Error> {
@@ -160,6 +191,46 @@ describe('HostConnection over the FakeHelper', () => {
     expect(result.kind).toBe('failed');
     expect(result).toMatchObject({written: true});
     expect(link.helper.stops).toEqual([{instanceId: '000000000001', force: false}]);
+  });
+
+  test('does not send inspection to a helper that did not negotiate it', async () => {
+    const link = new FakeLink();
+    link.helper.features.delete('instances_inspect');
+    await using connection = fakeConnection(link);
+
+    const error: unknown = await connection
+      .request({type: 'instances.inspect', instance_id: '0123456789ab', include_log: false})
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(HelperRequestError);
+    if (!(error instanceof HelperRequestError)) throw error;
+    expect(error.code).toBe('feature_not_negotiated');
+    expect(connection.phase.kind).toBe('ready');
+  });
+
+  test('inspection requests retained diagnostics only with explicit log consent', async () => {
+    const link = new FakeLink();
+    const instanceId = '0123456789ab';
+    link.helper.host.logs.set(instanceId, {text: 'retained diagnostics', truncated: false});
+    await using connection = fakeConnection(link);
+
+    const metadataOnly = await connection.request({
+      type: 'instances.inspect',
+      instance_id: instanceId,
+      include_log: false,
+    });
+    const withLog = await connection.request({
+      type: 'instances.inspect',
+      instance_id: instanceId,
+      include_log: true,
+    });
+
+    expect(metadataOnly.inspection.log).toBeNull();
+    expect(withLog.inspection.log).toEqual({
+      state: 'available',
+      text: 'retained diagnostics',
+      truncated: false,
+    });
   });
 
   test('a dropped link is checked, restored, and the registry watch resumes', async () => {
@@ -512,6 +583,145 @@ describe('HostConnection over the FakeHelper', () => {
 });
 
 describe('ConnectionManager', () => {
+  test('uncontended acquisitions register host ownership before returning', async () => {
+    const links: FakeLink[] = [];
+    const manager = fakeManager(() => {
+      const link = new FakeLink();
+      links.push(link);
+      return link;
+    });
+
+    const acquiring = manager.acquire(GPU, '/shown');
+    expect(links).toHaveLength(1);
+    const checking = manager.candidate({kind: 'ssh', alias: 'candidate'}, '/candidate');
+    expect(links).toHaveLength(2);
+    const signingIn = manager.signIn({kind: 'ssh', alias: 'sign-in'});
+    expect(links).toHaveLength(3);
+
+    const lease = await acquiring;
+    const candidate = await checking;
+    await signingIn;
+    await candidate[Symbol.asyncDispose]();
+    await lease[Symbol.asyncDispose]();
+    await manager[Symbol.asyncDispose]();
+  });
+
+  test('releasing the final connection lease retires its helper and host link', async () => {
+    const link = new FakeLink();
+    const manager = fakeManager(() => link);
+    const lease = await manager.acquire(GPU, '/src/vibesys');
+    const connection = lease.connection;
+    await connection.ready();
+
+    await lease[Symbol.asyncDispose]();
+
+    expect(manager.existing('ssh:gpu')).toBeNull();
+    expect(connection.phase.kind).toBe('closed');
+    expect(link.helper.running).toBe(0);
+    expect(link.released).toBe(1);
+    await manager[Symbol.asyncDispose]();
+    expect(link.released).toBe(1);
+  });
+
+  test('a candidate and sign-in keep the link alive after its final shown lease retires', async () => {
+    const link = new FakeLink();
+    const establishing = link.deferEstablish();
+    const manager = fakeManager(() => link);
+    const lease = await manager.acquire(GPU, '/shown');
+    const candidate = await manager.candidate(GPU, '/candidate');
+    const signingIn = manager.signIn(GPU);
+    await establishing.received;
+
+    await lease[Symbol.asyncDispose]();
+    expect(lease.connection.phase.kind).toBe('closed');
+    expect(link.released).toBe(0);
+
+    await candidate[Symbol.asyncDispose]();
+    expect(link.released).toBe(0);
+    establishing.release();
+    await signingIn;
+    expect(link.released).toBe(1);
+    await manager[Symbol.asyncDispose]();
+  });
+
+  test('a retired connection held by an attached run closes only after that hold ends', async () => {
+    const link = new FakeLink();
+    const manager = fakeManager(() => link);
+    const lease = await manager.acquire(GPU, '/src/vibesys');
+    await lease.connection.ready();
+    const releaseRun = lease.connection.hold();
+
+    await lease[Symbol.asyncDispose]();
+    expect(manager.existing('ssh:gpu')).toBeNull();
+    expect(lease.connection.phase.kind).toBe('ready');
+    expect(link.released).toBe(0);
+
+    releaseRun();
+    expect(lease.connection.phase.kind).toBe('closed');
+    await lease.connection[Symbol.asyncDispose]();
+    expect(link.released).toBe(1);
+    await manager[Symbol.asyncDispose]();
+  });
+
+  test('retiring a view lease cannot close an in-flight request owned by another lease', async () => {
+    const link = new FakeLink();
+    const manager = fakeManager(() => link);
+    const view = await manager.acquire(GPU, '/src/vibesys');
+    const request = await manager.acquire(GPU, '/src/vibesys');
+    await request.connection.ready();
+    const answer = link.helper.deferNext('instances.list');
+    const listing = request.connection.request({type: 'instances.list'});
+    await answer.received;
+
+    await view[Symbol.asyncDispose]();
+    expect(request.connection.phase.kind).toBe('ready');
+    expect(link.released).toBe(0);
+
+    answer.release();
+    await listing;
+    await request[Symbol.asyncDispose]();
+    expect(request.connection.phase.kind).toBe('closed');
+    expect(link.released).toBe(1);
+    await manager[Symbol.asyncDispose]();
+  });
+
+  test('all host acquisitions wait for the prior link release to settle', async () => {
+    const first = new HeldReleaseLink();
+    const second = new FakeLink();
+    const links = [first, second];
+    const manager = fakeManager(() => {
+      const link = links.shift();
+      if (link === undefined) throw new Error('unexpected third link');
+      return link;
+    });
+    const obsolete = await manager.acquire(GPU, '/a');
+    await obsolete.connection.ready();
+
+    const retiring = obsolete[Symbol.asyncDispose]();
+    await first.releaseStarted;
+    const acquiring = manager.acquire(GPU, '/a');
+    const checking = manager.candidate(GPU, '/candidate');
+    const signingIn = manager.signIn(GPU);
+
+    // No operation may consume the replacement while the old control path can still be exited.
+    expect(links).toEqual([second]);
+    expect(second.helper.running).toBe(0);
+
+    first.finishRelease();
+    await retiring;
+    const current = await acquiring;
+    const candidate = await checking;
+    await signingIn;
+    await current.connection.ready();
+
+    expect(current.connection).not.toBe(obsolete.connection);
+    expect(second.helper.running).toBe(1);
+    await candidate[Symbol.asyncDispose]();
+    await current[Symbol.asyncDispose]();
+    expect(second.released).toBe(1);
+    await manager[Symbol.asyncDispose]();
+  });
+
   test('release cancels every ssh attempt and waits for every retired process to exit', async () => {
     const actions: string[] = [];
     const stale = deferredKillProcess(() => actions.push('term-stale'));
@@ -601,10 +811,10 @@ describe('ConnectionManager', () => {
       return helper.spawn();
     };
     const manager = fakeManager(() => sshLink(spawn));
-    const replaced = manager.connection(GPU, '/a');
+    const replaced = (await manager.acquire(GPU, '/a')).connection;
     const release = replaced.hold();
     const firstReady = replaced.ready();
-    const shown = manager.connection(GPU, '/b');
+    const shown = (await manager.acquire(GPU, '/b')).connection;
     const secondReady = shown.ready();
     expect(checks).toHaveLength(1);
 
@@ -711,11 +921,11 @@ describe('ConnectionManager', () => {
       links += 1;
       return link;
     });
-    const kept = manager.connection(GPU, '/src/vibesys');
+    const kept = (await manager.acquire(GPU, '/src/vibesys')).connection;
     await kept.ready();
     {
       // regression: closing a checkout check ended the ssh master the kept connection used.
-      await using candidate = manager.candidate(GPU, '/src/other');
+      await using candidate = await manager.candidate(GPU, '/src/other');
       await candidate.ready();
     }
     expect(link.released).toBe(0);
@@ -734,19 +944,24 @@ describe('ConnectionManager', () => {
   test('regression: a changed checkout closes the replaced connection once no run holds it', async () => {
     const link = new FakeLink();
     const manager = fakeManager(() => link);
-    const first = manager.connection(GPU, '/a');
+    const firstLease = await manager.acquire(GPU, '/a');
+    const first = firstLease.connection;
     await first.ready();
     const release = first.hold();
-    const second = manager.connection(GPU, '/b');
+    const secondLease = await manager.acquire(GPU, '/b');
+    const second = secondLease.connection;
     expect(manager.existing('ssh:gpu')).toBe(second);
     await second.ready();
     // The attached run still dials through the connection it was attached with.
     expect(first.phase.kind).toBe('ready');
     release();
+    await firstLease[Symbol.asyncDispose]();
     expect(first.phase.kind).toBe('closed');
     // Nothing holds this one: replacing it closes it at once.
-    manager.connection(GPU, '/c');
+    const thirdLease = await manager.acquire(GPU, '/c');
+    await secondLease[Symbol.asyncDispose]();
     expect(second.phase.kind).toBe('closed');
+    await thirdLease[Symbol.asyncDispose]();
     await manager[Symbol.asyncDispose]();
     expect(link.helper.running).toBe(0);
   });
@@ -755,8 +970,8 @@ describe('ConnectionManager', () => {
     const helper = new FakeHelper();
     const {spawn, seen} = fakeSsh(helper);
     const manager = fakeManager(() => sshLink(spawn));
-    const kept = manager.connection(GPU, '/a');
-    await using candidate = manager.candidate(GPU, '/b');
+    const kept = (await manager.acquire(GPU, '/a')).connection;
+    await using candidate = await manager.candidate(GPU, '/b');
     await Promise.all([kept.ready(), candidate.ready()]);
     expect(seen.masters).toBe(1);
     await manager[Symbol.asyncDispose]();
@@ -767,7 +982,7 @@ describe('ConnectionManager', () => {
     helper.preamble = ['uv /opt/uv/bin/uv'];
     const {spawn, seen} = fakeSsh(helper);
     const manager = fakeManager(() => sshLink(spawn));
-    const connection = manager.connection(GPU, '/a');
+    const connection = (await manager.acquire(GPU, '/a')).connection;
     await connection.ready();
     helper.preamble = [];
     helper.publish(record('00000000000f', 'run-f'));

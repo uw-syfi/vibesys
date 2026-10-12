@@ -15,6 +15,7 @@ export interface RecentRunActions {
   readonly resume: (host: HostKey, project: string, run: ResumeRunId) => void;
   readonly stopControls: (host: HostKey, instance: string) => ReactNode;
   readonly openHost: (host: HostKey) => void;
+  readonly inspect: (run: RecentRun, instance: string) => void;
 }
 
 function statusText(status: RecentStatus): {text: string; className: string} {
@@ -45,17 +46,45 @@ function RowActions(props: {
             Reattach
           </Button>
           {actions.stopControls(run.host, instance)}
+          <Button onClick={() => actions.inspect(run, instance)}>Inspect</Button>
         </>
       );
     }
     case 'ended': {
       const decision = resumeDecision(run.runId);
-      if (decision.kind === 'unavailable') return <span className="muted">{decision.reason}</span>;
-      const resume = (): void => actions.resume(run.host, run.project, decision.runId);
-      return <Button onClick={resume}>Resume…</Button>;
+      const instance = status.instanceId;
+      if (decision.kind === 'unavailable') {
+        return (
+          <>
+            <span className="muted">{decision.reason}</span>
+            {instance === null ? null : (
+              <Button onClick={() => actions.inspect(run, instance)}>Inspect</Button>
+            )}
+          </>
+        );
+      }
+      return (
+        <>
+          <Button onClick={() => actions.resume(run.host, run.project, decision.runId)}>
+            Resume…
+          </Button>
+          {instance === null ? null : (
+            <Button onClick={() => actions.inspect(run, instance)}>Inspect</Button>
+          )}
+        </>
+      );
     }
-    case 'unknown':
-      return <Button onClick={() => actions.openHost(run.host)}>Open host</Button>;
+    case 'unknown': {
+      const instance = run.instanceId;
+      return (
+        <>
+          <Button onClick={() => actions.openHost(run.host)}>Open host</Button>
+          {instance === null ? null : (
+            <Button onClick={() => actions.inspect(run, instance)}>Inspect</Button>
+          )}
+        </>
+      );
+    }
   }
 }
 
@@ -66,14 +95,14 @@ export function RecentPanel(props: {
   const {lists, actions} = props;
   if (lists.runs.length === 0) {
     return (
-      <section id="recent-section">
+      <section id="recent-section" tabIndex={-1}>
         <h2>Recent</h2>
         <p className="muted">No runs yet. Runs you attach to appear here.</p>
       </section>
     );
   }
   return (
-    <section id="recent-section">
+    <section id="recent-section" tabIndex={-1}>
       <h2>Recent</h2>
       <table>
         <thead>

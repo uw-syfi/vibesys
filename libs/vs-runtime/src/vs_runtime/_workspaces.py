@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime._agent_execution import AgentExecutionScope
-    from vs_runtime._agent_sessions import RuntimeWorkspaceAgentSessions
     from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
     from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
     from vs_runtime.contracts import CandidateWorkspace, Workspace
@@ -127,7 +126,7 @@ class OwnedWorkspaces(Workspaces, Protocol):
         """Reject new work before teardown begins."""
 
     async def close(self) -> None:
-        """Release sessions and workspaces in dependency order."""
+        """Release workspaces in dependency order."""
         ...
 
 
@@ -326,7 +325,7 @@ class RuntimeCandidateWorkspace(RuntimeWorkspace):
 
 
 class RuntimeWorkspaces:
-    """Own workspace handles, agent sessions, and their teardown order."""
+    """Own workspace handles and their teardown order."""
 
     def __init__(
         self,
@@ -343,7 +342,6 @@ class RuntimeWorkspaces:
         self._candidates: dict[str, RuntimeCandidateWorkspace] = {}
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
-        self._sessions: RuntimeWorkspaceAgentSessions | None = None
         self._evaluations: set[asyncio.Task[object]] = set()
         self.access_fence: Callable[[Path], tuple[str, ...]] | None = None
         self.root = RuntimeWorkspace(self, resources.root)
@@ -361,20 +359,6 @@ class RuntimeWorkspaces:
         self.access_fence = fenced_by
         for handle in (self.root, *self._candidates.values()):
             handle.guard_access(fenced_by)
-
-    def _attach_sessions(self, sessions: RuntimeWorkspaceAgentSessions) -> None:
-        """Complete the private ownership cycle during runtime construction."""
-        if self._sessions is not None:
-            message = "agent sessions are already attached"
-            raise RuntimeError(message)
-        self._sessions = sessions
-
-    def _owned_sessions(self) -> RuntimeWorkspaceAgentSessions:
-        sessions = self._sessions
-        if sessions is None:
-            message = "runtime workspace construction is incomplete"
-            raise RuntimeError(message)
-        return sessions
 
     @property
     def supports_parallel_candidates(self) -> bool:
@@ -549,10 +533,6 @@ class RuntimeWorkspaces:
         async with self._lifecycle_lock:
             resource = self.resource_for(candidate)
             errors: list[BaseException] = []
-            try:
-                await self._owned_sessions().close_workspace(candidate)
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228408 [BLE001]; candidate resource cleanup must continue after session cleanup fails.
-                errors.append(error)
             lock = self._candidate_locks[resource.id or ""]
             async with lock, self._root_lock:
                 try:
@@ -574,10 +554,9 @@ class RuntimeWorkspaces:
         self._closed = True
         for evaluation in tuple(self._evaluations):
             evaluation.cancel()
-        self._owned_sessions().begin_close()
 
     async def close(self) -> None:
-        """Close candidate pairs, root sessions, then the root resource."""
+        """Close candidate pairs, then the root resource."""
         if self._close_task is None:
             self.begin_close()
             self._close_task = asyncio.create_task(self._close_once())
@@ -592,10 +571,6 @@ class RuntimeWorkspaces:
                 await candidate.discard()
             except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228410 [BLE001]; run cleanup attempts every candidate in reverse creation order.
                 errors.append(error)
-        try:
-            await self._owned_sessions().close()
-        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228422 [BLE001]; root sessions must not prevent root resource cleanup.
-            errors.append(error)
         async with self._root_lock:
             try:
                 await run_sync(self._runner, self.root._resource.close)  # noqa: SLF001  # lint-waiver: LW-228420 [SLF001]; collection close releases the root resource after all candidates.

@@ -5,8 +5,10 @@
  */
 
 import type {HostKey} from '@vibesys/hosts';
-import {settled} from '@vibesys/ipc';
+import {settled, type WelcomeInspection, type WelcomeResult} from '@vibesys/ipc';
+import {actorStore} from '@vibesys/machine';
 import {createStore, type Store} from '@vibesys/store';
+import {createActor, fromPromise} from 'xstate';
 import {
   COMPLETION_EMPTY,
   type CompletionAction,
@@ -18,11 +20,72 @@ import {
   type HostsBridge,
   hostInitial,
   hostStep,
+  type InspectorAction,
+  type InspectorCopy,
+  type InspectorInspect,
+  type InspectorState,
+  inspectorMachine,
+  inspectorView,
   PICKER_CLOSED,
   type PickerAction,
   type PickerState,
   pickerStep,
 } from '../../state/index.js';
+
+function inspect(
+  bridge: HostsBridge,
+  request: InspectorInspect,
+  signal: AbortSignal,
+): Promise<WelcomeResult<WelcomeInspection>> {
+  let pending = true;
+  const cancel = (): void => {
+    if (pending) void settled(bridge.cancelInspection(request.token));
+  };
+  signal.addEventListener('abort', cancel, {once: true});
+  let answer: Promise<WelcomeResult<WelcomeInspection>>;
+  try {
+    answer = bridge.inspect(request.host, request.instance, request.includeLog, request.token);
+  } catch (error) {
+    answer = Promise.reject(error);
+  }
+  return settled(answer).finally(() => {
+    pending = false;
+    signal.removeEventListener('abort', cancel);
+  });
+}
+
+async function copyValue(
+  copy: (value: string) => Promise<void>,
+  request: InspectorCopy,
+): Promise<WelcomeResult<null>> {
+  try {
+    await copy(request.value);
+    return {ok: true, value: null};
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      authNeeded: false,
+    };
+  }
+}
+
+/** The detached-run inspector store over the host bridge and an injected clipboard writer. */
+export function createInspectorStore(
+  bridge: HostsBridge,
+  copy: (value: string) => Promise<void>,
+): Store<InspectorState, InspectorAction> {
+  const machine = inspectorMachine.provide({
+    actors: {
+      inspect: fromPromise<WelcomeResult<WelcomeInspection>, InspectorInspect>(({input, signal}) =>
+        inspect(bridge, input, signal),
+      ),
+      copy: fromPromise<WelcomeResult<null>, InspectorCopy>(({input}) => copyValue(copy, input)),
+    },
+  });
+  // The actor lives as long as the window that renders it, so it is intentionally never stopped.
+  return actorStore(createActor(machine).start(), inspectorView);
+}
 
 /** The host panel's store, showing `firstHost` until told otherwise. */
 export function createHostStore(

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from entrypoints.launcher import source_checkout_root
 from server.host_api import (
     FailureReason,
+    InstanceInspectionMetadata,
     InstanceStatus,
     LiveInstanceRecord,
     RunPhase,
@@ -35,8 +36,10 @@ from server.host_api import (
     StartupStage,
 )
 from server.registry import (
+    FileInstanceMetadataStore,
     FileInstanceStore,
     InstanceHold,
+    InstanceMetadataStore,
     LiveRegistry,
     host_facts,
     instance_log_path,
@@ -47,6 +50,7 @@ from vs_project.api import ProjectStateError, validate_run_id
 from vs_sim.api import OsThreads, SystemClock
 
 if TYPE_CHECKING:
+    from vibesys.api import Runs
     from vs_sim.api import Clock, Threads
 
 SERVER_EXITED = FailureReason(
@@ -81,6 +85,8 @@ class RecordPublisher:
         hold: InstanceHold,
         record: LiveInstanceRecord,
         clock: Clock,
+        *,
+        metadata: InstanceMetadataStore,
         threads: Threads | None = None,
     ) -> None:
         """Publish ``record`` through ``hold`` now; ``clock`` stamps the tombstone.
@@ -88,6 +94,7 @@ class RecordPublisher:
         ``threads`` paces progress writes; it defaults to the operating system's.
         """
         self._hold = hold
+        self._metadata = metadata
         self._record = record
         self._clock = clock
         self._threads = threads or OsThreads()
@@ -96,6 +103,29 @@ class RecordPublisher:
         self._flush_scheduled = False
         self._written_at = self._threads.now()
         hold.publish(record)
+
+    def resolved(self, *, project_root: Path, task: str) -> None:
+        """Retain the immutable identity after the invocation selected its project and task."""
+        resolved_root = str(project_root.resolve())
+        with self._lock:
+            self._publish(project_root=resolved_root)
+            record = self._record
+        self._metadata.publish(
+            InstanceInspectionMetadata(
+                id=record.id,
+                project_root=resolved_root,
+                run_id=record.run_id,
+                task=task,
+                pid=record.pid,
+                started_at=record.started_at,
+                hostname=record.hostname,
+                protocol_version=record.protocol_version,
+                vibesys_version=record.vibesys_version,
+                vibesys_root=record.vibesys_root,
+                control_socket_path=record.socket_path,
+                server_log_path=record.log_path,
+            )
+        )
 
     def listening(self) -> None:
         """The control socket accepts connections."""
@@ -196,16 +226,21 @@ def _starting_record(identity: argparse.Namespace, root: Path, clock: Clock) -> 
     )
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, *, runs: Runs | None = None) -> None:
     """Hold this server's registry id for its lifetime and serve its run."""
     arguments = sys.argv[1:] if argv is None else argv
     identity = _identity(arguments)
     root = instance_root(os.environ, os.getuid())
     clock = SystemClock()
     with LiveRegistry(FileInstanceStore(root), clock).register(identity.instance_id) as hold:
-        publisher = RecordPublisher(hold, _starting_record(identity, root, clock), clock)
+        publisher = RecordPublisher(
+            hold,
+            _starting_record(identity, root, clock),
+            clock,
+            metadata=FileInstanceMetadataStore(root),
+        )
         try:
-            import_module("entrypoints.server").main(arguments, observer=publisher)
+            import_module("entrypoints.server").main(arguments, observer=publisher, runs=runs)
         finally:
             publisher.end()
 

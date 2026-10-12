@@ -119,7 +119,8 @@ Properties:
 
 - **Stateless.** Every request reads the registry, project state, or run records afresh. The helper
   owns no runs: `run.start` launches a detached run server and returns; the run outlives the helper.
-  Per-channel state is limited to the negotiated version, open watches, and requests in flight.
+  Per-channel state is bounded and limited to the negotiated version, request lifecycle, and one
+  active or physically stopping watch.
 - **Lives as long as its channel.** It exits when stdin reaches end of stream. A dropped app leaves
   nothing behind but the detached runs it started.
 - **Started fresh from the host's checkout.** The app never caches helper code on a host. The
@@ -127,7 +128,11 @@ Properties:
   checkout's, so its `hello` reports exactly what will start runs.
 - **Light.** Its import closure excludes the engine (see [Guards](#guards)); `hello` replies in
   about 250 ms on a development machine, budget 300 ms.
-- **Concurrent.** Requests on one channel are served concurrently and replies carry the request's
+- **Concurrent and bounded.** At most 16 request or compensating workers run on one channel.
+  Further worker-spawning requests receive `channel_busy` until one physically settles. A deadline
+  ends the caller-visible request, but its worker and request id remain owned until then. A watch
+  has at most one observation waiting for the supervisor, so a blocked sink cannot grow the event
+  mailbox. Requests on one channel are otherwise served concurrently and replies carry the request's
   id, so a slow `run.start` does not hold back `instances.list`. Every request carries a deadline;
   the helper replies `deadline_exceeded` rather than going silent.
 

@@ -387,6 +387,9 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
     control = _SessionControlStub(integration.control)
 
     class Observer:
+        def resolved(self, *, project_root: Path, task: str) -> None:
+            del project_root, task
+
         def listening(self) -> None:
             response = runtime.api.execute(StopCommand())
             assert response.ack is not None
@@ -444,6 +447,9 @@ def test_startup_rejects_commands_that_require_an_active_session(
 
     class Observer:
         failure: RunControlUnavailableError | None = None
+
+        def resolved(self, *, project_root: Path, task: str) -> None:
+            del project_root, task
 
         def listening(self) -> None:
             with pytest.raises(RunControlUnavailableError) as raised:

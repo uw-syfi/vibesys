@@ -191,12 +191,14 @@ def test_refund_guard_failure_blocks_the_claim(repeats: int) -> None:
 
 
 # P2: inputs released after a closed owner are disposed with the owner's reason.
-def release_after_closure(disposition: Literal["park", "cancel", "settle"]) -> core.Transition:
+def release_after_closure(
+    disposition: Literal["park", "cancel", "settle"], *, target: core.InputTarget | None = None
+) -> core.Transition:
     state, ref, _succ, owner_scope = interrupted_attempt_state("pending")
     owner = state.attempts.attempts[0]
     adm = owner.admission_id
     assert adm is not None
-    item = occurrence(0, 0, core.ScopeInputTarget(scope=owner_scope))
+    item = occurrence(0, 0, target or core.ScopeInputTarget(scope=owner_scope))
     inv = state.sessions.invocations[0]
     req = core.DispatchTurn(
         request_id=core.RequestId(root="old-dispatch"),

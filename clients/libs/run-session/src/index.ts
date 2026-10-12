@@ -11,6 +11,8 @@ export type {
   BrowserLifecycle,
   IterationLoad,
   PageVisibility,
+  RunCommand,
+  RunCommandOutcome,
   RunConnection,
   RunStreamHandlers,
   TransportHooks,

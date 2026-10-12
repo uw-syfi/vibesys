@@ -310,6 +310,7 @@ def _measure(draft: Draft, record: AttemptRecord) -> AttemptRecord:
                 candidate,
                 "profile" if profile else "official",
                 ("profile",) if profile else stages(draft.config),
+                record.plan.required_fields if profile else (),
             ),
         )
     )

@@ -7,7 +7,7 @@ import os
 import stat
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from hypothesis import given
@@ -31,7 +31,10 @@ from server.host_api import (
     DetachedLaunchErrorCode,
     DetachedLaunchFailure,
     FailureReason,
+    InstanceInspection,
+    InstanceInspectionMetadata,
     InstanceList,
+    InstanceLogTail,
     InstanceStatus,
     InstanceStopResult,
     LiveInstanceRecord,
@@ -43,14 +46,22 @@ from server.host_api import (
 from server.instances import ControlSocketStopRequester
 from server.registry import (
     TOMBSTONE_RETENTION_SECONDS,
+    FakeInstanceLogs,
+    FakeInstanceMetadataStore,
     FakeInstanceStore,
+    FileInstanceLogs,
+    FileInstanceMetadataStore,
     FileInstanceStore,
     InstanceHold,
+    InstanceInspector,
+    InstanceLogError,
     LiveRegistry,
     StopEffects,
     driving,
     instance_root,
 )
+from vibesys.api import CoreEvent, RunRequest, RunResult
+from vibesys.api.testing import FakeRuns
 from vibesys.orchestration.dynamic import DynamicOptions
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
@@ -64,10 +75,50 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import BinaryIO
+
+    from vibesys.api import Runs, RunView
+    from vibesys.api.auxiliary import RunReady
 
 INSTANCE = "0123456789ab"
 _RUN_ID = "20261010-120000-11111111-dynamic"
+
+
+class _FinishedSession:
+    """In-memory run session that completes without emitting observations."""
+
+    def __init__(self, run_id: str) -> None:
+        self._run_id = run_id
+
+    def start(self) -> None:
+        pass
+
+    async def await_result(self) -> RunResult:
+        return RunResult(run_id=self._run_id, loop="plain", succeeded=True)
+
+    def stop(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def on_committed_view(
+        self, listener: Callable[[RunView, tuple[str, ...] | None], None]
+    ) -> None:
+        del listener
+
+    def on_ready(self, listener: Callable[[RunReady], None]) -> None:
+        del listener
+
+
+def _finished_runs() -> Runs:
+    runs = FakeRuns[RunRequest, CoreEvent, RunResult, _FinishedSession](
+        lambda request, _sink: _FinishedSession(request.resolved_run_id),
+        identity=lambda request: request.resolved_run_id,
+        is_resume=lambda request: request.resume is not None,
+    )
+    return cast("Runs", runs)
 
 
 def _record(
@@ -401,11 +452,22 @@ def _serving_store() -> tuple[FakeInstanceStore, InstanceHold]:
     return store, hold
 
 
-def _run(argv: list[str], store: FakeInstanceStore) -> tuple[int, str]:
+def _run(
+    argv: list[str],
+    store: FakeInstanceStore,
+    *,
+    logs: FakeInstanceLogs | None = None,
+    metadata: FakeInstanceMetadataStore | None = None,
+) -> tuple[int, str]:
     clock = ManualClock()
     return run(
         argv,
         registry=LiveRegistry(store, ManualClock()),
+        inspector=InstanceInspector(
+            store,
+            logs if logs is not None else FakeInstanceLogs(),
+            metadata if metadata is not None else FakeInstanceMetadataStore(),
+        ),
         # Nothing listens on the simulated network, so every stop falls back
         # to the signal path, as it does for a server that does not answer.
         effects=StopEffects(
@@ -414,6 +476,22 @@ def _run(argv: list[str], store: FakeInstanceStore) -> tuple[int, str]:
             clock,
             clock.advance,
         ),
+    )
+
+
+def _inspection_metadata() -> InstanceInspectionMetadata:
+    return InstanceInspectionMetadata(
+        id=INSTANCE,
+        project_root="/project",
+        run_id=_RUN_ID,
+        task="queue",
+        pid=4242,
+        started_at=1.0,
+        hostname="node",
+        vibesys_version="0+test",
+        vibesys_root="/src/vibesys",
+        control_socket_path="/run/control.sock",
+        server_log_path="/run/server.log",
     )
 
 
@@ -439,6 +517,91 @@ def test_list_human_names_each_server_or_says_there_are_none() -> None:
     )
 
 
+def test_inspect_json_reports_a_live_server_without_reading_its_log() -> None:
+    store, _ = _serving_store()
+
+    class RefusingLogs(FakeInstanceLogs):
+        def tail(self, instance_id: str) -> InstanceLogTail:
+            del instance_id
+            raise AssertionError
+
+    code, output = _run(["inspect", INSTANCE, "--json"], store, logs=RefusingLogs())
+
+    inspection = InstanceInspection.model_validate_json(output)
+    assert code == 0
+    assert inspection.state.value == "live"
+    assert inspection.record is not None
+    assert inspection.log is None
+
+
+def test_inspect_human_names_retained_ended_identity_and_paths() -> None:
+    metadata = FakeInstanceMetadataStore()
+    metadata.publish(_inspection_metadata())
+
+    code, output = _run(["inspect", INSTANCE], FakeInstanceStore(), metadata=metadata)
+
+    assert code == 0
+    assert "State: ended" in output
+    assert "Hostname: node" in output
+    assert "Task: queue" in output
+    assert f"Run: {_RUN_ID}" in output
+    assert "Project: /project" in output
+    assert "Checkout: /src/vibesys" in output
+    assert "Control socket: /run/control.sock" in output
+    assert "Server log: /run/server.log" in output
+    assert "Diagnostics: not loaded (pass --include-log)" in output
+
+
+def test_inspect_explicit_log_consent_reports_missing_and_bounded_diagnostics() -> None:
+    store, _ = _serving_store()
+
+    missing = InstanceInspection.model_validate_json(
+        _run(["inspect", INSTANCE, "--include-log", "--json"], store)[1]
+    )
+    assert missing.log is not None
+    assert missing.log.state == "missing"
+
+    logs = FakeInstanceLogs(limit=5)
+    logs.contents[INSTANCE] = b"0123456789"
+    available = InstanceInspection.model_validate_json(
+        _run(["inspect", INSTANCE, "--include-log", "--json"], store, logs=logs)[1]
+    )
+    assert available.log is not None
+    assert available.log.state == "available"
+    assert available.log.text == "56789"
+    assert available.log.truncated is True
+
+
+def test_inspect_surfaces_an_unsafe_log_without_returning_partial_output() -> None:
+    store, _ = _serving_store()
+
+    class UnsafeLogs(FakeInstanceLogs):
+        def tail(self, instance_id: str) -> InstanceLogTail:
+            raise InstanceLogError.unsafe(Path(f"/run/{instance_id}/server.log"), "symbolic link")
+
+    with pytest.raises(InstanceLogError, match="refusing to inspect symbolic link"):
+        _run(["inspect", INSTANCE, "--include-log", "--json"], store, logs=UnsafeLogs())
+
+
+def test_inspect_cli_refuses_an_unsafe_log_without_printing_partial_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    root = instance_root(os.environ, os.getuid())
+    run_directory = root / "runs" / INSTANCE
+    run_directory.mkdir(parents=True)
+    outside = tmp_path / "outside.log"
+    outside.write_text("secret\n")
+    (run_directory / "server.log").symlink_to(outside)
+
+    assert instances_main(["inspect", INSTANCE, "--include-log", "--json"]) == 1
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "cannot safely inspect" in output.err
+    assert "secret" not in output.err
+
+
 def test_stop_json_reports_a_typed_outcome() -> None:
     store, _ = _serving_store()
 
@@ -449,12 +612,13 @@ def test_stop_json_reports_a_typed_outcome() -> None:
     assert InstanceStopResult.model_validate_json(output).outcome is StopOutcome.NOT_RUNNING
 
 
+@pytest.mark.parametrize("command", ["inspect", "stop"])
 @pytest.mark.parametrize("bad", ["../x", "ABCDEF012345", "short"])
-def test_stop_rejects_an_id_that_could_name_a_path(
-    bad: str, capsys: pytest.CaptureFixture[str]
+def test_instance_actions_reject_an_id_that_could_name_a_path(
+    command: str, bad: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        _run(["stop", bad], FakeInstanceStore())
+        _run([command, bad], FakeInstanceStore())
 
     assert exit_info.value.code == 2
     assert "must match" in capsys.readouterr().err
@@ -487,7 +651,9 @@ def test_a_detached_server_record_follows_its_run_and_names_it_throughout() -> N
         phases.append((record.status, record.phase, record.run_id))
 
     with registry.register(INSTANCE) as hold:
-        publisher = RecordPublisher(hold, _starting(INSTANCE), clock)
+        publisher = RecordPublisher(
+            hold, _starting(INSTANCE), clock, metadata=FakeInstanceMetadataStore()
+        )
         seen()
         publisher.listening()
         seen()
@@ -518,6 +684,34 @@ def test_a_detached_server_record_follows_its_run_and_names_it_throughout() -> N
     )
 
 
+def test_resolved_project_replaces_the_launch_directory_before_listening(tmp_path: Path) -> None:
+    """A live inspection sees the parsed project in both identity contracts."""
+    launch_directory = tmp_path / "launcher-cwd"
+    project = tmp_path / "selected-project"
+    launch_directory.mkdir()
+    project.mkdir()
+    store = FakeInstanceStore()
+    metadata = FakeInstanceMetadataStore()
+    clock = ManualClock()
+    registry = LiveRegistry(store, clock)
+    starting = _starting(INSTANCE).model_copy(
+        update={"project_root": str(launch_directory.resolve())}
+    )
+
+    with registry.register(INSTANCE) as hold:
+        publisher = RecordPublisher(hold, starting, clock, metadata=metadata)
+        publisher.resolved(project_root=project, task="latency")
+        publisher.listening()
+
+        inspection = InstanceInspector(store, FakeInstanceLogs(), metadata).inspect(INSTANCE)
+        assert inspection.state.value == "live"
+        assert inspection.record is not None
+        assert inspection.metadata is not None
+        assert inspection.record.project_root == str(project.resolve())
+        assert inspection.metadata.project_root == str(project.resolve())
+        publisher.end()
+
+
 _EARLY_FAILURE = FailureReason(
     code="sandbox_start_failed",
     stage="run",
@@ -532,7 +726,9 @@ def test_a_run_that_fails_at_startup_shows_its_reason_to_a_client_that_comes_lat
     clock = ManualClock(100.0)
     registry = LiveRegistry(FakeInstanceStore(), clock)
     with registry.register(INSTANCE) as hold:
-        publisher = RecordPublisher(hold, _starting(INSTANCE), clock)
+        publisher = RecordPublisher(
+            hold, _starting(INSTANCE), clock, metadata=FakeInstanceMetadataStore()
+        )
         publisher.listening()
         publisher.observe(status=RunStatus.FAILED)
         publisher.observe(failure=_EARLY_FAILURE)
@@ -553,7 +749,9 @@ def test_a_server_that_exits_before_its_run_ends_leaves_a_failed_tombstone() -> 
     clock = ManualClock(100.0)
     registry = LiveRegistry(FakeInstanceStore(), clock)
     with registry.register(INSTANCE) as hold:
-        RecordPublisher(hold, _starting(INSTANCE), clock).end()
+        RecordPublisher(
+            hold, _starting(INSTANCE), clock, metadata=FakeInstanceMetadataStore()
+        ).end()
 
     (ended,) = registry.list().ended
     assert ended.phase == RunPhase(status=RunStatus.FAILED, reason=SERVER_EXITED)
@@ -576,3 +774,55 @@ def test_a_detached_server_without_its_allocated_identity_registers_nothing(
 
     assert exit_info.value.code == 2
     assert not (tmp_path / "vibesys").exists()
+
+
+def test_detached_start_retains_resolved_identity_for_later_inspection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The child retains the sole task that server parsing selected automatically."""
+    launch_directory = tmp_path / "launcher-cwd"
+    launch_directory.mkdir()
+    project = tmp_path / "resolved-project"
+    project.mkdir()
+    write_task(
+        project,
+        'version = 1\n[agent]\ndomain = "generic"\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        task="latency",
+    )
+    monkeypatch.chdir(launch_directory)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setenv("VIBESYS_DETACHED_CHILD", "1")
+    root = instance_root(os.environ, os.getuid())
+    (root / "runs" / INSTANCE).mkdir(parents=True, mode=0o700)
+    socket = tmp_path / "control.sock"
+
+    detached_run_main(
+        [
+            "--detach",
+            "--instance-id",
+            INSTANCE,
+            "--run-id",
+            _RUN_ID,
+            "--control-socket",
+            str(socket),
+            "--outer-loop",
+            "plain",
+            "--project",
+            str(project),
+        ],
+        runs=_finished_runs(),
+    )
+
+    inspection = InstanceInspector(
+        FileInstanceStore(root),
+        FileInstanceLogs(root),
+        FileInstanceMetadataStore(root),
+    ).inspect(INSTANCE)
+    assert inspection.state.value == "ended"
+    assert inspection.record is None
+    assert inspection.metadata is not None
+    assert inspection.metadata.project_root == str(project)
+    assert inspection.metadata.task == "latency"
+    assert inspection.metadata.run_id == _RUN_ID
+    assert inspection.metadata.control_socket_path == str(socket)

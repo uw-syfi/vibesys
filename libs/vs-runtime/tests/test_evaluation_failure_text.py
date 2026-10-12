@@ -12,22 +12,12 @@ from hypothesis import strategies as st
 from vs_evaluation.api import EvidenceKind
 from vs_runtime.api import (
     render_evaluation_failure,
-    render_rejected_evidence,
     render_stage_failure,
 )
 
 _TEXT = st.text(max_size=40)
 _FAILURE = st.none() | _TEXT
 _CHECKS = st.lists(st.tuples(_FAILURE, st.sampled_from(EvidenceKind)), max_size=4)
-
-
-@given(_CHECKS)
-def test_rejected_evidence_is_one_line_per_check(
-    rejected: list[tuple[str | None, EvidenceKind]],
-) -> None:
-    expected = "\n".join(summary or f"{kind.value} failed" for summary, kind in rejected)
-
-    assert render_rejected_evidence(rejected) == expected
 
 
 @given(_FAILURE, _FAILURE)

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 from launch.agents import BuiltInSessionAgents
 from launch.catalog import built_in_orchestrations
-from launch.composition import AGENT_TOOL_BINDINGS, STATELESS_TOOL_SERVERS
+from launch.composition import STATELESS_TOOL_SERVERS
 from vibesys.api.request import validate_descriptor as _validate_descriptor
 from vibesys.api.request import validate_run_request as _validate_run_request
 from vibesys.api.store import open_run_store as _open_run_store
@@ -112,7 +112,6 @@ def create_session(
                 if selected.invocation_store_factory is None
                 else selected.invocation_store_factory
             ),
-            agent_tool_bindings=AGENT_TOOL_BINDINGS,
             stateless_tool_servers=STATELESS_TOOL_SERVERS,
             git_repository=selected.git_repository,
             slurm_process=selected.slurm_process,

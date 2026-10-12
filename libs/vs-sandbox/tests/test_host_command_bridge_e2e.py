@@ -33,8 +33,6 @@ from vs_sandbox.api.slurm import (
     HOST_COMMAND_CLIENT,
     AgentGpuConfig,
     AgentGpuLauncher,
-    GateKind,
-    Gates,
     GpuCommands,
     HostCommandBroker,
     RunRoots,
@@ -42,16 +40,13 @@ from vs_sandbox.api.slurm import (
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Sequence
     from pathlib import Path
 
-    from vs_sim.api import Event
 
 _ENABLE_ENV = "VIBESYS_E2E_DOCKER"
 _IMAGE = "python:3.12-slim"
 _CLIENT_IN_CONTAINER = "/opt/vibesys/vibesys-gpu"
-_RESULT = "/tmp/vibesys-framework-benchmark-{}.json"  # noqa: S108  # lint-waiver: LW-954375 [S108]; the framework's result path shape, inside the container.
-
 # Stands in for srun and scancel: records its argv and cwd, then runs what follows
 # `--`. Without a `--` it is scancel, and it reports the cancellation on a FIFO the
 # test blocks on, so the test waits for the event itself rather than polling for it.
@@ -69,12 +64,6 @@ if {cancelled!r}:
     with open({cancelled!r}, "w") as fifo:
         fifo.write(" ".join(sys.argv[1:]))
 """
-# The planned benchmark: writes the result file named by its last argument.
-_PLANNED_BENCHMARK = """\
-import sys
-open(sys.argv[-1], "w").write('{"throughput": 42}')
-print("benchmark ran")
-"""
 
 
 class _NoConfinement:
@@ -85,39 +74,12 @@ class _NoConfinement:
         return list(argv)
 
 
-class _PlannedGateRunner:
-    """Fake gate runner: runs the planned argv on the host, as the real runners do remotely."""
-
-    def __init__(self, planned: Mapping[GateKind, Sequence[str]]) -> None:
-        self._planned = planned
-
-    def run(
-        self,
-        kind: GateKind,
-        arguments: Sequence[str],
-        *,
-        cwd: Path,
-        write: Callable[[bytes], None],
-        cancel: Event,
-    ) -> int:
-        del cancel
-        done = run_test_command(
-            [*self._planned[kind], *arguments],
-            capture_output=True,
-            cwd=cwd,
-        )
-        write(done.stdout + done.stderr)
-        return done.returncode
-
-
 @contextmanager
 def _broker(
     tmp_path: Path, log: Path, cancelled: Path | None = None
 ) -> Iterator[HostCommandBroker]:
     fake = tmp_path / "fake_slurm.py"
     fake.write_text(_FAKE_SLURM.format(log=str(log), cancelled=str(cancelled or "")))
-    bench = tmp_path / "bench.py"
-    bench.write_text(_PLANNED_BENCHMARK)
     config = AgentGpuConfig.model_validate(
         {
             "partitions": ("main",),
@@ -133,10 +95,6 @@ def _broker(
         tmp_path / "broker.sock",
         roots=RunRoots((workspace,)),
         gpu=GpuCommands(config, _NoConfinement(), env, launcher=launcher),
-        gates=Gates(
-            _PlannedGateRunner({GateKind.BENCHMARK: (sys.executable, str(bench))}),
-            benchmark_output_argument="--vs-output",
-        ),
     )
     broker.start()
     try:
@@ -234,33 +192,6 @@ def test_a_container_outside_the_workspace_is_refused(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "inside the run's workspace" in result.stderr
     assert not log.exists()
-
-
-def test_a_benchmark_result_written_on_the_host_arrives_in_the_containers_tmp(
-    tmp_path: Path,
-) -> None:
-    log = tmp_path / "slurm.log"
-    result_path = _RESULT.format(uuid.uuid4().hex)
-    with _broker(tmp_path, log) as broker:
-        result = run_test_command(
-            _docker_run(
-                broker,
-                tmp_path,
-                [
-                    "sh",
-                    "-c",
-                    f"python3 {_CLIENT_IN_CONTAINER} --gate benchmark --vs-output {result_path}"
-                    f" && cat {result_path}",
-                ],
-            ),
-            text=True,
-            capture_output=True,
-            timeout=300,
-        )
-
-    assert result.returncode == 0, result.stderr
-    assert "benchmark ran" in result.stdout
-    assert '{"throughput": 42}' in result.stdout
 
 
 def test_stopping_the_container_client_cancels_the_job(tmp_path: Path) -> None:

@@ -250,6 +250,7 @@ PURE_EXPORTS = {
             "ValidationInfo",
             "RootModel",
             "SerializeAsAny",
+            "SerializerFunctionWrapHandler",
             "StrictBool",
             "StrictFloat",
             "StrictInt",

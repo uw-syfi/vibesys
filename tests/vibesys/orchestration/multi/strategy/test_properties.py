@@ -1,32 +1,33 @@
 """Properties of the multi search that its conformance subjects do not state.
 
-Each test runs whole searches on the production shell with scripted executors and reads only
-the decisions the strategy proposed: the roles asked in each round, the settlements and the
+Each test simulates whole searches on the production shell against a scripted world and reads
+only the decisions the strategy proposed: the roles asked in each round, the settlements and the
 operations.
 """
 
 from __future__ import annotations
 
 import json
-from collections import deque
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.multi.strategy._executors import Executors
-from tests.vibesys.orchestration.multi.strategy._replies import (
+from tests.vibesys.orchestration.multi.strategy.world import (
+    FACTS,
+    PROFILER,
+    RECIPE,
+    MultiWorld,
     implemented,
     plan_reply,
     pre_round_reply,
     profiler_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.multi.strategy._run import FACTS, run_shell
 
 from vibesys.hypothesis import rounds
 from vibesys.metrics import MetricSpace, Objective
-from vibesys.orchestration.multi.strategy.api import MultiStrategyState
+from vibesys.orchestration.multi.strategy.api import MultiStrategyState, ValidateLocal
 from vs_core.api import (
     AssessmentKind,
     LocalValidationReport,
@@ -37,15 +38,24 @@ from vs_core.api import (
     Stop,
     Withdraw,
 )
+from vs_dst.api import simulate
 
 if TYPE_CHECKING:
-    from vs_runtime.api.testing import Run
+    from vs_dst.api import SimulatedRun
 
 PURE = settings(max_examples=5, deadline=None, derandomize=True, database=None)
-_RECIPE = "validation/recipes.json"
 
 
-def _roles(run: Run) -> list[str]:
+def _run(world: MultiWorld) -> SimulatedRun:
+    """The world's run, which must have ended in its terminal state without a halt."""
+    run = simulate(world)
+    assert run.finished
+    assert run.halted is None
+    assert not run.liveness_violations
+    return run
+
+
+def _roles(run: SimulatedRun) -> list[str]:
     """The role of every turn the strategy requested, in order."""
     return [
         item.turn.session.role_id.root.removeprefix("multi-")
@@ -54,7 +64,7 @@ def _roles(run: Run) -> list[str]:
     ]
 
 
-def _settles(run: Run) -> list[Settle]:
+def _settles(run: SimulatedRun) -> list[Settle]:
     return [
         item.disposition
         for item in run.decisions
@@ -62,7 +72,7 @@ def _settles(run: Run) -> list[Settle]:
     ]
 
 
-def _starts(run: Run) -> list[StartAttempt]:
+def _starts(run: SimulatedRun) -> list[StartAttempt]:
     return [item for item in run.decisions if isinstance(item, StartAttempt)]
 
 
@@ -72,34 +82,30 @@ def _verdicts(settle: Settle) -> list[str]:
     ]
 
 
-def _validations(run: Run) -> list[Operation]:
+def _validations(run: SimulatedRun) -> list[tuple[Operation, ValidateLocal]]:
     return [
-        item
+        (item, item.request)
         for item in run.decisions
-        if isinstance(item, Operation) and type(item.request).__name__ == "ValidateLocal"
+        if isinstance(item, Operation) and isinstance(item.request, ValidateLocal)
     ]
 
 
 def test_unmeasured_frontier_claim_is_evidence_but_not_framework_retention() -> None:
-    executors = Executors(
-        planner=deque([plan_reply("h1"), plan_reply("h2"), plan_reply("h3")]),
-        implementer=deque(
-            [
-                implemented(
-                    "disproven",
-                    candidate_disposition="pareto_frontier",
-                    candidate_metrics={"throughput": 75.0},
-                    candidate_evaluation_artifact="agent-profile.json",
-                    candidate_retention_reason="agent reports a tradeoff",
-                ),
-                implemented(),
-                implemented(),
-            ]
-        ),
-        judge=deque(reviewed() for _ in range(3)),
+    claim = implemented(
+        "disproven",
+        candidate_disposition="pareto_frontier",
+        candidate_metrics={"throughput": 75.0},
+        candidate_evaluation_artifact="agent-profile.json",
+        candidate_retention_reason="agent reports a tradeoff",
+    )
+    world = MultiWorld(
+        plans=[plan_reply("h1"), plan_reply("h2"), plan_reply("h3")],
+        implementations=[claim, implemented(), implemented()],
+        max_rounds=3,
+        official_eval_every=2,
     )
 
-    run = run_shell(executors, max_rounds=3, official_eval_every=2)
+    run = _run(world)
     first = _settles(run)[0]
     state = MultiStrategyState.model_validate(run.state)
     ledger = rounds.decode(rounds.EncodedLedger(state.search_json, state.carry_json))
@@ -128,13 +134,15 @@ def test_m1_the_judge_is_asked_exactly_when_the_review_cadence_says(
     judge_every: int, outcomes: list[str]
 ) -> None:
     """A round is reviewed at the cadence, in the final round, or on a nominated candidate."""
-    executors = Executors(
-        planner=deque(plan_reply(f"h{n}") for n in range(3)),
-        implementer=deque(implemented(outcome) for outcome in outcomes),
-        judge=deque(reviewed() for _ in range(3)),
+    world = MultiWorld(
+        implementations=[implemented(outcome) for outcome in outcomes],
+        max_rounds=3,
+        judge_every=judge_every,
+        official_eval_every=9,
     )
-    run = run_shell(executors, max_rounds=3, judge_every=judge_every, official_eval_every=9)
-    reviews = _roles(run).count("judge")
+
+    reviews = _roles(_run(world)).count("judge")
+
     expected = sum(
         number == 3 or number % judge_every == 0 or outcome == "nominated"
         for number, outcome in enumerate(outcomes, start=1)
@@ -143,13 +151,16 @@ def test_m1_the_judge_is_asked_exactly_when_the_review_cadence_says(
 
 
 def test_a_round_whose_review_was_deferred_is_never_a_winner() -> None:
-    executors = Executors(
-        planner=deque([plan_reply("h1"), plan_reply("h2")]),
-        implementer=deque([implemented("disproven"), implemented("disproven")]),
-        judge=deque([reviewed()]),
+    world = MultiWorld(
+        implementations=[implemented("disproven"), implemented("disproven")],
+        reviews=[reviewed()],
+        max_rounds=2,
+        judge_every=2,
+        official_eval_every=9,
     )
-    run = run_shell(executors, max_rounds=2, judge_every=2, official_eval_every=9)
-    first, second = _settles(run)
+
+    first, second = _settles(_run(world))
+
     assert not first.eligible
     assert _verdicts(first) == []
     assert _verdicts(second) == ["satisfied"]
@@ -161,27 +172,25 @@ def test_paid_turns_of_a_round_never_exceed_the_retry_budget(
     retries: int, verdicts: list[bool]
 ) -> None:
     """Whatever the judge says, a round spends at most `max_retries_per_round` paid turns."""
-    executors = Executors(
-        planner=deque(plan_reply(f"h{n}") for n in range(3)),
-        implementer=deque(implemented() for _ in range(12)),
-        judge=deque(reviewed(passed=verdicts[n % len(verdicts)]) for n in range(12)),
-    )
-    run = run_shell(executors, max_rounds=2, max_retries_per_round=retries)
-    implementer_turns = [
+    run = _run(MultiWorld(passes=verdicts, max_rounds=2, max_retries_per_round=retries))
+
+    paid = [
         item
         for item in run.decisions
         if isinstance(item, RequestTurn) and item.turn.charge_class == "paid"
     ]
-    assert len(implementer_turns) <= 2 * retries
+    assert len(paid) <= 2 * retries
 
 
 def test_each_review_is_a_fresh_conversation() -> None:
-    executors = Executors(
-        planner=deque([plan_reply("h1")]),
-        implementer=deque(implemented() for _ in range(3)),
-        judge=deque([reviewed(passed=False), reviewed(passed=False), reviewed()]),
+    world = MultiWorld(
+        reviews=[reviewed(passed=False), reviewed(passed=False), reviewed()],
+        max_rounds=1,
+        max_retries_per_round=3,
     )
-    run = run_shell(executors, max_rounds=1, max_retries_per_round=3)
+
+    run = _run(world)
+
     sessions = [
         item.turn.session.session_id.root
         for item in run.decisions
@@ -195,12 +204,12 @@ def test_each_review_is_a_fresh_conversation() -> None:
 
 
 def test_a_failing_review_repairs_with_another_paid_turn_then_a_passing_one_is_measured() -> None:
-    executors = Executors(
-        planner=deque([plan_reply("h1")]),
-        implementer=deque(implemented() for _ in range(2)),
-        judge=deque([reviewed(passed=False), reviewed()]),
+    world = MultiWorld(
+        reviews=[reviewed(passed=False), reviewed()], max_rounds=1, max_retries_per_round=2
     )
-    run = run_shell(executors, max_rounds=1, max_retries_per_round=2)
+
+    run = _run(world)
+
     assert _roles(run).count("implementer") == 2
     (settle,) = _settles(run)
     assert settle.eligible
@@ -210,12 +219,10 @@ def test_a_failing_review_repairs_with_another_paid_turn_then_a_passing_one_is_m
 def test_a_judge_that_never_answers_validly_ends_the_round_unreviewed_without_a_paid_retry() -> (
     None
 ):
-    executors = Executors(
-        planner=deque([plan_reply("h1")]),
-        implementer=deque(implemented() for _ in range(3)),
-        judge=deque(["nope"] * 8),
-    )
-    run = run_shell(executors, max_rounds=1, max_retries_per_round=3)
+    world = MultiWorld(reviews=["nope"] * 8, max_rounds=1, max_retries_per_round=3)
+
+    run = _run(world)
+
     (settle,) = _settles(run)
     assert _roles(run).count("implementer") == 1
     assert not settle.eligible
@@ -228,22 +235,18 @@ def test_a_pareto_claim_dominated_by_the_archive_never_passes_review(
 ) -> None:
     """The live archive overrides a passing verdict on a frontier row it dominates."""
     space = MetricSpace(objectives=(Objective(name="throughput", direction="max"),))
-    executors = Executors(
-        planner=deque([plan_reply("h1"), plan_reply("h2")]),
-        implementer=deque(
-            [
-                implemented(),
-                implemented(
-                    candidate_disposition="pareto_frontier",
-                    candidate_metrics={"throughput": claimed},
-                ),
-            ]
-        ),
-        judge=deque([reviewed(), reviewed()]),
-        benchmark=lambda _commit: 100.0,
+    claim = implemented(
+        candidate_disposition="pareto_frontier", candidate_metrics={"throughput": claimed}
     )
-    run = run_shell(executors, max_rounds=2, metric_space=space)
-    second = _settles(run)[1]
+    world = MultiWorld(
+        plans=[plan_reply("h1"), plan_reply("h2")],
+        implementations=[implemented(), claim],
+        max_rounds=2,
+        metric_space=space,
+    )
+
+    second = _settles(_run(world))[1]
+
     assert _verdicts(second) == (["rejected"] if dominated else ["satisfied"])
     assert second.eligible is not dominated
 
@@ -252,36 +255,35 @@ def test_a_pareto_claim_dominated_by_the_archive_never_passes_review(
 
 
 def test_m3_validation_runs_once_per_paid_turn_and_a_failure_repairs_the_attempt() -> None:
-    outcomes = deque(
-        [
+    world = MultiWorld(
+        implementations=[implemented(validation_recipe_artifact=RECIPE) for _ in range(2)],
+        validations=[
             LocalValidationReport(status="succeeded", passed=False, recipe="unit", error="boom"),
             LocalValidationReport(status="succeeded", passed=True),
-        ]
+        ],
+        max_rounds=1,
+        max_retries_per_round=2,
     )
-    executors = Executors(
-        planner=deque([plan_reply("h1")]),
-        implementer=deque(implemented(validation_recipe_artifact=_RECIPE) for _ in range(2)),
-        judge=deque([reviewed(), reviewed()]),
-        validation=lambda _request: outcomes.popleft(),
-    )
-    run = run_shell(executors, max_rounds=1, max_retries_per_round=2)
+
+    run = _run(world)
+
     operations = _validations(run)
     assert len(operations) == 2
-    assert len({item.decision_id.root for item in operations}) == 2
-    assert [item.recipe_artifact for item in executors.validations] == [_RECIPE, _RECIPE]
+    assert len({decision.decision_id.root for decision, _ in operations}) == 2
+    assert [request.recipe_artifact for _, request in operations] == [RECIPE, RECIPE]
     (settle,) = _settles(run)
     assert settle.eligible
 
 
 def test_a_run_that_cannot_validate_approves_on_the_judges_verdict() -> None:
-    executors = Executors(
-        planner=deque([plan_reply("h1")]),
-        implementer=deque([implemented(validation_recipe_artifact=_RECIPE)]),
-        judge=deque([reviewed()]),
-        validation=lambda _request: LocalValidationReport(status="rejected", detail="no sandbox"),
+    world = MultiWorld(
+        implementations=[implemented(validation_recipe_artifact=RECIPE)],
+        validations=[LocalValidationReport(status="rejected", detail="no sandbox")],
+        max_rounds=1,
     )
-    run = run_shell(executors, max_rounds=1)
-    (settle,) = _settles(run)
+
+    (settle,) = _settles(_run(world))
+
     assert settle.eligible
 
 
@@ -297,23 +299,18 @@ def test_m2_an_advisory_failure_never_fails_the_round(
     routed: list[str], profiled: list[str]
 ) -> None:
     """A routing or profiling turn that gives garbage costs a note; the plan and the round go on."""
-    executors = Executors(
-        pre_round=deque(
+    world = MultiWorld(
+        pre_rounds=[
             "x" if item == "x" else pre_round_reply(need_profile=item == "profile")
             for item in routed * 4
-        ),
-        profiler=deque(profiler_reply() if item == "ok" else "x" for item in profiled * 4),
-        planner=deque(plan_reply(f"h{n}") for n in range(4)),
-        implementer=deque(implemented() for _ in range(4)),
-        judge=deque(reviewed() for _ in range(4)),
-    )
-    run = run_shell(
-        executors,
+        ],
+        profiles=[profiler_reply() if item == "ok" else "x" for item in profiled * 4],
         max_rounds=2,
-        profiler_id="linux_cpu",
-        profiler_support_name="linux_cpu_profiler",
-        profiler_mcp_name="vibesys-linux-cpu-profiler",
+        **PROFILER,
     )
+
+    run = _run(world)
+
     assert len(_starts(run)) == 2
     final = run.decisions[-1]
     assert isinstance(final, Stop)
@@ -321,30 +318,20 @@ def test_m2_an_advisory_failure_never_fails_the_round(
 
 
 def test_a_run_without_a_profiler_never_asks_the_routing_turn() -> None:
-    executors = Executors(
-        planner=deque([plan_reply("h1")]),
-        implementer=deque([implemented()]),
-        judge=deque([reviewed()]),
-    )
-    run = run_shell(executors, max_rounds=1)
+    run = _run(MultiWorld(max_rounds=1))
+
     assert _roles(run) == ["orchestrator", "implementer", "judge"]
 
 
 def test_a_requested_profile_is_collected_before_the_plan() -> None:
-    executors = Executors(
-        pre_round=deque([pre_round_reply(need_profile=True, focus="decode loop")]),
-        profiler=deque([profiler_reply()]),
-        planner=deque([plan_reply("h1")]),
-        implementer=deque([implemented()]),
-        judge=deque([reviewed()]),
-    )
-    run = run_shell(
-        executors,
+    world = MultiWorld(
+        pre_rounds=[pre_round_reply(need_profile=True, focus="decode loop")],
         max_rounds=1,
-        profiler_id="linux_cpu",
-        profiler_support_name="linux_cpu_profiler",
-        profiler_mcp_name="vibesys-linux-cpu-profiler",
+        **PROFILER,
     )
+
+    run = _run(world)
+
     assert _roles(run) == ["orchestrator", "profiler", "orchestrator", "implementer", "judge"]
 
 
@@ -353,26 +340,33 @@ def test_a_requested_profile_is_collected_before_the_plan() -> None:
 
 def test_m4_a_failed_official_gate_forces_the_next_review_even_for_a_continuation() -> None:
     """After a gate failure the repaired attempt is reviewed, though `continue` would defer it."""
-    fail_first = deque([None, 100.0])
-    executors = Executors(
-        planner=deque([plan_reply("h1")]),
-        implementer=deque(
-            [implemented(), implemented("continue", next_step="repair the gate path")]
-        ),
-        judge=deque([reviewed(), reviewed()]),
-        benchmark=lambda _commit: fail_first.popleft() if fail_first else 100.0,
+    world = MultiWorld(
+        implementations=[
+            implemented(),
+            implemented("continue", next_step="repair the gate path"),
+        ],
+        benchmark_failures=1,
+        max_rounds=2,
+        max_retries_per_round=2,
+        judge_every=1,
     )
-    run = run_shell(executors, max_rounds=2, max_retries_per_round=2, judge_every=1)
+
+    run = _run(world)
+
     assert _roles(run)[:5] == ["orchestrator", "implementer", "judge", "implementer", "judge"]
 
 
 def test_a_continuation_after_a_failed_review_is_not_reviewed_again() -> None:
-    executors = Executors(
-        planner=deque([plan_reply("h1")]),
-        implementer=deque([implemented(), implemented("continue", next_step="smaller repair")]),
-        judge=deque([reviewed(passed=False), reviewed()]),
+    world = MultiWorld(
+        implementations=[implemented(), implemented("continue", next_step="smaller repair")],
+        reviews=[reviewed(passed=False), reviewed()],
+        max_rounds=2,
+        max_retries_per_round=2,
+        judge_every=1,
     )
-    run = run_shell(executors, max_rounds=2, max_retries_per_round=2, judge_every=1)
+
+    run = _run(world)
+
     assert _roles(run)[:4] == ["orchestrator", "implementer", "judge", "implementer"]
 
 
@@ -380,12 +374,8 @@ def test_a_continuation_after_a_failed_review_is_not_reviewed_again() -> None:
 
 
 def test_an_invalid_plan_is_corrected_once_with_its_predecessor() -> None:
-    executors = Executors(
-        planner=deque(["not json", plan_reply("h1")]),
-        implementer=deque([implemented()]),
-        judge=deque([reviewed()]),
-    )
-    run = run_shell(executors, max_rounds=1)
+    run = _run(MultiWorld(plans=["not json", plan_reply("h1")], max_rounds=1))
+
     designer = [
         item
         for item in run.decisions
@@ -397,34 +387,30 @@ def test_an_invalid_plan_is_corrected_once_with_its_predecessor() -> None:
 
 
 def test_a_revert_to_the_input_starts_the_round_on_the_input() -> None:
-    executors = Executors(
-        planner=deque([plan_reply("h1"), plan_reply("h2", revert_to_round=0)]),
-        implementer=deque(implemented() for _ in range(4)),
-        judge=deque(reviewed() for _ in range(4)),
-    )
-    run = run_shell(executors, max_rounds=2)
+    world = MultiWorld(plans=[plan_reply("h1"), plan_reply("h2", revert_to_round=0)], max_rounds=2)
+
+    run = _run(world)
+
     assert _starts(run)[1].workspace.base == FACTS.baseline
 
 
 def test_a_continued_hypothesis_asks_no_designer() -> None:
-    executors = Executors(
-        planner=deque([plan_reply("h1")]),
-        implementer=deque(
-            [implemented("continue", next_step="finish it"), implemented("nominated")]
-        ),
-        judge=deque([reviewed(), reviewed()]),
+    world = MultiWorld(
+        plans=[plan_reply("h1")],
+        implementations=[implemented("continue", next_step="finish it"), implemented("nominated")],
+        max_rounds=2,
+        judge_every=1,
     )
-    run = run_shell(executors, max_rounds=2, judge_every=1)
+
+    run = _run(world)
+
     assert _roles(run).count("orchestrator") == 1
     assert len(_starts(run)) == 2
 
 
 def test_the_search_survives_an_implementer_whose_every_reply_is_unparsable() -> None:
-    executors = Executors(
-        planner=deque(plan_reply(f"h{n}") for n in range(3)),
-        implementer=deque(["no"] * 12),
-    )
-    run = run_shell(executors, max_rounds=2)
+    run = _run(MultiWorld(implementations=["no"] * 12, max_rounds=2))
+
     assert isinstance(run.decisions[-1], Stop)
     assert all(not item.eligible for item in _settles(run))
 
@@ -435,13 +421,10 @@ def test_the_profile_json_is_untouched_by_the_scripted_replies() -> None:
 
 @pytest.mark.parametrize("passed", [True, False])
 def test_the_retained_checkpoint_of_a_failed_round_is_work_in_progress(*, passed: bool) -> None:
-    executors = Executors(
-        planner=deque([plan_reply("h1")]),
-        implementer=deque(implemented() for _ in range(3)),
-        judge=deque(reviewed(passed=passed) for _ in range(3)),
-    )
-    run = run_shell(executors, max_rounds=1, max_retries_per_round=1)
-    (settle,) = _settles(run)
+    world = MultiWorld(passes=[passed], max_rounds=1, max_retries_per_round=1)
+
+    (settle,) = _settles(_run(world))
+
     assert settle.eligible is passed
     if not passed:
         assert settle.retention == "wip"
@@ -453,11 +436,15 @@ def test_a_failed_attribution_command_names_the_command_and_where_it_runs(
     exit_code: int, output: str
 ) -> None:
     """The run ends at the baseline attribution, saying what ran, where, and why it failed."""
-    run = run_shell(
-        Executors(attribution=output, attribution_exit_code=exit_code),
+    world = MultiWorld(
+        attribution_output=output,
+        attribution_exit_code=exit_code,
         max_rounds=2,
         attribution={"command": ("bash", "attribute.sh"), "timeout_seconds": 10},
     )
+
+    run = _run(world)
+
     assert isinstance(run.state, MultiStrategyState)
     error = run.state.design.last_error
     assert error is not None

@@ -234,6 +234,17 @@ bound port>`. That is the authority of every page this gateway hands out
 (`WebSocketGateway.url` is always `http://127.0.0.1:<bound port>/?token=...`),
 so the grant is exact and textual.
 
+Client code must not use `innerHTML`, `outerHTML`, `insertAdjacentHTML`, or
+`document.write`. These raw HTML sinks bypass React's normal escaping and could
+turn model- or tool-produced content into markup that violates this CSP. The
+client-wide `tools/lint-rules/no-raw-html-sinks.grit` rule enforces that restriction
+through `pnpm --dir clients check:ts`; the policy remains authoritative in
+`_POLICY_DIRECTIVES`, rather than being duplicated in the lint rule. The static
+gate covers dot and literal-computed properties, direct and optional calls, and
+plain, concatenating, or logical assignments in every TypeScript source
+extension used by the clients, including desktop preload `.cts` files. Dynamic
+property names and aliased method references are outside this syntactic rule.
+
 **Declared browser origins do not appear in `connect-src`, and must not be
 added to it.** They answer a different question. `--web-origin` is the inbound
 `Origin` allowlist: it says who may connect *to* the gateway. `connect-src`

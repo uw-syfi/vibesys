@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 from functools import cache
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.support.evaluation_scenarios import ScenarioOutcome, ScenarioSpec, capture_projection
 
 from vibesys.orchestration.dynamic.parents.api import (
     ParentCatalog,
@@ -17,43 +17,64 @@ from vibesys.orchestration.dynamic.parents.api import (
     options,
     resolve,
 )
-from vs_evaluation.api import ContentDigest, EvidenceKind, EvidenceOutcome
+from vs_evaluation.api import (
+    ContentDigest,
+    EvidenceFailureKind,
+    EvidenceFingerprints,
+    EvidenceKind,
+    EvidenceOutcome,
+    TrustedEvidence,
+)
 from vs_evaluator_protocol.api import PartialMeasurement, Progress
+
+
+def _digest(text: str) -> ContentDigest:
+    return ContentDigest.sha256(text.encode())
+
+
+def _evidence(
+    kind: EvidenceKind,
+    ordinal: int,
+    outcome: EvidenceOutcome,
+    partial: PartialMeasurement | None = None,
+) -> TrustedEvidence:
+    """One accepted stage receipt of the revision with this ordinal, in a fixed context."""
+    return TrustedEvidence(
+        evidence_id=hashlib.sha256(f"{kind.value}-{ordinal}".encode()).hexdigest(),
+        evaluation_id=f"handle-{ordinal}",
+        stage_name=kind.value,
+        kind=kind,
+        fingerprints=EvidenceFingerprints(
+            candidate=_digest(f"candidate-{ordinal}"),
+            evaluator=_digest("evaluator"),
+            workload=_digest("workload"),
+            environment=_digest("environment"),
+        ),
+        trusted_inputs=_digest("inputs"),
+        outcome=outcome,
+        partial_measurement=partial,
+        failure_kind=EvidenceFailureKind.WORKLOAD if partial is not None else None,
+        accepted_round=0,
+    )
 
 
 @cache
 def _snapshot(value: float, ordinal: int) -> ParentSnapshot:
-    evaluation = capture_projection(
-        ScenarioSpec(
-            outcome=ScenarioOutcome.CORRECTNESS_FAIL,
-            revision=f"revision-{ordinal}",
-            patch=f"patch-{ordinal}",
-            benchmark_failure=True,
-            partial=PartialMeasurement(
-                name="throughput",
-                value=value,
-                direction="max",
-                unit="tokens/s",
-                progress=Progress(completed=71 if ordinal == 1 else 65, required=72, unit="rounds"),
-            ),
-        )
+    partial = PartialMeasurement(
+        name="throughput",
+        value=value,
+        direction="max",
+        unit="tokens/s",
+        progress=Progress(completed=71 if ordinal == 1 else 65, required=72, unit="rounds"),
     )
-    accuracy = next(
-        item for item in evaluation.trusted_evidence if item.kind is EvidenceKind.ACCURACY
-    )
-    benchmark = next(
-        item for item in evaluation.trusted_evidence if item.kind is EvidenceKind.BENCHMARK
-    )
-    assert evaluation.handle_id is not None
-    assert evaluation.content_digest is not None
     return ParentSnapshot(
         hypothesis_id="source",
-        revision=evaluation.revision,
-        content_digest=evaluation.content_digest,
-        handle_id=evaluation.handle_id,
+        revision=f"revision-{ordinal}",
+        content_digest=_digest(f"candidate-{ordinal}").value,
+        handle_id=f"handle-{ordinal}",
         submission_index=ordinal,
-        accuracy=accuracy,
-        benchmark=benchmark,
+        accuracy=_evidence(EvidenceKind.ACCURACY, ordinal, EvidenceOutcome.PASSED),
+        benchmark=_evidence(EvidenceKind.BENCHMARK, ordinal, EvidenceOutcome.FAILED, partial),
         retained=True,
     )
 

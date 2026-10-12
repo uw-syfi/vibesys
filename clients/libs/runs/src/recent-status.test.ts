@@ -10,6 +10,7 @@ const RECENT: RecentRun = {
   project: '/p',
   task: 'spsc',
   runId: 'run-1',
+  instanceId: '00000000000a',
   attachedAt: 1,
 };
 
@@ -43,6 +44,7 @@ describe('recentStatus', () => {
       };
       expect(recentStatus(RECENT, listing)).toEqual({
         kind: 'ended',
+        instanceId: latest?.id ?? null,
         status: latest?.status ?? null,
         reason: null,
       });
@@ -64,5 +66,24 @@ describe('recentStatus', () => {
       status: 'running',
     });
     expect(recentStatus(RECENT, undefined)).toEqual({kind: 'unknown'});
+  });
+
+  test('an ended run keeps its durable locator after its tombstone expires', () => {
+    const other = server(9, 9, 'failed');
+    const listing: HostListing = {
+      kind: 'listed',
+      host: 'ssh:gpu',
+      live: [],
+      ended: [{...other, projectRoot: '/another-project'}],
+      unreadable: [],
+      unverified: [],
+    };
+
+    expect(recentStatus(RECENT, listing)).toEqual({
+      kind: 'ended',
+      instanceId: '00000000000a',
+      status: null,
+      reason: null,
+    });
   });
 });

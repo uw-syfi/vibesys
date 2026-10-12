@@ -12,7 +12,6 @@ from tests.server.support import (
 
 from server.api.protocol import PauseCommand, ResumeCommand, SteerCommand, StopCommand
 from server.events import (
-    AgentExecutionStartedData,
     EventStatus,
     EventType,
     RunEvent,
@@ -22,7 +21,6 @@ from server.run_lifecycle import RunStatus
 from vibesys.api import RunStopped
 from vibesys.events import CoreEventType
 from vibesys.events import EventStatus as CoreEventStatus
-from vibesys.steering import splice_steering
 
 
 def _status_changes(parts: ServerParts) -> list[tuple[RunStatus, RunStatus]]:
@@ -48,23 +46,17 @@ def _folded_status(events: list[RunEvent], through_sequence: int) -> RunStatus |
 def _enter_boundary(parts: ServerParts, kind: str, round_label: str, user_prompt: str) -> str:
     """Simulate core's entry-side agent turn control gating for a test.
 
-    Production gating lives in `vibesys.orchestration.runtime`,
-    not in the server's `RunController.before_agent`/`start_agent_execution`
-    any more. Tests that need pause-blocking, stop-raising, or steering
-    splicing at an invocation boundary replicate that call sequence here,
-    against the same `RunControlChannel` the real loop reads.
+    Production gating lives in the core run loop, not in the server's
+    `RunController.before_agent`/`start_agent_execution`. Tests that need pause-blocking or
+    stop-raising at an invocation boundary replicate that call sequence here, against the
+    same `RunControlChannel` the real loop reads. Steering is not simulated: on the core
+    path it is a session input that the next turn receives, and
+    `tests/composition/test_steer_reaches_the_next_turn.py` drives that for real.
     """
     control = parts.control
     control.raise_if_stopped()
     control.wait_while_paused()
-    steer_texts = control.take_pending_steer()
-    effective_prompt = splice_steering(user_prompt, steer_texts)
-    execution = parts.start_execution(kind, round_label, effective_prompt)
-    if steer_texts:
-        control.notify_steer_consumed(
-            agent_kind=kind, round_label=round_label, execution_id=execution.execution_id
-        )
-    return execution.user_prompt
+    return parts.start_execution(kind, round_label, user_prompt).user_prompt
 
 
 def test_pause_takes_effect_at_next_safe_point(tmp_path: Path) -> None:
@@ -83,62 +75,7 @@ def test_pause_takes_effect_at_next_safe_point(tmp_path: Path) -> None:
     assert result == ["prompt"]
 
 
-def test_steering_is_injected_once(tmp_path: Path) -> None:
-    parts = build_server_parts(tmp_path)
-    parts.control.queue_steer("focus on the KV cache")
-
-    effective = _enter_boundary(parts, "implementer", "round 1", "Do the work")
-
-    assert "Do the work" in effective
-    assert "focus on the KV cache" in effective
-    assert "Operator steering" in effective
-    started = next(
-        event for event in parts.journal.read() if event.type is EventType.AGENT_EXECUTION_STARTED
-    )
-    assert isinstance(started.data, AgentExecutionStartedData)
-    assert started.data.user_prompt == effective
-
-    parts.controller.after_agent("implementer", "round 1")
-    assert _enter_boundary(parts, "judge", "round 1", "Review it") == "Review it"
-
-
-class _RunningTurn:
-    """A turn in flight whose provider takes any message offered to it."""
-
-    agent_kind = "implementer"
-    round_label = "round 1"
-
-    def __init__(self, execution_id: str | None) -> None:
-        self.execution_id = execution_id
-
-    def offer_steer(self, text: str, on_rejected: object) -> bool:
-        del text, on_rejected
-        return True
-
-
-def test_a_steer_delivered_into_a_running_turn_is_journaled_once_and_not_spliced_again(
-    tmp_path: Path,
-) -> None:
-    parts = build_server_parts(tmp_path)
-    execution = parts.start_execution("implementer", "round 1", "work")
-    detach = parts.control.attach_steer_target(_RunningTurn(execution.execution_id))
-
-    parts.control.queue_steer("focus on the KV cache")
-    detach()
-
-    controls = [(e.text, e.status) for e in parts.journal.read() if e.type is EventType.CONTROL]
-    assert controls == [
-        ("/steer: focus on the KV cache", EventStatus.PENDING),
-        ("/steer", EventStatus.DELIVERED),
-    ]
-    delivered = [e for e in parts.journal.read() if e.status is EventStatus.DELIVERED]
-    assert [(e.agent_kind, e.round_label, e.execution_id) for e in delivered] == [
-        ("implementer", "round 1", execution.execution_id)
-    ]
-    assert _enter_boundary(parts, "judge", "round 1", "Review it") == "Review it"
-
-
-def test_steering_queued_while_paused_applies_on_resume(tmp_path: Path) -> None:
+def test_steering_queued_while_paused_survives_resume_for_core_to_take(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.start_execution("implementer", "round 1", "work")
     parts.control.request_pause()
@@ -152,9 +89,10 @@ def test_steering_queued_while_paused_applies_on_resume(tmp_path: Path) -> None:
     parts.control.resume()
     waiter.join(timeout=DEADLOCK_GUARD_S)
 
-    assert len(result) == 1
-    assert "Review" in result[0]
-    assert "check for reward hacking" in result[0]
+    assert result == ["Review"]
+    # Steering queued while paused waits for core to take it; resuming neither drops nor
+    # delivers it, and it reaches a turn only as session input (see the composition test).
+    assert parts.control.take_pending_steer() == ["check for reward hacking"]
 
 
 def test_api_control_commands_ack_and_reach_controller(tmp_path: Path) -> None:
@@ -170,7 +108,7 @@ def test_api_control_commands_ack_and_reach_controller(tmp_path: Path) -> None:
     assert (pause.ack.action, pause.ack.status) == ("pause", "pending")
     assert (resume.ack.action, resume.ack.status) == ("resume", "consumed")
     assert (steer.ack.action, steer.ack.status) == ("steer", "pending")
-    assert "prioritize latency" in _enter_boundary(parts, "implementer", "round 1", "Work")
+    assert parts.control.take_pending_steer() == ["prioritize latency"]
 
 
 def test_a_resume_command_can_ask_for_the_fallback_and_a_plain_one_cannot(tmp_path: Path) -> None:

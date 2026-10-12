@@ -181,7 +181,7 @@ class _LocalRunRecord:
         self._git_lock = threads.lock()
         registration = self._registration(self._manifest())
         self._framework_prefixes = (
-            registration.plugin.memory_paths if registration is not None else ()
+            registration.plugin.core.artifact_directories if registration is not None else ()
         )
 
     @property
@@ -211,20 +211,8 @@ class _LocalRunRecord:
         )
 
     def history_documents(self) -> tuple[RunDocument, ...]:
-        manifest = self._manifest()
-        registration = self._registration(manifest)
-        namespaces = (
-            (registration.plugin.id,)
-            if registration is not None and registration.plugin.state is not None
-            else ()
-        )
-        return tuple(
-            RunDocument(relative_path=item.relative_path, contents=item.contents)
-            for namespace in namespaces
-            for item in self._project.state.portable_namespace(self._run_id, namespace)
-            .snapshot()
-            .files
-        )
+        # A core run keeps its state in the run's state store, read through the projector.
+        return ()
 
     def portable_documents(self) -> tuple[RunDocument, ...]:
         snapshot = self._project.state.portable_run_export(self._run_id)

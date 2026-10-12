@@ -40,6 +40,9 @@ function checkAccepted(request: WelcomeRequest): void {
   if (request.kind === 'set-checkout' || request.kind === 'cancel-checkout') {
     expect(Number.isSafeInteger(request.change) && request.change > 0).toBe(true);
   }
+  if (request.kind === 'inspect' || request.kind === 'cancel-inspection') {
+    expect(Number.isSafeInteger(request.inspection) && request.inspection > 0).toBe(true);
+  }
   if (request.kind === 'resume') expect(isRunId(request.run)).toBe(true);
   if ('project' in request) expect(request.project.startsWith('/')).toBe(true);
   if ('host' in request) expect(['local', 'ssh']).toContain(request.host.kind);
@@ -96,6 +99,34 @@ describe('parseWelcomeRequest', () => {
     });
     expect(() => parseWelcomeRequest(WELCOME_CHANNELS.cancelCheckout, [0])).toThrow(
       'a checkout change is named by a positive integer',
+    );
+  });
+
+  test('inspection validates the host and id and treats only true as log consent', () => {
+    expect(
+      parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['ssh:gpu', '0123456789ab', true, 7]),
+    ).toEqual({
+      kind: 'inspect',
+      host: {kind: 'ssh', alias: 'gpu'},
+      instance: '0123456789ab',
+      includeLog: true,
+      inspection: 7,
+    });
+    expect(
+      parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '0123456789ab', 'true', 8]),
+    ).toMatchObject({includeLog: false});
+    expect(() =>
+      parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '0123456789ab', false, 0]),
+    ).toThrow('an inspection is named by a positive integer');
+    expect(() => parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '../etc'])).toThrow(
+      '12-digit instance id',
+    );
+    expect(parseWelcomeRequest(WELCOME_CHANNELS.cancelInspection, [9])).toEqual({
+      kind: 'cancel-inspection',
+      inspection: 9,
+    });
+    expect(() => parseWelcomeRequest(WELCOME_CHANNELS.cancelInspection, [0])).toThrow(
+      'an inspection is named by a positive integer',
     );
   });
 

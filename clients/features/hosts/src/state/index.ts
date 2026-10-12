@@ -31,6 +31,18 @@ export {
   hostStep,
 } from './host.js';
 export {
+  INSPECTOR_CLOSED,
+  type InspectorAction,
+  type InspectorCopy,
+  type InspectorField,
+  type InspectorInspect,
+  type InspectorState,
+  type InspectorTarget,
+  inspectionFields,
+  inspectorMachine,
+  inspectorView,
+} from './inspector.js';
+export {
   filterHosts,
   type HostChoice,
   moveSelection,

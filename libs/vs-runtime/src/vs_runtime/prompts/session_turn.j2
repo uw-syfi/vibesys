@@ -2,9 +2,9 @@
 {{ prompt | trim }}
 
 {% endfor %}
-{% if inputs %}
-New input since the last turn:
-{% for item in inputs %}
-- ({{ item.mode }}) {{ item.text | trim }}
+{% if steers %}
+New steering from the operator since the last turn. Treat it as high-priority guidance for the work you do now:
+{% for steer in steers %}
+- ({{ steer.mode }}) {{ steer.text | trim }}
 {% endfor %}
 {% endif %}

@@ -1,5 +1,10 @@
 import {describe, expect, test} from 'bun:test';
-import {ConnectionManager, DEFAULT_CONNECTION_CONFIG, HostConnection} from '@vibesys/connection';
+import {
+  type ConnectionLease,
+  ConnectionManager,
+  DEFAULT_CONNECTION_CONFIG,
+  HostConnection,
+} from '@vibesys/connection';
 import {FakeLink, record} from '@vibesys/connection/testing';
 import type {ConnectionStatus} from '@vibesys/hosts';
 import {exactResumeRunId} from '@vibesys/runs';
@@ -30,6 +35,19 @@ function gate(): Gate {
     }),
     receive: () => receive(),
     release: () => release(),
+  };
+}
+
+function lease(connection: HostConnection): ConnectionLease {
+  const release = connection.hold();
+  let released = false;
+  return {
+    connection,
+    async [Symbol.asyncDispose]() {
+      if (released) return;
+      released = true;
+      release();
+    },
   };
 }
 
@@ -126,7 +144,7 @@ function world(
         await deferred.wait;
       }
       if (call === options.failConnectionCall) throw new Error('the cleanup connection failed');
-      return connection;
+      return lease(connection);
     },
     openPage: () => {
       pages.opened += 1;
@@ -176,7 +194,14 @@ describe('RunControl over the FakeHelper', () => {
     const live = w.link.helper.host.instances[0];
     expect(attached?.runId).toBe(live?.run_id);
     expect(w.remembered).toEqual([
-      {host: 'local', project: '/p', task: 'spsc', runId: live?.run_id ?? '', attachedAt: 7},
+      {
+        host: 'local',
+        project: '/p',
+        task: 'spsc',
+        runId: live?.run_id ?? '',
+        instanceId: live?.id ?? '',
+        attachedAt: 7,
+      },
     ]);
     await w.connection[Symbol.asyncDispose]();
   });
@@ -507,11 +532,12 @@ describe('RunControl over the FakeHelper', () => {
       scheduleTimeout: new FakeClock().scheduleTimeout,
       log: () => {},
     });
-    const first = manager.connection(HOST, '/a');
+    const firstLease = await manager.acquire(HOST, '/a');
+    const first = firstLease.connection;
     const recents = new FakeRecentRuns();
     const delayed = recents.deferNext();
     const runs = new RunControl({
-      connection: async () => first,
+      connection: async () => firstLease,
       openPage: () => ({wake: () => {}, close: () => {}}),
       confirm: async () => true,
       remember: (run, current) => recents.remember(run, current),
@@ -522,7 +548,7 @@ describe('RunControl over the FakeHelper', () => {
 
     const attaching = runs.attach(HOST, RUN_A);
     await delayed.received;
-    manager.connection(HOST, '/b');
+    const secondLease = await manager.acquire(HOST, '/b');
     expect(first.phase.kind).toBe('ready');
 
     delayed.release();
@@ -531,5 +557,6 @@ describe('RunControl over the FakeHelper', () => {
     expect(first.held).toBe(true);
     runs.detach();
     expect(first.phase.kind).toBe('closed');
+    await secondLease[Symbol.asyncDispose]();
   });
 });

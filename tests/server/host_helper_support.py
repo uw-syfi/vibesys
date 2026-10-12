@@ -26,7 +26,14 @@ from server.host_helper import serve_channel
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import HelperHost, PathHints, Scan, ScannedEntry
 from server.instances import ControlSocketStopRequester
-from server.registry import FakeInstanceStore, LiveRegistry, StopEffects
+from server.registry import (
+    FakeInstanceLogs,
+    FakeInstanceMetadataStore,
+    FakeInstanceStore,
+    InstanceInspector,
+    LiveRegistry,
+    StopEffects,
+)
 from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller
 
 if TYPE_CHECKING:
@@ -146,8 +153,14 @@ def fake_host(
     launcher: FakeRunLauncher | None = None,
 ) -> HelperHost:
     """A helper host over Fakes, on ``threads``' clock and ``network``."""
+    instance_store = store or FakeInstanceStore()
     return HelperHost(
-        registry=LiveRegistry(store or FakeInstanceStore(), threads),
+        registry=LiveRegistry(instance_store, threads),
+        inspector=InstanceInspector(
+            instance_store,
+            FakeInstanceLogs(),
+            FakeInstanceMetadataStore(),
+        ),
         stop_effects=StopEffects(
             requester=ControlSocketStopRequester(network),
             signaller=FakeProcessSignaller(set()),

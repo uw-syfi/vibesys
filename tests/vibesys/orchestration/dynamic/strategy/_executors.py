@@ -1,18 +1,18 @@
-"""Scripted executors: what the planner, implementer, judge and evaluators answer.
+"""Scripted executors for the pure driver (`vs_core.testing.drive`) and hand-built shells.
 
-An executor reports what it saw (a job accepted, a stage passed, a reply) and
-never core's conclusions. Evidence identities are derived from the job's plan, so
-a reading and the evidence it decodes always agree.
+Tests that run the production shell use `world.DynamicWorld` (vs-dst) instead.
+
+An executor reports what it saw (a job accepted, a stage passed, a reply) and never core's
+conclusions. Evidence identities are derived from the job's plan, so a reading and the evidence
+it decodes always agree.
 """
 
 from __future__ import annotations
 
 import hashlib
-from collections import Counter, deque
+from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
-
-from tests.vibesys.orchestration.dynamic.strategy._run import FACTS
 
 from vibesys.orchestration.dynamic.strategy.api import (
     EvidenceReading,
@@ -20,7 +20,6 @@ from vibesys.orchestration.dynamic.strategy.api import (
     InterpretEvidence,
     MetricRow,
     ParentVerification,
-    PartialRow,
     RenderedArtifacts,
     RenderRoleArtifacts,
     VerifyParentRevision,
@@ -28,11 +27,9 @@ from vibesys.orchestration.dynamic.strategy.api import (
 )
 from vs_core.api import (
     AdoptRevision,
-    AgentMeasurementRequested,
     ArtifactId,
     ArtifactRef,
     CloseSession,
-    CoreEvent,
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
@@ -43,29 +40,25 @@ from vs_core.api import (
     EvidenceKind,
     EvidenceRef,
     ExecuteRegisteredOperation,
-    MeasurementPlan,
     ObservationStatus,
     ObserveOwnedJob,
     OwnedJob,
-    Request,
-    RequestId,
     ResourceId,
     ResumeSessionTurn,
     RetainRevision,
     RevisionRef,
-    Scope,
     SessionId,
     SnapshotAndRetain,
     SubmitMeasurement,
     VerifyAdoption,
 )
-from vs_core.testing.drive import Answer, Failed, Running, Succeeded, Unknown
-from vs_runtime.api.core import AgentEvaluationPolicy, handle_for
+from vs_core.testing.drive import Answer, Running, Succeeded, Unknown
+from vs_runtime.api.core import handle_for
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CoreState, Transition
+    from vs_core.api import CoreState, MeasurementPlan, Request, RequestId, Scope
 
 _KINDS = {
     "accuracy": EvidenceKind.CORRECTNESS,
@@ -83,46 +76,15 @@ def _lease(session_id: SessionId) -> ResourceId:
 class Executors:
     """Scripted answers for one run, popped in the order requests are authorized."""
 
-    # A reply is the agent's JSON, or an `Answer` for a turn that ends another way (as a
-    # `Failed` turn, which returns nothing usable).
+    # A reply is the agent's JSON, or an `Answer` for a turn that ends another way.
     planner: deque[str | Answer] = field(default_factory=deque)
     implementer: deque[str | Answer] = field(default_factory=deque)
     judge: deque[str | Answer] = field(default_factory=deque)
-    profiler: deque[str | Answer] = field(default_factory=deque)
-    # False retains one commit per attempt, whatever its turns did. True retains a new commit
-    # after every turn, as a worktree that changed between turns would.
-    retain_per_turn: bool = False
-    # True returns the same revision after this attempt's first retained turn, as production
-    # snapshotting does when a resumed turn only reads results and changes nothing.
-    unchanged_after_first_retain: bool = False
-    # Throughput per candidate commit; None makes the benchmark fail.
-    benchmark: Callable[[str], float | None] = lambda _commit: 100.0
-    accuracy: Callable[[str], bool] = lambda _commit: True
-    profile_reading: Callable[[str], tuple[bool, str]] = lambda _commit: (
-        True,
-        "profile captured",
-    )
-    # None makes the input's benchmark fail, as a workload the input cannot run does.
-    baseline_value: float | None = 50.0
-    # True for a measurement whose job ends without any evidence (its infrastructure failed).
-    infrastructure_failure: Callable[[MeasurementPlan], bool] = lambda _plan: False
-    parent_verified: Callable[[str], bool] = lambda _commit: True
     submit: Callable[[SubmitMeasurement], Answer] | None = None
-    # True for an implementer that measures its workspace through the evaluation tool during
-    # its turn: the production bridge's `AgentMeasurementRequested`, admitted by core.
-    agent_evaluation: bool = False
-    admit: Callable[[CoreEvent, float], Transition] | None = None
     jobs: int = 0
-    agent_calls: int = 0
-    now_at: float = 0.0
-    seen: list[Request] = field(default_factory=list)
     readings: dict[EvidenceId, EvidenceReading] = field(default_factory=dict)
-    retained: Counter[str] = field(default_factory=Counter)
-    retained_revisions: dict[str, RevisionRef] = field(default_factory=dict)
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
-        self.seen.append(request)
-        self.now_at = core.run.now_at
         if isinstance(request, ObserveOwnedJob):
             return self._observe(request, core)
         return self._answer(request)
@@ -142,26 +104,13 @@ class Executors:
             case CloseSession():
                 answer = Succeeded(resource_id=_lease(request.session_id))
             case SnapshotAndRetain():
-                answer = self._retain(request)
+                digest = hashlib.sha256(request.attempt.attempt_id.root.encode()).hexdigest()
+                answer = Succeeded(revision=RevisionRef.of_git_commit(digest[:40]))
             case RetainRevision():
                 answer = Succeeded(revision=request.revision)
             case AdoptRevision() | VerifyAdoption():
                 answer = Succeeded(revision=request.selection.revision)
         return answer
-
-    def _retained(self, attempt: str) -> RevisionRef:
-        """The commit the workspace executor retains next for the attempt (see `retain_per_turn`)."""
-        name = f"{attempt}:{self.retained[attempt]}" if self.retain_per_turn else attempt
-        return RevisionRef.of_git_commit(hashlib.sha256(name.encode()).hexdigest()[:40])
-
-    def _retain(self, request: SnapshotAndRetain) -> Answer:
-        attempt = request.attempt.attempt_id.root
-        if self.retained[attempt] and self.unchanged_after_first_retain:
-            return Succeeded(revision=self.retained_revisions[attempt])
-        revision = self._retained(attempt)
-        self.retained[attempt] += 1
-        self.retained_revisions[attempt] = revision
-        return Succeeded(revision=revision)
 
     def finished_agent_evaluation(self, request: SubmitMeasurement) -> Answer:
         """An agent's evaluation that ends as soon as it is accepted, with trusted evidence."""
@@ -201,29 +150,6 @@ class Executors:
             )
         return Succeeded(resource_id=_lease(request.spec.session_id))
 
-    def _evaluate_from_turn(self, request: DispatchTurn | ResumeSessionTurn) -> None:
-        """The implementer measures the revision core will retain for its attempt."""
-        assert self.admit is not None, "the shell must attach its admission before a run"
-        facts = FACTS
-        self.agent_calls += 1
-        candidate = self._retained(request.scope.owner.root)
-        policy = AgentEvaluationPolicy(
-            evaluator_digest=facts.evaluator_digest,
-            workload_digest=facts.workload_digest,
-            environment_digest=facts.environment_digest,
-            recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
-            stages=(("accuracy", 60.0), ("benchmark", 60.0)),
-            queue_allowance=10.0,
-            accuracy_stage="accuracy",
-        )
-        now = self.now_at
-        event = AgentMeasurementRequested(
-            scope=request.scope,
-            plan=policy.plan(candidate, now_at=now),
-            call_id=f"agent-call-{self.agent_calls}",
-        )
-        self.admit(event, now)
-
     def _submit(self, request: SubmitMeasurement) -> Answer:
         if request.plan.purpose == "local-validation" and self.submit is None:
             return self.finished_agent_evaluation(request)
@@ -240,17 +166,13 @@ class Executors:
             "orchestrator": self.planner,
             "implementer": self.implementer,
             "judge": self.judge,
-            "profiler": self.profiler,
         }[role]
         if not queue:
             return Unknown()
         reply = queue.popleft()
         if not isinstance(reply, str):
             return reply
-        if role == "implementer" and self.agent_evaluation:
-            self._evaluate_from_turn(request)
-        lease = _lease(request.turn.session.session_id)
-        return Succeeded(output_json=reply, resource_id=lease)
+        return Succeeded(output_json=reply, resource_id=_lease(request.turn.session.session_id))
 
     # -- evaluator --------------------------------------------------------
 
@@ -262,32 +184,21 @@ class Executors:
         )
         plan = job.plan
         assert isinstance(plan.candidate, RevisionRef)
-        if self.infrastructure_failure(plan):
-            return Failed(accepted=True)
         commit = plan.candidate.revision_id.root
         refs: list[EvidenceRef] = []
         stages: list[EvaluationStageResult] = []
         for stage in plan.stages:
-            kind = _KINDS[stage.stage_id]
-            reading = self._reading(plan, kind, stage.stage_id, commit)
+            reading = self._reading(plan, _KINDS[stage.stage_id], stage.stage_id, commit)
             refs.append(self._ref(job.scope, job.submission_id, plan, reading))
             self.readings[reading.evidence_id] = reading
             outcome = (
                 EvaluationStageOutcome.PASSED if reading.passed else EvaluationStageOutcome.FAILED
             )
             stages.append(EvaluationStageResult(stage_id=stage.stage_id, outcome=outcome))
-        accuracy = (
-            all(
-                item.passed
-                for item in self.readings.values()
-                if item.kind is EvidenceKind.CORRECTNESS
-            )
-            or plan.purpose == "baseline"
-        )
         return Succeeded(
             resource_id=request.resource_id,
             evidence=tuple(refs),
-            facts=EvaluationTerminalFacts(stages=tuple(stages), accuracy_passed=accuracy),
+            facts=EvaluationTerminalFacts(stages=tuple(stages), accuracy_passed=True),
         )
 
     @staticmethod
@@ -314,32 +225,14 @@ class Executors:
             status=ObservationStatus.SUCCEEDED if reading.passed else ObservationStatus.FAILED,
         )
 
+    @staticmethod
     def _reading(
-        self, plan: MeasurementPlan, kind: EvidenceKind, stage: str, commit: str
+        plan: MeasurementPlan, kind: EvidenceKind, stage: str, commit: str
     ) -> EvidenceReading:
         identifier = EvidenceId(root=f"{stage}:{plan.purpose}:{commit}")
-        if kind is EvidenceKind.CORRECTNESS:
-            passed = plan.purpose == "baseline" or self.accuracy(commit)
-            return EvidenceReading(evidence_id=identifier, kind=kind, passed=passed, stage=stage)
-        if kind is EvidenceKind.PROFILING:
-            passed, feedback = self.profile_reading(commit)
-            return EvidenceReading(
-                evidence_id=identifier,
-                kind=kind,
-                passed=passed,
-                stage=stage,
-                feedback=feedback,
-            )
-        value = self.baseline_value if plan.purpose == "baseline" else self.benchmark(commit)
-        if value is None:
-            return EvidenceReading(
-                evidence_id=identifier,
-                kind=kind,
-                passed=False,
-                stage=stage,
-                partial=PartialRow(name="throughput", value=1.0, direction="max", unit="tokens/s"),
-                feedback="benchmark failed",
-            )
+        if kind is not EvidenceKind.BENCHMARK:
+            return EvidenceReading(evidence_id=identifier, kind=kind, passed=True, stage=stage)
+        value = 50.0 if plan.purpose == "baseline" else 100.0
         return EvidenceReading(
             evidence_id=identifier,
             kind=kind,
@@ -353,11 +246,7 @@ class Executors:
     def _operation(self, request: ExecuteRegisteredOperation) -> Answer:
         typed = dynamic_operation_registry().decode(request.operation)
         if isinstance(typed, VerifyParentRevision):
-            return Succeeded(
-                outcome=ParentVerification(
-                    status="succeeded", verified=self.parent_verified(typed.parent.revision_id.root)
-                )
-            )
+            return Succeeded(outcome=ParentVerification(status="succeeded", verified=True))
         if isinstance(typed, InterpretEvidence):
             return Succeeded(
                 outcome=EvidenceReadings(

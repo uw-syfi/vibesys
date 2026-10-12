@@ -1,4 +1,4 @@
-import {LatestQueryOwner} from '@vibesys/transport';
+import {LatestQueryOwner} from './latest-query-owner.js';
 
 interface DesignQueryOwnerConfig<T> {
   readonly request: () => Promise<T>;

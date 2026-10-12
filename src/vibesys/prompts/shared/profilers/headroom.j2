@@ -41,7 +41,7 @@ entry point in this order:
 2. An executable `benchmark/headroom_capture.sh` (or `.py`) in the workspace,
    invoked with one argument: the output JSON path.
 
-Write reports under `progress/profiles/` for the current round so later rounds
+Write reports under `profile/` for the current round so later rounds
 can `compare` against them. Use only capture interfaces present when this turn
 started. If no capture entry point exists, do not fabricate a report or
 hand-write JSON; report the missing capability in `analysis` and name the
@@ -78,7 +78,7 @@ tools directly. Otherwise, shell out to the same subcommand on
 | `summary(report, top=10)` | `... summary <report>` | All-in-one: waterfall + top + caveats. |
 
 Start with `waterfall`, then `top`. When a previous round's report exists under
-`progress/profiles/`, run `compare` to verify whether the last hypothesis moved
+`profile/`, run `compare` to verify whether the last hypothesis moved
 its targeted bucket; that delta is the most valuable evidence you can return.
 
 Respect the report's `caveats` and per-kernel `notes`: upper-bound fusion
@@ -90,7 +90,7 @@ optimization loop blocked on new profiler infrastructure.
 
 ## Performance metric — do not duplicate an accepted canonical run
 
-The profiler is read-only and does not create a new candidate. If `progress/`
+The profiler is read-only and does not create a new candidate. If the run's evidence
 already contains a recent accepted canonical evaluation for the current
 candidate, do **not** rerun that expensive sweep merely to populate this
 response. The framework already tracks the accepted value. Set `perf_metric`

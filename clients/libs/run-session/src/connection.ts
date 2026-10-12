@@ -28,6 +28,8 @@ export interface WebSessionState {
   /** The event stream: whether the transcript on screen is still growing. */
   readonly status: WebSessionStatus;
   readonly error: Error | null;
+  /** The optional policy-navigation query failed; independent of event-stream health. */
+  readonly iterationError: Error | null;
   /**
    * Whether a control request issued now can be delivered, as the transport's control channel
    * reports it. A different fact from a stale transcript: the stream and the command path fail

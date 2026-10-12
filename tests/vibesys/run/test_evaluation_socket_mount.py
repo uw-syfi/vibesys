@@ -79,7 +79,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
         ) as host:
             for _ in range(candidates):
-                await host.run.workspaces.create_candidate()
+                await host.workspaces.create_candidate()
             (run_id,) = {c.labels["vibesys.run-id"] for c in engine.containers()}
             return reaches(run_id)
 

@@ -16,7 +16,7 @@ from vibesys.events import CoreEventType, EventStatus, RunFailedData, RunStarted
 from vibesys.orchestration.agent_options import attribution_command_of
 from vibesys.plugin_catalog import project_run
 from vibesys.run.core_run import RunEnd, drive_core_run, ensure_not_legacy_resume
-from vibesys.run.host import open_product_core_host, open_product_run_host
+from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
 from vibesys.run.profilers import (
     ProfilerPreflight,
@@ -44,10 +44,8 @@ if TYPE_CHECKING:
         AgentInvocationStore,
         AgentSessionKey,
     )
-    from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import OrchestrationDescriptor
     from vs_runtime.api import (
-        AgentToolBindingContext,
         OrchestrationPlugin,
         OrchestrationResumeDecision,
     )
@@ -91,10 +89,6 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     agent_client_factory: Callable[..., AgentClientProtocol],
     backend_factory: Callable[..., ComputeBackendImpl],
     profiler_preflight: ProfilerPreflight | None = None,
-    agent_tool_bindings: Mapping[
-        str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]
-    ]
-    | None = None,
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None,
     stop_timer: StopTimer,
     timing: RunTiming,
@@ -102,32 +96,12 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
 ) -> RunEnd:
     """Compose the private runtime host and run one validated plugin.
 
-    A plugin with a ``core`` policy is driven by the runtime's core run loop over
-    services built from the run's resources; any other plugin awaits its own
-    ``orchestrate``. No plugin has both.
+    The plugin's ``core`` policy is driven by the runtime's core run loop over services
+    built from the run's resources.
     """
-    if plugin.core is not None:
-        if request.resume is not None:
-            ensure_not_legacy_resume(request.project_root, request.resume.run_id)
-        async with open_product_core_host(
-            request,
-            integration,
-            open_agent_environment=open_agent_environment,
-            projector=projector,
-            resume_policy=resume_policy,
-            agent_client_factory=agent_client_factory,
-            backend_factory=backend_factory,
-            profiler_preflight=profiler_preflight,
-            agent_tool_bindings=agent_tool_bindings,
-            stateless_tool_servers=stateless_tool_servers,
-            plugin=plugin,
-            options=options,
-            stop_timer=stop_timer,
-            timing=timing,
-            invocation_store_factory=invocation_store_factory,
-        ) as core_host:
-            return await drive_core_run(core_host, integration)
-    async with open_product_run_host(
+    if request.resume is not None:
+        ensure_not_legacy_resume(request.project_root, request.resume.run_id)
+    async with open_product_core_host(
         request,
         integration,
         open_agent_environment=open_agent_environment,
@@ -136,12 +110,14 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         agent_client_factory=agent_client_factory,
         backend_factory=backend_factory,
         profiler_preflight=profiler_preflight,
-        agent_tool_bindings=agent_tool_bindings,
+        stateless_tool_servers=stateless_tool_servers,
         plugin=plugin,
+        options=options,
         stop_timer=stop_timer,
+        timing=timing,
         invocation_store_factory=invocation_store_factory,
-    ) as host:
-        return RunEnd(await plugin.orchestrate(host, options))
+    ) as core_host:
+        return await drive_core_run(core_host, integration)
 
 
 class _LocalRunSession:
@@ -328,7 +304,6 @@ class _LocalRunSession:
                 agent_client_factory=self._implementations.agent_client_factory,
                 backend_factory=self._implementations.backend_factory,
                 profiler_preflight=self._implementations.profiler_preflight,
-                agent_tool_bindings=self._implementations.agent_tool_bindings,
                 stateless_tool_servers=self._implementations.stateless_tool_servers,
                 stop_timer=self._implementations.stop_timer,
                 timing=self._implementations.timing,

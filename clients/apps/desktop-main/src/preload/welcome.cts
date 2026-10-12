@@ -22,8 +22,10 @@ const CHANNELS: Channels = {
   host: 'vibesys:welcome:host',
   setCheckout: 'vibesys:welcome:set-checkout',
   cancelCheckout: 'vibesys:welcome:cancel-checkout',
+  cancelInspection: 'vibesys:welcome:cancel-inspection',
   signIn: 'vibesys:welcome:sign-in',
   complete: 'vibesys:welcome:complete',
+  inspect: 'vibesys:welcome:inspect',
   tasks: 'vibesys:welcome:tasks',
   start: 'vibesys:welcome:start',
   cancelStart: 'vibesys:welcome:cancel-start',
@@ -65,8 +67,11 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     host: host => call(CHANNELS.host, host),
     setCheckout: (host, path, change) => call(CHANNELS.setCheckout, host, path, change),
     cancelCheckout: change => call(CHANNELS.cancelCheckout, change),
+    cancelInspection: inspection => call(CHANNELS.cancelInspection, inspection),
     signIn: host => call(CHANNELS.signIn, host),
     complete: (host, directory) => call(CHANNELS.complete, host, directory),
+    inspect: (host, instance, includeLog, inspection) =>
+      call(CHANNELS.inspect, host, instance, includeLog, inspection),
     tasks: (host, project) => call(CHANNELS.tasks, host, project),
     start: (host, project, task, args, start) =>
       call(CHANNELS.start, host, project, task, args, start),
@@ -93,7 +98,8 @@ if (process.type === 'renderer') {
     createWelcomePreload({
       platform: process.platform,
       invoke: (channel, ...args) => electron.ipcRenderer.invoke(channel, ...args),
-      on: (channel, listener) => electron.ipcRenderer.on(channel, (_event, value) => listener(value)),
+      on: (channel, listener) =>
+        electron.ipcRenderer.on(channel, (_event, value) => listener(value)),
     }),
   );
 }

@@ -8,7 +8,8 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import ValidationError
+from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.task_project import write_task
 
@@ -28,11 +29,10 @@ from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.integration import RunResources
-from vs_agent.api import NULL_AGENT_EVENT_SINK
+from vs_agent.api import NULL_AGENT_EVENT_SINK, AgentCapabilities
+from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
-from vs_runtime.api import OrchestrationPlugin, Run
-from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import HostEnvironmentFacts, RunEnvironmentPresentation
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
 
@@ -118,13 +118,8 @@ class _PreparedEnvironment:
         return self._environment._open(self._request)  # noqa: SLF001  # lint-waiver: LW-948034 [SLF001]; this prepared fake completes its paired environment's open phase.
 
 
-class _StubOptions(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-async def _run_stub(host: Run, options: BaseModel) -> PluginRunStatus:
-    del host, options
-    return PluginRunStatus.SUCCEEDED
+def _resumable_client(**_kwargs: object) -> FakeAgentClient:
+    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
 
 
 @pytest.fixture(params=[False, True], ids=["built-in", "fake"])
@@ -137,9 +132,7 @@ def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
 
 def _request(tmp_path: Path) -> tuple[RunRequest, OrchestrationRegistry]:
     registry = OrchestrationRegistry()
-    registry.register_plugin(
-        OrchestrationPlugin(id="stub", agents=(), options=_StubOptions, orchestrate=_run_stub)
-    )
+    registry.register_plugin(failing_plugin("stub"))
     input_root = tmp_path / "input"
     input_root.mkdir()
     write_task(
@@ -394,11 +387,19 @@ def test_independent_auxiliary_scope_survives_session_close(
     evidence = tmp_path / "evidence"
     evidence.mkdir()
 
+    # The built-in agents answer through the run's own client; the fake ones answer on their own.
+    answer = (
+        "Fake agent inspected the trajectory."
+        if agent_settings.agents is None
+        else "Stub agent inspected the available experiment trajectory."
+    )
+
     async def execute() -> None:
         settings = LaunchSettings(
             registry=registry,
             backend_factory=host_container_backend,
             agents=agent_settings.agents,
+            agent_client_factory=_resumable_client,
         )
         handle = default_runs(settings).start(request)
         scopes: list[AuxiliaryAgents] = []
@@ -412,19 +413,13 @@ def test_independent_auxiliary_scope_survives_session_close(
         handle.session.on_ready(ready)
         try:
             result = await handle.result()
-            assert result.succeeded
+            assert result.loop == "stub"
             assert len(scopes) == len(conversations) == 1
             scope = scopes[0]
             first = conversations[0]
-            assert (
-                first.turn("Continue after completion")
-                == "Stub agent inspected the available experiment trajectory."
-            )
+            assert first.turn("Continue after completion") == answer
             second = scope.create_auxiliary_agent(_launch(evidence))
-            assert (
-                second.turn("New terminal conversation")
-                == "Stub agent inspected the available experiment trajectory."
-            )
+            assert second.turn("New terminal conversation") == answer
             scope.close()
             scope.close()
             with pytest.raises(RuntimeError, match="closed"):

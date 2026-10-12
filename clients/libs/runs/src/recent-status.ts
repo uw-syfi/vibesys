@@ -12,6 +12,8 @@ export interface RecentRun {
   readonly project: string;
   readonly task: string | null;
   readonly runId: string;
+  /** Last known server instance, retained for diagnostics after registry tombstones expire. */
+  readonly instanceId: string | null;
   readonly attachedAt: number;
 }
 
@@ -20,7 +22,12 @@ export type RecentStatus =
   /** A live server drives it; attach to `instanceId`. */
   | {readonly kind: 'live'; readonly instanceId: string; readonly status: string}
   /** Its server ended; `status` is the phase it ended in, when the host still remembers it. */
-  | {readonly kind: 'ended'; readonly status: string | null; readonly reason: string | null}
+  | {
+      readonly kind: 'ended';
+      readonly instanceId: string | null;
+      readonly status: string | null;
+      readonly reason: string | null;
+    }
   /** The host cannot be asked now, or has not answered yet. */
   | {readonly kind: 'unknown'};
 
@@ -33,13 +40,18 @@ export function recentStatus(run: RecentRun, listing: HostListing | undefined): 
   if (live !== undefined) return {kind: 'live', instanceId: live.id, status: live.status};
   // A run resumed and ended again has several tombstones: its latest server says how it ended.
   const ended = listing.ended
-    .filter(entry => entry.runId === run.runId)
+    .filter(entry => entry.runId === run.runId && entry.projectRoot === run.project)
     .reduce<HostRun | undefined>(
       (latest, entry) =>
         latest === undefined || entry.startedAt > latest.startedAt ? entry : latest,
       undefined,
     );
-  return {kind: 'ended', status: ended?.status ?? null, reason: ended?.reason ?? null};
+  return {
+    kind: 'ended',
+    instanceId: ended?.id ?? run.instanceId,
+    status: ended?.status ?? null,
+    reason: ended?.reason ?? null,
+  };
 }
 
 /**

@@ -21,18 +21,12 @@ from vs_project.api import (
     RunLogger,
 )
 from vs_runtime import _boot_trace as boot_trace
-from vs_runtime._checkpoint import (
-    MultiSlotRoundTransactionCoordinator,
-    RoundRecoveryOutcome,
-)
 from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._recorded_environment import migrate_recorded_run_environment
 from vs_runtime._run_state import RunState
 from vs_runtime.contracts import OrchestrationResumeDecision
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel
-
     from vs_project.api import GitRepository, GitRepositoryFactory, StateStoreFactory
     from vs_runtime._project_materialization import ProjectMaterializer
 
@@ -98,14 +92,6 @@ class ProjectRunDirtyResumeError(ProjectRunError):
 
 
 @dataclass(frozen=True, slots=True)
-class ProjectStateDeclaration:
-    """One plugin-owned aggregate state model made durable by the runtime."""
-
-    namespace: str
-    model: type[BaseModel]
-
-
-@dataclass(frozen=True, slots=True)
 class ProjectRunRequest:
     """Authoritative facts needed to open one canonical project run."""
 
@@ -123,7 +109,6 @@ class ProjectRunRequest:
     excluded_dirs: frozenset[str] = frozenset()
     excluded_files: frozenset[str] = frozenset()
     trusted_input_paths: tuple[str | Path, ...] = ()
-    state: ProjectStateDeclaration | None = None
     candidate_support_dirs: frozenset[str] = frozenset()
     """Unversioned root directories every candidate worktree receives a copy of.
 
@@ -171,7 +156,6 @@ class ProjectRunResources:
     logger: RunLogger
     state: RunState
     objective_document: Path | None
-    round_transaction_coordinator: MultiSlotRoundTransactionCoordinator | None
     _teardown_stack: ExitStack
     _request: ProjectRunRequest
     _effects: ProjectRunEffects
@@ -368,7 +352,6 @@ def _assemble_project_run_resources(
         )
         git.init(existing=request.existing)
 
-    round_transaction_coordinator: MultiSlotRoundTransactionCoordinator | None = None
     with boot_trace.span("project_state_resume"):
         if request.existing:
             project_state.load_project()
@@ -378,11 +361,6 @@ def _assemble_project_run_resources(
                 request.run_id, project, git, run_manifest, log=logger.lprint
             )
             decision = resolve_resume(run_manifest)
-            round_transaction_coordinator = _round_transaction(request, project, git)
-            if round_transaction_coordinator is not None:
-                recovery = round_transaction_coordinator.recover()
-                if recovery is not RoundRecoveryOutcome.NO_TRANSACTION:
-                    logger.lprint(f"[project] recovered round transaction: {recovery.value}")
             _apply_resume_decision(request.run_id, project, git, decision)
             project_state.set_current_run(request.run_id)
         else:
@@ -407,10 +385,6 @@ def _assemble_project_run_resources(
                 project_state.initialization_snapshot(request.run_id),
             )
 
-    with boot_trace.span("round_transaction_recovery"):
-        if not request.existing:
-            round_transaction_coordinator = _round_transaction(request, project, git)
-
     state = RunState(project, git, request.run_id)
     objective_document = _record_effective_objective(request, state, git)
     return ProjectRunResources(
@@ -419,7 +393,6 @@ def _assemble_project_run_resources(
         logger,
         state,
         objective_document,
-        round_transaction_coordinator,
         teardown_stack,
         request,
         effects,
@@ -523,22 +496,6 @@ def _apply_resume_decision(
         git.snapshot_with_framework_metadata("vibesys: update run orchestration", snapshot)
     else:
         git.snapshot_framework_metadata_only("vibesys: migrate run orchestration", snapshot)
-
-
-def _round_transaction(
-    request: ProjectRunRequest,
-    project: Project,
-    git: GitTracker,
-) -> MultiSlotRoundTransactionCoordinator | None:
-    if request.state is None:
-        return None
-    return MultiSlotRoundTransactionCoordinator(
-        project,
-        git,
-        request.run_id,
-        namespace=request.state.namespace,
-        models={"state.json": request.state.model},
-    )
 
 
 def _close_after_construction_failure(

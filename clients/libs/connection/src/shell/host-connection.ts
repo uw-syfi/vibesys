@@ -52,6 +52,8 @@ export interface HostConnectionOptions {
   readonly config: ConnectionConfig;
   readonly scheduleTimeout: ScheduleTimeout;
   readonly log: (message: string) => void;
+  /** Tell the owning manager after every channel and helper process has ended. */
+  readonly released?: () => void;
 }
 
 /** What the app may tell a connection: a wake or a network change, or the user's retry. */
@@ -324,7 +326,7 @@ export class HostConnection implements AsyncDisposable {
 
   /** Release everything, once; every caller waits for the same release. */
   #release(): Promise<void> {
-    this.#closing ??= this.#stack.disposeAsync();
+    this.#closing ??= this.#stack.disposeAsync().finally(() => this.#options.released?.());
     return this.#closing;
   }
 

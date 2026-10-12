@@ -5,6 +5,7 @@ import type {
   ChromeState,
   WelcomeBridge,
   WelcomeEvent,
+  WelcomeInspection,
   WelcomeOverview,
   WelcomeResult,
 } from '@vibesys/ipc';
@@ -48,6 +49,8 @@ class FakeWelcomeBridge implements WelcomeBridge {
     readonly reply: Deferred<WelcomeResult<string>>;
   }> = [];
   readonly cancelledCheckouts: number[] = [];
+  readonly cancelledInspections: number[] = [];
+  readonly inspectionReplies: Array<Deferred<WelcomeResult<WelcomeInspection>>> = [];
   checkout = '/c';
   readonly #chrome: Array<(event: WelcomeEvent<ChromeState>) => void> = [];
   readonly #recent: Array<(event: WelcomeEvent<readonly RecentRun[]>) => void> = [];
@@ -69,6 +72,10 @@ class FakeWelcomeBridge implements WelcomeBridge {
     this.cancelledCheckouts.push(change);
     return this.#ask('cancel-checkout', null);
   };
+  cancelInspection = (inspection: number) => {
+    this.cancelledInspections.push(inspection);
+    return this.#ask('cancel-inspection', null);
+  };
   signIn = (host: HostKey) => this.#ask(`sign-in ${host}`, null);
   tasks = (host: HostKey, project: string) => this.#ask(`tasks ${host} ${project}`, ['spsc']);
   complete = (host: HostKey, directory: string) =>
@@ -81,6 +88,12 @@ class FakeWelcomeBridge implements WelcomeBridge {
   showWelcome = () => this.#ask('show-welcome', null);
   retry = () => this.#ask('retry', null);
   stop = () => this.#ask('stop', null);
+  inspect = () => {
+    this.asked.push('inspect');
+    const reply = new Deferred<WelcomeResult<WelcomeInspection>>();
+    this.inspectionReplies.push(reply);
+    return reply.promise;
+  };
   onChrome = (listener: (event: WelcomeEvent<ChromeState>) => void) => {
     this.#chrome.push(listener);
   };
@@ -156,7 +169,7 @@ async function loaded(
   confirm: (question: string) => boolean = () => true,
   host: HostKey = 'local',
 ): Promise<WelcomeStores> {
-  const loading = loadWelcomeStores(bridge, confirm);
+  const loading = loadWelcomeStores(bridge, confirm, async () => undefined);
   bridge.answerOverview({host});
   const result = await loading;
   if (!result.ok) throw new Error(result.error);
@@ -247,6 +260,57 @@ describe('loadWelcomeStores', () => {
     expect(stores.start.getState().kind).toBe('closed');
   });
 
+  test('a run filling the window closes an open inspector immediately', async () => {
+    const bridge = new FakeWelcomeBridge();
+    const stores = await loaded(bridge);
+    stores.inspector.dispatch({type: 'open', target: inspectorTarget()});
+    const reply = bridge.inspectionReplies[0];
+    if (reply === undefined) throw new Error('inspection call expected');
+    reply.resolve({ok: true, value: inspection()});
+    await settle();
+    expect(stores.inspector.getState().load.kind).toBe('ready');
+
+    bridge.pushChrome(chrome('attached'));
+
+    expect(stores.inspector.getState()).toMatchObject({target: null, load: {kind: 'idle'}});
+  });
+
+  test('a run filling the window fences a late inspector reply', async () => {
+    const bridge = new FakeWelcomeBridge();
+    const stores = await loaded(bridge);
+    stores.inspector.dispatch({type: 'open', target: inspectorTarget()});
+    const reply = bridge.inspectionReplies[0];
+    if (reply === undefined) throw new Error('inspection call expected');
+    expect(stores.inspector.getState().load.kind).toBe('loading');
+
+    bridge.pushChrome(chrome('attached'));
+    expect(stores.inspector.getState()).toMatchObject({target: null, load: {kind: 'idle'}});
+    await settle();
+    expect(bridge.cancelledInspections).toEqual([1]);
+
+    reply.resolve({ok: true, value: inspection()});
+    await settle();
+    expect(stores.inspector.getState()).toMatchObject({target: null, load: {kind: 'idle'}});
+  });
+
+  test('a later run update keeps an inspector opened from the run title strip', async () => {
+    const bridge = new FakeWelcomeBridge();
+    const stores = await loaded(bridge);
+    bridge.pushChrome(chrome('attached'));
+    stores.inspector.dispatch({type: 'open', target: inspectorTarget()});
+    const reply = bridge.inspectionReplies[0];
+    if (reply === undefined) throw new Error('inspection call expected');
+    reply.resolve({ok: true, value: inspection()});
+    await settle();
+
+    bridge.pushChrome(chrome('attached'));
+
+    expect(stores.inspector.getState()).toMatchObject({
+      target: {instanceId: '0123456789ab'},
+      load: {kind: 'ready'},
+    });
+  });
+
   test('choosing a host in the picker shows its panel', async () => {
     const bridge = new FakeWelcomeBridge();
     const stores = await loaded(bridge);
@@ -277,7 +341,11 @@ describe('loadWelcomeStores', () => {
 
   test('keeps every push that crosses the overview and continues live', async () => {
     const bridge = new FakeWelcomeBridge();
-    const loading = loadWelcomeStores(bridge, () => true);
+    const loading = loadWelcomeStores(
+      bridge,
+      () => true,
+      async () => undefined,
+    );
 
     expect(bridge.listenerCounts()).toEqual([1, 1, 1, 1]);
     bridge.pushChrome(chrome('covered'));
@@ -311,7 +379,11 @@ describe('loadWelcomeStores', () => {
     const states = ['one', 'two', 'three'];
     for (let snapshotAfter = 0; snapshotAfter <= states.length; snapshotAfter += 1) {
       const bridge = new FakeWelcomeBridge();
-      const loading = loadWelcomeStores(bridge, () => true);
+      const loading = loadWelcomeStores(
+        bridge,
+        () => true,
+        async () => undefined,
+      );
       for (const run of states.slice(0, snapshotAfter)) bridge.pushChrome(chrome(run));
       bridge.answerOverview({chrome: chrome(states[snapshotAfter - 1] ?? 'initial')});
       for (const run of states.slice(snapshotAfter)) bridge.pushChrome(chrome(run));
@@ -325,7 +397,11 @@ describe('loadWelcomeStores', () => {
   test('loads an authoritative listing sent before listener registration', async () => {
     const bridge = new FakeWelcomeBridge();
     bridge.pushListing(listing('initial'));
-    const loading = loadWelcomeStores(bridge, () => true);
+    const loading = loadWelcomeStores(
+      bridge,
+      () => true,
+      async () => undefined,
+    );
     bridge.answerOverview({chrome: chrome('snapshot'), listings: [listing('initial')]});
 
     const result = await loading;
@@ -337,7 +413,11 @@ describe('loadWelcomeStores', () => {
 
   test('does not repeat a host effect already included in the snapshot cursor', async () => {
     const bridge = new FakeWelcomeBridge();
-    const loading = loadWelcomeStores(bridge, () => true);
+    const loading = loadWelcomeStores(
+      bridge,
+      () => true,
+      async () => undefined,
+    );
     bridge.pushShowHost('ssh:included');
     bridge.answerOverview({chrome: chrome('snapshot'), host: 'ssh:included'});
 
@@ -349,7 +429,11 @@ describe('loadWelcomeStores', () => {
 
   test('stops buffering after an overview failure', async () => {
     const bridge = new FakeWelcomeBridge();
-    const loading = loadWelcomeStores(bridge, () => true);
+    const loading = loadWelcomeStores(
+      bridge,
+      () => true,
+      async () => undefined,
+    );
     bridge.overviewReply.resolve({ok: false, error: 'settings unavailable', authNeeded: false});
 
     await expect(loading).resolves.toEqual({
@@ -396,6 +480,7 @@ function recent(runId: string): RecentRun {
     project: `/projects/${runId}`,
     task: 'queue',
     runId,
+    instanceId: `instance-${runId}`,
     attachedAt: 1,
   };
 }
@@ -417,5 +502,30 @@ function listing(runId: string): HostListing {
     ended: [],
     unreadable: [],
     unverified: [],
+  };
+}
+
+function inspectorTarget() {
+  return {
+    host: 'local' as const,
+    hostLabel: 'This Mac',
+    instanceId: '0123456789ab',
+    task: 'queue',
+    runId: 'run-1',
+    project: '/projects/queue',
+    focusFallbackId: 'recent-section' as const,
+  };
+}
+
+function inspection(): WelcomeInspection {
+  return {
+    version: 1,
+    id: '0123456789ab',
+    state: 'ended',
+    record: null,
+    metadata: null,
+    control_socket_path: '/tmp/control.sock',
+    server_log_path: '/tmp/server.log',
+    log: null,
   };
 }

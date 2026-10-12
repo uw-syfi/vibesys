@@ -1,10 +1,9 @@
-"""A headless run, for a test to signal, whose orchestration awaits a Slurm job.
+"""A headless run, for a test to signal, whose strategy awaits a Slurm job.
 
 ``python -m tests.e2e._signalled_run PROJECT SLURM_CONFIG`` runs the
 headless supervisor over the product session, rendering to stdout, with a
-policy that awaits one benchmark on the configured (Fake) Slurm cluster. A
-stop does not interrupt the benchmark, as a stop does not interrupt in-flight
-evaluations of the dynamic policy, so only a cancellation ends the run early.
+strategy that measures the input baseline on the configured (Fake) Slurm cluster, so the
+run is waiting on a job until a signal ends it.
 """
 
 from __future__ import annotations
@@ -12,10 +11,10 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from tests.support.docker_environment import host_container_backend
-from tests.vibesys.orchestration.plugin import EmptyOptions
+from tests.support.skeleton_strategy import BaselineProbeStrategy
+from tests.vibesys.orchestration.plugin import capability_plugin
 
 from entrypoints.run import supervise
 from headless import run as render_run
@@ -26,41 +25,22 @@ from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.contracts import RunRequest
-from vs_agent.api.testing import FakeDockerBuildRunner
+from vs_agent.api import AgentCapabilities
+from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_project.api import OrchestrationDescriptor
-from vs_runtime.api import OrchestrationPlugin, RunStatus
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
-
-    from vs_agent.api import AgentClientProtocol
-    from vs_runtime.api import Run
 
 PLUGIN_ID = "slurm-signal"
 
 
-class _NoAgentsError(AssertionError):
-    def __init__(self) -> None:
-        super().__init__("the signalled run starts no agents")
-
-
-async def _await_benchmark(run: Run, _options: BaseModel) -> RunStatus:
-    await run.evaluation.benchmark(run.workspaces.root)
-    return RunStatus.SUCCEEDED
-
-
-def _no_agents(**_kwargs: object) -> AgentClientProtocol:
-    raise _NoAgentsError
+def _resumable_client(**_kwargs: object) -> FakeAgentClient:
+    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
 
 
 def main(project_root: Path, slurm_config: Path) -> None:
     """Run until the job ends or a signal ends the run."""
-    plugin = OrchestrationPlugin(
-        id=PLUGIN_ID, agents=(), options=EmptyOptions, orchestrate=_await_benchmark
-    )
     registry = OrchestrationRegistry()
-    registry.register_plugin(plugin)
+    registry.register_plugin(capability_plugin(PLUGIN_ID, strategy=BaselineProbeStrategy()))
     request = RunRequest(
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id=PLUGIN_ID, config_version=1, options={}),
@@ -79,7 +59,7 @@ def main(project_root: Path, slurm_config: Path) -> None:
     runs = default_runs(
         LaunchSettings(
             registry=registry,
-            agent_client_factory=_no_agents,
+            agent_client_factory=_resumable_client,
             backend_factory=host_container_backend,
         )
     )

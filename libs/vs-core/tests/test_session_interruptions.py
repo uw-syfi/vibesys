@@ -114,3 +114,40 @@ def test_interruption_requires_every_canonical_withdraw_fact(
     assert any(isinstance(row, core.CancelTurn) for row in result.requests) == proven
     assert result.state.sessions.run_charges == state.sessions.run_charges
     assert result.state.sessions.inputs == state.sessions.inputs
+
+
+def test_a_turn_that_ends_released_closes_the_cancellation_that_could_not_prove_it() -> None:
+    """A cancellation sent while the dispatch was in flight reports the turn not proven stopped.
+
+    Its own release is the proof. Left waiting, the cancellation reaches its reconciliation
+    deadline and blocks, and a stopped run could never close.
+    """
+    state, event = interrupt_state()
+    interrupted = reload_step(state, event)
+    cancel = interrupted.requests[0]
+    assert isinstance(cancel, core.CancelTurn)
+    dispatch = next(
+        r.request for r in state.intents.intents if isinstance(r.request, core.DispatchTurn)
+    )
+    sent = interrupted.state.model_copy(
+        update={
+            "intents": interrupted.state.intents.model_copy(
+                update={
+                    "intents": tuple(
+                        row.model_copy(update={"phase": core.IntentPhase.DISPATCHED})
+                        for row in interrupted.state.intents.intents
+                    )
+                }
+            )
+        }
+    )
+    unproven = turn_observation(cancel, sequence=1).model_copy(update={"observed_at": 1.0})
+    waiting = reload_step(sent, core.RequestObserved(observation=unproven))
+    row = next(r for r in waiting.state.intents.intents if r.request_id == cancel.request_id)
+    assert row.phase != core.IntentPhase.COMPLETED
+    ended = turn_observation(
+        dispatch, sequence=2, accepted=True, terminal=True, status=core.ObservationStatus.FAILED
+    ).model_copy(update={"released": True, "children_complete": True})
+    result = reload_step(waiting.state, core.RequestObserved(observation=ended))
+    row = next(r for r in result.state.intents.intents if r.request_id == cancel.request_id)
+    assert row.phase == core.IntentPhase.COMPLETED

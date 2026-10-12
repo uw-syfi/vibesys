@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import os
 import secrets
-import shlex
 import subprocess
 import textwrap
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -56,40 +55,6 @@ ALL_KINDS = ("slurm", "slurm-local", "slurm-local-gpu", "slurm-gpu-alias")
 #: The container's own ``/tmp``, where the framework's benchmark result is relayed to.
 CONTAINER_TMP = "/tmp"  # noqa: S108  # lint-waiver: LW-960011 [S108]; the framework result location is fixed, and it is this directory in the agent container.
 # > A tempfile call would name the test process's directory, not the container's.
-# Both gate scripts take their behavior from a file in their working directory, so
-# a test steers the gate (and, for ``slurm``, what is staged to the cluster) by
-# writing the file before it runs the gate. ``hold`` blocks until cancelled,
-# ``env`` prints the job's environment, ``exit:N`` fails with status N.
-ACCURACY_SCRIPT = textwrap.dedent(
-    """\
-    import os, pathlib, sys, time
-    path = pathlib.Path("accuracy_mode")
-    mode = path.read_text().strip() if path.exists() else "pass"
-    if mode == "hold":
-        print("holding", flush=True)
-        time.sleep(600)
-    elif mode == "env":
-        print("\\n".join(f"{key}={value}" for key, value in sorted(os.environ.items())))
-    elif mode.startswith("exit:"):
-        print("accuracy failed")
-        sys.exit(int(mode.removeprefix("exit:")))
-    else:
-        print("accuracy ok")
-    """
-)
-# Writes the result file named by --output, and prints where it ran.
-BENCHMARK_SCRIPT = textwrap.dedent(
-    """\
-    import json, os, pathlib, sys
-    output = sys.argv[sys.argv.index("--output") + 1]
-    with open(output, "w") as handle:
-        json.dump({"score": 42, "cwd": os.getcwd()}, handle)
-    print("benchmark wrote", output)
-    path = pathlib.Path("benchmark_mode")
-    mode = path.read_text().strip() if path.exists() else "pass"
-    sys.exit(int(mode.removeprefix("exit:")) if mode.startswith("exit:") else 0)
-    """
-)
 
 
 def build_agent_image() -> str:
@@ -147,30 +112,6 @@ class OpenRun:
     def has_gpu_commands(self) -> bool:
         """Whether the agent may run its own GPU commands (``$VIBESYS_GPU``) in this run."""
         return self.kind in GPU_KINDS
-
-    def launcher(self) -> str:
-        """The broker client the agent runs for gates: the program named by its gate commands."""
-        paths = self.session.view.paths
-        command = paths.benchmark_command or paths.accuracy_command
-        assert command is not None
-        return shlex.split(command)[0]
-
-    def gate(self, kind: str, *arguments: str) -> CommandResult:
-        """Run the agent's gate command for *kind* (planned or not) with *arguments*."""
-        return self.agent(shlex.join((self.launcher(), "--gate", kind, *arguments)))
-
-    def set_mode(self, gate: str, mode: str) -> None:
-        """Steer the next *gate* (``accuracy`` or ``benchmark``) run: ``pass``, ``hold``, ``env`` or ``exit:N``."""
-        (self.workspace / f"{gate}_mode").write_text(mode, encoding="utf-8")
-
-    def reset_modes(self) -> None:
-        """Forget every steered gate mode, so the next gate takes the default (``pass``).
-
-        A run is shared by many tests; a mode one test set (``hold`` above all)
-        would otherwise make a later test's gate block until the hang guard.
-        """
-        for gate in ("accuracy", "benchmark"):
-            (self.workspace / f"{gate}_mode").unlink(missing_ok=True)
 
     @property
     def container_id(self) -> str:
@@ -349,11 +290,9 @@ def make_request(
     accuracy: bool = True,
     log: Callable[[str], None] | None = None,
 ) -> RunEnvironmentRequest:
-    """Build the request: a workspace under the cluster's shared directory, planned gates."""
+    """Build the request: a workspace under the cluster's shared directory."""
     workspace = cluster.root / f"workspace-{run_id}"
     workspace.mkdir()
-    (workspace / "accuracy.py").write_text(ACCURACY_SCRIPT, encoding="utf-8")
-    (workspace / "benchmark.py").write_text(BENCHMARK_SCRIPT, encoding="utf-8")
     log_dir = cluster.root / f"logs-{run_id}"
     log_dir.mkdir()
     return RunEnvironmentRequest(
@@ -386,8 +325,6 @@ def make_candidate_request(
     base = make_request(cluster, directory, run_id)
     workspace = worktrees / f"candidate-{run_id}" / "workspace"
     workspace.mkdir(parents=True)
-    (workspace / "accuracy.py").write_text(ACCURACY_SCRIPT, encoding="utf-8")
-    (workspace / "benchmark.py").write_text(BENCHMARK_SCRIPT, encoding="utf-8")
     return replace(base, workspace=workspace, run_owned_roots=(worktrees,))
 
 
@@ -400,25 +337,13 @@ def open_run(
     *,
     accuracy: bool = True,
 ) -> Iterator[OpenRun]:
-    """Open *kind* as an older loop would; close the session and remove its containers on exit."""
+    """Open *kind* as a run would; close the session and remove its containers on exit."""
     run_id = f"t{secrets.token_hex(5)}"
     environment = make_environment(kind, cluster, directory, image_id)
     lines: list[str] = []
     request = make_request(cluster, directory, run_id, accuracy=accuracy, log=lines.append)
     with _opened(kind, cluster, environment, request) as run:
         yield replace(run, log_lines=tuple(lines))
-
-
-@contextmanager
-def open_dynamic_run(
-    kind: str, cluster: SlurmCluster, directory: Path, image_id: str
-) -> Iterator[OpenRun]:
-    """Open *kind* as the dynamic loop would: its agents have the evaluation tool, so no gate."""
-    run_id = f"t{secrets.token_hex(5)}"
-    environment = make_environment(kind, cluster, directory, image_id)
-    request = replace(make_request(cluster, directory, run_id), evaluation_tool=True)
-    with _opened(kind, cluster, environment, request) as run:
-        yield run
 
 
 @contextmanager

@@ -11,6 +11,8 @@
       ".dependency-cruiser.mjs",
       "**/*.ts",
       "**/*.tsx",
+      "**/*.cts",
+      "**/*.mts",
       "tools/scripts/**/*.mjs",
       "!**/dist",
       "!libs/contracts/src/generated"
@@ -22,6 +24,7 @@
     "indentWidth": 2,
     "lineWidth": 100
   },
+  "plugins": ["./tools/lint-rules/no-raw-html-sinks.grit"],
   "linter": {
     "enabled": true,
     "rules": {

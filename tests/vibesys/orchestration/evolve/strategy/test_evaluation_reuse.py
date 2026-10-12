@@ -9,68 +9,40 @@ refused for budget, and the port removed the judge's evaluation tool to avoid th
 
 from __future__ import annotations
 
-from collections import deque
 from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.evolve.strategy._replies import mutated, reviewed
-from tests.vibesys.orchestration.evolve.strategy._run import run_shell
-from tests.vibesys.orchestration.evolve.strategy._waiting_turns import (
-    WaitingTurns,
-    attach_for,
-    new_bridge,
-    translator_for,
-)
+from tests.vibesys.orchestration.evolve.strategy.world import EvolveWorld, run_to_end
 
 from vibesys.evolve_roles import JUDGE, MUTATOR
-from vs_core.api import AttemptPhase, RunStatus, Settle, Withdraw
-from vs_runtime.api.testing import HostOptions
+from vs_core.api import AttemptPhase, Settle, Withdraw
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    import pytest
-
-    from vs_runtime.api.testing import Run
+    from vs_dst.api import SimulatedRun
 
 
 def _run(
-    root: Path, *, polls: tuple[int, ...], waits: tuple[bool, ...], parallelism: int
-) -> tuple[Run, WaitingTurns]:
+    *, polls: tuple[int, ...], waits: tuple[bool, ...], parallelism: int
+) -> tuple[SimulatedRun, EvolveWorld]:
     """A run whose mutators submit and leave the job running, and whose judges may wait."""
-    bridge = new_bridge(root)
-    script = WaitingTurns(
-        mutator=deque(mutated() for _ in range(40)),
-        judge=deque(reviewed() for _ in range(40)),
-        roles=("judge",),
+    world = EvolveWorld(
+        wait_roles=("judge",),
         submit_only=("mutator",),
-        decide=lambda n: waits[n % len(waits)],
-        polls=list(polls),
-    )
-    host = HostOptions(
-        max_concurrent=2,
-        translator=translator_for(script, bridge),
-        attach=attach_for(script, bridge),
-        controlled=True,
-        lifecycle=frozenset({"suspend"}),
-    )
-    finished = run_shell(
-        script,
-        host=host,
+        waits=waits,
+        polls=polls,
         max_generations=1,
         children_per_generation=2,
         max_parallelism=parallelism,
     )
-    return finished, script
+    return run_to_end(world), world
 
 
-def _check(finished: Run, script: WaitingTurns) -> None:
-    assert finished.core.run.status == RunStatus.TERMINAL
-    assert all(a.phase == AttemptPhase.TERMINAL for a in finished.core.attempts.attempts)
-    assert all("handle_id" in reply for _, _, reply in script.asked), script.asked
+def _check(run: SimulatedRun, world: EvolveWorld) -> None:
+    assert all(a.phase == AttemptPhase.TERMINAL for a in run.core.attempts.attempts)
+    assert all("handle_id" in reply for _, _, reply in world.asked), world.asked
     by_attempt: dict[str, list[tuple[str, dict]]] = {}
-    for attempt, role, reply in script.asked:
+    for attempt, role, reply in world.asked:
         by_attempt.setdefault(attempt, []).append((role, reply))
     for asks in by_attempt.values():
         assert len({reply["handle_id"] for _, reply in asks}) == 1, "one candidate, one handle"
@@ -82,14 +54,14 @@ def test_the_judge_has_the_evaluation_tool_the_design_table_gives_it() -> None:
     assert [tool.id for tool in JUDGE.extra_tools] == [tool.id for tool in MUTATOR.extra_tools]
 
 
-def test_a_judge_asking_for_the_mutators_evaluation_gets_its_handle(tmp_path: Path) -> None:
-    finished, script = _run(tmp_path, polls=(3,), waits=(True,), parallelism=1)
+def test_a_judge_asking_for_the_mutators_evaluation_gets_its_handle() -> None:
+    run, world = _run(polls=(3,), waits=(True,), parallelism=1)
 
-    _check(finished, script)
-    assert any(role.endswith("judge") and reply["repeat"] for _, role, reply in script.asked)
+    _check(run, world)
+    assert any(role.endswith("judge") and reply["repeat"] for _, role, reply in world.asked)
     settles = [
         item.disposition
-        for item in finished.decisions
+        for item in run.decisions
         if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
     ]
     assert settles
@@ -103,13 +75,8 @@ def test_a_judge_asking_for_the_mutators_evaluation_gets_its_handle(tmp_path: Pa
     parallelism=st.integers(1, 2),
 )
 def test_judges_and_mutators_share_one_evaluation_whatever_runs_when(
-    tmp_path_factory: pytest.TempPathFactory,
-    polls: tuple[int, ...],
-    waits: tuple[bool, ...],
-    parallelism: int,
+    polls: tuple[int, ...], waits: tuple[bool, ...], parallelism: int
 ) -> None:
-    finished, script = _run(
-        tmp_path_factory.mktemp("reuse"), polls=polls, waits=waits, parallelism=parallelism
-    )
+    run, world = _run(polls=polls, waits=waits, parallelism=parallelism)
 
-    _check(finished, script)
+    _check(run, world)

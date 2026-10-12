@@ -8,24 +8,13 @@ from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_runtime.contracts import Run, RunCleanupError
+from vs_runtime.contracts import RunCleanupError
 from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
-    from vs_runtime._run_control import RunControlChannel
     from vs_runtime._workspaces import OwnedWorkspaces
-    from vs_runtime.contracts import (
-        Commands,
-        Control,
-        Evaluation,
-        Observations,
-        RunFacts,
-        Skills,
-        State,
-        WorkspaceAgentSessions,
-    )
     from vs_sim.api import BlockingRunner
 
 
@@ -87,62 +76,20 @@ class BlockingOperations:
         return errors
 
 
-class RuntimeControl:
-    """Land cooperative stop and pause requests at policy checkpoints."""
-
-    def __init__(self, channel: RunControlChannel, blocking: BlockingOperations) -> None:
-        self._channel = channel
-        self._blocking = blocking
-
-    async def checkpoint(self) -> None:
-        """Raise a pending stop or wait for a pending pause to resume."""
-        self._channel.raise_if_stopped()
-        await self._blocking.run(self._channel.wait_while_paused)
-
-
-def create_runtime_control(
-    channel: RunControlChannel,
-    blocking: BlockingOperations,
-) -> Control:
-    """Bind cooperative control to the host's cancellation-safe worker owner."""
-    return RuntimeControl(channel, blocking)
-
-
 @dataclass(frozen=True, slots=True)
 class RunHostComponents:
-    """Prepared capabilities for one runtime host."""
+    """Prepared resources for one runtime host: the workspace owner and the blocking executor."""
 
-    run_id: str
-    facts: RunFacts
-    agents: WorkspaceAgentSessions
     workspaces: OwnedWorkspaces
-    evaluation: Evaluation
-    state: State
-    control: Control
-    commands: Commands
-    skills: Skills
-    observations: Observations
     blocking: BlockingOperations
 
 
 class RuntimeRunHost:
-    """Concrete run host owning capability and resource teardown."""
+    """Concrete run host owning workspace and resource teardown."""
 
     def __init__(self, components: RunHostComponents, ownership: ExitStack) -> None:
         """Bind the fixed public value to its private lifecycle owner."""
-        self._workspaces = components.workspaces
-        self.run = Run(
-            run_id=components.run_id,
-            facts=components.facts,
-            agents=components.agents,
-            workspaces=components.workspaces,
-            evaluation=components.evaluation,
-            state=components.state,
-            control=components.control,
-            commands=components.commands,
-            skills=components.skills,
-            observations=components.observations,
-        )
+        self.workspaces = components.workspaces
         self._blocking = components.blocking
         self._ownership = ownership
         self._close_task: asyncio.Task[None] | None = None
@@ -155,10 +102,10 @@ class RuntimeRunHost:
 
     async def _close_once(self) -> None:
         self._blocking.begin_close()
-        self._workspaces.begin_close()
+        self.workspaces.begin_close()
         errors = await self._blocking.drain()
         try:
-            await self._workspaces.close()
+            await self.workspaces.close()
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948002 [BLE001]; cleanup must continue through independently owned resources.
             errors.append(error)
         try:
@@ -278,6 +225,5 @@ __all__ = [
     "BlockingOperations",
     "RunHostComponents",
     "RuntimeRunHost",
-    "create_runtime_control",
     "open_run_host",
 ]

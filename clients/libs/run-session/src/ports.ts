@@ -4,8 +4,16 @@
  * the page's lifecycle. Types only; the session's shell calls them and never names an
  * implementation.
  */
-import type {EventBatchMessage, IterationResult, RunSnapshot} from '@vibesys/contracts';
 import type {
+  EventBatchMessage,
+  IterationResult,
+  ProtocolResponse,
+  RequestInput,
+  RunSnapshot,
+  TuiDefaults,
+} from '@vibesys/contracts';
+import type {
+  AbortSignalLike,
   BatchReconciliation,
   ControlChannelState,
   StreamConnectionState,
@@ -34,12 +42,33 @@ export interface RunStreamHandlers {
   onConnectionState(state: StreamConnectionState): void;
 }
 
+/** A lifecycle command the run protocol accepts on its control channel. */
+export type RunCommand = Extract<RequestInput, {readonly type: `command.${string}`}>;
+
+/** The protocol-neutral result of delivering a run command. The connection resolves wire-level
+ * response shape here so presentation code receives only the fact it renders. */
+export type RunCommandOutcome =
+  | {
+      readonly kind: 'acknowledged';
+      readonly action: NonNullable<ProtocolResponse['ack']>['action'];
+      readonly status: NonNullable<ProtocolResponse['ack']>['status'];
+    }
+  | {readonly kind: 'rejected'; readonly message: string | null};
+
 /** The run behind one control transport: its snapshot and its persistent event stream. */
 export interface RunConnection {
   /** Load an unfenced snapshot, or require the event store established by a stream batch. */
   loadSnapshot(storeId?: string): Promise<RunSnapshot>;
   /** Load one page of the policy-owned iteration tree from the stream's store generation. */
-  loadIterations(cursor: string | null, expectedStoreId: string): Promise<IterationLoad>;
+  loadIterations(
+    cursor: string | null,
+    expectedStoreId: string,
+    signal: AbortSignalLike,
+  ): Promise<IterationLoad>;
+  /** Deliver one lifecycle command and resolve its wire response to a semantic outcome. */
+  command(input: RunCommand): Promise<RunCommandOutcome>;
+  /** Read the server's presentation defaults without making UI code name the transport. */
+  tuiDefaults(): Promise<TuiDefaults | null>;
   /** Subscribe once; settles when the first subscription does. */
   subscribe(handlers: RunStreamHandlers): Promise<void>;
   /** Resume the stream where it was. */

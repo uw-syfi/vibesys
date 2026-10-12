@@ -21,7 +21,7 @@ Layout under ``instance_root``::
 
     instances/<id>.lock   lifetime lock, published only once held
     instances/<id>.json   LiveInstanceRecord, written by the holder; its tombstone after
-    runs/<id>/control.sock, runs/<id>/server.log
+    runs/<id>/control.sock, runs/<id>/server.log, runs/<id>/inspection.json
 
 The module is light: it imports the standard library, Pydantic, the record
 contracts in ``server.host_api``, and ``vs_sim.api`` types, never the run
@@ -34,9 +34,10 @@ Public surface: the lock primitives (``LockState``, ``probe_lock``,
 ``LifetimeLock``, ``try_lock``, ``unlock``, ``FLOCK_AVAILABLE``), which the web
 gateway's claim in ``server.transport.discovery`` also uses; ``instance_root``
 and the per-instance paths; ``InstanceStore`` with its ``FileInstanceStore``
-and ``FakeInstanceStore`` implementations; the ``StopRequester`` interface and
-the ``StopEffects`` a stop uses; the pure ``judge`` and ``survey`` decisions;
-and ``LiveRegistry``, which composes them.
+and ``FakeInstanceStore`` implementations; ID-scoped log and immutable
+inspection-metadata stores; ``InstanceInspector``; the ``StopRequester``
+interface and the ``StopEffects`` a stop uses; the pure ``judge`` and
+``survey`` decisions; and ``LiveRegistry``, which composes them.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ import platform
 import re
 import secrets
 import stat
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib.metadata import PackageNotFoundError
@@ -54,13 +55,22 @@ from importlib.metadata import version as distribution_version
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from pydantic import ValidationError
+
 from server.host_api import (
+    INSPECTION_LOG_TAIL_BYTES,
     INSTANCE_ID_PATTERN,
     RECORD_VERSION,
+    AvailableLogTail,
     FailureReason,
+    InspectionState,
+    InstanceInspection,
+    InstanceInspectionMetadata,
     InstanceList,
+    InstanceLogTail,
     InstanceStopResult,
     LiveInstanceRecord,
+    MissingLogTail,
     RunPhase,
     RunStatus,
     StopOutcome,
@@ -68,6 +78,7 @@ from server.host_api import (
     UnreadableRecord,
     parse_record,
 )
+from vs_sim.api import sync_descriptor
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -100,6 +111,8 @@ CRASHED = FailureReason(
     message="The server exited without recording how its run ended; see its log.",
 )
 """The reason a listing records for a server that died without a tombstone."""
+_INSPECTION_METADATA_BYTES = 32 * 1024
+_INSPECTION_METADATA_NAME = "inspection.json"
 
 
 # --- lock primitives -------------------------------------------------------
@@ -432,6 +445,38 @@ class InstanceStore(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class InstancePaths:
+    """The two operator-visible paths derived from one validated registry id."""
+
+    control_socket: Path
+    server_log: Path
+
+
+class InstanceLogs(Protocol):
+    """Resolve and read one instance's diagnostics without accepting a filesystem path."""
+
+    def paths(self, instance_id: str) -> InstancePaths:
+        """Return the instance-owned paths derived from ``instance_id``."""
+        ...
+
+    def tail(self, instance_id: str) -> InstanceLogTail:
+        """Return a bounded log tail, or ``missing``; reject unsafe file types."""
+        ...
+
+
+class InstanceMetadataStore(Protocol):
+    """Immutable inspection snapshots keyed only by validated registry ids."""
+
+    def load(self, instance_id: str) -> InstanceInspectionMetadata | None:
+        """Load one retained snapshot, or ``None`` when it was never published."""
+        ...
+
+    def publish(self, metadata: InstanceInspectionMetadata) -> None:
+        """Publish one snapshot atomically; an unlike existing value is a conflict."""
+        ...
+
+
 class StopRequester(Protocol):
     """Ask a live server, over its control socket, to stop its run.
 
@@ -492,6 +537,328 @@ def instance_log_path(root: Path, instance_id: str) -> Path:
 def new_instance_id() -> str:
     """Return a fresh random registry id."""
     return secrets.token_hex(6)
+
+
+class InstanceLogError(RuntimeError):
+    """An instance log exists but cannot be read safely."""
+
+    @classmethod
+    def unreadable(cls, path: Path, detail: OSError) -> InstanceLogError:
+        """Build an I/O failure without exposing log contents."""
+        return cls(f"cannot safely inspect {path}: {detail}")
+
+    @classmethod
+    def unsafe(cls, path: Path, reason: str = "non-regular") -> InstanceLogError:
+        """Build a refusal for a path that is not the regular file expected."""
+        return cls(f"refusing to inspect {reason} log file {path}")
+
+
+class InstanceMetadataError(RuntimeError):
+    """A retained inspection snapshot is unsafe, malformed, or conflicting."""
+
+    @classmethod
+    def unreadable(cls, path: Path, detail: Exception) -> InstanceMetadataError:
+        """Build an I/O or validation failure naming only the snapshot path."""
+        return cls(f"cannot safely read inspection metadata {path}: {detail}")
+
+    @classmethod
+    def unsafe(cls, path: Path, reason: str) -> InstanceMetadataError:
+        """Build a refusal for an unsafe snapshot or parent component."""
+        return cls(f"refusing unsafe inspection metadata {path}: {reason}")
+
+
+class _InstanceDirectoryError(OSError):
+    """Descriptor-relative traversal could not safely reach an instance directory."""
+
+
+@contextmanager
+def _instance_directory(root: Path, instance_id: str) -> Iterator[int]:
+    """Open ``root/runs/<id>`` from ``/`` without following any directory symlink."""
+    instance_id = _checked_id(instance_id)
+    if not root.is_absolute() or any(part in {".", ".."} for part in root.parts[1:]):
+        message = f"registry root must be an absolute normalized path: {root}"
+        raise _InstanceDirectoryError(message)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptors: list[int] = []
+    try:
+        try:
+            parent = os.open(os.sep, flags)
+        except OSError as exc:  # pragma: no cover - a usable POSIX host always opens its root.
+            message = f"cannot safely open filesystem root: {exc}"
+            raise _InstanceDirectoryError(message) from exc
+        descriptors.append(parent)
+        for component in (*root.parts[1:], "runs", instance_id):
+            try:
+                descriptor = os.open(component, flags, dir_fd=parent)
+            except OSError as exc:
+                message = f"cannot safely open directory component {component!r}: {exc}"
+                raise _InstanceDirectoryError(message) from exc
+            descriptors.append(descriptor)
+            parent = descriptor
+        yield descriptors[-1]
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+class FileInstanceLogs:
+    """Bounded, no-follow access to ``server.log`` files under one registry root."""
+
+    def __init__(self, root: Path, *, limit: int = INSPECTION_LOG_TAIL_BYTES) -> None:
+        """Read logs under ``root``, returning no more than ``limit`` UTF-8 bytes."""
+        if not 0 < limit <= INSPECTION_LOG_TAIL_BYTES:
+            message = (
+                "the instance log tail limit must be between 1 and "
+                f"{INSPECTION_LOG_TAIL_BYTES} bytes"
+            )
+            raise ValueError(message)
+        self._root = root
+        self._limit = limit
+
+    def paths(self, instance_id: str) -> InstancePaths:
+        """Derive the two fixed paths from a validated id."""
+        directory = instance_run_directory(self._root, instance_id)
+        return InstancePaths(directory / "control.sock", directory / "server.log")
+
+    def tail(self, instance_id: str) -> InstanceLogTail:
+        """Read a bounded suffix through no-follow directory descriptors."""
+        path = self.paths(instance_id).server_log
+        try:
+            with _instance_directory(self._root, instance_id) as directory:
+                flags = (
+                    os.O_RDONLY
+                    | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_NONBLOCK", 0)
+                )
+                try:
+                    descriptor = os.open("server.log", flags, dir_fd=directory)
+                except FileNotFoundError:
+                    return MissingLogTail()
+                except OSError as exc:
+                    raise InstanceLogError.unreadable(path, exc) from exc
+                try:
+                    opened = os.fstat(descriptor)
+                    if not stat.S_ISREG(opened.st_mode):
+                        raise InstanceLogError.unsafe(path)
+                    extra = 3
+                    start = max(0, opened.st_size - self._limit - extra)
+                    os.lseek(descriptor, start, os.SEEK_SET)
+                    raw = _read_at_most(descriptor, self._limit + extra)
+                finally:
+                    os.close(descriptor)
+        except _InstanceDirectoryError as exc:
+            if isinstance(exc.__cause__, FileNotFoundError):
+                return MissingLogTail()
+            raise InstanceLogError.unreadable(path, exc) from exc
+        text = _bounded_utf8_tail(raw, self._limit)
+        return AvailableLogTail(
+            text=text,
+            truncated=opened.st_size > self._limit
+            or len(raw.decode("utf-8", errors="replace").encode("utf-8")) > self._limit,
+        )
+
+
+class FakeInstanceLogs:
+    """In-memory ``InstanceLogs`` with byte-for-byte tail semantics."""
+
+    def __init__(self, *, limit: int = INSPECTION_LOG_TAIL_BYTES) -> None:
+        """Keep in-memory log bytes and apply ``limit`` like the file implementation."""
+        if not 0 < limit <= INSPECTION_LOG_TAIL_BYTES:
+            message = (
+                "the instance log tail limit must be between 1 and "
+                f"{INSPECTION_LOG_TAIL_BYTES} bytes"
+            )
+            raise ValueError(message)
+        self.limit = limit
+        self.contents: dict[str, bytes] = {}
+
+    def paths(self, instance_id: str) -> InstancePaths:
+        """Derive stable fake paths from a validated id."""
+        directory = Path("/run/vibesys/runs") / _checked_id(instance_id)
+        return InstancePaths(directory / "control.sock", directory / "server.log")
+
+    def tail(self, instance_id: str) -> InstanceLogTail:
+        """Return the same bounded UTF-8 projection as ``FileInstanceLogs``."""
+        raw = self.contents.get(_checked_id(instance_id))
+        if raw is None:
+            return MissingLogTail()
+        return AvailableLogTail(
+            text=_bounded_utf8_tail(raw, self.limit),
+            truncated=len(raw) > self.limit
+            or len(raw.decode("utf-8", errors="replace").encode("utf-8")) > self.limit,
+        )
+
+
+class FileInstanceMetadataStore:
+    """Atomic immutable inspection snapshots inside each retained instance directory."""
+
+    def __init__(self, root: Path) -> None:
+        """Keep snapshots under the validated node-local registry ``root``."""
+        self._root = root
+
+    def load(self, instance_id: str) -> InstanceInspectionMetadata | None:
+        """Load a bounded regular snapshot through no-follow directory descriptors."""
+        instance_id = _checked_id(instance_id)
+        path = instance_run_directory(self._root, instance_id) / _INSPECTION_METADATA_NAME
+        try:
+            with _instance_directory(self._root, instance_id) as directory:
+                return self._load_from(directory, path)
+        except _InstanceDirectoryError as exc:
+            if isinstance(exc.__cause__, FileNotFoundError):
+                return None
+            raise InstanceMetadataError.unreadable(path, exc) from exc
+
+    def publish(self, metadata: InstanceInspectionMetadata) -> None:
+        """Create one crash-atomic snapshot without ever replacing an existing value."""
+        path = instance_run_directory(self._root, metadata.id) / _INSPECTION_METADATA_NAME
+        contents = metadata.model_dump_json().encode("utf-8") + b"\n"
+        if len(contents) > _INSPECTION_METADATA_BYTES:
+            raise InstanceMetadataError.unsafe(path, "serialized snapshot exceeds its byte bound")
+        try:
+            with _instance_directory(self._root, metadata.id) as directory:
+                existing = self._load_from(directory, path)
+                if existing is not None:
+                    self._require_same(path, existing, metadata)
+                    return
+                temporary = f".{_INSPECTION_METADATA_NAME}.{secrets.token_hex(6)}.tmp"
+                descriptor = os.open(
+                    temporary,
+                    os.O_CREAT
+                    | os.O_EXCL
+                    | os.O_WRONLY
+                    | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=directory,
+                )
+                try:
+                    try:
+                        _write_all(descriptor, contents)
+                        sync_descriptor(descriptor)
+                    finally:
+                        os.close(descriptor)
+                    try:
+                        os.link(
+                            temporary,
+                            _INSPECTION_METADATA_NAME,
+                            src_dir_fd=directory,
+                            dst_dir_fd=directory,
+                            follow_symlinks=False,
+                        )
+                        sync_descriptor(directory)
+                    except FileExistsError:
+                        existing = self._load_from(directory, path)
+                        if existing is None:  # pragma: no cover - link reported it exists.
+                            raise InstanceMetadataError.unsafe(
+                                path, "snapshot disappeared"
+                            ) from None
+                        self._require_same(path, existing, metadata)
+                finally:
+                    with suppress(FileNotFoundError):
+                        os.unlink(temporary, dir_fd=directory)
+        except _InstanceDirectoryError as exc:
+            raise InstanceMetadataError.unreadable(path, exc) from exc
+        except InstanceMetadataError:
+            raise
+        except OSError as exc:
+            raise InstanceMetadataError.unreadable(path, exc) from exc
+
+    @staticmethod
+    def _load_from(directory: int, path: Path) -> InstanceInspectionMetadata | None:
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        try:
+            descriptor = os.open(_INSPECTION_METADATA_NAME, flags, dir_fd=directory)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise InstanceMetadataError.unreadable(path, exc) from exc
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode):
+                raise InstanceMetadataError.unsafe(path, "snapshot is not a regular file")
+            if opened.st_size > _INSPECTION_METADATA_BYTES:
+                raise InstanceMetadataError.unsafe(path, "snapshot exceeds its byte bound")
+            contents = _read_at_most(descriptor, _INSPECTION_METADATA_BYTES + 1)
+        finally:
+            os.close(descriptor)
+        if len(contents) > _INSPECTION_METADATA_BYTES:
+            raise InstanceMetadataError.unsafe(path, "snapshot exceeds its byte bound")
+        try:
+            return InstanceInspectionMetadata.model_validate_json(contents, strict=True)
+        except ValidationError as exc:
+            raise InstanceMetadataError.unreadable(path, exc) from exc
+
+    @staticmethod
+    def _require_same(
+        path: Path,
+        existing: InstanceInspectionMetadata,
+        metadata: InstanceInspectionMetadata,
+    ) -> None:
+        if existing != metadata:
+            raise InstanceMetadataError.unsafe(path, "an unlike immutable snapshot already exists")
+
+
+class FakeInstanceMetadataStore:
+    """In-memory immutable snapshot store for public-interface tests."""
+
+    def __init__(self) -> None:
+        """Start with no retained snapshots."""
+        self.snapshots: dict[str, InstanceInspectionMetadata] = {}
+
+    def load(self, instance_id: str) -> InstanceInspectionMetadata | None:
+        """Return the retained snapshot, when present."""
+        return self.snapshots.get(_checked_id(instance_id))
+
+    def publish(self, metadata: InstanceInspectionMetadata) -> None:
+        """Publish idempotently and reject a conflicting replacement."""
+        existing = self.snapshots.get(metadata.id)
+        if existing is not None and existing != metadata:
+            path = Path("/run/vibesys/runs") / metadata.id / _INSPECTION_METADATA_NAME
+            raise InstanceMetadataError.unsafe(path, "an unlike immutable snapshot already exists")
+        self.snapshots[metadata.id] = metadata
+
+
+def _read_at_most(descriptor: int, limit: int) -> bytes:
+    """Read no more than ``limit`` bytes from a regular file descriptor."""
+    chunks: list[bytes] = []
+    remaining = limit
+    while remaining > 0:
+        chunk = os.read(descriptor, remaining)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _write_all(descriptor: int, contents: bytes) -> None:
+    """Write every byte or propagate the definite write failure."""
+    view = memoryview(contents)
+    while view:
+        written = os.write(descriptor, view)
+        if written == 0:
+            message = "writing inspection metadata made no progress"
+            raise OSError(message)
+        view = view[written:]
+
+
+def _bounded_utf8_tail(raw: bytes, limit: int) -> str:
+    """Decode a byte suffix, preserving valid text and keeping its UTF-8 form bounded."""
+    encoded = raw.decode("utf-8", errors="replace").encode("utf-8")
+    if len(encoded) > limit:
+        encoded = encoded[-limit:]
+    return encoded.decode("utf-8", errors="ignore")
 
 
 class FileInstanceHold:
@@ -684,6 +1051,65 @@ class FakeInstanceStore:
 
 
 # --- shell ------------------------------------------------------------------
+
+
+class InstanceInspector:
+    """Build one typed inspection from the registry and ID-scoped retained artifacts.
+
+    When a live server ends while its log is read, the result says ``ended`` but retains the
+    record from the first observation. A refresh therefore never presents a live state after the
+    lock has dropped.
+    """
+
+    def __init__(
+        self,
+        store: InstanceStore,
+        logs: InstanceLogs,
+        metadata: InstanceMetadataStore,
+    ) -> None:
+        """Compose registry observations with ID-scoped retained artifacts."""
+        self._store = store
+        self._logs = logs
+        self._metadata = metadata
+
+    def inspect(self, instance_id: str, *, include_log: bool = False) -> InstanceInspection:
+        """Observe one id and optionally load its bounded diagnostic tail."""
+        instance_id = _checked_id(instance_id)
+        metadata = self._metadata.load(instance_id)
+        before = self._store.observe(instance_id)
+        log = self._logs.tail(instance_id) if include_log else None
+        after = self._store.observe(instance_id) if include_log else before
+        state = _inspection_state(after)
+        record = (
+            after.record
+            if state is InspectionState.LIVE and isinstance(after.record, LiveInstanceRecord)
+            else before.record
+            if _inspection_state(before) is InspectionState.LIVE
+            and isinstance(before.record, LiveInstanceRecord)
+            else None
+        )
+        paths = self._logs.paths(instance_id)
+        control_socket = (
+            metadata.control_socket_path if metadata is not None else str(paths.control_socket)
+        )
+        server_log = metadata.server_log_path if metadata is not None else str(paths.server_log)
+        return InstanceInspection(
+            id=instance_id,
+            state=state,
+            record=record,
+            metadata=metadata,
+            control_socket_path=control_socket,
+            server_log_path=server_log,
+            log=log,
+        )
+
+
+def _inspection_state(observation: InstanceObservation) -> InspectionState:
+    if observation.lock is LockState.HELD and isinstance(observation.record, LiveInstanceRecord):
+        return InspectionState.LIVE
+    if observation.lock in {LockState.HELD, LockState.UNKNOWN}:
+        return InspectionState.UNVERIFIED
+    return InspectionState.ENDED
 
 
 @dataclass(frozen=True)

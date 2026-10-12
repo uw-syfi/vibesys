@@ -34,7 +34,8 @@ export function project(value: unknown): string {
 /** A token the view chose to name one operation (a start, a checkout change): a positive integer. */
 export function operationToken(value: unknown, operation: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(`a ${operation} is named by a positive integer`);
+    const article = /^[aeiou]/i.test(operation) ? 'an' : 'a';
+    throw new Error(`${article} ${operation} is named by a positive integer`);
   }
   return value;
 }

@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.dynamic.core_policy.api import (
-    reply_schemas,
-    requirements_for,
-)
 from vibesys.orchestration.dynamic.strategy.api import (
     DynamicConfig,
     DynamicStrategy,
@@ -24,12 +20,6 @@ from vs_core.api import (
 )
 from vs_core.testing.drive import Faults, Harness, Trace, drive
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
-from vs_runtime.api.testing import (
-    HostOptions,
-    Run,
-    Script,
-    drive_shell,
-)
 
 if TYPE_CHECKING:
     from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
@@ -92,44 +82,5 @@ def run(
     return trace
 
 
-def run_shell(
-    executors: Script,
-    *,
-    limits: Limits | None = None,
-    live: bool = True,
-    deadline_at: float = Harness.deadline_at,
-    host: HostOptions | None = None,
-    **overrides: object,
-) -> Run:
-    """Run a fresh strategy to the end of its run on the production shell.
-
-    The run must satisfy the liveness invariants (`vs_core.testing.liveness`) unless ``live``
-    is False.
-    """
-    settings = config(**overrides)
-    chosen_host = host or HostOptions()
-    harness = Harness(
-        registry=dynamic_operation_registry(),
-        facts=FACTS,
-        limits=limits or LIMITS,
-        envelope_type=RunEnvelope[DynamicStrategyState],
-        requirements=requirements_for(settings),
-        deadline_at=deadline_at,
-        lifecycle=chosen_host.lifecycle,
-    )
-    finished = drive_shell(
-        DynamicStrategy(config=settings),
-        executors,
-        harness,
-        reply_schemas(settings),
-        chosen_host,
-    )
-    if live:
-        assert_live(finished.journal, finished.core, Budget(retries=harness.limits.max_retries))
-    if finished.halted is not None:
-        raise finished.halted
-    return finished
-
-
-def kinds(trace: Trace[DynamicStrategyState] | Run) -> list[str]:
+def kinds(trace: Trace[DynamicStrategyState]) -> list[str]:
     return [type(item).__name__ for item in trace.decisions]

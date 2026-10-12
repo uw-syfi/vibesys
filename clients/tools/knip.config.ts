@@ -66,8 +66,8 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
   },
   'apps/desktop-renderer': {
     // The welcome page's entry (`welcome.html`, built by `vite.config.ts`).
-    entry: ['src/main.tsx', 'src/**/*.test.ts', 'src/**/*.test.tsx'],
-    project: ['src/**/*.ts', 'src/**/*.tsx'],
+    entry: ['src/main.tsx', 'src/**/*.test.ts', 'src/**/*.test.tsx', 'e2e/**/*.spec.ts'],
+    project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,js}'],
   },
 };
 

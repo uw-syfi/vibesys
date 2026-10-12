@@ -1,16 +1,16 @@
 """A turn that hits a provider capacity limit pauses the run and finishes after it resumes.
 
-The scenarios drive the public runtime with a scripted client: the client raises
-``AgentQuotaError`` for its first calls. The operator is simulated from inside the
-control channel's own PAUSED transition (the resume or stop is issued there), and
-waiting is a virtual clock, so nothing sleeps or reads real time.
+The scenarios install the run's capacity gate on a scripted client with
+``install_capacity_gate``, the call every client of a run goes through: the client raises
+``AgentQuotaError`` for its first calls. The operator is simulated from inside the control
+channel's own PAUSED transition (the resume or stop is issued there), and waiting is a
+virtual clock, so nothing sleeps or reads real time.
 """
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 from hypothesis import given
@@ -24,25 +24,7 @@ from vs_agent.api import (
     QuotaCondition,
     QuotaPlan,
 )
-from vs_runtime.api import AgentRole
-from vs_runtime.api.agent_session_fixtures import (
-    ClientFactory as _ClientFactory,
-)
-from vs_runtime.api.agent_session_fixtures import (
-    EnvironmentOpener as _EnvironmentOpener,
-)
-from vs_runtime.api.agent_session_fixtures import (
-    RuntimeEffects as _RuntimeEffects,
-)
-from vs_runtime.api.agent_session_fixtures import (
-    environment as _environment,
-)
-from vs_runtime.api.agent_session_fixtures import (
-    scripted_client as _client,
-)
-from vs_runtime.api.agent_session_fixtures import (
-    session_runtime as _runtime,
-)
+from vs_agent.api.testing import FakeAgentClient
 from vs_runtime.api.infrastructure import (
     CapacityHandling,
     QuotaAction,
@@ -52,17 +34,11 @@ from vs_runtime.api.infrastructure import (
     RunControlTransitionKind,
     RunStopped,
     create_run_control_channel,
+    install_capacity_gate,
 )
-from vs_runtime.api.testing import (
-    FakeAgentExecutionLifecycleSink,
-    FakeCapacityTimer,
-    FakeRunControlEventSink,
-)
+from vs_runtime.api.testing import FakeCapacityTimer, FakeRunControlEventSink
 
-if TYPE_CHECKING:
-    from vs_agent.api.testing import FakeAgentClient
-
-ROLE = AgentRole(id="worker", system_prompt="Work.")
+ROLE = "worker"
 START = 1_000_000.0
 
 
@@ -126,32 +102,22 @@ class _Run:
             self.timer = FakeCapacityTimer(
                 control, start=START, operator_resumes_after=self.operator_resumes_after
             )
-        replies: list[str] = []
-
-        async def scenario() -> None:
-            runtime = _runtime(
-                ROLE,
-                _RuntimeEffects(
-                    _ClientFactory(client),
-                    _EnvironmentOpener(_environment()),
-                    FakeAgentExecutionLifecycleSink(),
-                    agent_events=self.sink,
-                    capacity=CapacityHandling(self.policy, self.timer),
-                ),
-                control=control,
+        install_capacity_gate(
+            client,
+            control=control,
+            events=self.sink,
+            handling=CapacityHandling(self.policy, self.timer),
+        )
+        return [
+            client.invoke_text(
+                kind=ROLE,
+                workspace=Path(),
+                system_prompt="Work.",
+                user_prompt=prompt,
+                round_label="round",
             )
-            try:
-                session = await runtime.agents.create_session(
-                    ROLE, workspace=runtime.workspaces.root
-                )
-                for prompt in prompts:
-                    reply = await session.turn(prompt)
-                    replies.append(str(reply))
-            finally:
-                await runtime.workspaces.close()
-
-        asyncio.run(scenario())
-        return replies
+            for prompt in prompts
+        ]
 
 
 def _quota(
@@ -160,15 +126,23 @@ def _quota(
     return AgentQuotaError("claude", condition, "You've hit your limit", resets_at)
 
 
+def _client(stops: int, error: AgentQuotaError) -> FakeAgentClient:
+    return FakeAgentClient().fail(ROLE, error, times=stops)
+
+
+def _prompts(client: FakeAgentClient) -> list[str]:
+    return [call.user_prompt for call in client.calls_for(ROLE)]
+
+
 def test_a_quota_stop_pauses_the_run_and_the_turn_finishes_on_resume() -> None:
-    client = _client(responses=("done",)).fail("worker", _quota(resets_at=1_900_000_000.0), times=1)
+    client = _client(1, _quota(resets_at=1_900_000_000.0))
     run = _Run()
 
     replies = run.play(client, ("one",))
 
-    assert replies == ["done"]
+    assert len(replies) == 1
     # The paused turn is the same invocation, held in place and not issued anew.
-    assert [call.user_prompt for call in client.calls_for("worker")] == ["one"]
+    assert _prompts(client) == ["one"]
     assert run.kinds() == [
         RunControlTransitionKind.PAUSE_REQUESTED,
         RunControlTransitionKind.PAUSED,
@@ -179,17 +153,16 @@ def test_a_quota_stop_pauses_the_run_and_the_turn_finishes_on_resume() -> None:
         "claude",
         1_900_000_000.0,
         QuotaPlan(),
-        "worker",
+        ROLE,
     )
     assert run.sink.resumed == [("claude", "operator")]
 
 
 def test_a_stop_while_paused_on_quota_ends_the_turn_without_sending_it_again() -> None:
-    client = _client(responses=("done",)).fail("worker", _quota(), times=1)
     run = _Run(operator="stop")
 
     with pytest.raises(RunStopped):
-        run.play(client, ("one",))
+        run.play(_client(1, _quota()), ("one",))
 
     assert len(run.sink.paused) == 1
     assert run.sink.resumed == []
@@ -203,13 +176,13 @@ def test_a_stop_while_paused_on_quota_ends_the_turn_without_sending_it_again() -
 def test_any_run_of_quota_stops_pauses_once_each_and_loses_no_turn(
     stops: int, condition: QuotaCondition, resets_at: float | None
 ) -> None:
-    client = _client(responses=("a", "b")).fail("worker", _quota(condition, resets_at), times=stops)
+    client = _client(stops, _quota(condition, resets_at))
     run = _Run()
 
     replies = run.play(client, ("one", "two"))
 
-    assert replies == ["a", "b"]
-    assert [call.user_prompt for call in client.calls_for("worker")] == ["one", "two"]
+    assert len(replies) == 2
+    assert _prompts(client) == ["one", "two"]
     assert [(e.condition, e.resets_at) for e, _, _ in run.sink.paused] == [
         (condition, resets_at)
     ] * stops
@@ -218,12 +191,11 @@ def test_any_run_of_quota_stops_pauses_once_each_and_loses_no_turn(
 
 
 def test_the_wait_policy_resumes_by_itself_when_the_reported_reset_arrives() -> None:
-    client = _client(responses=("done",)).fail("worker", _quota(resets_at=START + 600), times=1)
+    client = _client(1, _quota(resets_at=START + 600))
     run = _Run(policy=QuotaPolicy(QuotaAction.WAIT))
 
-    replies = run.play(client, ("one",))
+    run.play(client, ("one",))
 
-    assert replies == ["done"]
     assert run.timer is not None
     assert run.timer.waits == [605.0]  # the reset plus the policy's margin
     assert run.kinds() == [
@@ -236,7 +208,7 @@ def test_the_wait_policy_resumes_by_itself_when_the_reported_reset_arrives() -> 
 
 
 def test_an_operator_who_resumes_early_ends_a_wait() -> None:
-    client = _client(responses=("done",)).fail("worker", _quota(resets_at=START + 600), times=1)
+    client = _client(1, _quota(resets_at=START + 600))
     run = _Run(policy=QuotaPolicy(QuotaAction.WAIT), operator_resumes_after=10.0)
 
     run.play(client, ("one",))
@@ -252,11 +224,10 @@ def test_an_operator_who_resumes_early_ends_a_wait() -> None:
 def test_a_policy_that_will_not_wait_ends_the_turn_with_the_quota_error_and_never_pauses(
     policy: QuotaPolicy,
 ) -> None:
-    client = _client(responses=("done",)).fail("worker", _quota(resets_at=START + 600), times=1)
     run = _Run(policy=policy)
 
     with pytest.raises(AgentQuotaError):
-        run.play(client, ("one",))
+        run.play(_client(1, _quota(resets_at=START + 600)), ("one",))
 
     assert run.transitions == []
     assert run.sink.paused == []
@@ -272,12 +243,12 @@ def test_a_policy_that_will_not_wait_ends_the_turn_with_the_quota_error_and_neve
 def test_a_wait_budget_bounds_the_total_time_a_turn_spends_waiting(
     stops: int, retry: int, budget: int
 ) -> None:
-    client = _client(responses=("done",)).fail("worker", _quota(), times=stops)
+    client = _client(stops, _quota())
     run = _Run(policy=QuotaPolicy(QuotaAction.WAIT, wait_seconds=budget, retry_seconds=retry))
     allowed_waits = -(-budget // retry)  # ceil: the last wait is cut to what remains
 
     if stops <= allowed_waits:
-        assert run.play(client, ("one",)) == ["done"]
+        assert len(run.play(client, ("one",))) == 1
     else:
         with pytest.raises(AgentQuotaError):
             run.play(client, ("one",))

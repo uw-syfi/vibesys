@@ -53,7 +53,6 @@ from vs_runtime._core_requests import (
     OwnerEvent,
     RequestExecutors,
     counts_toward_concurrency,
-    settles_through_core,
 )
 from vs_runtime._evaluation_jobs import awaits_submissions
 
@@ -1019,17 +1018,6 @@ class CoreRuntime[S: StrategyState]:
     def in_flight(self) -> tuple[Request, ...]:
         """The requests whose executors are running, in authorization order."""
         return tuple(flight.intent.request for flight in self._flights)
-
-    @property
-    def stop_ends_in_core(self) -> bool:
-        """Whether core will end every running request itself once a stop is committed.
-
-        True when each is a cancellation, or a turn core has asked to cancel. A request
-        with no cancellation in core (a measurement submission, a job poll) ends on its
-        own or not at all, so a stop that finds one cannot finish through core.
-        """
-        intents = self.record.envelope.core.intents.intents
-        return all(settles_through_core(f.intent.request, intents) for f in self._flights)
 
     def _finish_done(self) -> bool:
         """Queue the observations of finished flights, ties in authorization order.

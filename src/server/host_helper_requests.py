@@ -39,6 +39,8 @@ from server.host_api import (
     HelperReply,
     HelperRequest,
     InstanceList,
+    InstancesInspectReply,
+    InstancesInspectRequest,
     InstancesListReply,
     InstancesListRequest,
     InstancesUnwatchRequest,
@@ -75,7 +77,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
     from datetime import datetime
 
-    from server.registry import LiveRegistry, StopEffects
+    from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.relay import Dialer
     from vs_sim.api import Connection
 
@@ -236,6 +238,7 @@ class HelperHost:
     """Everything a request reads or changes on the host."""
 
     registry: LiveRegistry
+    inspector: InstanceInspector
     stop_effects: StopEffects
     projects: Projects
     directories: Directories
@@ -387,8 +390,8 @@ def _answer(request: HelperRequest, host: HelperHost) -> HelperReply | HelperErr
                     checkout=host.checkout.describe(),
                 )
             )
-        case InstancesListRequest():
-            reply = InstancesListReply(request_id=request_id, listing=host.registry.list())
+        case InstancesListRequest() | InstancesInspectRequest():
+            reply = _instances_reply(request, host)
         case TasksListRequest(project=project):
             tasks = host.projects.tasks(Path(_host_path(project, host.directories)))
             reply = TasksListReply(request_id=request_id, tasks=tasks)
@@ -413,6 +416,20 @@ def _answer(request: HelperRequest, host: HelperHost) -> HelperReply | HelperErr
         case _:
             assert_never(request)
     return reply
+
+
+def _instances_reply(
+    request: InstancesListRequest | InstancesInspectRequest, host: HelperHost
+) -> InstancesListReply | InstancesInspectReply:
+    """Answer one registry read through the host's shared registry interfaces."""
+    match request:
+        case InstancesListRequest(request_id=request_id):
+            return InstancesListReply(request_id=request_id, listing=host.registry.list())
+        case InstancesInspectRequest(
+            request_id=request_id, instance_id=instance_id, include_log=include_log
+        ):
+            inspection = host.inspector.inspect(instance_id, include_log=include_log)
+            return InstancesInspectReply(request_id=request_id, inspection=inspection)
 
 
 _CONNECT_ERRORS: Final[Mapping[ChannelEndOutcome, HelperErrorCode]] = {

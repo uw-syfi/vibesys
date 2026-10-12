@@ -75,14 +75,17 @@ function openRunConnection(
       }
       return response.snapshot;
     },
-    async loadIterations(cursor, expectedStoreId) {
+    async loadIterations(cursor, expectedStoreId, signal) {
       if (iterationCapability === 'unsupported') return {kind: 'unsupported'};
       try {
-        const response = await transport.request({
-          type: 'query.iterations',
-          expected_store_id: expectedStoreId,
-          ...(cursor === null ? {} : {cursor}),
-        });
+        const response = await transport.request(
+          {
+            type: 'query.iterations',
+            expected_store_id: expectedStoreId,
+            ...(cursor === null ? {} : {cursor}),
+          },
+          {signal},
+        );
         iterationCapability = 'supported';
         if (response.iterations_ready === false || response.iterations == null) {
           return {kind: 'not-ready'};
@@ -99,6 +102,22 @@ function openRunConnection(
         }
         throw error;
       }
+    },
+    async command(input) {
+      const response = await transport.request(input);
+      const acknowledgement = response.ack;
+      if (response.ok !== true || acknowledgement === null || acknowledgement === undefined) {
+        return {kind: 'rejected', message: response.error ?? null};
+      }
+      return {
+        kind: 'acknowledged',
+        action: acknowledgement.action,
+        status: acknowledgement.status,
+      };
+    },
+    async tuiDefaults() {
+      const response = await transport.request({type: 'query.tui_defaults'});
+      return response.ok === true ? (response.tui_defaults ?? null) : null;
     },
     subscribe(handlers) {
       return stream.subscribe({

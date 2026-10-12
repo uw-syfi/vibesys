@@ -189,7 +189,7 @@ error.
 
 ## Performance metric: do not duplicate an accepted canonical run
 
-The profiler is read-only and does not create a new candidate. If `progress/`
+The profiler is read-only and does not create a new candidate. If the run's evidence
 already contains a recent accepted canonical evaluation for the current
 candidate, do **not** rerun that expensive sweep merely to populate this
 response. The framework already tracks the accepted value. Set `perf_metric`

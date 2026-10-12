@@ -24,6 +24,7 @@
 
 import type {RunSnapshot} from '@vibesys/contracts';
 import {unprovided} from '@vibesys/machine';
+import type {IterationNavigationState} from '@vibesys/run-state';
 import type {ControlChannelState, StreamConnectionState} from '@vibesys/transport';
 import {and, assign, not, raise, type SnapshotFrom, setup, stateIn} from 'xstate';
 import type {WebSessionState, WebSessionStatus} from './connection.js';
@@ -53,6 +54,9 @@ export type RefreshOutcome =
   | {readonly kind: 'ready'}
   | {readonly kind: 'snapshot'; readonly result: SnapshotResult};
 
+/** A complete policy-navigation traversal, or no publishable tree for this response. */
+export type IterationQueryOutcome = IterationNavigationState | null;
+
 /** Which flights wait on a fenced snapshot load: they settle together when it does. */
 type LoadOwner = 'startup' | 'startup-recovery' | 'recovery' | 'replacement';
 
@@ -62,6 +66,8 @@ export type SessionEvent =
   | {readonly type: 'start'}
   /** A first or replacement batch established the store a snapshot can fence to. */
   | {readonly type: 'stream-established'; readonly storeId: string}
+  /** A semantic event invalidated navigation without changing the stream's store. */
+  | {readonly type: 'iterations-refresh'; readonly storeId: string}
   /** The event stream changed state. */
   | {readonly type: 'stream'; readonly state: StreamConnectionState}
   /** The stream reported a fault in band (a protocol error), or could not be recovered. */
@@ -123,6 +129,12 @@ export interface SessionContext {
     /** Stale causes visible when this load began. */
     readonly problemEpoch: number;
   };
+  /** The current navigation query and at most one latest-wins follow-up. */
+  readonly iterations: {
+    readonly currentStoreId: string | null;
+    readonly loadingStoreId: string;
+    readonly pendingStoreId: string | null;
+  };
 }
 
 /** A settled snapshot load: which issue it was, what it returned, and the causes it saw. */
@@ -133,7 +145,13 @@ interface Settled {
 }
 
 const INITIAL_CONTEXT: SessionContext = {
-  view: {hasSnapshot: false, status: 'connecting', error: null, controls: {status: 'connected'}},
+  view: {
+    hasSnapshot: false,
+    status: 'connecting',
+    error: null,
+    iterationError: null,
+    controls: {status: 'connected'},
+  },
   streamConnected: false,
   streamSnapshot: 'none',
   streamProblem: 'none',
@@ -143,6 +161,7 @@ const INITIAL_CONTEXT: SessionContext = {
   startupSnapshot: 'waiting',
   recovery: {intent: 'retry', issue: 0, problemEpoch: 0},
   replacement: {issue: 0, storeId: '', owner: 'replacement', problemEpoch: 0},
+  iterations: {currentStoreId: null, loadingStoreId: '', pendingStoreId: null},
 };
 
 const OPEN = '#session.open';
@@ -355,6 +374,46 @@ function startupSnapshotLoaded(context: SessionContext, ok: boolean): SessionCon
     : context;
 }
 
+/** The store named by an event that requests policy navigation. */
+function iterationStoreId(event: SessionEvent | InternalEvent): string | null {
+  return event.type === 'iterations-refresh' ? event.storeId : null;
+}
+
+/** Start a navigation query for one stream-store generation. */
+function beginIterationQuery(storeId: string): Partial<SessionContext> {
+  return {
+    iterations: {
+      currentStoreId: storeId,
+      loadingStoreId: storeId,
+      pendingStoreId: null,
+    },
+  };
+}
+
+/** Retain exactly one latest-wins query behind the operation already in flight. */
+function queueIterationQuery(context: SessionContext, storeId: string): Partial<SessionContext> {
+  return {
+    iterations: {
+      ...context.iterations,
+      currentStoreId: storeId,
+      pendingStoreId: storeId,
+    },
+  };
+}
+
+/** Promote the coalesced follow-up after its predecessor physically settles. */
+function promoteIterationQuery(context: SessionContext): Partial<SessionContext> {
+  const storeId = context.iterations.pendingStoreId;
+  if (storeId === null) return {};
+  return {
+    iterations: {
+      currentStoreId: storeId,
+      loadingStoreId: storeId,
+      pendingStoreId: null,
+    },
+  };
+}
+
 export const sessionMachine = setup({
   types: {
     context: {} as SessionContext,
@@ -369,6 +428,8 @@ export const sessionMachine = setup({
     loadReplacementSnapshot: unprovided<SnapshotResult, {readonly storeId: string}>(
       'loadReplacementSnapshot',
     ),
+    /** Load and normalize the complete iteration tree fenced to `storeId`. */
+    loadIterations: unprovided<IterationQueryOutcome, {readonly storeId: string}>('loadIterations'),
   },
   actions: {
     /**
@@ -385,6 +446,9 @@ export const sessionMachine = setup({
     redialControls: () => undefined,
     /** Release the connection and the page's listeners. */
     closeShell: () => undefined,
+    /** Publish one complete navigation traversal into the run's data fold. */
+    publishIterations: (_, _params: {readonly navigation: IterationNavigationState | null}) =>
+      undefined,
     /** A load settled (null: none did): the view, and the newest load applied. */
     settleSnapshot: assign(({context}, settled: Settled | null) =>
       settled === null ? context : snapshotSettled(context, settled),
@@ -393,6 +457,29 @@ export const sessionMachine = setup({
     issueReplacement: assign(({context, event}, {owner}: {readonly owner: LoadOwner}) =>
       event.type === 'stream-established' ? issueReplacement(context, event.storeId, owner) : {},
     ),
+    beginIterationQuery: assign(({event}) => {
+      const storeId = iterationStoreId(event);
+      return storeId === null ? {} : beginIterationQuery(storeId);
+    }),
+    beginCurrentIterationQuery: assign(({context}) => {
+      const storeId = context.iterations.currentStoreId;
+      return storeId === null ? {} : beginIterationQuery(storeId);
+    }),
+    queueIterationQuery: assign(({context, event}) => {
+      const storeId = iterationStoreId(event);
+      return storeId === null ? {} : queueIterationQuery(context, storeId);
+    }),
+    queueCurrentIterationQuery: assign(({context}) => {
+      const storeId = context.iterations.currentStoreId;
+      return storeId === null ? {} : queueIterationQuery(context, storeId);
+    }),
+    promoteIterationQuery: assign(({context}) => promoteIterationQuery(context)),
+    clearIterationError: assign(({context}) =>
+      context.view.iterationError === null ? {} : {view: {...context.view, iterationError: null}},
+    ),
+    reportIterationError: assign(({context}, {error}: {readonly error: Error}) => ({
+      view: {...context.view, iterationError: error},
+    })),
   },
   guards: {
     /** The fenced load in flight is for this store already. */
@@ -412,6 +499,9 @@ export const sessionMachine = setup({
       ({context}) => context.startupSnapshot === 'waiting',
       stateIn(`${OPEN}.recovery.refreshing`),
     ]),
+    iterationRefreshPending: ({context}) => context.iterations.pendingStoreId !== null,
+    canRefreshIterations: ({context, event}) =>
+      event.type === 'wake' && reachable(event.reach) && context.iterations.currentStoreId !== null,
   },
 }).createMachine({
   id: 'session',
@@ -482,13 +572,16 @@ export const sessionMachine = setup({
                     ],
                     onError: {
                       target: `${OPEN}.startup.done`,
-                      actions: assign(({context, event}) =>
-                        withProblem(
-                          {...context, streamConnected: false},
-                          'connection',
-                          toError(event.error),
+                      actions: [
+                        assign(({context, event}) =>
+                          withProblem(
+                            {...context, streamConnected: false},
+                            'connection',
+                            toError(event.error),
+                          ),
                         ),
-                      ),
+                        raise({type: 'session.stream-failed'}),
+                      ],
                     },
                   },
                   on: {
@@ -707,6 +800,83 @@ export const sessionMachine = setup({
             },
           },
         },
+        iterations: {
+          initial: 'waiting',
+          states: {
+            /** Start-up has no stream-store identity to fence a query to yet. */
+            waiting: {
+              on: {
+                'iterations-refresh': {
+                  target: 'loading',
+                  actions: 'beginIterationQuery',
+                },
+                // A cold-start stream failure proves there will be no initial query to await.
+                'session.stream-failed': {target: 'ready'},
+              },
+            },
+            ready: {
+              on: {
+                'iterations-refresh': {
+                  target: 'loading',
+                  actions: 'beginIterationQuery',
+                },
+                wake: {
+                  guard: 'canRefreshIterations',
+                  target: 'loading',
+                  actions: 'beginCurrentIterationQuery',
+                },
+              },
+            },
+            loading: {
+              on: {
+                // Retain exactly one follow-up and let the owned actor settle physically first.
+                'iterations-refresh': {actions: 'queueIterationQuery'},
+                wake: {
+                  guard: 'canRefreshIterations',
+                  actions: 'queueCurrentIterationQuery',
+                },
+              },
+              invoke: {
+                id: 'loadIterations',
+                src: 'loadIterations',
+                input: ({context}) => ({storeId: context.iterations.loadingStoreId}),
+                onDone: [
+                  {
+                    guard: 'iterationRefreshPending',
+                    target: 'loading',
+                    reenter: true,
+                    actions: 'promoteIterationQuery',
+                  },
+                  {
+                    target: 'ready',
+                    actions: [
+                      'clearIterationError',
+                      {
+                        type: 'publishIterations',
+                        params: ({event}) => ({navigation: event.output}),
+                      },
+                    ],
+                  },
+                ],
+                onError: [
+                  {
+                    guard: 'iterationRefreshPending',
+                    target: 'loading',
+                    reenter: true,
+                    actions: 'promoteIterationQuery',
+                  },
+                  {
+                    target: 'ready',
+                    actions: {
+                      type: 'reportIterationError',
+                      params: ({event}) => ({error: toError(event.error)}),
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
       },
     },
     /** Closed: every later report and reply is dropped. */
@@ -718,7 +888,10 @@ export type SessionSnapshot = SnapshotFrom<typeof sessionMachine>;
 
 /** Whether start-up has either completed its fenced handoff or failed (or the session ended). */
 export function sessionStartupSettled(snapshot: SessionSnapshot): boolean {
-  return snapshot.status !== 'active' || snapshot.matches({open: {startup: 'done'}});
+  return (
+    snapshot.status !== 'active' ||
+    (snapshot.matches({open: {startup: 'done'}}) && snapshot.matches({open: {iterations: 'ready'}}))
+  );
 }
 
 /** The stream's status and its error agree: stale exactly when there is an error. */

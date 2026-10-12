@@ -14,9 +14,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.core_plugins import capability_plugin
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.skeleton_strategy import Phase, SkeletonState, SkeletonStrategy
 from tests.support.task_project import write_task
-from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from entrypoints.run import supervise
 from headless import run as render_run
@@ -27,8 +28,10 @@ from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.contracts import ResumeRef, RunRequest
+from vs_agent.api import AgentCapabilities
+from vs_agent.api.testing import FakeAgentClient
+from vs_core.api import AttemptReady, RunView, StrategyEvent
 from vs_project.api import OrchestrationDescriptor, Project, ProjectStateError
-from vs_runtime.api import OrchestrationPlugin, RunStatus
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeContainer, FakeDockerEngine, HostExecutedContainerBackend
 from vs_sim.api.testing import FakeSignalSource
@@ -37,14 +40,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
-    from vs_runtime.api import Run
     from vs_sandbox.api import CommandRunner, HostResource, SandboxKind
 
 _PLUGIN_ID = "container-exit"
-
-
-class _OrchestrationFailedError(RuntimeError):
-    """The orchestration's own failure."""
 
 
 class _DaemonBackend(HostExecutedContainerBackend):
@@ -104,26 +102,38 @@ class _Observed:
 _MAX_CHECKPOINTS = 100_000
 
 
-async def _run_until_exit(
-    run: Run,
-    engine: FakeDockerEngine,
-    observed: _Observed,
-    signals: FakeSignalSource,
-    *,
-    exit_path: str,
-) -> RunStatus:
-    """Fail, or raise the signals of *exit_path* and then wait to be unwound."""
-    observed.run_id = run.run_id
-    observed.containers = engine.containers()
-    if exit_path == "failure":
-        raise _OrchestrationFailedError
-    for name in exit_path.split("+"):
-        assert signals.deliver(signal.Signals[name]), f"the run installed no {name} handler"
-    for _ in range(_MAX_CHECKPOINTS):
-        await run.control.checkpoint()
-        await asyncio.sleep(0)
-    message = f"the run was not unwound by {exit_path} within {_MAX_CHECKPOINTS} checkpoints"
-    raise AssertionError(message)
+class _ProbeStrategy(SkeletonStrategy):
+    """Start one attempt, so the run owns a container, then act on the exit path once it is live.
+
+    Core strategies are pure, so the probe's side effects (reading the daemon, delivering the
+    signals) reach the test through a module-level hook the test installs for one run.
+    """
+
+    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
+        state = super().on_event(view, event)
+        if isinstance(event, AttemptReady) and _LIVE_HOOK is not None:
+            return state.model_copy(update={"phase": _LIVE_HOOK(str(view.run.run_id.root))})
+        return state
+
+
+_LIVE_HOOK: Callable[[str], Phase] | None = None
+
+
+def _live_hook(
+    engine: FakeDockerEngine, observed: _Observed, signals: FakeSignalSource, exit_path: str
+) -> Callable[[str], Phase]:
+    """What happens once the run's container exists: note the daemon, then fail or signal."""
+
+    def live(run_id: str) -> Phase:
+        observed.run_id = run_id
+        observed.containers = engine.containers()
+        if exit_path == "failure":
+            return "failed"
+        for name in exit_path.split("+"):
+            assert signals.deliver(signal.Signals[name]), f"the run installed no {name} handler"
+        return "settle"
+
+    return live
 
 
 def _execute(
@@ -151,11 +161,15 @@ def _execute(
     signals = FakeSignalSource()
     ending_context = nullcontext() if ends_with is None else pytest.raises(ends_with)
 
-    async def orchestrate(run: Run, _options: object) -> RunStatus:
-        return await _run_until_exit(run, engine, observed, signals, exit_path=exit_path)
-
-    plugin = OrchestrationPlugin(
-        id=_PLUGIN_ID, agents=(), options=EmptyOptions, orchestrate=orchestrate
+    global _LIVE_HOOK  # noqa: PLW0603  # lint-waiver: LW-950003 [PLW0603]; a pure core strategy reaches the test only through this one hook, installed for one run.
+    _LIVE_HOOK = None if resumed is not None else _live_hook(engine, observed, signals, exit_path)
+    plugin = capability_plugin(
+        _PLUGIN_ID,
+        strategy=_ProbeStrategy(
+            state=SkeletonState(schema_version=1, phase="start"),
+            measured=False,
+            keeps_candidate=False,
+        ),
     )
     registry = OrchestrationRegistry()
     registry.register_plugin(plugin)
@@ -188,7 +202,9 @@ def _execute(
     runs = default_runs(
         LaunchSettings(
             registry=registry,
-            agent_client_factory=lambda **_: None,  # ty: ignore[invalid-argument-type]
+            agent_client_factory=lambda **_: FakeAgentClient(
+                capabilities=AgentCapabilities(provider_session_resume=True)
+            ),
             backend_factory=backend_factory,
         )
     )
@@ -197,17 +213,20 @@ def _execute(
         handle = runs.start(request) if resume is None else runs.resume(request)
         await supervise(handle, render_run(handle), signals=signals)
 
-    with ending_context:
-        asyncio.run(execute())
+    try:
+        with ending_context:
+            asyncio.run(execute())
+    finally:
+        _LIVE_HOOK = None
     return engine, observed
 
 
-# Each exit path ends the run its own typed way: a stop returns normally, a
-# failure raises the orchestration's error, a terminating signal exits 128 + n.
+# Each exit path ends the run its own typed way: a stop and a failure return normally, a
+# terminating signal exits 128 + n.
 @pytest.mark.parametrize(
     ("exit_path", "ends_with"),
     [
-        ("failure", _OrchestrationFailedError),
+        ("failure", None),
         ("SIGINT", None),
         ("SIGTERM", SystemExit),
         ("SIGHUP", SystemExit),
@@ -231,14 +250,13 @@ def test_an_exiting_run_leaves_no_container(
 def test_every_container_of_a_run_carries_the_runs_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _engine, observed = _execute(
-        tmp_path, monkeypatch, exit_path="failure", ends_with=_OrchestrationFailedError
-    )
+    _engine, observed = _execute(tmp_path, monkeypatch, exit_path="failure")
 
     assert observed.run_id
-    assert [container.labels for container in observed.containers] == [
-        {RUN_ID_LABEL: observed.run_id}
-    ]
+    assert observed.containers
+    assert all(
+        container.labels == {RUN_ID_LABEL: observed.run_id} for container in observed.containers
+    )
 
 
 def test_resuming_a_run_ends_the_containers_its_dead_host_left_behind(

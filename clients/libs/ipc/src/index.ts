@@ -32,6 +32,7 @@ export {
   WELCOME_EVENTS,
   type WelcomeBridge,
   type WelcomeEvent,
+  type WelcomeInspection,
   type WelcomeOverview,
   type WelcomeRequest,
   type WelcomeResult,

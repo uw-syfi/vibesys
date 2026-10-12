@@ -28,6 +28,15 @@ describe('WelcomeFeed', () => {
     expect(snapshot.eventCursor).toBe(published.sequence);
     expect(snapshot.recent).toEqual([recent('current')]);
   });
+
+  test('a retired host is absent from later renderer snapshots', () => {
+    const feed = new WelcomeFeed();
+    feed.listing(listing('ssh:worker', 'obsolete'));
+
+    feed.retireHost('ssh:worker');
+
+    expect(feed.snapshot(values([])).listings).toEqual([]);
+  });
 });
 
 function values(recentRuns: readonly RecentRun[]) {
@@ -61,6 +70,7 @@ function recent(runId: string): RecentRun {
     project: `/projects/${runId}`,
     task: 'queue',
     runId,
+    instanceId: `instance-${runId}`,
     attachedAt: 1,
   };
 }

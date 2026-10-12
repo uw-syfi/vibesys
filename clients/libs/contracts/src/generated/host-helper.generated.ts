@@ -3,6 +3,7 @@
 export type Request =
   | HelloRequest
   | InstancesListRequest
+  | InstancesInspectRequest
   | InstancesWatchRequest
   | InstancesUnwatchRequest
   | TasksListRequest
@@ -27,51 +28,57 @@ export type DeadlineMs1 = number;
 export type Type1 = "instances.list";
 export type RequestId2 = string;
 export type DeadlineMs2 = number;
-export type Type2 = "instances.watch";
+export type Type2 = "instances.inspect";
+export type InstanceId = string;
+export type IncludeLog = boolean;
 export type RequestId3 = string;
 export type DeadlineMs3 = number;
-export type Type3 = "instances.unwatch";
-export type WatchId = string;
+export type Type3 = "instances.watch";
 export type RequestId4 = string;
 export type DeadlineMs4 = number;
-export type Type4 = "tasks.list";
-export type Project = string;
+export type Type4 = "instances.unwatch";
+export type WatchId = string;
 export type RequestId5 = string;
 export type DeadlineMs5 = number;
-export type Type5 = "runs.list";
-export type Project1 = string;
+export type Type5 = "tasks.list";
+export type Project = string;
 export type RequestId6 = string;
 export type DeadlineMs6 = number;
-export type Type6 = "run.start";
+export type Type6 = "runs.list";
+export type Project1 = string;
+export type RequestId7 = string;
+export type DeadlineMs7 = number;
+export type Type7 = "run.start";
 export type Project2 = string;
 export type Task = string | null;
 export type Args = string[];
 export type Resume = ResumeRun | ResumeLatest | null;
 export type RunId = string;
 export type Latest = true;
-export type RequestId7 = string;
-export type DeadlineMs7 = number;
-export type Type7 = "run.stop";
-export type InstanceId = string;
-export type Force = boolean;
 export type RequestId8 = string;
 export type DeadlineMs8 = number;
-export type Type8 = "run.connect";
+export type Type8 = "run.stop";
 export type InstanceId1 = string;
+export type Force = boolean;
+export type RequestId9 = string;
+export type DeadlineMs9 = number;
+export type Type9 = "run.connect";
+export type InstanceId2 = string;
 /**
  * Which run-protocol connection a run channel carries (``WP-ROLES``).
  */
 export type RunRole = "control" | "subscribe" | "chat";
-export type RequestId9 = string;
-export type DeadlineMs9 = number;
-export type Type9 = "ping";
 export type RequestId10 = string;
 export type DeadlineMs10 = number;
-export type Type10 = "paths.complete";
+export type Type10 = "ping";
+export type RequestId11 = string;
+export type DeadlineMs11 = number;
+export type Type11 = "paths.complete";
 export type Prefix = string;
 export type Message =
   | HelloReply
   | InstancesListReply
+  | InstancesInspectReply
   | InstancesWatchReply
   | InstancesUnwatchReply
   | TasksListReply
@@ -83,8 +90,8 @@ export type Message =
   | PathsCompleteReply
   | InstancesChanged
   | HelperError;
-export type RequestId11 = string;
-export type Type11 = "hello";
+export type RequestId12 = string;
+export type Type12 = "hello";
 export type ProtocolVersion = number;
 /**
  * Optional capabilities negotiated by ``hello``; a closed set per protocol version.
@@ -92,14 +99,14 @@ export type ProtocolVersion = number;
  * A client calls a gated method only after ``hello`` returned its feature, so
  * a strict peer never sees a method it does not know.
  */
-export type HelperFeature = "instances_watch" | "paths_complete";
+export type HelperFeature = "instances_watch" | "paths_complete" | "instances_inspect";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
 export type Commit = string | null;
 export type Dirty = boolean | null;
-export type RequestId12 = string;
-export type Type12 = "instances.list";
+export type RequestId13 = string;
+export type Type13 = "instances.list";
 export type Version = 4;
 export type Version1 = 4;
 export type Id = string;
@@ -150,41 +157,69 @@ export type Id1 = string;
 export type Version2 = number | null;
 export type Unreadable = UnreadableRecord[];
 export type Unverified = string[];
-export type RequestId13 = string;
-export type Type13 = "instances.watch";
-export type WatchId1 = string;
 export type RequestId14 = string;
-export type Type14 = "instances.unwatch";
-export type WatchId2 = string;
-export type RequestId15 = string;
-export type Type15 = "tasks.list";
+export type Type14 = "instances.inspect";
 export type Version3 = 1;
+export type Id2 = string;
+/**
+ * What one coherent registry observation proved about an instance.
+ */
+export type InspectionState = "live" | "ended" | "unverified";
+export type Version4 = 1;
+export type Id3 = string;
 export type ProjectRoot1 = string;
-export type Name = string;
-export type Tasks = TaskSummary[];
-export type RequestId16 = string;
-export type Type16 = "runs.list";
-export type ProjectRoot2 = string;
 export type RunId2 = string;
 export type Task1 = string | null;
+export type Pid1 = number;
+export type StartedAt1 = number;
+export type Hostname1 = string;
+export type ProtocolVersion2 = 1;
+export type VibesysVersion2 = string;
+export type VibesysRoot1 = string | null;
+export type ControlSocketPath = string;
+export type ServerLogPath = string;
+export type ControlSocketPath1 = string;
+export type ServerLogPath1 = string;
+export type Log = (AvailableLogTail | MissingLogTail) | null;
+export type State = "available";
+export type Text = string;
+export type Truncated = boolean;
+export type State1 = "missing";
+export type RequestId15 = string;
+export type Type15 = "instances.watch";
+export type WatchId1 = string;
+export type RequestId16 = string;
+export type Type16 = "instances.unwatch";
+export type WatchId2 = string;
+export type RequestId17 = string;
+export type Type17 = "tasks.list";
+export type Version5 = 1;
+export type ProjectRoot2 = string;
+export type Name = string;
+export type Tasks = TaskSummary[];
+export type RequestId18 = string;
+export type Type18 = "runs.list";
+export type ProjectRoot3 = string;
+export type RunId3 = string;
+export type Task2 = string | null;
 export type DisplayName = string;
 export type CreatedAt = string;
-export type InstanceId2 = string | null;
+export type InstanceId3 = string | null;
 export type Runs = RunSummary[];
-export type RequestId17 = string;
-export type Type17 = "run.start";
+export type RequestId19 = string;
+export type Type19 = "run.start";
 export type Launch = LiveInstanceRecord | DetachedLaunchFailure;
-export type Version4 = 1;
+export type Version6 = 1;
 export type Outcome = "failed";
 export type Code1 = string;
 export type Stage1 = string;
 export type Message2 = string;
 export type ExitCode = number;
 export type LogPath1 = string | null;
-export type RequestId18 = string;
-export type Type18 = "run.stop";
-export type Version5 = 1;
-export type Id2 = string;
+export type RequestId20 = string;
+export type Type20 = "run.stop";
+export type Version7 = 1;
+export type Id4 = string;
 /**
  * What ``vibesys instances stop`` observed.
  */
@@ -193,14 +228,14 @@ export type StopOutcome = "stopped" | "stopping" | "not_running" | "still_runnin
  * How ``vibesys instances stop`` reached the server.
  */
 export type StopRoute = "control_socket" | "signal";
-export type RequestId19 = string;
-export type Type19 = "run.connect";
-export type RunId3 = string;
-export type ProtocolVersion2 = number;
-export type RequestId20 = string;
-export type Type20 = "ping";
 export type RequestId21 = string;
-export type Type21 = "paths.complete";
+export type Type21 = "run.connect";
+export type RunId4 = string;
+export type ProtocolVersion3 = number;
+export type RequestId22 = string;
+export type Type22 = "ping";
+export type RequestId23 = string;
+export type Type23 = "paths.complete";
 export type Directory = string;
 export type Name1 = string;
 export type Path = string;
@@ -208,11 +243,11 @@ export type VibesysCheckout = boolean;
 export type VibesysProject = boolean;
 export type GitRepository = boolean;
 export type Entries = PathEntry[];
-export type Truncated = boolean;
-export type Type22 = "instances.changed";
+export type Truncated1 = boolean;
+export type Type24 = "instances.changed";
 export type WatchId3 = string;
-export type Type23 = "error";
-export type RequestId22 = string | null;
+export type Type25 = "error";
+export type RequestId24 = string | null;
 /**
  * Why a request failed; a closed set.
  */
@@ -238,7 +273,7 @@ export type HelperErrorCode =
 export type Message3 = string;
 export type Path1 = string | null;
 export type SupportedVersions = [unknown, unknown] | null;
-export type VibesysVersion2 = string | null;
+export type VibesysVersion3 = string | null;
 /**
  * How a run channel's relay ended; each value has its own exit status.
  *
@@ -290,47 +325,57 @@ export interface InstancesListRequest {
   type: Type1;
 }
 /**
- * Push the listing now and again whenever it changes, until ``instances.unwatch``.
+ * Inspect one detached server without starting another host process.
  */
-export interface InstancesWatchRequest {
+export interface InstancesInspectRequest {
   request_id: RequestId2;
   deadline_ms: DeadlineMs2;
   type: Type2;
+  instance_id: InstanceId;
+  include_log?: IncludeLog;
+}
+/**
+ * Push the listing now and again whenever it changes, until ``instances.unwatch``.
+ */
+export interface InstancesWatchRequest {
+  request_id: RequestId3;
+  deadline_ms: DeadlineMs3;
+  type: Type3;
 }
 /**
  * Stop the watch that ``watch_id`` (its request's id) started.
  */
 export interface InstancesUnwatchRequest {
-  request_id: RequestId3;
-  deadline_ms: DeadlineMs3;
-  type: Type3;
+  request_id: RequestId4;
+  deadline_ms: DeadlineMs4;
+  type: Type4;
   watch_id: WatchId;
 }
 /**
  * The tasks a project defines under ``.vibesys/tasks/``.
  */
 export interface TasksListRequest {
-  request_id: RequestId4;
-  deadline_ms: DeadlineMs4;
-  type: Type4;
+  request_id: RequestId5;
+  deadline_ms: DeadlineMs5;
+  type: Type5;
   project: Project;
 }
 /**
  * A project's runs, with the phase of any server on this host that drives one.
  */
 export interface RunsListRequest {
-  request_id: RequestId5;
-  deadline_ms: DeadlineMs5;
-  type: Type5;
+  request_id: RequestId6;
+  deadline_ms: DeadlineMs6;
+  type: Type6;
   project: Project1;
 }
 /**
  * Start a detached run (``vibesys --detach``) in ``project``.
  */
 export interface RunStartRequest {
-  request_id: RequestId6;
-  deadline_ms: DeadlineMs6;
-  type: Type6;
+  request_id: RequestId7;
+  deadline_ms: DeadlineMs7;
+  type: Type7;
   project: Project2;
   task?: Task;
   args?: Args;
@@ -352,45 +397,45 @@ export interface ResumeLatest {
  * Stop a live detached server (``vibesys instances stop``).
  */
 export interface RunStopRequest {
-  request_id: RequestId7;
-  deadline_ms: DeadlineMs7;
-  type: Type7;
-  instance_id: InstanceId;
+  request_id: RequestId8;
+  deadline_ms: DeadlineMs8;
+  type: Type8;
+  instance_id: InstanceId1;
   force?: Force;
 }
 /**
  * Make this channel a byte relay to a live run's control socket.
  */
 export interface RunConnectRequest {
-  request_id: RequestId8;
-  deadline_ms: DeadlineMs8;
-  type: Type8;
-  instance_id: InstanceId1;
+  request_id: RequestId9;
+  deadline_ms: DeadlineMs9;
+  type: Type9;
+  instance_id: InstanceId2;
   role: RunRole;
 }
 /**
  * Liveness of the channel.
  */
 export interface PingRequest {
-  request_id: RequestId9;
-  deadline_ms: DeadlineMs9;
-  type: Type9;
+  request_id: RequestId10;
+  deadline_ms: DeadlineMs10;
+  type: Type10;
 }
 /**
  * The directories that complete a typed path on the host.
  */
 export interface PathsCompleteRequest {
-  request_id: RequestId10;
-  deadline_ms: DeadlineMs10;
-  type: Type10;
+  request_id: RequestId11;
+  deadline_ms: DeadlineMs11;
+  type: Type11;
   prefix: Prefix;
 }
 /**
  * The negotiated version and features, and what will start runs on this host.
  */
 export interface HelloReply {
-  request_id: RequestId11;
-  type: Type11;
+  request_id: RequestId12;
+  type: Type12;
   protocol_version: ProtocolVersion;
   features: Features1;
   vibesys_version: VibesysVersion;
@@ -408,8 +453,8 @@ export interface Checkout {
  * The registry's listing.
  */
 export interface InstancesListReply {
-  request_id: RequestId12;
-  type: Type12;
+  request_id: RequestId13;
+  type: Type13;
   listing: InstanceList;
 }
 /**
@@ -488,35 +533,88 @@ export interface UnreadableRecord {
   version: Version2;
 }
 /**
+ * One coherent inspection of a detached server and its retained artifacts.
+ */
+export interface InstancesInspectReply {
+  request_id: RequestId14;
+  type: Type14;
+  inspection: InstanceInspection;
+}
+/**
+ * ``vibesys instances inspect --json``: identity plus an optional diagnostic tail.
+ */
+export interface InstanceInspection {
+  version?: Version3;
+  id: Id2;
+  state: InspectionState;
+  record: LiveInstanceRecord | null;
+  metadata: InstanceInspectionMetadata | null;
+  control_socket_path: ControlSocketPath1;
+  server_log_path: ServerLogPath1;
+  log?: Log;
+}
+/**
+ * Immutable detached-process facts retained after its live record disappears.
+ */
+export interface InstanceInspectionMetadata {
+  version?: Version4;
+  id: Id3;
+  project_root: ProjectRoot1;
+  run_id: RunId2;
+  task?: Task1;
+  pid: Pid1;
+  started_at: StartedAt1;
+  hostname: Hostname1;
+  protocol_version?: ProtocolVersion2;
+  vibesys_version: VibesysVersion2;
+  vibesys_root?: VibesysRoot1;
+  control_socket_path: ControlSocketPath;
+  server_log_path: ServerLogPath;
+}
+/**
+ * A bounded suffix of one instance's regular ``server.log`` file.
+ */
+export interface AvailableLogTail {
+  state: State;
+  text: Text;
+  truncated: Truncated;
+}
+/**
+ * The instance has no retained ``server.log`` file.
+ */
+export interface MissingLogTail {
+  state: State1;
+}
+/**
  * The watch started; ``instances.changed`` for ``watch_id`` follows at once and on change.
  */
 export interface InstancesWatchReply {
-  request_id: RequestId13;
-  type: Type13;
+  request_id: RequestId15;
+  type: Type15;
   watch_id: WatchId1;
 }
 /**
  * The watch ended; no ``instances.changed`` for ``watch_id`` follows.
  */
 export interface InstancesUnwatchReply {
-  request_id: RequestId14;
-  type: Type14;
+  request_id: RequestId16;
+  type: Type16;
   watch_id: WatchId2;
 }
 /**
  * The project's tasks.
  */
 export interface TasksListReply {
-  request_id: RequestId15;
-  type: Type15;
+  request_id: RequestId17;
+  type: Type17;
   tasks: TaskList;
 }
 /**
  * ``vibesys tasks --json``: the tasks of one project.
  */
 export interface TaskList {
-  version?: Version3;
-  project_root: ProjectRoot1;
+  version?: Version5;
+  project_root: ProjectRoot2;
   tasks: Tasks;
 }
 /**
@@ -529,34 +627,34 @@ export interface TaskSummary {
  * The project's runs.
  */
 export interface RunsListReply {
-  request_id: RequestId16;
-  type: Type16;
+  request_id: RequestId18;
+  type: Type18;
   runs: RunList;
 }
 /**
  * A project's runs, oldest first.
  */
 export interface RunList {
-  project_root: ProjectRoot2;
+  project_root: ProjectRoot3;
   runs: Runs;
 }
 /**
  * One run of a project, from its durable manifest and this host's registry.
  */
 export interface RunSummary {
-  run_id: RunId2;
-  task: Task1;
+  run_id: RunId3;
+  task: Task2;
   display_name: DisplayName;
   created_at: CreatedAt;
   phase: RunPhase | null;
-  instance_id: InstanceId2;
+  instance_id: InstanceId3;
 }
 /**
  * The started server's record, or why nothing started.
  */
 export interface RunStartReply {
-  request_id: RequestId17;
-  type: Type17;
+  request_id: RequestId19;
+  type: Type19;
   launch: Launch;
 }
 /**
@@ -569,7 +667,7 @@ export interface RunStartReply {
  * ``exit_code`` is the process's exit status.
  */
 export interface DetachedLaunchFailure {
-  version?: Version4;
+  version?: Version6;
   outcome?: Outcome;
   code: Code1;
   stage: Stage1;
@@ -582,16 +680,16 @@ export interface DetachedLaunchFailure {
  * What the stop observed.
  */
 export interface RunStopReply {
-  request_id: RequestId18;
-  type: Type18;
+  request_id: RequestId20;
+  type: Type20;
   result: InstanceStopResult;
 }
 /**
  * ``vibesys instances stop --json``.
  */
 export interface InstanceStopResult {
-  version?: Version5;
-  id: Id2;
+  version?: Version7;
+  id: Id4;
   outcome: StopOutcome;
   route?: StopRoute | null;
 }
@@ -599,27 +697,27 @@ export interface InstanceStopResult {
  * The channel is now a byte relay carrying the run protocol to this run.
  */
 export interface RunConnectReply {
-  request_id: RequestId19;
-  type: Type19;
-  run_id: RunId3;
-  protocol_version: ProtocolVersion2;
+  request_id: RequestId21;
+  type: Type21;
+  run_id: RunId4;
+  protocol_version: ProtocolVersion3;
 }
 /**
  * The channel is alive.
  */
 export interface PingReply {
-  request_id: RequestId20;
-  type: Type20;
+  request_id: RequestId22;
+  type: Type22;
 }
 /**
  * Matching directories of ``directory``, sorted by name, at most ``PATHS_COMPLETE_CAP``.
  */
 export interface PathsCompleteReply {
-  request_id: RequestId21;
-  type: Type21;
+  request_id: RequestId23;
+  type: Type23;
   directory: Directory;
   entries: Entries;
-  truncated: Truncated;
+  truncated: Truncated1;
 }
 /**
  * One directory that completes the typed path, with what it looks like.
@@ -635,7 +733,7 @@ export interface PathEntry {
  * A push on a watch: the listing as it is now, sent first and then on each change.
  */
 export interface InstancesChanged {
-  type: Type22;
+  type: Type24;
   watch_id: WatchId3;
   listing: InstanceList;
 }
@@ -643,13 +741,13 @@ export interface InstancesChanged {
  * A failed request, or a line that was not one (``request_id`` is ``None`` then).
  */
 export interface HelperError {
-  type: Type23;
-  request_id: RequestId22;
+  type: Type25;
+  request_id: RequestId24;
   code: HelperErrorCode;
   message: Message3;
   path?: Path1;
   supported_versions?: SupportedVersions;
-  vibesys_version?: VibesysVersion2;
+  vibesys_version?: VibesysVersion3;
 }
 /**
  * The one stderr line a relayed run channel writes when it ends with a nonzero status.

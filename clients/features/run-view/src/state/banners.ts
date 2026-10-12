@@ -174,6 +174,7 @@ export const REPLAY_SESSION: WebSessionState = {
   hasSnapshot: true,
   status: 'connected',
   error: null,
+  iterationError: null,
   controls: {status: 'connected'},
 };
 

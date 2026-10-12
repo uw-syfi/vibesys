@@ -100,6 +100,11 @@ class ProfilerDefinition:
     # The executable the profiler needs and where it runs; ``None`` for a profiler that
     # is pure Python on the agent's interpreter and needs no external program.
     tool: ProfilerTool | None = None
+    # Tools of the profiler's MCP server that need a GPU driver in the process serving
+    # them (the editor). They are offered only when the run environment says the editor
+    # has a GPU, or when capture is routed elsewhere (remote); report-reading tools do not
+    # belong here.
+    driver_tools: frozenset[str] = frozenset()
 
     @property
     def support_name(self) -> str:
@@ -164,6 +169,7 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
             frozenset({DomainName.KERNEL_WRITING}),
             backends=frozenset({ComputeBackend.CUDA}),
             tool=ProfilerTool("ncu", ProfilerSite.GPU_WORKLOAD),
+            driver_tools=frozenset({"query_metrics"}),
         ),
         # The rocprof MCP server also exposes the torch analyzer's tools
         # (torch.profiler traces are a useful cross-check alongside rocprofv3
@@ -173,6 +179,24 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
             frozenset({DomainName.LLM_SERVING, DomainName.KERNEL_WRITING}),
             extra_support_kinds=frozenset({ProfilerKind.TORCH}),
             tool=ProfilerTool("rocprofv3", ProfilerSite.GPU_WORKLOAD),
+            driver_tools=frozenset(
+                {
+                    "profiling_capabilities",
+                    "profile_configured_timeline",
+                    "submit_configured_timeline",
+                    "capture_status",
+                    "await_capture",
+                    "cancel_capture",
+                    "profile_timeline",
+                    "profile_counters",
+                    "profile_kernel_deep",
+                    "profile_instructions",
+                    "profile_ops",
+                    "start_target",
+                    "stop_target",
+                    "targets",
+                }
+            ),
         ),
         ProfilerDefinition(ProfilerKind.OTEL, frozenset({DomainName.MICROSERVICES})),
         ProfilerDefinition(
