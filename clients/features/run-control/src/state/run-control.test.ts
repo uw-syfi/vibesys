@@ -1,19 +1,28 @@
 import {describe, expect, test} from 'bun:test';
 import type {WelcomeResult} from '@vibesys/ipc';
 import {randomChrome} from '@vibesys/ipc/testing';
+import {checkMachine} from '@vibesys/machine/testing';
 import {exactResumeRunId} from '@vibesys/runs';
-import {checkModel} from '@vibesys/store/testing';
+import {createActor, fromPromise} from 'xstate';
 import {
   type RunCommand,
-  WELCOME_INITIAL,
+  runControlMachine,
   type WelcomeAction,
   type WelcomeState,
-  welcomeStep,
+  welcomeView,
 } from './run-control.js';
 
 function failed<T>(error: string): WelcomeResult<T> {
   return {ok: false, error, authNeeded: false};
 }
+
+/** The kinds `progress()` has no text for. */
+const TEXTLESS_KINDS: ReadonlySet<RunCommand['kind']> = new Set([
+  'stop',
+  'retry',
+  'show-run',
+  'show-welcome',
+]);
 
 const COMMANDS: readonly RunCommand[] = [
   {kind: 'attach', host: 'local', instance: '0123456789ab'},
@@ -24,116 +33,141 @@ const COMMANDS: readonly RunCommand[] = [
   {kind: 'show-welcome'},
 ];
 
-/**
- * The kinds `progress()` has no text for. They must retire superseded progress, but may retain an
- * asynchronous problem that is not owned by the prior command.
- */
-const TEXTLESS_KINDS: ReadonlySet<RunCommand['kind']> = new Set([
-  'stop',
-  'retry',
-  'show-run',
-  'show-welcome',
-]);
+type Banner = WelcomeState['banner'];
 
-function assertTextlessCommandBanner(
-  before: WelcomeState,
-  command: RunCommand,
-  after: WelcomeState,
-): void {
+/** A textless command retires superseded progress but keeps an asynchronous problem. */
+function assertTextlessCommandBanner(prior: Banner, command: RunCommand, banner: Banner): void {
   if (!TEXTLESS_KINDS.has(command.kind)) return;
-  // A new token invalidates a previous attach/resume's progress, but not a problem event that
-  // arrived independently of a command.
-  if (before.banner?.source === 'progress') expect(after.banner).toBeNull();
-  if (before.banner?.source === 'problem') expect(after.banner).toEqual(before.banner);
+  if (prior?.source === 'progress') expect(banner).toBeNull();
+  if (prior?.source === 'problem') expect(banner).toEqual(prior);
 }
 
-function assertProblemReplyBanner(
-  before: WelcomeState,
-  action: Extract<WelcomeAction, {type: 'reply'}>,
-  after: WelcomeState,
-): void {
-  if (!action.result.ok || before.awaiting !== action.token) return;
-  if (before.banner?.source === 'problem') expect(after.banner).toEqual(before.banner);
+/** A failure replaces the banner; a success clears command-owned text but keeps a problem. */
+function assertSettledBanner(prior: Banner, output: WelcomeResult<null>, banner: Banner): void {
+  const kept = prior?.source === 'problem' ? prior : null;
+  expect(banner).toEqual(output.ok ? kept : {text: output.error, error: true, source: 'reply'});
 }
 
-function assertBannerInvariant(
-  before: WelcomeState,
-  action: WelcomeAction,
-  after: WelcomeState,
-): void {
-  if (action.type === 'command') {
-    assertTextlessCommandBanner(before, action.command, after);
-    return;
-  }
-  if (action.type === 'reply') assertProblemReplyBanner(before, action, after);
+function assertBanner(prior: Banner, event: {readonly type: string}, banner: Banner): void {
+  if (event.type === 'problem')
+    expect(banner).toEqual({text: 'settings unreadable', error: true, source: 'problem'});
+  if (event.type === 'command')
+    assertTextlessCommandBanner(
+      prior,
+      (event as Extract<WelcomeAction, {type: 'command'}>).command,
+      banner,
+    );
+  if (event.type === 'xstate.done.actor.command')
+    assertSettledBanner(prior, (event as unknown as {output: WelcomeResult<null>}).output, banner);
 }
 
-describe('welcome banner', () => {
-  test('model: the banner answers the latest action only', () => {
-    checkModel({
-      initial: WELCOME_INITIAL,
-      step: welcomeStep,
-      action: (random, issued): WelcomeAction =>
-        random.pick<WelcomeAction>([
+/** Let settled operations report: promise callbacks only, no timers. */
+async function flush(): Promise<void> {
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+}
+
+describe('run-control machine', () => {
+  test('model: busy exactly while a command runs, and a settled command sets the banner', () => {
+    checkMachine({
+      machine: runControlMachine,
+      input: undefined,
+      event: (random, live) => {
+        const settle = live.operations.flatMap(operation => [
+          live.done(operation, random.bool() ? {ok: true, value: null} : failed('failed')),
+          live.error(operation, new Error('bridge failed')),
+        ]);
+        return random.pick([
           {type: 'command', command: random.pick(COMMANDS)},
           {type: 'chrome', chrome: randomChrome(random)},
-          {
-            type: 'reply',
-            token: random.pick(issued),
-            result: random.bool() ? {ok: true, value: null} : failed('failed'),
-          },
-        ]),
-      issues: request => request.token,
-      awaited: state => ({banner: state.awaiting}),
-      reply: action => (action.type === 'reply' ? {slot: 'banner', token: action.token} : null),
-      also: assertBannerInvariant,
+          {type: 'problem', text: 'settings unreadable'},
+          ...settle,
+          ...settle,
+        ]);
+      },
+      invariants: snapshot =>
+        welcomeView(snapshot).busy === snapshot.matches('commanding')
+          ? []
+          : [`busy ${welcomeView(snapshot).busy} in ${String(snapshot.value)}`],
+      also: (before, event, after) =>
+        assertBanner(welcomeView(before).banner, event, welcomeView(after).banner),
     });
   });
 
-  test('regression: a textless stop command clears the progress text of an outstanding attach', () => {
-    const attaching = welcomeStep(WELCOME_INITIAL, {
-      type: 'command',
-      command: {kind: 'attach', host: 'local', instance: 'run-a'},
+  test('the banner answers the latest command only, whatever order the replies arrive in', async () => {
+    const replies = new Map<string, (result: WelcomeResult<null>) => void>();
+    const actor = createActor(
+      runControlMachine.provide({
+        actors: {
+          command: fromPromise<WelcomeResult<null>, RunCommand>(
+            ({input}) => new Promise(resolve => replies.set(input.kind, resolve)),
+          ),
+        },
+      }),
+    ).start();
+    actor.send({type: 'command', command: COMMANDS[0] as RunCommand});
+    actor.send({type: 'command', command: COMMANDS[1] as RunCommand});
+    expect(welcomeView(actor.getSnapshot()).banner).toEqual({
+      text: 'Resuming run-1…',
+      error: false,
+      source: 'progress',
     });
-    expect(attaching.state.banner).toEqual({
+
+    replies.get('resume')?.({ok: true, value: null});
+    await flush();
+    expect(welcomeView(actor.getSnapshot())).toEqual(
+      expect.objectContaining({banner: null, busy: false}),
+    );
+    replies.get('attach')?.(failed('attach failed late'));
+    await flush();
+    expect(welcomeView(actor.getSnapshot())).toMatchObject({banner: null, busy: false});
+  });
+
+  test('regression: a textless stop command clears the progress text of an outstanding attach', () => {
+    const actor = createActor(
+      runControlMachine.provide({
+        actors: {
+          command: fromPromise<WelcomeResult<null>, RunCommand>(() => new Promise(() => {})),
+        },
+      }),
+    ).start();
+    actor.send({type: 'command', command: {kind: 'attach', host: 'local', instance: 'run-a'}});
+    expect(welcomeView(actor.getSnapshot()).banner).toEqual({
       text: 'Attaching to run-a…',
       error: false,
       source: 'progress',
     });
 
-    // Before the attach reply lands, the user stops a different run. `stop` has no progress text
-    // of its own, but it still supersedes the attach: `awaiting` moves on, and the banner must not
-    // keep describing the now-abandoned attach.
-    const stopping = welcomeStep(attaching.state, {
+    // `stop` has no progress text of its own, but it supersedes the attach, so the banner must not
+    // keep describing the abandoned attach.
+    actor.send({
       type: 'command',
       command: {kind: 'stop', host: 'local', instance: 'run-b', force: false},
     });
-    expect(stopping.state.awaiting).not.toBe(attaching.state.awaiting);
-    expect(stopping.state.banner).toBeNull();
+    expect(welcomeView(actor.getSnapshot()).banner).toBeNull();
   });
 
-  test('regression: a textless command and its successful reply retain an asynchronous problem', () => {
-    const problem = welcomeStep(WELCOME_INITIAL, {type: 'problem', text: 'Connection lost.'});
-    const stopping = welcomeStep(problem.state, {
+  test('regression: a textless command and its successful reply retain an asynchronous problem', async () => {
+    const replies: Array<(result: WelcomeResult<null>) => void> = [];
+    const actor = createActor(
+      runControlMachine.provide({
+        actors: {
+          command: fromPromise<WelcomeResult<null>, RunCommand>(
+            () => new Promise(resolve => replies.push(resolve)),
+          ),
+        },
+      }),
+    ).start();
+    actor.send({type: 'problem', text: 'Connection lost.'});
+    actor.send({
       type: 'command',
       command: {kind: 'stop', host: 'local', instance: 'run-a', force: false},
     });
-    const [request] = stopping.requests;
+    const problem = {text: 'Connection lost.', error: true, source: 'problem'} as const;
+    expect(welcomeView(actor.getSnapshot()).banner).toEqual(problem);
 
-    expect(stopping.state.banner).toEqual({
-      text: 'Connection lost.',
-      error: true,
-      source: 'problem',
-    });
-    expect(request).toBeDefined();
-    if (request === undefined) throw new Error('the stop command should be requested');
-
-    const stopped = welcomeStep(stopping.state, {
-      type: 'reply',
-      token: request.token,
-      result: {ok: true, value: null},
-    });
-    expect(stopped.state.awaiting).toBeNull();
-    expect(stopped.state.banner).toEqual(stopping.state.banner);
+    expect(replies).toHaveLength(1);
+    replies[0]?.({ok: true, value: null});
+    await flush();
+    expect(welcomeView(actor.getSnapshot())).toMatchObject({banner: problem, busy: false});
   });
 });

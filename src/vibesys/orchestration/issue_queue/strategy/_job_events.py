@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from vibesys.candidates.api import STOPPED
 from vibesys.orchestration.issue_queue.models import (
+    GenericIssuePerfEvalResult,
     ImplementerReplyModel,
     IssueImplementerResult,
     IssueJudgeResult,
@@ -71,7 +72,9 @@ _ROLE_NAME: dict[Role, Literal["implementer", "judge", "perf-evaluator"]] = {
     Role.JUDGE: "judge",
     Role.PERF: "perf-evaluator",
 }
-type Result = IssueImplementerResult | IssueJudgeResult | IssuePerfEvalResult
+type Result = (
+    IssueImplementerResult | IssueJudgeResult | IssuePerfEvalResult | GenericIssuePerfEvalResult
+)
 
 
 def _with(state: IssueQueueStrategyState, job: Job) -> IssueQueueStrategyState:
@@ -277,7 +280,9 @@ def _decode(role: Role, payload: str, config: IssueQueueConfig) -> object:
             return ImplementerReplyModel.model_validate_json(payload).reply
         if role is Role.JUDGE:
             return JudgeReplyModel.model_validate_json(payload).reply
-        return perf_result_model(config.max_issues_per_perf_eval).model_validate_json(payload)
+        return perf_result_model(
+            config.max_issues_per_perf_eval, domain_id=config.domain_id
+        ).model_validate_json(payload)
     except ValidationError as error:
         return str(error)[:_ERROR_LIMIT]
 
@@ -463,19 +468,29 @@ def _reviewed(
 
 
 def _evaluated(
-    state: IssueQueueStrategyState, result: IssuePerfEvalResult, payload: str
+    state: IssueQueueStrategyState,
+    result: IssuePerfEvalResult | GenericIssuePerfEvalResult,
+    payload: str,
 ) -> IssueQueueStrategyState:
     job = state.job
     if job is None:
         return state
+    if isinstance(result, GenericIssuePerfEvalResult):
+        primary_trend = result.primary_metric_trend
+        secondary_trend = result.secondary_metric_trend or ""
+    else:
+        primary_trend = result.throughput_trend
+        secondary_trend = result.latency_trend
     return _with(
         state,
         job.model_copy(
             update={
                 "filed": _files(result.new_issues),
                 "reply_json": payload,
-                "throughput_trend": result.throughput_trend,
-                "latency_trend": result.latency_trend,
+                # The persisted v1 state keeps its original field names; the generic agent
+                # contract is mapped to them only at this compatibility boundary.
+                "throughput_trend": primary_trend,
+                "latency_trend": secondary_trend,
                 "metrics_json": json.dumps(result.metrics.model_dump(mode="json"), sort_keys=True),
                 "phase": Phase.FILE,
                 "step": Step.NEEDED,
@@ -494,7 +509,7 @@ def _accept(
 
 def _written_turn(
     state: IssueQueueStrategyState,
-    reply: IssueImplementerResult | IssuePerfEvalResult,
+    reply: IssueImplementerResult | IssuePerfEvalResult | GenericIssuePerfEvalResult,
     payload: str,
     candidate: RevisionRef | None,
 ) -> IssueQueueStrategyState:
@@ -533,7 +548,7 @@ def settle_retained(
     role = Role.IMPLEMENTER if job.kind is JobKind.ISSUE else Role.PERF
     reply = _decode(role, job.held_reply, config)
     held = _with(state, job.released())
-    if isinstance(reply, IssueImplementerResult | IssuePerfEvalResult):
+    if isinstance(reply, IssueImplementerResult | IssuePerfEvalResult | GenericIssuePerfEvalResult):
         return _written_turn(held, reply, job.held_reply, candidate)
     return held
 
@@ -576,7 +591,7 @@ def _answered(
 ) -> IssueQueueStrategyState:
     """Accept a role's result. A write turn's waits for its checkpoint to be readable."""
     payload = event.output_json or ""
-    if isinstance(reply, IssueImplementerResult | IssuePerfEvalResult):
+    if isinstance(reply, IssueImplementerResult | IssuePerfEvalResult | GenericIssuePerfEvalResult):
         candidate = _candidate_of(view, job, event.invocation)
         if candidate is None:
             return _with(state, job.holding(payload, event.invocation))
@@ -599,7 +614,13 @@ def on_turn(
         return _correct(state, config, reply, event.invocation) or fail(
             state, f"invalid {role.value} reply"
         )
-    if isinstance(reply, IssueImplementerResult | IssueJudgeResult | IssuePerfEvalResult):
+    if isinstance(
+        reply,
+        IssueImplementerResult
+        | IssueJudgeResult
+        | IssuePerfEvalResult
+        | GenericIssuePerfEvalResult,
+    ):
         return _answered(state, view, reply, job, event)
     return _wait_or_correct(state, view, config, event)
 

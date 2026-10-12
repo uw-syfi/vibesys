@@ -1,0 +1,23 @@
+// A feature's control state is an XState machine (docs/contributing/clients-architecture.md,
+// "State"): a delay is an `after` transition and cancellation is leaving the state that owns the
+// work. Hand-rolled timers and abort controllers in `state/` and `effects/` are the bookkeeping
+// that kept producing stale replies and orphaned timers, so they are not written there. Any
+// reference counts, not only a call: `const later = setTimeout` schedules all the same.
+// The modules `biome.json` excludes from this rule await their machines, a list that only
+// shrinks; biome.json takes no comments, so the list is tracked here and in #1969.
+language js;
+
+or {
+  JsIdentifierExpression(name = `setTimeout`),
+  JsIdentifierExpression(name = `setInterval`),
+  JsIdentifierExpression(name = `AbortController`),
+  `globalThis.setTimeout`,
+  `globalThis.setInterval`,
+  `globalThis.AbortController`
+} as $reference where {
+  register_diagnostic(
+    span = $reference,
+    message = "A feature's state/ and effects/ do not schedule timers or abort work by hand. Use an `after` transition for a delay and leave the state to cancel an invoked operation.",
+    severity = "error"
+  )
+}

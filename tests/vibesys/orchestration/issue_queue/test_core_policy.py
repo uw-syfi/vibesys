@@ -14,7 +14,7 @@ from vibesys.orchestration.issue_queue.core_policy.api import (
     RunBounds,
     build_core_policy,
 )
-from vibesys.orchestration.issue_queue.models import IssueQueueOptions
+from vibesys.orchestration.issue_queue.models import GenericIssuePerfEvalResult, IssueQueueOptions
 from vibesys.orchestration.issue_queue.strategy.api import (
     IMPLEMENTER_REPLY,
     JUDGE_REPLY,
@@ -37,6 +37,7 @@ INPUTS = PolicyInputs(
     accuracy_configured=True,
     benchmark_configured=True,
 )
+GENERIC_INPUTS = INPUTS.model_copy(update={"domain_id": "generic"})
 OPTIONS = st.builds(
     IssueQueueOptions,
     max_rounds=st.integers(1, 6),
@@ -75,6 +76,95 @@ def test_every_declared_reply_schema_has_a_reply_type_and_the_evaluators_is_capp
     capped = policy.reply_schemas[PERF_REPLY]
     schema = json.dumps(capped.model_json_schema())
     assert f'"maxItems": {cap}' in schema
+
+
+def test_the_performance_reply_schema_describes_domain_neutral_measurements() -> None:
+    policy = build_core_policy(
+        IssueQueueOptions(max_rounds=1, max_attempts_per_issue=1, max_issues_per_perf_eval=1),
+        BOUNDS,
+        GENERIC_INPUTS,
+    )
+    reply = policy.reply_schemas[PERF_REPLY]
+    schema = json.dumps(reply.model_json_schema())
+
+    for serving_field in ("load_levels", "token_throughput", "ttft", "tpot"):
+        assert serving_field not in schema
+
+    parsed = reply.model_validate_json(
+        json.dumps(
+            {
+                "analysis": "The queue benchmark improved.",
+                "metrics": {
+                    "measurements": [
+                        {"name": "operations_per_second", "value": 42.0, "unit": "ops/s"}
+                    ]
+                },
+                "evaluator_feedback": ["Measure a larger queue."],
+                "new_issues": [],
+                "primary_metric_trend": "improved",
+                "secondary_metric_trend": "mixed",
+            }
+        )
+    )
+    assert isinstance(parsed, GenericIssuePerfEvalResult)
+    assert parsed.metrics.measurements[0].name == "operations_per_second"
+
+
+def test_an_in_flight_serving_performance_reply_remains_compatible() -> None:
+    policy = build_core_policy(
+        IssueQueueOptions(max_rounds=1, max_attempts_per_issue=1, max_issues_per_perf_eval=1),
+        BOUNDS,
+        GENERIC_INPUTS,
+    )
+    reply = policy.reply_schemas[PERF_REPLY]
+    parsed = reply.model_validate_json(
+        json.dumps(
+            {
+                "analysis": "Measured the configured serving workload.",
+                "metrics": {
+                    "load_levels": [
+                        {
+                            "target_rate": 1.0,
+                            "actual_rate": 1.0,
+                            "num_requests": 1,
+                            "num_completed": 1,
+                            "num_failed": 0,
+                            "duration": 1.0,
+                            "throughput": {
+                                "request_throughput": 1.0,
+                                "token_throughput": 8.0,
+                            },
+                        }
+                    ]
+                },
+                "evaluator_feedback": [],
+                "new_issues": [],
+                "throughput_trend": "improved",
+                "latency_trend": "mixed",
+            }
+        )
+    )
+
+    assert isinstance(parsed, GenericIssuePerfEvalResult)
+    assert parsed.primary_metric_trend == "improved"
+    assert parsed.secondary_metric_trend == "mixed"
+    assert parsed.metrics.measurements == ()
+    normalized = json.dumps(parsed.model_dump(mode="json"))
+    assert "load_levels" not in normalized
+
+
+def test_the_llm_serving_performance_contract_retains_its_structured_metrics() -> None:
+    policy = build_core_policy(
+        IssueQueueOptions(max_rounds=1, max_attempts_per_issue=1, max_issues_per_perf_eval=1),
+        BOUNDS,
+        INPUTS,
+    )
+    schema = json.dumps(policy.reply_schemas[PERF_REPLY].model_json_schema())
+
+    assert "load_levels" in schema
+    assert "token_throughput" in schema
+    assert "throughput_trend" in schema
+    assert '"measurements":' not in schema
 
 
 def test_the_judge_is_the_declared_authority_for_the_only_required_assessment() -> None:

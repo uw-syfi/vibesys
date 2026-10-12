@@ -184,6 +184,7 @@ from vs_runtime._run_control import (
 )
 from vs_runtime._run_environment import (
     AgentPaths,
+    ClusterEvaluationFacts,
     DockerEnvironment,
     DockerEnvironmentConfig,
     DockerEnvironmentFacts,
@@ -487,6 +488,7 @@ __all__ = [
     "BundledResources",
     "CapacityHandling",
     "CapacityTimer",
+    "ClusterEvaluationFacts",
     "CommandExecutionResult",
     "CommittedStateObserver",
     "CompletedRound",

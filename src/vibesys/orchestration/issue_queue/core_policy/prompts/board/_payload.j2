@@ -1,5 +1,5 @@
 {# Context: `payload` (dict): one recorded turn's JSON fields. #}
-{% for key, label in (("summary", "Summary"), ("self_check", "Self Check"), ("verdict", "Verdict"), ("analysis", "Analysis"), ("feedback", "Feedback"), ("throughput_trend", "Throughput Trend"), ("latency_trend", "Latency Trend")) %}
+{% for key, label in (("summary", "Summary"), ("self_check", "Self Check"), ("verdict", "Verdict"), ("analysis", "Analysis"), ("feedback", "Feedback"), ("primary_metric_trend", "Primary Metric Trend"), ("secondary_metric_trend", "Secondary Metric Trend"), ("throughput_trend", "Throughput Trend"), ("latency_trend", "Latency Trend")) %}
 {% if payload.get(key) %}
 - **{{ label }}**: {{ payload[key] }}
 {% endif %}

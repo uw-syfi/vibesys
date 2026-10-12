@@ -365,6 +365,9 @@ importers:
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../ipc
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../../machine
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../../runs
@@ -383,6 +386,9 @@ importers:
       react:
         specifier: 19.1.1
         version: 19.1.1
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
@@ -496,6 +502,22 @@ importers:
       '@vibesys/store':
         specifier: workspace:*
         version: link:../store
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  machine:
+    dependencies:
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../store
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -2227,6 +2249,9 @@ packages:
       utf-8-validate:
         optional: true
 
+  xstate@5.33.2:
+    resolution: {integrity: sha512-8tC7yXgeCvpT8gKEeEje6ikJJG1wpnoLiXe+HfECW8m10ubMd3QxKOwWA8KxPJVBcLwfdRoMKYxIBGYKmo37/A==}
+
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
@@ -3561,6 +3586,8 @@ snapshots:
   whatwg-mimetype@3.0.0: {}
 
   ws@8.22.0: {}
+
+  xstate@5.33.2: {}
 
   yallist@3.1.1: {}
 

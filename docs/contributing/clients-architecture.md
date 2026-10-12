@@ -40,6 +40,8 @@ clients/
   contracts/        @vibesys/contracts        generated message types + the one runtime validator
   ui/               @vibesys/ui               domain-free React primitives + design tokens
   store/            @vibesys/store            domain-free reducer kernel + fold model-test kit
+  machine/          @vibesys/machine          domain-free machine glue + machine model-test kit
+                                                                                 -> store
   run-state/        @vibesys/run-state        pure fold of run events; ./rounds, ./performance,
                                               ./transcript projections -> contracts
   transport/        @vibesys/transport        framing, redial, persistent stream -> contracts
@@ -48,7 +50,8 @@ clients/
   runs/             @vibesys/runs             run identity, recent status, resume and stop
                                                                                  -> contracts, hosts
   run-session/      @vibesys/run-session      one live run: runStep, the session lifecycle, its
-                                              ports, connectRun, WebSession    -> run-state, transport, store
+                                              ports, connectRun, WebSession    -> contracts, run-state,
+                                                                       transport, store
   transport-node/   @vibesys/transport-node   stdio / unix socket / ssh channel  -> transport
   ipc/              @vibesys/ipc              typed main <-> renderer messages, the welcome
                                               requests' parsers per feature      -> hosts, runs
@@ -72,7 +75,8 @@ flowchart BT
   transport["transport (L1)"] --> contracts
   hosts["hosts (L1)"] --> contracts
   runs["runs (L2)"] --> contracts & hosts
-  run-session["run-session (L2)"] --> run-state & transport & store
+  machine["machine (L1)"] --> store
+  run-session["run-session (L2)"] --> contracts & run-state & transport & store
   transport-node["transport-node (L2, Node)"] --> transport
   ipc["ipc (L3)"] --> hosts & runs
   connection["connection (L3, Node)"] --> contracts & transport & hosts
@@ -91,7 +95,7 @@ cycles, and forbids feature-to-feature and app-to-app edges, because peers share
 | Layer | Rank | Packages | May depend on |
 | --- | --- | --- | --- |
 | `foundation` | 0 | `contracts`, `ui`, `store` | nothing in the workspace |
-| `core` | 1 | `run-state`, `transport`, `hosts` | foundation |
+| `core` | 1 | `run-state`, `transport`, `hosts`, `machine` | foundation |
 | `domain` | 2 | `runs`, `run-session`, `transport-node` | foundation, core |
 | `service` | 3 | `ipc`, `connection`, `settings` | foundation, core, domain |
 | `feature` | 4 | `feature-*` | anything below |
@@ -172,6 +176,7 @@ through no path: only `node` entries may import them, and only `desktop-main` an
 | 6 | `@vibesys/ui` and `@vibesys/store` have no domain dependencies and name no domain concept; helpers live in the lowest package that needs them, with no shared junk drawer | `layer-direction` (both are rank 0), `domain-free` (no word of `DOMAIN_WORDS`, or an inflection of one, in their production source or stylesheet); review |
 | 7 | A foundation, core, or domain package is named for the concept it owns, not for a bucket | `bucket-names` (no segment of its name in `BUCKET_NAMES`) |
 | 8 | A sandboxed preload loads only Electron at run time; every workspace import in it is erased | `preload-sandbox` (what the entry's emitted CommonJS still requires); `.dependency-cruiser.mjs` keeps a preload's imports to `@vibesys/ipc` and Electron |
+| 9 | Control state is an XState machine; data folds are plain reducers (see [State](#state)) | `external-dependencies` (`xstate` only in features' `./state` and `./renderer` and `MACHINE_PACKAGES`); `lint-rules/features-no-hand-rolled-control.grit`, `lint-rules/control-state-no-store-kernel.grit` |
 
 All package-graph rules, and the tables they read, live in one module,
 [`clients/scripts/check_package_graph.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/scripts/check_package_graph.mjs),
@@ -209,6 +214,7 @@ checker (`EXTERNAL_DEPENDENCIES`, rule `external-dependencies`):
 | `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, features' `./renderer`, browser and renderer apps |
 | `electron` | `node` and `preload` entries of features (`./main`) and apps (`desktop-main`) |
 | `@opentui/core` | `node` entries of apps (the deprecated `tui`) |
+| `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine`; `run-session` joins it with its session machine (#1969). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
 | Node builtins (`node:*` and bare names) | `node` entries |
 
 A package that declares one of them in `dependencies` must have an entry allowed to use it. Knip
@@ -220,6 +226,95 @@ used, and used only where its runtime allows.
 lets it skip the per-entry project rules; every other rule applies to it. It is deprecated and keeps
 its exemption until it is deleted. The table only shrinks: `desktop` left it when its main process
 was composed from packages (`apps/desktop-main`, phase 8 of #1878).
+
+## State
+
+Client state comes in two kinds, and each has one form.
+
+**Control state is an XState v5 machine.** Control state is a mode with effects: it starts work,
+waits for it, retries, times out, cancels, and decides what a late answer means. The live run
+session (start-up, then the stream; single-flight recovery), the run-control banner (the latest
+command wins), the desktop connection manager (dial, back off, redial on wake), and a sheet that
+loads, submits, and cancels are all control state. Each is written as
+`setup({types, actors, actions, guards, delays}).createMachine(...)`:
+
+- every operation is an invoked actor with an explicit `id`, declared with a placeholder
+  (`unprovided` from `@vibesys/machine`) and provided by the shell with `machine.provide`, so the
+  machine stays pure and the operation stays injectable;
+- a delay is an `after` transition, with the clock injected through `createActor`'s `clock`
+  option (`clockFrom` adapts a `ScheduleTimeout`, so tests drive it with a fake clock);
+- cancellation is leaving the state that owns the work: the operation stops, its delay is
+  cancelled, and a stopped operation never reports, so there is no reply token to compare;
+- the view reads the actor through `actorStore`, which notifies only when the view changes.
+
+**A data fold is a plain reducer.** A data fold turns ordered inputs into a value and has no mode:
+the run event fold (`@vibesys/run-state`), a host's listing, recent runs. It is a pure
+`(state, action) -> state` on `@vibesys/store`, tested with `checkModel`. A package that owns
+control state keeps its folds in their own modules and uses `createStore` nowhere else.
+
+**Resources.** XState drops a late output but cannot stop the work that produces it: a
+`fromPromise` body keeps running after its actor stops. So an operation that opens a resource
+returns it, and the machine installs it in that operation's `onDone` action, from where leaving the
+state disposes it. An operation that holds a resource only while it runs either reads its `signal`
+and disposes what it opened when that is aborted, or leaves teardown to the owner of the
+connection it ran on, which tears down whatever they left open when the shell closes it.
+
+**Failures.** Every invoke has an `onError` as well as an `onDone`. The shell's operations report
+expected failures as output (a snapshot load resolves to `{ok: false, error}`), and
+`onError` handles a rejection the same way, so an unexpected throw ends the flight instead of
+leaving its region waiting. An action can throw too (a fold or a connection method), which stops
+the actor; the shell observes that with an `error` observer and releases what it holds.
+
+**Tests.** A machine is tested three ways, all scaffolded by `pnpm new:package feature <name>`:
+pure transitions through `getNextSnapshot` (or `transition`, which also returns the actions);
+`checkMachine` from `@vibesys/machine/testing`, which folds seeded random events (plain events,
+and the done, error, and fire outcomes of whatever is live) and checks after every step that each
+live operation and armed delay belongs to an active state, that no delay is armed twice or
+cancelled while not armed, that a final state holds nothing, and the model's own invariants; and,
+for stale replies, a live actor whose operations the test settles in a chosen order. Migrating a
+reducer to a machine keeps its seeded invariants (ported through the kit) and its shell's
+behavioral tests, changed only where an operation's reply now lands a step later (a test then
+waits for the published state instead of reading it at once), and deletes the reducer in the same
+change.
+
+**Why.** Hand-rolled control state kept producing the same bugs: a reply token compared against the
+wrong slot, a timer not cleared on one exit path, an abort controller that outlived its owner.
+Each fix added bookkeeping that the next change missed. A machine makes "this work belongs to
+this state" structural, and the kit checks it over every seeded interleaving.
+
+**Rejected alternatives.**
+
+- *Effect.ts.* Its fibers and scopes solve cancellation, but the model-based tests that are the
+  core of this codebase's testing cannot enumerate or step a fiber: the seeded invariant harness
+  would not port. XState keeps the transition pure (`transition` is a function), so it does.
+- *No library.* Reducers with reply tokens plus hand-written timer and abort bookkeeping in the
+  shell were what we had. Cancellation and timing lived in the shell, outside the tested core,
+  and kept regressing.
+- *XState for folds too.* A fold has no transitions to model: wrapping it in a one-state machine
+  adds a runtime and an indirection and checks nothing more than `checkModel` does.
+
+**Pitfalls.** Inside `setup`, `enqueueActions` does not type-check under
+`exactOptionalPropertyTypes`; use `assign` and parameterized actions. Actions in one transition see
+each other's `assign`s in order, so an action that must read the previous context runs before the
+`assign`. A placeholder actor typed differently from the real one makes `provide` reject it; type
+the placeholder with the operation's input and output. `always` guards should read context, not
+the event. Every invoke gets an explicit `id` (the kit requires it).
+
+**Where XState may appear** is rule 9: the `external-dependencies` table confines the import, and
+two GritQL rules (wired in `biome.json`) keep features' `state/` and `effects/` free of
+`setTimeout`, `setInterval`, and `AbortController`, and keep migrated control-state packages off
+`createStore`. `run-session`'s session lifecycle and the features still on the reducer kernel are
+migrated one per change. Until then the two effects modules that hand-roll a timer or an abort
+controller (`hosts`' path completion, `gateway-connect`'s attempt) are listed as exclusions in
+`biome.json`, a list that only shrinks, and `run-session` is not yet held to the `createStore`
+rule; the remaining migrations and those exclusions are tracked in #1969.
+
+| Control state | Form | Status |
+| --- | --- | --- |
+| `run-session`'s session lifecycle (`sessionStep`, `WebSession`) | reducer with reply tokens | pending migration (#1969) |
+| `feature-run-control`'s commands and banner | machine | migrated (#1950) |
+| `@vibesys/connection`'s connection manager (`connection/src/state`) | pure `state + event -> state + requests` core | one change; `connection` joins `MACHINE_PACKAGES` with it |
+| `feature-start-run`, `feature-hosts`, `feature-gateway-connect`, `feature-replay` screen stores | reducer with reply tokens | one feature per change |
 
 ## Build model
 
@@ -285,7 +380,9 @@ its runtime's `lib` and `types`, the test project and solution `tsconfig.json`, 
 `tsconfig.architecture.json` that dependency-cruiser resolves. Knip derives its policy from the
 exports, and Biome and Turborepo cover the package by glob. A feature lands in
 `features/<name>` as `@vibesys/feature-<name>` with `./state`, `./renderer`, and `./main`; an app
-in `apps/<name>` as `@vibesys/app-<name>`; any other layer in `<name>` with one `.` entry
+in `apps/<name>` as `@vibesys/app-<name>`; a feature's `./state` also starts from a
+control-state machine skeleton, its pure-transition test, and its `checkMachine` model (see
+[State](#state)); any other layer in `<name>` with one `.` entry
 (`neutral` unless `--runtime` says otherwise). Its test scaffolds one package of each shape and
 requires the graph checker, the workspace declarations, `tsc -b`, and the package's own tests to
 pass, and a Node import in a scaffolded renderer entry to fail compilation.
@@ -307,7 +404,8 @@ names a missing or extra one.
 | `@vibesys/transport-node` | domain | exists: the Unix-socket `ServerClient`; desktop's ssh and local-host links join it with the connection manager | backend-client split (#1910) |
 | `@vibesys/hosts` | core | exists: host identity and keys, labels, the checkout and project path rules (`HostValidationError`), a host's listed runs with their phase text (`instancePhaseText`), and what the window shows about a connection; depends on `contracts` | domain split (#1949) |
 | `@vibesys/runs` | domain | exists: run, task, and instance ids, a recent run's status from its host's listing, the exact-resume policy, the stop flow; depends on `contracts`, `hosts` | domain split (#1949) |
-| `@vibesys/run-session` | domain | exists: the run fold's wiring (`runStep`), the session lifecycle (`sessionStep`), its ports, the run connection over a control transport (`connectRun`), and `WebSession`, with `./testing` (an in-memory control transport and page lifecycle, and `sessionWith`) | domain split (#1949) |
+| `@vibesys/machine` | core | exists: `actorStore`, `clockFrom`, `unprovided` (`.`) and `checkMachine` (`./testing`); domain-free | state architecture (#1950) |
+| `@vibesys/run-session` | domain | exists: the run fold's wiring (`runStep`), the session lifecycle (`sessionStep`, a reducer pending its migration to a machine, #1969), its ports, the run connection over a control transport (`connectRun`), and `WebSession`, with `./testing` (an in-memory control transport and page lifecycle, and `sessionWith`) | domain split (#1949) |
 | `@vibesys/entities` | domain | deleted: split into `hosts` and `runs`; task arguments (`shellWords`) moved into `@vibesys/feature-start-run` | domain split (#1949) |
 | `@vibesys/ipc` | service | exists: the run page's bridge (port messages, their validation, the preload contract web's desktop shell reads) and the welcome view's channels, events, and payloads, with each feature's requests (channels, bridge slice, and the parser the main process runs) in `welcome/<feature>.ts`, and `./testing` (random window states for store models); depends on `hosts`, `runs` | domain packages (phase 5 of #1878); per-feature parsers with phase 8 |
 | `@vibesys/connection` | service | exists (`.`, `node`): the connection manager (`ConnectionManager`, `HostConnection`: a pure `state/` machine and a `shell/` owning the links, channels, and timers), the ssh and local links, the bootstrap, and `connectionStatus`, with `./testing` (`FakeHelper`, `FakeLink`, and the `HostConnection` contract suite); depends on `contracts`, `transport`, `hosts` | desktop main process (phase 8 of #1878) |

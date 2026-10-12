@@ -1,7 +1,7 @@
 /**
- * The run-control feature's pure core: the run commands that do not belong to one sheet (attach,
- * resume, stop, retry, switching between the run and the welcome view), the banner answering the
- * latest of them, and the title strip's selectors. Its effects reach the main process only through
+ * The run-control feature's pure core: the machine for the run commands that do not belong to one
+ * sheet (attach, resume, stop, retry, switching between the run and the welcome view), the banner
+ * answering the latest of them, and the title strip's selectors. Its effects reach the main process only through
  * `RunControlBridge`, which the app implements with the welcome bridge.
  */
 
@@ -12,11 +12,11 @@ export type RunControlBridge = RunControlWelcomeBridge;
 
 export {
   type RunCommand,
+  runControlMachine,
   WELCOME_INITIAL,
   type WelcomeAction,
-  type WelcomeRequest,
   type WelcomeState,
-  welcomeStep,
+  welcomeView,
 } from './run-control.js';
 export {
   connectionText,

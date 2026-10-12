@@ -1,0 +1,16 @@
+// A package whose control state is a machine does not also hand-roll one on the reducer kernel
+// (docs/contributing/clients-architecture.md, "State"): `createStore` from `@vibesys/store` is for
+// data folds, and a control-state package's fold modules are excluded where this rule is wired
+// (biome.json). A package joins the rule's includes when its control state becomes a machine
+// (`run-session` is pending, #1969). Any reference counts, so an alias is caught too. (An import pattern would miss
+// `import {createStore, only}`: Grit's `import $clause from $source` does not match a named clause
+// of more than one specifier.)
+language js;
+
+JsIdentifierExpression(name = `createStore`) as $reference where {
+  register_diagnostic(
+    span = $reference,
+    message = "Control state here is an XState machine: run it with createActor (and actorStore from @vibesys/machine for a view), not createStore from @vibesys/store.",
+    severity = "error"
+  )
+}

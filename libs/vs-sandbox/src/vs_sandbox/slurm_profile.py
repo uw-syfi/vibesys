@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from vs_evaluation.api import ProfileField
-from vs_slurm.api import shell_join_with_port
+from vs_slurm.api import PORT_PLACEHOLDER, shell_join_with_port
 
 if TYPE_CHECKING:
     from vs_sandbox.slurm_policy import SlurmExecutionPolicy
@@ -41,27 +41,23 @@ def configured_capture_lifecycle(
     *,
     workload_timeout_seconds: int | None = None,
 ) -> dict[str, object] | None:
-    """Return the serving capture lifecycle, or ``None`` without a service.
+    """Return the capture lifecycle the run can execute, or ``None`` when it has none.
 
-    A configured service requires ``profile.command``; a benchmark is never a fallback.
-
-    The service runs under the profiler on one dynamic port; the load is the
-    trusted profiling command; startup, grace, and timeout fit inside the job
-    timeout.
+    With a configured service, the service runs under the profiler on one dynamic
+    port and the load is the trusted profiling command; ``profile.command`` is then
+    required, and a benchmark is never a fallback. Without a service the profiling
+    command is itself the profiled target and runs to completion under the profiler
+    (a kernel or script workload), so no signal ever stops it; with no command there
+    is nothing to capture and the result is ``None``. Startup, grace, and timeout
+    fit inside the job timeout.
     """
     service = policy.remote_service()
     if service is None:
-        return None
+        return _command_capture_lifecycle(config, profile_command, workload_timeout_seconds)
     if profile_command is None:
         message = "profile.command is required for a configured serving capture"
         raise ValueError(message)
-    job_timeout_s = float(config.job_timeout_seconds)
-    completion_margin_s = min(
-        _MAX_JOB_MARGIN_SECONDS,
-        max(_MIN_JOB_MARGIN_SECONDS, job_timeout_s * _JOB_MARGIN_FRACTION),
-    )
-    timeout_s = max(1.0, job_timeout_s - completion_margin_s)
-    grace_s = min(_MAX_GRACE_SECONDS, max(_MIN_GRACE_SECONDS, timeout_s * _GRACE_FRACTION))
+    timeout_s, grace_s = _job_budget(config)
     ready_timeout_s = min(float(service.startup_timeout_seconds), max(1.0, timeout_s - grace_s))
     if workload_timeout_seconds is not None:
         timeout_s = min(timeout_s, ready_timeout_s + workload_timeout_seconds + grace_s)
@@ -95,6 +91,42 @@ def configured_capture_lifecycle(
         "load_timeout_s": workload_timeout_seconds,
         "load_command": f"{read_port}\n{shell_join_with_port(profile_command)}",
         "setup_command": setup_command,
+        "stop_signal": "SIGINT",
+        "grace_s": grace_s,
+        "timeout_s": timeout_s,
+    }
+
+
+def _job_budget(config: SlurmConfig) -> tuple[float, float]:
+    """The capture's overall timeout and stop grace, both fitted inside the job timeout."""
+    job_timeout_s = float(config.job_timeout_seconds)
+    completion_margin_s = min(
+        _MAX_JOB_MARGIN_SECONDS,
+        max(_MIN_JOB_MARGIN_SECONDS, job_timeout_s * _JOB_MARGIN_FRACTION),
+    )
+    timeout_s = max(1.0, job_timeout_s - completion_margin_s)
+    grace_s = min(_MAX_GRACE_SECONDS, max(_MIN_GRACE_SECONDS, timeout_s * _GRACE_FRACTION))
+    return timeout_s, grace_s
+
+
+def _command_capture_lifecycle(
+    config: SlurmConfig,
+    profile_command: tuple[str, ...] | None,
+    workload_timeout_seconds: int | None,
+) -> dict[str, object] | None:
+    """The lifecycle of a command-only target: it exits by itself, so no stop signal is used."""
+    if profile_command is None:
+        return None
+    if any(PORT_PLACEHOLDER in argument for argument in profile_command):
+        message = "profile.command uses the dynamic port, which needs a [vibesys.service]"
+        raise ValueError(message)
+    timeout_s, grace_s = _job_budget(config)
+    if workload_timeout_seconds is not None:
+        timeout_s = min(timeout_s, workload_timeout_seconds + grace_s)
+    return {
+        "command": shlex.join(profile_command),
+        "cwd": None,
+        "env": {},
         "stop_signal": "SIGINT",
         "grace_s": grace_s,
         "timeout_s": timeout_s,

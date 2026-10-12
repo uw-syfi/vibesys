@@ -90,6 +90,28 @@
       "plugins": ["./lint-rules/ui-no-timers.grit"]
     },
     {
+      "includes": [
+        "features/*/src/**/state/**/*.ts",
+        "features/*/src/**/state/**/*.tsx",
+        "features/*/src/**/effects/**/*.ts",
+        "features/*/src/**/effects/**/*.tsx",
+        "!**/*.test.ts",
+        "!**/*.test.tsx",
+        "!features/gateway-connect/src/renderer/effects/gateway-connect.ts",
+        "!features/hosts/src/renderer/effects/stores.ts"
+      ],
+      "plugins": ["./lint-rules/features-no-hand-rolled-control.grit"]
+    },
+    {
+      "includes": [
+        "features/run-control/src/**/*.ts",
+        "features/run-control/src/**/*.tsx",
+        "!**/*.test.ts",
+        "!**/*.test.tsx"
+      ],
+      "plugins": ["./lint-rules/control-state-no-store-kernel.grit"]
+    },
+    {
       "includes": ["**/*.test.ts", "**/*.test.tsx"],
       "linter": {
         "rules": {

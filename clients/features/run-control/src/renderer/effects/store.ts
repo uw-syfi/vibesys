@@ -1,17 +1,19 @@
 /**
- * The run-control feature's shell: its store, each run command performed through the injected
- * `RunControlBridge` and its reply dispatched back with the command's token.
+ * The run-control feature's shell: the machine's actor, its `command` operation performed through
+ * the injected `RunControlBridge`, seen as the store the view subscribes to.
  */
 
 import {settled, type WelcomeResult} from '@vibesys/ipc';
-import {createStore, type Store} from '@vibesys/store';
+import {actorStore} from '@vibesys/machine';
+import type {Store} from '@vibesys/store';
+import {createActor, fromPromise} from 'xstate';
 import {
   type RunCommand,
   type RunControlBridge,
-  WELCOME_INITIAL,
+  runControlMachine,
   type WelcomeAction,
   type WelcomeState,
-  welcomeStep,
+  welcomeView,
 } from '../../state/index.js';
 
 /** Ask the user a yes/no question (the window's native confirm). */
@@ -48,9 +50,13 @@ export function createRunControlStore(
   bridge: RunControlBridge,
   confirm: Confirm,
 ): Store<WelcomeState, WelcomeAction> {
-  return createStore(welcomeStep, WELCOME_INITIAL, (request, dispatch) => {
-    void settled(command(bridge, confirm, request.command)).then(result =>
-      dispatch({type: 'reply', token: request.token, result}),
-    );
+  const machine = runControlMachine.provide({
+    actors: {
+      command: fromPromise<WelcomeResult<null>, RunCommand>(({input}) =>
+        settled(command(bridge, confirm, input)),
+      ),
+    },
   });
+  // The actor lives as long as the window that renders it, so it is intentionally never stopped.
+  return actorStore(createActor(machine).start(), welcomeView);
 }

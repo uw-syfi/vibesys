@@ -48,11 +48,13 @@
     "@vibesys/contracts": "workspace:*",
     "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
+    "@vibesys/machine": "workspace:*",
     "@vibesys/runs": "workspace:*",
     "@vibesys/settings": "workspace:*",
     "@vibesys/store": "workspace:*",
     "@vibesys/transport": "workspace:*",
     "@vibesys/ui": "workspace:*",
-    "react": "19.1.1"
+    "react": "19.1.1",
+    "xstate": "5.33.2"
   }
 }

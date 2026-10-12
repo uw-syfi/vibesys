@@ -12,7 +12,10 @@
  * from the exports, and Biome and Turborepo cover the package by glob, so neither needs an edit.
  *
  * A feature (`pnpm new:package feature stop-run`) lands in `features/<name>` as
- * `@vibesys/feature-<name>` with `./state`, `./renderer`, and `./main`; an app in `apps/<name>` as
+ * `@vibesys/feature-<name>` with `./state`, `./renderer`, and `./main`, and its `./state` starts
+ * from a control-state machine skeleton (`setup({types, actors, actions, guards, delays})` with an
+ * injected operation), a pure-transition test through `getNextSnapshot`, and the seeded invariant
+ * harness (`checkMachine` from `@vibesys/machine/testing`); an app in `apps/<name>` as
  * `@vibesys/app-<name>`; any other layer in `<name>` as `@vibesys/<name>` with one `.` entry of the
  * given runtime (`neutral` unless `--runtime` says otherwise).
  *
@@ -27,6 +30,8 @@ import {FEATURE_ENTRIES, LAYERS, RUNTIMES} from './check_package_graph.mjs';
 
 const NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const ARCHITECTURE_TSCONFIG = 'tsconfig.architecture.json';
+/** The package that owns the machine glue; its manifest pins the one `xstate` version. */
+const MACHINE_PACKAGE = 'machine';
 const TYPESCRIPT = '^5.8.3';
 const BUN_TYPES = '1.4.2';
 const NODE_TYPES = '^24.0.0';
@@ -145,6 +150,104 @@ function entryFiles(plan, subpath, base) {
   };
 }
 
+/** The `xstate` version the workspace pins, read from the machine package's manifest. */
+function xstateVersion(workspaceRoot) {
+  const manifest = JSON.parse(
+    readFileSync(join(workspaceRoot, MACHINE_PACKAGE, 'package.json'), 'utf8'),
+  );
+  return manifest.dependencies.xstate;
+}
+
+/** A feature's control-state skeleton: the machine, its tests, and its export. */
+function machineFiles(plan) {
+  const id = camel(plan.name);
+  const type = pascal(plan.name);
+  return {
+    'src/state/machine.ts': `/**
+ * The ${plan.name} feature's control state, as a machine (docs/contributing/clients-architecture.md,
+ * "State"). A skeleton to replace: a mode (\`idle\`, \`working\`), the operation \`working\`
+ * invokes (provided by \`renderer/effects\` with \`machine.provide({actors})\`), and a deadline as an
+ * \`after\` delay. Leaving \`working\` stops the operation and cancels the deadline.
+ */
+import {unprovided} from '@vibesys/machine';
+import {assign, setup} from 'xstate';
+
+export interface ${type}Context {
+  readonly attempts: number;
+  readonly error: string | null;
+}
+
+export type ${type}Event = {readonly type: 'start'} | {readonly type: 'cancel'};
+
+export const ${id}Machine = setup({
+  types: {context: {} as ${type}Context, events: {} as ${type}Event},
+  actors: {work: unprovided<null>('work')},
+  actions: {
+    countAttempt: assign(({context}) => ({attempts: context.attempts + 1, error: null})),
+    fail: assign((_, params: {readonly error: string}) => ({error: params.error})),
+  },
+  guards: {mayStart: ({context}) => context.attempts < 3},
+  delays: {deadline: 10_000},
+}).createMachine({
+  id: '${id}',
+  context: {attempts: 0, error: null},
+  initial: 'idle',
+  states: {
+    idle: {on: {start: {guard: 'mayStart', target: 'working', actions: 'countAttempt'}}},
+    working: {
+      invoke: {
+        id: 'work',
+        src: 'work',
+        onDone: 'idle',
+        onError: {
+          target: 'idle',
+          actions: {type: 'fail', params: ({event}) => ({error: String(event.error)})},
+        },
+      },
+      after: {deadline: {target: 'idle', actions: {type: 'fail', params: {error: 'timed out'}}}},
+      on: {cancel: 'idle'},
+    },
+  },
+});
+`,
+    'src/state/machine.test.ts': `import {describe, expect, test} from 'bun:test';
+import {checkMachine} from '@vibesys/machine/testing';
+import {getInitialSnapshot, getNextSnapshot} from 'xstate';
+import {${id}Machine} from './machine.js';
+
+describe('${id}Machine', () => {
+  test('start begins the work, and the deadline gives up on it', () => {
+    const working = getNextSnapshot(${id}Machine, getInitialSnapshot(${id}Machine), {type: 'start'});
+    expect(working.value).toBe('working');
+    const timedOut = getNextSnapshot(${id}Machine, working, {
+      type: 'xstate.after.deadline.${id}.working',
+    } as never);
+    expect({value: timedOut.value, error: timedOut.context.error}).toEqual({
+      value: 'idle',
+      error: 'timed out',
+    });
+  });
+
+  test('model: work and its deadline live only while working; attempts are bounded', () => {
+    checkMachine({
+      machine: ${id}Machine,
+      input: undefined,
+      event: (random, live) =>
+        random.pick([
+          {type: 'start'},
+          {type: 'cancel'},
+          ...live.operations.map(operation => live.done(operation, null)),
+          ...live.operations.map(operation => live.error(operation, new Error('failed'))),
+          ...live.delays.map(delay => live.fire(delay)),
+        ]),
+      invariants: snapshot => (snapshot.context.attempts <= 3 ? [] : ['more than three attempts']),
+    });
+  });
+});
+`,
+  };
+}
+
 /** Every file the package needs, as `{path: content}` relative to the package directory. */
 export function packageFiles(plan, workspaceRoot) {
   const packageRoot = join(workspaceRoot, plan.directory);
@@ -157,6 +260,15 @@ export function packageFiles(plan, workspaceRoot) {
   ]);
   const projects = entries.map(([, entry]) => entry.project);
   const files = Object.assign({}, ...entries.map(([, entry]) => entry.files));
+  const feature = plan.layer === 'feature';
+  const machine = relative(packageRoot, join(workspaceRoot, MACHINE_PACKAGE));
+  if (feature) {
+    Object.assign(files, machineFiles(plan));
+    files['src/state/index.ts'] += `export {${camel(plan.name)}Machine} from './machine.js';\n`;
+    const state = JSON.parse(files['tsconfig.state.json']);
+    state.references = [{path: `${machine}/tsconfig.lib.json`}];
+    files['tsconfig.state.json'] = json(state);
+  }
   files['tsconfig.test.json'] = json({
     extends: base,
     compilerOptions: {
@@ -165,7 +277,10 @@ export function packageFiles(plan, workspaceRoot) {
       tsBuildInfoFile: '.tsbuild/test.tsbuildinfo',
     },
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
-    references: projects.map(project => ({path: `./${project}`})),
+    references: [
+      ...projects.map(project => `./${project}`),
+      ...(feature ? [`${machine}/tsconfig.testing.json`] : []),
+    ].map(path => ({path})),
   });
   files['tsconfig.json'] = json({
     files: [],
@@ -184,6 +299,14 @@ export function packageFiles(plan, workspaceRoot) {
       check: 'tsc -b',
       test: `node ${runner} ./src`,
     },
+    ...(feature
+      ? {
+          dependencies: {
+            '@vibesys/machine': 'workspace:*',
+            xstate: xstateVersion(workspaceRoot),
+          },
+        }
+      : {}),
     devDependencies: {
       '@types/bun': BUN_TYPES,
       ...(usesNode ? {'@types/node': NODE_TYPES} : {}),

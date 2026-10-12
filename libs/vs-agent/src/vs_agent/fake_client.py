@@ -14,6 +14,7 @@ constructed response objects, and this module never runs an external agent.
 from __future__ import annotations
 
 import functools
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Concatenate, Literal, Self, TypeVar
@@ -35,6 +36,7 @@ from vs_agent.contracts import (
     SteerOutcome,
     session_spec_fingerprint,
 )
+from vs_agent.reply_limits import ReplyGuard, reply_breach
 from vs_agent.runner import validate_typed_response
 from vs_agent.session_errors import SessionResumeError
 from vs_agent.session_store import NullSessionStore, SessionStore
@@ -125,6 +127,13 @@ def _materialize_text(source: TextSource, invocation: FakeInvocation) -> str:
 
 
 _PopT = TypeVar("_PopT")
+
+
+def _refuse_flood(text: str) -> None:
+    """End the turn as production does when its reply passes the declared reply limits."""
+    refusal = reply_breach(text)
+    if refusal is not None:
+        raise AgentOutputSchemaError(refusal)
 
 
 def _pop(queues: dict[str, list[_PopT]], kind: str) -> _PopT | None:
@@ -522,6 +531,7 @@ class FakeAgentClient:
                 session_spec.role, invocation, turn.output_schema
             ).model_dump_json()
         )
+        _refuse_flood(text)
         result = AgentTurnResult(
             text=text,
             provider_session_id=(
@@ -673,7 +683,9 @@ class FakeAgentClient:
         self._maybe_raise(kind, user_prompt, round_label, invocation_id)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
-        return self._resolve_text(kind, invocation)
+        text = self._resolve_text(kind, invocation)
+        _refuse_flood(text)
+        return text
 
     # -- internals ------------------------------------------------------------
 
@@ -780,7 +792,11 @@ class FakeAgentClient:
         chunks = self._stream_chunks.get(kind)
         if not chunks:
             return
+        guard = ReplyGuard()
         for chunk in chunks:
+            refusal = guard.feed(chunk)
+            if refusal is not None:
+                raise AgentOutputSchemaError(refusal)
             self._sink.agent_output(
                 chunk,
                 channel="assistant",
@@ -809,6 +825,7 @@ class FakeAgentClient:
             # takes the same path: an instance of the wrong type fails here
             # exactly as the equivalent agent reply would.
             value = value.model_dump(mode="json")
+        _refuse_flood(json.dumps(value))
         return validate_typed_response(value, response_cls)
 
     def _resolve_text(self, kind: str, invocation: FakeInvocation) -> str:

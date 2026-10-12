@@ -30,8 +30,10 @@
  *   that entry is `neutral` or of the same runtime, so a Node-only package is unreachable from a
  *   `dom` or `neutral` entry.
  * - `external-dependencies`: React only in `dom` entries, Electron only in `node` and `preload`
- *   entries of features and apps, Node builtins only in `node` entries (`EXTERNAL_DEPENDENCIES`); a
- *   package that declares one of them in `dependencies` has an entry that may use it.
+ *   entries of features and apps, XState only where control state lives (features' `./state` and
+ *   `./renderer`, and the effect-owning packages in `MACHINE_PACKAGES`), Node builtins only in
+ *   `node` entries (`EXTERNAL_DEPENDENCIES`); a package that declares one of them in
+ *   `dependencies` has an entry that may use it.
  * - `preload-sandbox`: a `preload` entry's emitted code loads only Electron. Electron's sandbox
  *   gives a preload a `require` that reaches `electron` and nothing else, so a workspace package is
  *   imported as a type (`import type`, `typeof import(...)`), never as a value.
@@ -108,15 +110,34 @@ export const RUNTIMES = {
 export const FEATURE_ENTRIES = {'./state': 'neutral', './renderer': 'dom', './main': 'node'};
 
 /**
+ * The packages that own effects and run control-state machines outside a feature
+ * (docs/contributing/clients-architecture.md, "State"): the machine glue and its test kit. The
+ * live run session joins them with its session machine (#1969). Folds (`store`, `run-state`),
+ * models (`hosts`, `runs`), primitives (`ui`), and the wire packages (`contracts`, `transport`,
+ * `ipc`) never import XState.
+ */
+export const MACHINE_PACKAGES = ['@vibesys/machine'];
+const ALL_RUNTIMES = Object.keys(RUNTIMES);
+
+/**
  * Third-party imports confined by runtime and layer, the one allowlist for them. A specifier
- * matches an entry when it is the package or one of its subpaths. An importing entry must have one
- * of `runtimes`, and its package one of `layers` when that is given. Node builtins (`node:*` and
- * the bare names in `builtinModules`) are confined to `node` entries the same way.
+ * matches a rule when it is the package or one of its subpaths, and a package may appear in more
+ * than one rule: an import is allowed when any of its rules allows it. A rule allows an importing
+ * entry with one of its `runtimes`, and, when given, of a package in one of its `layers`, at one of
+ * its `subpaths`, or named in its `names`. Node builtins (`node:*` and the bare names in
+ * `builtinModules`) are confined to `node` entries the same way.
  */
 export const EXTERNAL_DEPENDENCIES = [
   {packages: ['react', 'react-dom'], runtimes: ['dom']},
   {packages: ['electron'], runtimes: ['node', 'preload'], layers: ['feature', 'app']},
   {packages: ['@opentui/core'], runtimes: ['node'], layers: ['app']},
+  {
+    packages: ['xstate'],
+    runtimes: ALL_RUNTIMES,
+    layers: ['feature'],
+    subpaths: ['./state', './renderer'],
+  },
+  {packages: ['xstate'], runtimes: ALL_RUNTIMES, names: MACHINE_PACKAGES},
 ];
 const NODE_BUILTINS = {runtimes: ['node']};
 /** What a sandboxed preload's `require` reaches. */
@@ -449,13 +470,13 @@ export function externalPolicy(specifier) {
   if (specifier.startsWith('node:') || builtinModules.includes(specifier.split('/')[0])) {
     return {
       name: specifier.startsWith('node:') ? specifier : `node:${specifier}`,
-      ...NODE_BUILTINS,
+      rules: [NODE_BUILTINS],
     };
   }
-  const policy = EXTERNAL_DEPENDENCIES.find(({packages}) =>
+  const rules = EXTERNAL_DEPENDENCIES.filter(({packages}) =>
     packages.some(name => specifier === name || specifier.startsWith(`${name}/`)),
   );
-  return policy === undefined ? undefined : {name: specifier, ...policy};
+  return rules.length === 0 ? undefined : {name: specifier, rules};
 }
 
 function externalManifestErrors(workspacePackage) {
@@ -481,10 +502,29 @@ function externalManifestErrors(workspacePackage) {
 }
 
 function policyAllows(policy, workspacePackage, entry) {
-  if (!policy.runtimes.includes(entry.runtime)) return false;
+  return policy.rules.some(rule => ruleAllows(rule, workspacePackage, entry));
+}
+
+function ruleAllows(rule, {name, manifest}, entry) {
   return (
-    policy.layers === undefined || policy.layers.includes(workspacePackage.manifest.vibesys.layer)
+    rule.runtimes.includes(entry.runtime) &&
+    (rule.layers === undefined || rule.layers.includes(manifest.vibesys.layer)) &&
+    (rule.subpaths === undefined || rule.subpaths.includes(entry.subpath)) &&
+    (rule.names === undefined || rule.names.includes(name))
   );
+}
+
+/** Who a policy allows, in words: one phrase per rule. */
+function allowedImporters(policy) {
+  return policy.rules
+    .map(rule => {
+      const runtimes = rule.runtimes === ALL_RUNTIMES ? '' : `${rule.runtimes.join(' or ')} `;
+      const layers = rule.layers === undefined ? '' : ` of a ${rule.layers.join(' or ')}`;
+      const subpaths = rule.subpaths === undefined ? '' : ` (${rule.subpaths.join(', ')})`;
+      const names = rule.names === undefined ? '' : ` of ${rule.names.join(', ')}`;
+      return `${runtimes}entries${layers}${subpaths}${names}`;
+    })
+    .join('; or ');
 }
 
 function splitSpecifier(specifier) {
@@ -544,12 +584,11 @@ function externalError(workspacePackage, path, specifier) {
   if (policy === undefined || isTestCode(path)) return undefined;
   const importer = owningEntry(packageEntries(workspacePackage), path);
   if (importer === undefined || policyAllows(policy, workspacePackage, importer)) return undefined;
-  const layers = policy.layers === undefined ? '' : ` of a ${policy.layers.join(' or ')}`;
   return violation(
     'external-dependencies',
     `${workspacePackage.directory}/${path}`,
     `the ${importer.runtime} entry ${workspacePackage.name} ${importer.subpath} must not import ` +
-      `${specifier}; only ${policy.runtimes.join(' or ')} entries${layers} may`,
+      `${specifier}; only ${allowedImporters(policy)} may`,
   );
 }
 

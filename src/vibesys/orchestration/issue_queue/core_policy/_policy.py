@@ -66,6 +66,7 @@ class PolicyInputs(_Value):
     """
 
     objective: Annotated[str, Field(min_length=1)]
+    domain_id: Annotated[str, Field(min_length=1)] = "llm-serving"
     baseline_commit: Annotated[str, Field(min_length=1)]
     evaluator_digest: Annotated[str, Field(min_length=1)]
     workload_digest: Annotated[str, Field(min_length=1)]
@@ -122,7 +123,7 @@ def reply_schemas(config: IssueQueueConfig) -> Mapping[SchemaRef, type[BaseModel
     return {
         IMPLEMENTER_REPLY: ImplementerReplyModel,
         JUDGE_REPLY: JudgeReplyModel,
-        PERF_REPLY: perf_result_model(config.max_issues_per_perf_eval),
+        PERF_REPLY: perf_result_model(config.max_issues_per_perf_eval, domain_id=config.domain_id),
     }
 
 
@@ -148,6 +149,7 @@ def config_from(
     }
     return IssueQueueConfig(
         recipe=inputs.recipe,
+        domain_id=inputs.domain_id,
         accuracy_configured=inputs.accuracy_configured,
         benchmark_configured=inputs.benchmark_configured,
         queue_allowance_seconds=float(bounds.queue_allowance_seconds),
