@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import tomllib
 from collections import Counter
 from pathlib import Path
@@ -12,6 +11,7 @@ import pytest
 import yaml
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.child_pytest import child_pythonpath
 from tests.support.sharding import (
     DEFAULT_DURATIONS,
     HEAVY_SHARE,
@@ -310,16 +310,7 @@ def test_a_shard_that_owns_no_test_under_the_given_path_passes(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository = Path(__file__).parents[2]
-    monkeypatch.setenv(
-        "PYTHONPATH",
-        os.pathsep.join(
-            (
-                str(repository),
-                str(repository / "libs" / "vs-sim" / "pytest_plugin"),
-                os.environ.get("PYTHONPATH", ""),
-            )
-        ),
-    )
+    monkeypatch.setenv("PYTHONPATH", child_pythonpath(repository))
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     pytester.makeconftest((repository / "conftest.py").read_text(encoding="utf-8"))
     pytester.makepyfile(test_only="def test_only(): pass")

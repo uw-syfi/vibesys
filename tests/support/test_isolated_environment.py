@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
+from tests.support.child_pytest import child_pythonpath
 
 pytest_plugins = ["pytester"]
 
@@ -28,16 +28,7 @@ def test_duration_order_respects_the_distribution_mode(
 ) -> None:
     distribution, workers, first = case
     repository = Path(__file__).parents[2]
-    monkeypatch.setenv(
-        "PYTHONPATH",
-        os.pathsep.join(
-            (
-                str(repository),
-                str(repository / "libs" / "vs-sim" / "pytest_plugin"),
-                os.environ.get("PYTHONPATH", ""),
-            )
-        ),
-    )
+    monkeypatch.setenv("PYTHONPATH", child_pythonpath(repository))
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     monkeypatch.delenv("VIBESYS_TEST_SHARD", raising=False)
     pytester.makeconftest(
@@ -89,16 +80,7 @@ def test_collection_workers_and_children_have_private_state(
         monkeypatch.setenv(variable, str(shared))
     for variable in ("CARGO_HOME", "RUSTUP_HOME", "GOCACHE", "GOMODCACHE"):
         monkeypatch.setenv(variable, str(shared / variable))
-    monkeypatch.setenv(
-        "PYTHONPATH",
-        os.pathsep.join(
-            (
-                str(repository),
-                str(repository / "libs" / "vs-sim" / "pytest_plugin"),
-                os.environ.get("PYTHONPATH", ""),
-            )
-        ),
-    )
+    monkeypatch.setenv("PYTHONPATH", child_pythonpath(repository))
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     # The nested suite checks both workers even when its parent is a CI shard.
     monkeypatch.delenv("VIBESYS_TEST_SHARD", raising=False)
