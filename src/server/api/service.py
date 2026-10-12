@@ -12,7 +12,7 @@ from server.api.experiments import (
     ExperimentQueryResult,
     build_experiment_log,
 )
-from server.api.iterations import page_iterations
+from server.api.iterations import IterationSlice, page_iterations
 from server.api.performance import (
     build_performance_context,
     summarize_objective,
@@ -48,7 +48,7 @@ from server.api.protocol import (
 from server.chat.options import ChatOptions, build_chat_options
 from server.control_envelope import CommandAck
 from server.events import EventType, RunEvent
-from vibesys.api import RunRecordReadError
+from vibesys.api import IterationUnavailable, RunRecordReadError
 from vibesys.api.hypothesis import agent_projection
 from vs_sim.api import OsThreads
 
@@ -95,6 +95,16 @@ class SnapshotStoreReplacedError(RuntimeError):
     def __init__(self) -> None:
         """Keep the public failure independent of opaque store identifiers."""
         super().__init__("The run event store changed before the snapshot was captured")
+
+
+class IterationStoreReplacedError(RuntimeError):
+    """A fenced iteration request whose event store is no longer current."""
+
+    diagnostic_code = "iteration_store_replaced"
+
+    def __init__(self) -> None:
+        """Keep the public failure independent of opaque store identifiers."""
+        super().__init__("The run event store changed before iterations were captured")
 
 
 class _RunControlState(StrEnum):
@@ -313,21 +323,16 @@ class RunApi:
                 experiments_ready=ready,
             )
         if isinstance(request, IterationQuery):
-            self._journal.record(EventType.STATUS_QUERY, "/iterations")
-            attached_run = self._controller.attached_run
+            iterations = self.iterations(
+                expected_store_id=request.expected_store_id,
+                parent_id=request.parent_id,
+                cursor=request.cursor,
+                limit=request.limit,
+            )
             return Response(
                 request_id=request.request_id,
-                iterations=(
-                    page_iterations(
-                        attached_run.view(),
-                        parent_id=request.parent_id,
-                        cursor=request.cursor,
-                        limit=request.limit,
-                    )
-                    if attached_run is not None
-                    else None
-                ),
-                iterations_ready=attached_run is not None,
+                iterations=iterations,
+                iterations_ready=iterations is not None,
             )
         if isinstance(request, DesignQuery):
             self._journal.record(EventType.STATUS_QUERY, "/design")
@@ -438,6 +443,29 @@ class RunApi:
                     )
                     for spec in self._chat.threads_locked()
                 ],
+            )
+
+    def iterations(
+        self,
+        *,
+        expected_store_id: str | None,
+        parent_id: str | None,
+        cursor: str | None,
+        limit: int,
+    ) -> IterationSlice | IterationUnavailable | None:
+        """Capture one iteration page from the store generation the stream established."""
+        with self._condition:
+            if (
+                expected_store_id is not None
+                and self._journal.store_id_locked() != expected_store_id
+            ):
+                raise IterationStoreReplacedError
+            self._journal.record(EventType.STATUS_QUERY, "/iterations")
+            attached_run = self._controller.attached_run_locked()
+            if attached_run is None:
+                return None
+            return page_iterations(
+                attached_run.view(), parent_id=parent_id, cursor=cursor, limit=limit
             )
 
     def subscription_checkpoint(

@@ -151,9 +151,16 @@ class DesignQuery(Request):
 
 
 class IterationQuery(Request):
-    """Request one bounded page of roots or direct children."""
+    """Request one bounded page of roots or direct children.
+
+    ``expected_store_id`` fences every page to the event store whose stream
+    established the navigation query. None preserves the unfenced request for
+    clients that do not combine iteration navigation with a live subscription.
+    An empty string is a real fence for the pre-attachment store.
+    """
 
     type: Literal["query.iterations"] = "query.iterations"
+    expected_store_id: str | None = None
     parent_id: str | None = None
     cursor: str | None = None
     limit: int = Field(default=100, ge=1, le=MAX_ITERATION_PAGE_SIZE)

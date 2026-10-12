@@ -24,8 +24,18 @@ import {
 } from '@vibesys/run-state';
 import {LatestQueryOwner} from '@vibesys/transport';
 import {type Actor, createActor, fromPromise} from 'xstate';
-import {isSnapshotStoreReplaced, type WebSessionState} from './connection.js';
-import type {BrowserLifecycle, RunConnection, RunStreamHandlers, TransportHooks} from './ports.js';
+import {
+  isIterationStoreReplaced,
+  isSnapshotStoreReplaced,
+  type WebSessionState,
+} from './connection.js';
+import type {
+  BrowserLifecycle,
+  IterationLoad,
+  RunConnection,
+  RunStreamHandlers,
+  TransportHooks,
+} from './ports.js';
 import {createRunStore, type RunStore, runStep} from './run.js';
 import {
   type Reachability,
@@ -400,12 +410,14 @@ export class WebSession {
   #loadIterations = (): Promise<void> => this.#iterationQuery.refresh();
 
   async #collectIterationPages(): Promise<IterationNavigationState | null> {
+    const expectedStoreId = this.#streamStoreId;
+    if (expectedStoreId === null) return null;
     let cursor: string | null = null;
     const seen = new Set<string>();
     let staged = initialIterationNavigation();
     do {
-      const loaded = await this.#connection.loadIterations(cursor);
-      if (loaded.kind !== 'result') return null;
+      const loaded = await this.#loadIterationPage(cursor, expectedStoreId);
+      if (loaded === null || loaded.kind !== 'result') return null;
       staged = reduceIterationResult(staged, loaded.result);
       if (!('items' in loaded.result)) return staged;
       cursor = loaded.result.next_cursor ?? null;
@@ -415,6 +427,18 @@ export class WebSession {
       if (cursor !== null) seen.add(cursor);
     } while (cursor !== null);
     return staged;
+  }
+
+  async #loadIterationPage(
+    cursor: string | null,
+    expectedStoreId: string,
+  ): Promise<IterationLoad | null> {
+    try {
+      return await this.#connection.loadIterations(cursor, expectedStoreId);
+    } catch (error) {
+      if (isIterationStoreReplaced(error)) return null;
+      throw error;
+    }
   }
 
   #reportIterationError = (error: unknown): void => {

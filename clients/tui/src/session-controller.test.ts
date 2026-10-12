@@ -288,7 +288,10 @@ describe('session controller', () => {
 
     await controller.start();
 
-    expect(transport.requests).toContainEqual({type: 'query.iterations'});
+    expect(transport.requests).toContainEqual({
+      type: 'query.iterations',
+      expected_store_id: '',
+    });
     expect(iterationRailRounds(controller.state)).toMatchObject([
       {iterationLabel: 'Generation 4', number: null, status: 'active'},
     ]);
@@ -438,6 +441,52 @@ describe('session controller', () => {
     await controller.stop();
   });
 
+  it('suppresses a fenced iteration rejection until the stream proves the next store', async () => {
+    const transport = new FakeTransport();
+    transport.iterationsReady = true;
+    transport.iterations = iterationPage('store-a', 1);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.iterationResponses.push(
+      new ServerError('The run event store changed before iterations were captured', {
+        code: 'iteration_store_replaced',
+        summary: 'The run event store changed before iterations were captured',
+        scope: 'request',
+      }),
+      iterationPageResponse('store-c', null, 3, 1, null),
+    );
+
+    transport.emit({
+      type: 'event_batch',
+      events: [event(1, 'server_ready')],
+      store_id: 'store-2',
+      history_after_sequence: 0,
+      rebootstrap: true,
+    });
+    await settleMicrotasks();
+
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(controller.state.errorBanner).toBeNull();
+
+    transport.emit({
+      type: 'event_batch',
+      events: [event(1, 'server_ready')],
+      store_id: 'store-3',
+      history_after_sequence: 0,
+      rebootstrap: true,
+    });
+    await waitForController(controller, state => state.iterations.revision === 'store-c');
+
+    expect(
+      transport.requests.filter(request => request.type === 'query.iterations').slice(-2),
+    ).toEqual([
+      {type: 'query.iterations', expected_store_id: 'store-2'},
+      {type: 'query.iterations', expected_store_id: 'store-3'},
+    ]);
+    expect(controller.state.errorBanner).toBeNull();
+    await controller.stop();
+  });
+
   it.each([
     'success',
     'failure',
@@ -487,6 +536,10 @@ describe('session controller', () => {
 
     expect(controller.state.iterations.revision).toBe('bulk');
     expect(iterationRailRounds(controller.state)).toHaveLength(125);
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toEqual([
+      {type: 'query.iterations', expected_store_id: ''},
+      {type: 'query.iterations', expected_store_id: '', cursor: 'page-2'},
+    ]);
   });
 
   it('reports an initial second-page rejection without rejecting bootstrap or publishing a partial tree', async () => {
@@ -1484,7 +1537,7 @@ describe('session controller', () => {
 
     expect(transport.requests).toEqual([
       {type: 'query.snapshot'},
-      {type: 'query.iterations'},
+      {type: 'query.iterations', expected_store_id: ''},
       {type: 'query.experiments'},
       {type: 'query.design'},
     ]);

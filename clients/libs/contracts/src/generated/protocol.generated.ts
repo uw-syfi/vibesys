@@ -96,6 +96,7 @@ export type RequestId12 = string;
 export type ClientId12 = string;
 export type Timestamp12 = string;
 export type Type12 = "query.iterations";
+export type ExpectedStoreId1 = string | null;
 export type ParentId = string | null;
 export type Cursor = string | null;
 export type Limit = number;
@@ -868,6 +869,11 @@ export interface ExperimentCursor {
 }
 /**
  * Request one bounded page of roots or direct children.
+ *
+ * ``expected_store_id`` fences every page to the event store whose stream
+ * established the navigation query. None preserves the unfenced request for
+ * clients that do not combine iteration navigation with a live subscription.
+ * An empty string is a real fence for the pre-attachment store.
  */
 export interface IterationQuery {
   protocol_version?: ProtocolVersion12;
@@ -875,6 +881,7 @@ export interface IterationQuery {
   client_id?: ClientId12;
   timestamp?: Timestamp12;
   type: Type12;
+  expected_store_id?: ExpectedStoreId1;
   parent_id?: ParentId;
   cursor?: Cursor;
   limit?: Limit;

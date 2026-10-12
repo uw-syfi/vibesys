@@ -38,8 +38,8 @@ export interface RunStreamHandlers {
 export interface RunConnection {
   /** Load an unfenced snapshot, or require the event store established by a stream batch. */
   loadSnapshot(storeId?: string): Promise<RunSnapshot>;
-  /** Load one page of the policy-owned iteration tree. */
-  loadIterations(cursor: string | null): Promise<IterationLoad>;
+  /** Load one page of the policy-owned iteration tree from the stream's store generation. */
+  loadIterations(cursor: string | null, expectedStoreId: string): Promise<IterationLoad>;
   /** Subscribe once; settles when the first subscription does. */
   subscribe(handlers: RunStreamHandlers): Promise<void>;
   /** Resume the stream where it was. */

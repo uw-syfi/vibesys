@@ -14,6 +14,7 @@ import {
   StreamReconciler,
   sameControlChannelState,
 } from '@vibesys/transport';
+import {isIterationStoreReplaced} from './connection.js';
 import type {RunConnection, TransportHooks} from './ports.js';
 
 /** The event stream's tail and its redial timing; the defaults are the transport's. */
@@ -74,11 +75,12 @@ function openRunConnection(
       }
       return response.snapshot;
     },
-    async loadIterations(cursor) {
+    async loadIterations(cursor, expectedStoreId) {
       if (iterationCapability === 'unsupported') return {kind: 'unsupported'};
       try {
         const response = await transport.request({
           type: 'query.iterations',
+          expected_store_id: expectedStoreId,
           ...(cursor === null ? {} : {cursor}),
         });
         iterationCapability = 'supported';
@@ -87,7 +89,11 @@ function openRunConnection(
         }
         return {kind: 'result', result: response.iterations};
       } catch (error) {
-        if (iterationCapability === 'unknown' && isServerRejection(error)) {
+        if (
+          iterationCapability === 'unknown' &&
+          isServerRejection(error) &&
+          !isIterationStoreReplaced(error)
+        ) {
           iterationCapability = 'unsupported';
           return {kind: 'unsupported'};
         }

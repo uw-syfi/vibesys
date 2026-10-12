@@ -7,6 +7,11 @@ export function isSnapshotStoreReplaced(error: unknown): error is Error {
   return error instanceof ServerError && error.diagnostic?.code === 'snapshot_store_replaced';
 }
 
+/** Whether a fenced iteration page belongs to a stream store the server has replaced. */
+export function isIterationStoreReplaced(error: unknown): error is Error {
+  return error instanceof ServerError && error.diagnostic?.code === 'iteration_store_replaced';
+}
+
 export type WebSessionStatus = 'connecting' | 'connected' | 'stale';
 
 /** What the page renders about its connection. */

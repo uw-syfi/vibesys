@@ -355,7 +355,10 @@ describe('WebSession', () => {
 
     await session.start();
 
-    expect(transport.requests).toContainEqual({type: 'query.iterations'});
+    expect(transport.requests).toContainEqual({
+      type: 'query.iterations',
+      expected_store_id: 'store-1',
+    });
     expect(session.store.getIterations().byId['generation:1']).toMatchObject({
       kind: 'generation',
       label: 'Generation 1',
@@ -545,6 +548,79 @@ describe('WebSession', () => {
     await session.close();
   });
 
+  test('suppresses an old-control iteration rejection until the stream proves the next store', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.iterations.push(iterationResponse('store-a', 'Generation 1'));
+    await session.start();
+    transport.iterations.push(
+      iterationStoreReplacedError(),
+      iterationResponse('store-c', 'Generation 3'),
+    );
+    const stream = transport.subscriptions[0];
+    if (stream === undefined) throw new Error('Initial subscription did not open');
+
+    stream.onMessage(
+      eventBatch([event(1, 'server_ready')], {
+        through_sequence: 1,
+        store_id: 'store-2',
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    await settle();
+
+    expect(session.store.getIterations().revision).toBe('store-a');
+    expect(session.getState().error).toBeNull();
+
+    stream.onMessage(
+      eventBatch([event(1, 'server_ready')], {
+        through_sequence: 1,
+        store_id: 'store-3',
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    await waitForSession(session, () => session.store.getIterations().revision === 'store-c');
+
+    expect(
+      transport.requests.filter(request => request.type === 'query.iterations').slice(-2),
+    ).toEqual([
+      {type: 'query.iterations', expected_store_id: 'store-2'},
+      {type: 'query.iterations', expected_store_id: 'store-3'},
+    ]);
+    expect(session.getState().error).toBeNull();
+    await session.close();
+  });
+
+  test('does not mistake an initial store fence for an unsupported iteration capability', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.iterations.push(iterationStoreReplacedError());
+
+    await session.start();
+
+    expect(session.store.getIterations().revision).toBeNull();
+    expect(session.getState().error).toBeNull();
+
+    transport.iterations.push(iterationResponse('store-b', 'Generation 2'));
+    transport.subscriptions[0]?.onMessage(
+      eventBatch([event(1, 'server_ready')], {
+        through_sequence: 1,
+        store_id: 'store-2',
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    await waitForSession(session, () => session.store.getIterations().revision === 'store-b');
+
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toEqual([
+      {type: 'query.iterations', expected_store_id: 'store-1'},
+      {type: 'query.iterations', expected_store_id: 'store-2'},
+    ]);
+    await session.close();
+  });
+
   test('publishes more than one hundred iteration roots only after the last page', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
@@ -564,6 +640,10 @@ describe('WebSession', () => {
 
     expect(session.store.getIterations().revision).toBe('bulk');
     expect(Object.keys(session.store.getIterations().byId)).toHaveLength(125);
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toEqual([
+      {type: 'query.iterations', expected_store_id: 'store-1'},
+      {type: 'query.iterations', expected_store_id: 'store-1', cursor: 'page-2'},
+    ]);
     await session.close();
   });
 
@@ -2122,6 +2202,14 @@ function iterationPageResponse(
       next_cursor: nextCursor,
     },
   };
+}
+
+function iterationStoreReplacedError(): ServerError {
+  return new ServerError('The run event store changed before iterations were captured', {
+    code: 'iteration_store_replaced',
+    summary: 'The run event store changed before iterations were captured',
+    scope: 'request',
+  });
 }
 
 /** The typed server refusal for an expected-store snapshot fence. */

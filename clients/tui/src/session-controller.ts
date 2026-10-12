@@ -271,7 +271,12 @@ const BACKFILL_CHUNK = 1_000;
 
 type IterationQueryOutcome =
   | {readonly kind: 'unsupported'}
-  | {readonly kind: 'supported'; readonly navigation: IterationNavigationState | null};
+  | {readonly kind: 'store-replaced'}
+  | {
+      readonly kind: 'supported';
+      readonly storeId: string;
+      readonly navigation: IterationNavigationState | null;
+    };
 
 export class SocketSessionController implements SessionController {
   #state: SessionState;
@@ -323,10 +328,14 @@ export class SocketSessionController implements SessionController {
   readonly #iterationQuery = new LatestQueryOwner<IterationQueryOutcome>({
     request: () => this.#requestIterations(),
     publish: outcome => {
+      if (outcome.kind === 'store-replaced') return;
       this.#iterationCapability = outcome.kind;
-      if (outcome.kind === 'supported' && outcome.navigation !== null) {
-        this.#setState({...this.#state, iterations: outcome.navigation});
+      if (outcome.kind !== 'supported' || outcome.navigation === null) return;
+      if (outcome.storeId !== this.#reconciler.storeId()) {
+        void this.#loadIterations();
+        return;
       }
+      this.#setState({...this.#state, iterations: outcome.navigation});
     },
     report: error => this.#reportIterationError(error),
   });
@@ -514,20 +523,35 @@ export class SocketSessionController implements SessionController {
   }
 
   async #requestIterations(): Promise<IterationQueryOutcome> {
+    const expectedStoreId = this.#reconciler.storeId();
     let response: ProtocolResponse;
     try {
-      response = await this.client.request({type: 'query.iterations'});
+      response = await this.client.request({
+        type: 'query.iterations',
+        expected_store_id: expectedStoreId,
+      });
     } catch (error) {
+      if (isIterationStoreReplaced(error)) return {kind: 'store-replaced'};
       if (this.#iterationCapability === 'unknown' && isServerRejection(error)) {
         return {kind: 'unsupported'};
       }
       throw error;
     }
-    return {kind: 'supported', navigation: await this.#collectIterationPages(response)};
+    try {
+      return {
+        kind: 'supported',
+        storeId: expectedStoreId,
+        navigation: await this.#collectIterationPages(response, expectedStoreId),
+      };
+    } catch (error) {
+      if (isIterationStoreReplaced(error)) return {kind: 'store-replaced'};
+      throw error;
+    }
   }
 
   async #collectIterationPages(
     response: ProtocolResponse,
+    expectedStoreId: string,
   ): Promise<IterationNavigationState | null> {
     const seen = new Set<string>();
     let staged = initialIterationNavigation();
@@ -538,7 +562,11 @@ export class SocketSessionController implements SessionController {
       if (cursor === null) return staged;
       if (seen.has(cursor)) throw new Error('iteration query repeated a paging cursor');
       seen.add(cursor);
-      response = await this.client.request({type: 'query.iterations', cursor});
+      response = await this.client.request({
+        type: 'query.iterations',
+        expected_store_id: expectedStoreId,
+        cursor,
+      });
     }
     return null;
   }
@@ -1555,6 +1583,7 @@ export class SocketSessionController implements SessionController {
         this.#setState(applyEvent(this.#state, message.event));
         return {events: [message.event], iterationStoreReplaced: false};
       case 'event_batch': {
+        const previousIterationStore = this.#reconciler.storeId();
         const reconciliation = this.#reconciler.reconcileBatch(message, {resumed});
         if (reconciliation.kind === 'rebootstrap') {
           this.#streamGeneration += 1;
@@ -1571,7 +1600,9 @@ export class SocketSessionController implements SessionController {
         );
         return {
           events: message.events,
-          iterationStoreReplaced: reconciliation.kind === 'rebootstrap',
+          iterationStoreReplaced:
+            reconciliation.kind === 'rebootstrap' ||
+            previousIterationStore !== this.#reconciler.storeId(),
         };
       }
       case 'protocol_error':
@@ -1678,6 +1709,10 @@ function reportCaughtError(
     scope,
     diagnostic: error instanceof ServerError ? error.diagnostic : null,
   });
+}
+
+function isIterationStoreReplaced(error: unknown): error is ServerError {
+  return error instanceof ServerError && error.diagnostic?.code === 'iteration_store_replaced';
 }
 
 function errorMessage(error: unknown): string {

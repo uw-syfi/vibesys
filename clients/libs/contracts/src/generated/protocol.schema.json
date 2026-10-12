@@ -2500,7 +2500,7 @@
     },
     "IterationQuery": {
       "additionalProperties": false,
-      "description": "Request one bounded page of roots or direct children.",
+      "description": "Request one bounded page of roots or direct children.\n\n``expected_store_id`` fences every page to the event store whose stream\nestablished the navigation query. None preserves the unfenced request for\nclients that do not combine iteration navigation with a live subscription.\nAn empty string is a real fence for the pre-attachment store.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -2527,6 +2527,18 @@
           "default": "query.iterations",
           "title": "Type",
           "type": "string"
+        },
+        "expected_store_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Store Id"
         },
         "parent_id": {
           "anyOf": [

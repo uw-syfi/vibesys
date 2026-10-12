@@ -38,7 +38,11 @@ class RunController:
     def attached_run(self) -> RunRecord | None:
         """Return the semantic run record attached to this controller."""
         with self._condition:
-            return self._attached_run
+            return self.attached_run_locked()
+
+    def attached_run_locked(self) -> RunRecord | None:
+        """Return the semantic run record while the caller holds the shared condition."""
+        return self._attached_run
 
     @property
     def current_round(self) -> str | None:
