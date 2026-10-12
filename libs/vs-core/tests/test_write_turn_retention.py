@@ -27,12 +27,12 @@ def write_turn_world(
     *, access: core.Access = core.Access.WRITE_CANDIDATE, charged: bool = True
 ) -> tuple[core.CoreState, core.DispatchTurn | core.ResumeSessionTurn]:
     """An active attempt whose write turn is executing."""
-    state, request, _ = yield_state("dispatch")
+    state, request, _ = yield_state("dispatch", access)
     owner = state.attempts.attempts[0]
     session = state.sessions.sessions[0]
     invocation = state.sessions.invocations[0]
-    spec = session.spec.model_copy(update={"access": access})
-    turn = invocation.turn.model_copy(update={"session": spec})
+    spec = session.spec
+    turn = invocation.turn
     owner = owner.model_copy(update={"charges": (CHARGE,) if charged else ()})
     ready = core.RecoveryBarrier(phase=core.RecoveryPhase.READY)
     assert owner.admission_id is not None

@@ -58,10 +58,12 @@ from .scheduling import (
 from .session_inputs import InputDelivered, InputDropped, InputRecord
 from .sessions import (
     InterruptCompleted,
+    InterruptFailed,
     SessionProjection,
     SessionsEvent,
     SessionsState,
     TurnResult,
+    YieldPublicationFailed,
 )
 from .settlement import (
     AdoptionFailed,
@@ -243,6 +245,8 @@ type StrategyEvent = Annotated[
     | MeasurementResult
     | ResumeAuthorized
     | TurnSuspended
+    | YieldPublicationFailed
+    | InterruptFailed
     | OperationResult
     | IntentBlocked
     | ControlChanged

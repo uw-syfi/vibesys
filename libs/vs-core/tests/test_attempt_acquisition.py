@@ -2813,7 +2813,8 @@ def test_checkpoint_completion_rejects_mismatched_canonical_observation_request(
     result = step(reload_state(state), event)
     assert result.state.attempts == state.attempts
     assert result.requests == ()
-    assert result.events == ()
+    # The checkpoint was refused, so the interruption that waited on it ends as failed.
+    assert [row.kind for row in result.events] == ["interrupt_failed"]
 
 
 @pytest.mark.parametrize("status", [ObservationStatus.UNKNOWN, ObservationStatus.SUCCEEDED])

@@ -51,6 +51,7 @@ from vs_core.api import (
     StrategyEvent,
     TurnResult,
     TurnSuspended,
+    YieldPublicationFailed,
 )
 
 
@@ -122,18 +123,31 @@ class DynamicStrategy:
             return attempt_events.on_ready(state, event)
         if isinstance(event, AttemptSettled):
             return attempt_events.on_settled(state, view, self.config, event)
-        if isinstance(event, TurnSuspended | ResumeAuthorized | AttemptExhausted | IntentBlocked):
+        if isinstance(
+            event,
+            TurnSuspended
+            | YieldPublicationFailed
+            | ResumeAuthorized
+            | AttemptExhausted
+            | IntentBlocked,
+        ):
             return self._suspension(state, event)
         return self._run_feedback(state, event)
 
     def _suspension(
         self,
         state: DynamicStrategyState,
-        event: TurnSuspended | ResumeAuthorized | AttemptExhausted | IntentBlocked,
+        event: TurnSuspended
+        | YieldPublicationFailed
+        | ResumeAuthorized
+        | AttemptExhausted
+        | IntentBlocked,
     ) -> DynamicStrategyState:
         """Fold the feedback that suspends, resumes, exhausts or blocks a workstream."""
         if isinstance(event, TurnSuspended):
             return attempt_events.on_suspended(state, event)
+        if isinstance(event, YieldPublicationFailed):
+            return attempt_events.on_yield_failed(state, event)
         if isinstance(event, ResumeAuthorized):
             return attempt_events.on_resume(state, event)
         if isinstance(event, AttemptExhausted):

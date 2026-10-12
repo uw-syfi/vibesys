@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.checkpoint_faults import CHECKPOINTS, with_checkpoints
 from tests.vibesys.orchestration.single.strategy._replies import combined, plan_reply
 from tests.vibesys.orchestration.single.strategy._run import run_shell
 from tests.vibesys.orchestration.single.strategy._waiting_turns import (
@@ -30,13 +31,16 @@ if TYPE_CHECKING:
     import pytest
 
 
-def _run(
+# A parameter bundle would rewrite every call of this shared helper for one more fault knob; the
+# knobs are independent keyword-only axes of one generated run, so the long signature is the plain form.
+def _run(  # noqa: PLR0913
     root: Path,
     *,
     waits: tuple[bool, ...],
     polls: tuple[int, ...],
     rounds: int,
     ends: tuple[str, ...] = ("wait",),
+    checkpoints: tuple[str, ...] = (),
 ) -> Run:
     bridge = new_bridge(root)
     script = WaitingTurns(
@@ -54,7 +58,7 @@ def _run(
         controlled=True,
         lifecycle=frozenset({"suspend"}),
     )
-    return run_shell(script, host=host, max_rounds=rounds)
+    return run_shell(with_checkpoints(script, checkpoints), host=host, max_rounds=rounds)
 
 
 def test_a_round_whose_turn_waited_adopts_the_candidate_it_checkpointed(tmp_path: Path) -> None:
@@ -132,3 +136,38 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
         assert [type(item).__name__ for item in finished.decisions] == [
             type(item).__name__ for item in run(("wait",)).decisions
         ]
+
+
+@settings(max_examples=10, deadline=None, derandomize=True, database=None)
+@given(checkpoints=CHECKPOINTS, polls=st.integers(0, 3))
+def test_a_run_ends_whatever_the_checkpoint_of_a_waiting_turn_does(
+    tmp_path_factory: pytest.TempPathFactory, checkpoints: tuple[str, ...], polls: int
+) -> None:
+    """A turn that asked to wait is suspended or failed with a reason, never left waiting.
+
+    Core publishes the suspension only once the turn's workspace is checkpointed. Whether
+    the executor retains it, fails it for good or fails it transiently, the run must reach
+    terminal with every attempt closed and no wait left without something to end it
+    (`run_shell` asserts the last).
+    """
+    finished = _run(
+        tmp_path_factory.mktemp("checkpoints"),
+        waits=(True,),
+        polls=(polls,),
+        rounds=1,
+        checkpoints=checkpoints,
+    )
+
+    assert finished.core.run.status == RunStatus.TERMINAL
+    for attempt in finished.core.attempts.attempts:
+        assert attempt.phase == AttemptPhase.TERMINAL
+
+
+def test_a_declined_checkpoint_fails_the_waiting_turn_instead_of_stalling_the_run(
+    tmp_path: Path,
+) -> None:
+    """Every checkpoint fails: the turn cannot be suspended, and the run still ends."""
+    finished = _run(tmp_path, waits=(True,), polls=(1,), rounds=1, checkpoints=("failed",))
+
+    assert finished.core.run.status == RunStatus.TERMINAL
+    assert finished.core.evaluation.continuations == ()

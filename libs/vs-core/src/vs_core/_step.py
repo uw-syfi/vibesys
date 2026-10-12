@@ -31,6 +31,7 @@ from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
 from ._values import digest
+from ._waits import stalled_checkpoint_waits
 from .types.attempts import (
     AttemptAdmitted,
     AttemptPhase,
@@ -134,6 +135,7 @@ from .types.session_inputs import InputDropped, InputDropReason
 from .types.sessions import (
     Access,
     CancelTurn,
+    CheckpointStalled,
     CloseSession,
     DispatchTurn,
     InspectTurn,
@@ -170,6 +172,8 @@ from .types.strategy import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .attempts import Reducer as AttemptsReducer
     from .evaluation import Reducer as EvaluationReducer
     from .types.evaluation import Continuation
@@ -178,6 +182,7 @@ if TYPE_CHECKING:
 MAX_SIGNALS = 1024
 
 type Dispatch = Callable[[CoreState, Signal], AreaChange]
+type _Pending = tuple[Signal, DecisionId | None, tuple[DecisionId, ...], DecisionId | None]
 
 
 @dataclass(frozen=True)
@@ -631,6 +636,28 @@ def _signal_admission(
     return explicit or inherited or _scope_admission(state, scope)
 
 
+def _stall_entries(
+    state: CoreState, in_flight: Sequence[Request], seen: set[tuple[Area, str]]
+) -> list[_Pending]:
+    """One pending stall signal per checkpoint wait that nothing can end, once per step.
+
+    A stall already raised in this step is not raised again: if its reducer could not end the
+    wait (an ambiguous record it refuses to act on), the wait stays visible to the orphan
+    check instead of the step looping on it.
+    """
+    if state.run.status == RunStatus.TERMINAL:
+        return []
+    signals = (
+        CheckpointStalled(invocation=invocation)
+        for invocation in stalled_checkpoint_waits(state.sessions, state.intents.intents, in_flight)
+    )
+    return [
+        (signal, None, (), _signal_admission(state, signal))
+        for signal in signals
+        if (event_area(signal), digest(signal)) not in seen
+    ]
+
+
 def propagate(
     state: CoreState,
     initial: tuple[Signal, ...],
@@ -643,7 +670,9 @@ def propagate(
     seen: set[tuple[Area, str]] = set()
     requests: list[Request] = []
     events: list[StrategyEvent] = []
-    while pending:
+    # At quiescence a suspension nothing can publish is ended, so the wait its turn opened
+    # always has a resolver, whichever way the checkpoint went.
+    while pending or (pending := _stall_entries(state, requests, seen)):
         pending.sort(key=lambda entry: SIGNAL_ORDER.index(event_area(entry[0])))
         signal, cause, requires, admission_id = pending.pop(0)
         admission_id = _signal_admission(state, signal, admission_id)

@@ -18,10 +18,12 @@ from ._proofs import (
     request_matches,
 )
 from ._session_scope import attempt_for, proven_invocation, scope_active
+from ._waits import draining_without_cancel, stalled_checkpoint_waits
 from .types.attempts import SnapshotAndRetain
 from .types.common import (
     AttemptId,
     AttemptRef,
+    CheckpointDecline,
     CompletionStatus,
     ContractValidationError,
     LifecycleClass,
@@ -29,11 +31,14 @@ from .types.common import (
     RequestId,
 )
 from .types.evaluation import TurnSuspended
-from .types.intents import ExecuteRegisteredOperation
+from .types.intents import ExecuteRegisteredOperation, IntentPhase
 from .types.kernel import AreaChange, DecisionCompleted
 from .types.sessions import (
+    CheckpointFailure,
+    CheckpointStalled,
     DispatchTurn,
     InspectTurn,
+    InterruptFailed,
     InvocationCheckpointAvailable,
     ResumeSessionTurn,
     RunInvocationCheckpoint,
@@ -41,6 +46,7 @@ from .types.sessions import (
     RunInvocationCheckpointRequested,
     SessionPhase,
     SnapshotAndRetainRun,
+    YieldPublicationFailed,
 )
 
 if TYPE_CHECKING:
@@ -365,6 +371,119 @@ def _run_checkpoint_observed(
             ),
         ),
     )
+
+
+def _stall_reason(
+    state: SessionsState, context: SessionsContext, invocation: Invocation
+) -> tuple[CheckpointFailure, CheckpointDecline | None]:
+    """Why no suspension will be published, read from the records the checkpoint left."""
+    ref = invocation.invocation
+    owner = attempt_for(context, invocation.scope)
+    if owner is None:
+        retained = any(row.invocation == ref for row in state.run_checkpoints)
+        failed = any(
+            isinstance(row.request, SnapshotAndRetainRun)
+            and row.request.invocation == ref
+            and row.phase == IntentPhase.COMPLETED
+            for row in context.intents.intents
+        )
+        declines = (CheckpointDecline.SNAPSHOT_FAILED,) if failed else ()
+    else:
+        retained = any(row.invocation == ref for row in owner.checkpoints)
+        declines = tuple(row.reason for row in owner.checkpoint_declines if row.invocation == ref)
+    if retained:
+        return CheckpointFailure.UNPUBLISHABLE, None
+    if declines:
+        return CheckpointFailure.CHECKPOINT_DECLINED, declines[-1]
+    return CheckpointFailure.NO_CHECKPOINT, None
+
+
+def _end_yield(
+    state: SessionsState, context: SessionsContext, invocation: Invocation
+) -> tuple[AreaChange[SessionsState], Invocation]:
+    """Make a suspending turn a failed terminal turn that its session can follow."""
+    reason, decline = _stall_reason(state, context, invocation)
+    ref = invocation.invocation
+    ended = invocation.model_copy(
+        update={"pending_suspension": None, "phase": SessionPhase.TERMINAL}
+    )
+    state = _replace_invocation(state, ended)
+    session = _session(state, ref.session_id)
+    if (
+        session is not None
+        and session.invocation == ref.invocation_id
+        and session.phase not in (SessionPhase.CLOSING, SessionPhase.TERMINAL)
+    ):
+        state = _replace_session(state, session.model_copy(update={"phase": SessionPhase.IDLE}))
+    signals: tuple[Signal, ...] = ()
+    observation = invocation.observation
+    intent = _intent(context, observation.request_id) if observation is not None else None
+    decision_id = intent.request.decision_id if intent is not None else None
+    receipt = (
+        next((row for row in context.run.receipts if row.decision_id == decision_id), None)
+        if decision_id is not None
+        else None
+    )
+    if decision_id is not None and receipt is not None and receipt.completion is None:
+        signals = (DecisionCompleted(decision_id=decision_id, status=CompletionStatus.FAILED),)
+    failed = YieldPublicationFailed(invocation=ref, reason=reason, decline=decline)
+    return AreaChange(state=state, signals=signals, events=(failed,)), ended
+
+
+def _end_interrupt(
+    state: SessionsState, context: SessionsContext, invocation: Invocation
+) -> AreaChange[SessionsState]:
+    """Close a draining interruption whose checkpoint cannot come: blocked, with the reason."""
+    claim = next(row for row in state.interrupts if row.invocation == invocation.invocation)
+    reason, decline = _stall_reason(state, context, invocation)
+    blocked = claim.model_copy(update={"phase": "blocked"})
+    state = state.model_copy(
+        update={
+            "interrupts": tuple(
+                blocked if row.invocation == claim.invocation else row for row in state.interrupts
+            )
+        }
+    )
+    failed = InterruptFailed(invocation=invocation.invocation, reason=reason, decline=decline)
+    return AreaChange(state=state, events=(failed,))
+
+
+def end_stalled_checkpoint_waits(
+    state: SessionsState, context: SessionsContext, event: CheckpointStalled
+) -> tuple[AreaChange[SessionsState], Invocation | None]:
+    """End the waits on a checkpoint that nothing can deliver; also the ended turn, if any.
+
+    A suspending turn becomes a failed terminal turn: its pending suspension is dropped, its
+    session can take a new turn, and its decision completes failed so dependents do not wait
+    on a yield that will never come. The strategy learns why from ``YieldPublicationFailed``.
+    A draining interruption is closed as blocked and the strategy learns from
+    ``InterruptFailed``. A stall naming an invocation whose waits still have a producer, or
+    that has none, changes nothing.
+    """
+    invocation = next(
+        (row for row in state.invocations if row.invocation == event.invocation), None
+    )
+    if (
+        event.invocation not in stalled_checkpoint_waits(state, context.intents.intents)
+        or invocation is None
+    ):
+        # The step raises a stall only for an invocation `stalled_checkpoint_waits` names, so
+        # this guards a stall submitted from outside against waits that still have a producer.
+        return AreaChange(state=state), None
+    interrupted = draining_without_cancel(state, event.invocation)
+    ended: Invocation | None = None
+    change: AreaChange[SessionsState] = AreaChange(state=state)
+    if invocation.pending_suspension is not None:
+        change, ended = _end_yield(state, context, invocation)
+        invocation = ended
+    if interrupted:
+        closed = _end_interrupt(change.state, context, invocation)
+        change = AreaChange(
+            state=closed.state,
+            signals=change.signals,
+            events=(*change.events, *closed.events),
+        )
+    return change, ended
 
 
 def advance(

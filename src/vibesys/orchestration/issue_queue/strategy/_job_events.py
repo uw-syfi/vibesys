@@ -61,6 +61,7 @@ from vs_core.api import (
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
+    YieldPublicationFailed,
     turn_reply,
 )
 from vs_issue_tracker.api import AppliedChanges, IssueType
@@ -364,6 +365,16 @@ def on_suspended(state: IssueQueueStrategyState, event: TurnSuspended) -> IssueQ
     return _with(
         state, job.model_copy(update={"turn": turn, "step": Step.SUSPENDED, "awaiting": None})
     )
+
+
+def on_yield_failed(
+    state: IssueQueueStrategyState, event: YieldPublicationFailed
+) -> IssueQueueStrategyState:
+    """Core could not publish the wait it recorded: the job fails with core's reason."""
+    job = _turn_job(state, event.invocation.invocation_id.root)
+    if job is None or job.turn is None or job.step is not Step.AWAITING:
+        return state
+    return fail(state, f"the turn's wait could not be published: {event.detail}")
 
 
 def on_resume(state: IssueQueueStrategyState, event: ResumeAuthorized) -> IssueQueueStrategyState:

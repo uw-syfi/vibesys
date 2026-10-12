@@ -53,6 +53,7 @@ from vs_core.api import (
     StrategyEvent,
     TurnResult,
     TurnSuspended,
+    YieldPublicationFailed,
 )
 
 
@@ -138,18 +139,31 @@ class IssueQueueStrategy:
             return job_events.on_ready(state, event)
         if isinstance(event, AttemptSettled):
             return job_events.on_settled(state, event)
-        if isinstance(event, TurnSuspended | ResumeAuthorized | AttemptExhausted | IntentBlocked):
+        if isinstance(
+            event,
+            TurnSuspended
+            | YieldPublicationFailed
+            | ResumeAuthorized
+            | AttemptExhausted
+            | IntentBlocked,
+        ):
             return self._suspension(state, event)
         return self._run_feedback(state, event)
 
     def _suspension(
         self,
         state: IssueQueueStrategyState,
-        event: TurnSuspended | ResumeAuthorized | AttemptExhausted | IntentBlocked,
+        event: TurnSuspended
+        | YieldPublicationFailed
+        | ResumeAuthorized
+        | AttemptExhausted
+        | IntentBlocked,
     ) -> IssueQueueStrategyState:
         """Fold the feedback that suspends, resumes, exhausts or blocks the open job."""
         if isinstance(event, TurnSuspended):
             return job_events.on_suspended(state, event)
+        if isinstance(event, YieldPublicationFailed):
+            return job_events.on_yield_failed(state, event)
         if isinstance(event, ResumeAuthorized):
             return job_events.on_resume(state, event)
         if isinstance(event, AttemptExhausted):

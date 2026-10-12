@@ -6,10 +6,11 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from . import _session_inputs, _session_turns
+from . import _session_inputs, _session_stalls, _session_turns
 from ._proofs import Proven, committed_stop
 from .types.kernel import AreaChange
 from .types.sessions import (
+    CheckpointStalled,
     InputAcceptanceObserved,
     InputReservationReleased,
     InputReservationRequested,
@@ -111,6 +112,7 @@ EVENT_TO_SUBAREA: Mapping[type[SessionsEvent], Reducer] = MappingProxyType(
         TurnInputsReserved: _session_turns.advance,
         SessionDrainRequested: _shared_observation,
         InvocationCheckpointAvailable: _shared_observation,
+        CheckpointStalled: _session_stalls.advance_stalled_checkpoint_waits,
         SessionInputReceived: _session_inputs.advance,
         InputReservationRequested: _session_inputs.advance,
         InputAcceptanceObserved: _session_inputs.advance,

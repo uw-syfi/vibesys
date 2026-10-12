@@ -18,6 +18,7 @@ REDUCERS = core.CoreReducers(
 
 def yield_state(
     origin: Literal["dispatch", "resume"] = "dispatch",
+    access: core.Access = core.Access.WRITE_CANDIDATE,
 ) -> tuple[core.CoreState, core.DispatchTurn | core.ResumeSessionTurn, core.Continuation]:
     """Seed authentic immutable sibling authority without executing its stub."""
     state = core.initial_state()
@@ -30,7 +31,7 @@ def yield_state(
             role_id=core.RoleId(root="worker"),
             policy="reuse",
             lifetime="owner",
-            access=core.Access.WRITE_CANDIDATE,
+            access=access,
         ),
         invocation_id=core.InvocationId(root="yield-turn"),
         workspace=owner_scope,

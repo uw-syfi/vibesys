@@ -8,6 +8,28 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 
+class CheckpointDecline(StrEnum):
+    """Why an invocation checkpoint was not taken, so a decline is never silent."""
+
+    WRITER_ACTIVE = "writer_active"
+    """Another writer of the attempt's workspace has not ended, so a snapshot would
+    be torn. The later writer's own terminal turn requests the checkpoint."""
+
+    UNAUTHORIZED = "unauthorized"
+    """Neither an interruption claim nor a terminal write turn authorizes it."""
+
+    UNCHARGED = "uncharged"
+    """The invocation has no live charge in this attempt, so it is not this
+    attempt's work."""
+
+    NOT_ACTIVE = "not_active"
+    """The attempt is not active; its closure retains the workspace itself."""
+
+    SNAPSHOT_FAILED = "snapshot_failed"
+    """The executor ended the snapshot request without a retained revision. Closure
+    still retains the workspace, so the attempt can release."""
+
+
 class Value(BaseModel):
     """Persistable data, never live interfaces or mutable containers."""
 

@@ -57,6 +57,7 @@ from vs_core.api import (
     StrategyEvent,
     TurnResult,
     TurnSuspended,
+    YieldPublicationFailed,
 )
 
 
@@ -138,7 +139,14 @@ class MultiStrategy:
 
     def _lifecycle(self, state: MultiStrategyState, event: StrategyEvent) -> MultiStrategyState:
         """Fold lifecycle feedback; other feedback needs no state change here."""
-        if isinstance(event, AttemptReady | AttemptSettled | TurnSuspended | ResumeAuthorized):
+        if isinstance(
+            event,
+            AttemptReady
+            | AttemptSettled
+            | TurnSuspended
+            | YieldPublicationFailed
+            | ResumeAuthorized,
+        ):
             return self._attempt_feedback(state, event)
         if isinstance(event, AttemptExhausted):
             return round_events.on_exhausted(state, event)
@@ -149,7 +157,11 @@ class MultiStrategy:
     def _attempt_feedback(
         self,
         state: MultiStrategyState,
-        event: AttemptReady | AttemptSettled | TurnSuspended | ResumeAuthorized,
+        event: AttemptReady
+        | AttemptSettled
+        | TurnSuspended
+        | YieldPublicationFailed
+        | ResumeAuthorized,
     ) -> MultiStrategyState:
         if isinstance(event, AttemptReady):
             return round_events.on_ready(state, event)
@@ -157,6 +169,8 @@ class MultiStrategy:
             return round_events.on_settled(state, self.config, event)
         if isinstance(event, TurnSuspended):
             return turn_events.on_suspended(state, event)
+        if isinstance(event, YieldPublicationFailed):
+            return turn_events.on_yield_failed(state, event)
         return turn_events.on_resume(state, event)
 
     def _run_feedback(self, state: MultiStrategyState, event: StrategyEvent) -> MultiStrategyState:

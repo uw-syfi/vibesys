@@ -79,6 +79,7 @@ from vs_core.api import (
     TurnResult,
     TurnSuspended,
     WaitableReply,
+    YieldPublicationFailed,
     ledger_refs,
     may_resubmit,
     trusted_keys,
@@ -483,6 +484,16 @@ def on_suspended(state: DynamicStrategyState, event: TurnSuspended) -> DynamicSt
         index,
         record.model_copy(update={"turn": turn, "step": Step.SUSPENDED, "awaiting": None}),
     )
+
+
+def on_yield_failed(
+    state: DynamicStrategyState, event: YieldPublicationFailed
+) -> DynamicStrategyState:
+    """Core could not publish the wait it recorded: the workstream fails with core's reason."""
+    index = _invocation_index(state, event.invocation.invocation_id.root)
+    if index is None or state.attempts[index].step is not Step.AWAITING:
+        return state
+    return fail(state, index, f"the turn's wait could not be published: {event.detail}")
 
 
 def _next_after_candidate(record: AttemptRecord, config: DynamicConfig) -> AttemptRecord:

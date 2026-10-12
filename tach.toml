@@ -1140,7 +1140,7 @@ from = ["vs_runtime._fake_agent_invocations"]
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._session_checkpoints", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
+depends_on = ["vs_core._session_checkpoints", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -1172,6 +1172,15 @@ depends_on = ["vibesys.orchestration.structured_turn", "vibesys.prompts", "vs_ev
 [[interfaces]]
 from = ["vibesys.run.validated_turn"]
 expose = ["validated_turn", "validated_conversation"]
+
+[[modules]]
+path = "vs_core._waits"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core.types", "vs_core.types.common"]
+
+[[interfaces]]
+from = ["vs_core._waits"]
+expose = ["Producer", "Wait", "WaitKind", "WaitingPhase", "draining_without_cancel", "orphan_waits", "phase_waits", "stalled_checkpoint_waits", "waits"]
 
 [[modules]]
 path = "vs_core._proofs"
@@ -1525,7 +1534,7 @@ expose = ["acceptance_signals", "acceptance_unresolved", "is_terminal", "observe
 [[modules]]
 path = "vs_core._session_checkpoints"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._proofs", "vs_core._session_scope", "vs_core.types", "vs_core.types.common"]
+depends_on = ["vs_core._proofs", "vs_core._session_scope", "vs_core._waits", "vs_core.types", "vs_core.types.common"]
 
 [[interfaces]]
 from = ["vs_core._session_checkpoints"]
