@@ -219,7 +219,6 @@ def profiler_prompt(state: MultiStrategyState, config: MultiConfig) -> ProfilerP
         profiler_kind=config.profiler_id,
         profile_focus=state.design.profile_focus or "general steady-state benchmark hotspots",
         benchmark_command=config.benchmark_command,
-        modality=config.modality,
         profile_execution=config.profile_execution,
         profiler_support_name=config.profiler_support_name,
         profiler_mcp_name=config.profiler_mcp_name,
@@ -265,7 +264,6 @@ def implement_prompt(
         official_reason=record.planned_official_reason,
         benchmark_enabled=config.benchmark_configured,
         active_component=None if focus is None else (focus.active_component or None),
-        modality=config.modality,
         reference_path=config.reference_path,
         interface=config.interface,
     )
@@ -289,7 +287,6 @@ def judge_prompt(
         official_due=record.planned_official_reason is not None,
         official_reason=record.planned_official_reason,
         benchmark_enabled=config.benchmark_configured,
-        modality=config.modality,
         interface=config.interface,
         cited_evidence=cited_evidence,
     )

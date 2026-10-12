@@ -39,10 +39,6 @@ Your working directory contains the implementer's code and a `{{ profiler_suppor
 The benchmark command is `{{ benchmark_command }}`.
 {% endif %}
 
-{% if modality %}
-{% include "_modality/" ~ modality ~ "/profiler.j2" %}
-{% endif %}
-
 {% if domain_profiler %}
 {{ domain_profiler }}
 

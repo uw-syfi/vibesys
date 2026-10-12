@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
-from vibesys.prompts import PROMPTS_DIR, render_string, render_template
+from vibesys.prompts import PROMPTS_DIR, render_template
+from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -58,7 +59,8 @@ def render_domain_section(
         )
     if not raw:
         return ""
-    return render_string(raw, **context).strip("\n")
+    # The pack renders from its own directory, so a role file can include its pack's partials.
+    return TemplateRenderer(domain.prompt_dir).render_string(raw, **context).strip("\n")
 
 
 def render_domain_sections(domain: DomainDefinition, **context: object) -> dict[DomainRole, str]:

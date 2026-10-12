@@ -236,7 +236,7 @@ def _common_configuration() -> _CommonConfiguration:
         "cli_timeout": 321,
         "compute_backend": "cpu",
         "profiler": "none",
-        "modality": "kv_store",
+        "modality": "image_generation",
         "default_reasoning_effort": "high",
     }
 

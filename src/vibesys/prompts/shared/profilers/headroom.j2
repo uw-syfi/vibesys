@@ -57,10 +57,6 @@ analysis CLI (`analyze_headroom.py`).
 The benchmark command is `{{ benchmark_command }}`.
 {% endif %}
 
-{% if modality %}
-{% include "_modality/" ~ modality ~ "/profiler.j2" %}
-{% endif %}
-
 {% if domain_profiler %}
 {{ domain_profiler }}
 

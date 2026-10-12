@@ -104,13 +104,6 @@ def requirements_for(config: EvolveConfig) -> EvidenceRequirements:
     )
 
 
-def _modality(options: EvolveOptions, inputs: PolicyInputs) -> str | None:
-    """The modality the prompts adapt to: the option, else text generation for LLM serving."""
-    if options.modality is not None:
-        return options.modality
-    return "text_generation" if inputs.domain_id == "llm-serving" else None
-
-
 def config_for(options: EvolveOptions, bounds: RunBounds, inputs: PolicyInputs) -> EvolveConfig:
     """Project the validated options and resolved inputs onto the strategy's static config."""
     stage_budgets = {
@@ -151,7 +144,7 @@ def config_for(options: EvolveOptions, bounds: RunBounds, inputs: PolicyInputs) 
             "profiler_id": inputs.profiler_id,
             "profile_execution": inputs.profile_execution,
             "benchmark_command": inputs.benchmark_command,
-            "modality": _modality(options, inputs),
+            "modality": options.modality,
             "reference_path": inputs.reference_path,
             "benchmark_configured": inputs.benchmark_configured,
             "accuracy_configured": inputs.accuracy_configured,

@@ -33,7 +33,6 @@ _ROOT = Path(templates.__file__).parent
 _OBJECTIVE = "Raise queue throughput."
 _RENDERER = TemplateRenderer(_ROOT, fallback_roots=(CORE_PROTOCOL_DIR, PROMPTS_DIR / "shared"))
 _TEXT = st.text(alphabet="abcdefg hij", min_size=1, max_size=12)
-_MODALITIES = st.sampled_from((None, "text_generation", "kv_store"))
 _REVISIONS = st.sampled_from(("a1", "b2")).map(
     lambda name: RevisionRef(revision_id=RevisionId(root=name), digest=f"git-commit:{name}")
 )
@@ -55,7 +54,6 @@ _COLD = st.builds(
     repair_seed=st.booleans(),
     failed_lessons=st.lists(_TEXT, max_size=3).map(tuple),
     num_failed_attempts=st.integers(0, 4),
-    modality=_MODALITIES,
     reference_path=st.sampled_from((".", "reference")),
 )
 _CHILD = st.builds(
@@ -64,16 +62,14 @@ _CHILD = st.builds(
     is_cold_start=st.booleans().filter(lambda value: not value),
     parent=_INDIVIDUALS,
     inspirations=st.lists(_INDIVIDUALS, max_size=2).map(tuple),
-    modality=_MODALITIES,
 )
-_JUDGE = st.builds(JudgePrompt, candidate=_REVISIONS, modality=_MODALITIES)
+_JUDGE = st.builds(JudgePrompt, candidate=_REVISIONS)
 _PROFILER = st.builds(
     ProfilerPrompt,
     candidate=_REVISIONS,
     profiler_kind=st.sampled_from(sorted(kind.value for kind in ACTIVE_PROFILER_KINDS)),
     profile_execution=st.sampled_from(("local", "remote")),
     benchmark_command=st.none() | _TEXT,
-    modality=_MODALITIES,
     objectives=st.lists(
         st.builds(ObjectiveAxis, name=_TEXT, direction=st.sampled_from(("max", "min"))),
         max_size=2,

@@ -1,3 +1,7 @@
+{% if modality %}
+{% include "modality/" ~ modality ~ "/profiler.md" %}
+
+{% endif %}
 ## LLM-serving profile capture
 
 Capture the benchmark's steady-state production path. For a one-process

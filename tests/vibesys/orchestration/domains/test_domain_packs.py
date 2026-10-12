@@ -19,10 +19,25 @@ from vibesys.domains.registry import (
     DOMAINS,
     resolve_domain,
 )
-from vibesys.domains.rendering import render_domain_section
+from vibesys.domains.rendering import render_domain_section as _render_domain_section
 from vibesys.prompts import render_template
 
 _TEMPLATE_DIR = Path(multi_templates.__file__).parent
+# The variable set `domain_prompt_sections` always passes; a test overrides what it varies.
+_RUN_CONTEXT: dict[str, object] = {
+    "modality": None,
+    "interface": "inprocess",
+    "reference_path": ".",
+    "benchmark_command": None,
+    "accuracy_command": None,
+    "runtime_notes": "",
+    "profile_execution": "local",
+    "workspace_sources": (),
+}
+
+
+def render_domain_section(domain: DomainDefinition, role: DomainRole, **context: object) -> str:
+    return _render_domain_section(domain, role, **(_RUN_CONTEXT | context))
 
 
 def _temporary_domain(prompt_dir: Path) -> DomainDefinition:
@@ -339,14 +354,22 @@ def test_render_database_profiler_has_content() -> None:
     assert "output-equivalence" in section.lower()
 
 
+def _serving_profiler(profile_execution: str) -> str:
+    """The llm-serving pack's profiler section, which the profiler prompt embeds."""
+    return render_domain_section(
+        resolve_domain(DomainName.LLM_SERVING),
+        DomainRole.PROFILER,
+        modality="text_generation",
+        profile_execution=profile_execution,
+    )
+
+
 def test_torch_profiler_remote_capture_is_provider_neutral() -> None:
     common = {
         "objective": "Measure service throughput.",
         "profile_focus": "Find the dominant accelerator bottleneck.",
         "runtime_notes": "Read the selected environment's runtime contract.",
         "benchmark_command": "./benchmark",
-        "modality": "text_generation",
-        "domain_profiler": "",
         "profiler_support_name": "torch_profiler",
         "profiler_mcp_name": "vibesys-torch-profiler",
         "campaign": None,
@@ -356,12 +379,14 @@ def test_torch_profiler_remote_capture_is_provider_neutral() -> None:
         "profilers/torch.j2",
         template_dir=_TEMPLATE_DIR,
         **common,
+        domain_profiler=_serving_profiler("local"),
         profile_execution="local",
     )
     remote = render_template(
         "profilers/torch.j2",
         template_dir=_TEMPLATE_DIR,
         **common,
+        domain_profiler=_serving_profiler("remote"),
         profile_execution="remote",
     )
 

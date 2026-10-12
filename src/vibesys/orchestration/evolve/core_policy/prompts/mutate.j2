@@ -1,7 +1,5 @@
 {% from '_revision.j2' import rev %}
 {% from 'domain_section.j2' import domain_section %}
-{% if modality %}{% include "_modality/" ~ modality ~ "/implementer.j2" %}
-{% endif %}
 You are the mutation operator in an LLM-driven evolutionary search. Produce one
 offspring by editing the workspace in place. A passing offspring is profiled and
 added to the population; a failing offspring is discarded after its feedback is

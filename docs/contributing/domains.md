@@ -75,7 +75,7 @@ use any of these in any file without tracking which role you're in:
 
 | Variable | Meaning |
 |----------|---------|
-| `modality` | The `--modality` value (e.g. `text_generation`). |
+| `modality` | The `--modality` value, or the domain's `default_modality` when the flag is omitted; `None` for domains that declare no `modalities`. |
 | `interface` | The `--interface` value: `inprocess` (direct invocation inside an evaluator process) or `service` (over the wire). It does not imply a language or artifact format. |
 | `reference_path` | Path to the reference material, or `.` when the input bundle has no `reference/` directory. |
 | `benchmark_command` | Benchmark command declared by the input manifest, or falsy if no benchmark is attached. |
@@ -83,6 +83,11 @@ use any of these in any file without tracking which role you're in:
 | `runtime_notes` | Runtime-environment notes for the round. |
 | `profile_execution` | Where profiling must run to observe the production hot path: `local` or `remote`. |
 | `workspace_sources` | Tuple of the manifest's `[[workspace.sources]]` entries (pinned starting-point checkouts materialized into the workspace; each has `name`, `repo`, `commit`, `dest`), or empty when the input bundle declares none. Branch on it to swap from-scratch guidance for build-on-the-seed guidance. |
+
+A domain that supports modalities declares them on its `DomainDefinition` (`modalities`,
+`default_modality`) and keeps one partial per role under `prompts/modality/<name>/<role>.md`,
+which its role files include. A `--modality` the domain does not declare is rejected with an
+error naming the choices.
 
 These are always defined (falsy when not applicable), so a plain `{% if benchmark_command %}`
 is enough: no `is defined` guard needed.

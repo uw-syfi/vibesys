@@ -35,7 +35,6 @@ vibesys --outer-loop agent \
   --backend cpu \
   --agent-backend cli --cli-provider claude \
   --max-rounds 6 \
-  --modality kv_store \
   --interface service \
   --no-skills
 ```

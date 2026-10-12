@@ -170,8 +170,21 @@ def domain_prompt_sections(
     through this one path. The pack is addressed only by the run's domain; a role the pack
     leaves out renders as an empty section.
     """
+    domain = resolve_domain(DomainName(facts.domain_id))
+    modality = modality or domain.default_modality
+    if modality is not None and modality not in domain.modalities:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="modality_not_in_domain",
+                stage="prompt_validation",
+                message=(
+                    f"modality {modality!r} is not provided by the {domain.name.value!r} domain; "
+                    f"it provides: {', '.join(domain.modalities) or 'none'}"
+                ),
+            )
+        )
     sections = render_domain_sections(
-        resolve_domain(DomainName(facts.domain_id)),
+        domain,
         modality=modality,
         interface=interface,
         reference_path=facts.reference_location,

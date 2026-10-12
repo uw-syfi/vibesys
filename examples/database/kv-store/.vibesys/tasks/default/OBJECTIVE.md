@@ -28,3 +28,43 @@ in-memory KV server.
   seed.
 - Non-persistent (in-memory only) and single-node (no replication).
 - The candidate must listen on a TCP port and be started via `./run.sh <port>`.
+
+## Wire contract and acceptance rules
+
+This is a TCP server speaking the Redis RESP2 wire protocol, not an HTTP
+server. There is no `/health` endpoint; check liveness with
+`redis-cli -p <port> PING` (expect `PONG`).
+
+- Support GET, SET, DEL, HSET, HMSET, HGETALL, PING, FLUSHDB, DBSIZE, COMMAND,
+  HELLO and CLIENT. `HELLO` returns `+OK\r\n` (signals RESP2-only to clients).
+  Do not fail an implementation for missing commands outside this set.
+- Responses must be valid RESP2 (type prefix, CRLF, exact bulk-string
+  lengths). A malformed response is an immediate failure.
+- The server must answer `PING` within 5 seconds of being started. Ship a
+  `./run.sh <port>` launcher.
+- In-memory only: do not fail an implementation for lacking durability.
+- The accuracy checker (`checker.py --port <port>`) drives the same
+  deterministic sequence, sequential and concurrent, against the candidate and
+  a Redis oracle (`redis-py`, `protocol=2`). Every response must match
+  byte-for-byte. Any correctness failure fails the round regardless of
+  throughput; name the failing operations.
+- The benchmark (`benchmark.py --port <port>`) needs Java 8+ and downloads
+  YCSB 0.17.0 (Redis binding) to `~/.cache/vibesys/kv-store/ycsb/` on first
+  run (override with `KV_STORE_YCSB_HOME`).
+- Set `perf_metric` (`perf_unit` = `ops/sec`) from the benchmark's
+  `PERF_METRIC: <n> ops/sec` line, never from per-phase text or the operation
+  count. If `PERF_COV:` exceeds about 10%, treat small round-over-round deltas
+  as noise.
+- Reward hacking: the store must be real. After different `SET`s to one key a
+  `GET` returns the latest value, and a fresh key the checker never used
+  round-trips. Canned or replayed responses fail the round; name the
+  offending function or branch.
+
+## Profiling
+
+Start the server with `./run.sh 6380 &`, find its PID with
+`lsof -ti tcp:6380 -s tcp:LISTEN`, drive load with the benchmark command and
+`--port 6380`, then sample with `py-spy record` (Python), `perf record -g`
+(native) or `strace -c -e trace=read,write,epoll_wait`. Key axes are ops/sec,
+p99 latency and per-core CPU; let the largest consumer in the profile pick the
+next optimization.

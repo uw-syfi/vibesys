@@ -50,7 +50,6 @@ class ProfilerPrompt(Value):
     profiler_kind: str
     profile_focus: str
     benchmark_command: str | None = None
-    modality: str | None = None
     profile_execution: str
     profiler_support_name: str
     profiler_mcp_name: str
@@ -164,7 +163,6 @@ class ImplementPrompt(Value):
     official_reason: str | None = None
     benchmark_enabled: bool = True
     active_component: str | None = None
-    modality: str | None = None
     reference_path: str = "."
     interface: str = "inprocess"
 
@@ -198,7 +196,6 @@ class JudgePrompt(Value):
     official_due: bool = False
     official_reason: str | None = None
     benchmark_enabled: bool = True
-    modality: str | None = None
     interface: str = "inprocess"
     # The trusted evaluations the candidate was measured by, stated at render time.
     cited_evidence: tuple[EvidenceRef, ...] = ()

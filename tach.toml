@@ -427,7 +427,7 @@ depends_on = ["vibesys", "vibesys.orchestration.skill_selection", "vs_runtime"]
 [[modules]]
 path = "vibesys.domains"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vibesys.prompts"]
+depends_on = ["vibesys", "vibesys.prompts", "vs_prompts"]
 
 [[modules]]
 # Product-owned authored-input parsing, validation, rendering, and synthesis.

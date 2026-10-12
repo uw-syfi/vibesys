@@ -139,9 +139,6 @@ not implementer continuation work. Audit erroneous downgrades too: when hard
 invariants hold and a row is genuinely nondominated,
 require `pareto_frontier` even if the causal minimum was missed.
 
-{% if modality %}{% include "_modality/" ~ modality ~ "/judge.j2" %}
-{% endif %}
-
 PASS only when analysis, verified evidence, declared outcome, and disposition
 are mutually consistent. Put every actionable failure in `feedback`. Return only
 the schema-valid JSON object; the framework records it.
