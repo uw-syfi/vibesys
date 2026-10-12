@@ -101,8 +101,7 @@ export class Hosts {
 
   /** Why the settings file is ignored, reading it afresh; null when it is fine or absent. */
   async settingsProblem(): Promise<string | null> {
-    await this.#deps.settings.hosts();
-    return this.#deps.settings.hostsProblem;
+    return (await this.#deps.settings.hosts()).problem;
   }
 
   /** The concrete aliases in `~/.ssh/config`. */
@@ -119,7 +118,7 @@ export class Hosts {
 
   /** The checkout `id` runs VibeSys from, or null when the user has not set one. */
   async checkout(id: HostId): Promise<string | null> {
-    const saved = settingsFor(await this.#deps.settings.hosts(), id)?.checkout ?? null;
+    const saved = settingsFor((await this.#deps.settings.hosts()).settings, id)?.checkout ?? null;
     if (saved !== null) return saved;
     return id.kind === 'local' ? this.#deps.localCheckout : null;
   }

@@ -59,8 +59,9 @@ describe('SettingsStore', () => {
     for (const invalid of invalidFiles) {
       const filesystem = new FakeSettingsFilesystem({[path]: invalid});
       const {settings, logged} = store(filesystem, directory);
-      expect(await settings.hosts()).toEqual(EMPTY_SETTINGS);
-      expect(settings.hostsProblem).toContain(path);
+      const observed = await settings.hosts();
+      expect(observed.settings).toEqual(EMPTY_SETTINGS);
+      expect(observed.problem).toContain(path);
 
       let updates = 0;
       const changing = settings.updateHosts(current => {
@@ -90,7 +91,7 @@ describe('SettingsStore', () => {
           'ssh:new': {checkout: '/new'},
         },
       });
-      expect(settings.hostsProblem).toBeNull();
+      expect((await settings.hosts()).problem).toBeNull();
     }
   });
 
@@ -146,7 +147,7 @@ describe('SettingsStore', () => {
     await settings.updateRecent(current => remember(current, run(1)));
     await settings.updateRecent(current => remember(current, run(2)));
 
-    expect(await settings.hosts()).toEqual({
+    expect((await settings.hosts()).settings).toEqual({
       version: 2,
       hosts: {'ssh:one': {checkout: '/one'}, 'ssh:two': {checkout: '/two'}},
     });
@@ -174,7 +175,6 @@ describe('SettingsStore', () => {
     }
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toContain(`could not read ${path}`);
-    expect(settings.hostsProblem).toContain(`could not read ${path}`);
     expect(logged).toContainEqual(expect.stringContaining(`could not read ${path}`));
     expect(filesystem.operations).toEqual([{kind: 'read', path}]);
     expect(JSON.parse(filesystem.text(path))).toEqual({
@@ -192,12 +192,13 @@ describe('SettingsStore', () => {
         'ssh:new': {checkout: '/new'},
       },
     });
-    expect(settings.hostsProblem).toBeNull();
+    expect((await settings.hosts()).problem).toBeNull();
     expect(filesystem.operations.map(operation => operation.kind)).toEqual([
       'read',
       'read',
       'write',
       'replace',
+      'read',
     ]);
   });
 
@@ -231,6 +232,27 @@ describe('SettingsStore', () => {
       'write',
       'replace',
     ]);
+  });
+
+  test('concurrent host reads keep each diagnostic with the value that produced it', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'hosts.json');
+    const valid = {
+      version: 2 as const,
+      hosts: {'ssh:existing': {checkout: '/existing'}},
+    };
+    const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(valid)}\n`});
+    const {settings} = store(filesystem, directory);
+    filesystem.failNextRead(path, fileError('EACCES', path));
+
+    const failed = settings.hosts();
+    const succeeded = settings.hosts();
+
+    await expect(failed).resolves.toEqual({
+      settings: EMPTY_SETTINGS,
+      problem: expect.stringContaining(`could not read ${path}`),
+    });
+    await expect(succeeded).resolves.toEqual({settings: valid, problem: null});
   });
 
   test('regression: a failed host-settings replace removes its staged file', async () => {
@@ -324,7 +346,7 @@ describe('SettingsStore', () => {
     );
 
     expect(outcome).toBe('cancelled');
-    expect(await settings.hosts()).toEqual(EMPTY_SETTINGS);
+    expect((await settings.hosts()).settings).toEqual(EMPTY_SETTINGS);
     expect(readdirSync(directory).filter(name => name.endsWith('.tmp'))).toEqual([]);
   });
 
@@ -354,7 +376,7 @@ describe('SettingsStore', () => {
       await Promise.all(updates);
       const recent = (await settings.recent()).runs.map(entry => entry.attachedAt).sort();
       expect(recent).toEqual([...runs].sort());
-      expect(Object.keys((await settings.hosts()).hosts).sort()).toEqual(
+      expect(Object.keys((await settings.hosts()).settings.hosts).sort()).toEqual(
         hosts.map(alias => `ssh:${alias}`).sort(),
       );
       expect(logged.filter(line => line.startsWith('ignoring'))).toEqual([]);

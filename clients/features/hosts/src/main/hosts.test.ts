@@ -185,7 +185,7 @@ describe('Hosts checkout changes', () => {
     await retired;
     await expect(newer).resolves.toBe('/src/vibesys');
 
-    expect(settingsFor(await settings.hosts(), LOCAL)?.checkout).toBe('/newer');
+    expect(settingsFor((await settings.hosts()).settings, LOCAL)?.checkout).toBe('/newer');
     // `/cancelled` opened only its disposable candidate; it never replaced the watched connection.
     expect(link.helper.checkouts).toEqual(['/existing', '/cancelled', '/newer', '/newer']);
     expect(manager.existing('local')?.checkoutRoot).toBe('/src/vibesys');
@@ -231,7 +231,7 @@ describe('Hosts checkout changes', () => {
     held.release();
 
     await expect(changing).resolves.toBe('/src/vibesys');
-    expect(settingsFor(await settings.hosts(), LOCAL)?.checkout).toBe('/new');
+    expect(settingsFor((await settings.hosts()).settings, LOCAL)?.checkout).toBe('/new');
     expect(link.helper.checkouts).toEqual(['/existing', '/new', '/new']);
     expect(manager.existing('local')?.checkoutRoot).toBe('/src/vibesys');
   });

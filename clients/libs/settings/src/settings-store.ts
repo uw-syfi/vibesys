@@ -11,8 +11,8 @@
  *   reader sees the old file or the new one, never a partial write.
  * - **Changes are announced.** `onRecentChanged` listeners hear every update of the recent runs, so
  *   no view has a refresh path to forget.
- * - **Invalid files are ignored by reads and reported** (`hostsProblem` for hosts); updates reject
- *   them before writing, so the bytes remain available for repair.
+ * - **Invalid files are ignored by reads and reported** in the same host-settings snapshot; updates
+ *   reject them before writing, so the bytes remain available for repair.
  *
  * Electron-free: the main process supplies the paths.
  */
@@ -41,6 +41,13 @@ interface ReadResult<T> {
   readonly failure: Error | null;
 }
 
+/** One coherent observation of `hosts.json`. */
+export interface HostSettingsSnapshot {
+  readonly settings: SettingsFile;
+  /** Why this observation ignored the file; null when it was valid or absent. */
+  readonly problem: string | null;
+}
+
 /** Whether a conditional settings update crossed its atomic replace boundary. */
 type SettingsUpdateOutcome = 'committed' | 'cancelled';
 
@@ -49,7 +56,6 @@ export class SettingsStore {
   readonly #filesystem: SettingsFilesystem;
   /** The last update; each update starts after it settles. */
   #queue: Promise<void> = Promise.resolve();
-  #hostsProblem: string | null = null;
   readonly #recentListeners = new Set<(recent: RecentFile) => void>();
 
   constructor(options: SettingsStoreOptions) {
@@ -57,36 +63,28 @@ export class SettingsStore {
     this.#filesystem = options.filesystem ?? NODE_SETTINGS_FILESYSTEM;
   }
 
-  /** Why `hosts.json` was ignored on its last read; null when it is fine or absent. */
-  get hostsProblem(): string | null {
-    return this.#hostsProblem;
-  }
-
-  /** The host settings, read afresh. */
-  async hosts(): Promise<SettingsFile> {
-    return (await this.#readHosts()).value;
+  /** The host settings and this exact read's diagnostic, read afresh. */
+  async hosts(): Promise<HostSettingsSnapshot> {
+    const read = await this.#readHosts();
+    return {settings: read.value, problem: read.failure?.message ?? null};
   }
 
   async #readHosts(): Promise<ReadResult<SettingsFile>> {
     const read = await readText(this.#filesystem, this.#options.settingsPath);
     if (read.kind === 'missing') {
-      this.#hostsProblem = null;
       return {value: EMPTY_SETTINGS, failure: null};
     }
     if (read.kind === 'failed') {
       const failure = readFailure(this.#options.settingsPath, read.error);
-      this.#hostsProblem = failure.message;
       this.#options.log(failure.message);
       return {value: EMPTY_SETTINGS, failure};
     }
     try {
       const parsed = parseSettings(JSON.parse(read.text) as unknown);
-      this.#hostsProblem = null;
       return {value: parsed, failure: null};
     } catch (error) {
       const failure = invalidFile(this.#options.settingsPath, error);
-      this.#hostsProblem = failure.message;
-      this.#options.log(`ignoring ${this.#hostsProblem}`);
+      this.#options.log(`ignoring ${failure.message}`);
       return {value: EMPTY_SETTINGS, failure};
     }
   }

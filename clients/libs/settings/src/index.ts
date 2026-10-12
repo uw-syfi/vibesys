@@ -13,4 +13,4 @@ export {
   rememberInstance,
   type StoredRecentRun,
 } from './recent.js';
-export {SettingsStore} from './settings-store.js';
+export {type HostSettingsSnapshot, SettingsStore} from './settings-store.js';
