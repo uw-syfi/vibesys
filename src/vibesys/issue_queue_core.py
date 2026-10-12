@@ -21,6 +21,7 @@ from vibesys.core_roles import (
 from vibesys.core_wiring import (
     ResolvedRun,
     agent_evaluation_policy,
+    domain_prompt_sections,
     evaluation_inputs,
     operation_catalog,
     require_candidate_sandboxes,
@@ -183,6 +184,7 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
             "facts": context.facts,
             "objective": policy.facts.objective,
             "agent_evaluation": True,
+            "domain_sections": domain_prompt_sections(context.facts, modality=options.modality),
         },
         requirements=policy.requirements,
         agent_evaluation=agent_evaluation_policy(

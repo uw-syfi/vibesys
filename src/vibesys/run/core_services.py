@@ -180,6 +180,8 @@ class CoreServices:
     clock: SleepingClock
     agent_evaluation: AgentEvaluationBridge | None = None
     """The in-turn evaluation tool service, when the plan offers one; the run loop serves it."""
+    profile_capture_withheld: bool = False
+    """The plan would offer profile work, but the run environment cannot capture a profile."""
 
     async def close(self) -> None:
         """Release the evaluation executor; workspaces and the client close with the host."""
@@ -241,6 +243,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         artifacts=artifacts,
         clock=resources.clock,
         agent_evaluation=bridge,
+        profile_capture_withheld=plan.profile_capture_withheld,
     )
 
 

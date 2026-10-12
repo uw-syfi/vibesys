@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from tests.vibesys.golden.helpers import assert_exact_text
 
+from vibesys.core_wiring import domain_prompt_sections
 from vibesys.issue_queue_board import IssueQueueTexts
 from vibesys.issue_queue_core import CORE_ROLES
 from vibesys.orchestration.issue_queue.core_policy.api import (
@@ -145,6 +146,7 @@ def _render(context: PromptContext | str, facts: RunFacts) -> str:
         "facts": facts,
         "objective": facts.objective,
         "agent_evaluation": True,
+        "domain_sections": domain_prompt_sections(facts),
     }
     if isinstance(context, str):
         return IssueQueueTexts(variables).issue_body(context)

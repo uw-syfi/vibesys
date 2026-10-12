@@ -34,10 +34,6 @@ Benchmark command: {{ benchmark_command }}
 The benchmark command is documented in `OBJECTIVE.md`.
 {% endif %}
 
-{% if modality %}
-{% include "_modality/" ~ modality ~ "/profiler.j2" %}
-{% endif %}
-
 {% if domain_profiler %}
 {{ domain_profiler }}
 

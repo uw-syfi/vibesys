@@ -1,5 +1,5 @@
 {% set runtime_notes = environment_notes %}
-{% set domain_profiler = '' %}
+{% set domain_profiler = domain_sections['profiler'] %}
 {% set profile_focus = 'Measure the headline metric for this candidate; rank top kernel-level bottlenecks.' %}
 {% include 'profilers/' ~ profiler_kind ~ '.j2' %}
 {% include 'profilers/_pareto_objectives.j2' %}

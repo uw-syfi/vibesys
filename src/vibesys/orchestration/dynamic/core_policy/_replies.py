@@ -50,7 +50,11 @@ def reply_schemas(config: DynamicConfig) -> Mapping[SchemaRef, type[BaseModel]]:
 
 
 def run_prompt_variables(
-    *, objective: str, environment_notes: str, agent_evaluation: bool
+    *,
+    objective: str,
+    environment_notes: str,
+    agent_evaluation: bool,
+    domain_sections: Mapping[str, str],
 ) -> dict[str, object]:
     """The run-level variables every dynamic template reads, besides its own context's fields.
 
@@ -61,6 +65,7 @@ def run_prompt_variables(
         "objective": objective,
         "environment_notes": environment_notes,
         "agent_evaluation": agent_evaluation,
+        "domain_sections": domain_sections,
         "plan_example": planner_reply_example(),
     }
 

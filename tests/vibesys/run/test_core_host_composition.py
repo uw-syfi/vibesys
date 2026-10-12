@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import pytest
+from tests.support.container_credentials import set_container_cli_credentials
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
 from tests.support.task_project import write_task
@@ -17,7 +18,7 @@ from vibesys.api._session import run_plugin
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_task
-from vibesys.orchestration.profilers import ProfilerKind
+from vibesys.orchestration.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.plugin_registration import OrchestrationRegistration
 from vibesys.run.contracts import RunRequest
 from vibesys.run.core_services import CoreCompositionError
@@ -94,7 +95,11 @@ def _resumable_client(**_kwargs: object) -> FakeAgentClient:
 
 
 def _policy(
-    templates: Path, strategy: Strategy[Any] | None = None, deadline_seconds: float = 1000.0
+    templates: Path,
+    strategy: Strategy[Any] | None = None,
+    deadline_seconds: float = 1000.0,
+    *,
+    profile_capture_withheld: bool = False,
 ) -> CorePolicy:
     def plan(context: CoreRunContext) -> CorePlan:
         identity = semantic_evaluation_identity(
@@ -112,6 +117,7 @@ def _policy(
             ),
             limits=Limits(),
             deadline_seconds=deadline_seconds,
+            profile_capture_withheld=profile_capture_withheld,
         )
 
     return CorePolicy(
@@ -122,12 +128,12 @@ def _policy(
     )
 
 
-def _plugin(templates: Path) -> OrchestrationPlugin:
+def _plugin(templates: Path, *, profile_capture_withheld: bool = False) -> OrchestrationPlugin:
     return OrchestrationPlugin(
         id="core-test",
         agents=(AgentRole(id="implementer", system_prompt="Implement."),),
         options=EmptyOptions,
-        core=_policy(templates),
+        core=_policy(templates, profile_capture_withheld=profile_capture_withheld),
     )
 
 
@@ -142,7 +148,11 @@ def _write_project(root: Path) -> None:
     )
 
 
-def _request(project_root: Path, config: Config | None = None) -> RunRequest:
+def _request(
+    project_root: Path,
+    config: Config | None = None,
+    profiler_kind: ProfilerKind = ProfilerKind.NONE,
+) -> RunRequest:
     return RunRequest(
         run_environment=fake_docker_environment(),
         project_root=project_root,
@@ -151,9 +161,9 @@ def _request(project_root: Path, config: Config | None = None) -> RunRequest:
         input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name="core-test",
-        agent_backend="stub",
+        agent_backend="stub" if profiler_kind is ProfilerKind.NONE else "cli",
         cli_provider="claude",
-        profiler_kind=ProfilerKind.NONE,
+        profiler_kind=profiler_kind,
         backend=ComputeBackend.CPU,
     )
 
@@ -193,6 +203,35 @@ def _open(
     return lambda: run_virtual(clock, exercise())
 
 
+def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
+    """The text a run with a chosen profiler reports on its event stream while opening."""
+    project_root = tmp_path / "project"
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    _write_project(project_root)
+    integration = LocalRunIntegration()
+    clock = VirtualClock(at=0.0)
+
+    async def exercise() -> str:
+        try:
+            async with open_product_core_host(
+                _request(project_root, profiler_kind=ProfilerKind.LINUX_CPU),
+                integration,
+                plugin=_plugin(templates, profile_capture_withheld=profile_capture_withheld),
+                options=EmptyOptions(),
+                timing=RunTiming(clock, 60.0),
+                agent_client_factory=_resumable_client,
+                backend_factory=host_container_backend,
+                invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+                profiler_preflight=lambda kind: ProfilerPreflightResult(kind=kind, usable=True),
+            ):
+                return "\n".join(repr(event) for event in integration.events.read())
+        finally:
+            integration.close()
+
+    return run_virtual(clock, exercise())
+
+
 def test_core_host_yields_services_whose_state_starts_the_strategy(tmp_path: Path) -> None:
     services = _open(tmp_path, client_factory=_resumable_client, journal=True)()
     strategy = services.strategy
@@ -203,6 +242,17 @@ def test_core_host_yields_services_whose_state_starts_the_strategy(tmp_path: Pat
     assert [op.kind for op in catalog.offered_operations] == ["test.render"]
     assert state.run.facts.objective == "Improve the queue."
     assert len(state.run.facts.evaluator_digest) == DIGEST_LENGTH
+
+
+@pytest.mark.parametrize("withheld", [False, True])
+def test_the_profile_capture_note_appears_only_when_the_plan_withholds_profile_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, withheld: bool
+) -> None:
+    """A profiler is chosen on a run that cannot capture; the note follows the plan alone."""
+    set_container_cli_credentials(monkeypatch)
+    output = _run_diagnostics(tmp_path, profile_capture_withheld=withheld)
+    assert ("framework profile capture is unavailable" in output) is withheld
+    assert "cannot capture a profile" not in output
 
 
 @pytest.mark.parametrize(

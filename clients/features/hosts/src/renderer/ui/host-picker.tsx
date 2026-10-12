@@ -1,7 +1,7 @@
 /** "Connect to host": search `~/.ssh/config` aliases or type a destination; arrows and Enter pick. */
 
 import {Button, Dialog} from '@vibesys/ui';
-import type {JSX, KeyboardEvent} from 'react';
+import {type JSX, type KeyboardEvent, useId} from 'react';
 import {type PickerAction, type PickerState, pickerChoices} from '../../state/picker.js';
 
 function emptyText(state: Extract<PickerState, {kind: 'open'}>): string {
@@ -10,29 +10,33 @@ function emptyText(state: Extract<PickerState, {kind: 'open'}>): string {
 
 function Choices(props: {
   readonly state: Extract<PickerState, {kind: 'open'}>;
+  readonly listboxId: string;
   readonly picker: (action: PickerAction) => void;
 }): JSX.Element {
-  const {state, picker} = props;
+  const {state, listboxId, picker} = props;
   const choices = pickerChoices(state);
-  if (choices.length === 0) return <p className="muted">{emptyText(state)}</p>;
   return (
-    <div className="list" role="listbox" aria-label="Hosts">
-      {choices.map((choice, index) => (
-        <Button
-          key={`${choice.typed ? 'typed' : 'config'}:${choice.alias}`}
-          role="option"
-          tabIndex={-1}
-          aria-selected={index === state.selected}
-          className="option"
-          onClick={() => picker({type: 'choose', index})}
-        >
-          <span>{choice.alias}</span>
-          <span className="muted">
-            {choice.typed ? 'connect to this destination' : 'ssh config'}
-          </span>
-        </Button>
-      ))}
-    </div>
+    <>
+      <div id={listboxId} className="list" role="listbox" aria-label="Hosts">
+        {choices.map((choice, index) => (
+          <Button
+            id={`${listboxId}-option-${index}`}
+            key={`${choice.typed ? 'typed' : 'config'}:${choice.alias}`}
+            role="option"
+            tabIndex={-1}
+            aria-selected={index === state.selected}
+            className="option"
+            onClick={() => picker({type: 'choose', index})}
+          >
+            <span>{choice.alias}</span>
+            <span className="muted">
+              {choice.typed ? 'connect to this destination' : 'ssh config'}
+            </span>
+          </Button>
+        ))}
+      </div>
+      {choices.length === 0 ? <p className="muted">{emptyText(state)}</p> : null}
+    </>
   );
 }
 
@@ -43,6 +47,7 @@ export function HostPicker(props: {
   readonly picker: (action: PickerAction) => void;
 }): JSX.Element {
   const {state, picker} = props;
+  const listboxId = useId();
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
@@ -60,9 +65,18 @@ export function HostPicker(props: {
       {state.kind !== 'open' ? null : (
         <>
           <input
-            // biome-ignore lint/a11y/noAutofocus: the sheet is a search box; typing starts at once.
             autoFocus
             className="search"
+            role="combobox"
+            aria-label="Search hosts"
+            aria-expanded={true}
+            aria-controls={listboxId}
+            aria-autocomplete="list"
+            aria-activedescendant={
+              pickerChoices(state)[state.selected] === undefined
+                ? undefined
+                : `${listboxId}-option-${state.selected}`
+            }
             placeholder="Search hosts, or type user@host"
             spellCheck={false}
             autoComplete="off"
@@ -71,7 +85,7 @@ export function HostPicker(props: {
             onKeyDown={onKeyDown}
           />
           {state.aliases.kind === 'failed' ? <p className="error">{state.aliases.error}</p> : null}
-          <Choices state={state} picker={picker} />
+          <Choices state={state} listboxId={listboxId} picker={picker} />
         </>
       )}
     </Dialog>

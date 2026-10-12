@@ -49,6 +49,7 @@ def run_prompt_variables(
     environment_notes: str,
     agent_evaluation: bool,
     validation_recipe_schema: str,
+    domain_sections: Mapping[str, str],
 ) -> dict[str, object]:
     """The run-level variables every multi template reads, besides its own context's fields."""
     return {
@@ -56,4 +57,5 @@ def run_prompt_variables(
         "environment_notes": environment_notes,
         "agent_evaluation": agent_evaluation,
         "validation_recipe_schema": validation_recipe_schema,
+        "domain_sections": domain_sections,
     }

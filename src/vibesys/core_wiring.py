@@ -12,6 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from vibesys.constants import DomainName
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_sections
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.run.evaluation_backend import semantic_evaluation_identity
 from vs_core.api import ArtifactId, ArtifactRef
@@ -24,6 +27,8 @@ from vs_runtime.api.core import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from vs_core.api import MeasurementRecipe, StrategyOperations
     from vs_runtime.api import ArtifactStore, RunFacts
     from vs_runtime.api.core import OperationPorts
@@ -34,6 +39,7 @@ __all__ = [
     "ParallelCandidateFacts",
     "ResolvedRun",
     "agent_evaluation_policy",
+    "domain_prompt_sections",
     "evaluation_inputs",
     "operation_catalog",
     "require_candidate_sandboxes",
@@ -82,6 +88,9 @@ class EvaluationInputs:
     benchmark_configured: bool
     profiling: bool
     profile_measurement: bool
+    profile_capture_withheld: bool
+    """A strategy that offers profile work was denied it: the plan names a profile command and a
+    profiler is chosen, but the run environment has no framework-side capture."""
     accuracy_seconds: float | None
     benchmark_seconds: float | None
     profile_seconds: float | None
@@ -93,6 +102,7 @@ def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
     receipt = run.artifacts.write(plan.model_dump_json().encode())
     identity = semantic_evaluation_identity(plan, run.facts, run.environment)
     profiling = run.facts.profiler_id != "none"
+    wants_profile_work = profiling and plan.profile_command is not None
     return EvaluationInputs(
         evaluator_digest=identity.evaluator.value,
         workload_digest=identity.workload.value,
@@ -103,9 +113,8 @@ def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
         accuracy_configured=run.facts.accuracy_configured,
         benchmark_configured=run.facts.benchmark_configured,
         profiling=profiling,
-        profile_measurement=profiling
-        and plan.profile_command is not None
-        and run.environment.captures_profile,
+        profile_measurement=wants_profile_work and run.environment.captures_profile,
+        profile_capture_withheld=wants_profile_work and not run.environment.captures_profile,
         accuracy_seconds=plan.accuracy_timeout_seconds,
         benchmark_seconds=plan.benchmark_timeout_seconds,
         profile_seconds=plan.profile_timeout_seconds,
@@ -152,3 +161,40 @@ def require_candidate_sandboxes(environment: ParallelCandidateFacts, *, loop: st
                 ),
             )
         )
+
+
+def domain_prompt_sections(
+    facts: RunFacts, *, modality: str | None = None, interface: str = "inprocess"
+) -> Mapping[str, str]:
+    """The run's domain pack as one rendered section per role, for the plan's prompt variables.
+
+    Every strategy's role prompts render ``domain_sections[<role>]`` in the same slot
+    (`core_protocol/domain_section.j2`), so a domain's contract text reaches every strategy
+    through this one path. The pack is addressed only by the run's domain; a role the pack
+    leaves out renders as an empty section.
+    """
+    domain = resolve_domain(DomainName(facts.domain_id))
+    modality = modality or domain.default_modality
+    if modality is not None and modality not in domain.modalities:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="modality_not_in_domain",
+                stage="prompt_validation",
+                message=(
+                    f"modality {modality!r} is not provided by the {domain.name.value!r} domain; "
+                    f"it provides: {', '.join(domain.modalities) or 'none'}"
+                ),
+            )
+        )
+    sections = render_domain_sections(
+        domain,
+        modality=modality,
+        interface=interface,
+        reference_path=facts.reference_location,
+        benchmark_command=facts.benchmark_command,
+        accuracy_command=facts.accuracy_command,
+        runtime_notes=facts.environment_notes,
+        profile_execution=facts.profile_execution.value,
+        workspace_sources=facts.workspace_sources,
+    )
+    return {role.value: text for role, text in sections.items()}

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
@@ -55,7 +56,10 @@ def _text(prompt: PlannerPrompt) -> str:
         "portfolio.j2",
         **variables,
         **run_prompt_variables(
-            objective="Raise throughput.", environment_notes="", agent_evaluation=False
+            domain_sections=EMPTY_DOMAIN_SECTIONS,
+            objective="Raise throughput.",
+            environment_notes="",
+            agent_evaluation=False,
         ),
     )
 

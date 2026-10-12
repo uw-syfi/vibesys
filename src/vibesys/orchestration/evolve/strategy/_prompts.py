@@ -45,7 +45,6 @@ class MutatePrompt(Value):
     num_failed_attempts: int = Field(default=0, ge=0)
     parent: Individual | None = None
     inspirations: tuple[Individual, ...] = ()
-    modality: str | None = None
     reference_path: str = "."
     interface: str = "inprocess"
 
@@ -55,7 +54,6 @@ class JudgePrompt(Value):
 
     template: Literal[PromptTemplate.JUDGE] = PromptTemplate.JUDGE
     candidate: RevisionRef
-    modality: str | None = None
     interface: str = "inprocess"
     # The trusted evaluations the offspring was measured by, stated at render time.
     cited_evidence: tuple[EvidenceRef, ...] = ()
@@ -69,7 +67,6 @@ class ProfilerPrompt(Value):
     profiler_kind: str
     profile_execution: str
     benchmark_command: str | None = None
-    modality: str | None = None
     objectives: tuple[ObjectiveAxis, ...] = ()
     profiler_support_name: str
     profiler_mcp_name: str

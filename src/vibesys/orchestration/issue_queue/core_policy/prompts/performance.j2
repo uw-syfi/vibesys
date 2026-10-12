@@ -1,8 +1,9 @@
 {% from '_macros.j2' import board_list %}
+{% from 'domain_section.j2' import domain_section %}
 Run performance evaluation {{ iteration }}.
 
 {% include '_run_context.j2' %}
-{% if facts.profiler_id == "none" %}
+{{ domain_section(domain_sections, 'profiler') }}{% if facts.profiler_id == "none" %}
 No profiler is configured; do not attempt a profile.
 {% else %}
 Profiler `{{ facts.profiler_id }}` is available through the fixed `profiler` tool and executes on the {{ facts.profile_execution.value }} path.

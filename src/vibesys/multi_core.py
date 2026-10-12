@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from vibesys.core_wiring import (
     ResolvedRun,
     agent_evaluation_policy,
+    domain_prompt_sections,
     evaluation_inputs,
     operation_catalog,
 )
@@ -149,6 +150,9 @@ def _plan_for(options_type: type[MultiRunOptions]) -> Callable[[CoreRunContext],
                 objective=policy.facts.objective,
                 environment_notes=context.facts.environment_notes,
                 agent_evaluation=True,
+                domain_sections=domain_prompt_sections(
+                    context.facts, modality=config.modality, interface=config.interface
+                ),
                 validation_recipe_schema=json.dumps(
                     ValidationRecipeArtifact.model_json_schema(), indent=2
                 ),

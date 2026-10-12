@@ -1,3 +1,7 @@
+{% if modality %}
+{% include "modality/" ~ modality ~ "/implementer.md" %}
+
+{% endif %}
 ## LLM-serving implementation invariants
 
 Trace every claim through the real request-to-model-to-stream path. Prove the

@@ -5,6 +5,61 @@ Objective: Maximize measured token throughput without losing correctness.
 Accuracy command: uv run check-accuracy
 Benchmark command: uv run benchmark
 Runtime notes: Use CUDA with bfloat16.
+
+## Server Type: Text Generation (Causal LM)
+
+The server exposes OpenAI-compatible text generation endpoints:
+- `POST /v1/completions` — `{prompt, max_tokens, temperature, stream}`
+- `POST /v1/chat/completions` — `{messages, max_tokens, temperature, stream}`
+- `GET /health` — health check
+
+Key performance axes: **time-to-first-token (TTFT)**, **time-per-output-token (TPOT)**, **throughput** (tokens/s under concurrent requests). Prefill and decode are distinct phases with different bottlenecks.
+
+## Profiling Commands
+
+**Warmup** (run after server health check, before and during profiling):
+```
+curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
+```
+
+**Workload** (run during profiling when no benchmark tool is available):
+```
+for i in 1 2 3 4 5; do
+  curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
+    -d '{"prompt":"The capital of France is","max_tokens":32,"temperature":0}'
+done
+```
+
+## LLM-serving profile capture
+
+Capture the benchmark's steady-state production path. For a one-process
+profiler, run the server under it and drive load from another shell. Discover
+flags with `--help`; benchmark CLIs need not share token/request/rate flags.
+
+For a local service: read objective, contract, manifest, and declared lifecycle;
+identify executable, port, and ownership without assuming filename/language;
+stop only identified stale processes; prewarm model/kernels; profile the server;
+drive a short representative declared benchmark; then stop and analyze it.
+
+For a compatible in-process adapter, the reference torch harness is:
+
+```
+python torch_profiler/analyze_torch_profile.py capture \
+  --model-dir /workspace --weights-dir /model \
+  --output /tmp/prof.json \
+  --warmup 3 --num-iters 20 --max-tokens 32 \
+  --prompt "The capital of France is"
+```
+
+Use it only when `VibeServeModel.from_pretrained(...)` and `.generate(...)`
+exercise the reviewed production mechanism. It captures device kernels, not
+HTTP, admission, scheduling, queueing, or service batching; do not extrapolate
+without end-to-end evidence or recreate the production hot path just for it.
+
+Capture-tool argument contracts are engine-specific: see
+`serving-systems/references/tooling/profiling-serving-engines.md` and
+`serving-systems/references/engines/`. ROCm:
+`serving-systems/references/platforms/rocm/profiler.md`.
 Profiler `torch` is available through the fixed `profiler` tool and executes on the local path.
 Configured load levels: "discover a low, medium, high, and saturation workload"
 Prior performance records:

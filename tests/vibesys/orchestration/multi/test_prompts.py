@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 
 import vibesys.orchestration.multi.core_policy.prompts as templates
 from vibesys.orchestration.multi.core_policy.api import run_prompt_variables
@@ -45,7 +46,6 @@ _RENDERER = TemplateRenderer(
     _ROOT, fallback_roots=(SERIAL_SEARCH_PROMPTS, CORE_PROTOCOL_DIR, PROMPTS_DIR / "shared")
 )
 _TEXT = st.text(alphabet="abcdefg hij", min_size=1, max_size=12)
-_MODALITIES = st.sampled_from((None, "text_generation", "kv_store"))
 _REVISIONS = st.sampled_from(("a1", "b2")).map(
     lambda name: RevisionRef(revision_id=RevisionId(root=name), digest=f"git-commit:{name}")
 )
@@ -111,7 +111,6 @@ _IMPLEMENT = st.builds(
     official_reason=st.none() | _TEXT,
     benchmark_enabled=st.booleans(),
     active_component=st.none() | _TEXT,
-    modality=_MODALITIES,
     reference_path=st.sampled_from((".", "reference")),
     **_REPAIR,
 )
@@ -147,7 +146,6 @@ _JUDGE = st.builds(
     official_due=st.booleans(),
     official_reason=st.none() | _TEXT,
     benchmark_enabled=st.booleans(),
-    modality=_MODALITIES,
 )
 _PRE_ROUND = st.builds(
     PreRoundPrompt,
@@ -166,7 +164,6 @@ _PROFILER = st.builds(
     profiler_kind=st.sampled_from(sorted(kind.value for kind in ACTIVE_PROFILER_KINDS)),
     profile_focus=_TEXT,
     benchmark_command=st.none() | _TEXT,
-    modality=_MODALITIES,
     profile_execution=st.sampled_from(("local", "remote")),
     profiler_support_name=_TEXT,
     profiler_mcp_name=_TEXT,
@@ -193,6 +190,7 @@ def _variables(context: Value, *, agent_evaluation: bool = True) -> dict[str, ob
     variables.pop("template")
     return {
         **run_prompt_variables(
+            domain_sections=EMPTY_DOMAIN_SECTIONS,
             objective=_OBJECTIVE,
             environment_notes="note",
             agent_evaluation=agent_evaluation,

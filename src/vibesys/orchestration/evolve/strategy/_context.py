@@ -44,7 +44,6 @@ def mutate_prompt(
             repair_seed=slot.repair_seed,
             failed_lessons=lessons,
             num_failed_attempts=failed,
-            modality=config.modality,
             reference_path=config.reference_path,
             interface=config.interface,
         )
@@ -54,7 +53,6 @@ def mutate_prompt(
         is_cold_start=False,
         parent=parent,
         inspirations=_peers(state, proposal.inspiration_ids),
-        modality=config.modality,
         reference_path=config.reference_path,
         interface=config.interface,
     )
@@ -68,10 +66,7 @@ def judge_prompt(
         message = "a review needs the mutator's candidate"
         raise RuntimeError(message)
     return JudgePrompt(
-        candidate=slot.candidate,
-        modality=config.modality,
-        interface=config.interface,
-        cited_evidence=cited_evidence,
+        candidate=slot.candidate, interface=config.interface, cited_evidence=cited_evidence
     )
 
 
@@ -85,7 +80,6 @@ def profile_prompt(slot: SlotState, config: EvolveConfig) -> ProfilerPrompt:
         profiler_kind=ProfilerKind(config.profiler_id).value,
         profile_execution=config.profile_execution,
         benchmark_command=config.benchmark_command,
-        modality=config.modality,
         objectives=tuple(
             ObjectiveAxis(name=item.name, direction=item.direction)
             for item in config.metric_space.objectives

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from vibesys.core_wiring import (
     ResolvedRun,
     agent_evaluation_policy,
+    domain_prompt_sections,
     evaluation_inputs,
     operation_catalog,
 )
@@ -131,6 +132,9 @@ def _plan(context: CoreRunContext) -> CorePlan:
             objective=policy.facts.objective,
             environment_notes=context.facts.environment_notes,
             agent_evaluation=True,
+            domain_sections=domain_prompt_sections(
+                context.facts, modality=config.modality, interface=config.interface
+            ),
         ),
         requirements=policy.requirements,
         agent_evaluation=agent_evaluation_policy(

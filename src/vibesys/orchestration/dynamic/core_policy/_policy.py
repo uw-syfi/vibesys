@@ -69,6 +69,7 @@ class PolicyInputs(_Value):
     benchmark_configured: bool
     profiling: bool
     profile_measurement: bool
+    profile_capture_withheld: bool = False
     accuracy_seconds: Seconds | None = None
     benchmark_seconds: Seconds | None = None
     profile_seconds: Seconds | None = None
@@ -88,6 +89,8 @@ class DynamicCorePolicy:
     deadline_at: float
     reply_schemas: Mapping[SchemaRef, type[BaseModel]]
     requirements: EvidenceRequirements
+    profile_capture_withheld: bool = False
+    """The run asked for profile work this environment cannot capture, so none is offered."""
 
 
 def requirements_for(config: DynamicConfig) -> EvidenceRequirements:
@@ -159,4 +162,5 @@ def build_core_policy(
         deadline_at=run_deadline_at(bounds.max_run_seconds),
         reply_schemas=reply_schemas(config),
         requirements=requirements_for(config),
+        profile_capture_withheld=inputs.profile_capture_withheld,
     )

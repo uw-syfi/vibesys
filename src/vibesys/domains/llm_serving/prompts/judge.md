@@ -1,3 +1,7 @@
+{% if modality %}
+{% include "modality/" ~ modality ~ "/judge.md" %}
+
+{% endif %}
 ## LLM-serving review invariants
 
 audit the implementer's retained performance evidence and verify the real

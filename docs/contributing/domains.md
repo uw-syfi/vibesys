@@ -38,17 +38,19 @@ src/vibesys/domains/my_domain/
 
   prompts/
     README.md        # optional human documentation
-    implementer.md   # injected as {{ domain_implementer }}
-    judge.md         # injected as {{ domain_judge }}
-    single_agent.md  # injected as {{ domain_single_agent }} (optional)
-    orchestrator.md  # injected as {{ domain_orchestrator }} (optional)
-    profiler.md      # injected as {{ domain_profiler }} (optional)
+    implementer.md   # the implementer prompts' domain section
+    judge.md         # the judge prompts' domain section
+    single_agent.md  # the single-agent round prompt's domain section (optional)
+    orchestrator.md  # the planner prompts' domain section (optional)
+    profiler.md      # the profiler prompts' domain section (optional)
 ```
 
 Rules:
 
-- **Inside the domain prompt directory, the filename is the address.** `implementer.md` maps to
-  `{{ domain_implementer }}`, `judge.md` maps to `{{ domain_judge }}`, and so on.
+- **Inside the domain prompt directory, the filename is the address.** The run's plan renders
+  each role file once into `domain_sections[<role>]`, and every strategy's prompt for that
+  role renders it in one fixed slot, right after the run context
+  (`prompts/core_protocol/domain_section.j2`). A strategy's own templates never name a domain.
 - **A missing role file injects nothing** for that role.
 - **`single_agent.md` is optional.** Omit it and it's derived automatically by
   concatenating `implementer.md` and `judge.md`: no third copy to hand-maintain.
@@ -73,7 +75,7 @@ use any of these in any file without tracking which role you're in:
 
 | Variable | Meaning |
 |----------|---------|
-| `modality` | The `--modality` value (e.g. `text_generation`). |
+| `modality` | The `--modality` value, or the domain's `default_modality` when the flag is omitted; `None` for domains that declare no `modalities`. |
 | `interface` | The `--interface` value: `inprocess` (direct invocation inside an evaluator process) or `service` (over the wire). It does not imply a language or artifact format. |
 | `reference_path` | Path to the reference material, or `.` when the input bundle has no `reference/` directory. |
 | `benchmark_command` | Benchmark command declared by the input manifest, or falsy if no benchmark is attached. |
@@ -81,6 +83,11 @@ use any of these in any file without tracking which role you're in:
 | `runtime_notes` | Runtime-environment notes for the round. |
 | `profile_execution` | Where profiling must run to observe the production hot path: `local` or `remote`. |
 | `workspace_sources` | Tuple of the manifest's `[[workspace.sources]]` entries (pinned starting-point checkouts materialized into the workspace; each has `name`, `repo`, `commit`, `dest`), or empty when the input bundle declares none. Branch on it to swap from-scratch guidance for build-on-the-seed guidance. |
+
+A domain that supports modalities declares them on its `DomainDefinition` (`modalities`,
+`default_modality`) and keeps one partial per role under `prompts/modality/<name>/<role>.md`,
+which its role files include. A `--modality` the domain does not declare is rejected with an
+error naming the choices.
 
 These are always defined (falsy when not applicable), so a plain `{% if benchmark_command %}`
 is enough: no `is defined` guard needed.

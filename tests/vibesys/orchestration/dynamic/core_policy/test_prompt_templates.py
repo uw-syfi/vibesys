@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
 from vibesys.orchestration.dynamic.core_policy.api import (
@@ -137,7 +138,10 @@ def _variables(context: BaseModel, *, agent_evaluation: bool = False) -> dict[st
     variables.pop("template")
     return {
         **run_prompt_variables(
-            objective=_OBJECTIVE, environment_notes="", agent_evaluation=agent_evaluation
+            domain_sections=EMPTY_DOMAIN_SECTIONS,
+            objective=_OBJECTIVE,
+            environment_notes="",
+            agent_evaluation=agent_evaluation,
         ),
         **variables,
     }

@@ -1,9 +1,10 @@
 {% from '_revision.j2' import rev %}
+{% from 'domain_section.j2' import domain_section %}
 {% from '_macros.j2' import citations %}
 Own hypothesis `{{ hypothesis_id }}` in this isolated candidate workspace.
 
 {% include 'run_context.j2' %}
-
+{{ domain_section(domain_sections, 'implementer') }}
 Claim: {{ hypothesis }}
 Task: {{ task }}
 Pass criteria: {{ pass_criteria }}

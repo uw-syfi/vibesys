@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Literal, cast
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 
 from vibesys.orchestration.evolve.core_policy.api import prompts as evolve_prompts
 from vibesys.orchestration.evolve.strategy.api import JudgePrompt as EvolveJudgePrompt
@@ -73,6 +74,7 @@ _RUN = {
     "objective": _FACTS.objective,
     "environment_notes": "",
     "agent_evaluation": True,
+    "domain_sections": EMPTY_DOMAIN_SECTIONS,
 }
 
 

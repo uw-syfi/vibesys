@@ -1364,6 +1364,8 @@ class CorePlan:
     """Who may vouch for a candidate and which proofs make it winner-eligible."""
     agent_evaluation: AgentEvaluationPolicy | None = None
     """The plan an agent measures with through its in-turn tool; None offers no tool."""
+    profile_capture_withheld: bool = False
+    """The strategy would offer profile work but the run environment cannot capture a profile."""
     """Run-level template variables (such as the objective) every rendered prompt can read."""
 
 

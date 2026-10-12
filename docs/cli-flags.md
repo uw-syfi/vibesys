@@ -585,8 +585,10 @@ instead, `--input-domain` sets `[agent].domain` for the generated manifest. New
 domains are added in source by registering a domain package with optional
 environment setup/teardown hooks.
 
-`--modality` supplies the task I/O contract, such as text generation or
-speech-to-text. Domains and modalities may define language, toolchain, and
+`--modality` selects one of the modalities the run's domain declares (for `llm-serving`:
+text generation, the default, image or video generation, text-to-speech, speech-to-text and
+realtime audio); its text lives in that domain's pack. Other domains declare none and reject
+the flag; an example's own wire contract belongs in its `OBJECTIVE.md`. Domains and modalities may define language, toolchain, and
 artifact requirements. Interface-specific prose should describe only the
 direct-call or service boundary.
 

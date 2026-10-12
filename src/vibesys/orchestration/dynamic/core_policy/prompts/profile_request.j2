@@ -1,10 +1,13 @@
 {% from '_revision.j2' import rev %}
+{% from 'domain_section.j2' import domain_section %}
 {{ question }}
 
 The optimization run planning the next candidates asked this question about revision
 `{{ rev(target) }}`. Its objective:
 {{ objective }}
-{% include 'environment_notes.j2' %}{% if required_fields %}
+{% include 'environment_notes.j2' %}
+{{ domain_section(domain_sections, 'profiler') }}
+{% if required_fields %}
 Required measurement fields: {{ required_fields | join(', ') }}.
 Answer each field from captured evidence. Aggregate timings do not establish phase
 attribution or HIP API timing. If evidence lacks any required field, report

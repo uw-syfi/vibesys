@@ -1001,8 +1001,9 @@ mapping above, each deliberate:
   frontier, notices, the implementer's claims for the judge, the profile) is rendered from typed
   rows, the validation recipe contract is rendered from its schema, and the profiler prompt is the
   per-kind shared template plus where to write its bounded evidence (`profile/round-NNNN/`). The
-  domain sections and skill-recommendation resolution are not rendered; the modality and interface
-  texts are.
+  run's domain pack is rendered once by the plan (`domain_sections`) into one slot of each role's
+  prompt, and skill-recommendation resolution is not rendered; the modality and interface texts
+  are.
 - Properties M1 to M4 are tests of the strategy on the production shell (the roles asked per round
   against the cadence table, advisory failures, one `ValidateLocal` per paid turn, a gate failure
   keeping the next review); M5 is the conformance crash sweep over the profile-guided subject,
