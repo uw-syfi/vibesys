@@ -76,6 +76,7 @@ describe('recentStatus', () => {
       live: [],
       ended: [{...other, projectRoot: '/another-project'}],
       unreadable: [],
+      unverified: [],
     };
 
     expect(recentStatus(RECENT, listing)).toEqual({

@@ -36,7 +36,7 @@ test('live runs do not hide unreadable and unverified registry verdicts', () => 
       state={state}
       listing={listing}
       completion={COMPLETION_EMPTY}
-      actions={{attach: () => undefined, stopControls: () => null}}
+      actions={{attach: () => undefined, stopControls: () => null, inspect: () => undefined}}
       send={{host: () => undefined, completion: () => undefined, startRun: () => undefined}}
     />,
   );
