@@ -60,6 +60,7 @@ from vs_core.api import (
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
+    turn_reply,
 )
 from vs_issue_tracker.api import AppliedChanges, IssueType
 
@@ -593,7 +594,7 @@ def on_turn(
         return state
     if event.observation.status is not ObservationStatus.SUCCEEDED or event.output_json is None:
         return _unfinished(state, view, config, event)
-    reply = _decode(role, event.output_json, config)
+    reply = turn_reply(event, lambda payload: _decode(role, payload, config))
     if isinstance(reply, str):
         return _correct(state, config, reply, event.invocation) or fail(
             state, f"invalid {role.value} reply"

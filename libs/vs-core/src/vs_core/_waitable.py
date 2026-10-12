@@ -9,7 +9,8 @@ scope's own admitted submissions (`AgentEvaluationBridge`); this module owns onl
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Self, override
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, override
 
 from pydantic import (
     BaseModel,
@@ -21,6 +22,11 @@ from pydantic import (
     field_validator,
 )
 from pydantic.json_schema import GenerateJsonSchema
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from .types.sessions import TurnResult
 
 
 class WaitingForDependency(BaseModel):
@@ -184,3 +190,29 @@ class WaitableReply[R](BaseModel):
         )
         _use_any_of(schema)
         return schema
+
+
+@dataclass(frozen=True)
+class SuspendedTurn:
+    """The turn is suspended on core's record, whatever reply the agent ended it with."""
+
+
+def turn_reply[R](
+    event: TurnResult, decode: Callable[[str], R | WaitingForEvaluation | str]
+) -> R | WaitingForEvaluation | SuspendedTurn | str:
+    """Read a succeeded turn's reply; a suspended turn is a wait whatever its reply says.
+
+    Core records the wait the agent validated, not the reply it ended the turn with. An agent
+    can validate a wait and still end with a final result or a malformed reply. Core holds
+    that turn as suspended, so accepting the result, or asking the role to correct it, would
+    request a turn core refuses (``session has an outstanding invocation``). The recorded
+    suspension decides: the reply is dropped, the strategy yields, and the role answers again
+    when the turn resumes. Every strategy reads a role's reply through this function.
+
+    ``decode`` returns the role's result, a ``WaitingForEvaluation``, or the validation error
+    text. It is not called for a suspending turn. A wait reply on a turn core did not suspend
+    comes back as ``WaitingForEvaluation`` for the strategy to correct.
+    """
+    if event.suspending:
+        return SuspendedTurn()
+    return decode(event.output_json or "")

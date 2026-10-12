@@ -11,7 +11,7 @@ import asyncio
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 from tests.support.owed_submissions import owed_in
 from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors, WorldTranslator
@@ -19,8 +19,15 @@ from tests.vibesys.orchestration.issue_queue.strategy._run import FACTS, config
 
 from vibesys.core_wiring import agent_evaluation_policy
 from vibesys.orchestration.issue_queue.strategy.api import measurement_recipe
-from vs_core.api import DispatchTurn, ResourceId, ResumeSessionTurn, TurnObserved
-from vs_core.testing.drive import Succeeded
+from vs_core.api import (
+    CoreState,
+    DispatchTurn,
+    ObserveOwnedJob,
+    ResourceId,
+    ResumeSessionTurn,
+    TurnObserved,
+)
+from vs_core.testing.drive import Running, Succeeded
 from vs_evaluation.api import SubmitCall, WaitCall
 from vs_runtime.api.core import EVALUATION_TOOL_ID, AgentEvaluationBridge, ExecutionResult
 from vs_runtime.contracts import AgentRole, AgentTool
@@ -78,11 +85,18 @@ class WaitingTurns(Executors):
     """
 
     decide: Callable[[int], bool] = lambda _ordinal: True
+    ends: Callable[[int], str] = lambda _ordinal: "wait"
+    """How the n-th waiting turn ends once it has validated its wait: with the waiting reply
+    (``"wait"``), the role's final result (``"result"``) or a reply that is not valid JSON
+    (``"invalid"``). Core records the wait either way, because the tool call made it."""
     roles: tuple[str, ...] = ("implementer", "judge")
     delay: Callable[[int], int] = lambda _ordinal: 0
     started: int = 0
     delayed: int = 0
     waiting: set[str] = field(default_factory=set)
+    polls: int = 0
+    """How many polls each evaluation job reports running before it ends."""
+    remaining: dict[str, int] = field(default_factory=dict)
     clock: VirtualClock | None = None
     """The run's simulated clock, bound by `attach_for` once the run exists."""
 
@@ -95,8 +109,26 @@ class WaitingTurns(Executors):
                 assert request.request_id is not None
                 self.waiting.add(request.request_id.root)
                 lease = ResourceId(root=f"lease:{request.turn.session.session_id.root}")
-                return Succeeded(output_json=WAITING, resource_id=lease)
+                return Succeeded(output_json=self._ending(request, ordinal), resource_id=lease)
         return super()._turn(request)
+
+    @override
+    def _observe(self, request: ObserveOwnedJob, core: CoreState) -> Answer:
+        left = self.remaining.setdefault(request.resource_id.root, self.polls)
+        if left > 0:
+            self.remaining[request.resource_id.root] = left - 1
+            return Running(resource_id=request.resource_id)
+        return super()._observe(request, core)
+
+    def _ending(self, request: DispatchTurn, ordinal: int) -> str:
+        """The reply the waiting turn ends with."""
+        ending = self.ends(ordinal)
+        if ending == "result":
+            answer = super()._turn(request)
+            assert isinstance(answer, Succeeded)
+            assert answer.output_json is not None
+            return answer.output_json
+        return {"wait": WAITING, "invalid": "not json"}[ending]
 
 
 def attach_for(

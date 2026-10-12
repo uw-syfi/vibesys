@@ -61,6 +61,8 @@ class Scenario:
     """The roles whose turns may wait."""
     submit_only: tuple[str, ...] = ()
     """The roles whose turns submit an evaluation and end plainly, leaving it running."""
+    ends: tuple[str, ...] = ("wait",)
+    """How each waiting turn ends: ``wait``, ``result`` or ``invalid`` (see `WaitingTurns.ends`)."""
     unchanged_after_first_retain: bool = False
     """Whether a resumed turn leaves the worktree as it was (retains nothing of its own)."""
 
@@ -95,6 +97,7 @@ def run_scripted(root: Path, scenario: Scenario) -> tuple[Run, WaitingTurns]:
         delay=lambda n: scenario.delays[n % len(scenario.delays)],
         polls=list(scenario.polls),
         roles=scenario.roles,
+        ends=lambda n: scenario.ends[n % len(scenario.ends)],
         submit_only=scenario.submit_only,
         unchanged_after_first_retain=scenario.unchanged_after_first_retain,
         benchmark=lambda commit: scenario.throughput[
@@ -209,3 +212,57 @@ def test_an_implementer_resumed_after_waiting_keeps_the_candidate_it_checkpointe
         if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
     ]
     assert settle.candidate is not None
+
+
+@settings(max_examples=10, deadline=None, derandomize=True, database=None)
+@given(
+    ends=st.lists(st.sampled_from(("wait", "result", "invalid")), min_size=1, max_size=4).map(
+        tuple
+    ),
+    roles=st.sampled_from((("implementer", "judge"), ("judge",), ("implementer",))),
+    polls=st.integers(0, 8),
+)
+def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
+    tmp_path_factory: pytest.TempPathFactory,
+    ends: tuple[str, ...],
+    roles: tuple[str, ...],
+    polls: int,
+) -> None:
+    """Core holds a turn that validated a wait as suspended, so no reply may be accepted.
+
+    A turn that ends with its final result or an invalid reply instead of the waiting reply
+    must still yield: accepting or correcting it would request a turn core refuses, which
+    halts the run (`run_shell` raises the halt). So the strategy's decisions must not depend on
+    which reply the suspended turn ended with: they equal those of a run whose turns all end
+    with the waiting reply.
+    """
+
+    def run(chosen: tuple[str, ...]) -> Run:
+        return run_waiting(
+            tmp_path_factory.mktemp("ends"),
+            Scenario(
+                rounds=1,
+                in_flight=1,
+                waits=(True,),
+                polls=(polls,),
+                delays=(0,),
+                verdicts=(True,),
+                outcomes=("supported",),
+                throughput=(100.0,),
+                roles=roles,
+                ends=chosen,
+            ),
+        )
+
+    finished = run(ends)
+
+    assert finished.core.run.status == RunStatus.TERMINAL
+    for attempt in finished.core.attempts.attempts:
+        assert attempt.phase == AttemptPhase.TERMINAL
+    if "invalid" not in ends:
+        # Whether core records a wait on an invalid reply is core's own rule, so only the other
+        # replies are compared.
+        assert finished.core.evaluation.continuations != ()
+        assert [type(item).__name__ for item in finished.decisions] == [
+            type(item).__name__ for item in run(("wait",)).decisions
+        ]

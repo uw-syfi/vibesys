@@ -100,6 +100,10 @@ class WaitingTurns(Executors):
     """
 
     decide: Callable[[int], bool] = lambda _ordinal: True
+    ends: Callable[[int], str] = lambda _ordinal: "wait"
+    """How the n-th waiting turn ends once it has validated its wait: with the waiting reply
+    (``"wait"``), the role's final result (``"result"``) or a reply that is not valid JSON
+    (``"invalid"``). Core records the wait either way, because the tool call made it."""
     roles: tuple[str, ...] = ("implementer", "judge")
     delay: Callable[[int], int] = lambda _ordinal: 0
     polls: list[int] = field(default_factory=lambda: [0])
@@ -148,8 +152,18 @@ class WaitingTurns(Executors):
                 assert request.request_id is not None
                 self.waiting.add(request.request_id.root)
                 lease = ResourceId(root=f"lease:{request.turn.session.session_id.root}")
-                return Succeeded(output_json=WAITING, resource_id=lease)
+                return Succeeded(output_json=self._ending(request, ordinal), resource_id=lease)
         return super()._turn(request)
+
+    def _ending(self, request: DispatchTurn, ordinal: int) -> str:
+        """The reply the waiting turn ends with."""
+        ending = self.ends(ordinal)
+        if ending == "result":
+            answer = super()._turn(request)
+            assert isinstance(answer, Succeeded)
+            assert answer.output_json is not None
+            return answer.output_json
+        return {"wait": WAITING, "invalid": "not json"}[ending]
 
 
 def attach_for(

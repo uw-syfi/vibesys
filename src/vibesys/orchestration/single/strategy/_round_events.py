@@ -48,6 +48,7 @@ from vs_core.api import (
     Rejected,
     ResumeAuthorized,
     RunView,
+    SuspendedTurn,
     TurnCandidate,
     TurnCandidateFailed,
     TurnCandidatePending,
@@ -60,6 +61,7 @@ from vs_core.api import (
     ledger_refs,
     may_resubmit,
     trusted_keys,
+    turn_reply,
 )
 
 _REPLY = WaitableReply[SingleAgentRoundResponse]
@@ -318,12 +320,12 @@ def on_turn(
         return state
     if event.observation.status is not ObservationStatus.SUCCEEDED or event.output_json is None:
         return _unfinished(state, view, config, record, event)
-    reply = _decode(event.output_json)
+    reply = turn_reply(event, _decode)
     if isinstance(reply, str):
         return _corrected(
             state, config, record, event, ReplyCorrectionPrompt(role="implementer", error=reply)
         )
-    if isinstance(reply, WaitingForEvaluation):
+    if isinstance(reply, WaitingForEvaluation | SuspendedTurn):
         return _waiting(state, view, config, record, event)
     candidate = _candidate_of(view, record, event.invocation)
     if candidate is None or isinstance(candidate, TurnCandidatePending):

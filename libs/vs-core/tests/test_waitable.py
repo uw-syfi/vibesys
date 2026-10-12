@@ -9,7 +9,24 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from vs_core.api import DecisionFeedback, Waitable, WaitableReply, WaitingForEvaluation
+from vs_core.api import (
+    AttemptId,
+    DecisionFeedback,
+    EventId,
+    InvocationId,
+    InvocationRef,
+    Observation,
+    ObservationStatus,
+    RequestId,
+    Scope,
+    SessionId,
+    SuspendedTurn,
+    TurnResult,
+    Waitable,
+    WaitableReply,
+    WaitingForEvaluation,
+    turn_reply,
+)
 
 
 class Verdict(BaseModel):
@@ -82,3 +99,40 @@ def test_the_envelope_schema_has_an_object_root_and_no_one_of() -> None:
 def test_a_wait_names_nonblank_unique_handles(handles: list[str]) -> None:
     with pytest.raises(ValidationError):
         _REPLY.validate_python({"kind": "waiting_for_evaluation", "handles": handles})
+
+
+def _turn(output_json: str, *, suspending: bool) -> TurnResult:
+    return TurnResult(
+        invocation=InvocationRef(
+            session_id=SessionId(root="s"), invocation_id=InvocationId(root="i"), generation=0
+        ),
+        observation=Observation(
+            event_id=EventId(root="e"),
+            request_id=RequestId(root="r"),
+            scope=Scope(owner=AttemptId(root="a"), generation=0),
+            sequence=1,
+            observed_at=1.0,
+            status=ObservationStatus.SUCCEEDED,
+            accepted=True,
+            terminal=True,
+        ),
+        output_json=output_json,
+        suspending=suspending,
+    )
+
+
+def _decode(payload: str) -> Verdict | WaitingForEvaluation | str:
+    try:
+        return _ENVELOPE.model_validate_json(payload).reply
+    except ValidationError as error:
+        return str(error)
+
+
+@given(payload=st.one_of(st.text(), st.booleans().map(lambda p: f'{{"passed": {str(p).lower()}}}')))
+def test_a_suspending_turn_is_a_wait_whatever_its_reply_says(payload: str) -> None:
+    assert turn_reply(_turn(payload, suspending=True), _decode) == SuspendedTurn()
+
+
+@given(payload=st.one_of(st.text(), st.booleans().map(lambda p: f'{{"passed": {str(p).lower()}}}')))
+def test_a_turn_that_is_not_suspending_reads_its_reply(payload: str) -> None:
+    assert turn_reply(_turn(payload, suspending=False), _decode) == _decode(payload)
