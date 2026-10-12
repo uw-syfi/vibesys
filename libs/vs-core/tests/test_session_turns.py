@@ -178,14 +178,15 @@ def carrying_request(spec: core.SessionSpec, scope: core.Scope) -> core.Intent:
     A turn acquiring with no request about its session is an orphan wait that the step ends
     (`AcquisitionStalled`), so a state seeded between two signals carries one.
     """
+    request_id = core.RequestId(root=f"carry:{spec.session_id.root}")
     request = core.EnsureSession(
-        request_id=core.RequestId(root=f"carry:{spec.session_id.root}"),
+        request_id=request_id,
         scope=scope,
         deadline_at=100.0,
         spec=spec,
     )
     return core.Intent(
-        request_id=request.request_id,
+        request_id=request_id,
         request=request,
         payload_digest=value_digest(request),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
