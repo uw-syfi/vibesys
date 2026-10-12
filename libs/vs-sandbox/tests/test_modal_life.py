@@ -40,7 +40,12 @@ _LISTING = st.one_of(
     st.builds(ContainerListing, st.lists(_ENTRY, max_size=4).map(tuple)),
     st.builds(ListingFailed, st.text(max_size=20)),
 )
-_RANK = {ContainerUnknown: -1, ContainerStarting: 0, ContainerRunning: 1}
+
+
+def _rank(life: ContainerStarting | ContainerRunning | ContainerUnknown) -> int:
+    if isinstance(life, ContainerRunning):
+        return 1
+    return 0 if isinstance(life, ContainerStarting) else -1
 
 
 @given(listings=st.lists(_LISTING, max_size=20))
@@ -50,7 +55,7 @@ def test_a_listing_never_takes_a_known_container_life_backwards(
     held: ContainerStarting | ContainerRunning | ContainerUnknown = ContainerUnknown()
     for listing in listings:
         after = observe_container(held, listing, _APP)
-        assert _RANK[type(after)] >= _RANK[type(held)]
+        assert _rank(after) >= _rank(held)
         if isinstance(held, ContainerRunning):
             assert after == held
         if not isinstance(held, ContainerUnknown):
