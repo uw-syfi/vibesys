@@ -10,7 +10,7 @@ import stat
 import tempfile
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -19,6 +19,7 @@ from vs_sandbox.api.skypilot import (
     AckedFrame,
     ArtifactFrame,
     ErrorFrame,
+    JobStatus,
     OutputFrame,
     ResultFrame,
     encode_message,
@@ -79,12 +80,12 @@ def _serve_frames(
 
 @pytest.mark.parametrize(
     ("status", "expected"),
-    [("COMPLETED", 0), ("APPLICATION_FAILED", 1), ("CANCELLED", 130)],
+    [(JobStatus.COMPLETED, 0), (JobStatus.APPLICATION_FAILED, 1), (JobStatus.CANCELLED, 130)],
 )
 def test_helper_relays_streams_and_maps_terminal_status(
     socket_dir: Path,
     tmp_path: Path,
-    status: Literal["COMPLETED", "APPLICATION_FAILED", "CANCELLED"],
+    status: JobStatus,
     expected: int,
 ) -> None:
     path = socket_dir / "bridge.sock"
@@ -167,7 +168,7 @@ def test_helper_materializes_narrow_framework_result_artifact(
                 sha256=hashlib.sha256(b'{"score": 1}').hexdigest(),
                 data_base64=base64.b64encode(b'{"score": 1}').decode(),
             ),
-            ResultFrame(status="COMPLETED", sky_exit_code=0, remote_job_id=7),
+            ResultFrame(status=JobStatus.COMPLETED, sky_exit_code=0, remote_job_id=7),
         ],
     )
     try:
@@ -206,7 +207,7 @@ def test_pending_invocation_identity_survives_helper_process_state_reload(
     second_path = tmp_path / "second.sock"
     second_thread = _serve_frames(
         second_path,
-        [ResultFrame(status="COMPLETED", sky_exit_code=0, remote_job_id=7)],
+        [ResultFrame(status=JobStatus.COMPLETED, sky_exit_code=0, remote_job_id=7)],
         invocation_ids,
     )
     assert (
@@ -237,7 +238,7 @@ def test_acknowledged_pending_invocation_removal_is_directory_durable(
     socket_path = socket_dir / "bridge.sock"
     thread = _serve_frames(
         socket_path,
-        [ResultFrame(status="COMPLETED", sky_exit_code=0, remote_job_id=7)],
+        [ResultFrame(status=JobStatus.COMPLETED, sky_exit_code=0, remote_job_id=7)],
     )
 
     assert (
@@ -272,7 +273,7 @@ def test_pending_invocation_recovers_an_incomplete_token_file(
     recovered_path = socket_dir / "recovered.sock"
     recovered_thread = _serve_frames(
         recovered_path,
-        [ResultFrame(status="COMPLETED", sky_exit_code=0, remote_job_id=7)],
+        [ResultFrame(status=JobStatus.COMPLETED, sky_exit_code=0, remote_job_id=7)],
         recovered_ids,
     )
     assert (

@@ -12,12 +12,32 @@ import uuid
 from collections import deque
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, assert_never, runtime_checkable
 
 import yaml
 
+from vs_sandbox.skypilot_states import (
+    INITIAL_JOB_LIFE,
+    ClusterEnded,
+    ClusterInfo,
+    ClusterInitializing,
+    ClusterUnknown,
+    ClusterUp,
+    Finished,
+    Indeterminate,
+    JobLife,
+    JobStatus,
+    JobUnknown,
+    LogsFailed,
+    RemoteJobInfo,
+    advance,
+    cluster_life,
+    describe_cluster,
+    job_reading,
+    logs_verdict,
+    status_text,
+)
 from vs_sim.api import (
     OsThreads,
     PipedProcess,
@@ -38,10 +58,6 @@ _CLUSTER_COMPONENT = re.compile(r"[^a-z0-9-]+")
 _MAX_CLUSTER_NAME = 28
 _JOB_DISCOVERY_TIMEOUT_SECONDS = 60.0
 _POLL_INTERVAL_SECONDS = 2.0
-_SKY_JOB_FAILED = 100
-_SKY_JOB_NOT_FINISHED = 101
-_SKY_JOB_NOT_FOUND = 102
-_SKY_JOB_CANCELLED = 103
 _PROCESS_CLEANUP_TIMEOUT_SECONDS = 5.0
 _PROCESS_OUTPUT_TAIL_CHARACTERS = 64 * 1024
 _PROCESS_OUTPUT_READ_CHARACTERS = 64 * 1024
@@ -119,9 +135,9 @@ class SkyPilotOutputError(SkyPilotCLIError):
         return cls(f"SkyPilot job {job_name!r} changed ID from {expected} to {actual}")
 
     @classmethod
-    def unknown_job_status(cls) -> SkyPilotOutputError:
-        """Describe a queue record with an unrecognized job status."""
-        return cls("SkyPilot queue returned an unknown job status")
+    def unknown_job_status(cls, raw: str | None) -> SkyPilotOutputError:
+        """Describe a queue record whose job status is missing or not a documented one."""
+        return cls(f"SkyPilot queue returned an unknown job status {raw!r}")
 
     @classmethod
     def invalid_queue_json(cls) -> SkyPilotOutputError:
@@ -143,9 +159,9 @@ class SkyPilotClusterNotReadyError(SkyPilotCLIError):
     """Raised when a cluster does not reach a reusable state in time."""
 
     @classmethod
-    def unknown_status(cls, name: str) -> SkyPilotClusterNotReadyError:
-        """Describe a cluster whose reported status is unknown."""
-        return cls(f"SkyPilot cluster {name!r} has an unknown status")
+    def unknown_status(cls, name: str, raw: str | None) -> SkyPilotClusterNotReadyError:
+        """Describe a cluster whose reported status is missing or not a documented one."""
+        return cls(f"SkyPilot cluster {name!r} has an unknown status {raw!r}")
 
     @classmethod
     def became_unavailable(cls, name: str, status: str) -> SkyPilotClusterNotReadyError:
@@ -160,38 +176,6 @@ class SkyPilotJobStateError(SkyPilotCLIError):
     def logs_indicate_unknown_state(cls, returncode: int, job_id: int) -> SkyPilotJobStateError:
         """Describe an indeterminate state code returned while reading job logs."""
         return cls(f"SkyPilot logs returned job state code {returncode} for job {job_id}")
-
-
-class ClusterStatus(StrEnum):
-    """Observed lifecycle state of a named cluster."""
-
-    INIT = "INIT"
-    UP = "UP"
-    STOPPED = "STOPPED"
-    DOWN = "DOWN"
-    UNKNOWN = "UNKNOWN"
-
-
-class JobStatus(StrEnum):
-    """Outcome of a submitted application command."""
-
-    COMPLETED = "COMPLETED"
-    APPLICATION_FAILED = "APPLICATION_FAILED"
-    CANCELLED = "CANCELLED"
-
-
-class RemoteJobStatus(StrEnum):
-    """SkyPilot queue status used for recovery decisions."""
-
-    INIT = "INIT"
-    PENDING = "PENDING"
-    SETTING_UP = "SETTING_UP"
-    RUNNING = "RUNNING"
-    SUCCEEDED = "SUCCEEDED"
-    FAILED = "FAILED"
-    FAILED_SETUP = "FAILED_SETUP"
-    FAILED_DRIVER = "FAILED_DRIVER"
-    CANCELLED = "CANCELLED"
 
 
 @dataclass(frozen=True)
@@ -633,14 +617,6 @@ class _StreamOutput:
 
 
 @dataclass(frozen=True)
-class ClusterInfo:
-    """Identity and observed lifecycle state of one cluster."""
-
-    name: str
-    status: ClusterStatus
-
-
-@dataclass(frozen=True)
 class JobResult:
     """Application result returned from a remote cluster."""
 
@@ -668,15 +644,6 @@ class JobResult:
     def stderr_truncated(self) -> bool:
         """Whether characters before the retained stderr tail were discarded."""
         return self.stderr_omitted_characters > 0
-
-
-@dataclass(frozen=True)
-class RemoteJobInfo:
-    """Recoverable identity and queue state for one remote job."""
-
-    job_id: int
-    job_name: str
-    status: RemoteJobStatus
 
 
 def _resource_fingerprint(resources: ResolvedSkyPilotResources) -> str:
@@ -758,6 +725,8 @@ class SkyPilotJobRunner:
         self._command_runner = command_runner or SubprocessCommandRunner(self._threads)
         self._executable = executable
         self._poll_interval = poll_interval
+        # The held life of each job this runner has read: one order per job, whichever path read it.
+        self._job_lives: dict[tuple[str, str], JobLife] = {}
         self._job_name_factory = job_name_factory or (lambda: f"vibesys-job-{uuid.uuid4().hex}")
 
     def inspect_cluster(self, name: str, *, timeout: float = 60) -> ClusterInfo | None:
@@ -781,12 +750,7 @@ class SkyPilotJobRunner:
         for entry in entries:
             if not isinstance(entry, dict) or entry.get("name") != name:
                 continue
-            raw_status = entry.get("status")
-            try:
-                status = ClusterStatus(str(raw_status).upper())
-            except ValueError:
-                status = ClusterStatus.UNKNOWN
-            return ClusterInfo(name=name, status=status)
+            return ClusterInfo(name=name, life=cluster_life(status_text(entry.get("status"))))
         return None
 
     def launch(
@@ -803,7 +767,7 @@ class SkyPilotJobRunner:
                 ["launch", "-y", "-d", "-c", name, str(task_path)],
                 timeout=timeout,
             )
-        return ClusterInfo(name=name, status=ClusterStatus.UP)
+        return ClusterInfo(name=name, life=ClusterUp())
 
     def ensure_cluster(
         self,
@@ -815,14 +779,18 @@ class SkyPilotJobRunner:
         """Reuse an active named cluster or replace an inactive one."""
         deadline = None if timeout is None else self._threads.now() + timeout
         current = self.inspect_cluster(name, timeout=self._remaining(deadline, default=60) or 60)
-        if current is not None and current.status is ClusterStatus.UP:
-            return current
-        if current is not None and current.status is ClusterStatus.INIT:
-            return self._wait_for_cluster(name, deadline)
-        if current is not None and current.status is ClusterStatus.UNKNOWN:
-            raise SkyPilotClusterNotReadyError.unknown_status(name)
         if current is not None:
-            self.release(name, timeout=self._remaining(deadline, default=60) or 60)
+            match current.life:
+                case ClusterUp():
+                    return current
+                case ClusterInitializing():
+                    return self._wait_for_cluster(name, deadline)
+                case ClusterUnknown(raw=raw):
+                    raise SkyPilotClusterNotReadyError.unknown_status(name, raw)
+                case ClusterEnded():
+                    self.release(name, timeout=self._remaining(deadline, default=60) or 60)
+                case _:
+                    assert_never(current.life)
         return self.launch(name, resources, timeout=self._remaining(deadline))
 
     def run(  # noqa: PLR0913  # lint-waiver: LW-009055 [PLR0913]; streaming callbacks and resume identity are independent controls of one public job operation.
@@ -873,16 +841,16 @@ class SkyPilotJobRunner:
             stdout_sink=stdout_sink,
             stderr_sink=stderr_sink,
         )
-        if result.returncode == 0:
-            status = JobStatus.COMPLETED
-        elif result.returncode == _SKY_JOB_FAILED:
-            status = JobStatus.APPLICATION_FAILED
-        elif result.returncode == _SKY_JOB_CANCELLED:
-            status = JobStatus.CANCELLED
-        elif result.returncode in {_SKY_JOB_NOT_FINISHED, _SKY_JOB_NOT_FOUND}:
-            raise SkyPilotJobStateError.logs_indicate_unknown_state(result.returncode, job_id)
-        else:
-            raise SkyPilotControlPlaneError.logs_failed(result.returncode)
+        verdict = logs_verdict(result.returncode)
+        match verdict:
+            case Finished(status=status):
+                pass
+            case Indeterminate(returncode=code):
+                raise SkyPilotJobStateError.logs_indicate_unknown_state(code, job_id)
+            case LogsFailed(returncode=code):
+                raise SkyPilotControlPlaneError.logs_failed(code)
+            case _:
+                assert_never(verdict)
         return JobResult(
             status=status,
             sky_exit_code=result.returncode,
@@ -918,20 +886,23 @@ class SkyPilotJobRunner:
             raise SkyPilotOutputError.invalid_job_id()
         if job_id is not None and remote_id != job_id:
             raise SkyPilotOutputError.job_id_changed(job_name, job_id, remote_id)
-        try:
-            status = RemoteJobStatus(str(record.get("status", "RUNNING")).upper())
-        except ValueError as exc:
-            raise SkyPilotOutputError.unknown_job_status() from exc
-        return RemoteJobInfo(remote_id, job_name, status)
+        raw = status_text(record.get("status"))
+        reading = job_reading(raw)
+        if isinstance(reading, JobUnknown):
+            raise SkyPilotOutputError.unknown_job_status(reading.raw)
+        key = (cluster_name, job_name)
+        life = advance(self._job_lives.get(key, INITIAL_JOB_LIFE), reading)
+        self._job_lives[key] = life
+        return RemoteJobInfo(remote_id, job_name, life)
 
     def _wait_for_cluster(self, name: str, deadline: float | None) -> ClusterInfo:
         while True:
             remaining = self._remaining(deadline, default=60)
             current = self.inspect_cluster(name, timeout=remaining or 60)
-            if current is not None and current.status is ClusterStatus.UP:
+            if current is not None and isinstance(current.life, ClusterUp):
                 return current
-            if current is None or current.status is not ClusterStatus.INIT:
-                observed = "absent" if current is None else current.status.value
+            if current is None or not isinstance(current.life, ClusterInitializing):
+                observed = "absent" if current is None else describe_cluster(current.life)
                 raise SkyPilotClusterNotReadyError.became_unavailable(name, observed)
             self._pause(deadline, f"SkyPilot cluster {name!r} remained INIT")
 

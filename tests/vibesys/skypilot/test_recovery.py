@@ -12,6 +12,7 @@ from vs_sandbox.api.skypilot import (
     InvocationProvenance,
     InvocationRecord,
     InvocationResultRecord,
+    JobStatus,
 )
 
 if TYPE_CHECKING:
@@ -52,7 +53,7 @@ def _attempt_resources() -> AttemptResourcesRecord:
 
 def _result(artifact_path: Path) -> InvocationResultRecord:
     return InvocationResultRecord(
-        status="COMPLETED",
+        status=JobStatus.COMPLETED,
         sky_exit_code=0,
         artifact=ArtifactRecord.create(str(artifact_path), b"{}"),
         provenance=InvocationProvenance(

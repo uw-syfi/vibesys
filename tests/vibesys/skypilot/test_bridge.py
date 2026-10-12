@@ -21,7 +21,8 @@ from vs_sandbox.api.skypilot import (
     AttemptResourcesRecord,
     CancellableOutputSink,
     ClusterInfo,
-    ClusterStatus,
+    ClusterLife,
+    ClusterUp,
     ErrorFrame,
     EvaluationRequest,
     InvocationJournal,
@@ -100,7 +101,7 @@ class FakeRunner(SkyPilotJobRunner):
         self.cancel_calls: list[tuple[str, int]] = []
         self.workdirs: list[Path] = []
         self.commands: list[tuple[str, ...]] = []
-        self.cluster_status: ClusterStatus | None = ClusterStatus.UP
+        self.cluster_life: ClusterLife | None = ClusterUp()
 
     def ensure_cluster(
         self,
@@ -111,13 +112,13 @@ class FakeRunner(SkyPilotJobRunner):
     ) -> ClusterInfo:
         del resources, timeout
         self.ensure_calls += 1
-        return ClusterInfo(name, ClusterStatus.UP)
+        return ClusterInfo(name, ClusterUp())
 
     def inspect_cluster(self, name: str, *, timeout: float = 60) -> ClusterInfo | None:
         del timeout
-        if self.cluster_status is None:
+        if self.cluster_life is None:
             return None
-        return ClusterInfo(name, self.cluster_status)
+        return ClusterInfo(name, self.cluster_life)
 
     def run(  # noqa: PLR0913  # lint-waiver: LW-010051 [PLR0913]; this fake preserves the public SkyPilotJobRunner.run callback and resume controls so the bridge exercises the real runner contract.
         self,
@@ -632,9 +633,9 @@ def test_startup_replacement_evidence_applies_only_to_preexisting_invocations(
     journal = InvocationJournal(namespace)
     invocation_id = "f" * 32
     prepared = journal.prepare(invocation_id, "1" * 64, "2" * 64)
-    runner.cluster_status = None
+    runner.cluster_life = None
     bridge.start()
-    runner.cluster_status = ClusterStatus.UP
+    runner.cluster_life = ClusterUp()
     bridge._locally_prepared_invocations.add(invocation_id)  # noqa: SLF001  # LW-010027; marks an invocation prepared in this process for recovery discrimination
 
     assert bridge._recover_after_allocation_loss(prepared) is prepared  # noqa: SLF001  # LW-010028; verifies an unsubmitted journal record is retained after allocation loss
@@ -1501,7 +1502,7 @@ def _terminal_record(tmp_path: Path) -> tuple[InvocationJournal, InvocationRecor
     record = journal.submitting(record, "lease", _attempt_resources())
     record = journal.submitted(record, 9, "lease")
     result = InvocationResultRecord(
-        status="COMPLETED",
+        status=JobStatus.COMPLETED,
         sky_exit_code=0,
         provenance=InvocationProvenance(
             profile_name="test",

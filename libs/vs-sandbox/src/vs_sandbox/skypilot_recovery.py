@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vs_sandbox.skypilot_states import JobStatus
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -89,7 +91,7 @@ class InvocationResultRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    status: Literal["COMPLETED", "APPLICATION_FAILED", "CANCELLED"]
+    status: JobStatus
     sky_exit_code: int
     artifact: ArtifactRecord | None = None
     provenance: InvocationProvenance

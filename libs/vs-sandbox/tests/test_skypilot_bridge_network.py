@@ -16,7 +16,7 @@ from vs_project.api.testing import scratch_state_directory
 from vs_sandbox.api.skypilot import (
     AckRequest,
     ClusterInfo,
-    ClusterStatus,
+    ClusterUp,
     ErrorFrame,
     EvaluationRequest,
     JobResult,
@@ -63,11 +63,11 @@ class _Runner(SkyPilotJobRunner):
     ) -> ClusterInfo:
         del resources, timeout
         self.ensure_calls += 1
-        return ClusterInfo(name, ClusterStatus.UP)
+        return ClusterInfo(name, ClusterUp())
 
     def inspect_cluster(self, name: str, *, timeout: float = 60) -> ClusterInfo | None:
         del timeout
-        return ClusterInfo(name, ClusterStatus.UP)
+        return ClusterInfo(name, ClusterUp())
 
     def run(  # noqa: PLR0913  # lint-waiver: LW-731021 [PLR0913]; this Fake keeps the public SkyPilotJobRunner.run signature.
         self,

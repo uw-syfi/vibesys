@@ -37,11 +37,14 @@ from vs_sandbox.skypilot_recovery import (
 )
 from vs_sandbox.skypilot_runner import (
     CancellableOutputSink,
-    ClusterStatus,
-    RemoteJobInfo,
-    RemoteJobStatus,
     SkyPilotControlPlaneError,
     SkyPilotJobStateError,
+)
+from vs_sandbox.skypilot_states import (
+    JobStatus,
+    RemoteJobInfo,
+    allocation_gone,
+    is_driver_failure,
 )
 from vs_sim.api import OsThreads, UnixNetwork
 
@@ -406,14 +409,7 @@ class SkyPilotBridge:
         self.socket_path.unlink(missing_ok=True)
         try:
             previous_cluster = self._runner.inspect_cluster(self._cluster_name)
-            self._cluster_replaced_on_start = (
-                previous_cluster is None
-                or previous_cluster.status
-                in {
-                    ClusterStatus.DOWN,
-                    ClusterStatus.STOPPED,
-                }
-            )
+            self._cluster_replaced_on_start = allocation_gone(previous_cluster)
             self._runner.ensure_cluster(self._cluster_name, self._resources)
             listener = self._network.listen(str(self.socket_path))
             self._listener = listener
@@ -635,7 +631,7 @@ class SkyPilotBridge:
                     try:
                         found = self._reconcile(active_record)
                         self._require_open_for_remote_action()
-                        if found is not None and found.status is RemoteJobStatus.FAILED_DRIVER:
+                        if found is not None and is_driver_failure(found.life):
                             failed_cluster = active_record.active_cluster_name or self._cluster_name
                             active_record = self._retry_after_infrastructure_failure(active_record)
                             self._runner.release(failed_cluster)
@@ -693,11 +689,7 @@ class SkyPilotBridge:
                         latest = self._journal.load(request.invocation_id) or active_record
                         attempted_cluster = latest.active_cluster_name or self._cluster_name
                         cluster = self._runner.inspect_cluster(attempted_cluster)
-                        allocation_expired = cluster is None or cluster.status in {
-                            ClusterStatus.DOWN,
-                            ClusterStatus.STOPPED,
-                        }
-                        if not allocation_expired:
+                        if not allocation_gone(cluster):
                             raise
                         self._require_open_for_remote_action()
                         active_record = self._recover_after_allocation_loss(latest)
@@ -707,7 +699,7 @@ class SkyPilotBridge:
                 monitor.join(timeout=1)
             with self._active_lock:
                 self._active_jobs.discard((result.cluster_name, result.remote_job_id))
-            artifact = artifact_stream.result() if result.status.value == "COMPLETED" else None
+            artifact = artifact_stream.result() if result.status is JobStatus.COMPLETED else None
             latest = self._journal.load(request.invocation_id) or record
             attempt_resources = latest.attempt_resources
             if attempt_resources is None:
@@ -719,7 +711,7 @@ class SkyPilotBridge:
                 else None
             )
             terminal = InvocationResultRecord(
-                status=result.status.value,
+                status=result.status,
                 sky_exit_code=result.sky_exit_code,
                 artifact=artifact_record,
                 provenance=InvocationProvenance(
@@ -763,7 +755,7 @@ class SkyPilotBridge:
         ):
             return True
         cluster = self._runner.inspect_cluster(cluster_name)
-        return cluster is None or cluster.status in {ClusterStatus.DOWN, ClusterStatus.STOPPED}
+        return allocation_gone(cluster)
 
     def _reconcile(self, record: InvocationRecord) -> RemoteJobInfo | None:
         """Attach to an exact prior job before any new submission."""

@@ -7,6 +7,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from vs_sandbox.skypilot_states import JobStatus
+
 PROTOCOL_VERSION = 2
 
 
@@ -36,7 +38,7 @@ class ResultFrame(_Message):
     """Terminal remote job result."""
 
     type: Literal["result"] = "result"
-    status: Literal["COMPLETED", "APPLICATION_FAILED", "CANCELLED"]
+    status: JobStatus
     sky_exit_code: int
     remote_job_id: int
 

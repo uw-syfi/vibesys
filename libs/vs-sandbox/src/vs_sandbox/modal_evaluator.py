@@ -41,6 +41,7 @@ import urllib.error
 import urllib.request
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -291,7 +292,7 @@ def wait_for_health(base_url: str, *, timeout_seconds: float) -> None:
     while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(health_url, timeout=10) as response:  # noqa: S310  # lint-waiver: LW-010210 [S310]; the endpoint is restricted to a verified Modal HTTPS host.
-                if response.status == _HTTP_OK_STATUS:
+                if health_ready(response.status):
                     return
                 last_error = f"HTTP {response.status}"
         except (OSError, urllib.error.URLError) as exc:
@@ -305,7 +306,7 @@ def _healthy_now(base_url: str) -> bool:
     """Return whether an existing deployment is immediately reusable."""
     try:
         with urllib.request.urlopen(_modal_health_url(base_url), timeout=5) as response:  # noqa: S310  # lint-waiver: LW-010211 [S310]; readiness probes only contact a verified Modal HTTPS host.
-            return response.status == _HTTP_OK_STATUS
+            return health_ready(response.status)
     except (OSError, urllib.error.URLError, ValueError):
         return False
 
@@ -539,6 +540,140 @@ def _build_stage_archive(
     return payload
 
 
+# --- The Modal lifecycle translator ------------------------------------------
+#
+# This helper is mounted into the runtime as one stdlib-only file, so its
+# translator lives here rather than in a sibling module. Modal reports three raw
+# things: the ``modal container list`` entries, the exit-code marker line the
+# bootstrap script prints, and the HTTP status of ``/health``. These functions
+# are the only place that text is interpreted; everything else reads a life.
+#
+# * No guessing. A listing that cannot be read, a marker that is not a plain
+#   exit code, or no marker at all is ``...Unknown(raw)``; it is never a running
+#   container and never an exit code of zero.
+# * Forward only (containers). Starting < Running; a reading that would move
+#   backwards, or an unreadable one, never replaces a known life.
+# * The exec reading is one terminal reading, not a series. The trusted script
+#   prints its marker last, so the last marker line is the reading and any
+#   earlier marker-shaped line is the evaluator's own output.
+
+_EXIT_CODE_TEXT = re.compile(r"[0-9]{1,3}")
+_MAX_EXIT_CODE = 255
+
+
+class ExecEnd(StrEnum):
+    """How the in-container command ended."""
+
+    OK = "ok"
+    NONZERO_EXIT = "nonzero_exit"
+
+
+@dataclass(frozen=True)
+class ExecEnded:
+    """The bootstrap script reported the command's exit code."""
+
+    outcome: ExecEnd
+    exit_code: int
+
+
+@dataclass(frozen=True)
+class ExecUnknown:
+    """No exit code was reported. ``raw`` is the unreadable marker text, None if there was none."""
+
+    raw: str | None = None
+
+
+ExecLife = ExecEnded | ExecUnknown
+
+
+def exec_life_of_marker(suffix: str) -> ExecLife:
+    """What the text after the exit-code marker says. Total; only ``0``-``255`` in ASCII."""
+    if _EXIT_CODE_TEXT.fullmatch(suffix) is None or int(suffix) > _MAX_EXIT_CODE:
+        return ExecUnknown(raw=suffix)
+    code = int(suffix)
+    return ExecEnded(ExecEnd.OK if code == 0 else ExecEnd.NONZERO_EXIT, code)
+
+
+def exit_status_of(life: ExecLife, modal_returncode: int) -> int:
+    """The process exit status a life reads as. An unknown life is never success."""
+    if isinstance(life, ExecEnded):
+        return life.exit_code
+    return modal_returncode or 1
+
+
+@dataclass(frozen=True)
+class ContainerStarting:
+    """The app has no listed container yet."""
+
+
+@dataclass(frozen=True)
+class ContainerRunning:
+    """A container of the app is listed."""
+
+    container_id: str
+
+
+@dataclass(frozen=True)
+class ContainerUnknown:
+    """The listing could not be read. ``raw`` says why."""
+
+    raw: str | None = None
+
+
+ContainerLife = ContainerStarting | ContainerRunning | ContainerUnknown
+
+
+@dataclass(frozen=True)
+class ContainerListing:
+    """The parsed JSON of one successful ``modal container list --json``."""
+
+    entries: tuple[object, ...]
+
+
+@dataclass(frozen=True)
+class ListingFailed:
+    """``modal container list`` failed or printed something that is not JSON."""
+
+    reason: str
+
+
+def container_reading(raw: ContainerListing | ListingFailed, app_identifier: str) -> ContainerLife:
+    """What one listing says on its own. Total."""
+    if isinstance(raw, ListingFailed):
+        return ContainerUnknown(raw=raw.reason)
+    for entry in raw.entries:
+        if not isinstance(entry, dict):
+            continue
+        # Key style varies across modal client versions: 1.5.x emits
+        # snake_case ("app_name"), older clients title case ("App Name").
+        name = entry.get("app_name") or entry.get("App Name")
+        container_id = entry.get("container_id") or entry.get("Container ID")
+        if name == app_identifier and container_id:
+            return ContainerRunning(str(container_id))
+    return ContainerStarting()
+
+
+def advance_container(prev: ContainerLife, seen: ContainerLife) -> ContainerLife:
+    """Join a listing's life into the held life, forward only."""
+    if isinstance(seen, ContainerUnknown):
+        return seen if isinstance(prev, ContainerUnknown) else prev
+    if isinstance(prev, ContainerRunning):
+        return prev
+    return seen
+
+
+def observe_container(
+    prev: ContainerLife, raw: ContainerListing | ListingFailed, app_identifier: str
+) -> ContainerLife:
+    """Fold one listing into *prev*. Total, pure, and forward only."""
+    return advance_container(prev, container_reading(raw, app_identifier))
+
+
+def health_ready(http_status: int) -> bool:
+    """Whether an HTTP status from ``/health`` says the deployment serves."""
+    return http_status == _HTTP_OK_STATUS
+
+
 def _find_app_container(
     app_identifier: str,
     *,
@@ -552,39 +687,44 @@ def _find_app_container(
     readiness and discovery, probing the public endpoint starts a container.
     """
     deadline = time.monotonic() + timeout_seconds
+    life: ContainerLife = ContainerUnknown()
     last_error = "no container listed"
     while True:
-        try:
-            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010242 [S603]; list is a fixed read-only Modal CLI operation with no user command string.
-                [shutil.which("uv") or "uv", "run", "modal", "container", "list", "--json"],
-                cwd=workspace,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=60,
-            )
-            if result.returncode == 0:
-                entries = json.loads(result.stdout)
-            else:
-                entries = []
-                last_error = f"container list exited {result.returncode}: {result.stderr.strip()}"
-        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
-            entries = []
-            last_error = f"{type(exc).__name__}: {exc}"
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            # Key style varies across modal client versions: 1.5.x emits
-            # snake_case ("app_name"), older clients title case ("App Name").
-            name = entry.get("app_name") or entry.get("App Name")
-            container_id = entry.get("container_id") or entry.get("Container ID")
-            if name == app_identifier and container_id:
-                return str(container_id)
+        listing = _list_containers(workspace)
+        reading = container_reading(listing, app_identifier)
+        if isinstance(reading, ContainerUnknown):
+            last_error = reading.raw or last_error
+        life = advance_container(life, reading)
+        if isinstance(life, ContainerRunning):
+            return life.container_id
         if time.monotonic() >= deadline:
             message = f"no running container found for Modal app {app_identifier}: {last_error}"
             raise TimeoutError(message)
         _healthy_now(base_url)
         time.sleep(5)
+
+
+def _list_containers(workspace: str) -> ContainerListing | ListingFailed:
+    """Run ``modal container list --json`` and parse it, without interpreting the entries."""
+    try:
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010242 [S603]; list is a fixed read-only Modal CLI operation with no user command string.
+            [shutil.which("uv") or "uv", "run", "modal", "container", "list", "--json"],
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            return ListingFailed(
+                f"container list exited {result.returncode}: {result.stderr.strip()}"
+            )
+        entries = json.loads(result.stdout)
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+        return ListingFailed(f"{type(exc).__name__}: {exc}")
+    if not isinstance(entries, list):
+        return ListingFailed("container list JSON is not a list")
+    return ContainerListing(tuple(entries))
 
 
 def _bootstrap_script(
@@ -664,9 +804,9 @@ printf '\\n{_EXEC_RC_MARKER}%s\\n' "$rc"
 """
 
 
-def _parse_exec_output(stdout: str) -> tuple[int | None, dict[str, bytes], str]:
-    """Split exec stdout into exit code, relayed output files, and passthrough."""
-    exit_code: int | None = None
+def _parse_exec_output(stdout: str) -> tuple[ExecLife, dict[str, bytes], str]:
+    """Split exec stdout into the exec life, relayed output files, and passthrough."""
+    life: ExecLife = ExecUnknown()
     files: dict[str, bytes] = {}
     passthrough: list[str] = []
     collecting: str | None = None
@@ -688,12 +828,10 @@ def _parse_exec_output(stdout: str) -> tuple[int | None, dict[str, bytes], str]:
             collecting = stripped[len(_OUTPUT_FILE_MARKER) + 1 :]
             continue
         if stripped.startswith(_EXEC_RC_MARKER):
-            suffix = stripped[len(_EXEC_RC_MARKER) :]
-            if suffix.isdigit():
-                exit_code = int(suffix)
+            life = exec_life_of_marker(stripped[len(_EXEC_RC_MARKER) :])
             continue
         passthrough.append(line)
-    return exit_code, files, "\n".join(passthrough)
+    return life, files, "\n".join(passthrough)
 
 
 class _DeploymentKeepWarm:
@@ -774,22 +912,21 @@ def _execute_colocated(
             text=True,
             check=False,
         )
-    exit_code, files, passthrough = _parse_exec_output(result.stdout)
+    life, files, passthrough = _parse_exec_output(result.stdout)
     if passthrough:
         print(passthrough)  # noqa: T201  # lint-waiver: LW-000215 [T201]; candidate evaluator stdout is passed through to the invoking CLI.
     if result.stderr:
         print(result.stderr, file=sys.stderr, end="")  # noqa: T201  # lint-waiver: LW-000216 [T201]; candidate evaluator stderr is passed through to the invoking CLI.
     for path, payload in files.items():
         Path(path).write_bytes(payload)
-    if exit_code is None:
+    if isinstance(life, ExecUnknown):
         tail = result.stdout[-_MAX_DIAGNOSTIC_CHARS:]
         print(  # noqa: T201  # lint-waiver: LW-000217 [T201]; candidate evaluator exit diagnostics are shown to the invoking CLI.
             "Modal evaluator exec did not report an exit code "
             f"(modal exit {result.returncode}); output tail:\n{tail}",
             file=sys.stderr,
         )
-        return result.returncode or 1
-    return exit_code
+    return exit_status_of(life, result.returncode)
 
 
 def run_evaluator(  # noqa: PLR0913  # lint-waiver: LW-011128 [PLR0913]; This installed CLI helper accepts argv, workspace, entrypoint, readiness timeout, trusted setup argv, and evaluator package root as separate caller controls.

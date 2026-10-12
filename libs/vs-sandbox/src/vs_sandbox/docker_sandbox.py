@@ -28,6 +28,12 @@ from vs_sandbox.docker_cli import (
     DockerCli,
     SubprocessDockerCli,
 )
+from vs_sandbox.docker_states import (
+    INITIAL_CONTAINER_LIFE,
+    RemovalReading,
+    observe_removal,
+    released,
+)
 from vs_sandbox.host_resources import HostResourceAccess
 from vs_sandbox.host_sandbox import WorkspaceSandbox
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
@@ -120,7 +126,8 @@ def _cleanup_containers(docker: DockerCli | None = None) -> None:
             removed = docker.run(["docker", "rm", "-f", container_id], timeout_seconds=10)
         if removed is None:
             continue
-        if removed.returncode == 0 or "No such container" in (removed.stderr or ""):
+        reading = RemovalReading(removed.returncode, removed.stderr or "")
+        if released(observe_removal(INITIAL_CONTAINER_LIFE, reading)):
             _live_containers.pop(container_id, None)
 
 
@@ -745,12 +752,8 @@ class DockerSandbox(WorkspaceSandbox):
                 result = self._docker.run(cmd, timeout_seconds=timeout)
                 self._log_cmd(cmd, result)
                 if cmd[1] == "rm":
-                    stderr = result.stderr or ""
-                    removed = (
-                        result.returncode == 0
-                        or "No such container" in stderr
-                        or ("removal of container" in stderr and "is already in progress" in stderr)
-                    )
+                    reading = RemovalReading(result.returncode, result.stderr or "")
+                    removed = released(observe_removal(INITIAL_CONTAINER_LIFE, reading))
                     if not removed:
                         cleanup_error = RuntimeError(
                             f"Failed to remove Docker container {container_id} "
