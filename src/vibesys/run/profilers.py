@@ -12,7 +12,7 @@ from vibesys.orchestration.profilers import (
     ProfilerPreflightResult,
     preflight_profiler_kind,
     profiler_definition,
-    resolve_profiler_kind,
+    resolve_profiler_choice,
 )
 from vs_agent.api import agent_supports_tool_servers
 from vs_project.api import Project, ProjectLayoutError
@@ -65,7 +65,7 @@ def resolve_run_profiler(
     """Resolve and validate the profiler selected for one product run."""
     config = request.config
     try:
-        resolved = resolve_profiler_kind(
+        choice = resolve_profiler_choice(
             request.profiler_kind,
             domain=request.input_bundle.domain,
             backend=request.backend,
@@ -84,6 +84,9 @@ def resolve_run_profiler(
                 message=f"--profiler: {exc}",
             )
         ) from exc
+    resolved = choice.kind
+    if choice.reason is not None and log is not None:
+        log(f"[profiler] --profiler auto chose 'none': {choice.reason}.")
     if preflight and environment.requires_local_profiler_preflight:
         result = preflight_profiler_kind(resolved, native_preflight=native_preflight)
         if not result.usable:
