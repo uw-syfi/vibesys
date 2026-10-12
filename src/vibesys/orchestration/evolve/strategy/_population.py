@@ -74,6 +74,9 @@ def fitness(
 ) -> tuple[float | None, str | None, Metrics]:
     """A candidate's recorded fitness: the trusted benchmark over the profiler's self-report.
 
+    A trusted headline always labels itself: its declared unit, else its metric name (the
+    profiler's own unit describes the profiler's number, which the headline replaces).
+
     The trusted row is merged over the profiler's row rather than replacing it: the scalar
     contract reports one number, so on a two-axis task replacing the row would leave every
     individual incomplete on the second axis, and the frontier (which keeps only individuals
@@ -85,7 +88,7 @@ def fitness(
     headline = None if benchmark is None else benchmark.headline()
     if benchmark is not None and headline is not None:
         trusted = {row.name: row.value for row in benchmark.metrics}
-        unit = headline.unit or (profile.perf_unit if profile is not None else None)
+        unit = headline.unit or headline.name
         return headline.value, unit, tuple((metrics | trusted).items())
     return (
         None if profile is None else profile.perf_metric,

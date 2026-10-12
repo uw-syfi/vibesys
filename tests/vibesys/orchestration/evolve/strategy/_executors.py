@@ -106,6 +106,8 @@ class Executors:
     changes: Callable[[str], bool] = lambda _attempt: True
     # Throughput per candidate commit; None makes the benchmark fail.
     benchmark: Callable[[str], float | None] = lambda _commit: 100.0
+    # The benchmark headline's declared unit; most real benchmarks declare none.
+    unit: str | None = "tokens/s"
     # Further metric rows reported with the throughput, per candidate commit.
     extra_metrics: Callable[[str], tuple[MetricRow, ...]] = lambda _commit: ()
     accuracy: Callable[[str], bool] = lambda _commit: True
@@ -310,7 +312,7 @@ class Executors:
             passed=True,
             stage=stage,
             metrics=(
-                MetricRow(name="throughput", value=value, direction="max", unit="tokens/s"),
+                MetricRow(name="throughput", value=value, direction="max", unit=self.unit),
                 *self.extra_metrics(commit),
             ),
         )

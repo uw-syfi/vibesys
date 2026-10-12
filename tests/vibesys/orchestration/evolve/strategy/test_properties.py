@@ -26,6 +26,7 @@ from vs_core.api import (
 )
 
 if TYPE_CHECKING:
+    from vs_core.testing.drive import Answer
     from vs_runtime.api.testing import Run
 
 RUNS = settings(max_examples=3, deadline=None, derandomize=True, database=None)
@@ -218,3 +219,39 @@ def test_a_dispatch_is_never_repeated_for_one_invocation() -> None:
     assert len(dispatched) == len(set(dispatched))
     assert DispatchTurn is not None
     assert config().total_attempts >= 1
+
+
+@RUNS
+@given(
+    unit=st.none() | st.sampled_from(("tokens/s", "calls/s")),
+    profiler_replies=st.sampled_from(("unparsable", "no_metric")),
+)
+def test_every_trusted_individual_records_a_unit_label_whatever_the_profiler_says(
+    unit: str | None, profiler_replies: str
+) -> None:
+    """A benchmark headline without a declared unit is labeled by its metric name.
+
+    The profiler's own self-report cannot supply the label: it fails, or reports no number.
+    """
+    profiler: deque[str | Answer] = deque(
+        ['{"analysis": 1}'] * 4 if profiler_replies == "unparsable" else [profiled()] * 4
+    )
+    executors = Executors(
+        mutator=deque(mutated() for _ in range(2)),
+        judge=deque(reviewed() for _ in range(2)),
+        profiler=profiler,
+        unit=unit,
+    )
+    trace = run_shell(
+        executors,
+        max_generations=1,
+        children_per_generation=1,
+        profiler_id="linux_cpu",
+        profiler_support_name="linux_cpu_profiler",
+        profiler_mcp_name="vibesys-linux-cpu-profiler",
+    )
+    state = _state(trace)
+    assert state.population is not None
+    measured = [item for item in state.population.individuals if item.perf_metric is not None]
+    assert measured
+    assert all(item.perf_unit == (unit or "throughput") for item in measured)
