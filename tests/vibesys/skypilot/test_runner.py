@@ -1085,3 +1085,75 @@ def test_run_times_out_when_job_never_appears_in_queue(tmp_path: Path) -> None:
 def test_task_document_rejects_empty_command() -> None:
     with pytest.raises(ValueError, match="command must not be empty"):
         build_task_document(_resources(), command=())
+
+
+# Regressions for status the runner used to guess: a missing job status read as
+# RUNNING, any case was folded to a known status, and a stale listing could take
+# a finished job back to running.
+
+
+def test_query_job_does_not_read_a_missing_status_as_running() -> None:
+    runner = SkyPilotJobRunner(
+        FakeCommandRunner([_queue({"job_name": "j", "job_id": 7})]),
+    )
+
+    with pytest.raises(SkyPilotOutputError, match="unknown job status None"):
+        runner.query_job("lease", job_name="j")
+
+
+_JOB_STATES = [
+    "INIT",
+    "PENDING",
+    "SETTING_UP",
+    "RUNNING",
+    "SUCCEEDED",
+    "FAILED",
+    "FAILED_SETUP",
+    "FAILED_DRIVER",
+    "CANCELLED",
+]
+
+
+@given(status=st.one_of(st.sampled_from(_JOB_STATES), st.text(max_size=14)))
+def test_query_job_accepts_exactly_the_documented_spellings(status: str) -> None:
+    runner = SkyPilotJobRunner(
+        FakeCommandRunner([_queue({"job_name": "j", "job_id": 7, "status": status})]),
+    )
+
+    if status in _JOB_STATES:
+        found = runner.query_job("lease", job_name="j")
+        assert found is not None
+        assert found.life.kind != "unknown"
+    else:
+        with pytest.raises(SkyPilotOutputError, match="unknown job status"):
+            runner.query_job("lease", job_name="j")
+
+
+@given(statuses=st.lists(st.sampled_from(_JOB_STATES), min_size=1, max_size=12))
+def test_a_job_the_queue_reported_finished_never_runs_again(statuses: list[str]) -> None:
+    fake = FakeCommandRunner(
+        [_queue({"job_name": "j", "job_id": 7, "status": status}) for status in statuses]
+    )
+    runner = SkyPilotJobRunner(fake)
+    ended: JobEnded | None = None
+
+    for _ in statuses:
+        found = runner.query_job("lease", job_name="j")
+        assert found is not None
+        if ended is not None:
+            assert found.life == ended
+        elif isinstance(found.life, JobEnded):
+            ended = found.life
+
+
+def test_cluster_status_is_not_matched_case_insensitively() -> None:
+    def runner() -> SkyPilotJobRunner:
+        listing = [{"name": "lease", "status": "up"}]
+        return SkyPilotJobRunner(FakeCommandRunner([_result(stdout=json.dumps(listing))]))
+
+    cluster = runner().inspect_cluster("lease")
+
+    assert cluster is not None
+    assert cluster.life == ClusterUnknown(raw="up")
+    with pytest.raises(SkyPilotClusterNotReadyError, match="unknown status 'up'"):
+        runner().ensure_cluster("lease", _resources())

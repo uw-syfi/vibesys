@@ -101,6 +101,8 @@ def advance(prev: ContainerLife, seen: ContainerLife) -> ContainerLife:
         return seen if isinstance(prev, ContainerUnknown) else prev
     if isinstance(prev, ContainerUnknown):
         return seen
+    if isinstance(prev, ContainerGone):
+        return prev
     return seen if _RANK[seen.kind] >= _RANK[prev.kind] else prev
 
 

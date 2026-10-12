@@ -23,6 +23,11 @@ if TYPE_CHECKING:
 _PROTOCOL_VERSION = 2
 _MAX_FRAME_BYTES = 1024 * 1024
 _FRAMEWORK_ARGUMENT_COUNT = 2
+# This helper is mounted alone and cannot import the protocol, so it restates the
+# result vocabulary of ``vs_sandbox.skypilot_states.JobStatus``;
+# ``tests/test_skypilot_states.py`` pins the two together.
+RESULT_STATUSES = frozenset({"COMPLETED", "APPLICATION_FAILED", "CANCELLED"})
+_CANCELLED_EXIT_STATUS = 130
 
 
 @dataclass(frozen=True)
@@ -62,6 +67,13 @@ def _relay_output(frame: dict[str, object], stdout: TextIO, stderr: TextIO) -> b
     return True
 
 
+def exit_status_of(status: str) -> int:
+    """The process exit status of a validated result status."""
+    if status == "COMPLETED":
+        return 0
+    return _CANCELLED_EXIT_STATUS if status == "CANCELLED" else 1
+
+
 def _validate_result(
     frame: dict[str, object],
     artifacts: tuple[str, ...],
@@ -73,7 +85,7 @@ def _validate_result(
     if (
         set(frame) != {"version", "type", "status", "sky_exit_code", "remote_job_id"}
         or not isinstance(status, str)
-        or status not in {"COMPLETED", "APPLICATION_FAILED", "CANCELLED"}
+        or status not in RESULT_STATUSES
         or not _strict_int(frame.get("sky_exit_code"))
         or not _strict_int(frame.get("remote_job_id"))
         or (status == "COMPLETED" and bool(artifacts) != artifact_received)
@@ -186,7 +198,7 @@ def _complete_result(
         print("SkyPilot bridge returned an invalid acknowledgement", file=stderr)
         return 2
     _remove_pending_invocation(session.pending_path)
-    return 0 if status == "COMPLETED" else 130 if status == "CANCELLED" else 1
+    return exit_status_of(status)
 
 
 # lint-waiver: LW-994577 [PLR0913]; this installed CLI helper takes the evaluator kind, bridge socket, arguments, caller state directory, and both output streams as separate caller controls.
