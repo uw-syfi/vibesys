@@ -99,7 +99,6 @@ _CONTROL_EVENT_TYPES = frozenset(
         CoreEventType.RESUMED,
         CoreEventType.STOP_REQUESTED,
         CoreEventType.STEER_CONSUMED,
-        CoreEventType.STEER_DELIVERED,
         CoreEventType.PAUSED,
         CoreEventType.STOPPED,
     }
@@ -419,12 +418,6 @@ class RunIntegrationAdapter:
             self.controller.stop_after_call()
         elif event.type is CoreEventType.STEER_CONSUMED:
             self.controller.record_steer_consumed(
-                agent_kind=event.agent_kind,
-                round_label=event.round_label,
-                execution_id=event.execution_id,
-            )
-        elif event.type is CoreEventType.STEER_DELIVERED:
-            self.controller.record_steer_delivered(
                 agent_kind=event.agent_kind,
                 round_label=event.round_label,
                 execution_id=event.execution_id,

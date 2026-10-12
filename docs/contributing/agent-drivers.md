@@ -182,32 +182,13 @@ work in #787) can act on it.
 ## Operator steering
 
 An operator message waits in the run's steering queue, the single source of
-truth, and leaves it at one of two drain points:
-
-| Drain point | When | Journaled as |
-|---|---|---|
-| Invocation boundary | the next agent turn starts and the message is spliced into its prompt | `steer_consumed` |
-| Mid-turn | a turn is running and its provider takes the message now | `steer_delivered` |
-
-Mid-turn delivery is an optional capability. `RuntimeAgentExecution` offers each
-running turn to the channel as a `SteerTarget`; `RuntimeRunControlChannel.queue_steer`
-offers a new message to the turn that began first, through the client's
-`SteerableAgentClient.steer`. The AgentShim session answers
-`SteerOutcome.DELIVERED` only when its transport's profile says it can take a
-message (`ProviderProfile.supports_steer`). The one-shot transport, which reads
-no input after launch, answers `UNSUPPORTED` without asking the library, so
-steering is live only on stream transports (Claude stream-json, Codex
-app-server; selected with `ConfinedSessionLauncher(transport=TransportKind.STREAM)`).
-
-Anything not delivered mid-turn keeps today's behavior: it stays queued for the
-next boundary. That includes a message offered before the provider reports the
-turn running (`NO_RUNNING_TURN`), a session without the capability, and a message
-the provider accepts and then refuses (`SteerRejected`): the channel queues it
-again at the head and journals `steer_queued` a second time. `delivered` means
-the provider accepted the message into the running turn, not that the model has
-read it; a provider that reports consumption does so on the diagnostic channel.
-No sub-agent targeting is offered: with several turns in flight the oldest one
-is offered the message.
+truth. The core run loop drains the queue at each control poll and records every
+message as a durable session input addressed to the run. The next agent turn the
+run starts reserves the input, renders it into that turn's prompt, and the run
+journals `steer_consumed` once the message has reached a turn. An input is
+delivered exactly once: a turn that is cancelled or rejected before the provider
+accepts it returns the input to pending, and a later turn receives it. A turn
+already running is never interrupted by a steer.
 
 ## Provider session resume
 

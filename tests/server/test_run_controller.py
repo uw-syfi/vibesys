@@ -75,42 +75,6 @@ def test_pause_takes_effect_at_next_safe_point(tmp_path: Path) -> None:
     assert result == ["prompt"]
 
 
-class _RunningTurn:
-    """A turn in flight whose provider takes any message offered to it."""
-
-    agent_kind = "implementer"
-    round_label = "round 1"
-
-    def __init__(self, execution_id: str | None) -> None:
-        self.execution_id = execution_id
-
-    def offer_steer(self, text: str, on_rejected: object) -> bool:
-        del text, on_rejected
-        return True
-
-
-def test_a_steer_delivered_into_a_running_turn_is_journaled_once_and_not_spliced_again(
-    tmp_path: Path,
-) -> None:
-    parts = build_server_parts(tmp_path)
-    execution = parts.start_execution("implementer", "round 1", "work")
-    detach = parts.control.attach_steer_target(_RunningTurn(execution.execution_id))
-
-    parts.control.queue_steer("focus on the KV cache")
-    detach()
-
-    controls = [(e.text, e.status) for e in parts.journal.read() if e.type is EventType.CONTROL]
-    assert controls == [
-        ("/steer: focus on the KV cache", EventStatus.PENDING),
-        ("/steer", EventStatus.DELIVERED),
-    ]
-    delivered = [e for e in parts.journal.read() if e.status is EventStatus.DELIVERED]
-    assert [(e.agent_kind, e.round_label, e.execution_id) for e in delivered] == [
-        ("implementer", "round 1", execution.execution_id)
-    ]
-    assert parts.control.take_pending_steer() == []
-
-
 def test_steering_queued_while_paused_survives_resume_for_core_to_take(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.start_execution("implementer", "round 1", "work")
