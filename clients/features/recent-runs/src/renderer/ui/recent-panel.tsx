@@ -74,8 +74,17 @@ function RowActions(props: {
         </>
       );
     }
-    case 'unknown':
-      return <Button onClick={() => actions.openHost(run.host)}>Open host</Button>;
+    case 'unknown': {
+      const instance = run.instanceId;
+      return (
+        <>
+          <Button onClick={() => actions.openHost(run.host)}>Open host</Button>
+          {instance === null ? null : (
+            <Button onClick={() => actions.inspect(run, instance)}>Inspect</Button>
+          )}
+        </>
+      );
+    }
   }
 }
 
