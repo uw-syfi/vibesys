@@ -138,15 +138,24 @@ function desktopWebSocket(bridge: DesktopBridge): WebSocketLike {
  */
 function desktopLifecycle(base: BrowserLifecycle, bridge: DesktopBridge): BrowserLifecycle {
   const online = new Set<() => void>();
+  let shellReachable = false;
   bridge.onWake(() => {
-    for (const listener of [...online]) listener();
+    // Main emits this only after its host connection is ready. Expose that stronger evidence while
+    // dispatching the event, then return to the browser's generic reachability for later events.
+    const previous = shellReachable;
+    shellReachable = true;
+    try {
+      for (const listener of [...online]) listener();
+    } finally {
+      shellReachable = previous;
+    }
   });
   return {
     get visibilityState() {
       return base.visibilityState;
     },
     get online() {
-      return base.online;
+      return shellReachable || base.online;
     },
     addEventListener(type, listener) {
       if (type === 'online') online.add(listener);

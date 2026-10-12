@@ -2,8 +2,8 @@ import {describe, expect, test} from 'bun:test';
 import type {RunEvent} from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
 import type {DesktopSocketHandlers} from '@vibesys/ipc';
-import type {BrowserLifecycle} from '@vibesys/run-session';
-import {WebSession} from '@vibesys/run-session';
+import {type BrowserLifecycle, WebSession} from '@vibesys/run-session';
+import {FakeLifecycle} from '@vibesys/run-session/testing';
 import type {ScheduleTimeout} from '@vibesys/transport';
 import {
   desktopBridge,
@@ -177,14 +177,43 @@ describe('desktop session', () => {
     await session.close();
   });
 
-  test('a wake from the shell redials a dropped stream and resumes after the last event', async () => {
+  test('a shell wake is one reachable attempt without weakening browser reachability', () => {
     const shell = new FakeShell();
+    const browser = new FakeLifecycle();
+    browser.setOnline(false);
+    const bridge = desktopBridge(shell.bridge);
+    if (bridge === null) throw new Error('bridge rejected');
+    const {lifecycle} = desktopSessionOptions(bridge, browser);
+    const online: boolean[] = [];
+    const visibility: boolean[] = [];
+    lifecycle.addEventListener('online', () => online.push(lifecycle.online));
+    lifecycle.addEventListener('visibilitychange', () => visibility.push(lifecycle.online));
+
+    expect(lifecycle.online).toBe(false);
+    shell.wake();
+    expect(online).toEqual([true]);
+    expect(lifecycle.online).toBe(false);
+
+    browser.setVisibility('hidden');
+    browser.setVisibility('visible');
+    expect(visibility).toEqual([false, false]);
+    browser.setOnline(true);
+    expect(online).toEqual([true, true]);
+    expect(lifecycle.online).toBe(true);
+  });
+
+  test('an offline shell wake redials a dropped stream and resumes after the last event', async () => {
+    const shell = new FakeShell();
+    const lifecycle = new FakeLifecycle();
+    lifecycle.setOnline(false);
     shell.events.push(event(1, 'server_ready'));
     const bridge = desktopBridge(shell.bridge);
     if (bridge === null) throw new Error('bridge rejected');
-    const session = new WebSession(
-      desktopSessionOptions(bridge, visible, {scheduleTimeout: frozen, reconnectDelaysMs: [0]}),
-    );
+    const options = desktopSessionOptions(bridge, lifecycle, {
+      scheduleTimeout: frozen,
+      reconnectDelaysMs: [0],
+    });
+    const session = new WebSession(options);
     await session.start();
     await sequenceReaches(session, 1);
 
@@ -195,6 +224,7 @@ describe('desktop session', () => {
     shell.wake();
     await sequenceReaches(session, 2);
     expect(shell.connections).toBeGreaterThan(dialsBeforeWake);
+    expect(options.lifecycle.online).toBe(false);
     await session.close();
   });
 });
