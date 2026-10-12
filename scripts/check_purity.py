@@ -90,6 +90,11 @@ PURE_EXPORTS = {
     "functools": frozenset(
         {"cache", "cached_property", "cmp_to_key", "lru_cache", "partial", "reduce", "wraps"}
     ),
+    # `weakref.ref` and `id` are approved for one use: a memo keyed by the identity of a live
+    # frozen value (`vs_core._values.InstanceMemo`). The key is never observable, a hit must
+    # resolve to the very same object, and a hit returns what recomputation would, so no result
+    # depends on addresses or collection timing.
+    "weakref": frozenset({"ref"}),
     "hashlib": frozenset(
         {
             "blake2b",
@@ -352,6 +357,7 @@ PURE_BUILTINS = frozenset(
         "True",
         "getattr",
         "hasattr",
+        "id",
         "Exception",
         "ArithmeticError",
         "AssertionError",
