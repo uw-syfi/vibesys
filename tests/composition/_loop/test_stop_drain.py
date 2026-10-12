@@ -16,23 +16,33 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, Phase, given, settings
 from hypothesis import strategies as st
-from tests.composition._loop import _crash as crash
 from tests.composition._loop import conformance as c
 from tests.composition._loop.subjects import SUBJECTS
 from tests.composition._loop.test_conformance import outcomes
 
 from vs_core.api import OwnedJob, RegisteredOwnedJob, RunStatus
 from vs_core.testing.liveness import End, final_state
+from vs_dst.api import Effects, RecoverableExecutors
+from vs_project.api import FakeStateStore
 from vs_runtime.api.core import drive_core, start_core
 from vs_runtime.api.infrastructure import RunStopped
-from vs_runtime.api.testing import LEASE, FakePublicationDelivery
+from vs_runtime.api.testing import (
+    LEASE,
+    FakePublicationDelivery,
+    HostOptions,
+    scripted_host,
+)
 from vs_sim.api.testing import run_virtual
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Callable, Coroutine, Mapping
 
-    from vs_core.api import CoreState
+    from pydantic import BaseModel
+
+    from vs_core.api import CoreState, OperationRegistry, SchemaRef
+    from vs_core.api.testing import Journal
     from vs_runtime.api.core import RunOutcome
+    from vs_runtime.api.testing import Script
     from vs_sim.api.testing import VirtualClock
 
 MAX_HOSTS = 4
@@ -76,15 +86,33 @@ def _hosts_until_ended(
     With a ``grace`` the first host gives up that long after the stop (see above); a resume
     then runs without a bound.
     """
-    store = crash.CrashingStore(None, crash.CrashPoint.BEFORE_COMMIT)
-    effects = crash.Effects()
+    store = FakeStateStore()
+    effects = Effects()
     delivery = FakePublicationDelivery(store)
     clock_at = 1.0
+
+    def translator(
+        script: Script,
+        core: Callable[[], CoreState],
+        registry: OperationRegistry,
+        schemas: Mapping[SchemaRef, type[BaseModel]],
+        journal: Journal,
+    ) -> RecoverableExecutors:
+        return RecoverableExecutors(script, core, registry, schemas, journal, effects)
+
+    options = HostOptions(attach=world.attach, translator=translator)
     for hosts in range(1, MAX_HOSTS + 1):
-        shell, host, config, clock = crash.new_host(
-            subject, world, (store, delivery, effects), c.Tape(), clock_at
+        scripted = scripted_host(
+            subject.new_strategy(),
+            world,
+            subject.harness,
+            subject.schemas,
+            options,
+            store=store,
+            delivery=delivery,
+            clock_at=clock_at,
         )
-        world.attach(shell, clock)
+        shell, host, config, clock = scripted.shell, scripted.host, scripted.config, scripted.clock
         start_core(host, config)
         running = drive_core(host, config)
         try:
