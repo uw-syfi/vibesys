@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -27,6 +27,7 @@ from vibesys.orchestration.issue_queue.strategy.api import (
 from vibesys.orchestration.issue_queue.strategy.api import ResumePrompt as IssueQueueResume
 from vibesys.prompts import CORE_PROTOCOL_DIR, ResumePrompt
 from vs_core.api import (
+    ArtifactRef,
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
@@ -59,6 +60,8 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vs_core.api import OperationRequest
+
 REVISION = RevisionRef(revision_id=RevisionId(root="cand"), digest="d")
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 _DIGEST = ContentDigest(value="a" * 64)
@@ -82,7 +85,7 @@ class _Request:
 
 
 def _record(
-    value: float, unit: str, direction: str, *, passed: bool
+    value: float, unit: str, direction: Literal["max", "min"], *, passed: bool
 ) -> tuple[EvidenceRef, TrustedEvidence]:
     evidence = TrustedEvidence(
         evidence_id="b" * 64,
@@ -94,7 +97,7 @@ def _record(
         ),
         trusted_inputs=_DIGEST,
         outcome=EvidenceOutcome.PASSED if passed else EvidenceOutcome.FAILED,
-        metrics=(EvidenceMetric(name="throughput", value=value, direction=direction, unit=unit),),  # type: ignore[arg-type]
+        metrics=(EvidenceMetric(name="throughput", value=value, direction=direction, unit=unit),),
         accepted_round=0,
     )
     ref = EvidenceRef(
@@ -133,9 +136,9 @@ def _render(
     fence = ExecutionContext(
         fence=HostFence(host_id=HostId(root="host"), epoch=1), now_at=1.0, payload_digest="d"
     )
-    outcome = asyncio.run(owner.execute(_Request(context), fence))  # type: ignore[arg-type]
+    outcome = asyncio.run(owner.execute(cast("OperationRequest", _Request(context)), fence))
     assert outcome["status"] == "succeeded", outcome
-    (artifact,) = outcome["prompts"]  # type: ignore[misc]
+    (artifact,) = cast("tuple[ArtifactRef, ...]", outcome["prompts"])
     return (store.read_digest(artifact.digest) or b"").decode()
 
 
@@ -199,7 +202,7 @@ def _cases() -> dict[str, Callable[..., str]]:
     passed=st.booleans(),
 )
 def test_a_prompt_citing_trusted_evidence_states_value_unit_direction_and_verdict(
-    name: str, value: float, unit: str, direction: str, *, passed: bool
+    name: str, value: float, unit: str, direction: Literal["max", "min"], *, passed: bool
 ) -> None:
     ref, evidence = _record(value, unit, direction, passed=passed)
     with tempfile.TemporaryDirectory() as raw:
@@ -217,7 +220,7 @@ def test_a_prompt_citing_trusted_evidence_states_value_unit_direction_and_verdic
     passed=st.booleans(),
 )
 def test_the_tool_reply_stage_carries_the_recorded_measurement(
-    value: float, unit: str, direction: str, *, passed: bool
+    value: float, unit: str, direction: Literal["max", "min"], *, passed: bool
 ) -> None:
     _, evidence = _record(value, unit, direction, passed=passed)
     stage = EvaluationStageOutcome.of(evidence)
