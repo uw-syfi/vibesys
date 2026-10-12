@@ -373,6 +373,51 @@ describe('HostConnection over the FakeHelper', () => {
     expect(connection.phase.kind).toBe('ready');
   });
 
+  test('cancelled run dials leave no readiness work to replay after the host recovers', async () => {
+    const link = new FakeLink();
+    link.helper.publish(record('00000000000c', 'run-c'));
+    link.helper.host.runs.set('00000000000c', ECHO_SERVER);
+    const establishing = link.deferEstablish();
+    await using connection = fakeConnection(link);
+    const controllers = Array.from({length: 4}, () => new AbortController());
+    const dials = controllers.map(controller =>
+      rejection(connection.openRun('00000000000c', controller.signal)),
+    );
+    await establishing.received;
+
+    const reasons = controllers.map((controller, index) => {
+      const reason = new DOMException(`page ${index} closed`, 'AbortError');
+      controller.abort(reason);
+      return reason;
+    });
+    expect(await Promise.all(dials)).toEqual(reasons);
+    expect(link.helper.spawned).toBe(0);
+
+    establishing.release();
+    await phaseReached(connection, 'ready');
+    expect(connection.phase.kind).toBe('ready');
+    // Only the recovered control helper exists: no abandoned run dial started a helper later.
+    expect(link.helper.spawned).toBe(1);
+    expect(link.helper.running).toBe(1);
+  });
+
+  test('cancelling an established run channel is cleanup, not a host failure', async () => {
+    const link = new FakeLink();
+    link.helper.publish(record('00000000000c', 'run-c'));
+    link.helper.host.runs.set('00000000000c', ECHO_SERVER);
+    await using connection = fakeConnection(link);
+    const controller = new AbortController();
+    const {stream} = await connection.openRun('00000000000c', controller.signal);
+    const closed = new Promise<void>(resolve => stream.once('close', resolve));
+    stream.on('error', () => {});
+
+    controller.abort();
+    await closed;
+
+    expect(connection.phase.kind).toBe('ready');
+    expect(link.helper.running).toBe(1);
+  });
+
   test('regression: closing resolves only once every helper process has exited', async () => {
     const link = new FakeLink();
     link.helper.publish(record('00000000000c', 'run-c'));

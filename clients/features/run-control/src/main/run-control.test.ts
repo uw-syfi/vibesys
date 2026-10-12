@@ -5,12 +5,14 @@ import {
   DEFAULT_CONNECTION_CONFIG,
   HostConnection,
 } from '@vibesys/connection';
-import {FakeLink, record} from '@vibesys/connection/testing';
+import {FakeLink, phaseReached, record} from '@vibesys/connection/testing';
 import type {InstanceList} from '@vibesys/contracts/host-helper';
 import type {ConnectionStatus} from '@vibesys/hosts';
+import type {MainToPage} from '@vibesys/ipc';
 import {exactResumeRunId} from '@vibesys/runs';
 import type {StoredRecentRun} from '@vibesys/settings';
 import {FakeClock} from '@vibesys/transport/testing';
+import type {RelayPort} from './relay.js';
 import {RunControl} from './run-control.js';
 
 const HOST = {kind: 'local'} as const;
@@ -69,6 +71,27 @@ class FakeLog {
   waitFor(text: string): Promise<void> {
     if (this.messages.some(message => message.includes(text))) return Promise.resolve();
     return new Promise<void>(resolve => this.#waiters.push({text, resolve}));
+  }
+}
+
+/** One run-page connection, controlled synchronously by the test. */
+class FakeRelayPort implements RelayPort {
+  readonly posted: MainToPage[] = [];
+  closed = false;
+  #close: () => void = () => {};
+
+  post(message: MainToPage): void {
+    this.posted.push(message);
+  }
+  onMessage(_listener: (data: unknown) => void): void {}
+  onClose(listener: () => void): void {
+    this.#close = listener;
+  }
+  close(): void {
+    this.closed = true;
+  }
+  disconnect(): void {
+    this.#close();
   }
 }
 
@@ -583,6 +606,40 @@ describe('RunControl over the FakeHelper', () => {
     expect(w.connection.held).toBe(true);
     w.runs.detach();
     expect(w.connection.held).toBe(false);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('pages closed before host recovery do not open stale run channels afterward', async () => {
+    const w = world();
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+    let runConnections = 0;
+    w.link.helper.host.runs.set(RUN_A, () => {
+      runConnections += 1;
+    });
+    await w.runs.attach(HOST, RUN_A);
+    const recovering = w.link.deferEstablish();
+    w.link.helper.drop();
+    await recovering.received;
+
+    const ports = Array.from({length: 4}, () => new FakeRelayPort());
+    for (const port of ports) {
+      w.runs.connect(port);
+      port.disconnect();
+      port.disconnect();
+    }
+    expect(ports.every(port => port.closed)).toBe(true);
+    expect(ports.map(port => port.posted)).toEqual(
+      ports.map(() => [{type: 'close'}] as MainToPage[]),
+    );
+
+    recovering.release();
+    await phaseReached(w.connection, 'ready');
+    await Promise.resolve();
+
+    expect(runConnections).toBe(0);
+    expect(w.link.helper.running).toBe(1);
+    expect(w.connection.phase.kind).toBe('ready');
+    expect(w.runs.attached()?.connection.kind).toBe('connected');
     await w.connection[Symbol.asyncDispose]();
   });
 

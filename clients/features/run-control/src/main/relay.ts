@@ -52,12 +52,13 @@ interface PendingFrame {
  * Relay between `port` and the stream `dial` opens. Resolves once the connection has ended on both
  * sides; never rejects (a failed dial is reported to the page as `close` without `open`).
  *
- * `scheduleTimeout` is the seam for the post-EOF credit deadline; tests inject a deterministic
- * clock, production takes the real timer.
+ * The relay owns the signal passed to `dial`: ending either side cancels a dial still waiting and
+ * the channel it opened. `scheduleTimeout` is the seam for the post-EOF credit deadline; tests
+ * inject a deterministic clock, production takes the real timer.
  */
 export function relay(
   port: RelayPort,
-  dial: () => Promise<Duplex>,
+  dial: (signal: AbortSignal) => Promise<Duplex>,
   scheduleTimeout: ScheduleTimeout = defaultScheduleTimeout,
 ): Promise<void> {
   return new Promise(resolve => new StreamRelay(port, dial, resolve, scheduleTimeout).start());
@@ -65,7 +66,9 @@ export function relay(
 
 class StreamRelay {
   readonly #port: RelayPort;
-  readonly #dial: () => Promise<Duplex>;
+  readonly #dial: (signal: AbortSignal) => Promise<Duplex>;
+  /** The dial and the channel it opens live exactly as long as this relay. */
+  readonly #dialAbort = new AbortController();
   readonly #resolve: () => void;
   readonly #scheduleTimeout: ScheduleTimeout;
   readonly #framer = new NewlineFramer();
@@ -75,13 +78,15 @@ class StreamRelay {
   #pageReceiveCredit = 0;
   #stream: Duplex | null = null;
   #streamEnded = false;
+  #dialSettled = false;
   #closed = false;
+  #settled = false;
   /** Cancels the pending-page-output deadline armed by `#armCreditDeadline`, while one is live. */
   #creditDeadline: (() => void) | null = null;
 
   constructor(
     port: RelayPort,
-    dial: () => Promise<Duplex>,
+    dial: (signal: AbortSignal) => Promise<Duplex>,
     resolve: () => void,
     scheduleTimeout: ScheduleTimeout,
   ) {
@@ -94,9 +99,25 @@ class StreamRelay {
   start(): void {
     this.#port.onClose(() => this.#finish());
     this.#port.onMessage(data => this.#receive(data));
-    void this.#dial().then(
-      stream => this.#opened(stream),
-      () => this.#finish(),
+    let dialing: Promise<Duplex>;
+    try {
+      dialing = this.#dial(this.#dialAbort.signal);
+    } catch {
+      this.#dialSettled = true;
+      this.#finish();
+      return;
+    }
+    void dialing.then(
+      stream => {
+        this.#dialSettled = true;
+        this.#opened(stream);
+        this.#settle();
+      },
+      () => {
+        this.#dialSettled = true;
+        this.#finish();
+        this.#settle();
+      },
     );
   }
 
@@ -261,6 +282,7 @@ class StreamRelay {
   #finish(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#dialAbort.abort();
     this.#cancelCreditDeadline();
     this.#pending.length = 0;
     this.#pendingBytes = 0;
@@ -269,6 +291,13 @@ class StreamRelay {
       this.#port.post({type: 'close'});
     } catch {}
     this.#port.close();
+    this.#settle();
+  }
+
+  /** The relay owns a pending dial too, so completion waits until cancellation has reached it. */
+  #settle(): void {
+    if (!this.#closed || !this.#dialSettled || this.#settled) return;
+    this.#settled = true;
     this.#resolve();
   }
 }

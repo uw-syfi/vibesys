@@ -6,8 +6,8 @@
  * The run's identity comes from its record (`run_id`), when the app starts or attaches to it; it is
  * never inferred later. Whether the run ended comes from the host's pushed registry, a run channel
  * that ended with `run_gone`, or a check that found the run gone. The page keeps its own resume
- * logic but no retry timer: a dial waits for the host connection to be ready, and the page is woken
- * when the connection recovers.
+ * logic but no retry timer: while its page still owns it, a dial waits for the host connection to
+ * be ready, and the page is woken when the connection recovers.
  */
 
 import {
@@ -258,9 +258,9 @@ export class RunControl {
       port.close();
       return;
     }
-    void relay(port, async () => {
+    void relay(port, async signal => {
       try {
-        return (await run.connection.openRun(run.instanceId)).stream;
+        return (await run.connection.openRun(run.instanceId, signal)).stream;
       } catch (error) {
         if (error instanceof Error && 'reason' in error && error.reason === 'run-gone') {
           this.#ended(run);

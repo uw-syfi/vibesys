@@ -376,21 +376,67 @@ describe('relay', () => {
   test('a send before open ends the connection', async () => {
     const port = new FakePort();
     // A dial that has not connected yet (the host is reconnecting).
-    const done = relay(port, () => new Promise<Duplex>(() => {}));
+    const done = relay(
+      port,
+      signal =>
+        new Promise<Duplex>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), {once: true});
+        }),
+    );
     port.send({type: 'send', data: '{}'});
     await done;
     expect(port.posted).toEqual([{type: 'close'}]);
   });
 
-  test('the page going away destroys the stream', async () => {
-    let serverClosed: Promise<void> = Promise.resolve();
-    const {port, done} = await connected(connection => {
-      serverClosed = new Promise(resolve => connection.once('close', () => resolve()));
-      connection.resume();
+  test('the page going away cancels its pending dial and disposes a late stream', async () => {
+    const port = new FakePort();
+    const dialSignals: AbortSignal[] = [];
+    let open = (_stream: Duplex): void => {};
+    const done = relay(port, signal => {
+      dialSignals.push(signal);
+      return new Promise<Duplex>(resolve => {
+        open = resolve;
+      });
     });
+    let settled = false;
+    void done.then(() => {
+      settled = true;
+    });
+
+    expect(dialSignals).toHaveLength(1);
+    expect(dialSignals[0]?.aborted).toBe(false);
+    port.disconnect();
+    await Promise.resolve();
+    expect(dialSignals[0]?.aborted).toBe(true);
+    expect(dialSignals[0]?.reason).toBeInstanceOf(DOMException);
+    expect(settled).toBe(false);
+
+    const late = new ControlledReadStream();
+    open(late);
+    await done;
+    expect(late.destroyed).toBe(true);
+    expect(settled).toBe(true);
+    expect(port.posted).toEqual([{type: 'close'}]);
+  });
+
+  test('the page going away destroys the stream', async () => {
+    const [stream, host] = duplexPair();
+    const port = new FakePort();
+    const dialSignals: AbortSignal[] = [];
+    const done = relay(port, async signal => {
+      dialSignals.push(signal);
+      return stream;
+    });
+    const serverClosed = new Promise<void>(resolve => host.once('close', () => resolve()));
+    host.resume();
+    await port.until(posted => posted.some(message => message.type === 'open'));
+    expect(dialSignals).toHaveLength(1);
+    expect(dialSignals[0]?.aborted).toBe(false);
+
     port.disconnect();
     await done;
     await serverClosed;
+    expect(dialSignals[0]?.aborted).toBe(true);
     expect(frames(port.posted)).toEqual([]);
   });
 

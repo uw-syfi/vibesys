@@ -18,12 +18,13 @@
  * A failed run dial is reported to the machine with its real cause, whose routing decides what that
  * means: a link-class cause starts a check that ends in ready or stops; `auth`/`incompatible` move
  * the host to its matching terminal phase; `run-gone`/`denied` are the run's own fact and leave the
- * host ready.
+ * host ready. A caller may cancel its own run dial without changing host state; the operation's
+ * signal and the connection's lifetime jointly own any run channel that dial opened.
  */
 
 import type {InstanceList} from '@vibesys/contracts/host-helper';
 import {clockFrom} from '@vibesys/machine';
-import type {ScheduleTimeout} from '@vibesys/transport';
+import {abortReason, type ScheduleTimeout} from '@vibesys/transport';
 import {type Actor, createActor, fromPromise} from 'xstate';
 import {
   type Cause,
@@ -252,13 +253,35 @@ export class HostConnection implements AsyncDisposable {
     return () => this.#watchers.delete(listener);
   }
 
-  /** Resolve once the host is ready, opening the connection if it is idle. */
-  ready(): Promise<void> {
+  /**
+   * Resolve once the host is ready, opening the connection if it is idle. An owning operation may
+   * withdraw its wait without changing the host connection's own lifetime.
+   */
+  ready(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted === true) return Promise.reject(abortReason(signal));
     if (this.#phase.kind === 'idle') this.#send({type: 'open'});
     if (this.#phase.kind === 'ready') return Promise.resolve();
     const terminal = terminalError(this.#phase);
     if (terminal !== null) return Promise.reject(terminal);
-    return new Promise((resolve, reject) => this.#waiters.add({resolve, reject}));
+    return new Promise((resolve, reject) => {
+      const settled = (complete: () => void): void => {
+        this.#waiters.delete(waiter);
+        signal?.removeEventListener('abort', aborted);
+        complete();
+      };
+      const waiter = {
+        resolve: () => settled(resolve),
+        reject: (error: Error) => settled(() => reject(error)),
+      };
+      const aborted = (): void => {
+        if (signal !== undefined) waiter.reject(abortReason(signal));
+      };
+      this.#waiters.add(waiter);
+      signal?.addEventListener('abort', aborted, {once: true});
+      // The native signal cannot abort between the entry check and this synchronous registration,
+      // but this also keeps the contract correct for structural AbortSignal implementations.
+      if (signal?.aborted === true) aborted();
+    });
   }
 
   /** Send `body` on the control channel once the host is ready. */
@@ -301,13 +324,22 @@ export class HostConnection implements AsyncDisposable {
    * cause, same as a stream that later ends abnormally (`#connectRun`'s `error` listener): a
    * link-class cause is checked and returns to ready (which wakes the run's page) or stops;
    * `auth`/`incompatible` move the host to its matching terminal phase. Rejects with `run-gone`,
-   * `denied`, `link`, or the host's terminal reason.
+   * `denied`, `link`, the host's terminal reason, or the caller's abort reason when `signal` ends.
    */
-  async openRun(instanceId: string): Promise<{runId: string; stream: RunStream}> {
-    await this.ready();
+  async openRun(
+    instanceId: string,
+    signal?: AbortSignal,
+  ): Promise<{runId: string; stream: RunStream}> {
+    await this.ready(signal);
+    const lifetime =
+      signal === undefined ? this.#abort.signal : AbortSignal.any([this.#abort.signal, signal]);
     try {
-      return await this.#connectRun(instanceId, this.#abort.signal);
+      if (lifetime.aborted) throw abortReason(lifetime);
+      return await this.#connectRun(instanceId, lifetime);
     } catch (error) {
+      // Losing the page that owns this dial is ordinary resource cleanup, not evidence that either
+      // the run or its host failed. Preserve the caller's cancellation outside that taxonomy.
+      if (signal?.aborted === true) throw abortReason(signal);
       const failure = asConnectionError(error);
       this.#send({type: 'run-ended', instanceId, cause: failure.reason, detail: failure.message});
       throw failure;
@@ -352,6 +384,7 @@ export class HostConnection implements AsyncDisposable {
       throw error;
     }
     connected.stream.once('error', error => {
+      if (signal.aborted) return;
       const cause: Cause = error instanceof ConnectionError ? error.reason : 'link';
       this.#send({type: 'run-ended', instanceId, cause, detail: error.message});
     });
