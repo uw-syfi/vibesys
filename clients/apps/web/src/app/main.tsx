@@ -21,7 +21,7 @@ import {browserLifecycle} from '../platform/lifecycle.js';
 import '../styles.css';
 import {bootPlan} from './boot.js';
 import {createDemoApp, createLiveApp} from './compose.js';
-import {applyWebTheme} from './theme.js';
+import {applySessionTheme, applyWebTheme} from './theme.js';
 
 // Remove the launch secret before DOM validation, storage access, or any
 // asynchronous work can fail and leave it in browser-visible history.
@@ -87,10 +87,7 @@ function renderLive(webSocketUrl: string, browserSession: string | null): void {
     lifecycle: browserLifecycle(),
     connect: connectRun(hooks => openTransport(url, hooks)),
   });
-  void session.tuiDefaults().then(
-    defaults => applyWebTheme(document.documentElement, defaults?.theme),
-    () => applyWebTheme(document.documentElement, null),
-  );
+  void applySessionTheme(document.documentElement, session);
   reactRoot.render(<StrictMode>{createLiveApp(session)}</StrictMode>);
 }
 

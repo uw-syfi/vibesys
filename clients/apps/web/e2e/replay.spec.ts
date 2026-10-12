@@ -58,11 +58,11 @@ short`;
   const transcript = page.locator('.transcript-content').filter({hasText: 'A'.repeat(128)});
   await expect(transcript).toHaveText(formattedContent);
   const layout = await transcript.evaluate((element, payload) => {
-    const text = element.firstChild;
+    const text = element.querySelector('pre')?.firstChild;
     const entry = element.parentElement;
     const panel = element.closest('.panel');
     if (!(text instanceof Text) || entry === null || panel === null) {
-      throw new Error('Transcript markup does not expose its text, entry, and panel');
+      throw new Error('Transcript markup does not expose its text row and panel');
     }
     const character = (index: number): DOMRect => {
       const range = document.createRange();

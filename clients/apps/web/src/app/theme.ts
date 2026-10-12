@@ -185,6 +185,13 @@ export interface WebThemeTarget {
   readonly style: Pick<CSSStyleDeclaration, 'setProperty'>;
 }
 
+/** The live-session boundary needed to select a server theme after startup has proved the run. */
+export interface WebThemeSession {
+  start(): Promise<void>;
+  getState(): {readonly hasSnapshot: boolean};
+  tuiDefaults(): Promise<Pick<TuiDefaults, 'theme'> | null>;
+}
+
 export function webThemeName(value: string | null | undefined): WebThemeName {
   return WEB_THEME_NAMES.includes(value as WebThemeName) ? (value as WebThemeName) : 'dark';
 }
@@ -196,5 +203,28 @@ export function applyWebTheme(target: WebThemeTarget, value: string | null | und
   const tokens = WEB_THEME_TOKENS[name];
   for (const key of Object.keys(CSS_TOKEN_NAMES) as Array<keyof WebThemeTokens>) {
     target.style.setProperty(CSS_TOKEN_NAMES[key], tokens[key]);
+  }
+}
+
+/**
+ * Apply the default synchronously, then ask a healthy live session for its preference.
+ *
+ * The optional presentation query must not race the session's stream-first startup. A cold stream
+ * failure has made no claim about the independent control channel, and opening that channel just
+ * for a theme would turn one observed outage into two banners. Once startup has accepted a fenced
+ * snapshot, the query reuses the control channel the session already established.
+ */
+export async function applySessionTheme(
+  target: WebThemeTarget,
+  session: WebThemeSession,
+): Promise<void> {
+  applyWebTheme(target, null);
+  try {
+    await session.start();
+    if (!session.getState().hasSnapshot) return;
+    const defaults = await session.tuiDefaults();
+    applyWebTheme(target, defaults?.theme);
+  } catch {
+    applyWebTheme(target, null);
   }
 }

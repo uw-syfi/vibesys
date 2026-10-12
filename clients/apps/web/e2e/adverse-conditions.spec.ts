@@ -94,7 +94,7 @@ test('page reload keeps the live run and a fresh client converges to the same st
   await expect(page.getByText(marker, {exact: false})).toBeVisible();
   await expect(page.locator('.status')).toHaveText('running');
   const sequence = await sequenceText(page);
-  const transcript = await page.locator('.panel-heading span').textContent();
+  const transcript = await page.getByRole('region', {name: /^Transcript,/}).textContent();
   expect(gateway.isRunning()).toBe(true);
 
   const reloadedBatch = batches.next(batch => batch.store_id === before.store_id);
@@ -107,7 +107,7 @@ test('page reload keeps the live run and a fresh client converges to the same st
   await expect(page.getByText(marker, {exact: false})).toBeVisible();
   await expect(page.locator('.status')).toHaveText('running');
   expect(await sequenceText(page)).toBe(sequence);
-  expect(await page.locator('.panel-heading span').textContent()).toBe(transcript);
+  expect(await page.getByRole('region', {name: /^Transcript,/}).textContent()).toBe(transcript);
 });
 
 test('worker exit terminates every gateway and retains an unconfirmed runtime directory', async () => {

@@ -5,7 +5,7 @@ import {desktopBridge, desktopSessionOptions, markDesktopShell} from '../platfor
 import {browserLifecycle} from '../platform/lifecycle.js';
 import '../styles.css';
 import {createLiveApp} from './compose.js';
-import {applyWebTheme} from './theme.js';
+import {applySessionTheme, applyWebTheme} from './theme.js';
 
 // The desktop shell's entry: the page is bundled inside the app, and the shell's bridge is its
 // only way to the server. There is no URL, token, or gateway to read.
@@ -25,9 +25,6 @@ if (bridge === null) {
   );
 } else {
   const session = new WebSession(desktopSessionOptions(bridge, browserLifecycle()));
-  void session.tuiDefaults().then(
-    defaults => applyWebTheme(document.documentElement, defaults?.theme),
-    () => applyWebTheme(document.documentElement, null),
-  );
+  void applySessionTheme(document.documentElement, session);
   reactRoot.render(<StrictMode>{createLiveApp(session)}</StrictMode>);
 }

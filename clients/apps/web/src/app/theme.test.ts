@@ -1,5 +1,6 @@
 import {expect, test} from 'bun:test';
 import {
+  applySessionTheme,
   applyWebTheme,
   WEB_THEME_NAMES,
   WEB_THEME_TOKENS,
@@ -29,6 +30,54 @@ test('uses the readable default for an absent or unknown server theme', () => {
 
   expect(target.dataset['theme']).toBe('dark');
   expect(target.values.get('--page-background')).toBe(WEB_THEME_TOKENS.dark.pageBackground);
+});
+
+test('queries the server theme only after live startup accepts a snapshot', async () => {
+  const target = new FakeThemeTarget();
+  let finishStartup: () => void = () => undefined;
+  const startup = new Promise<void>(resolve => {
+    finishStartup = resolve;
+  });
+  const calls: string[] = [];
+  const session = {
+    hasSnapshot: true,
+    start: () => {
+      calls.push('start');
+      return startup;
+    },
+    getState() {
+      return {hasSnapshot: this.hasSnapshot};
+    },
+    tuiDefaults: () => {
+      calls.push('tui-defaults');
+      return Promise.resolve({theme: 'light' as const});
+    },
+  };
+
+  const applying = applySessionTheme(target, session);
+
+  expect(target.dataset['theme']).toBe('dark');
+  expect(calls).toEqual(['start']);
+  finishStartup();
+  await applying;
+  expect(calls).toEqual(['start', 'tui-defaults']);
+  expect(target.dataset['theme']).toBe('light');
+});
+
+test('does not open the control channel for a theme after cold stream startup fails', async () => {
+  const target = new FakeThemeTarget();
+  let defaultsQueries = 0;
+  await applySessionTheme(target, {
+    start: () => Promise.resolve(),
+    getState: () => ({hasSnapshot: false}),
+    tuiDefaults: () => {
+      defaultsQueries += 1;
+      return Promise.resolve({theme: 'light'});
+    },
+  });
+
+  expect(defaultsQueries).toBe(0);
+  expect(target.dataset['theme']).toBe('dark');
 });
 
 test('applies a complete distinct palette for every advertised theme', () => {
