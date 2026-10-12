@@ -36,6 +36,7 @@ from vs_sandbox.api.skypilot import (
     ResponseFrame,
     SkyPilotBridge,
     SkyPilotJobRunner,
+    SkyPilotOutputError,
     SubprocessCommandRunner,
     decode_response,
     encode_message,
@@ -1554,3 +1555,35 @@ def test_snapshot_digest_and_staging_reject_special_files_and_oversized_workspac
     monkeypatch.setattr(bridge_module, "_MAX_STAGED_FILES", 0)
     with pytest.raises(ValueError, match="exceeds remote staging limits"):
         _private(bridge, "_stage_workspace")(tmp_path / "stage")
+
+
+def test_a_queue_record_without_a_status_ends_the_request_in_a_typed_failure(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    """An unreadable queue status is a permanent failure: no retry, no resubmission."""
+
+    class UnreadableQueueRunner(FakeRunner):
+        def query_job(
+            self,
+            cluster_name: str,
+            *,
+            job_name: str,
+            job_id: int | None = None,
+            timeout: float = 60,
+        ) -> RemoteJobInfo | None:
+            del cluster_name, job_name, job_id, timeout
+            raise SkyPilotOutputError.unknown_job_status(None)
+
+    runner = UnreadableQueueRunner()
+    bridge = _bridge(tmp_path, socket_dir, runner)
+    bridge.start()
+    try:
+        frame = _send_raw(
+            bridge, encode_message(EvaluationRequest(kind="accuracy", invocation_id="7" * 32))
+        )
+    finally:
+        bridge.close()
+
+    assert isinstance(frame, ErrorFrame)
+    assert frame.error == "SkyPilotOutputError"
+    assert runner.commands == []

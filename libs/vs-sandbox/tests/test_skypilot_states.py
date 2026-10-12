@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -17,6 +19,7 @@ from vs_sandbox.api.skypilot import (
     ClusterUp,
     Finished,
     Indeterminate,
+    InvocationResultRecord,
     JobEnd,
     JobEnded,
     JobLife,
@@ -25,12 +28,15 @@ from vs_sandbox.api.skypilot import (
     JobStatus,
     JobUnknown,
     LogsFailed,
+    ResultFrame,
     SkyClusterState,
     SkyJobState,
     StatusText,
     advance,
     allocation_gone,
     cluster_life,
+    decode_response,
+    encode_message,
     is_driver_failure,
     job_reading,
     logs_verdict,
@@ -161,3 +167,34 @@ def test_the_standalone_evaluator_helper_accepts_exactly_the_protocol_statuses()
     assert evaluator_helper.exit_status_of(JobStatus.COMPLETED.value) == 0
     assert evaluator_helper.exit_status_of(JobStatus.CANCELLED.value) == 130
     assert evaluator_helper.exit_status_of(JobStatus.APPLICATION_FAILED.value) == 1
+
+
+def test_recorded_wire_json_with_plain_status_strings_still_decodes() -> None:
+    """The result status is a JobStatus in Python and the same plain string on the wire."""
+    frame = decode_response(
+        b'{"version":2,"type":"result","status":"APPLICATION_FAILED","sky_exit_code":100,'
+        b'"remote_job_id":7}'
+    )
+    assert isinstance(frame, ResultFrame)
+    assert frame.status is JobStatus.APPLICATION_FAILED
+    assert json.loads(encode_message(frame))["status"] == "APPLICATION_FAILED"
+
+    recorded = {
+        "status": "COMPLETED",
+        "sky_exit_code": 0,
+        "artifact": None,
+        "provenance": {
+            "profile_name": "p",
+            "infra": "i",
+            "cluster_name": "c",
+            "job_name": "j",
+            "remote_job_id": 9,
+            "attempt": 1,
+            "accelerator_type": "A100",
+            "nodes": 1,
+            "accelerators_per_node": 1,
+        },
+    }
+    record = InvocationResultRecord.model_validate_json(json.dumps(recorded))
+    assert record.status is JobStatus.COMPLETED
+    assert json.loads(record.model_dump_json())["status"] == "COMPLETED"

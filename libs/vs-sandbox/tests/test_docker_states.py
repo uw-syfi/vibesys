@@ -59,19 +59,25 @@ def test_every_reading_maps_to_a_defined_life(reading: RemovalReading) -> None:
     assert released(life) == (not isinstance(life, ContainerUnknown))
 
 
-@given(reading=_READING)
-def test_a_failure_with_unrecognised_text_leaves_the_container_owned(
-    reading: RemovalReading,
+@given(returncode=st.integers(1, 130), detail=st.text(max_size=30))
+def test_a_failure_with_text_the_daemon_never_prints_leaves_the_container_owned(
+    returncode: int, detail: str
 ) -> None:
-    life = observe_removal(INITIAL_CONTAINER_LIFE, reading)
-    recognised = (
-        reading.returncode == 0
-        or "No such container" in reading.stderr
-        or ("removal of container" in reading.stderr and "is already in progress" in reading.stderr)
-    )
-    assert released(life) == recognised
-    if not recognised:
-        assert life == ContainerUnknown(raw=reading.stderr.strip(), returncode=reading.returncode)
+    """Text that names neither an absent nor a vanishing container proves nothing is gone."""
+    stderr = f"Error response from daemon: {detail.replace('container', '')}"
+    life = observe_removal(INITIAL_CONTAINER_LIFE, RemovalReading(returncode, stderr))
+    assert not released(life)
+    assert life == ContainerUnknown(raw=stderr.strip(), returncode=returncode)
+
+
+@given(returncode=st.integers(1, 130), name=st.text("abcdef0123456789", min_size=1, max_size=12))
+def test_the_daemons_own_messages_release_the_container(returncode: int, name: str) -> None:
+    for stderr in (
+        f"Error response from daemon: No such container: {name}",
+        f"Error response from daemon: removal of container {name} is already in progress",
+    ):
+        life = observe_removal(INITIAL_CONTAINER_LIFE, RemovalReading(returncode, stderr))
+        assert released(life)
 
 
 def test_each_way_of_being_gone_has_its_own_outcome() -> None:
