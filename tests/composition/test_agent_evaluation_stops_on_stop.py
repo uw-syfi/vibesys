@@ -27,6 +27,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from vs_runtime.api.core import RunOutcome
+
 
 SOCKET_REPLY = TypeAdapter(SocketSuccess | SocketFailure)
 GRACE_S = 60.0
@@ -55,7 +57,7 @@ class _OnSleep(ProbedRunClock):
 
 
 async def _until_the_host_gives_up(
-    running: asyncio.Future[object], clock: ProbedRunClock, stopped_at: list[float]
+    running: asyncio.Task[RunOutcome], clock: ProbedRunClock, stopped_at: list[float]
 ) -> None:
     """Wait for the loop; ``GRACE_S`` after the stop, cancel it as the host does.
 
