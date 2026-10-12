@@ -12,18 +12,18 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
-from collections import deque
 from pathlib import Path
 
 import pytest
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
+from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
+
+from vs_dst.api import simulate
 
 _GOLDEN = Path(__file__).with_name("golden_decision_transcripts.json")
 
@@ -54,16 +54,18 @@ def _scenarios() -> dict[str, dict[str, object]]:
 
 def _transcript(spec: dict[str, object]) -> list[list[str]]:
     count = int(str(spec["count"]))
-    executors = Executors(
-        planner=deque([plan_reply(*(implement(f"h{i}") for i in range(count)))]),
-        implementer=deque(implemented() for _ in range(count)),
-        judge=deque(reviewed(passed=bool(spec["passes"])) for _ in range(count)),
+    plans = [plan_reply(*(implement(f"h{i}") for i in range(count)))]
+    world = DynamicWorld(
+        planner=["not json", *plans] if spec["fix"] else plans,
+        implementer=[implemented() for _ in range(count)],
+        judge=[reviewed(passed=bool(spec["passes"])) for _ in range(count)],
         retain_per_turn=bool(spec["per_turn"]),
-        benchmark=lambda _commit, value=float(str(spec["bench"])): value,
+        throughputs=(float(str(spec["bench"])),),
+        max_in_flight=int(str(spec["parallel"])),
     )
-    if spec["fix"]:
-        executors.planner.appendleft("not json")
-    finished = run_shell(executors, max_in_flight=int(str(spec["parallel"])))
+    finished = simulate(world)
+    assert finished.finished
+    assert not finished.liveness_violations
     return [
         [
             type(item).__name__,

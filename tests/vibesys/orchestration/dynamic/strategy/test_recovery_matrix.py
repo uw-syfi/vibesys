@@ -11,25 +11,22 @@ by the dynamic search (and so exercised by every case) or as issued only by reco
 
 from __future__ import annotations
 
-from collections import Counter, deque
+from collections import Counter
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
+from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 
-from vs_core.api import ResourceId, SubmitMeasurement
-from vs_core.testing.drive import Retryable, Running, Unknown
-from vs_core.testing.liveness import LivenessViolationError
+from vs_core.testing.drive import Retryable, Unknown
+from vs_dst.api import simulate
 from vs_runtime.api.core import REQUEST_DISPATCH
-from vs_runtime.api.testing import HostOptions
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request
@@ -86,34 +83,32 @@ class Reply(StrEnum):
     SILENT = "silent"
 
 
-class Faulted:
-    """Executors that answer the requests of one kind the way the case says."""
+class Faulted(DynamicWorld):
+    """A world that answers the requests of one kind the way the case says."""
 
-    def __init__(self, kind: str, how: Reply) -> None:
+    def __init__(self, kind: str, how: Reply, *, cap: int, deadline_at: float) -> None:
+        super().__init__(
+            planner=[plan_reply(*(implement(f"h{n}") for n in range(WORKSTREAMS)))],
+            implementer=[implemented() for _ in range(WORKSTREAMS)],
+            judge=[reviewed() for _ in range(WORKSTREAMS)],
+            polls=(0,),
+            max_concurrent=cap,
+            max_in_flight=WORKSTREAMS,
+            deadline_at=deadline_at,
+        )
         self._kind = kind
         self._how = how
         self.executed: Counter[str] = Counter()
-        self._seen = 0
-        self._base = Executors(
-            planner=deque([plan_reply(*(implement(f"h{n}") for n in range(WORKSTREAMS)))]),
-            implementer=deque(implemented() for _ in range(WORKSTREAMS)),
-            judge=deque(reviewed() for _ in range(WORKSTREAMS)),
-            submit=lambda request: Running(resource_id=ResourceId(root=f"job:{_root(request)}")),
-        )
+        self._seen_of_kind = 0
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
         assert request.request_id is not None
         self.executed[request.request_id.root] += 1
         if request.kind == self._kind:
-            position, self._seen = self._seen, self._seen + 1
+            position, self._seen_of_kind = self._seen_of_kind, self._seen_of_kind + 1
             if self._how is Reply.SILENT or position == 0:
                 return Unknown() if self._how is not Reply.RETRYABLE_ONCE else Retryable()
-        return self._base(request, core)
-
-
-def _root(request: SubmitMeasurement) -> str:
-    assert request.request_id is not None
-    return request.request_id.root
+        return super().__call__(request, core)
 
 
 def test_every_registered_kind_is_classified() -> None:
@@ -123,14 +118,13 @@ def test_every_registered_kind_is_classified() -> None:
 
 def _run(kind: str, how: Reply | None, cap: int) -> Faulted:
     deadline = OPEN_DEADLINE if (kind, how) in KNOWN_OPEN else DEADLINE
-    script = Faulted(kind, how) if how is not None else Faulted("", Reply.SILENT)
-    run_shell(
-        script,
-        host=HostOptions(max_concurrent=cap),
-        max_in_flight=WORKSTREAMS,
-        deadline_at=deadline,
-    )
-    return script
+    answered = ("", Reply.SILENT) if how is None else (kind, how)
+    world = Faulted(*answered, cap=cap, deadline_at=deadline)
+    run = simulate(world)
+
+    assert run.finished
+    assert not run.liveness_violations
+    return world
 
 
 @pytest.mark.parametrize("cap", [1, 2])
@@ -201,11 +195,7 @@ def _cases() -> list[object]:
             1 + (kind_at + how_at) % 2,
             id=f"{kind}-{how.value}",
             marks=(
-                [
-                    pytest.mark.xfail(
-                        raises=LivenessViolationError, strict=True, reason=OPEN_AFTER_BLOCK_GAP
-                    )
-                ]
+                [pytest.mark.xfail(raises=AssertionError, strict=True, reason=OPEN_AFTER_BLOCK_GAP)]
                 if (kind, how) in KNOWN_OPEN
                 else []
             ),

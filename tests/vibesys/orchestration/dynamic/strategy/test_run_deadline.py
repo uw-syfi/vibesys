@@ -10,48 +10,17 @@ scripted agents that answer at once, so time never runs out while they run.
 
 from __future__ import annotations
 
-from collections import deque
-
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
-    implement,
-    implemented,
-    plan_reply,
-    reviewed,
-)
-from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, LIMITS, config
+from tests.vibesys.orchestration.dynamic.strategy._run import config
+from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 
-from vibesys.orchestration.dynamic.core_policy.api import reply_schemas, requirements_for
-from vibesys.orchestration.dynamic.strategy.api import (
-    DynamicStrategy,
-    DynamicStrategyState,
-    dynamic_operation_registry,
-)
-from vs_core.api import DispatchTurn, RequestTurn, ResumeSessionTurn, RunEnvelope
-from vs_core.testing.drive import Harness
-from vs_runtime.api.testing import Run, drive_shell
+from vs_core.api import DispatchTurn, RequestTurn, ResumeSessionTurn
+from vs_dst.api import SimulatedRun, simulate
 
 
-def _run(deadline_at: float) -> Run:
-    executors = Executors(
-        planner=deque([plan_reply(implement("h1"))]),
-        implementer=deque([implemented()]),
-        judge=deque([reviewed()]),
-    )
-    settings = config()
-    harness = Harness(
-        registry=dynamic_operation_registry(),
-        facts=FACTS,
-        limits=LIMITS,
-        envelope_type=RunEnvelope[DynamicStrategyState],
-        requirements=requirements_for(settings),
-        deadline_at=deadline_at,
-    )
-    return drive_shell(
-        DynamicStrategy(config=settings), executors, harness, reply_schemas(settings)
-    )
+def _run(deadline_at: float) -> SimulatedRun:
+    return simulate(DynamicWorld(deadline_at=deadline_at))
 
 
 @settings(max_examples=2, deadline=None, derandomize=True, database=None)
@@ -61,6 +30,8 @@ def test_a_run_shorter_than_a_turn_budget_asks_its_turns_within_the_run(
     deadline_at: float,
 ) -> None:
     trace = _run(deadline_at)
+    assert trace.finished
+    assert not trace.liveness_violations
     assert trace.halted is None, trace.halted
     result = trace.core.run.result
     assert result is not None

@@ -10,21 +10,14 @@ when it holds a trusted result: a retained candidate, or an input that was measu
 
 from __future__ import annotations
 
-from collections import deque
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
-    implement,
-    implemented,
-    plan_reply,
-    reviewed,
-)
-from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
+from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 
 from vs_core.api import CollectEvidence, ProposeWinner, Stop
+from vs_dst.api import simulate
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -42,21 +35,14 @@ class Input(StrEnum):
     INFRASTRUCTURE = "infrastructure"
 
 
-def _executors(measurement: Input, *, candidate_found: bool) -> Executors:
-    executors = Executors(
-        planner=deque([plan_reply(implement("h1"))]),
-        implementer=deque([implemented()]),
-        judge=deque([reviewed()]),
+def _world(measurement: Input, *, candidate_found: bool) -> DynamicWorld:
+    loser = 10.0 if measurement is Input.MEASURED else None
+    candidate = 100.0 if candidate_found else loser
+    return DynamicWorld(
+        baseline_throughput=None if measurement is Input.FAILED_WORKLOAD else 50.0,
+        unmeasured=("baseline",) if measurement is Input.INFRASTRUCTURE else (),
+        throughputs=(candidate,),
     )
-    if measurement is Input.FAILED_WORKLOAD:
-        executors.baseline_value = None
-    if measurement is Input.INFRASTRUCTURE:
-        executors.infrastructure_failure = lambda plan: plan.purpose == "baseline"
-    if candidate_found:
-        executors.benchmark = lambda _commit: 100.0
-    else:
-        executors.benchmark = lambda _commit: 10.0 if measurement is Input.MEASURED else None
-    return executors
 
 
 def _stop(decisions: Sequence[Decision]) -> RunResultProposal:
@@ -70,14 +56,15 @@ def _stop(decisions: Sequence[Decision]) -> RunResultProposal:
 def test_every_input_measurement_outcome_ends_the_run_with_its_status(
     measurement: Input, *, candidate_found: bool
 ) -> None:
-    executors = _executors(measurement, candidate_found=candidate_found)
+    run = simulate(_world(measurement, candidate_found=candidate_found))
 
-    trace = run_shell(executors)
-
-    assert len(executors.seen) <= MAX_REQUESTS
-    assert sum(isinstance(request, CollectEvidence) for request in executors.seen) <= 3
-    result = _stop(trace.decisions)
-    proposals = [item for item in trace.decisions if isinstance(item, ProposeWinner)]
+    assert run.finished
+    assert not run.liveness_violations
+    requests = [intent.request for intent in run.core.intents.intents]
+    assert len(requests) <= MAX_REQUESTS
+    assert sum(isinstance(request, CollectEvidence) for request in requests) <= 3
+    result = _stop(run.decisions)
+    proposals = [item for item in run.decisions if isinstance(item, ProposeWinner)]
     if candidate_found:
         assert result.outcome == "success"
         assert [item.selection.kind for item in proposals] == ["retained_candidate"]
