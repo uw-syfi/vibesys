@@ -982,7 +982,7 @@ expose = ["create_evaluation", "trusted_evaluation_plan"]
 from = ["vibesys.run.evaluation"]
 
 [[interfaces]]
-expose = ["ProfilerPreflight", "native_profiler_preflight", "resolve_run_profiler", "validate_run_request"]
+expose = ["ProfilerPreflight", "native_profiler_preflight", "resolve_run_profiler", "validate_attribution_command", "validate_run_request"]
 from = ["vibesys.run.profilers"]
 
 [[interfaces]]
