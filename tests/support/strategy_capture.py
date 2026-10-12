@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
-from vs_dst.api import simulate
+from vs_dst.api import World, simulate
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from vs_dst.api import RunSetup
 
 
-class Hosted(Protocol):
+class Hosted(World, Protocol):
     """A vs-dst world whose strategy can be swapped for a recording one."""
 
     setup: RunSetup
