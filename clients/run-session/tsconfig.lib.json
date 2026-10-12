@@ -21,6 +21,9 @@
       "path": "../contracts/tsconfig.lib.json"
     },
     {
+      "path": "../machine/tsconfig.lib.json"
+    },
+    {
       "path": "../run-state/tsconfig.lib.json"
     },
     {
