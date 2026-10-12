@@ -22,6 +22,6 @@ if (bridge === null) {
     </StrictMode>,
   );
 } else {
-  const session = new WebSession(desktopSessionOptions(bridge, browserLifecycle));
+  const session = new WebSession(desktopSessionOptions(bridge, browserLifecycle()));
   reactRoot.render(<StrictMode>{createLiveApp(session)}</StrictMode>);
 }
