@@ -18,7 +18,7 @@ from vibesys.api._session import run_plugin
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_task
-from vibesys.orchestration.profilers import ProfilerKind
+from vibesys.orchestration.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.plugin_registration import OrchestrationRegistration
 from vibesys.run.contracts import RunRequest
 from vibesys.run.core_services import CoreCompositionError
@@ -223,6 +223,7 @@ def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+                profiler_preflight=lambda kind: ProfilerPreflightResult(kind=kind, usable=True),
             ):
                 return "\n".join(repr(event) for event in integration.events.read())
         finally:
