@@ -12,20 +12,10 @@ from enum import StrEnum
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol
 
-from vs_agent.api import (
-    AgentClientProtocol,
-    AgentEventSink,
-    AgentInvocationStore,
-    AgentSessionKey,
-    SessionStore,
-    build_agent_client,
-)
-from vs_mcp.api import ToolServerDescriptor
 from vs_runtime._agent_execution import (
     AgentExecutionConfiguration,
     AgentExecutionEnvironment,
     AgentExecutionScope,
-    AgentMessageRouter,
     ScopedAgentEnvironment,
     SharedAgentEnvironmentConflictError,
     open_agent_execution_environment,
@@ -37,7 +27,6 @@ from vs_runtime._agent_lifecycle import (
     AgentExecutionStarted,
     AgentExecutionStatus,
 )
-from vs_runtime._agent_sessions import RuntimeWorkspaceAgentSessions
 from vs_runtime._bounded_stop import (
     StopGraceError,
     StopTimer,
@@ -49,14 +38,7 @@ from vs_runtime._bundled_paths import (
     resolve_bundled_tree,
     resolve_packaged_tree,
 )
-from vs_runtime._capacity_gate import PAUSE_ONLY, CapacityHandling, CapacityTimer
-from vs_runtime._checkpoint import (
-    CompletedRound,
-    MultiSlotRoundTransaction,
-    MultiSlotRoundTransactionCoordinator,
-    RoundRecoveryOutcome,
-    RoundTransactionError,
-)
+from vs_runtime._capacity_gate import CapacityHandling, CapacityTimer, install_capacity_gate
 from vs_runtime._container_runtime_policy import DockerInDockerUnsupportedError
 from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
 from vs_runtime._environment_startup import (
@@ -135,7 +117,6 @@ from vs_runtime._model_artifacts import (
 )
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
 from vs_runtime._objective_document import materialize_objective_document
-from vs_runtime._prepared_conversations import prepare_agent_conversation
 from vs_runtime._project_materialization import (
     FreshProjectError,
     FreshProjectErrorKind,
@@ -156,7 +137,6 @@ from vs_runtime._project_run import (
     ProjectRunMismatchKind,
     ProjectRunRequest,
     ProjectRunResources,
-    ProjectStateDeclaration,
     open_project_run_resources,
 )
 from vs_runtime._quota_policy import (
@@ -181,7 +161,6 @@ from vs_runtime._run_control import (
     RunControlTransitionKind,
     RunStopped,
     RuntimeRunControlChannel,
-    SteerTarget,
 )
 from vs_runtime._run_environment import (
     AgentPaths,
@@ -217,7 +196,6 @@ from vs_runtime._run_host import (
     BlockingOperations,
     RunHostComponents,
     RuntimeRunHost,
-    create_runtime_control,
     open_run_host,
 )
 from vs_runtime._run_state import RunState
@@ -238,10 +216,8 @@ from vs_runtime._skills import (
     discover_skill_dirs,
     load_skill_frontmatter,
     offered_skill_facts,
-    resolve_skill_resources,
 )
 from vs_runtime._slurm_environment import SlurmEnvironment
-from vs_runtime._state import CommittedStateObserver, create_state
 from vs_runtime._tool_location import ToolLocation, ToolSite
 from vs_runtime._trusted_evaluation import (
     ProtocolBenchmarkContract,
@@ -294,13 +270,11 @@ from vs_runtime._workspaces import (
     WorkspaceResource,
     WorkspaceResourceProvider,
 )
-from vs_runtime.contracts import AgentToolBindingContext
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
 
-    from vs_agent.api import AgentSessions
     from vs_runtime.api import AgentRole
 
 
@@ -310,49 +284,17 @@ def create_run_control_channel(events: RunControlEventSink) -> RunControlChannel
 
 
 type AgentConfigurationResolver = Callable[[AgentRole], AgentExecutionConfiguration]
-type AgentToolResolver = Callable[[AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]
 
 
-def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR0913]; composition fixes independent execution and workspace effects behind focused plugin-facing capabilities.
-    roles: tuple[AgentRole, ...],
+def create_workspace_runtime(
     *,
     workspace_resources: WorkspaceResourceProvider,
-    resolve_configuration: AgentConfigurationResolver,
-    session_store: Callable[[], SessionStore | None],
-    control: RunControlChannel,
-    lifecycle_events: AgentExecutionLifecycleSink,
-    agent_events: AgentEventSink,
-    route_message: AgentMessageRouter,
     blocking: BlockingOperations,
-    client_factory: Callable[..., AgentClientProtocol] | None = None,
-    tool_bindings: Mapping[str, AgentToolResolver] | None = None,
-    log: Callable[[str], None] = print,
-    session_transport: AgentSessions | None = None,
-    invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None,
-    capacity: CapacityHandling = PAUSE_ONLY,
 ) -> WorkspaceRuntime:
-    """Create one owner for workspace handles and their bound agent sessions."""
+    """Create one owner for workspace handles and the commands and evaluation over them."""
     workspaces = RuntimeWorkspaces(workspace_resources, runner=blocking.runner)
-    agents = RuntimeWorkspaceAgentSessions(
-        roles,
-        workspaces=workspaces,
-        resolve_configuration=resolve_configuration,
-        session_store=session_store,
-        control=control,
-        lifecycle_events=lifecycle_events,
-        agent_events=agent_events,
-        route_message=route_message,
-        client_factory=build_agent_client if client_factory is None else client_factory,
-        tool_bindings=tool_bindings,
-        log=log,
-        session_transport=session_transport,
-        invocation_store=invocation_store,
-        capacity=capacity,
-    )
-    workspaces._attach_sessions(agents)  # noqa: SLF001  # lint-waiver: LW-837221 [SLF001]; this sole factory completes the private ownership cycle before either capability escapes.
     commands = RuntimeCommands(workspaces, blocking)
     return WorkspaceRuntime(
-        agents=agents,
         workspaces=workspaces,
         commands=commands,
         evaluation=RuntimeWorkspaceEvaluation(workspaces, commands),
@@ -484,17 +426,13 @@ __all__ = [
     "AgentExecutionScope",
     "AgentExecutionStarted",
     "AgentExecutionStatus",
-    "AgentMessageRouter",
     "AgentPaths",
-    "AgentToolResolver",
     "BlockingOperations",
     "BundledResources",
     "CapacityHandling",
     "CapacityTimer",
     "ClusterEvaluationFacts",
     "CommandExecutionResult",
-    "CommittedStateObserver",
-    "CompletedRound",
     "DockerEnvironment",
     "DockerEnvironmentConfig",
     "DockerEnvironmentFacts",
@@ -541,8 +479,6 @@ __all__ = [
     "ModelRequestError",
     "ModelRequestReconciler",
     "ModelVolumeProvisioner",
-    "MultiSlotRoundTransaction",
-    "MultiSlotRoundTransactionCoordinator",
     "NativeCpuProfilerKind",
     "NativeCpuProfilerPreflight",
     "OwnedWorkspaces",
@@ -559,7 +495,6 @@ __all__ = [
     "ProjectRunMismatchKind",
     "ProjectRunRequest",
     "ProjectRunResources",
-    "ProjectStateDeclaration",
     "ProjectTreeCopy",
     "ProtocolBenchmarkContract",
     "ProviderFallback",
@@ -568,8 +503,6 @@ __all__ = [
     "QuotaPolicy",
     "RecordState",
     "ResolvedEvaluatorPackage",
-    "RoundRecoveryOutcome",
-    "RoundTransactionError",
     "RunControlChannel",
     "RunControlEventSink",
     "RunControlTransition",
@@ -601,7 +534,6 @@ __all__ = [
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
     "StageFailureText",
-    "SteerTarget",
     "StopGraceError",
     "StopTimer",
     "Switch",
@@ -638,8 +570,6 @@ __all__ = [
     "create_managed_conversation",
     "create_model_request_reconciler",
     "create_run_control_channel",
-    "create_runtime_control",
-    "create_state",
     "create_trusted_evaluation_executor",
     "create_workspace_runtime",
     "decide_quota",
@@ -653,6 +583,7 @@ __all__ = [
     "evaluator_container_setup",
     "find_job_tool",
     "image_features",
+    "install_capacity_gate",
     "job_failure",
     "load_evaluator_package",
     "load_skill_frontmatter",
@@ -670,7 +601,6 @@ __all__ = [
     "open_workspace_environment_resources",
     "parse_profile_command",
     "preflight_native_cpu_profiler",
-    "prepare_agent_conversation",
     "prepare_docker_evaluator_resources",
     "prepare_model_artifacts",
     "prepare_trusted_evaluation_plan",
@@ -684,7 +614,6 @@ __all__ = [
     "resolve_packaged_tree",
     "resolve_run_environment_spec",
     "resolve_sdk_source",
-    "resolve_skill_resources",
     "run_environment_deprecation",
     "run_environment_record",
     "run_local_validation",

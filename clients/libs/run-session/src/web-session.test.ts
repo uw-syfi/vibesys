@@ -5,7 +5,7 @@ import {SEEDS, Seeded} from '@vibesys/store/testing';
 import type {BatchReconciliation, StreamMessageContext} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import {connectRun} from './connect.js';
-import type {RunConnection, RunStreamHandlers} from './ports.js';
+import type {RunCommandOutcome, RunConnection, RunStreamHandlers} from './ports.js';
 import {
   deferred,
   disconnect,
@@ -56,6 +56,12 @@ class PendingHandleConnection implements RunConnection {
     return 'current';
   }
   redialControls(): void {}
+  command(): Promise<RunCommandOutcome> {
+    return Promise.resolve({kind: 'rejected', message: null});
+  }
+  tuiDefaults(): Promise<null> {
+    return Promise.resolve(null);
+  }
   close(): Promise<void> {
     return Promise.resolve();
   }
@@ -102,6 +108,12 @@ class FaultBeforeSnapshotConnection implements RunConnection {
     return 'transitioning';
   }
   redialControls(): void {}
+  command(): Promise<RunCommandOutcome> {
+    return Promise.resolve({kind: 'rejected', message: null});
+  }
+  tuiDefaults(): Promise<null> {
+    return Promise.resolve(null);
+  }
   close(): Promise<void> {
     return Promise.resolve();
   }
@@ -166,6 +178,12 @@ class FailingRecoveryConnection implements RunConnection {
   redialControls(): void {
     const failure = this.redialFailures.shift();
     if (failure !== undefined) throw failure;
+  }
+  command(): Promise<RunCommandOutcome> {
+    return Promise.resolve({kind: 'rejected', message: null});
+  }
+  tuiDefaults(): Promise<null> {
+    return Promise.resolve(null);
   }
   close(): Promise<void> {
     this.closeCalls += 1;
@@ -331,6 +349,45 @@ describe('WebSession robustness', () => {
 });
 
 describe('WebSession', () => {
+  test('delivers a lifecycle command through the session-owned control connection', async () => {
+    const {session, transport} = sessionWith(new FakeLifecycle());
+    transport.snapshots.push({
+      request_id: 'request-pause',
+      ok: true,
+      ack: {action: 'pause', status: 'pending'},
+    });
+
+    const outcome = await session.command({type: 'command.pause'});
+
+    expect(transport.requests).toEqual([{type: 'command.pause'}]);
+    expect(outcome).toEqual({kind: 'acknowledged', action: 'pause', status: 'pending'});
+    await session.close();
+  });
+
+  test('turns a rejected command response into the session command outcome', async () => {
+    const {session, transport} = sessionWith(new FakeLifecycle());
+    transport.snapshots.push({
+      request_id: 'request-stop',
+      ok: false,
+      error: 'run is read only',
+    });
+
+    await expect(session.command({type: 'command.stop'})).resolves.toEqual({
+      kind: 'rejected',
+      message: 'run is read only',
+    });
+    await session.close();
+  });
+
+  test('reads presentation defaults through the same session-owned control connection', async () => {
+    const {session, transport} = sessionWith(new FakeLifecycle());
+
+    await session.tuiDefaults();
+
+    expect(transport.requests).toEqual([{type: 'query.tui_defaults'}]);
+    await session.close();
+  });
+
   test('keeps a foreign fenced snapshot from proving the streamed run healthy', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);

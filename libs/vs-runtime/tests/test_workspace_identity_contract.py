@@ -16,7 +16,7 @@ from hypothesis import strategies as st
 from tests.support import run_test_command
 from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_proof
 
-from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
+from vs_agent.api import NULL_SKILL_SELECTION
 from vs_core.api import HostFence, HostId
 from vs_project.api import (
     GitError,
@@ -47,15 +47,12 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentView,
     TrustedEvaluationPlan,
     WorkspaceResourceFactory,
-    create_run_control_channel,
     create_workspace_runtime,
     open_project_run_resources,
     open_run_environment_resources,
 )
 from vs_runtime.api.operation_fixtures import VerifyParentRevision as _VerifyRequest
 from vs_runtime.api.testing import (
-    FakeAgentExecutionLifecycleSink,
-    FakeRunControlEventSink,
     FakeWorkspace,
     FakeWorkspaces,
 )
@@ -152,15 +149,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                 events=lambda _event: None,
             )
             workspaces = create_workspace_runtime(
-                (),
-                workspace_resources=resources,
-                resolve_configuration=lambda _role: pytest.fail("unexpected agent"),
-                session_store=lambda: None,
-                control=create_run_control_channel(FakeRunControlEventSink()),
-                lifecycle_events=FakeAgentExecutionLifecycleSink(),
-                agent_events=NULL_AGENT_EVENT_SINK,
-                route_message=lambda message, _steering: message,
-                blocking=BlockingOperations(),
+                workspace_resources=resources, blocking=BlockingOperations()
             ).workspaces
         try:
             yield workspaces

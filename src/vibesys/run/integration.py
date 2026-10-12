@@ -160,66 +160,10 @@ class CommittedStateProjector(Protocol):
         ...
 
 
-class _StateCommitObserver:
-    """Publish product projections only after runtime durability succeeds."""
-
-    def __init__(
-        self,
-        integration: LocalRunIntegration,
-        run_id: str,
-        projector: CommittedStateProjector | None,
-        namespace: str,
-    ) -> None:
-        self._integration = integration
-        self._run_id = run_id
-        self._projector = projector
-        self._namespace = namespace
-
-    def committed(self, previous: BaseModel | None, current: BaseModel) -> None:
-        """Publish the durable state hint before its derived semantic events."""
-        self._integration.publish_committed_state(self._namespace, current)
-        _emit_commit_events(
-            self._integration.events,
-            self._project(previous),
-            self._project(current),
-        )
-
-    def _project(self, value: BaseModel | None) -> _RunProjection | None:
-        projector = self._projector
-        if projector is None or value is None:
-            return None
-        return projector.project_committed(self._namespace, value, run_id=self._run_id)
-
-
 def _round_entries(view: _RunProjection | None) -> dict[int, _RoundProjection]:
     if view is None:
         return {}
     return {round_summary.number: round_summary for round_summary in view.rounds}
-
-
-def _emit_commit_events(
-    events: EventJournal,
-    before: _RunProjection | None,
-    after: _RunProjection | None,
-) -> None:
-    """Emit semantic changes newly made observable by one durable commit."""
-    if after is None:
-        return
-    before_rounds = _round_entries(before)
-    after_rounds = _round_entries(after)
-    new_round_numbers = sorted(number for number in after_rounds if number not in before_rounds)
-    for number in new_round_numbers:
-        _emit_round_finished(events, after_rounds[number])
-    if before is None:
-        return
-    before_revision = before.experiment_revision
-    after_revision = after.experiment_revision
-    if after_revision is not None and after_revision != before_revision:
-        reason = "round_persisted" if new_round_numbers else "active_hypothesis_changed"
-        events.emit(
-            CoreEventType.EXPERIMENTS_CHANGED,
-            data=ExperimentsChangedData(reason=reason, revision=after_revision),
-        )
 
 
 def _experiments_view(view: _RunProjection) -> Mapping[str, object]:
@@ -288,8 +232,20 @@ def _emit_winner_selected(
     )
 
 
-class _CoreCommitObserver(_StateCommitObserver):
+class _CoreCommitObserver:
     """Publish a confirmed core commit: the committed-view hint, then its semantic events."""
+
+    def __init__(
+        self,
+        integration: LocalRunIntegration,
+        run_id: str,
+        projector: CommittedStateProjector | None,
+        namespace: str,
+    ) -> None:
+        self._integration = integration
+        self._run_id = run_id
+        self._projector = projector
+        self._namespace = namespace
 
     def committed(self, previous: BaseModel | None, current: BaseModel) -> None:
         """Publish the durable state hint before the events derived from it."""
@@ -302,6 +258,12 @@ class _CoreCommitObserver(_StateCommitObserver):
             winner_selection(previous) if isinstance(previous, RuntimeRecord) else None,
             winner_selection(current) if isinstance(current, RuntimeRecord) else None,
         )
+
+    def _project(self, value: BaseModel | None) -> _RunProjection | None:
+        projector = self._projector
+        if projector is None or value is None:
+            return None
+        return projector.project_committed(self._namespace, value, run_id=self._run_id)
 
 
 class LocalRunIntegration:
@@ -439,15 +401,6 @@ class LocalRunIntegration:
     ) -> None:
         """Register the sole application projection of freshly committed state."""
         self._committed_state_listener = listener
-
-    def state_commit_observer(
-        self,
-        run_id: str,
-        projector: CommittedStateProjector | None,
-        namespace: str,
-    ) -> _StateCommitObserver:
-        """Bind durable plugin state to product hints and semantic events."""
-        return _StateCommitObserver(self, run_id, projector, namespace)
 
     def core_commit_observer(
         self,

@@ -7,25 +7,23 @@ in the hypothesis record, and the run died revalidating its state on the next co
 from __future__ import annotations
 
 import json
-from collections import deque
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._harness import envelope, round_trip
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
     implemented,
     plan_reply,
-    reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
+from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 
 from vibesys.hypothesis import HypothesisStrategy
 from vibesys.orchestration.dynamic.models import StrategyReason
 from vibesys.orchestration.dynamic.strategy.api import DynamicStrategyState
 from vs_core.api import Stop
+from vs_dst.api import simulate
 
 
 def _second_plan(disposition: str, reason_kind: str = "blocked") -> str:
@@ -51,16 +49,19 @@ def _blocked() -> str:
 
 @pytest.mark.parametrize("disposition", ["parked", "abandoned"])
 def test_a_run_survives_the_planner_retiring_a_finished_hypothesis(disposition: str) -> None:
-    executors = Executors(
-        planner=deque([plan_reply(implement("h1")), _second_plan(disposition)]),
-        implementer=deque([_blocked(), _blocked(), implemented()]),
-        judge=deque([reviewed()]),
+    world = DynamicWorld(
+        planner=[plan_reply(implement("h1")), _second_plan(disposition)],
+        implementer=[_blocked(), _blocked(), implemented()],
+        max_rounds=2,
+        max_retries_per_round=5,
     )
 
-    trace = run_shell(executors, max_rounds=2, max_retries_per_round=5)
+    run = simulate(world)
 
-    assert not executors.planner, "the retiring plan was never asked for"
-    final = trace.decisions[-1]
+    assert run.finished
+    assert not run.liveness_violations
+    assert world.unused["orchestrator"] == 0, "the retiring plan was never asked for"
+    final = run.decisions[-1]
     assert isinstance(final, Stop)
     assert final.result.outcome == "success"
 
@@ -73,13 +74,18 @@ def test_a_run_survives_the_planner_retiring_a_finished_hypothesis(disposition: 
 def test_every_retirement_the_planner_schema_allows_leaves_a_persistable_state(
     disposition: str, reason_kind: str
 ) -> None:
-    executors = Executors(
-        planner=deque([plan_reply(implement("h1")), _second_plan(disposition, reason_kind)]),
-        implementer=deque([_blocked(), _blocked(), implemented()]),
-        judge=deque([reviewed()]),
+    world = DynamicWorld(
+        planner=[plan_reply(implement("h1")), _second_plan(disposition, reason_kind)],
+        implementer=[_blocked(), _blocked(), implemented()],
+        max_rounds=2,
+        max_retries_per_round=5,
     )
 
-    state = run_shell(executors, max_rounds=2, max_retries_per_round=5).state
+    run = simulate(world)
+    state = run.state
+
+    assert run.finished
+    assert not run.liveness_violations
     assert isinstance(state, DynamicStrategyState)
 
     retired = next(item for item in state.hypotheses if item.hypothesis_id == "h1")

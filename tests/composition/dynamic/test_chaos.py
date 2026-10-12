@@ -13,13 +13,19 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.composition.dynamic._chaos import Injected, plan_for, run_chaos, unexplained_end
+from tests.composition.dynamic._chaos import (
+    Injected,
+    UnresolvedDispatchError,
+    plan_for,
+    run_chaos,
+    unexplained_end,
+)
 
 from vibesys.api import RunStatus, RunStopped
 from vs_agent.api import AgentOutputSchemaError
 from vs_agent.api.testing import AgentCrashError
 from vs_faults.api import AgentFault, Boundary, ClusterFault
-from vs_runtime.api import RunCleanupError, RuntimeContractError, UnresolvedDispatchError
+from vs_runtime.api import RunCleanupError, RuntimeContractError
 
 if TYPE_CHECKING:
     from pathlib import Path

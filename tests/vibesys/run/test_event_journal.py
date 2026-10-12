@@ -8,11 +8,9 @@ from pydantic import ValidationError
 from vibesys.events import (
     AgentExecutionStartedData,
     AgentOutputChunkData,
-    AsyncOperationKind,
-    AsyncOperationLifecycleData,
-    AsyncOperationState,
     CoreEventType,
     RoundFinishedData,
+    WinnerSelectedData,
 )
 from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.infrastructure import (
@@ -30,31 +28,17 @@ def test_current_round_event_requires_explicit_profile_outcome() -> None:
         RoundFinishedData.model_validate({"attempts": 1, "judge_verdict": "pass"})
 
 
-def test_async_operation_lifecycle_uses_the_unified_durable_stream(tmp_path: Path) -> None:
+def test_a_semantic_event_uses_the_unified_durable_stream(tmp_path: Path) -> None:
     integration = LocalRunIntegration()
     try:
-        integration.attach(tmp_path, run_id="run-operations")
-        integration.events.emit(
-            CoreEventType.ASYNC_OPERATION_LIFECYCLE,
-            data=AsyncOperationLifecycleData(
-                operation_kind=AsyncOperationKind.PROFILER,
-                operation_id="profile-1",
-                state=AsyncOperationState.RUNNING,
-                revision=2,
-                scope_id="candidate-prefill",
-            ),
-        )
+        integration.attach(tmp_path, run_id="run-winner")
+        data = WinnerSelectedData(selection="candidate", revision="abc123", settlement_id="s-1")
+        integration.events.emit(CoreEventType.WINNER_SELECTED, data=data)
 
         event = integration.events.read()[0]
-        assert event.run_id == "run-operations"
-        assert event.type is CoreEventType.ASYNC_OPERATION_LIFECYCLE
-        assert event.data == AsyncOperationLifecycleData(
-            operation_kind=AsyncOperationKind.PROFILER,
-            operation_id="profile-1",
-            state=AsyncOperationState.RUNNING,
-            revision=2,
-            scope_id="candidate-prefill",
-        )
+        assert event.run_id == "run-winner"
+        assert event.type is CoreEventType.WINNER_SELECTED
+        assert event.data == data
     finally:
         integration.close()
 

@@ -1,10 +1,15 @@
 import {describe, expect, test} from 'bun:test';
 import type {InstanceInspection, LiveInstanceRecord} from '@vibesys/contracts/host-helper';
+import type {WelcomeInspection, WelcomeResult} from '@vibesys/ipc';
+import {checkMachine} from '@vibesys/machine/testing';
+import {createActor, fromPromise} from 'xstate';
 import {
-  INSPECTOR_CLOSED,
+  type InspectorCopy,
+  type InspectorInspect,
   type InspectorTarget,
   inspectionFields,
-  inspectorStep,
+  inspectorMachine,
+  inspectorView,
 } from './inspector.js';
 
 const target: InspectorTarget = {
@@ -62,94 +67,179 @@ function inspection(overrides: Partial<InstanceInspection> = {}): InstanceInspec
   };
 }
 
-describe('inspector state', () => {
-  test('opens by loading metadata and only the latest refresh can replace it', () => {
-    let step = inspectorStep(INSPECTOR_CLOSED, {type: 'open', target});
-    expect(step.requests).toEqual([
-      {kind: 'inspect', token: 1, host: 'local', instance: target.instanceId, includeLog: false},
-    ]);
-    const first = step.state.load.kind === 'loading' ? step.state.load.token : 0;
-    step = inspectorStep(step.state, {type: 'load-log'});
-    const second = step.state.load.kind === 'loading' ? step.state.load.token : 0;
+class Deferred<T> {
+  readonly promise: Promise<T>;
+  #resolve: (value: T) => void = () => undefined;
 
-    expect(
-      inspectorStep(step.state, {
-        type: 'inspection-reply',
-        token: first,
-        result: {ok: true, value: inspection()},
-      }).state,
-    ).toBe(step.state);
-    const answered = inspectorStep(step.state, {
-      type: 'inspection-reply',
-      token: second,
-      result: {ok: true, value: inspection({state: 'ended'})},
-    }).state;
-    expect(answered.load).toMatchObject({kind: 'ready', inspection: {state: 'ended'}});
-    expect(answered.includeLog).toBe(true);
-  });
-
-  test('closing invalidates an in-flight answer and clears log consent', () => {
-    const loading = inspectorStep(INSPECTOR_CLOSED, {type: 'open', target}).state;
-    const token = loading.load.kind === 'loading' ? loading.load.token : 0;
-    const closing = inspectorStep(loading, {type: 'close'});
-    const closed = closing.state;
-    expect(closing.requests).toEqual([{kind: 'cancel-inspection', token}]);
-    const late = inspectorStep(closed, {
-      type: 'inspection-reply',
-      token,
-      result: {ok: true, value: inspection()},
-    }).state;
-    expect(late).toBe(closed);
-    expect(closed.target).toBeNull();
-    expect(closed.includeLog).toBe(false);
-  });
-
-  test('a refresh retires a completed copy notice before reporting its load', () => {
-    let step = inspectorStep(INSPECTOR_CLOSED, {type: 'open', target});
-    const inspectionToken = step.state.load.kind === 'loading' ? step.state.load.token : 0;
-    step = inspectorStep(step.state, {
-      type: 'inspection-reply',
-      token: inspectionToken,
-      result: {ok: true, value: inspection()},
+  constructor() {
+    this.promise = new Promise(resolve => {
+      this.#resolve = resolve;
     });
-    step = inspectorStep(step.state, {type: 'copy', label: 'Project', value: '/project'});
-    const copyToken = step.state.copying ?? 0;
-    step = inspectorStep(step.state, {
-      type: 'copy-reply',
-      token: copyToken,
-      label: 'Project',
-      error: null,
-    });
-    expect(step.state.notice).toEqual({text: 'Project copied.', error: false});
+  }
 
-    const refreshed = inspectorStep(step.state, {type: 'refresh'}).state;
-    expect(refreshed.load.kind).toBe('loading');
-    expect(refreshed.notice).toBeNull();
-    expect(refreshed.copying).toBeNull();
+  resolve(value: T): void {
+    this.#resolve(value);
+  }
+}
+
+function failure<T>(error: string): WelcomeResult<T> {
+  return {ok: false, error, authNeeded: false};
+}
+
+/** Let promise actors report without consulting timers or wall-clock time. */
+async function flush(): Promise<void> {
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+}
+
+function inspectorActor(
+  inspect: (request: InspectorInspect) => Promise<WelcomeResult<WelcomeInspection>>,
+  copy: (request: InspectorCopy) => Promise<WelcomeResult<null>> = () =>
+    Promise.resolve({ok: true, value: null}),
+) {
+  return createActor(
+    inspectorMachine.provide({
+      actors: {
+        inspect: fromPromise<WelcomeResult<WelcomeInspection>, InspectorInspect>(({input}) =>
+          inspect(input),
+        ),
+        copy: fromPromise<WelcomeResult<null>, InspectorCopy>(({input}) => copy(input)),
+      },
+    }),
+  ).start();
+}
+
+describe('inspector machine', () => {
+  test('model: every operation belongs to the state that owns it', () => {
+    checkMachine({
+      machine: inspectorMachine,
+      input: undefined,
+      event: (random, live) => {
+        const outcomes = live.operations.flatMap(operation =>
+          operation === 'inspect'
+            ? [
+                live.done(operation, {ok: true, value: inspection()}),
+                live.done(operation, failure<WelcomeInspection>('inspection unavailable')),
+                live.error(operation, new Error('inspection transport failed')),
+              ]
+            : [
+                live.done(operation, {ok: true, value: null}),
+                live.done(operation, failure<null>('clipboard unavailable')),
+                live.error(operation, new Error('clipboard failed')),
+              ],
+        );
+        return random.pick([
+          {type: 'open', target},
+          {type: 'close'},
+          {type: 'load-log'},
+          {type: 'refresh'},
+          {type: 'copy', label: 'Project', value: '/project'},
+          ...outcomes,
+        ]);
+      },
+      invariants: snapshot => {
+        const view = inspectorView(snapshot);
+        const problems: string[] = [];
+        if ((view.target === null) !== snapshot.matches('closed')) {
+          problems.push('only the closed state may have no target');
+        }
+        if ((view.load.kind === 'loading') !== snapshot.matches('loading')) {
+          problems.push('loading view and state disagree');
+        }
+        if ((view.copying !== null) !== snapshot.matches('copying')) {
+          problems.push('copying view and state disagree');
+        }
+        return problems;
+      },
+    });
   });
 
-  test('a refresh fences an in-flight copy reply behind the new inspection generation', () => {
-    let step = inspectorStep(INSPECTOR_CLOSED, {type: 'open', target});
-    step = inspectorStep(step.state, {type: 'copy', label: 'Project', value: '/project'});
-    const copyToken = step.state.copying ?? 0;
-    const refreshed = inspectorStep(step.state, {type: 'refresh'}).state;
-    const refreshToken = refreshed.load.kind === 'loading' ? refreshed.load.token : 0;
-    const failed = inspectorStep(refreshed, {
-      type: 'inspection-reply',
-      token: refreshToken,
-      result: {ok: false, error: 'inspection unavailable', authNeeded: false},
-    }).state;
-    const late = inspectorStep(failed, {
-      type: 'copy-reply',
-      token: copyToken,
-      label: 'Project',
-      error: 'clipboard unavailable',
-    }).state;
+  test('only the latest inspection can replace the view', async () => {
+    const replies: Array<Deferred<WelcomeResult<WelcomeInspection>>> = [];
+    const actor = inspectorActor(() => {
+      const reply = new Deferred<WelcomeResult<WelcomeInspection>>();
+      replies.push(reply);
+      return reply.promise;
+    });
 
-    expect(late).toBe(failed);
-    expect(late.load).toEqual({kind: 'error', message: 'inspection unavailable'});
-    expect(late.notice).toBeNull();
-    expect(late.copying).toBeNull();
+    actor.send({type: 'open', target});
+    expect(replies).toHaveLength(1);
+    actor.send({type: 'load-log'});
+    expect(replies).toHaveLength(2);
+    expect(inspectorView(actor.getSnapshot())).toMatchObject({
+      includeLog: true,
+      load: {kind: 'loading'},
+    });
+
+    replies[0]?.resolve({ok: true, value: inspection()});
+    await flush();
+    expect(inspectorView(actor.getSnapshot()).load.kind).toBe('loading');
+
+    replies[1]?.resolve({ok: true, value: inspection({state: 'ended'})});
+    await flush();
+    expect(inspectorView(actor.getSnapshot()).load).toMatchObject({
+      kind: 'ready',
+      inspection: {state: 'ended'},
+    });
+  });
+
+  test('closing stops the inspection and a late answer cannot reopen the sheet', async () => {
+    const reply = new Deferred<WelcomeResult<WelcomeInspection>>();
+    const actor = inspectorActor(() => reply.promise);
+
+    actor.send({type: 'open', target});
+    actor.send({type: 'close'});
+    const closed = inspectorView(actor.getSnapshot());
+    expect(closed).toMatchObject({target: null, includeLog: false, load: {kind: 'idle'}});
+
+    reply.resolve({ok: true, value: inspection()});
+    await flush();
+    expect(inspectorView(actor.getSnapshot())).toBe(closed);
+  });
+
+  test('refresh cancels copy state and fences its late failure behind the new load', async () => {
+    const copyReply = new Deferred<WelcomeResult<null>>();
+    let inspections = 0;
+    const actor = inspectorActor(
+      () =>
+        Promise.resolve(
+          inspections++ === 0
+            ? {ok: true, value: inspection()}
+            : failure<WelcomeInspection>('inspection unavailable'),
+        ),
+      () => copyReply.promise,
+    );
+
+    actor.send({type: 'open', target});
+    await flush();
+    actor.send({type: 'copy', label: 'Project', value: '/project'});
+    expect(inspectorView(actor.getSnapshot()).copying).not.toBeNull();
+
+    actor.send({type: 'refresh'});
+    await flush();
+    const failed = inspectorView(actor.getSnapshot());
+    expect(failed).toMatchObject({
+      load: {kind: 'error', message: 'inspection unavailable'},
+      copying: null,
+      notice: null,
+    });
+
+    copyReply.resolve(failure('clipboard unavailable'));
+    await flush();
+    expect(inspectorView(actor.getSnapshot())).toBe(failed);
+  });
+
+  test('a completed copy reports its label', async () => {
+    const actor = inspectorActor(() => Promise.resolve({ok: true, value: inspection()}));
+    actor.send({type: 'open', target});
+    await flush();
+
+    actor.send({type: 'copy', label: 'Project', value: '/project'});
+    await flush();
+
+    expect(inspectorView(actor.getSnapshot()).notice).toEqual({
+      text: 'Project copied.',
+      error: false,
+    });
   });
 });
 

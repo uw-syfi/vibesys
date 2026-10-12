@@ -96,6 +96,7 @@ function Demo({
         onReattach={NOTHING}
         onReconnectControls={NOTHING}
         onRetryReplay={() => replay.dispatch({type: 'load'})}
+        onCommand={null}
       />
     </>
   );
@@ -116,6 +117,7 @@ function Live({session, run}: {readonly session: WebSession; readonly run: RunSt
       onReattach={() => session.reattach()}
       onReconnectControls={() => session.reconnectControls()}
       onRetryReplay={NOTHING}
+      onCommand={session.command}
     />
   );
 }

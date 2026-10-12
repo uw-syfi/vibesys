@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_runtime.api import SkillCatalogError, SkillFact, SkillResourceRequest
+from vs_runtime.api import SkillFact
 from vs_runtime.api.infrastructure import (
-    BlockingOperations,
     SkillMetadataError,
     build_skill_catalog,
     discover_skill_dirs,
     offered_skill_facts,
-    resolve_skill_resources,
 )
-from vs_runtime.api.infrastructure_skills import create_installed_skills
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -70,99 +66,3 @@ def test_offered_facts_name_every_skill_with_its_description_on_one_line(
         SkillFact(name="profiling", description="Test."),
     )
     assert offered_skill_facts(()) == ()
-
-
-def test_resource_resolution_preserves_partial_success_and_blocks_escapes(
-    tmp_path: Path,
-) -> None:
-    _write_skill(tmp_path, "profiling")
-    catalog = build_skill_catalog((tmp_path,))
-
-    result = resolve_skill_resources(
-        (
-            SkillResourceRequest(
-                name="profiling",
-                resource_paths=("references/guide.md", "missing.md", "../secret"),
-                purpose="inspect behavior",
-            ),
-            SkillResourceRequest(name="unknown", purpose="not installed"),
-        ),
-        catalog,
-    )
-
-    assert result.resolved[0].name == "profiling"
-    assert result.resolved[0].router_path == "profiling/SKILL.md"
-    assert result.resolved[0].resource_paths == ("profiling/references/guide.md",)
-    assert len(result.diagnostics) == 3
-    assert "resource file does not exist" in result.diagnostics[0]
-    assert "must be relative" in result.diagnostics[1]
-    assert "unknown installed skill" in result.diagnostics[2]
-
-
-def test_resource_resolution_accepts_agent_visible_paths(tmp_path: Path) -> None:
-    _write_skill(tmp_path, "profiling")
-    catalog = build_skill_catalog((tmp_path,))
-
-    result = resolve_skill_resources(
-        (
-            SkillResourceRequest(
-                name="profiling",
-                resource_paths=(
-                    "profiling/references/guide.md",
-                    "references/guide.md",
-                ),
-                purpose="reuse a displayed resource path",
-            ),
-        ),
-        catalog,
-    )
-
-    assert result.diagnostics == ()
-    assert result.resolved[0].resource_paths == ("profiling/references/guide.md",)
-
-
-def test_installed_skills_resolve_through_the_runtime_capability(tmp_path: Path) -> None:
-    _write_skill(tmp_path, "profiling")
-    skills = create_installed_skills((tmp_path,), BlockingOperations())
-
-    result = asyncio.run(
-        skills.resolve(
-            (
-                SkillResourceRequest(
-                    name="profiling",
-                    resource_paths=("references/guide.md", "missing.md"),
-                    purpose="inspect behavior",
-                ),
-                SkillResourceRequest(name="unknown", purpose="not installed"),
-            )
-        )
-    )
-
-    assert result.resolved[0].name == "profiling"
-    assert result.resolved[0].resource_paths == ("profiling/references/guide.md",)
-    assert len(result.diagnostics) == 2
-    assert "resource file does not exist" in result.diagnostics[0]
-    assert "unknown installed skill" in result.diagnostics[1]
-
-
-def test_installed_skills_translate_invalid_catalog_to_contract_error(tmp_path: Path) -> None:
-    skill = tmp_path / "profiling"
-    skill.mkdir()
-    (skill / "SKILL.md").write_text("missing frontmatter\n")
-    skills = create_installed_skills((tmp_path,), BlockingOperations())
-
-    with pytest.raises(SkillCatalogError, match="SkillMetadataError:"):
-        asyncio.run(
-            skills.resolve((SkillResourceRequest(name="profiling", purpose="inspect behavior"),))
-        )
-
-
-def test_installed_skills_report_when_no_sources_are_installed() -> None:
-    skills = create_installed_skills((), BlockingOperations())
-
-    result = asyncio.run(
-        skills.resolve((SkillResourceRequest(name="profiling", purpose="inspect behavior"),))
-    )
-
-    assert result.resolved == ()
-    assert result.diagnostics == ("no skill sources are installed",)

@@ -33,12 +33,14 @@ export {
 export {
   INSPECTOR_CLOSED,
   type InspectorAction,
+  type InspectorCopy,
   type InspectorField,
-  type InspectorRequest,
+  type InspectorInspect,
   type InspectorState,
   type InspectorTarget,
   inspectionFields,
-  inspectorStep,
+  inspectorMachine,
+  inspectorView,
 } from './inspector.js';
 export {
   filterHosts,

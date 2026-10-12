@@ -1,7 +1,8 @@
-/** Pure state and presentation decisions for the detached-run inspector sheet. */
+/** Pure control state and presentation decisions for the detached-run inspector sheet. */
 import type {HostKey} from '@vibesys/hosts';
 import type {WelcomeInspection, WelcomeResult} from '@vibesys/ipc';
-import {only, type Step} from '@vibesys/store';
+import {unprovided} from '@vibesys/machine';
+import {assign, type SnapshotFrom, setup} from 'xstate';
 
 export interface InspectorTarget {
   readonly host: HostKey;
@@ -44,117 +45,202 @@ export type InspectorAction =
   | {readonly type: 'close'}
   | {readonly type: 'load-log'}
   | {readonly type: 'refresh'}
-  | {
-      readonly type: 'inspection-reply';
-      readonly token: number;
-      readonly result: WelcomeResult<WelcomeInspection>;
-    }
-  | {readonly type: 'copy'; readonly label: string; readonly value: string}
-  | {
-      readonly type: 'copy-reply';
-      readonly token: number;
-      readonly label: string;
-      readonly error: string | null;
-    };
+  | {readonly type: 'copy'; readonly label: string; readonly value: string};
 
-export type InspectorRequest =
-  | {
-      readonly kind: 'inspect';
-      readonly token: number;
-      readonly host: HostKey;
-      readonly instance: string;
-      readonly includeLog: boolean;
-    }
-  | {readonly kind: 'cancel-inspection'; readonly token: number}
-  | {readonly kind: 'copy'; readonly token: number; readonly label: string; readonly value: string};
+export interface InspectorInspect {
+  readonly token: number;
+  readonly host: HostKey;
+  readonly instance: string;
+  readonly includeLog: boolean;
+}
 
-function load(state: InspectorState, includeLog: boolean): Step<InspectorState, InspectorRequest> {
-  const target = state.target;
-  if (target === null) return only(state);
-  const token = state.next;
-  const logs = state.includeLog || includeLog;
+export interface InspectorCopy {
+  readonly token: number;
+  readonly label: string;
+  readonly value: string;
+}
+
+interface Context {
+  readonly view: InspectorState;
+  readonly inspection: InspectorInspect | null;
+  readonly copy: InspectorCopy | null;
+}
+
+function beginLoad(view: InspectorState, includeLog: boolean): Partial<Context> {
+  const target = view.target;
+  if (target === null) return {};
+  const token = view.next;
+  const logs = view.includeLog || includeLog;
   return {
-    state: {
-      ...state,
+    view: {
+      ...view,
       next: token + 1,
       includeLog: logs,
       load: {kind: 'loading', token},
       notice: null,
       copying: null,
     },
-    requests: [
-      {
-        kind: 'inspect',
-        token,
-        host: target.host,
-        instance: target.instanceId,
-        includeLog: logs,
-      },
-    ],
+    inspection: {
+      token,
+      host: target.host,
+      instance: target.instanceId,
+      includeLog: logs,
+    },
+    copy: null,
   };
 }
 
-export function inspectorStep(
-  state: InspectorState,
-  action: InspectorAction,
-): Step<InspectorState, InspectorRequest> {
-  switch (action.type) {
-    case 'open':
-      return load(
-        {
-          ...state,
-          target: action.target,
-          includeLog: false,
-          load: {kind: 'idle'},
-          notice: null,
-          copying: null,
+function failed(error: unknown): {readonly kind: 'error'; readonly message: string} {
+  return {kind: 'error', message: error instanceof Error ? error.message : String(error)};
+}
+
+export const inspectorMachine = setup({
+  types: {context: {} as Context, events: {} as InspectorAction},
+  actors: {
+    inspect: unprovided<WelcomeResult<WelcomeInspection>, InspectorInspect>('inspect'),
+    copy: unprovided<WelcomeResult<null>, InspectorCopy>('copy'),
+  },
+  guards: {
+    hasTarget: ({context}) => context.view.target !== null,
+    canCopy: ({context}) =>
+      context.view.target !== null &&
+      context.view.load.kind === 'ready' &&
+      context.view.copying === null,
+  },
+}).createMachine({
+  id: 'inspector',
+  context: {view: INSPECTOR_CLOSED, inspection: null, copy: null},
+  initial: 'closed',
+  on: {
+    open: {
+      target: '.loading',
+      reenter: true,
+      actions: assign(({context, event}) =>
+        beginLoad(
+          {
+            ...context.view,
+            target: event.target,
+            includeLog: false,
+            load: {kind: 'idle'},
+            notice: null,
+            copying: null,
+          },
+          false,
+        ),
+      ),
+    },
+    close: {
+      target: '.closed',
+      actions: assign(({context}) => ({
+        view: {...INSPECTOR_CLOSED, next: context.view.next + 1},
+        inspection: null,
+        copy: null,
+      })),
+    },
+    'load-log': {
+      guard: 'hasTarget',
+      target: '.loading',
+      reenter: true,
+      actions: assign(({context}) => beginLoad(context.view, true)),
+    },
+    refresh: {
+      guard: 'hasTarget',
+      target: '.loading',
+      reenter: true,
+      actions: assign(({context}) => beginLoad(context.view, context.view.includeLog)),
+    },
+    copy: {
+      guard: 'canCopy',
+      target: '.copying',
+      reenter: true,
+      actions: assign(({context, event}) => {
+        const token = context.view.next;
+        return {
+          view: {...context.view, next: token + 1, copying: token, notice: null},
+          copy: {token, label: event.label, value: event.value},
+        };
+      }),
+    },
+  },
+  states: {
+    closed: {},
+    loading: {
+      invoke: {
+        id: 'inspect',
+        src: 'inspect',
+        input: ({context}) => context.inspection as InspectorInspect,
+        onDone: {
+          target: 'shown',
+          actions: assign(({context, event}) => ({
+            view: {
+              ...context.view,
+              load: event.output.ok
+                ? {kind: 'ready', inspection: event.output.value}
+                : {kind: 'error', message: event.output.error},
+            },
+            inspection: null,
+          })),
         },
-        false,
-      );
-    case 'close': {
-      const requests =
-        state.load.kind === 'loading'
-          ? [{kind: 'cancel-inspection' as const, token: state.load.token}]
-          : [];
-      return {state: {...INSPECTOR_CLOSED, next: state.next + 1}, requests};
-    }
-    case 'load-log':
-      return load(state, true);
-    case 'refresh':
-      return load(state, state.includeLog);
-    case 'inspection-reply':
-      if (
-        state.target === null ||
-        state.load.kind !== 'loading' ||
-        state.load.token !== action.token
-      ) {
-        return only(state);
-      }
-      return only({
-        ...state,
-        load: action.result.ok
-          ? {kind: 'ready', inspection: action.result.value}
-          : {kind: 'error', message: action.result.error},
-      });
-    case 'copy': {
-      if (state.target === null) return only(state);
-      const token = state.next;
-      return {
-        state: {...state, next: token + 1, copying: token, notice: null},
-        requests: [{kind: 'copy', token, label: action.label, value: action.value}],
-      };
-    }
-    case 'copy-reply':
-      if (state.copying !== action.token) return only(state);
-      return only({
-        ...state,
-        copying: null,
-        notice:
-          action.error === null
-            ? {text: `${action.label} copied.`, error: false}
-            : {text: `Could not copy ${action.label.toLowerCase()}: ${action.error}`, error: true},
-      });
-  }
+        onError: {
+          target: 'shown',
+          actions: assign(({context, event}) => ({
+            view: {...context.view, load: failed(event.error)},
+            inspection: null,
+          })),
+        },
+      },
+    },
+    shown: {},
+    copying: {
+      invoke: {
+        id: 'copy',
+        src: 'copy',
+        input: ({context}) => context.copy as InspectorCopy,
+        onDone: {
+          target: 'shown',
+          actions: assign(({context, event}) => {
+            const operation = context.copy as InspectorCopy;
+            return {
+              view: {
+                ...context.view,
+                copying: null,
+                notice: event.output.ok
+                  ? {text: `${operation.label} copied.`, error: false}
+                  : {
+                      text: `Could not copy ${operation.label.toLowerCase()}: ${event.output.error}`,
+                      error: true,
+                    },
+              },
+              copy: null,
+            };
+          }),
+        },
+        onError: {
+          target: 'shown',
+          actions: assign(({context, event}) => {
+            const operation = context.copy as InspectorCopy;
+            const error = failed(event.error).message;
+            return {
+              view: {
+                ...context.view,
+                copying: null,
+                notice: {
+                  text: `Could not copy ${operation.label.toLowerCase()}: ${error}`,
+                  error: true,
+                },
+              },
+              copy: null,
+            };
+          }),
+        },
+      },
+    },
+  },
+});
+
+/** What the sheet renders of an inspector snapshot. */
+export function inspectorView(snapshot: SnapshotFrom<typeof inspectorMachine>): InspectorState {
+  return snapshot.context.view;
 }
 
 export interface InspectorField {

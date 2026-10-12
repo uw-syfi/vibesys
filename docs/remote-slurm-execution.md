@@ -8,40 +8,19 @@ policy, and SkyPilot/SSH configuration supplies site access.
 ## Direct Slurm (`--run-environment slurm`)
 
 `--run-environment slurm --slurm-config PATH` runs trusted accuracy and
-benchmark gates, and ROCprof captures, on a Slurm cluster the submit host reaches
+benchmark evaluations, and ROCprof captures, on a Slurm cluster the submit host reaches
 directly (for example over SSH), without SkyPilot. The editor is the same local
 Docker container as in every other environment, with the workspace mounted at
 its host path.
 
 The container cannot hold the cluster's tools or credentials, so trusted work never
-runs there. What the agent can reach for trusted evaluation depends on the loop, and
-the environment decides it once, from whether the loop's agents have the evaluation
-tool (`offers_evaluation_tool` in `src/vibesys/run/host.py`, passed as
-`RunEnvironmentRequest.evaluation_tool`).
-
-- **The dynamic loop** has the evaluation tool (`submit_evaluation`, then
-  `validate_evaluation_wait`), which the run's evaluation service answers on the
-  host; only its results count. Its agents get no shell client for evaluation: no
-  `vibesys-gate`, no `vibesys-gpu --gate` (the broker refuses the `gate` operation),
-  no accuracy or benchmark command in their paths, and no gate text in their prompts.
-  Without agent GPU commands the container reaches no host broker at all.
-- **Every older loop** (agent single and multi, profile-guided, plain/issue queue) has no evaluation tool. Its mid-turn gate and its framework's post-round
-  trusted evaluation keep the path below, unchanged. Each is deleted as its loop is
-  ported to the core path (roadmap #1952, tracked by #1649), and finally in phase 6.
-
-For an older loop the host owns a broker and the container reaches it over a
-bind-mounted Unix socket with a per-run token. The agent runs a gate as `vibesys-gate --gate accuracy` or
-`vibesys-gate --gate benchmark`. The client is mounted at
-`/usr/local/bin/vibesys-gate`, so the bare name resolves in any shell, and the
-environment notes in the agent's prompts name it and the gates the task plans. The
-broker runs the planned gate with the
-cluster wrapper (`vs_sandbox.slurm_command`), which stages the workspace, runs
-the job, and copies the result back. The agent names only the gate and supplies no
-arguments; the broker passes the benchmark's declared result argument itself,
-relays the result file into the container's `/tmp`, and names it in the gate's
-output. The framework's own evaluation sends the argument and path explicitly,
-which the broker validates. Interrupting the client or
-dropping the connection cancels the job.
+runs there. Every loop's agents request trusted evaluation through the evaluation
+tool (`submit_evaluation`, then `validate_evaluation_wait`), which the run answers on
+the host; only its results count, and the framework's own trusted evaluation of a
+round runs the same stages on the cluster through the core evaluation executor. The
+agents get no shell client for evaluation: no accuracy or benchmark command in their
+paths and no evaluation command in their prompts. Without agent GPU commands the
+container reaches no host broker at all.
 
 The ROCprof server runs in the container and reaches the cluster through a
 second host broker. It imports the Slurm adapter from the framework's `libs`
@@ -70,7 +49,7 @@ workstreams, and its start log says so.
 On a host that is itself a Slurm submit node (`[slurm.transport] kind = "local"`),
 the operator can also let the agent run its own GPU commands as Slurm jobs, by
 adding a `[vibesys.agent_gpu]` table to the same operator file. The same host
-broker then offers `vibesys-gpu` (beside the gates for an older loop), and the agent profiles
+broker then offers `vibesys-gpu`, and the agent profiles
 through its own commands instead of through the remote ROCprof capture. The
 table is rejected with any other transport. See
 [GPU commands through Slurm](slurm-gpu-commands.md) for the table, the agent's

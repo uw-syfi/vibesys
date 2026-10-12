@@ -122,7 +122,7 @@ def test_the_notes_name_the_absolute_path_of_a_tool_the_job_path_lacks() -> None
             template_dir=PROMPTS_DIR / "environments",
             service_command="",
             evaluation_tool=True,
-            gate_client="vibesys-gpu",
+            gpu_client="vibesys-gpu",
             gates=(),
             agent_gpu=agent_gpu,
             read_only_paths=[],

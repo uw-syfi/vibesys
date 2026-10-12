@@ -77,8 +77,16 @@ def _invoke(
     }
 
 
-def build_server(*, runner: capture_runtime.CommandRunner = subprocess.run) -> FastMCP:
-    """Expose NCU availability and bounded report inspection."""
+def build_server(
+    *,
+    runner: capture_runtime.CommandRunner = subprocess.run,
+    withheld: frozenset[str] = frozenset(),
+) -> FastMCP:
+    """Expose NCU availability and bounded report inspection.
+
+    ``withheld`` names tools the run does not offer (those needing a GPU driver the
+    editor lacks); they are absent from the tool list, not rejected when called.
+    """
     mcp = FastMCP("vibesys-ncu-profiler")
     invoke = functools.partial(_invoke, runner=runner)
 
@@ -149,6 +157,9 @@ def build_server(*, runner: capture_runtime.CommandRunner = subprocess.run) -> F
             )
         return {"report": str(artifact.resolve()), "page": page, **result}
 
+    for name in sorted(withheld):
+        mcp.remove_tool(name)  # a name the server lacks raises: a stale list must not pass silently
+
     return mcp
 
 
@@ -156,7 +167,7 @@ def main(argv: list[str] | None = None) -> None:
     """Start the stdio MCP server."""
     parser = argparse.ArgumentParser(description="Nsight Compute report MCP server")
     parser.parse_args(argv)
-    build_server().run(transport="stdio")
+    build_server(withheld=capture_runtime.withheld_tools_from_env()).run(transport="stdio")
 
 
 if __name__ == "__main__":

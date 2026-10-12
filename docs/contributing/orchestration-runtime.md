@@ -1,341 +1,109 @@
-# Orchestration plugins and runtime
+# Orchestration strategies and the runtime
 
-VibeSys orchestration is ordinary Python policy over a small runtime contract.
-A plugin declares its agent roles and policy entry point. The runtime supplies
-sessions, workspaces, evaluation, durable state, control, commands, skills, and
-typed observations through `Run`.
+Every VibeSys orchestration is a strategy on the `vs-core` lifecycle. A strategy is a pure
+object that decides the next step from a read-only view of the run; the runtime owns the
+loop that executes those steps (agent turns, workspaces, measurements, operations) and
+feeds the outcomes back as events. A plugin is the declaration that joins a strategy to its
+roles, options and prompts. There is no other way to run a policy: a plugin without a
+`core` policy is rejected, and the older imperative contract (`orchestrate(run, options)`
+over a `Run` bundle of sessions, state and evaluation) no longer exists.
 
 The boundary is deliberate:
 
 | Owner | Holds |
 |---|---|
-| `src/vibesys/orchestration/` | Agent roles, prompts, reply schemas, search and selection policy, evaluation cadence, policy state, and plugin declarations |
+| `src/vibesys/orchestration/<strategy>/` | The strategy (`strategy/`), its core policy (`core_policy/`), agent roles, prompts, reply schemas, options and plugin declaration |
+| `src/vibesys/*_core.py`, `core_wiring.py`, `core_roles.py` | Thin product wiring: build the plan from the run's facts, register the strategy's operations, and join it to the runtime |
 | `src/vibesys/plugin_catalog.py` | The product registry for declared plugin registrations |
-| `src/vibesys/run/`, `src/vibesys/composition.py` | Thin VibeSys composition: bind product config to roles, adapt trusted evaluation and host profiler/skill effects, translate semantic events, and connect a selected plugin to the runtime |
-| `libs/vs-runtime/` | Reusable session, workspace, state, evaluation, control, command, skill, and cleanup mechanics |
+| `src/vibesys/run/`, `src/vibesys/composition.py` | Thin VibeSys composition: open the run's resources, adapt trusted evaluation, translate semantic events, and compose the core host |
+| `libs/vs-core/` | The pure lifecycle: state, decisions, events, the authoring kit (`vs_core.api`) |
+| `libs/vs-runtime/` | The shell that drives core: request executors, workspaces, sessions, evaluation, cleanup |
 | `libs/vs-agent/`, `libs/vs-sandbox/`, `libs/vs-project/` | Agent harnesses, isolated execution, and project persistence |
 
-Policy imports public contracts from `vs_runtime.api`, never the composition-only
-`vs_runtime.api.infrastructure` surface. It does not construct agent clients,
-sandboxes, worktrees, or product run resources. Runtime libraries do not import
-VibeSys policy. [`tach.toml`](https://github.com/uw-syfi/vibesys/blob/main/tach.toml)
-enforces the dependency direction.
+A strategy imports `vs_core.api` and the product's shared policy packages; it never
+constructs agent clients, sandboxes, worktrees, or run resources. Runtime libraries do not
+import VibeSys policy.
+[`tach.toml`](https://github.com/uw-syfi/vibesys/blob/main/tach.toml) enforces the
+dependency direction. The design behind this contract, and the vocabulary (decision,
+attempt, settlement, operation, adoption, suspension), is in
+[Running single, multi, evolve and issue_queue on the vs-core lifecycle](../design/strategies-on-core.md).
 
 ## Plugin declaration
 
-An `OrchestrationPlugin` is the complete declaration of one policy. Its
-`agents` tuple is the sole role catalog. There is no separate agent registry.
-The product's `OrchestrationRegistry` selects plugins by stable ID; it does not
-redeclare their roles.
+An `OrchestrationPlugin` is the complete declaration of one policy:
 
-```python
-from pydantic import BaseModel, ConfigDict
-from vs_runtime.api import (
-    AgentCapability,
-    AgentRole,
-    OrchestrationPlugin,
-    Run,
-    RunStatus,
-    WorkspaceAccess,
-)
+- `id` and `config_version`: persisted in the run manifest, so change them deliberately;
+- `options`: a strict Pydantic model; unknown keys are rejected;
+- `agents`: the sole role catalog, a tuple of `AgentRole`. There is no separate agent
+  registry; the product's `OrchestrationRegistry` selects plugins by stable ID and does not
+  redeclare their roles;
+- `core`: a `CorePolicy`, the declarative data that makes the plugin a run.
 
+A `CorePolicy` carries no loop and no service. It holds `plan` (a pure function of the
+run's `CoreRunContext` that returns the strategy, its limits, reply schemas, facts and the
+measurement recipe), the operations the strategy registers and the runtime role behind
+each, the retention label of a verified revision, the prompt template directory, and the
+workspace directories a write-artifacts turn may write (`artifact_directories`, which the
+run also preserves across restores).
 
-class Options(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+Registration validates the policy and names the offending key (for example
+`core.artifact_directories[0]`) before any run resources open. The registration may also
+carry a resume policy, a round-count projection and a projector that reads the run's
+committed record for live and historical views.
 
-    max_rounds: int = 1
+## What a strategy declares
 
+A strategy declares its phases, its turn table and its settle policy, and the runtime
+handles corrections, lost turns, suspension, checkpoints, refunds, stop and exhaustion. The
+shared pieces live in `vs_core.api` (identity grammar, decision builders, turn chains,
+attempt tracking, evidence views) and in sibling packages `vibesys.candidates`,
+`vibesys.hypothesis` and `vibesys.metrics`. Time comes from `view.run.now_at`; a strategy
+has no clock, I/O or randomness of its own.
 
-class WorkerReply(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    summary: str
-
-
-WORKER = AgentRole(
-    id="worker",
-    system_prompt="Implement the requested change and report what you verified.",
-    workspace_access=WorkspaceAccess.READ_WRITE,
-    required_capabilities=frozenset({AgentCapability.SESSION_REUSE}),
-)
-
-
-async def orchestrate(run: Run, raw_options: BaseModel) -> RunStatus:
-    options = Options.model_validate(raw_options)
-    session = await run.agents.create_session(
-        WORKER,
-        workspace=run.workspaces.root,
-    )
-    try:
-        for round_number in range(1, options.max_rounds + 1):
-            reply = await session.turn(
-                f"Implement round {round_number}.",
-                response=WorkerReply,
-            )
-            run.observations.note(reply.summary)
-    finally:
-        await session.close()
-    return RunStatus.SUCCEEDED
-
-
-PLUGIN = OrchestrationPlugin(
-    id="example",
-    agents=(WORKER,),
-    options=Options,
-    orchestrate=orchestrate,
-)
-```
-
-Roles contain facts fixed for every session of that role:
-
-- `id`, which also binds the role to user-supplied model and reasoning config;
-- `system_prompt`;
-- `extra_tools`, for additive product-registered tools fixed for the role;
-- workspace access;
-- required driver capabilities.
-
-`extra_tools` is not an allowlist of every tool the agent can use. Harness-native
-shell and filesystem tools are configured by the selected runtime. Entries in
-`extra_tools` name additional tools that product composition must register and
-bind before the role can create a session.
-
-Changing evidence belongs in the message passed to `turn`, not in a rebuilt
-role. A response schema is selected per turn, so one session may request
-different typed replies as the conversation progresses. Omitting `response`
-returns text.
-
-Plugin declarations may also name their typed state model and memory paths.
-VibeSys-specific projection, resume compatibility, and maximum-round display
-policy live in the plugin's product `OrchestrationRegistration`, not in the
-reusable runtime contract. Projection callbacks return the strict
-`vibesys.api.PluginProjection` contract, which reuses `RoundSummary`; the
-product catalog validates that exact result type before exposing a view.
-Product configuration is validated against `plugin.agents`, so an unknown role
-override fails before any run resource opens.
-
-Built-in plugins live in `orchestration/{single,multi,issue_queue,evolve}` and
-are registered in `launch.built_in_orchestrations`. Keep role
-declarations in the owning plugin package, normally in `agents.py`, and expose
-them through the plugin's `agents` tuple.
-
-## Explicit session semantics
-
-`run.agents.create_session` makes conversation lifetime visible in policy
-code:
-
-```python
-first = await run.agents.create_session(WORKER, workspace=workspace)
-await first.turn("Inspect the failure.")
-await first.turn("Now implement the fix.")  # continues the same context
-
-second = await run.agents.create_session(WORKER, workspace=workspace)
-await second.turn("Review independently.")  # a fresh conversation
-```
-
-An unnamed session starts a fresh provider conversation. Repeated calls to
-`turn` on that session preserve its context. A non-empty `member_id` gives the
-conversation a durable policy identity, allowing a later session with the same
-role and member ID to resume provider context when the configured driver
-supports `PROVIDER_SESSION_RESUME`. Use it only when that durable identity is
-part of the policy.
-
-The role, workspace, writable paths, and resolved harness/model binding are
-fixed when the session is created. `WorkspaceAccess.LIMITED` requires explicit
-workspace-relative `writable_paths`; other access modes reject them. A session
-bound to a discarded candidate workspace is invalidated.
-
-Close sessions in `finally`. `close()` is idempotent, and the runtime closes
-all remaining sessions in reverse creation order as a failure-path fallback.
-Explicit cleanup in policy keeps the intended lifetime readable and releases
-resources before the whole run ends.
-
-## Static and dynamic teams
-
-A team needs no framework DSL. It is a normal Python collection of explicit
-sessions. This avoids nested context managers and keeps message routing in the
-policy that owns it.
-
-```python
-roles = (PLANNER, IMPLEMENTER, REVIEWER)
-team = [
-    await run.agents.create_session(role, workspace=workspace)
-    for role in roles
-]
-try:
-    plan = await team[0].turn("Plan the next change.", response=Plan)
-    result = await team[1].turn(render_implementation(plan), response=Result)
-    verdict = await team[2].turn(render_review(plan, result), response=Verdict)
-finally:
-    for session in reversed(team):
-        await session.close()
-```
-
-For a dynamic team, keep a dictionary keyed by a policy-owned member ID and
-pass that ID as `member_id` when the member joins. The policy decides which
-member sees which follow-on message, whether members share a workspace, and
-when a member leaves. The runtime still owns isolation and eventual cleanup.
-A member ID must be a canonical `AgentId` (printable characters in NFC form,
-no leading or trailing whitespace). When an agent chooses the ID, type the
-field of its structured reply as `AgentId`, so a bad ID fails the reply's
-validation and reaches the agent's correction turn instead of failing later
-at workspace or session creation.
-
-Concurrent work is also ordinary Python. Use `asyncio.TaskGroup` only when the
-chosen workspaces and policy state are independent. Do not concurrently call
-`turn` on one session; turns in a conversation are sequential.
-
-## `Run` capabilities
-
-`Run` exposes semantics needed by policy, not product or provider
-implementation objects:
-
-| Capability | Policy use |
-|---|---|
-| `facts` | Read immutable objective, domain, environment, evaluation, profiler, and workspace-source facts |
-| `agents` | Create and own explicit agent sessions |
-| `workspaces` | Use the root workspace, create/discard candidates, adopt a retained revision, or export a patch |
-| `evaluation` | Run trusted accuracy, benchmark, and audited local-validation operations |
-| `state` | Load and atomically commit the plugin's declared Pydantic state model |
-| `control` | Check cooperative pause and stop state at policy-selected boundaries |
-| `commands` | Run validated commands in a selected workspace |
-| `skills` | Resolve policy-selected installed skill resources |
-| `observations` | Publish informational notes or non-fatal semantic warnings |
-
-Workspace and candidate lifetimes are explicit. A plugin creates a candidate
-with `run.workspaces.create_candidate()`, retains or adopts a revision through
-the workspace APIs, and discards the candidate in `finally`. The lower runtime
-owns Git, sandbox, worktree, and cleanup mechanics. A policy that runs one
-logical member through a sequence of candidates passes
-`create_candidate(revision, member_id=...)`: each of that member's candidates
-gets the same path, so an agent session created with the same `member_id`
-resumes its provider conversation (providers key history by working
-directory). At most one candidate per member ID is live at a time. Similarly, orchestration
-decides when correctness or performance evaluation is due and interprets the
-typed result; the runtime performs the trusted evaluation.
-
-Measurements retain their captured revision and content digest independently of
-later workspace edits. `trusted_operations` exposes both, plus the first agent
-requester's `submission_index`; completion order and later joins do not change
-that index. Zero denotes unknown chronology in legacy access records. A trusted
-run-wide observation without captured revision provenance fails explicitly.
-
-`Evaluation.evidence_revisions()` projects the host-owned revision registry for
-evaluation handles, accepted evidence IDs, and profiler operation IDs.
-`evidence_revision(reference)` resolves one reference from that registry, returns
-`None` for an unregistered local artifact, and rejects unknown `eval_` handles
-with `EvaluationAgentAccessError`. The run shell refreshes the registry after each planner reply; pure plan
-validation rejects evidence attributed to another revision.
-Implementation references resolve from the same registry before binding an
-omitted revision. Local artifacts with omitted revisions bind to the final
-implementation snapshot.
-
-The runtime and thin product wiring publish the lifecycle semantics that
-existing consumers use: agent-turn start and finish, workspace snapshots and
-restore warnings, evaluation-gate start and terminal finish, and state
-projections after durable commit. Resource creation, adoption, discard, and
-write-ahead-log checkpoints remain runtime-owned tested mechanics, not public
-events without a consumer. Plugins do not manually duplicate these facts.
+Agents that measure a candidate in the middle of a turn do it through the evaluation tool
+(`submit_evaluation`, then `validate_evaluation_wait` and a waiting reply). The run's
+evaluation bridge answers it on the host; core resumes the same conversation once the
+measurement ends. On every run environment the agent is given no shell client for
+evaluation, and the framework's own trusted measurement runs through the core evaluation
+executor.
 
 ## Policy organization
 
-Keep code near the plugin that owns the decision:
+Keep code near the strategy that owns the decision:
 
-- `agents.py`: immutable role declarations;
-- `plugin.py`: the `OrchestrationPlugin` declaration;
-- `orchestration.py`: high-level sequencing and control flow;
-- `models.py` or focused policy modules: options, state, reply schemas, and
-  deterministic transitions;
-- `prompts/`: agent-visible prompt rendering owned by that policy.
+- `roles` (or `*_roles.py`): immutable role declarations;
+- `plugin.py`: the plugin declaration and registration;
+- `strategy/`: the pure strategy, its state and its transitions;
+- `core_policy/`: the plan, limits, projection and reply parsing the runtime joins to the
+  strategy, with `prompts/` for the agent-visible templates;
+- `models.py` or focused policy modules: options, reply schemas, deterministic transitions.
 
-Every direct subfolder of `vibesys.orchestration` is one strategy package.
-Shared policy and resources live beside it under `vibesys`, including
-`hypothesis`, `metrics`, `profile_focus`, `steering`, `domains`, and shared
-`prompts`; these siblings never import orchestration. Domain templates live
-with their domain, and strategy templates with their strategy. Top-level
-orchestration modules remain shared policy helpers. Follow the layout and
-placement rule in [architecture.md](architecture.md). Extract shared policy
-only when real callers need the same semantics. Do not introduce setup objects,
-registries, builders, or callback bundles merely to shorten orchestration code.
+Every direct subfolder of `vibesys.orchestration` is one strategy package. Shared policy and
+resources live beside it under `vibesys`, including `hypothesis`, `metrics`,
+`profile_focus`, `steering`, `domains`, and shared `prompts`; these siblings never import
+orchestration. Follow the layout and placement rule in [architecture.md](architecture.md).
+Extract shared policy only when real callers need the same semantics.
 
 ## Adding a plugin
 
-1. Create `src/vibesys/orchestration/<plugin>/` with strict Pydantic options,
-   any typed state, role declarations, prompts, and the orchestration function.
-2. Construct one `OrchestrationPlugin`; its `agents` tuple is authoritative.
-3. Use only `Run` capabilities for effects. Keep selection, cadence,
-   message routing, and response interpretation in the plugin.
-4. Export its product registration and add it to
-   `launch.built_in_orchestrations` through the individual registration facade
-   `vibesys.api.catalog`.
-5. Add policy tests through `FakeRun`, prompt or state-transition tests as
-   appropriate, and integration coverage for product composition only when the
-   boundary itself changes.
-6. Add any new module edge to `tach.toml` and run `uv run python scripts/check_tach.py`.
+1. Create `src/vibesys/orchestration/<plugin>/` with strict Pydantic options, role
+   declarations, prompts, the strategy and its core policy.
+2. Construct one `OrchestrationPlugin` with a `CorePolicy`; its `agents` tuple is
+   authoritative.
+3. Export its product registration and add it to `launch.built_in_orchestrations` through
+   the individual registration facade `vibesys.api.catalog`.
+4. Add the strategy to the conformance suite and its pure-tier tests (see the `testing`
+   skill), and wiring tests only when the boundary itself changes.
+5. Add any new module edge to `tach.toml` and run `uv run python scripts/check_tach.py`.
 
-A preset that shares an implementation but changes policy options should be a
-separate plugin with its own stable ID and options type. Plugin IDs and option
-versions are persisted in the run manifest, so change them deliberately.
+A preset that shares an implementation but changes policy options should be a separate
+plugin with its own stable ID and options type.
 
-## Testing orchestration policy
+## Testing a strategy
 
-Use the public fake from `vs_runtime.api.testing`. It derives agent and state
-contracts from the plugin, so tests cannot silently invent a second role
-catalog.
-
-```python
-import asyncio
-from collections import deque
-
-from pydantic import BaseModel
-from vs_runtime.api.testing import FakeRun
-
-
-replies = deque([WorkerReply(summary="implemented")])
-
-
-def respond(
-    role: AgentRole,
-    history: tuple[str, ...],
-    message: str,
-    response: type[BaseModel] | None,
-) -> object:
-    assert role is WORKER
-    assert history == ()
-    assert message == "Implement round 1."
-    assert response is WorkerReply
-    return replies.popleft()
-
-
-async def scenario() -> None:
-    run = FakeRun(PLUGIN, responder=respond)
-    try:
-        status = await PLUGIN.orchestrate(run, Options())
-        assert status is RunStatus.SUCCEEDED
-        assert run.agents.sessions[0].closed
-    finally:
-        await run.close()
-
-
-asyncio.run(scenario())
-```
-
-The fake records sessions, per-session message history, workspaces, evaluation
-calls, state commits, control checkpoints, commands, skills, and observations.
-Configure those public fake capabilities directly. Do not patch runtime
-internals or replace private functions.
-
-Useful focused commands:
-
-```bash
-uv run pytest tests/vibesys/orchestration/multi/strategy
-uv run pytest tests/vibesys/orchestration/single/strategy tests/composition/_loop
-uv run pytest tests/vibesys/orchestration/test_explicit_agent_sessions.py
-uv run pytest tests/vibesys/architecture
-uv run python scripts/check_tach.py
-uv run python scripts/check_test_isolation.py
-```
-
-Prompt snapshots live with their owning policy tests. Regenerate only the
-affected snapshots with `UPDATE_PROMPT_SNAPSHOTS=1`; regenerate end-to-end
-goldens with `UPDATE_GOLDEN=1 uv run pytest tests/vibesys/golden`, and review
-the resulting diff before committing it.
+Drive the strategy as the shell does: build `RunView`s, feed `StrategyEvent`s, and assert on
+the proposals. `vs_runtime.api.testing` offers the runtime shell kit (`ScriptedExecutors`,
+`drive_shell`, restart-at-boundary) for tests that run a strategy against scripted
+executors, and `tests/support/core_plugins.py` offers stub core plugins for tests of the
+wiring around a run (registration, launch, projection, resource lifetime) that need a plugin
+that composes and ends rather than one that searches.

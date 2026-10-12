@@ -479,7 +479,6 @@ def test_context_assembly_logs_stage_timings(tmp_path: Path) -> None:
         "log_bootstrap",
         "git_tracker_init",
         "project_state_resume",
-        "round_transaction_recovery",
         "workspace_setup",
         "environment_open",
         "device_monitor_start",

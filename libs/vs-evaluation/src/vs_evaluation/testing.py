@@ -11,18 +11,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ValidationError
 
-from vs_evaluation.agent_evidence import EvidenceFingerprints, EvidenceKind
-from vs_evaluation.agent_models import (
-    EVALUATION_ACCESS_STATE_PATH,
-    EvaluationAgentState,
-    HandleAccess,
-    HandleAssociation,
-    ScopeRelease,
-    SubmittedSemanticEvaluation,
-    register_handle_access,
-)
 from vs_evaluation.coordinator import (
-    EvaluationCoordinator,
     EvaluationKeyConflictError,
     RevisionConflictError,
 )
@@ -31,7 +20,6 @@ from vs_evaluation.models import (
     AvailabilitySnapshot,
     AvailabilityState,
     CostClass,
-    EvaluationAwaitResult,
     EvaluationRequest,
     EvaluationState,
     EvaluationStepResult,
@@ -42,22 +30,12 @@ from vs_evaluation.models import (
     StoredEvaluation,
 )
 from vs_evaluation.ports import ExecutorRejectedError, ExecutorSubmissionError
-from vs_evaluation.scope_state import ScopeClosingError, ScopeLifecycleStore
-from vs_evaluation.settlements import (
-    EvaluationDependencyError,
-    EvaluationSettlementBackend,
-    EvaluationSettlementObservation,
-    OwnedEvaluationDependencies,
-    ServiceEvaluationSettlements,
-    SettlementErrorCode,
-)
 from vs_project.api import ProjectStateError, StateModelNotFoundError
-from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from types import TracebackType
 
-    from vs_evaluation.state_namespace import EvaluationStateNamespace
+    from vs_sim.api.testing import ManualClock
 
 
 @dataclass
@@ -477,225 +455,7 @@ __all__ = [
     "FakeDeadlineScope",
     "FakeEvaluationBackend",
     "FakeEvaluationExecutor",
-    "FakeEvaluationSettlements",
     "FakeSubmission",
     "InMemoryEvaluationNamespace",
     "InMemoryEvaluationStore",
 ]
-
-
-class FakeEvaluationSettlements:
-    """In-memory settlements with production ownership, validation and host-wait semantics.
-
-    Explicit executor barriers control observations. Composition reuses the
-    settlement algorithm with faithful in-memory coordinator and storage.
-    """
-
-    def __init__(
-        self,
-        *,
-        backend: EvaluationSettlementBackend | None = None,
-        namespace: EvaluationStateNamespace | None = None,
-    ) -> None:
-        """Create isolated durable state and externally observable fake jobs."""
-        self.namespace = InMemoryEvaluationNamespace()
-        self.store = InMemoryEvaluationStore()
-        self.executor = FakeEvaluationExecutor(ManualClock(), advance_clock_on_timeout=False)
-        self.coordinator = EvaluationCoordinator(
-            self.executor, self.store, self.executor.clock, deadline_factory=FakeDeadlineFactory()
-        )
-        self.backend = _FakeSettlementBackend(self.coordinator)
-        self._service = ServiceEvaluationSettlements(
-            self.backend if backend is None else backend,
-            self.namespace if namespace is None else namespace,
-        )
-
-    async def submit(
-        self,
-        request: EvaluationRequest,
-        fingerprints: EvidenceFingerprints,
-        *,
-        principal_id: str | None = None,
-    ) -> str:
-        """Submit an explicit host-scope capture, or a named principal's requester."""
-        scopes = ScopeLifecycleStore(self.namespace)
-        if request.owner_scope is not None and scopes.released(request.owner_scope):
-            raise ScopeClosingError(request.owner_scope)
-        scope = next(
-            (item for item in scopes.snapshot().scopes if item.scope_id == request.owner_scope),
-            None,
-        )
-        if scope is not None and scope.generation != request.owner_generation:
-            raise EvaluationDependencyError(SettlementErrorCode.STALE_GENERATION, request.key)
-        canonical = await self.store.get_by_key(request.key)
-        capture = request if canonical is None else canonical.request
-        if (
-            request.model_copy(
-                update={
-                    "owner_scope": capture.owner_scope,
-                    "owner_generation": capture.owner_generation,
-                }
-            )
-            != capture
-        ):
-            raise EvaluationKeyConflictError(request.key)
-        handle = await self.coordinator.prepare(capture)
-        self.backend.remember_submission(
-            SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
-        )
-        capture_record = await self.coordinator.recorded_snapshot(handle.id)
-        state = (
-            self.namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
-            or EvaluationAgentState()
-        )
-        existing = next((item for item in state.handles if item.handle_id == handle.id), None)
-        if existing is not None and existing.fingerprints != fingerprints:
-            raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle.id)
-        association = HandleAssociation(
-            scope_id=request.owner_scope,
-            generation=request.owner_generation,
-            principal_id=principal_id,
-            submission_index=state.next_submission_index(),
-        )
-        access = HandleAccess(
-            handle_id=handle.id,
-            scope_id=capture.owner_scope,
-            fingerprints=fingerprints,
-            kinds=tuple(EvidenceKind(stage.name) for stage in request.stages),
-            owners=frozenset() if principal_id is None else frozenset({principal_id}),
-            observers=frozenset() if principal_id is None else frozenset({principal_id}),
-            associations=(association,)
-            if existing is None
-            else existing.requesters(legacy_generation=capture.owner_generation),
-        ).associate(association, capture_state=capture_record.state)
-        self.namespace.save(
-            EVALUATION_ACCESS_STATE_PATH,
-            register_handle_access(state, access),
-        )
-        await self.coordinator.submit(capture)
-        return handle.id
-
-    async def cancel_association(self, handle_id: str, scope_id: str) -> None:
-        """Withdraw this scope's waits, cancelling only after the last requester leaves."""
-        state = self.namespace.load(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
-        access = next((item for item in state.handles if item.handle_id == handle_id), None)
-        if access is None:
-            raise EvaluationDependencyError(SettlementErrorCode.UNKNOWN_HANDLE, handle_id)
-        if not any(item.scope_id == scope_id for item in access.requesters()):
-            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
-        withdrawn = access.detach(scope_id=scope_id)
-        self.namespace.save(EVALUATION_ACCESS_STATE_PATH, register_handle_access(state, withdrawn))
-        if not any(item.active for item in withdrawn.requesters()):
-            await self.coordinator.cancel(handle_id)
-
-    async def release_scope(self, scope_id: str) -> ScopeRelease:
-        """Fence this generation and withdraw every requester wait in its scope."""
-        scopes = ScopeLifecycleStore(self.namespace)
-        _, first_release = scopes.begin(scope_id)
-        state = self.namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
-        handles = (
-            tuple(
-                access.handle_id
-                for access in state.handles
-                if any(item.scope_id == scope_id and item.active for item in access.requesters())
-            )
-            if state
-            else ()
-        )
-        cancellations_before = len(self.executor.cancellations)
-        for handle in handles:
-            await self.cancel_association(handle, scope_id)
-        scopes.complete(scope_id)
-        return ScopeRelease(
-            scope_id=scope_id,
-            evaluations=tuple(self.executor.cancellations[cancellations_before:]),
-            first_release=first_release,
-        )
-
-    async def reopen_scope(self, scope_id: str) -> None:
-        """Advance only a completely released scope to its next generation."""
-        ScopeLifecycleStore(self.namespace).reopen(scope_id)
-
-    async def submission_history(self, scope_id: str) -> tuple[StoredEvaluation, ...]:
-        """Read complete owned durable records in the real admission order."""
-        return await self._service.submission_history(scope_id)
-
-    async def observe(
-        self, dependencies: OwnedEvaluationDependencies
-    ) -> tuple[EvaluationSettlementObservation, ...]:
-        """Validate and observe in-memory durable facts."""
-        return await self._service.observe(dependencies)
-
-    async def inspect(
-        self, dependencies: OwnedEvaluationDependencies
-    ) -> tuple[EvaluationSettlementObservation, ...]:
-        """Inspect in-memory external facts without admitting or cancelling work."""
-        return await self._service.inspect(dependencies)
-
-    async def wait_any(
-        self, dependencies: OwnedEvaluationDependencies
-    ) -> tuple[EvaluationSettlementObservation, ...]:
-        """Wait on deterministic executor barriers without cancelling jobs."""
-        return await self._service.wait_any(dependencies)
-
-
-class _FakeSettlementBackend:
-    def __init__(self, coordinator: EvaluationCoordinator) -> None:
-        self._coordinator = coordinator
-        self.read_error: OSError | None = None
-        self.ownership_error: OSError | None = None
-        self._submissions: dict[str, SubmittedSemanticEvaluation] = {}
-        self.record_read_started = asyncio.Event()
-        self._record_read_gate: asyncio.Event | None = None
-        self._misrouted_record_handle: str | None = None
-
-    def remember_submission(self, submitted: SubmittedSemanticEvaluation) -> None:
-        existing = self._submissions.get(submitted.handle_id)
-        if existing is not None and existing != submitted:
-            raise EvaluationDependencyError(
-                SettlementErrorCode.IDENTITY_CONFLICT, submitted.handle_id
-            )
-        self._submissions[submitted.handle_id] = submitted
-
-    async def recorded_submission(self, handle_id: str) -> SubmittedSemanticEvaluation | None:
-        return self._submissions.get(handle_id)
-
-    def forget_submission(self, handle_id: str) -> None:
-        """Simulate a legacy capture lacking immutable identity evidence."""
-        self._submissions.pop(handle_id, None)
-
-    async def owned_handles(self, scope_id: str | None) -> tuple[str, ...]:
-        if self.ownership_error is not None:
-            raise self.ownership_error
-        return tuple(
-            record.handle_id
-            for record in await self._coordinator.history()
-            if scope_id is None or record.request.owner_scope == scope_id
-        )
-
-    def hold_record_reads(self) -> asyncio.Event:
-        """Return a deterministic barrier that releases durable record reads."""
-        self._record_read_gate = asyncio.Event()
-        self.record_read_started.clear()
-        return self._record_read_gate
-
-    def misroute_next_record_read(self, to_handle_id: str) -> None:
-        """Inject a durable transport attribution fault on the next record read."""
-        self._misrouted_record_handle = to_handle_id
-
-    async def inspect_snapshot(self, handle_id: str) -> StoredEvaluation | None:
-        """Inspect once without starting or cancelling external work."""
-        return await self._coordinator.inspect_snapshot(handle_id)
-
-    async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
-        self.record_read_started.set()
-        if self._record_read_gate is not None:
-            await self._record_read_gate.wait()
-        if self.read_error is not None:
-            raise self.read_error
-        target = self._misrouted_record_handle or handle_id
-        self._misrouted_record_handle = None
-        return await self._coordinator.recorded_snapshot(target)
-
-    async def await_result(self, handle_id: str, timeout_s: float) -> EvaluationAwaitResult:
-        return await self._coordinator.await_result(handle_id, timeout_s)

@@ -119,6 +119,28 @@ def _released(observation: Observation | None) -> bool:
     )
 
 
+def _vacant_workspace_request(intent: Intent | None) -> bool:
+    """A workspace request that was answered terminal without taking anything.
+
+    A request the executor rejected, failed, or cancelled before accepting it created no
+    workspace resource, so there is nothing for a closing attempt to wait to see released.
+    The executor marks such an answer neither ``released`` nor ``children_complete`` (there is
+    nothing to release and no manifest), so ``_released`` can never hold for it.
+    """
+    if intent is None or not isinstance(intent.request, EnsureWorkspace | RestoreRevision):
+        return False
+    observation = intent.observation
+    return bool(
+        observation is not None
+        and observation.terminal
+        and not observation.accepted
+        and observation.resource_id is None
+        and not observation.children
+        and observation.status
+        in (ObservationStatus.REJECTED, ObservationStatus.FAILED, ObservationStatus.CANCELLED)
+    )
+
+
 def _child_released(context: AttemptsContext, child: ChildLease) -> bool:
     marks = child.observation_watermarks
     return bool(
@@ -901,7 +923,9 @@ def _start_closure(
         if row.scope == scope and row.resource_id is None and not row.released
     )
     edges.extend(
-        ReleaseDependency(kind="request", identity=value) for value in owner.pending_intents
+        ReleaseDependency(kind="request", identity=value)
+        for value in owner.pending_intents
+        if not _vacant_workspace_request(_intent(context, value))
     )
     edges.append(ReleaseDependency(kind="request", identity=event.authority))
     closure = AttemptClosure(
@@ -1052,8 +1076,12 @@ def _request_release_proof(
             and observation.terminal
             and _retention_done(owner, context)
         )
-    return _released(observation) and (
-        edge.kind != "operation" or getattr(intent.request, "operation_id", None) == edge.identity
+    return _vacant_workspace_request(intent) or (
+        _released(observation)
+        and (
+            edge.kind != "operation"
+            or getattr(intent.request, "operation_id", None) == edge.identity
+        )
     )
 
 

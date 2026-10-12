@@ -21,6 +21,7 @@ import {browserLifecycle} from '../platform/lifecycle.js';
 import '../styles.css';
 import {bootPlan} from './boot.js';
 import {createDemoApp, createLiveApp} from './compose.js';
+import {applySessionTheme, applyWebTheme} from './theme.js';
 
 // Remove the launch secret before DOM validation, storage access, or any
 // asynchronous work can fail and leave it in browser-visible history.
@@ -31,6 +32,7 @@ if (scrubbed.pageUrl !== launchUrl) {
 }
 
 markDesktopShell(document.documentElement, window.vibesysDesktop);
+applyWebTheme(document.documentElement, null);
 
 const root = document.querySelector('#root');
 if (root === null) throw new Error('Web viewer root is missing');
@@ -85,6 +87,7 @@ function renderLive(webSocketUrl: string, browserSession: string | null): void {
     lifecycle: browserLifecycle(),
     connect: connectRun(hooks => openTransport(url, hooks)),
   });
+  void applySessionTheme(document.documentElement, session);
   reactRoot.render(<StrictMode>{createLiveApp(session)}</StrictMode>);
 }
 

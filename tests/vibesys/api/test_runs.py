@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.support.core_plugins import capability_plugin, failing_plugin
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
 from tests.support.task_project import write_task
-from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from entrypoints.run import supervise
 from launch import LaunchSettings, default_runs
@@ -28,17 +28,13 @@ from vibesys.api import (
 )
 from vibesys.api import RunStatus as ProductRunStatus
 from vibesys.api.request import load_task
+from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, ProjectStateError, validate_run_id
-from vs_runtime.api import OrchestrationPlugin, RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from pydantic import BaseModel
-
-    from vs_runtime.api import Run
 
 
 @pytest.fixture
@@ -65,23 +61,14 @@ def request_template(tmp_path: Path) -> RunRequest:
     )
 
 
-async def _finish(run: Run, _options: BaseModel) -> RunStatus:
-    run.observations.note("identity probe")
-    return RunStatus.SUCCEEDED
-
-
 def _fake_agent(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient()
+    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
 
 
 @pytest.mark.asyncio
 async def test_launch_allocates_identity_before_execution(request_template: RunRequest) -> None:
     registry = OrchestrationRegistry()
-    registry.register_plugin(
-        OrchestrationPlugin(
-            id="identity-test", agents=(), options=EmptyOptions, orchestrate=_finish
-        )
-    )
+    registry.register_plugin(failing_plugin("identity-test"))
     runs = default_runs(
         LaunchSettings(
             registry=registry,
@@ -96,7 +83,6 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
     assert runs.attach(allocated) is handle
     assert runs.list_active() == (handle,)
     result = await handle.result()
-    assert result.succeeded
     assert result.run_id == allocated
     events = [event async for event in handle.events()]
     assert events
@@ -119,7 +105,6 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
     assert runs.attach(allocated) is resumed
     assert runs.list_active() == (resumed,)
     resumed_result = await resumed.result()
-    assert resumed_result.succeeded
     assert resumed_result.run_id == allocated
     resumed_events = [event async for event in resumed.events()]
     assert resumed_events
@@ -169,18 +154,12 @@ def test_resume_accepts_only_matching_preallocated_identity(
 async def test_requested_stop_returns_typed_status_after_cleanup(
     request_template: RunRequest,
 ) -> None:
-    entered, release = asyncio.Event(), asyncio.Event()
-
-    async def stopped(run: Run, _options: BaseModel) -> RunStatus:
-        entered.set()
-        await release.wait()
-        await run.control.checkpoint()
-        return RunStatus.SUCCEEDED
-
     registry = OrchestrationRegistry()
+    # A strategy that never proposes anything: only the operator's stop can end this run.
     registry.register_plugin(
-        OrchestrationPlugin(
-            id="identity-test", agents=(), options=EmptyOptions, orchestrate=stopped
+        capability_plugin(
+            "identity-test",
+            strategy=SkeletonStrategy(state=SkeletonState(schema_version=1, phase="done")),
         )
     )
     runs = default_runs(
@@ -191,9 +170,7 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
         )
     )
     handle = runs.start(request_template)
-    await entered.wait()
     handle.stop()
-    release.set()
     result = await supervise(handle, handle_signals=False)
     assert result.status is ProductRunStatus.STOPPED
     assert not result.succeeded

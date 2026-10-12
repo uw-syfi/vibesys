@@ -172,6 +172,8 @@ class World:
     gate: FaultGate | None = None
     git: WorldGit | None = None
     """The Git the world runs on, as the scripted agent and the assertions see it."""
+    evaluations: list[SemanticSlurmEvaluationExecutor] = field(default_factory=list)
+    """The evaluation executor of every process started, which a host closes at exit."""
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -224,6 +226,7 @@ class World:
             stage_failure_text=render_stage_failure,
             cluster=self.cluster,
         )
+        self.evaluations.append(evaluation)
         if self.timed is not None:
             clock, runtime = self.timed
             evaluation = TimedPolls(evaluation, clock, runtime, self.polls, self.during_submit)

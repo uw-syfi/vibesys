@@ -10,6 +10,7 @@
 export {connectionStatus} from './connection-status.js';
 export {controlDirectory, installAskpass} from './shell/askpass.js';
 export {
+  type ConnectionLease,
   ConnectionManager,
   DEFAULT_CONNECTION_CONFIG,
 } from './shell/connection-manager.js';

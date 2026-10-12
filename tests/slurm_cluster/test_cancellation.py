@@ -17,35 +17,24 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.slurm_cluster
 
 # Matches the Python process of the broker client (not the shell that starts it).
-_CLIENT = "^python3 .*vibesys-g(pu|ate)"
-
-
-def _hold(run: OpenRun, via: str) -> str:
-    """The agent command that starts a job, a gate or a GPU command, that runs until cancelled."""
-    if via == "gpu":
-        if not run.has_gpu_commands:
-            pytest.skip("this environment has no agent GPU commands")
-        return '"$VIBESYS_GPU" -- sleep 600'
-    run.set_mode("accuracy", "hold")
-    return f"{run.launcher()} --gate accuracy"
+_CLIENT = "^python3 .*vibesys-gpu"
+_HOLD = '"$VIBESYS_GPU" -- sleep 600'
 
 
 def _signal_client(run: OpenRun, number: signal.Signals) -> None:
     run.agent(f"kill -{number.value} $(pgrep -f '{_CLIENT}')")
 
 
-@pytest.mark.parametrize("via", ["gate", "gpu"])
 @pytest.mark.parametrize(
     ("number", "status"), [(signal.SIGTERM, 143), (signal.SIGINT, 130), (signal.SIGKILL, 137)]
 )
 def test_signalling_the_agents_client_cancels_the_job_and_gives_the_shell_status(
-    run: OpenRun, slurm_cluster: SlurmCluster, number: signal.Signals, status: int, via: str
+    gpu_run: OpenRun, slurm_cluster: SlurmCluster, number: signal.Signals, status: int
 ) -> None:
-    command = _hold(run, via)
-    pending = in_background(lambda: run.agent(command))
+    pending = in_background(lambda: gpu_run.agent(_HOLD))
     job = slurm_cluster.wait_for_job("")
 
-    _signal_client(run, number)
+    _signal_client(gpu_run, number)
     result = pending.result(timeout=HANG_GUARD_SECONDS)
 
     # SIGKILL gives the client no chance to speak: the broker sees only a dropped connection.
@@ -54,13 +43,11 @@ def test_signalling_the_agents_client_cancels_the_job_and_gives_the_shell_status
     assert slurm_cluster.job_state(job) == "CANCELLED"
 
 
-@pytest.mark.parametrize("via", ["gate", "gpu"])
 def test_cancelling_the_agents_command_stops_its_client_and_its_job(
-    run: OpenRun, slurm_cluster: SlurmCluster, via: str
+    gpu_run: OpenRun, slurm_cluster: SlurmCluster
 ) -> None:
     cancel = threading.Event()
-    command = _hold(run, via)
-    pending = in_background(lambda: run.agent(command, cancel=cancel))
+    pending = in_background(lambda: gpu_run.agent(_HOLD, cancel=cancel))
     job = slurm_cluster.wait_for_job("")
 
     cancel.set()
@@ -74,7 +61,7 @@ def test_cancelling_the_agents_command_stops_its_client_and_its_job(
 def test_a_job_the_operator_cancels_ends_the_agents_command_with_a_failure(
     gpu_run: OpenRun, slurm_cluster: SlurmCluster
 ) -> None:
-    pending = in_background(lambda: gpu_run.agent('"$VIBESYS_GPU" -- sleep 600'))
+    pending = in_background(lambda: gpu_run.agent(_HOLD))
     job = slurm_cluster.wait_for_job("")
 
     slurm_cluster.slurm("scancel", job)

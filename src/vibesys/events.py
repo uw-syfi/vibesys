@@ -62,12 +62,11 @@ class CoreEventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
     WINNER_SELECTED = "winner_selected"
-    ASYNC_OPERATION_LIFECYCLE = "async_operation_lifecycle"
 
     # Run-control transitions (see `vs_runtime.api.infrastructure.RunControlChannel`):
     # request-time events (`*_REQUESTED`, `STEER_QUEUED`, `RESUMED`) come from
     # `RunControl` callers; boundary-consume-time events (`PAUSED`, `STOPPED`,
-    # `STEER_CONSUMED`, `STEER_DELIVERED`) come from the run boundary or an agent turn. A server
+    # `STEER_CONSUMED`) come from the run boundary or an agent turn. A server
     # projects both onto its own status machine
     # and CONTROL journal; there is no frontend-visible wire event for them.
     STEER_QUEUED = "steer_queued"
@@ -75,7 +74,6 @@ class CoreEventType(StrEnum):
     RESUMED = "resumed"
     STOP_REQUESTED = "stop_requested"
     STEER_CONSUMED = "steer_consumed"
-    STEER_DELIVERED = "steer_delivered"
     PAUSED = "paused"
     STOPPED = "stopped"
 
@@ -115,29 +113,6 @@ class FrameworkSource(StrEnum):
     GPU = "gpu"
     SKYPILOT = "skypilot"
     OTHER = "other"
-
-
-class AsyncOperationKind(StrEnum):
-    """Framework-owned categories of asynchronous operation."""
-
-    EVALUATION = "evaluation"
-    PROFILER = "profiler"
-
-
-class AsyncOperationState(StrEnum):
-    """Union of backend-neutral lifecycle states published by operation services."""
-
-    SUBMITTED = "submitted"
-    QUEUED = "queued"
-    STARTING = "starting"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELED = "canceled"
-    INTERRUPTED = "interrupted"
-    SUPERSEDED = "superseded"
-    TIMED_OUT = "timed_out"
 
 
 class EventPayload(BaseModel):
@@ -545,19 +520,6 @@ class WinnerSelectedData(EventPayload):
     settlement_id: str | None = None
 
 
-class AsyncOperationLifecycleData(EventPayload):
-    """Backend-neutral lifecycle fact for host-owned asynchronous work."""
-
-    kind: Literal["async_operation_lifecycle"] = "async_operation_lifecycle"
-    operation_kind: AsyncOperationKind
-    operation_id: str = Field(min_length=1)
-    state: AsyncOperationState
-    revision: int | None = Field(default=None, ge=0)
-    scope_id: str | None = None
-    current_stage: str | None = None
-    source: FrameworkSource = FrameworkSource.LOOP
-
-
 CoreEventData = Annotated[
     InvocationStartedData
     | InvocationFinishedData
@@ -588,8 +550,7 @@ CoreEventData = Annotated[
     | WorkspaceSnapshotData
     | RunConfiguredData
     | FrameworkWarningData
-    | WinnerSelectedData
-    | AsyncOperationLifecycleData,
+    | WinnerSelectedData,
     Field(discriminator="kind"),
 ]
 

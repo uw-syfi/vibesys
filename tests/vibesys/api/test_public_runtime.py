@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterator, Mapping
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.docker_environment import (
-    fake_docker_environment,
-    host_container_backend,
-)
+from tests.support.core_host_world import open_core_host
+from tests.support.docker_environment import fake_docker_environment
 from tests.support.task_project import write_task
-from tests.vibesys.orchestration.plugin import capability_plugin
+from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
 
 from vibesys.api import (
     ComputeBackend,
@@ -22,17 +19,12 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import load_task
-from vibesys.events import (
-    AgentOutputChunkData,
-    CoreEventType,
-    FrameworkSource,
-    FrameworkWarningData,
-)
-from vibesys.run.host import open_product_run_host
+from vibesys.run.core_services import CoreCompositionError
+from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
-from vs_mcp.api import ToolServerDescriptor
-from vs_runtime.api import AgentToolBindingContext
+from vs_runtime.api.core import RunTiming
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -60,30 +52,6 @@ class _LifecycleBackend(FakeComputeBackend):
     def make_monitor(self, log_dir: Path) -> _LifecycleMonitor:
         del log_dir
         return self.monitor
-
-
-class _ToolBindingAssemblyError(RuntimeError):
-    def __init__(self) -> None:
-        super().__init__("tool binding assembly failed")
-
-
-class _FailingToolBindings(
-    Mapping[
-        str,
-        Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]],
-    ]
-):
-    def __len__(self) -> int:
-        return 1
-
-    def __iter__(self) -> Iterator[str]:
-        raise _ToolBindingAssemblyError
-
-    def __getitem__(
-        self,
-        key: str,
-    ) -> Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]:
-        raise KeyError(key)
 
 
 def _write_project(root: Path) -> None:
@@ -121,12 +89,7 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(
-            _request(project_root),
-            integration,
-            plugin=_PLUGIN,
-            backend_factory=host_container_backend,
-        ) as ctx:
+        async with open_core_host(_request(project_root), integration, plugin=_PLUGIN) as ctx:
             root = ctx.workspaces.root
             original = root.revision
             assert original is not None
@@ -147,45 +110,7 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
         integration.close()
 
 
-def test_product_observations_log_once_and_publish_typed_warnings(tmp_path: Path) -> None:
-    project_root = tmp_path / "project"
-    _write_project(project_root)
-    integration = LocalRunIntegration()
-
-    async def exercise() -> None:
-        async with open_product_run_host(
-            _request(project_root),
-            integration,
-            plugin=_PLUGIN,
-            backend_factory=host_container_backend,
-        ) as run:
-            assert not hasattr(run, "log")
-            assert not hasattr(run, "close")
-            run.observations.note("policy note")
-            run.observations.warning("policy warning")
-
-    try:
-        asyncio.run(exercise())
-        events = integration.events.read()
-    finally:
-        integration.close()
-
-    diagnostic_lines = [
-        event.data.content
-        for event in events
-        if isinstance(event.data, AgentOutputChunkData) and event.data.channel == "diagnostic"
-    ]
-    assert diagnostic_lines.count("policy note\n") == 1
-    assert diagnostic_lines.count("policy warning\n") == 1
-    warnings = [event for event in events if event.type is CoreEventType.FRAMEWORK_WARNING]
-    assert len(warnings) == 1
-    assert warnings[0].data == FrameworkWarningData(
-        summary="policy warning",
-        source=FrameworkSource.LOOP,
-    )
-
-
-def test_product_host_closes_resources_when_capability_assembly_fails(tmp_path: Path) -> None:
+def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration()
@@ -195,13 +120,14 @@ def test_product_host_closes_resources_when_capability_assembly_fails(tmp_path: 
         return backend
 
     async def exercise() -> None:
-        with pytest.raises(RuntimeError, match="tool binding assembly failed"):
-            async with open_product_run_host(
+        with pytest.raises(CoreCompositionError, match="agent_client_factory"):
+            async with open_product_core_host(
                 _request(project_root),
                 integration,
                 plugin=_PLUGIN,
+                options=EmptyOptions(),
+                timing=RunTiming(SystemClock(), 60.0),
                 backend_factory=backend_factory,
-                agent_tool_bindings=_FailingToolBindings(),
             ):
                 pytest.fail("failed product assembly yielded a run")
 

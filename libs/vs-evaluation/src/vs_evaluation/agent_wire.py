@@ -17,10 +17,10 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from vs_evaluation.agent_models import (
     RECEIPT_LINE,
     AgentEvaluationReply,
+    AgentToolArgs,
     SocketFailure,
     SocketReply,
 )
-from vs_evaluation.profiler_models import AgentToolArgs
 from vs_mcp.api import ToolSpec
 
 if TYPE_CHECKING:

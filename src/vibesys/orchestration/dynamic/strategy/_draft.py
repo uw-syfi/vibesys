@@ -98,10 +98,21 @@ def measurement_recipe(config: DynamicConfig, facts: RunFacts) -> MeasurementRec
 
 
 def measurement_plan(
-    draft: Draft, candidate: RevisionRef, purpose: Purpose, stages: tuple[str, ...]
+    draft: Draft,
+    candidate: RevisionRef,
+    purpose: Purpose,
+    stages: tuple[str, ...],
+    required_profile_fields: tuple[str, ...] = (),
 ) -> MeasurementPlan:
-    """An ordered plan over the named stages, each depending on the one before it."""
-    return measurement_recipe(draft.config, draft.view.facts).plan(
+    """An ordered plan over the named stages, each depending on the one before it.
+
+    ``required_profile_fields`` is what a profile's evidence must contain: a profile that asks
+    for HIP API timing is not satisfied by one without it.
+    """
+    recipe = measurement_recipe(draft.config, draft.view.facts)
+    if required_profile_fields:
+        recipe = recipe.requiring("profile", required_profile_fields)
+    return recipe.plan(
         candidate,
         purpose=purpose,
         now_at=draft.view.run.now_at,

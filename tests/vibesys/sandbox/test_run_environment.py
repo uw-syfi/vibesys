@@ -69,7 +69,6 @@ from vs_sandbox.api.slurm import (
     SlurmGpuAliasError,
     load_slurm_operator_settings,
     read_slurm_capture_plan,
-    read_slurm_evaluation_plan,
     run_brokered_process,
 )
 
@@ -496,10 +495,10 @@ remote_python = "/remote/venv/bin/python"
     assert kind is SandboxKind.DOCKER
     assert options["same_path_workspace"] is True
     assert options["attach_accelerator"] is False
-    # The gates are requests to the host broker, not host commands run in the container.
-    assert (session.view.paths.accuracy_command or "").endswith("vibesys-gate --gate accuracy")
-    assert (session.view.paths.benchmark_command or "").endswith("vibesys-gate --gate benchmark")
-    assert "vs_sandbox" not in (session.view.paths.accuracy_command or "")
+    # Trusted evaluation runs on the cluster through the evaluation tool: the agent is handed
+    # no accuracy or benchmark command to run in its container.
+    assert session.view.paths.accuracy_command is None
+    assert session.view.paths.benchmark_command is None
     profiler_env = dict(session.view.profiler_mcp_env)
     # The profiler reads the run's own rendering of the settings it validated.
     assert load_slurm_operator_settings(
@@ -512,7 +511,8 @@ remote_python = "/remote/venv/bin/python"
     assert profiler_env["VIBESYS_SLURM_BROKER_TOKEN"]
     # The import roots are the container launcher's, not the environment's.
     assert "PYTHONPATH" not in profiler_env
-    evaluation = read_slurm_evaluation_plan(tmp_path / "logs/slurm-evaluation-plan.json")
+    assert session.view.cluster_evaluation is not None
+    evaluation = session.view.cluster_evaluation.plan
     capture = read_slurm_capture_plan(tmp_path / "logs/slurm-capture-plan.json")
     cluster_state_root = tmp_path / "logs/slurm-cluster"
     assert evaluation.cluster_state_root == cluster_state_root
@@ -576,7 +576,8 @@ startup_timeout_seconds = 600
         ),
     )
 
-    evaluation = read_slurm_evaluation_plan(tmp_path / "logs/slurm-evaluation-plan.json")
+    assert session.view.cluster_evaluation is not None
+    evaluation = session.view.cluster_evaluation.plan
     assert evaluation.profile_command is not None
     assert evaluation.profile_command[:2] == (
         "/remote/venv/bin/python",

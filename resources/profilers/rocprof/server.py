@@ -95,6 +95,7 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
     run_worker: Callable[..., Awaitable[str]] = mcp_async.run_cancellable,
     import_sibling: Callable[[str], ModuleType | None] = capture.import_torch_sibling,
     remote_capture: RemoteCapture | None = None,
+    withheld: frozenset[str] = frozenset(),
 ) -> FastMCP:
     """Construct the FastMCP instance with the curated rocprof tool set.
 
@@ -1073,6 +1074,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         """
         return _capture_cli(kernel_bench.cmd_verdict, samples=samples, threshold_pct=threshold_pct)
 
+    for name in sorted(withheld):
+        mcp.remove_tool(name)  # a name the server lacks raises: a stale list must not pass silently
     return mcp
 
 
@@ -1097,7 +1100,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: D103  # LW-910106; thi
             profile_root=capture_runtime.profiles_root(),
             evaluator_plan=Path(plan_path) if plan_path else None,
         )
-    mcp = build_server(remote_capture=remote_capture)
+    mcp = build_server(
+        remote_capture=remote_capture, withheld=capture_runtime.withheld_tools_from_env()
+    )
     mcp.run(transport="stdio")
 
 

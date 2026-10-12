@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_runtime.api import CandidateProfileStatus, Evaluation
+from vs_runtime.api import Evaluation
 from vs_runtime.api.infrastructure import (
     RunStopped,
     StopGraceError,
@@ -224,14 +224,10 @@ async def test_gated_evaluation_refuses_new_work_after_a_stop() -> None:
         await evaluation.validate_local(
             workspace, recipe_artifact="recipe.sh", report_location="report.md"
         )
-    with pytest.raises(RunStopped):
-        await evaluation.profile("fake-revision", "Where does time go?", member_id="h1")
 
     assert len(inner.accuracy_calls) == 1
     assert inner.benchmark_calls == []
     assert inner.local_validation_calls == []
-    assert inner.profile_calls == []
-    assert await evaluation.agent_evaluations(workspace) == ()
 
 
 @pytest.mark.asyncio
@@ -262,8 +258,6 @@ async def test_gated_evaluation_returns_a_result_that_finishes_before_any_stop()
     result = await evaluation.benchmark(workspace)
 
     assert result == inner.default_benchmark
-    profile = await evaluation.profile("fake-revision", "Where does time go?", member_id="h1")
-    assert profile.revision == "fake-revision"
 
 
 def _evaluation_members() -> list[str]:
@@ -281,44 +275,6 @@ def test_gated_evaluation_offers_every_evaluation_member(member: str) -> None:
     evaluation = stop_gated_evaluation(FakeEvaluation(), channel)
 
     assert callable(getattr(evaluation, member, None)), member
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("supported", [True, False])
-async def test_gated_evaluation_reports_the_inner_profiling_capability_after_a_stop(
-    *, supported: bool
-) -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink())
-    inner = FakeEvaluation()
-    inner.profiling_supported = supported
-    evaluation = stop_gated_evaluation(inner, channel)
-
-    assert await evaluation.can_profile() is supported
-    channel.request_stop()
-    assert await evaluation.can_profile() is supported
-
-
-@pytest.mark.asyncio
-async def test_gated_evaluation_releases_jobs_after_a_stop_and_refuses_later_profiles() -> None:
-    """Release is cleanup, so a stop does not refuse it; a repeat releases nothing."""
-    channel = create_run_control_channel(FakeRunControlEventSink())
-    inner = FakeEvaluation(profiling_supported=True)
-    evaluation = stop_gated_evaluation(inner, channel)
-    channel.request_stop()
-
-    first = await evaluation.release_jobs("h1")
-    again = await evaluation.release_jobs("h1")
-
-    assert first.first_release
-    assert not again.first_release
-    assert (again.evaluations, again.profiler_operations) == ((), ())
-    assert inner.released == ["h1", "h1"]
-    assert await evaluation.jobs_released("h1")
-    with pytest.raises(RunStopped):
-        await evaluation.reopen_jobs("h1")
-    assert await evaluation.jobs_released("h1")
-    profile = await inner.profile("fake-revision", "Where does time go?", member_id="h1")
-    assert profile.status is CandidateProfileStatus.FAILED
 
 
 @pytest.mark.asyncio

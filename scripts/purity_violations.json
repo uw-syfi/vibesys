@@ -322,13 +322,6 @@
     "occurrence": 1
   },
   {
-    "path": "src/vibesys/orchestration/progress.py",
-    "symbol": "<module>",
-    "rule": "banned-import",
-    "subject": "pathlib",
-    "occurrence": 1
-  },
-  {
     "path": "src/vibesys/orchestration/skill_selection.py",
     "symbol": "<module>",
     "rule": "banned-import",
@@ -357,63 +350,7 @@
     "occurrence": 2
   },
   {
-    "path": "src/vibesys/orchestration/structured_turn.py",
-    "symbol": "<module>",
-    "rule": "io-import",
-    "subject": "vs_runtime.api",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/structured_turn.py",
-    "symbol": "<module>",
-    "rule": "io-import",
-    "subject": "vs_runtime.api",
-    "occurrence": 2
-  },
-  {
-    "path": "src/vibesys/orchestration/structured_turn.py",
-    "symbol": "attempt_structured_turn",
-    "rule": "async-def",
-    "subject": "attempt_structured_turn",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/structured_turn.py",
-    "symbol": "attempt_structured_turn",
-    "rule": "await",
-    "subject": "Call(func=Name(id='structured_turn', ctx=Load()), args=[Name(id='session', ctx=Load()), Name(id='message', ctx=Load()), Name(id='response', ctx=Load())], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/structured_turn.py",
-    "symbol": "structured_turn",
-    "rule": "async-def",
-    "subject": "structured_turn",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/structured_turn.py",
-    "symbol": "structured_turn",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='session', ctx=Load()), attr='turn', ctx=Load()), args=[Name(id='correction', ctx=Load())], keywords=[keyword(arg='response', value=Name(id='response', ctx=Load()))])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/structured_turn.py",
-    "symbol": "structured_turn",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='session', ctx=Load()), attr='turn', ctx=Load()), args=[Name(id='message', ctx=Load())], keywords=[keyword(arg='response', value=Name(id='response', ctx=Load()))])",
-    "occurrence": 1
-  },
-  {
     "path": "src/vibesys/prompts/renderer.py",
-    "symbol": "<module>",
-    "rule": "banned-import",
-    "subject": "pathlib",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/steering/__init__.py",
     "symbol": "<module>",
     "rule": "banned-import",
     "subject": "pathlib",

@@ -12,13 +12,18 @@ from pydantic import TypeAdapter
 from . import attempts, evaluation, intents, scheduling, sessions, settlement
 from ._continuations import SuspensionRefusal, exhausted, paid_prefix_refusal, wait_refusal_in
 from ._deadlines import bound_to_run, bounded_decision
+from ._dispatch_episode import (
+    dispatch_episode_current,
+    registered_retirement,
+    retirement_dispatch,
+    scope_admission,
+)
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
 from ._proofs import (
     Proven,
     accepted_receipt_for,
     committed_stop,
-    current_admission,
     dependencies_for,
     descriptor_matches,
     observation_for,
@@ -33,15 +38,10 @@ from ._values import digest
 from ._waits import stalled_acquisitions, stalled_checkpoint_waits, undispatchable_requests
 from .types.attempts import (
     AttemptAdmitted,
-    AttemptPhase,
     AttemptRegistered,
     AttemptsEvent,
-    CloseAttemptScope,
-    DiscardWorkspace,
-    RetainRevision,
     RetireRequested,
     ScopeReopenAdmitted,
-    SnapshotAndRetain,
 )
 from .types.common import (
     Area,
@@ -63,27 +63,20 @@ from .types.common import (
     RevisionAuthority,
     RunStatus,
     Scope,
-    SessionId,
     SettlementId,
     SignalCycleError,
 )
 from .types.evaluation import (
-    CancelOwnedJob,
     ContinuationPhase,
     ContinuationReopenRequested,
     EvaluationEvent,
-    InspectOwnedJob,
     MeasurementRequested,
-    ObserveOwnedJob,
 )
 from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import (
-    BlockIntent,
-    CancelOwnedResource,
     DecisionDependencyResolved,
     DispatchAuthorized,
     ExecuteRegisteredOperation,
-    InspectRequest,
     Intent,
     IntentPhase,
     IntentsEvent,
@@ -135,11 +128,8 @@ from .types.session_inputs import InputDropped, InputDropReason
 from .types.sessions import (
     Access,
     AcquisitionStalled,
-    CancelTurn,
     CheckpointStalled,
-    CloseSession,
     DispatchTurn,
-    InspectTurn,
     InterruptRequested,
     Invocation,
     ResumeSessionTurn,
@@ -606,21 +596,6 @@ def _validate_area_outputs(
             )
 
 
-def _scope_admission(state: CoreState, scope: Scope | None) -> DecisionId | None:
-    """Separately proposed work derives authority from its exact current owner."""
-    if scope is None or not isinstance(scope.owner, AttemptId):
-        return None
-    owner = next(
-        (
-            attempt
-            for attempt in state.attempts.attempts
-            if attempt.attempt_id == scope.owner and attempt.generation == scope.generation
-        ),
-        None,
-    )
-    return owner.admission_id if owner is not None else None
-
-
 def _signal_admission(
     state: CoreState, signal: Signal, inherited: DecisionId | None = None
 ) -> DecisionId | None:
@@ -634,7 +609,7 @@ def _signal_admission(
     scope = getattr(signal, "scope", None) or getattr(
         getattr(signal, "request", None), "scope", None
     )
-    return explicit or inherited or _scope_admission(state, scope)
+    return explicit or inherited or scope_admission(state, scope)
 
 
 def _stall_entries(
@@ -664,7 +639,7 @@ def _stall_entries(
         ),
         *(
             RequestUndispatchable(request_id=request_id)
-            for request_id in undispatchable_requests(state.intents, state.run.receipts)
+            for request_id in undispatchable_requests(state)
         ),
     )
     return [
@@ -1299,178 +1274,9 @@ def _validate_observation_ingress(state: CoreState, event: CoreEvent) -> None:
         validate_registered_owner(state, event)
 
 
-def _retirement_dispatch(request: Request) -> bool:
-    """Recorded inspection and release requests retain their original lease authority."""
-    return isinstance(
-        request,
-        InspectRequest
-        | InspectTurn
-        | InspectOwnedJob
-        | ObserveOwnedJob
-        | CancelOwnedResource
-        | CancelTurn
-        | CancelOwnedJob
-        | BlockIntent,
-    )
-
-
-def _episode_recorded(state: CoreState, request: Request) -> bool:
-    """Admission history binds cleanup authority to its exact attempt generation."""
-    if not isinstance(request.scope.owner, AttemptId):
-        return True
-    target = AttemptRef(attempt_id=request.scope.owner, generation=request.scope.generation)
-    proof = accepted_receipt_for(state.run.receipts, request.admission_id, None)
-    if not isinstance(proof, Proven):
-        return False
-    decision = proof.value.decision
-    return (
-        isinstance(decision, StartAttempt)
-        and decision.scope.owner == state.run.run_id
-        and decision.attempt_id == target.attempt_id
-        and decision.scope.generation == target.generation
-    ) or (
-        isinstance(decision, Operation)
-        and decision.scope.owner == state.run.run_id
-        and decision.normalized_scope_reopen is not None
-        and decision.normalized_scope_reopen.attempt == target
-    )
-
-
-def _retirement_target_matches(
-    state: CoreState, request: Request, decision: Withdraw | Stop
-) -> bool:
-    if not _episode_recorded(state, request):
-        return False
-    if isinstance(decision, Stop):
-        stop = committed_stop(state.run)
-        return isinstance(stop, Proven) and stop.value == decision
-    target = decision.target
-    if isinstance(target, AttemptRef):
-        return request.scope == Scope(owner=target.attempt_id, generation=target.generation) and (
-            not isinstance(
-                request, CloseAttemptScope | DiscardWorkspace | RetainRevision | SnapshotAndRetain
-            )
-            or request.attempt == target
-        )
-    if isinstance(target, InvocationRef):
-        return any(
-            invocation.invocation == target and invocation.scope == request.scope
-            for invocation in state.sessions.invocations
-        )
-    return any(
-        isinstance(intent.request, ExecuteRegisteredOperation)
-        and intent.request.operation_id == target.operation_id
-        and intent.request.scope == request.scope
-        for intent in state.intents.intents
-    )
-
-
-def _session_retirement_matches(state: CoreState, request: CloseSession) -> bool:
-    """A reusable conversation cannot be closed by a previous admission's request."""
-    if (
-        isinstance(request.scope.owner, AttemptId)
-        and _scope_admission(state, request.scope) != request.admission_id
-    ):
-        return False
-    return any(
-        session.spec.session_id == request.session_id and session.scope == request.scope
-        for session in state.sessions.sessions
-    )
-
-
-def _closure_retirement(state: CoreState, request: Request) -> bool:
-    """Settlement and setup cleanup use recorded closure and exact release edges."""
-    if not isinstance(request.scope.owner, AttemptId):
-        return False
-    target = AttemptRef(attempt_id=request.scope.owner, generation=request.scope.generation)
-    owner = next(
-        (
-            item
-            for item in state.attempts.attempts
-            if item.attempt_id == target.attempt_id and item.generation == target.generation
-        ),
-        None,
-    )
-    if owner is None or owner.closure is None or owner.closure.admission_id != request.admission_id:
-        return False
-    if (
-        isinstance(
-            request, CloseAttemptScope | DiscardWorkspace | RetainRevision | SnapshotAndRetain
-        )
-        and request.attempt != target
-    ):
-        return False
-    identities: set[RequestId | SessionId | OperationId | None] = {request.request_id}
-    if isinstance(request, CloseSession):
-        identities.add(request.session_id)
-    if isinstance(request, ExecuteRegisteredOperation):
-        identities.add(request.operation_id)
-    return request.request_id == owner.closure.authority or any(
-        edge.identity in identities for edge in owner.release_dependencies
-    )
-
-
-def _registered_retirement(state: CoreState, request: Request) -> bool:
-    """Reusable scope mutation needs canonical retirement and its recorded episode."""
-    if not isinstance(
-        request,
-        ExecuteRegisteredOperation
-        | CloseAttemptScope
-        | CloseSession
-        | DiscardWorkspace
-        | RetainRevision
-        | SnapshotAndRetain,
-    ):
-        return False
-    if (
-        isinstance(request, ExecuteRegisteredOperation)
-        and request.operation.schema_ref.lifecycle != LifecycleClass.IDEMPOTENT_WRITE
-    ):
-        return False
-    authority = accepted_receipt_for(state.run.receipts, request.decision_id, None)
-    decision_authority = (
-        isinstance(authority, Proven)
-        and isinstance(authority.value.decision, Withdraw | Stop)
-        and _retirement_target_matches(state, request, authority.value.decision)
-    )
-    return (
-        (decision_authority or _closure_retirement(state, request))
-        and (
-            not isinstance(
-                request,
-                ExecuteRegisteredOperation | SnapshotAndRetain | DiscardWorkspace | CloseSession,
-            )
-            or not isinstance(request.scope.owner, AttemptId)
-            or _scope_admission(state, request.scope) == request.admission_id
-        )
-        and (not isinstance(request, CloseSession) or _session_retirement_matches(state, request))
-    )
-
-
 def _validate_dispatch_episode(state: CoreState, request: Request) -> None:
     """A prepared ordinary mutation never gains authority over a later episode."""
-    if not isinstance(request.scope.owner, AttemptId):
-        return
-    if (
-        request_lifecycle(request) == LifecycleClass.QUERY
-        or _retirement_dispatch(request)
-        or _registered_retirement(state, request)
-    ):
-        return
-    owner = next(
-        (
-            attempt
-            for attempt in state.attempts.attempts
-            if attempt.attempt_id == request.scope.owner
-            and attempt.generation == request.scope.generation
-        ),
-        None,
-    )
-    if (
-        not isinstance(current_admission(owner, request.scope, request.admission_id), Proven)
-        or owner is None
-        or owner.phase not in (AttemptPhase.ACQUIRING, AttemptPhase.ACTIVE)
-    ):
+    if not dispatch_episode_current(state, request):
         raise ContractError(
             ("admission_id",), "ordinary mutation requires the current owned admission episode"
         )
@@ -1665,8 +1471,8 @@ def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
         if (
             intent is not None
             and state.intents.recovery.phase != RecoveryPhase.READY
-            and not _retirement_dispatch(intent.request)
-            and not _registered_retirement(state, intent.request)
+            and not retirement_dispatch(intent.request)
+            and not registered_retirement(state, intent.request)
         ):
             raise ContractError(("recovery",), "ordinary dispatch requires ready recovery")
         if intent is None or dependency_status(state, intent.request) != DependencyStatus.SUCCEEDED:

@@ -20,16 +20,26 @@ def test_a_restart_after_any_crash_finishes_the_same_run():
 `vs_dst.api` holds:
 
 - `World` (a `typing.Protocol`): what a test builds. `setup` says which strategy runs
-  (`RunSetup`: a fresh strategy factory, the `vs_core` `Harness` and the reply schemas) and
+  (`RunSetup`: a fresh strategy factory, the `vs_core` `Harness` (which carries the run's
+  limits and lifecycle capabilities), the reply schemas, and how the loop is arranged:
+  `max_concurrent` and `controlled`) and
   `__call__(request, core)` answers every request the executors receive. A world also carries
   its position (the scripted replies it has handed out), so it must be plain data that
   `copy.deepcopy` can copy; `setup` is immutable and is shared, never copied. A world that cannot be
   copied fails `simulate` with `WorldNotCopyableError`, naming its type.
-- `simulate(world, *, max_concurrent=1, controlled=False) -> SimulatedRun`: runs the whole
+- `HostedWorld` (optional, a `typing.Protocol`): a world whose agents act on the host while a
+  request runs, such as an agent calling a tool server bound to the shell. `attach(shell, clock)`
+  is called once per host (a restarted host gets its own) and returns an `Enact`: it receives each
+  executed request with the result its executor produced and returns the result the shell is
+  told. Host-bound objects live in that closure, never in the world, which is copied.
+- `simulate(world) -> SimulatedRun`: runs the whole
   run on the production shell (`vs_runtime`'s `CoreRuntime` and loop, a virtual clock, an
   in-memory store, a publication delivery, and executors that seal what each effect did).
-- `SimulatedRun`: `result`, `state`, `core`, `decisions`, `journal`, `finished`, `halted`,
-  `stopped`, `commits`, `executed_effects`, `no_effect_ran_twice()`, `crash_points()` and
+- `SimulatedRun`: `result`, `world` (the world as the run left it, for a test that reads the far
+  side back), `state`, `core`, `decisions`, `journal`, `finished`, `halted`,
+  `stopped`, `liveness_violations` (the invariants of `vs_core.testing.liveness` the run broke,
+  empty when it is live; a test asserts it is empty, nothing checks it behind the scenes),
+  `commits`, `executed_effects`, `no_effect_ran_twice()`, `crash_points()` and
   `rerun_with_crash(point)`.
 - `CrashPoint` (`CrashKind.BEFORE_COMMIT` or `AFTER_COMMIT` of commit k; it prints as
   `before commit 17`) and the one setting that chooses which of them a suite tries
@@ -51,7 +61,9 @@ instance) on a copy of that, after the dead host's lease has expired, and runs i
 prefix is not run again, so a sweep costs the sum of the suffixes. Nothing from the dead host is
 copied: its memory is gone by definition.
 
-A recovered run reports the decisions of both hosts; its `journal` is the new host's.
+A recovered run reports the decisions of every host so far; its `journal` is the new host's.
+It offers the crash points of its own hosts, so it can be crashed again (a second death during
+recovery).
 
 ## Which crash points a suite tries
 

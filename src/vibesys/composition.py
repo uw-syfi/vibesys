@@ -27,8 +27,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from vibesys.config import Config
-    from vibesys.run.evaluation_backend import SemanticEvaluationBackend
-    from vs_evaluation.api import EvaluationAgentService
     from vs_runtime.api import AgentRole
 
 _DISTRIBUTION = "vibesys"
@@ -41,20 +39,6 @@ class AgentToolContext:
 
     profiler_id: str
     profiler_env: tuple[tuple[str, str], ...] = ()
-    evaluation_service: EvaluationAgentService | None = None
-    evaluation_backend: SemanticEvaluationBackend | None = None
-
-    def install_evaluation(
-        self,
-        service: EvaluationAgentService,
-        backend: SemanticEvaluationBackend,
-    ) -> None:
-        """Install the run-owned service before orchestration creates sessions."""
-        if self.evaluation_service is not None or self.evaluation_backend is not None:
-            message = "evaluation agent service is already installed"
-            raise RuntimeError(message)
-        self.evaluation_service = service
-        self.evaluation_backend = backend
 
 
 def prepare_domain_model_artifacts(

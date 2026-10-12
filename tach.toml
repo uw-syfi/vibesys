@@ -195,7 +195,7 @@ depends_on = ["server.host_api", "server.host_helper_requests", "vs_project", "v
 [[modules]]
 path = "vibesys"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_runtime", "vs_sandbox", "vibesys.errors", "vibesys.run.evaluation_backend"]
+depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_runtime", "vs_sandbox", "vibesys.errors", "vibesys.run.evaluation_identity"]
 
 [[modules]]
 # Typed product configuration failures shared by public transports. No
@@ -284,7 +284,7 @@ depends_on = ["vibesys.multi_core", "vibesys.orchestration.multi.models"]
 [[modules]]
 path = "vibesys.orchestration.dynamic"
 layer = "loops"
-depends_on = ["vibesys.dynamic_core", "vibesys.orchestration.dynamic.parents", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_backend", "vs_prompts", "vs_runtime", "vs_evaluation.api", "vibesys.orchestration.dynamic.models", "vs_evaluator_protocol"]
+depends_on = ["vibesys.dynamic_core", "vibesys.orchestration.dynamic.parents", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_identity", "vs_prompts", "vs_runtime", "vs_evaluation.api", "vibesys.orchestration.dynamic.models", "vs_evaluator_protocol"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
@@ -295,12 +295,6 @@ depends_on = ["vibesys.evolve_core", "vibesys.orchestration.evolve.models"]
 path = "vibesys.orchestration.issue_queue"
 layer = "loops"
 depends_on = ["vibesys.issue_queue_core", "vibesys.orchestration.issue_queue.models"]
-
-[[modules]]
-# Shared memory paths declared by the built-in orchestration plugins.
-path = "vibesys.orchestration.memory"
-layer = "orchestration_host"
-depends_on = []
 
 [[modules]]
 # Pure, deterministic hypothesis policy: never agents/prompts/I/O.
@@ -324,31 +318,9 @@ layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.run.contracts"]
 
 [[modules]]
-# Per-round progress entries; a written entry is the only proof a prompt may point at.
-path = "vibesys.orchestration.progress"
-layer = "orchestration_host"
-depends_on = ["vs_prompts"]
-
-[[modules]]
-# The one correction turn every built-in plugin sends after an invalid structured reply.
-path = "vibesys.orchestration.structured_turn"
-layer = "orchestration_host"
-depends_on = ["vibesys.prompts", "vs_runtime"]
-
-[[modules]]
-path = "vibesys.run.profiler_agent"
-layer = "orchestration_host"
-depends_on = ["vibesys.prompts", "vibesys.orchestration.structured_turn", "vibesys.run.validated_turn", "vs_core", "vs_evaluation.api", "vs_runtime"]
-
-[[modules]]
 path = "vibesys.orchestration.skill_selection"
 layer = "orchestration_host"
 depends_on = ["vibesys", "vs_agent"]
-
-[[modules]]
-path = "vibesys.orchestration.attempts"
-layer = "roles_search"
-depends_on = []
 
 [[modules]]
 path = "vibesys.orchestration.review"
@@ -361,9 +333,9 @@ layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm"]
 
 [[modules]]
-path = "vibesys.run.evaluation_backend"
+path = "vibesys.run.evaluation_identity"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime", "vs_sim.api"]
+depends_on = ["vs_evaluation.api", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.slurm_evaluation"
@@ -378,7 +350,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp"]
+depends_on = ["vibesys", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_identity", "vibesys.run.slurm_evaluation", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp"]
 
 [[modules]]
 path = "vibesys.run.evaluation_socket"
@@ -455,12 +427,7 @@ depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "v
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_async_ops.api", "vs_core", "vs_agent", "vs_issue_tracker", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
-
-[[modules]]
-path = "vs_runtime._fake_agent_invocations"
-layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_project"]
+depends_on = ["vs_async_ops.api", "vs_core", "vs_agent", "vs_issue_tracker", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_agent"
@@ -530,27 +497,22 @@ depends_on = []
 [[modules]]
 path = "vs_evaluation.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluator_protocol", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_evaluation.scope_state", "vs_evaluation.semantic_stage", "vs_evaluation.settlements", "vs_evaluation.state_namespace"]
+depends_on = ["vs_evaluator_protocol", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.semantic_stage", "vs_evaluation.state_namespace"]
 
 [[modules]]
 path = "vs_evaluation.api.tools"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_mcp", "vs_evaluation.agent_core_mcp", "vs_evaluation.agent_wire"]
+depends_on = ["vs_evaluation.agent_core_mcp", "vs_evaluation.agent_wire"]
 
 [[modules]]
 path = "vs_evaluation.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.profiler_testing", "vs_evaluation.started_operation", "vs_evaluation.testing"]
+depends_on = ["vs_evaluation.started_operation", "vs_evaluation.testing"]
 
 [[modules]]
 path = "vs_evaluation.agent_evidence"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_evaluator_protocol"]
-
-[[modules]]
-path = "vs_evaluation.agent_mcp"
-layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_models", "vs_evaluation.agent_wire", "vs_evaluation.profiler_models", "vs_mcp"]
 
 [[modules]]
 # The core-path tool server: submit and validate-wait only, over the shared wire.
@@ -562,17 +524,12 @@ depends_on = ["vs_evaluation.agent_models", "vs_evaluation.agent_wire", "vs_mcp"
 # Client side of the evaluation tool wire shared by both tool servers.
 path = "vs_evaluation.agent_wire"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_models", "vs_evaluation.profiler_models", "vs_mcp"]
+depends_on = ["vs_evaluation.agent_models", "vs_mcp"]
 
 [[modules]]
 path = "vs_evaluation.agent_models"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models", "vs_evaluation.profiler_models"]
-
-[[modules]]
-path = "vs_evaluation.agent_service"
-layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_evaluation.scope_state", "vs_evaluation.settlements", "vs_evaluation.state_namespace", "vs_project"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models"]
 
 [[modules]]
 path = "vs_evaluation.semantic_stage"
@@ -601,11 +558,6 @@ layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
-path = "vs_evaluation.repeated_failure"
-layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.failure_signature", "vs_evaluation.models"]
-
-[[modules]]
 path = "vs_evaluation.models"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_evaluator_protocol"]
@@ -616,21 +568,6 @@ layer = "prompts_and_lower_libs"
 depends_on = ["vs_evaluation.models"]
 
 [[modules]]
-path = "vs_evaluation.profiler_models"
-layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence"]
-
-[[modules]]
-path = "vs_evaluation.profiler_service"
-layer = "prompts_and_lower_libs"
-depends_on = ["vs_async_ops.api", "vs_evaluation.agent_evidence", "vs_evaluation.profiler_models", "vs_evaluation.state_namespace"]
-
-[[modules]]
-path = "vs_evaluation.profiler_testing"
-layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.profiler_models"]
-
-[[modules]]
 path = "vs_evaluation.started_operation"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_evaluation.lifecycle", "vs_evaluation.ports", "vs_sim.api", "vs_sim.api.testing"]
@@ -638,7 +575,7 @@ depends_on = ["vs_evaluation.lifecycle", "vs_evaluation.ports", "vs_sim.api", "v
 [[modules]]
 path = "vs_evaluation.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.coordinator", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.scope_state", "vs_evaluation.settlements", "vs_evaluation.state_namespace", "vs_project", "vs_sim.api.testing"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.coordinator", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.state_namespace", "vs_project", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_prompts"
@@ -967,12 +904,8 @@ expose = ["PLUGIN", "REGISTRATION"]
 from = ["vibesys.orchestration.dynamic"]
 
 [[interfaces]]
-expose = ["ProfilerEvaluationAccess", "RuntimeProfilerTurnProvision"]
-from = ["vibesys.run.profiler_agent"]
-
-[[interfaces]]
-expose = ["EvidenceResultIdentity", "EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "agent_evaluation", "evidence_identity", "semantic_evaluation_identity"]
-from = ["vibesys.run.evaluation_backend"]
+expose = ["SemanticEvaluationIdentity", "semantic_evaluation_identity"]
+from = ["vibesys.run.evaluation_identity"]
 
 [[interfaces]]
 expose = ["SlurmSemanticEvaluationExecutor"]
@@ -999,7 +932,7 @@ expose = ["create_evaluation", "trusted_evaluation_plan"]
 from = ["vibesys.run.evaluation"]
 
 [[interfaces]]
-expose = ["ProfilerPreflight", "native_profiler_preflight", "resolve_run_profiler", "validate_attribution_command", "validate_run_request"]
+expose = ["ProfilerPreflight", "ProfilerToolOffer", "WITHHELD_TOOLS_ENV", "profiler_tool_offer", "native_profiler_preflight", "resolve_run_profiler", "validate_attribution_command", "validate_run_request"]
 from = ["vibesys.run.profilers"]
 
 [[interfaces]]
@@ -1017,11 +950,6 @@ from = ["vibesys.orchestration.skill_selection"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_sandbox"]
-
-[[modules]]
-path = "vibesys.steering"
-layer = "orchestration_host"
-depends_on = ["vs_prompts"]
 
 [[modules]]
 path = "vibesys.plugin_registration"
@@ -1046,10 +974,6 @@ expose = ["BackendPromptRenderer", "CORE_PROTOCOL_DIR", "ComputeBackendFragment"
 from = ["vibesys.prompts"]
 
 [[interfaces]]
-expose = ["splice_steering"]
-from = ["vibesys.steering"]
-
-[[interfaces]]
 expose = ["AcceptedReading", "EvidenceReading", "FrameworkBenchmarkOutcome", "Measurement", "MetricComparison", "MetricRow", "MetricSpace", "Objective", "PartialRow", "accept_readings", "judged_evidence", "reading_of"]
 from = ["vibesys.metrics"]
 
@@ -1060,15 +984,6 @@ from = ["vibesys.domains"]
 [[interfaces]]
 expose = ["AgentRunProjection", "HypothesisRoundView", "HypothesisView", "RoundView", "agent_projection", "project_hypothesis_state"]
 from = ["vibesys.hypothesis.readmodel"]
-
-[[modules]]
-path = "vs_evaluation.scope_state"
-layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.state_namespace"]
-
-[[interfaces]]
-expose = ["EvaluationAdmissionStoppedError", "ScopeClosingError", "ScopeIntent", "ScopeLifecycleStore", "ScopePhase", "ScopeState", "ScopeSubmissionTracker"]
-from = ["vs_evaluation.scope_state"]
 
 [[modules]]
 path = "vs_evaluation.state_namespace"
@@ -1142,22 +1057,9 @@ from = ["vibesys.api.assembly"]
 expose = ["ProfilerPreflight", "SessionAgents", "SessionImplementations"]
 
 [[modules]]
-path = "vs_evaluation.settlements"
-layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.coordinator", "vs_evaluation.models", "vs_evaluation.scope_state", "vs_evaluation.state_namespace"]
-
-[[interfaces]]
-expose = ["EvaluationDependencyError", "EvaluationPending", "EvaluationSettlementBackend", "EvaluationSettlementObservation", "EvaluationSettlementOutcome", "EvaluationSettlements", "EvaluationUnknown", "OwnedEvaluationDependencies", "ServiceEvaluationSettlements", "SettlementErrorCode", "TerminalEvaluationResult"]
-from = ["vs_evaluation.settlements"]
-
-[[interfaces]]
-expose = ["FakeAgentInvocations", "FakeInvocationIdentity"]
-from = ["vs_runtime._fake_agent_invocations"]
-
-[[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._session_checkpoints", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
+depends_on = ["vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -1173,31 +1075,22 @@ expose = ["[A-Za-z][A-Za-z0-9_]*"]
 from = ["vibesys.orchestration.dynamic.models"]
 
 [[modules]]
-path = "vibesys.run.attempt_evaluations"
-layer = "roles_search"
-depends_on = ["vs_project", "vs_runtime"]
-
-[[interfaces]]
-expose = ["AttemptEvaluationCursor", "AttemptEvaluationCursorError", "AttemptEvaluationCursors"]
-from = ["vibesys.run.attempt_evaluations"]
-
-[[modules]]
-path = "vibesys.run.validated_turn"
-layer = "orchestration_host"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.prompts", "vs_evaluation.api", "vs_runtime", "vs_agent", "vs_prompts"]
-
-[[interfaces]]
-from = ["vibesys.run.validated_turn"]
-expose = ["validated_turn", "validated_conversation"]
-
-[[modules]]
 path = "vs_core._waits"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common"]
+depends_on = ["vs_core._dispatch_episode", "vs_core._proofs", "vs_core.types", "vs_core.types.common"]
 
 [[interfaces]]
 from = ["vs_core._waits"]
 expose = ["Outcome", "Producer", "RESOLUTIONS", "Resolution", "Wait", "WaitKind", "WaitingPhase", "awaiting_refund", "draining_without_cancel", "orphan_waits", "phase_waits", "stalled_acquisitions", "stalled_checkpoint_waits", "undispatchable_requests", "waits"]
+
+[[modules]]
+path = "vs_core._dispatch_episode"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common"]
+
+[[interfaces]]
+from = ["vs_core._dispatch_episode"]
+expose = ["EpisodeFacts", "dispatch_episode_current", "episode_ended", "registered_retirement", "retirement_dispatch", "scope_admission"]
 
 [[modules]]
 path = "vs_core._proofs"
@@ -1349,7 +1242,7 @@ expose = ["ResolvedRun", "dynamic_core_registration", "dynamic_operation_catalog
 # place that stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.dynamic_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.dynamic_roles", "vibesys.errors", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.evaluation_backend"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.dynamic_roles", "vibesys.errors", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.evaluation_identity"]
 
 [[interfaces]]
 from = ["vibesys.dynamic_roles"]
@@ -1360,7 +1253,7 @@ expose = ["CORE_ROLES", "IMPLEMENTER", "JUDGE", "ORCHESTRATOR", "PROFILER"]
 # the production owner of each operation role, and the sandbox check.
 path = "vibesys.core_wiring"
 layer = "loops"
-depends_on = ["vs_core", "vs_runtime", "vibesys", "vibesys.domains", "vibesys.errors", "vibesys.run.evaluation_backend"]
+depends_on = ["vs_core", "vs_runtime", "vibesys", "vibesys.domains", "vibesys.errors", "vibesys.run.evaluation_identity"]
 
 [[interfaces]]
 from = ["vibesys.core_wiring"]

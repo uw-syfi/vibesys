@@ -123,7 +123,7 @@ class TinyStrategy(Value):
         return self.state
 
 
-def tiny_setup(items: int) -> RunSetup:
+def tiny_setup(items: int, max_concurrent: int = 1) -> RunSetup:
     """The tiny strategy over ``items`` items, hosted with no operations."""
     declaration = initial_state().run.declaration
     names = tuple(ItemId(root=f"item:{n}") for n in range(items))
@@ -138,14 +138,15 @@ def tiny_setup(items: int) -> RunSetup:
             envelope_type=RunEnvelope[TinyState],
         ),
         schemas={},
+        max_concurrent=max_concurrent,
     )
 
 
 class TinyWorld:
     """Executors that hand out workspaces, one numbered resource after another."""
 
-    def __init__(self, items: int = 2) -> None:
-        self.setup = tiny_setup(items)
+    def __init__(self, items: int = 2, max_concurrent: int = 1) -> None:
+        self.setup = tiny_setup(items, max_concurrent)
         self.workspaces_handed_out = 0
         self.seen: list[str] = []
 

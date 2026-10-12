@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.core_plugins import failing_plugin
 from tests.support.task_project import write_task
-from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from entrypoints.run import run_headless
 from launch import LaunchSettings, default_runs
@@ -21,25 +22,19 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_task
+from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
-from vs_runtime.api import OrchestrationPlugin, Run, RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pydantic import BaseModel
-
     from vibesys.api import Runs
-
-
-async def _finish(run: Run, _options: BaseModel) -> RunStatus:
-    run.observations.note("launched through an injected run service")
-    return RunStatus.SUCCEEDED
+    from vs_runtime.api import CorePlan, CoreRunContext
 
 
 def _fake_agent(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient()
+    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
 
 
 def _request(root: Path) -> RunRequest:
@@ -67,12 +62,12 @@ def _request(root: Path) -> RunRequest:
 
 def _runs(clients: list[FakeAgentClient] | None = None) -> Runs:
     registry = OrchestrationRegistry()
-    registry.register_plugin(
-        OrchestrationPlugin(id="launch-test", agents=(), options=EmptyOptions, orchestrate=_finish)
-    )
+    registry.register_plugin(failing_plugin("launch-test"))
 
     def agent_factory(**_kwargs: object) -> FakeAgentClient:
-        client = FakeAgentClient(session_reuse=True).set_text(None, "retained chat answer")
+        client = FakeAgentClient(
+            session_reuse=True, capabilities=AgentCapabilities(provider_session_resume=True)
+        ).set_text(None, "retained chat answer")
         if clients is not None:
             clients.append(client)
         return client
@@ -92,18 +87,18 @@ def test_headless_entry_starts_and_renders_launch_run(
     runs = _runs()
     result = run_headless(_request(tmp_path / "project"), runs)
 
-    assert result.succeeded
     assert result.run_id.endswith("launch-test")
+    assert not result.succeeded
     assert runs.attach(result.run_id).run_id == result.run_id
     assert runs.list_active() == ()
-    assert "launched through an injected run service" in capsys.readouterr().out
+    assert "[git-tracking]" in capsys.readouterr().out
 
 
 class _CoreRejectedError(Exception):
     """A typed failure standing in for a run-halting core error."""
 
 
-async def _fail(_run: Run, _options: BaseModel) -> RunStatus:
+def _rejecting_plan(_context: CoreRunContext) -> CorePlan:
     message = "core rejected\nthe observation"
     raise _CoreRejectedError(message)
 
@@ -112,8 +107,9 @@ def test_headless_entry_prints_one_run_failed_line_with_the_typed_reason(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     registry = OrchestrationRegistry()
+    plugin = failing_plugin("launch-test")
     registry.register_plugin(
-        OrchestrationPlugin(id="launch-test", agents=(), options=EmptyOptions, orchestrate=_fail)
+        replace(plugin, core=replace(plugin.core, plan=_rejecting_plan)),
     )
     runs = default_runs(
         LaunchSettings(
@@ -134,8 +130,7 @@ def test_server_entry_starts_launch_run_and_projects_events(tmp_path: Path) -> N
     runtime = ServerRuntime(run_id="run-1", socket_path=tmp_path / "control.sock", runs=runs)
     try:
         result = runtime.drive(_request(tmp_path / "project"))
-        assert result.succeeded
-        assert any(event.type == "run_finished" for event in runtime.journal.read())
+        assert any(event.type == "run_failed" for event in runtime.journal.read())
         assert runtime.session is None
         assert runs.attach(result.run_id).run_id == result.run_id
         assert runs.list_active() == ()
@@ -169,14 +164,17 @@ def test_server_retains_chat_after_run_result_and_releases_it_on_close(tmp_path:
     runs = _runs(clients)
     runtime = ServerRuntime(run_id="run-1", socket_path=tmp_path / "control.sock", runs=runs)
     try:
-        result = runtime.drive(_request(tmp_path / "project"))
-        assert result.succeeded
+        runtime.drive(_request(tmp_path / "project"))
         assert clients, [
             event.model_dump_json()
             for event in runtime.journal.read()
             if "unavailable" in event.model_dump_json()
         ]
-        assert all(not client.closed for client in clients)
+        # The chat's client is made when the run is ready, before the run's own; the run's
+        # closed with its host, and the chat's outlives the run's result.
+        retained, *owned = clients
+        assert not retained.closed
+        assert all(client.closed for client in owned)
         assert runtime.chat.chat("What happened in this run?") == "retained chat answer"
     finally:
         runtime.integration.close()

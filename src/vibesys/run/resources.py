@@ -102,7 +102,6 @@ from vs_runtime.api.infrastructure import (
     ProjectRunMismatchError,
     ProjectRunRequest,
     ProjectRunResources,
-    ProjectStateDeclaration,
     RunEnvironmentRequest,
     RunEnvironmentResources,
     TrustedEvaluationPlan,
@@ -123,8 +122,6 @@ from vs_sandbox.api import (
     create_compute_backend,
 )
 from vs_sim.api import MonotonicClock
-
-_StateBinding = ProjectStateDeclaration
 
 
 def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
@@ -163,10 +160,8 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
         | None
     ) = None,
-    state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     profiler_preflight: ProfilerPreflight | None = None,
-    evaluation_tool: bool = False,
 ) -> "_PreparedRun":
     """Open one project context and register its resources with ``ownership``.
 
@@ -185,10 +180,8 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
         integration=integration,
         agent_specs=agent_specs,
         resume_policy=resume_policy,
-        state_binding=state_binding,
         backend_factory=backend_factory,
         profiler_preflight=profiler_preflight,
-        evaluation_tool=evaluation_tool,
     )
 
 
@@ -202,10 +195,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
         | None
     ) = None,
-    state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     profiler_preflight: ProfilerPreflight | None = None,
-    evaluation_tool: bool = False,
 ) -> "_PreparedRun":
     validate_run_request(request)
     bundle = request.input_bundle
@@ -468,11 +459,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                             evaluator_source=evaluator_source,
                         )
                     ),
-                    state=(
-                        ProjectStateDeclaration(state_binding.namespace, state_binding.model)
-                        if state_binding is not None
-                        else None
-                    ),
                 ),
                 effects=ProjectRunEffects(
                     git_events=CoreGitTrackerEvents(integration.events),
@@ -627,7 +613,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 project_path_policy=project_path_policy,
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
                 docker_in_docker=bundle.docker_in_docker,
-                evaluation_tool=evaluation_tool,
                 startup=startup.report,
             )
         environment_resources = open_run_environment_resources(

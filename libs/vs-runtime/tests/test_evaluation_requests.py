@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
+import shlex
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -145,12 +147,14 @@ class World:
 
 
 @asynccontextmanager
-async def world(cluster: ScenarioCluster | None = None) -> AsyncIterator[World]:
+async def world(
+    cluster: ScenarioCluster | None = None, *, profile_command: tuple[str, ...] | None = None
+) -> AsyncIterator[World]:
     cluster = cluster or ScenarioCluster()
     with tempfile.TemporaryDirectory() as raw:
         base = Path(raw)
         (base / "project").mkdir()
-        stack = await build_stack(base / "stack", cluster)
+        stack = await build_stack(base / "stack", cluster, profile_command=profile_command)
         try:
             yield World(base, cluster, stack)
         finally:
@@ -1000,3 +1004,63 @@ async def test_a_benchmark_that_wrote_its_record_and_failed_is_the_workloads_per
             ObservationStatus.FAILED,
         }
         assert target.evaluation_result is not None
+
+
+# required profile outputs
+
+
+def _capture_command() -> tuple[str, ...]:
+    request = {
+        "kind": "timeline",
+        "lifecycle": {"command": "true"},
+        "options": {},
+        "local_workspace": ".",
+    }
+    return (
+        "python3",
+        "rocprof_profiler/remote_capture.py",
+        "--request-json",
+        json.dumps(request),
+    )
+
+
+async def _profile_capture_options(outputs: tuple[str, ...]) -> dict[str, Any]:
+    """The capture request the cluster was asked to run for a profile plan requiring ``outputs``."""
+    async with world(profile_command=_capture_command()) as w:
+        base = plan(stages=("profile",), candidate=w.stack.snapshot)
+        stage = base.stages[0].model_copy(update={"required_outputs": outputs})
+        profile = base.model_copy(update={"purpose": "profile", "stages": (stage,)})
+        sub = submission("profile", override=profile)
+        resource = resource_of(await run(w, sub))
+        await settled(w, resource)
+        [batch] = w.cluster.batches
+        remote = shlex.split(batch.stages[0].command[-1])
+        selected = json.loads(remote[remote.index("--request-json") + 1])
+        assert isinstance(selected, dict)
+        return selected
+
+
+async def test_a_profile_plans_required_fields_reach_the_capture_request() -> None:
+    selected = await _profile_capture_options(("hip_api_timing",))
+
+    assert selected["options"]["hip_api"] is True
+    assert selected["required_fields"] == ["hip_api_timing"]
+
+
+async def test_a_profile_plan_requiring_nothing_leaves_the_capture_request_as_configured() -> None:
+    selected = await _profile_capture_options(())
+
+    assert selected["options"] == {}
+    assert "required_fields" not in selected
+
+
+async def test_a_required_output_the_executor_cannot_supply_is_rejected_naming_the_field() -> None:
+    async with world(profile_command=_capture_command()) as w:
+        base = plan(stages=("profile",), candidate=w.stack.snapshot)
+        stage = base.stages[0].model_copy(update={"required_outputs": ("not_a_profile_field",)})
+        sub = submission("profile", override=base.model_copy(update={"stages": (stage,)}))
+        result = await run(w, sub)
+
+        assert result.observation.observation.resource_id is None
+        assert "stages.profile.required_outputs" in repr(result.observation)
+        assert w.cluster.batches == []

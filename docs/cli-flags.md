@@ -73,31 +73,23 @@ operator, declare a policy in `agent.toml`:
 
 ```toml
 [agent.quota]
-policy = "fallback"          # pause | wait | fail | fallback
-wait_seconds = 14400         # with "wait" or "fallback"
+policy = "wait"              # pause | wait | fail
+wait_seconds = 14400         # with "wait"
 retry_seconds = 300          # used when the provider gave no reset time
-fallback_provider = "codex"  # claude | codex | gemini | opencode
-fallback_model = "gpt-5.4"
 ```
 
 `pause` (the default) waits for the operator. `wait` resumes the run by itself
 once the provider's reported reset time (plus a few seconds) has passed, or
 every `retry_seconds` when it reported none, and fails the turn with the quota
 error once `wait_seconds` is spent or the reset lies beyond it. `fail` does not
-pause. `fallback` waits like `wait` (not at all when `wait_seconds` is omitted)
-and then switches the run to `fallback_provider` and `fallback_model`.
+pause.
 
-A fallback never moves a conversation: the turn in flight ends with the quota
-error, so a hypothesis is never continued on another model, and every session
-opened afterwards is a fresh conversation on the fallback. The switch is
-journaled (`provider_switched`: from, to, model and who chose it), and every later
-event carries the provider and model it actually ran on. A session still open on
-the replaced provider fails its next capacity stop at once. The switch lasts for
-the process: a run resumed from disk starts on its configured provider again.
-Any policy may name a fallback, which an operator can then choose when resuming a
-paused run. A misspelled key, an unknown policy or provider, `wait_seconds` with
-`pause` or `fail`, half a fallback, or a fallback that is the provider the run
-already uses is rejected at startup, naming the key.
+A run drives every role through one agent client on one provider, so it cannot
+switch to a fallback provider on a quota stop. `fallback_provider`,
+`fallback_model` and `policy = "fallback"` are accepted by the config schema but
+refused when a run starts, naming the key; use `pause`, `wait` or `fail`. A
+misspelled key, an unknown policy, or `wait_seconds` with `pause` or `fail` is
+rejected at startup, naming the key.
 
 ### Run time budget
 

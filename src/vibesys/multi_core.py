@@ -202,7 +202,6 @@ def multi_core_registration(
         agents=CORE_ROLES,
         options=options_type,
         core=multi_core_policy(options_type),
-        memory_paths=ARTIFACT_DIRECTORIES,
     )
     return OrchestrationRegistration(
         plugin=plugin,

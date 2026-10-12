@@ -13,6 +13,7 @@ import json
 from typing import Literal
 
 from vs_core.api import (
+    Accepted,
     Access,
     AdoptionResult,
     ArtifactId,
@@ -79,9 +80,9 @@ class SkeletonState(StrategyState):
 
 
 def measurement(
-    candidate: RevisionRef, purpose: Literal["baseline", "official"]
+    candidate: RevisionRef, purpose: Literal["baseline", "official"], *, now_at: float = 0.0
 ) -> MeasurementPlan:
-    """An accuracy-then-benchmark plan of one exact revision."""
+    """An accuracy-then-benchmark plan of one exact revision, ``now_at`` seconds into the clock."""
     return MeasurementPlan(
         purpose=purpose,
         candidate=candidate,
@@ -94,10 +95,10 @@ def measurement(
         ),
         policy="ordered",
         recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest=DIGEST),
-        submitted_at=0.0,
+        submitted_at=now_at,
         queue_allowance=880.0,
         # Absolute run-clock time, past any restart the scenarios make (the run ends at 1000 s).
-        deadline_at=900.0,
+        deadline_at=now_at + 900.0,
         accuracy_stage="accuracy",
     )
 
@@ -116,6 +117,15 @@ class SkeletonStrategy(Value):
     measured: bool = True
     keeps_candidate: bool = True
     cancels_after_start: bool = False
+
+    def _origin(self, view: RunView) -> float:
+        """The clock time the plans' deadlines count from.
+
+        Zero, so a plan is a pure function of the run's state: a plan that changed with the
+        clock would be a new decision at every tick of a virtual-clock run.
+        """
+        del view
+        return 0.0
 
     @classmethod
     def unmeasured(cls, *, keeps_candidate: bool = True) -> SkeletonStrategy:
@@ -169,7 +179,7 @@ class SkeletonStrategy(Value):
                 decision = Measure(
                     decision_id=DecisionId(root="measure-baseline"),
                     scope=run,
-                    plan=measurement(view.facts.baseline, "baseline"),
+                    plan=measurement(view.facts.baseline, "baseline", now_at=self._origin(view)),
                 )
             case "start":
                 decision = StartAttempt(
@@ -245,7 +255,7 @@ class SkeletonStrategy(Value):
                         ),
                         prompts=(),
                         output_schema=SchemaRef(name="implementation", version=1),
-                        deadline_at=400.0,
+                        deadline_at=self._origin(view) + 400.0,
                         charge_class="paid",
                     ),
                 )
@@ -254,7 +264,7 @@ class SkeletonStrategy(Value):
                 return Measure(
                     decision_id=DecisionId(root="measure-candidate"),
                     scope=attempt,
-                    plan=measurement(state.candidate, "official"),
+                    plan=measurement(state.candidate, "official", now_at=self._origin(view)),
                 )
             case "settle":
                 return Withdraw(
@@ -296,6 +306,24 @@ class SkeletonStrategy(Value):
         if isinstance(event, AttemptSettled):
             update["settlement"] = event.settlement.settlement_id
         return update
+
+
+class BaselineProbeStrategy(SkeletonStrategy):
+    """Submit the input-baseline measurement once, then wait for the run to be ended.
+
+    It is a run that is always waiting on a job: for tests of what ends such a run (a signal,
+    an operator stop) and what the host then cancels.
+    """
+
+    def _origin(self, view: RunView) -> float:
+        """Count deadlines from now: this run is driven on a real clock, far from zero."""
+        return view.run.now_at
+
+    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
+        state = super().on_event(view, event)
+        if isinstance(event, Accepted) and state.phase == "baseline":
+            return state.model_copy(update={"phase": "done"})
+        return state
 
 
 def _committed(event: TurnResult) -> RevisionRef | None:

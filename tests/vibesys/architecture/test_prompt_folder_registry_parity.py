@@ -14,43 +14,27 @@ from launch import built_in_orchestrations
 _ORCHESTRATION = Path(__file__).parents[3].resolve() / "src" / "vibesys" / "orchestration"
 
 
-def _registered_strategy_folders() -> set[str]:
-    """Strategy folders whose orchestrate function owns prompts beside it."""
-    return {folder for folder, core in _registrations() if core is None}
-
-
 def _core_prompt_folders() -> set[Path]:
     """The prompt folders that core policies declare."""
-    return {core for _, core in _registrations() if core is not None}
+    return {core for _, core in _registrations()}
 
 
-def _registrations() -> set[tuple[str, Path | None]]:
+def _registrations() -> set[tuple[str, Path]]:
     registry = built_in_orchestrations()
-    found: set[tuple[str, Path | None]] = set()
+    found: set[tuple[str, Path]] = set()
     for registration in registry._registrations.values():  # noqa: SLF001  # LW-040196 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
-        plugin = registration.plugin
-        if plugin.core is not None:
-            # A core policy has no orchestrate function: its prompt folder is its prompt owner.
-            location = Path(plugin.core.prompt_templates).resolve()
-            found.add((location.relative_to(_ORCHESTRATION).parts[0], location))
-            continue
-        module = plugin.orchestrate.__module__
-        prefix = "vibesys.orchestration."
-        assert module.startswith(prefix), f"registered policy {module!r} is not under {prefix}"
-        found.add((module.split(".")[2], None))
+        # A core policy's prompt folder is its prompt owner.
+        location = Path(registration.plugin.core.prompt_templates).resolve()
+        found.add((location.relative_to(_ORCHESTRATION).parts[0], location))
     return found
 
 
 def test_every_registered_strategy_has_a_local_prompt_owner() -> None:
-    folders = _registered_strategy_folders()
     orchestration = _ORCHESTRATION
-    missing = sorted(
-        folder
-        for folder in folders
-        if not (orchestration / folder / "prompts.py").is_file()
-        and not (orchestration / folder / "prompts").is_dir()
+    outside = sorted(
+        str(folder) for folder in _core_prompt_folders() if orchestration not in folder.parents
     )
-    assert not missing, f"registered strategies with no plugin-local prompt owner: {missing}"
+    assert not outside, f"core policies whose prompt folder is outside a strategy: {outside}"
     empty = sorted(
         str(folder.relative_to(orchestration))
         for folder in _core_prompt_folders()

@@ -73,6 +73,22 @@ function openRunConnection(
       }
       return response.snapshot;
     },
+    async command(input) {
+      const response = await transport.request(input);
+      const acknowledgement = response.ack;
+      if (response.ok !== true || acknowledgement === null || acknowledgement === undefined) {
+        return {kind: 'rejected', message: response.error ?? null};
+      }
+      return {
+        kind: 'acknowledged',
+        action: acknowledgement.action,
+        status: acknowledgement.status,
+      };
+    },
+    async tuiDefaults() {
+      const response = await transport.request({type: 'query.tui_defaults'});
+      return response.ok === true ? (response.tui_defaults ?? null) : null;
+    },
     subscribe(handlers) {
       return stream.subscribe({
         cursor: handlers.cursor,

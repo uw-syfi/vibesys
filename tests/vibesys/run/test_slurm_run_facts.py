@@ -1,10 +1,9 @@
-"""A Slurm run's facts follow the loop's evaluation surface and keep the task's accuracy gate (#1649).
+"""A Slurm run's facts give agents no evaluation command and keep the task's accuracy gate.
 
-A loop whose agents have the evaluation tool (the dynamic loop) is given no accuracy or
-benchmark command by the Slurm environment, because the agent requests trusted evaluation
-through the tool. A loop without it keeps the gate commands its trusted evaluation runs. Either
-way the dynamic loop decides whether to run correctness from ``accuracy_configured``, which
-must follow the task, not the agent-facing paths.
+The Slurm environment gives no agent an accuracy or benchmark command, because every agent
+requests trusted evaluation through the evaluation tool. A strategy still decides whether to
+run correctness from ``accuracy_configured``, which must follow the task, not the agent-facing
+paths.
 """
 
 from __future__ import annotations
@@ -15,7 +14,8 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
-from tests.support.docker_environment import host_container_backend
+from tests.support.core_host_world import open_core_host
+from tests.support.core_plugins import capability_plugin
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
     bounds_of,
@@ -32,17 +32,17 @@ from vibesys.inputs import load_task
 from vibesys.orchestration.dynamic import DynamicOptions
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
-from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import reap_orphaned_agents
 from vs_agent.api.testing import FakeConfinement, FakeDockerBuildRunner
 from vs_core.api import AssessmentKind
 from vs_project.api import OrchestrationDescriptor
-from vs_runtime.api import AgentRole, AgentTool, OrchestrationPlugin, RunFacts, RunStatus
 from vs_sandbox.api.testing import FakeDockerEngine
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vs_runtime.api import OrchestrationPlugin, RunFacts
 
 _SLURM_LOCAL = """[slurm]
 name = "test-cluster"
@@ -58,24 +58,7 @@ class _Options(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-async def _orchestrate(run: object, _options: BaseModel) -> RunStatus:
-    del run
-    return RunStatus.SUCCEEDED
-
-
-# An older loop: no agent has the evaluation tool.
-_GATE_LOOP = OrchestrationPlugin(
-    id="slurm-facts", agents=(), options=_Options, orchestrate=_orchestrate
-)
-# A loop whose agent does.
-_TOOL_LOOP = OrchestrationPlugin(
-    id="slurm-facts",
-    agents=(
-        AgentRole(id="probe", system_prompt="probe", extra_tools=(AgentTool(id="evaluation"),)),
-    ),
-    options=_Options,
-    orchestrate=_orchestrate,
-)
+_PLUGIN = capability_plugin("slurm-facts", options=_Options)
 
 
 def _write_project(root: Path) -> None:
@@ -103,7 +86,7 @@ def _request(root: Path, config: Path) -> RunRequest:
             },
         ),
         project_root=root,
-        orchestration=OrchestrationDescriptor(id=_GATE_LOOP.id, config_version=1, options={}),
+        orchestration=OrchestrationDescriptor(id=_PLUGIN.id, config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "slurm-facts"}}),
         input_bundle=load_task(root),
         objective="Improve the queue.",
@@ -123,13 +106,8 @@ def _facts(tmp_path: Path, plugin: OrchestrationPlugin) -> RunFacts:
     integration = LocalRunIntegration()
 
     async def exercise() -> RunFacts:
-        async with open_product_run_host(
-            _request(root, config),
-            integration,
-            plugin=plugin,
-            backend_factory=host_container_backend,
-        ) as run:
-            return run.facts
+        async with open_core_host(_request(root, config), integration, plugin=plugin) as host:
+            return host.facts
 
     try:
         return asyncio.run(exercise())
@@ -137,20 +115,10 @@ def _facts(tmp_path: Path, plugin: OrchestrationPlugin) -> RunFacts:
         integration.close()
 
 
-def test_a_loop_without_the_evaluation_tool_keeps_the_gate_commands_on_slurm(
-    tmp_path: Path,
-) -> None:
-    facts = _facts(tmp_path, _GATE_LOOP)
-
-    assert (facts.accuracy_command or "").endswith("vibesys-gate --gate accuracy")
-    assert (facts.benchmark_command or "").endswith("vibesys-gate --gate benchmark")
-    assert facts.accuracy_configured
-
-
 def test_the_dynamic_loop_still_requires_correctness_on_slurm(tmp_path: Path) -> None:
-    facts = _facts(tmp_path, _TOOL_LOOP)
+    facts = _facts(tmp_path, _PLUGIN)
 
-    # The agent is handed no command for trusted evaluation ...
+    # The agent is handed no command for trusted evaluation: it uses the evaluation tool ...
     assert facts.accuracy_command is None
     assert facts.benchmark_command is None
     # ... and the task's gates are still configured, so the dynamic loop still requires them.

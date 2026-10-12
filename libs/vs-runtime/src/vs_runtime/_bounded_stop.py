@@ -13,26 +13,14 @@ from vs_runtime._run_control import RunStopped
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 
-    from vs_evaluation.api import (
-        EvaluationSettlementObservation,
-        EvaluationSettlements,
-        OwnedEvaluationDependencies,
-        ProfilerOperation,
-        StoredEvaluation,
-        TrustedEvidence,
-    )
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import (
         AccuracyEvaluation,
         AccuracyReceipt,
-        AgentEvaluation,
         BenchmarkEvaluation,
         BenchmarkObjective,
-        CandidateProfile,
         Evaluation,
         LocalValidationEvaluation,
-        ProfileField,
-        ReleasedJobs,
         Workspace,
     )
 
@@ -207,116 +195,6 @@ class _StopGatedEvaluation:
             )
         )
 
-    async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
-        return await self._inner.agent_evaluations(workspace)
-
-    def settlements(self) -> EvaluationSettlements:
-        """Reads and observer cancellation remain available during stop settlement."""
-        return _StopGatedEvaluationSettlements(self._inner.settlements(), self)
-
-    def current_time(self) -> float:
-        return self._inner.current_time()
-
-    async def wait_until(self, deadline_at_s: float) -> None:
-        await self.until_stop(self._inner.wait_until(deadline_at_s))
-
-    async def submitted_deadline(self, handle_id: str) -> float:
-        return await self._inner.submitted_deadline(handle_id)
-
-    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
-        await self._inner.cancel_submitted(handle_id, scope_id=scope_id)
-
-    async def validate_wait(
-        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
-    ) -> None:
-        await self._inner.validate_wait(handles, scope_id=scope_id, principal_id=principal_id)
-
-    async def profiler_operation(
-        self, operation_id: str, *, principal_id: str, scope_id: str | None
-    ) -> ProfilerOperation:
-        return await self._inner.profiler_operation(
-            operation_id, principal_id=principal_id, scope_id=scope_id
-        )
-
-    async def wait_profiler(
-        self, operation_id: str, *, principal_id: str, scope_id: str | None
-    ) -> ProfilerOperation:
-        return await self.until_stop(
-            self._inner.wait_profiler(operation_id, principal_id=principal_id, scope_id=scope_id)
-        )
-
-    async def cancel_profiler(
-        self, operation_id: str, *, principal_id: str, scope_id: str | None
-    ) -> None:
-        await self._inner.cancel_profiler(
-            operation_id, principal_id=principal_id, scope_id=scope_id
-        )
-
-    async def validate_profiler_wait(
-        self, handles: tuple[str, ...], *, principal_id: str, scope_id: str | None
-    ) -> None:
-        await self._inner.validate_profiler_wait(
-            handles, principal_id=principal_id, scope_id=scope_id
-        )
-
-    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
-        return await self._inner.submitted_generation(handle_id, scope_id=scope_id)
-
-    async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
-        return await self._inner.accepted_evidence_ids(handle_id)
-
-    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
-        return await self._inner.submitted_report(handle_id, scope_id=scope_id)
-
-    async def receipt_matches_current_context(
-        self, revision: str, evidence: TrustedEvidence
-    ) -> bool:
-        return await self._inner.receipt_matches_current_context(revision, evidence)
-
-    async def evidence_revisions(self) -> dict[str, str]:
-        return await self._inner.evidence_revisions()
-
-    async def evidence_revision(self, reference: str) -> str | None:
-        return await self._inner.evidence_revision(reference)
-
-    async def submitted_revision(self, handle_id: str) -> str:
-        return await self._inner.submitted_revision(handle_id)
-
-    async def can_profile(self) -> bool:
-        return await self._inner.can_profile()
-
-    async def profile(
-        self,
-        revision: str,
-        request: str,
-        *,
-        member_id: str,
-        required_fields: tuple[ProfileField, ...] = (),
-    ) -> CandidateProfile:
-        # A profile runs a profiler agent turn, which gets the grace period
-        # like any agent turn, so only its start is gated.
-        self._channel.raise_if_stopped()
-        return await self._inner.profile(
-            revision, request, member_id=member_id, required_fields=required_fields
-        )
-
-    async def reopen_jobs(self, member_id: str) -> None:
-        """Reconcile a completed release and open a fresh generation for resumed work."""
-        self._channel.raise_if_stopped()
-        await self._inner.reopen_jobs(member_id)
-
-    async def jobs_released(self, member_id: str) -> bool:
-        """Project whether the member's durable scope refuses ordinary admission.
-
-        Closing and completed releases both fence new work. Recovery can
-        reconcile cleanup before opening a fresh scope generation.
-        """
-        return await self._inner.jobs_released(member_id)
-
-    async def release_jobs(self, member_id: str) -> ReleasedJobs:
-        # Release is cleanup: it cancels jobs, so it must work after a stop.
-        return await self._inner.release_jobs(member_id)
-
     async def until_stop[T](self, evaluation: Coroutine[object, object, T]) -> T:
         """Run *evaluation*; a stop requested meanwhile cancels it and lands."""
         try:
@@ -347,43 +225,14 @@ class _StopGatedEvaluation:
         raise RunStopped
 
 
-class _StopGatedEvaluationSettlements:
-    """Stop cancels host observation while its owner preserves jobs and handles."""
-
-    def __init__(self, inner: EvaluationSettlements, owner: _StopGatedEvaluation) -> None:
-        self._inner = inner
-        self._owner = owner
-
-    async def submission_history(self, scope_id: str) -> tuple[StoredEvaluation, ...]:
-        return await self._owner.until_stop(self._inner.submission_history(scope_id))
-
-    async def observe(
-        self,
-        dependencies: OwnedEvaluationDependencies,
-    ) -> tuple[EvaluationSettlementObservation, ...]:
-        return await self._owner.until_stop(self._inner.observe(dependencies))
-
-    async def inspect(
-        self, dependencies: OwnedEvaluationDependencies
-    ) -> tuple[EvaluationSettlementObservation, ...]:
-        return await self._owner.until_stop(self._inner.inspect(dependencies))
-
-    async def wait_any(
-        self,
-        dependencies: OwnedEvaluationDependencies,
-    ) -> tuple[EvaluationSettlementObservation, ...]:
-        return await self._owner.until_stop(self._inner.wait_any(dependencies))
-
-
 def stop_gated_evaluation(inner: Evaluation, channel: RunControlChannel) -> Evaluation:
     """Return *inner* with a pending stop landed before each new evaluation.
 
     Starting an evaluation is a cooperative boundary, like starting an agent
-    turn: once a stop is requested, ``accuracy``, ``benchmark``,
-    ``validate_local``, and ``profile`` raise :class:`RunStopped` instead of
-    starting work. An ``accuracy``, ``benchmark``, or ``validate_local`` call
+    turn: once a stop is requested, ``accuracy``, ``benchmark``, and
+    ``validate_local`` raise :class:`RunStopped` instead of starting work. A call
     running when the stop is requested is cancelled, not awaited, and raises
-    :class:`RunStopped`. Reading recorded evaluations stays available.
+    :class:`RunStopped`.
     """
     return _StopGatedEvaluation(inner, channel)
 

@@ -7,20 +7,13 @@ import json
 import shlex
 import sys
 from dataclasses import replace
-from functools import partial
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
 
-from vibesys.dynamic_roles import PROFILER
-from vibesys.orchestration.dynamic import PLUGIN
-from vibesys.run.evaluation_backend import EvidenceReusingEvaluation, SemanticEvaluationStage
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_evaluation.api import (
     ContentDigest,
-    EvaluationAgentRole,
-    EvaluationAgentService,
     EvaluationCoordinator,
     EvaluationFailed,
     EvaluationRequest,
@@ -29,32 +22,18 @@ from vs_evaluation.api import (
     EvidenceFingerprints,
     EvidenceKind,
     EvidenceOutcome,
-    EvidenceReply,
     ExecutorObservation,
-    ProfilerAgentResult,
-    ProfilerAgentService,
-    ProfilerAgentServiceHooks,
     ResourceRequirements,
+    SemanticEvaluationStage,
     StageFailureKind,
     StageState,
     TrustedEvidence,
 )
-from vs_evaluation.api.testing import (
-    FakeProfilerTurnProvision,
-    InMemoryEvaluationStore,
-    wait_until_executor_started,
-)
-from vs_evaluation.api.tools import build_evaluation_tools
+from vs_evaluation.api.testing import InMemoryEvaluationStore, wait_until_executor_started
 from vs_project.api import StateNamespace
-from vs_runtime.api import (
-    AgentToolBindingContext,
-    CandidateProfileStatus,
-    ProfileField,
-    Run,
-    RunCleanupError,
-)
+from vs_runtime.api import ProfileField, RunCleanupError
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
-from vs_runtime.api.testing import FakeRun, FakeWorkspace
+from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
 from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, arrival, wait_or_fail
@@ -80,8 +59,6 @@ from vs_slurm.api import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support.evaluation_scenarios import EvaluationScenario
-
     from vs_runtime.api import CandidateWorkspace, Workspace, Workspaces
     from vs_sim.api import Event
 
@@ -95,6 +72,15 @@ _PHASES = {
     SlurmJobStatus.CANCELLED: SlurmPhase.ENDED,
     SlurmJobStatus.UNKNOWN: SlurmPhase.UNKNOWN,
 }
+
+
+class _World:
+    """A fake workspace owner over a project root, closed by the test that opens it."""
+
+    def __init__(self, project_root: Path) -> None:
+        self.workspaces = FakeWorkspaces(
+            FakeWorkspace(path=project_root), supports_parallel_candidates=True
+        )
 
 
 class _TrackedCandidate:
@@ -398,7 +384,7 @@ async def test_semantic_executor_preserves_infrastructure_failure_provenance(
     kind: EvidenceKind,
 ) -> None:
     job_exit_code, batch_failure, stage_exit_code, stage_failure = fault
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     stage = SlurmBatchStageResult(
@@ -463,7 +449,7 @@ async def test_coordinator_retains_completed_stages_after_late_infrastructure_fa
     tmp_path: Path, fault: tuple[int, str | None, int | None, str | None]
 ) -> None:
     job_exit_code, batch_failure, stage_exit_code, stage_failure = fault
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     accuracy = SlurmBatchStageResult(
@@ -521,7 +507,7 @@ async def test_coordinator_retains_completed_stages_after_late_infrastructure_fa
 
 @pytest.mark.asyncio
 async def test_semantic_executor_fuses_recovers_and_reports_shared_capacity(tmp_path: Path) -> None:
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     namespace = _namespace(tmp_path)
     config = _config()
@@ -579,7 +565,7 @@ async def test_semantic_executor_fuses_recovers_and_reports_shared_capacity(tmp_
 async def test_unsupported_profile_evaluation_fails_instead_of_staying_queued(
     tmp_path: Path,
 ) -> None:
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     runner = _Runner(tmp_path / "runner")
@@ -618,7 +604,7 @@ async def test_a_kind_without_a_command_is_rejected_not_passed(
     tmp_path: Path, kind: EvidenceKind
 ) -> None:
     """A stage with no command ran ``true`` and was recorded as passed evidence."""
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     runner = _Runner(tmp_path / "runner")
@@ -651,7 +637,7 @@ async def test_a_kind_without_a_command_is_rejected_not_passed(
 @pytest.mark.asyncio
 async def test_a_plan_with_a_trusted_capture_produces_profile_evidence(tmp_path: Path) -> None:
     """Regression: no executor produced profile evidence, so every profile was unsupported."""
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     runner = _Runner(
@@ -700,135 +686,9 @@ async def test_a_plan_with_a_trusted_capture_produces_profile_evidence(tmp_path:
     await executor.close()
 
 
-class _CapturedRevisionWorkspace(FakeWorkspace):
-    """A profiler's immutable checkout snapshots its existing revision."""
-
-    async def snapshot(self, label: str) -> str:
-        del label
-        assert self.revision is not None
-        return self.revision
-
-
-class _WorkspaceInterpretingProfiler(FakeProfilerTurnProvision):
-    """Interpret supplied evidence through the offered workspace evidence tool."""
-
-    def __init__(self, scenario: EvaluationScenario) -> None:
-        super().__init__()
-        self.scenario = scenario
-        self.service: EvaluationAgentService | None = None
-        self.host_handle: str | None = None
-        self.interpreted_handle: str | None = None
-        self.host_state: EvaluationState | None = None
-
-    async def run_turn(
-        self,
-        *,
-        session_id: str,
-        operation_id: str,
-        request: str,
-        scope_id: str | None,
-        candidate_snapshot_id: str,
-    ) -> ProfilerAgentResult:
-        assert self.service is not None
-        backend = self.scenario.backend
-        (self.host_handle,) = await backend.owned_handles(scope_id)
-        self.host_state = await backend.recorded_status(self.host_handle)
-        workspace = _CapturedRevisionWorkspace(
-            path=self.scenario.workspace.path,
-            workspace_id=f"profiler:{operation_id}",
-            revision=candidate_snapshot_id,
-        )
-        backend.bind(AgentToolBindingContext(PROFILER, workspace, "planned-profile", str))
-        grant = self.service.grant(
-            principal_id="profiler:planned-profile",
-            role=EvaluationAgentRole.PROFILER,
-            scope_id=workspace.id,
-        )
-        tools = build_evaluation_tools(
-            socket_path=self.service.socket_path, token=grant.token, role=grant.role
-        )
-        assert "interpretation-only" in request
-        assert self.host_handle in request
-        evidence_tool = next(tool for tool in tools if tool.name == "accepted_evidence")
-        reply = EvidenceReply.model_validate_json(
-            await asyncio.to_thread(
-                evidence_tool.handler,
-                evidence_tool.input_schema.model_validate(
-                    {"evidence_kinds": [EvidenceKind.PROFILE]}
-                ),
-            )
-        )
-        self.interpreted_handle = self.host_handle
-        assert reply.evidence
-        assert {item.evaluation_id for item in reply.evidence} == {self.host_handle}
-        self.complete(operation_id, evidence_ids=tuple(item.evidence_id for item in reply.evidence))
-        return await super().run_turn(
-            session_id=session_id,
-            operation_id=operation_id,
-            request=request,
-            scope_id=scope_id,
-            candidate_snapshot_id=candidate_snapshot_id,
-        )
-
-
-@pytest.mark.asyncio
-async def test_planned_profile_workspace_interprets_the_host_capture(tmp_path: Path) -> None:
-    """The host supplies one Slurm capture and the profiler reads accepted evidence."""
-    async with build_scenario(
-        tmp_path, ScenarioSpec(kinds=(EvidenceKind.ACCURACY,)), Producer.SLURM
-    ) as scenario:
-        provision = _WorkspaceInterpretingProfiler(scenario)
-        profiler = ProfilerAgentService(
-            provision,
-            scenario.namespace,
-            ProfilerAgentServiceHooks(
-                partial(scenario.backend.snapshot, label="profiler-agent-dispatch"),
-                scenario.backend.resolve_profile_evidence,
-                prepare_request=scenario.backend.prepare_profiler_request,
-            ),
-        )
-        service = EvaluationAgentService(
-            scenario.backend, scenario.namespace, tmp_path / "evaluation.sock", profiler
-        )
-        provision.service = service
-        source = scenario.run
-        run = Run(
-            run_id=source.run_id,
-            facts=source.facts,
-            agents=source.agents,
-            workspaces=scenario.workspaces,
-            evaluation=EvidenceReusingEvaluation(
-                source.evaluation,
-                scenario.backend,
-                run_id=source.run_id,
-                scopes=service,
-                profiler=profiler,
-            ),
-            state=source.state,
-            control=source.control,
-            commands=source.commands,
-            skills=source.skills,
-            observations=source.observations,
-        )
-        await service.start()
-        try:
-            assert scenario.profile_capture_count == 0
-            profile = await run.evaluation.profile(
-                scenario.projection.revision, "Where does decode time go?", member_id="planned"
-            )
-            assert profile.status is CandidateProfileStatus.OBSERVED
-            assert provision.host_state is EvaluationState.SUCCEEDED
-            assert scenario.profile_capture_count == 1
-            assert provision.interpreted_handle == provision.host_handle
-            assert profile.evidence_ids
-        finally:
-            await service.close()
-            await profiler.close()
-
-
 @pytest.mark.asyncio
 async def test_a_plan_without_a_capture_reports_no_profile_kind(tmp_path: Path) -> None:
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     executor = SlurmSemanticEvaluationExecutor(
         _config(),
         SlurmExecutionPolicy(),
@@ -852,7 +712,7 @@ async def test_a_plan_without_a_capture_reports_no_profile_kind(tmp_path: Path) 
 
 @pytest.mark.asyncio
 async def test_failed_accuracy_fails_the_evaluation_with_its_diagnostics(tmp_path: Path) -> None:
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     runner = _Runner(
@@ -907,7 +767,7 @@ async def test_failed_accuracy_fails_the_evaluation_with_its_diagnostics(tmp_pat
 async def test_silent_benchmark_failure_reports_the_time_limit_and_server_log(
     tmp_path: Path,
 ) -> None:
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     runner = _Runner(
@@ -959,7 +819,7 @@ async def test_silent_benchmark_failure_reports_the_time_limit_and_server_log(
 
 @pytest.mark.asyncio
 async def test_close_drains_provider_before_discarding_candidate(tmp_path: Path) -> None:
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     runner = _Runner(tmp_path / "runner", block_wait=True)
@@ -989,7 +849,7 @@ async def test_close_drains_provider_before_discarding_candidate(tmp_path: Path)
 
 @pytest.mark.asyncio
 async def test_close_retains_execution_until_cleanup_settles(tmp_path: Path) -> None:
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     workspaces = _TrackedWorkspaces(run.workspaces, errors=(None, None), blocked=True)
     config = _config()
@@ -1024,7 +884,7 @@ async def test_close_retains_execution_until_cleanup_settles(tmp_path: Path) -> 
 
 @pytest.mark.asyncio
 async def test_close_attempts_every_cleanup_and_aggregates_errors(tmp_path: Path) -> None:
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     workspaces = _TrackedWorkspaces(
         _TrackedWorkspaces(run.workspaces),
@@ -1063,7 +923,7 @@ async def test_close_attempts_every_cleanup_and_aggregates_errors(tmp_path: Path
 
 @pytest.mark.asyncio
 async def test_close_discards_workspace_when_provider_cleanup_fails(tmp_path: Path) -> None:
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     runner = _Runner(tmp_path / "runner", block_wait=True, fail_cancel=True)
@@ -1094,7 +954,7 @@ async def test_close_discards_workspace_when_provider_cleanup_fails(tmp_path: Pa
 async def test_read_only_restart_inspection_does_not_recreate_candidate_workspace(
     tmp_path: Path,
 ) -> None:
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     runner = _Runner(tmp_path / "runner")
@@ -1153,7 +1013,7 @@ async def test_aggregate_ambiguity_cannot_promote_completed_stage_evidence(
     aggregate: tuple[SlurmJobStatus, int | None, str | None],
 ) -> None:
     status, code, failure = aggregate
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     stages = tuple(
         SlurmBatchStageResult(
@@ -1221,7 +1081,7 @@ async def test_required_hip_timing_reaches_fake_slurm_as_the_actual_capture_flag
     tmp_path: Path,
 ) -> None:
     """The real semantic codec selects the capture's API option, not just agent wording."""
-    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("hip-request")
     capture_request = {
         "kind": "timeline",

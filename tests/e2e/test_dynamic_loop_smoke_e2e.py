@@ -440,13 +440,8 @@ def test_serving_smoke_fixture_builds_a_profiled_cli_request(tmp_path: Path) -> 
 
 
 def _evaluation_submitted(events: list[dict[str, object]]) -> bool:
-    return any(
-        event.get("type") == "async_operation_lifecycle"
-        and isinstance(event.get("data"), dict)
-        and event["data"].get("operation_kind") == "evaluation"  # ty: ignore[unresolved-attribute]
-        and event["data"].get("state") == "submitted"  # ty: ignore[unresolved-attribute]
-        for event in events
-    )
+    """Whether a measurement has started: the core path's ``gate_started`` event."""
+    return any(event.get("type") == "gate_started" for event in events)
 
 
 @_requires_cli()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.composition import agent_spec_from_config
@@ -31,6 +32,41 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vibesys.run.contracts import RunRequest
+
+
+WITHHELD_TOOLS_ENV = "VIBESYS_PROFILER_WITHHELD_TOOLS"
+"""Server environment variable naming the tools a profiler server must not register."""
+
+
+@dataclass(frozen=True)
+class ProfilerToolOffer:
+    """Which of a profiler server's tools a run does not offer, and why."""
+
+    withheld: tuple[str, ...]
+    reason: str = ""
+
+
+def profiler_tool_offer(
+    kind: ProfilerKind, *, editor_has_gpu: bool, captures_remotely: bool = False
+) -> ProfilerToolOffer:
+    """Withhold the tools that need a GPU driver when the editor has none.
+
+    The decision reads two run-environment facts (``RunEnvironmentView.editor_has_gpu`` and
+    ``profile_execution``), never an environment name. A capture routed to a remote target
+    needs no driver in the editor, so the tools that bridge it stay offered.
+    """
+    if kind not in ACTIVE_PROFILER_KINDS or editor_has_gpu or captures_remotely:
+        return ProfilerToolOffer(())
+    definition = profiler_definition(kind)
+    withheld = tuple(sorted(definition.driver_tools))
+    if not withheld:
+        return ProfilerToolOffer(())
+    names = ", ".join(f"`{name}`" for name in withheld)
+    return ProfilerToolOffer(
+        withheld,
+        f"{definition.mcp_name}: {names} not offered because they need a GPU driver and the "
+        "editor has no GPU (GPU work runs as separate jobs)",
+    )
 
 
 class ProfilerPreflight(Protocol):
@@ -248,7 +284,10 @@ def validate_attribution_command(request: RunRequest, command: tuple[str, ...] |
 
 
 __all__ = [
+    "WITHHELD_TOOLS_ENV",
+    "ProfilerToolOffer",
     "native_profiler_preflight",
+    "profiler_tool_offer",
     "resolve_run_profiler",
     "validate_attribution_command",
     "validate_run_request",

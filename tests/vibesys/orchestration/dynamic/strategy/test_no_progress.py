@@ -11,7 +11,7 @@ agents and count the implementer turns the run requests.
 
 from __future__ import annotations
 
-from collections import Counter, deque
+from collections import Counter
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -19,21 +19,22 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy._run import config, run_shell
+from tests.vibesys.orchestration.dynamic.strategy._run import config
+from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 
 from vs_core.api import ProposeWinner, RequestTurn, Withdraw
 from vs_core.testing.drive import Failed
+from vs_dst.api import simulate
 
 if TYPE_CHECKING:
     from vs_core.testing.drive import Answer
-    from vs_runtime.api.testing import Run
+    from vs_dst.api import SimulatedRun
 
 
 def _failed(next_step: str, *cited: str) -> str:
@@ -46,7 +47,7 @@ def _failed(next_step: str, *cited: str) -> str:
     )
 
 
-def _implementer_turns(finished: Run) -> Counter[str]:
+def _implementer_turns(finished: SimulatedRun) -> Counter[str]:
     """Paid and corrected implementer turns the run requested, by agent session."""
     return Counter(
         item.turn.session.session_id.root
@@ -55,7 +56,7 @@ def _implementer_turns(finished: Run) -> Counter[str]:
     )
 
 
-def _planner_turns(finished: Run) -> int:
+def _planner_turns(finished: SimulatedRun) -> int:
     return sum(
         1
         for item in finished.decisions
@@ -64,27 +65,34 @@ def _planner_turns(finished: Run) -> int:
 
 
 def test_a_repeating_failure_costs_at_most_the_bound_then_the_planner_is_asked_again() -> None:
-    executors = Executors(
-        planner=deque([plan_reply(implement("h1")), plan_reply(implement("h2"))]),
-        implementer=deque([_failed("same"), _failed("same"), _failed("same"), implemented()]),
-        judge=deque([reviewed()]),
+    world = DynamicWorld(
+        planner=[plan_reply(implement("h1")), plan_reply(implement("h2"))],
+        implementer=[_failed("same"), _failed("same"), _failed("same"), implemented()],
+        max_rounds=2,
+        max_retries_per_round=5,
     )
-    finished = run_shell(executors, max_rounds=2, max_retries_per_round=5)
+    finished = simulate(world)
+
+    assert finished.finished
+    assert not finished.liveness_violations
     turns = _implementer_turns(finished)
     # h1 settles as failed after the default two unmeasured turns; h2 then takes the third
     # failing reply, and ends on the next.
     assert sorted(turns.values()) == [2, 2]
-    assert not executors.planner
-    assert not executors.implementer
+    assert world.unused["orchestrator"] == 0
+    assert world.unused["implementer"] == 0
 
 
 def test_the_first_failure_without_a_next_step_or_evidence_still_gets_one_more_turn() -> None:
-    executors = Executors(
-        planner=deque([plan_reply(implement("h1"))]),
-        implementer=deque([implemented("implementation_failed"), implemented()]),
-        judge=deque([reviewed()]),
+    world = DynamicWorld(
+        implementer=[implemented("implementation_failed"), implemented()],
+        max_rounds=1,
+        max_retries_per_round=5,
     )
-    finished = run_shell(executors, max_rounds=1, max_retries_per_round=5)
+    finished = simulate(world)
+
+    assert finished.finished
+    assert not finished.liveness_violations
     assert list(_implementer_turns(finished).values()) == [2]
     proposal = next(item for item in finished.decisions if isinstance(item, ProposeWinner))
     assert proposal.selection.kind == "retained_candidate"
@@ -93,42 +101,53 @@ def test_the_first_failure_without_a_next_step_or_evidence_still_gets_one_more_t
 def test_rewording_the_step_or_citing_more_files_does_not_earn_a_turn_under_a_larger_bound() -> (
     None
 ):
-    executors = Executors(
-        planner=deque([plan_reply(implement("h1")), plan_reply(implement("h2"))]),
-        implementer=deque(
-            [_failed("split it", "a.py"), _failed("break it up", "b.py"), implemented()]
-        ),
-        judge=deque([reviewed()]),
+    world = DynamicWorld(
+        planner=[plan_reply(implement("h1")), plan_reply(implement("h2"))],
+        implementer=[_failed("split it", "a.py"), _failed("break it up", "b.py"), implemented()],
+        max_rounds=2,
+        max_retries_per_round=5,
+        max_unmeasured_turns=5,
     )
-    finished = run_shell(executors, max_rounds=2, max_retries_per_round=5, max_unmeasured_turns=5)
+    finished = simulate(world)
+
+    assert finished.finished
+    assert not finished.liveness_violations
     # The worktree retained the same revision after both turns, so the second repeated the first.
     assert sorted(_implementer_turns(finished).values()) == [1, 2]
-    assert not executors.planner
+    assert world.unused["orchestrator"] == 0
 
 
 def test_a_turn_that_retains_a_new_revision_is_asked_again_and_can_be_measured() -> None:
-    executors = Executors(
-        planner=deque([plan_reply(implement("h1"))]),
-        implementer=deque([_failed("same"), _failed("same"), implemented()]),
-        judge=deque([reviewed()]),
+    world = DynamicWorld(
+        implementer=[_failed("same"), _failed("same"), implemented()],
         retain_per_turn=True,
+        max_rounds=1,
+        max_retries_per_round=5,
+        max_unmeasured_turns=3,
     )
-    finished = run_shell(executors, max_rounds=1, max_retries_per_round=5, max_unmeasured_turns=3)
+    finished = simulate(world)
+
+    assert finished.finished
+    assert not finished.liveness_violations
     assert list(_implementer_turns(finished).values()) == [3]
     proposal = next(item for item in finished.decisions if isinstance(item, ProposeWinner))
     assert proposal.selection.kind == "retained_candidate"
 
 
 def test_turns_that_end_without_a_reply_count_toward_the_bound() -> None:
-    executors = Executors(
-        planner=deque([plan_reply(implement("h1")), plan_reply(implement("h2"))]),
-        implementer=deque([Failed(), Failed(), implemented()]),
-        judge=deque([reviewed()]),
+    world = DynamicWorld(
+        planner=[plan_reply(implement("h1")), plan_reply(implement("h2"))],
+        implementer=[Failed(), Failed(), implemented()],
+        max_rounds=2,
+        max_retries_per_round=5,
     )
-    finished = run_shell(executors, max_rounds=2, max_retries_per_round=5)
+    finished = simulate(world)
+
+    assert finished.finished
+    assert not finished.liveness_violations
     # h1 settles as failed after two lost turns, so h2 gets the third reply and is measured.
     assert sorted(_implementer_turns(finished).values()) == [1, 2]
-    assert not executors.implementer
+    assert world.unused["implementer"] == 0
 
 
 def test_an_unknown_option_is_rejected_by_name() -> None:
@@ -151,9 +170,9 @@ class _Turn(StrEnum):
     REJECTED = "rejected"
 
 
-def _script(turns: list[_Turn]) -> tuple[deque[str | Answer], int]:
+def _script(turns: list[_Turn]) -> tuple[list[str | Answer], int]:
     """The implementer replies for a sequence of outcomes, and how many judge rejections."""
-    replies: deque[str | Answer] = deque()
+    replies: list[str | Answer] = []
     for turn in turns:
         match turn:
             case _Turn.NO_REPLY:
@@ -182,15 +201,19 @@ def test_unmeasured_turns_follow_the_bound_whatever_the_outcomes(
     the agent's wording cannot buy more.
     """
     replies, rejections = _script(turns)
-    executors = Executors(
-        planner=deque([plan_reply(implement("h1")), plan_reply(implement("h2"))]),
+    world = DynamicWorld(
+        planner=[plan_reply(implement("h1")), plan_reply(implement("h2"))],
         implementer=replies,
-        judge=deque(reviewed(passed=False) for _ in range(rejections + 8)),
+        judge=[reviewed(passed=False) for _ in range(rejections + 8)],
         retain_per_turn=new_revision_each_turn,
+        max_rounds=2,
+        max_retries_per_round=12,
+        max_unmeasured_turns=bound,
     )
-    finished = run_shell(
-        executors, max_rounds=2, max_retries_per_round=12, max_unmeasured_turns=bound
-    )
+    finished = simulate(world)
+
+    assert finished.finished
+    assert not finished.liveness_violations
     counts = _implementer_turns(finished)
     assert len(counts) == 2
     assert _planner_turns(finished) == 2
@@ -212,21 +235,17 @@ def test_the_planner_is_not_re_asked_while_nothing_it_sees_has_changed() -> None
     run is not held to the liveness invariants, so the asserted turn count is what fails
     without the fix.
     """
-    executors = Executors(
-        planner=deque(
-            [plan_reply(implement("h1"), implement("h2")), *[plan_reply(implement("h1"))] * 40]
-        ),
-        implementer=deque([_failed("a"), implemented()]),
-        judge=deque([reviewed()]),
-    )
-    finished = run_shell(
-        executors,
-        live=False,
+    world = DynamicWorld(
+        planner=[plan_reply(implement("h1"), implement("h2")), *[plan_reply(implement("h1"))] * 40],
+        implementer=[_failed("a"), implemented()],
         max_rounds=3,
         max_in_flight=2,
         max_retries_per_round=3,
         max_unmeasured_turns=1,
     )
+    finished = simulate(world)
+
+    assert finished.halted is None
     ends = [i for i, item in enumerate(finished.decisions) if isinstance(item, Withdraw)]
     assert len(ends) >= 2
     between = [

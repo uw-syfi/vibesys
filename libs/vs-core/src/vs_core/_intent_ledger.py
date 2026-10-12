@@ -15,8 +15,10 @@ its request fields.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ._dispatch_episode import episode_ended
 from ._intent_forward import declaration, intents_own, owner_signals, success_without_reply
 from ._outcomes import prove_outcome
 from ._proofs import (
@@ -78,9 +80,11 @@ from .types.sessions import (
 from .types.strategy import Cancel, Withdraw
 
 if TYPE_CHECKING:
+    from .types.attempts import AttemptsState
     from .types.common import DecisionId
-    from .types.intents import IntentsEvent, Request
-    from .types.kernel import IntentsContext, Signal, StrategyEvent
+    from .types.intents import IntentsEvent, IntentsState, Request
+    from .types.kernel import IntentsContext, RunState, Signal, StrategyEvent
+    from .types.sessions import SessionsState
 
     type Facts = RequestObserved | TargetObservation
 
@@ -241,8 +245,8 @@ def _observed(
     if root is None:
         raise ContractError(("observation", "request_id"), "observation names no canonical request")
     change = _apply(state, context, root, event)
-    if isinstance(root.request, CancelTurn):
-        return _finish(change, _end_released_dispatch(change.state, context, root, event))
+    if isinstance(root.request, CancelTurn | DispatchTurn):
+        return _finish(change, _end_released_turn_pair(change.state, context, root, event))
     target = event.target
     if target is None or target.target_resource is not None:
         return change
@@ -263,6 +267,15 @@ def _observed(
         restated = TurnObserved(invocation=root.request.invocation, observation=target.observation)
         return _finish(change, AreaChange(state=change.state, signals=(restated,)))
     return change
+
+
+def _end_released_turn_pair(
+    state: IntentsState, context: IntentsContext, root: Intent, event: RequestObserved
+) -> AreaChange[IntentsState]:
+    """A release of a turn closes the other half of its dispatch and cancellation pair."""
+    if isinstance(root.request, CancelTurn):
+        return _end_released_dispatch(state, context, root, event)
+    return _end_cancels_of_released_turn(state, context, root, event)
 
 
 def _end_released_dispatch(
@@ -307,6 +320,53 @@ def _end_released_dispatch(
         }
     )
     return _apply(state, context, dispatch, TargetObservation(observation=ended))
+
+
+def _end_cancels_of_released_turn(
+    state: IntentsState, context: IntentsContext, root: Intent, event: RequestObserved
+) -> AreaChange[IntentsState]:
+    """A turn that ended released ends the cancellations still waiting on its dispatch.
+
+    A cancellation sent while the turn's dispatch was in flight could not prove the turn
+    stopped, so it waits. The dispatch's own release is that proof: left open, the cancellation
+    reaches its reconciliation deadline and blocks, and a run that was stopped cannot close.
+    """
+    observation = event.observation
+    request = root.request
+    if not isinstance(request, DispatchTurn) or not (
+        observation.terminal and observation.released and observation.children_complete
+    ):
+        return AreaChange(state=state)
+    invocations = {
+        row.invocation
+        for row in context.sessions.invocations
+        if row.turn == request.turn and row.scope == request.scope
+    }
+    waiting = [
+        (intent, intent.observation)
+        for intent in state.intents
+        if isinstance(intent.request, CancelTurn)
+        and intent.request.invocation in invocations
+        and intent.phase in (IntentPhase.DISPATCHED, IntentPhase.RECONCILING, IntentPhase.BLOCKED)
+        and intent.observation is not None
+        and not intent.observation.terminal
+    ]
+    change = AreaChange(state=state)
+    for cancel, waiting_on in waiting:
+        ended = observation.model_copy(
+            update={
+                "request_id": cancel.request_id,
+                "event_id": EventId(root=f"{cancel.request_id.root}:released-with-dispatch"),
+                "sequence": waiting_on.sequence + 1,
+                "status": ObservationStatus.CANCELLED,
+                "accepted": False,
+                "resource_id": waiting_on.resource_id,
+            }
+        )
+        change = _finish(
+            change, _apply(change.state, context, cancel, TargetObservation(observation=ended))
+        )
+    return change
 
 
 def _reissuable(intent: Intent, proof: ReissueProof) -> bool:
@@ -504,15 +564,32 @@ def _retry(
     return _reissue(state, intent)
 
 
+@dataclass(frozen=True)
+class _EpisodeFacts:
+    """The state slices an episode check reads, joined from the context and the intents."""
+
+    run: RunState
+    attempts: AttemptsState
+    sessions: SessionsState
+    intents: IntentsState
+
+
 def _undispatchable(
     state: IntentsState, context: IntentsContext, event: RequestUndispatchable
 ) -> AreaChange[IntentsState]:
-    """Close a prepared request whose dependencies failed for good, as an unsent cancellation."""
+    """Close a prepared request that can never be dispatched, as an unsent cancellation.
+
+    Its dependencies failed for good, or the episode that prepared it ended.
+    """
     intent = _unique(state, event.request_id)
-    if (
-        intent is None
-        or intent.phase != IntentPhase.PREPARED
-        or not dependency_failed(intent.request, context.run.receipts, state)
+    if intent is None or intent.phase != IntentPhase.PREPARED:
+        return AreaChange(state=state)
+    facts = _EpisodeFacts(
+        run=context.run, attempts=context.attempts, sessions=context.sessions, intents=state
+    )
+    if not (
+        dependency_failed(intent.request, context.run.receipts, state)
+        or episode_ended(facts, intent.request)
     ):
         return AreaChange(state=state)
     return _cancel_prepared(state, context, (intent,))

@@ -7,9 +7,9 @@ import shutil
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.task_project import write_task
-from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from launch import LaunchSettings, create_session
 from vibesys.api import (
@@ -28,13 +28,10 @@ from vibesys.api.profilers import ProfilerPreflightResult
 from vibesys.api.request import RunEnvironmentSpec, load_task
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
-from vs_runtime.api import OrchestrationPlugin, RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from pydantic import BaseModel
 
 
 _PREFLIGHT_WARNING = (
@@ -70,17 +67,9 @@ class _RecordingBackendFactory:
         return FakeComputeBackend()
 
 
-async def _finish(_run: object, _options: BaseModel) -> RunStatus:
-    return RunStatus.SUCCEEDED
-
-
 def _profiler_registry() -> OrchestrationRegistry:
     registry = OrchestrationRegistry()
-    registry.register_plugin(
-        OrchestrationPlugin(
-            id="profiler-preflight-test", agents=(), options=EmptyOptions, orchestrate=_finish
-        )
-    )
+    registry.register_plugin(failing_plugin("profiler-preflight-test"))
     return registry
 
 
@@ -252,7 +241,7 @@ def test_auto_native_preflight_failure_records_none_without_profiler_support(
 
     result = asyncio.run(session.await_result())
 
-    assert result.succeeded
+    assert result.loop == "profiler-preflight-test"
     assert preflight.calls == [ProfilerKind.LINUX_CPU]
     assert backend.calls == 1
     manifest = Project.open(request.project_root).state.load_run(request.resolved_run_id)
@@ -301,7 +290,7 @@ def test_auto_native_preflight_failure_through_default_launch_wiring(
 
     result = asyncio.run(session.await_result())
 
-    assert result.succeeded
+    assert result.loop == "profiler-preflight-test"
     manifest = Project.open(request.project_root).state.load_run(request.resolved_run_id)
     assert manifest.execution.resolved_profiler == ProfilerKind.NONE.value
 

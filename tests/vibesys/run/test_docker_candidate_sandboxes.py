@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.core_host_world import open_core_host
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import capability_plugin
 
@@ -27,7 +28,6 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_task
-from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_sandbox.api import DockerSandbox
@@ -117,7 +117,7 @@ def _candidate_container_counts(
     integration = LocalRunIntegration()
 
     async def exercise() -> tuple[bool, int, int, int]:
-        async with open_product_run_host(
+        async with open_core_host(
             request, integration, plugin=_PLUGIN, backend_factory=backend_factory
         ) as run:
             supported = run.workspaces.supports_parallel_candidates

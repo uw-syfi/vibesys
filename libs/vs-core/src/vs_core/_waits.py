@@ -23,6 +23,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, assert_never
 
+from ._dispatch_episode import episode_ended
 from ._proofs import dependency_failed
 from .types.attempts import AttemptPhase, SnapshotAndRetain
 from .types.common import (
@@ -56,8 +57,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
     from .types.common import RequestId, SessionId
-    from .types.intents import Intent, IntentsState, Request
-    from .types.kernel import CoreEvent, CoreState, DecisionReceipt
+    from .types.intents import Intent, Request
+    from .types.kernel import CoreEvent, CoreState
     from .types.sessions import Invocation, SessionsState, SessionView
 
 
@@ -557,20 +558,24 @@ def stalled_checkpoint_waits(
     )
 
 
-def undispatchable_requests(
-    intents: IntentsState, receipts: tuple[DecisionReceipt, ...]
-) -> tuple[RequestId, ...]:
-    """The prepared requests whose declared dependencies failed for good, so no dispatch can follow.
+def undispatchable_requests(state: CoreState) -> tuple[RequestId, ...]:
+    """The prepared requests that can never be dispatched, so the step cancels them unsent.
 
-    A dependent is cancelled when its dependency fails, but one prepared after that is never
-    reached by that cancellation. Dispatch authorization refuses it forever (a failed
-    dependency is final), so the step cancels it unsent. The acceptance of the request's own
-    decision is established when it is registered and is not re-checked here.
+    Two facts make a prepared request undispatchable for good. A dependency it declared
+    failed (a dependent is cancelled when its dependency fails, but one prepared after that
+    is never reached by that cancellation), or the episode that prepared it ended: the
+    attempt closed or a stop retired its scope while the request waited for a slot. Dispatch
+    authorization refuses both forever. The acceptance of the request's own decision is
+    established when it is registered and is not re-checked here.
     """
     return tuple(
         row.request_id
-        for row in intents.intents
-        if row.phase == IntentPhase.PREPARED and dependency_failed(row.request, receipts, intents)
+        for row in state.intents.intents
+        if row.phase == IntentPhase.PREPARED
+        and (
+            dependency_failed(row.request, state.run.receipts, state.intents)
+            or episode_ended(state, row.request)
+        )
     )
 
 
@@ -613,7 +618,7 @@ def _yield_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
 
 def _dispatch_waits(core: CoreState) -> list[Wait]:
     """A prepared request waits for the shell to dispatch it, which core must be able to allow."""
-    undispatchable = set(undispatchable_requests(core.intents, core.run.receipts))
+    undispatchable = set(undispatchable_requests(core))
     return [
         Wait(
             waiter=WaitKind.DISPATCH,

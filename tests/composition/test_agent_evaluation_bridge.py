@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from vs_project.api import StateNamespace
     from vs_runtime.api.core import AccessGuardedWorkspace
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
+    from vs_sim.api import Clock
 
 ROLE = AgentRole(
     id="implementer", system_prompt="implement", extra_tools=(AgentTool(id=EVALUATION_TOOL_ID),)
@@ -218,7 +219,12 @@ class Scenario:
 
 
 @asynccontextmanager
-async def scenario(tmp_path: Path, *, submissions: int = 1) -> AsyncIterator[Scenario]:
+async def scenario(
+    tmp_path: Path,
+    *,
+    submissions: int = 1,
+    timed: tuple[Clock, float] | None = None,
+) -> AsyncIterator[Scenario]:
     """A run whose implementer submits ``submissions`` times through the tool, then waits."""
     writers: list[ToolUsingWriter] = []
     resolvers: list[ToolResolver] = []
@@ -252,7 +258,7 @@ async def scenario(tmp_path: Path, *, submissions: int = 1) -> AsyncIterator[Sce
         bridges.append(bridge)
         return bridge
 
-    with open_skeleton_world(tmp_path, WaitingStrategy(), agents=agents) as world:
+    with open_skeleton_world(tmp_path, WaitingStrategy(), agents=agents, timed=timed) as world:
         world.yields = yields
         world.limits = Limits(max_turns=2)
         yield Scenario(world, writers[0], bridges)

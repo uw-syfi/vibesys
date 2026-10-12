@@ -7,7 +7,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import BaseModel, ConfigDict
 
 from vs_project.api import (
     GitError,
@@ -25,7 +24,6 @@ from vs_runtime.api.infrastructure import (
     ProjectRunMismatchError,
     ProjectRunMismatchKind,
     ProjectRunRequest,
-    ProjectStateDeclaration,
     SDKRoots,
     open_project_run_resources,
 )
@@ -38,12 +36,6 @@ if TYPE_CHECKING:
     from vs_project.api import OrchestrationRunManifest
 
 _RUN_ID = "project-run-test"
-
-
-class _PolicyState(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    completed_rounds: tuple[int, ...] = ()
 
 
 @pytest.fixture(autouse=True)
@@ -76,7 +68,6 @@ def _request(
         run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=descriptor or _descriptor(),
-        state=ProjectStateDeclaration("policy", _PolicyState),
     )
 
 
@@ -138,7 +129,6 @@ def test_fresh_run_owns_manifest_git_logger_and_state(tmp_path: Path) -> None:
     assert manifest.orchestration == _descriptor()
     assert resources.git.project_branch == manifest.branch
     assert resources.state.run_id == _RUN_ID
-    assert resources.round_transaction_coordinator is not None
     assert events == ["ready:logs", "log:before logger"]
     assert sys.stderr is not original_stderr
 
@@ -306,36 +296,6 @@ def test_resume_applies_policy_decision_and_restores_current_run(tmp_path: Path)
     ) as resources:
         assert resources.project.state.load_run(_RUN_ID).orchestration == requested
         assert resources.project.state.current_run_id() == _RUN_ID
-
-
-def test_resume_recovers_unfinished_typed_state_transaction(tmp_path: Path) -> None:
-    root = tmp_path / "project"
-    _write_project(root)
-    events: list[str] = []
-    effects = _effects(events)
-    resources = open_project_run_resources(
-        _request(root), effects=effects, resolve_resume=_unexpected_resume
-    )
-    coordinator = resources.round_transaction_coordinator
-    assert coordinator is not None
-    coordinator.begin(
-        1,
-        writes={"state.json": _PolicyState(completed_rounds=(1,))},
-        candidate=False,
-    )
-    resources.close()
-
-    with open_project_run_resources(
-        _request(root, existing=True),
-        effects=effects,
-        resolve_resume=lambda _recorded: OrchestrationResumeDecision(descriptor=None),
-    ) as resumed:
-        state = resumed.project.state.portable_namespace(_RUN_ID, "policy").load(
-            "state.json", _PolicyState
-        )
-        assert state == _PolicyState(completed_rounds=(1,))
-
-    assert "log:[project] recovered round transaction: committed" in events
 
 
 def test_resume_reports_policy_neutral_task_mismatch_and_cleans_logger(tmp_path: Path) -> None:

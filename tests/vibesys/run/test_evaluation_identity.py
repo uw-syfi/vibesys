@@ -5,7 +5,7 @@ from __future__ import annotations
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.run.evaluation_backend import semantic_evaluation_identity
+from vibesys.run.evaluation_identity import semantic_evaluation_identity
 from vs_runtime.api import RunFacts
 from vs_runtime.api.infrastructure import AgentPaths, RunEnvironmentView, TrustedEvaluationPlan
 

@@ -2,8 +2,8 @@
 
 The broker serves an agent's Slurm requests from the submit host. Everything
 here goes through its public surface over the simulated network, with every
-handler a simulated thread and a recording launcher and gate runner standing in
-for ``srun`` and the cluster. The real Unix socket is covered by
+handler a simulated thread and a recording launcher standing in for ``srun`` and the
+cluster. The real Unix socket is covered by
 ``tests/e2e/test_host_command_broker_unix_socket.py``.
 """
 
@@ -13,10 +13,8 @@ import ast
 import base64
 import json
 import posixpath
-import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -28,16 +26,12 @@ from vs_sandbox.api.slurm import (
     COMMAND_BROKER_TOKEN_ENV,
     HOST_COMMAND_CLIENT,
     AgentGpuConfig,
-    BenchmarkOutputKind,
     BrokerTransport,
-    GateKind,
-    Gates,
     GpuCommand,
     GpuCommands,
     GpuJobRequest,
     HostCommandBroker,
     RunRoots,
-    classify_benchmark_output,
 )
 
 # test-isolation: the client is a single-file CLI that is intentionally absent from the library API.
@@ -46,6 +40,7 @@ from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
+    from pathlib import Path
 
     from vs_sim.api import Connection, Event
     from vs_sim.api.testing import Sim
@@ -81,35 +76,6 @@ class _RecordingLauncher:
         return 5
 
 
-class _RecordingGates:
-    """Fake gate runner: records each gate, can write the result file, can block."""
-
-    def __init__(
-        self, threads: SimThreads, *, block: bool = False, result: bytes | None = None
-    ) -> None:
-        self.runs: list[tuple[GateKind, tuple[str, ...], Path]] = []
-        self.cancelled = threads.event()
-        self._block = block
-        self._result = result
-
-    def run(
-        self,
-        kind: GateKind,
-        arguments: Sequence[str],
-        *,
-        cwd: Path,
-        write: Callable[[bytes], None],
-        cancel: Event,
-    ) -> int:
-        self.runs.append((kind, tuple(arguments), cwd))
-        write(f"gate {kind.value}\n".encode())
-        if self._result is not None and arguments:
-            Path(arguments[-1]).write_bytes(self._result)
-        if self._block and cancel.wait(HANG_GUARD_S):
-            self.cancelled.set()
-        return 3
-
-
 class _PrefixConfinement:
     """Fake confinement that records the workspace it was asked to confine to."""
 
@@ -138,10 +104,6 @@ def _gpu(launcher: _RecordingLauncher, host_env: Mapping[str, str] | None = None
     return GpuCommands(_config(), _PrefixConfinement(), host_env or {}, launcher=launcher)
 
 
-def _gates(gates: _RecordingGates, output_argument: str | None = _OUTPUT_ARGUMENT) -> Gates:
-    return Gates(gates, output_argument)
-
-
 @dataclass(frozen=True)
 class _Network:
     """The simulated network the broker listens on and the clients dial."""
@@ -168,13 +130,11 @@ def _serving(
     workspace: Path,
     *,
     gpu: GpuCommands | None = None,
-    gates: Gates | None = None,
 ) -> Iterator[HostCommandBroker]:
     broker = HostCommandBroker(
         tmp_path / "broker.sock",
         roots=RunRoots((workspace,)),
         gpu=gpu,
-        gates=gates,
         transport=net.transport,
     )
     broker.start()
@@ -230,17 +190,6 @@ def _gpu_call(broker: HostCommandBroker, cwd: str, **updates: object) -> dict[st
         "gpus": 1,
         "time_minutes": 1,
         "env": {},
-    }
-    return {**call, **updates}
-
-
-def _gate_call(broker: HostCommandBroker, cwd: str, **updates: object) -> dict[str, object]:
-    call: dict[str, object] = {
-        "op": "gate",
-        "token": broker.token,
-        "kind": "accuracy",
-        "arguments": [],
-        "cwd": cwd,
     }
     return {**call, **updates}
 
@@ -387,272 +336,12 @@ class TestGpuOperation:
         self, sim: Sim, tmp_path: Path, workspace: Path
     ) -> None:
         def program(net: _Network) -> dict[str, object]:
-            gates = _RecordingGates(net.threads)
-            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
+            with _serving(net, tmp_path, workspace) as broker:
                 return _raw_request(net, broker, _gpu_call(broker, str(workspace)))
 
         reply = _simulate(sim, program)
 
         assert "does not offer the gpu operation" in str(reply["error"])
-
-
-class TestGateOperation:
-    def test_runs_the_planned_gate_from_the_requested_directory(
-        self,
-        sim: Sim,
-        tmp_path: Path,
-        workspace: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsysbinary: pytest.CaptureFixture[bytes],
-    ) -> None:
-        monkeypatch.chdir(workspace)
-
-        def program(net: _Network) -> tuple[int, _RecordingGates]:
-            gates = _RecordingGates(net.threads)
-            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
-                _point_at(monkeypatch, broker)
-                return _run_client(net, ["--gate", "accuracy"]), gates
-
-        status, gates = _simulate(sim, program)
-
-        assert status == 3
-        assert capsysbinary.readouterr().out == b"gate accuracy\n"
-        assert gates.runs == [(GateKind.ACCURACY, (), workspace.resolve())]
-
-    def test_a_workspace_result_path_passes_through_unchanged(
-        self, sim: Sim, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.chdir(workspace)
-
-        def program(net: _Network) -> _RecordingGates:
-            gates = _RecordingGates(net.threads)
-            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
-                _point_at(monkeypatch, broker)
-                _run_client(
-                    net, ["--gate", "benchmark", _OUTPUT_ARGUMENT, ".vibesys-benchmark-x1.json"]
-                )
-            return gates
-
-        assert _simulate(sim, program).runs[0][1] == (
-            _OUTPUT_ARGUMENT,
-            ".vibesys-benchmark-x1.json",
-        )
-
-    def test_a_framework_result_is_written_on_the_host_and_relayed_to_the_caller(
-        self, sim: Sim, tmp_path: Path, workspace: Path
-    ) -> None:
-        """The gate writes a host file of the same allowed shape; the caller gets its contents."""
-
-        def program(net: _Network) -> tuple[list[dict[str, Any]], _RecordingGates]:
-            gates = _RecordingGates(net.threads, result=b'{"ok": true}')
-            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
-                frames = _frames(
-                    net,
-                    broker,
-                    _gate_call(
-                        broker,
-                        str(workspace),
-                        kind="benchmark",
-                        arguments=[_OUTPUT_ARGUMENT, _FRAMEWORK_RESULT],
-                    ),
-                )
-            return frames, gates
-
-        frames, gates = _simulate(sim, program)
-
-        argument = gates.runs[0][1]
-        assert argument[0] == _OUTPUT_ARGUMENT
-        assert argument[1] != _FRAMEWORK_RESULT
-        # The wrapper that runs the gate accepts exactly this shape, and the broker removed it.
-        assert classify_benchmark_output(argument[1]) is BenchmarkOutputKind.FRAMEWORK
-        assert not Path(argument[1]).exists()
-        files = [frame["file"] for frame in frames if "file" in frame]
-        assert len(files) == 1
-        assert files[0]["path"] == _FRAMEWORK_RESULT
-        assert base64.b64decode(files[0]["data"]) == b'{"ok": true}'
-        assert frames[-1] == {"exit": 3}
-
-    def test_the_client_writes_the_relayed_file_where_the_caller_asked(
-        self, sim: Sim, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # The framework names this fixed /tmp shape; a fresh nonce keeps runs apart.
-        target = Path(f"/tmp/vibesys-framework-benchmark-{uuid.uuid4().hex}.json")  # noqa: S108  # lint-waiver: LW-954374 [S108]; the framework's result path shape under test.
-        monkeypatch.chdir(workspace)
-
-        def program(net: _Network) -> int:
-            gates = _RecordingGates(net.threads, result=b"relayed")
-            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
-                _point_at(monkeypatch, broker)
-                return _run_client(net, ["--gate", "benchmark", _OUTPUT_ARGUMENT, str(target)])
-
-        try:
-            status = _simulate(sim, program)
-
-            assert status == 3
-            assert target.read_bytes() == b"relayed"
-            assert list(target.parent.glob(f".{target.name}*")) == []
-        finally:
-            target.unlink(missing_ok=True)
-
-    @settings(max_examples=60, deadline=None)
-    @given(
-        seed=SEEDS,
-        kind=st.sampled_from(list(GateKind)),
-        arguments=st.lists(
-            st.sampled_from(
-                [
-                    _OUTPUT_ARGUMENT,
-                    "--other",
-                    "x",
-                    ".vibesys-benchmark-ok.json",
-                    ".vibesys-benchmark-/../escape.json",
-                    _FRAMEWORK_RESULT,
-                    "/tmp/vibesys-framework-benchmark-../x.json",  # noqa: S108  # lint-waiver: LW-954373 [S108]; a rejected path under test.
-                    "/etc/passwd",
-                ]
-            ),
-            max_size=3,
-        ),
-    )
-    def test_gate_arguments_are_accepted_only_in_the_planned_shapes(
-        self,
-        seed: int | None,
-        kind: GateKind,
-        arguments: list[str],
-        tmp_path_factory: pytest.TempPathFactory,
-    ) -> None:
-        workspace = tmp_path_factory.mktemp("workspace")
-        valid_results = {".vibesys-benchmark-ok.json", _FRAMEWORK_RESULT}
-
-        def program(net: _Network) -> tuple[list[dict[str, Any]], _RecordingGates]:
-            gates = _RecordingGates(net.threads)
-            with _serving(net, workspace, workspace, gates=_gates(gates)) as broker:
-                call = _gate_call(broker, str(workspace), kind=kind.value, arguments=arguments)
-                return _frames(net, broker, call), gates
-
-        frames, gates = _simulate_with(seed, program)
-
-        expected = arguments == [] or (
-            kind is GateKind.BENCHMARK
-            and len(arguments) == 2
-            and arguments[0] == _OUTPUT_ARGUMENT
-            and arguments[1] in valid_results
-        )
-        assert bool(gates.runs) == expected
-        if expected and kind is GateKind.BENCHMARK:
-            # What the broker hands the gate wrapper is itself an allowed result path:
-            # the wrapper validates it again with the same function.
-            assert classify_benchmark_output(gates.runs[-1][1][1]) is not None
-        if not expected:
-            assert "invalid arguments" in str(frames[0]["error"])
-
-    def test_a_benchmark_without_a_declared_result_argument_takes_no_arguments(
-        self, sim: Sim, tmp_path: Path, workspace: Path
-    ) -> None:
-        def program(net: _Network) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-            gates = _RecordingGates(net.threads)
-            with _serving(net, tmp_path, workspace, gates=_gates(gates, None)) as broker:
-                refused = _frames(
-                    net,
-                    broker,
-                    _gate_call(broker, str(workspace), kind="benchmark", arguments=["--x", "y"]),
-                )
-                accepted = _frames(
-                    net, broker, _gate_call(broker, str(workspace), kind="benchmark")
-                )
-            return refused, accepted
-
-        refused, accepted = _simulate(sim, program)
-
-        assert "invalid arguments" in str(refused[0]["error"])
-        assert accepted[-1] == {"exit": 3}
-
-    @settings(max_examples=40, deadline=None)
-    @given(
-        seed=SEEDS,
-        kind=st.sampled_from(list(GateKind)),
-        output_argument=st.one_of(st.none(), st.just(_OUTPUT_ARGUMENT), st.just("--output-json")),
-    )
-    def test_a_gate_the_agent_names_runs_whatever_result_argument_the_task_declares(
-        self,
-        seed: int | None,
-        kind: GateKind,
-        output_argument: str | None,
-        tmp_path_factory: pytest.TempPathFactory,
-    ) -> None:
-        """The agent names only the gate; the broker supplies the task's result argument."""
-        workspace = tmp_path_factory.mktemp("workspace")
-
-        def program(net: _Network) -> tuple[list[dict[str, Any]], _RecordingGates]:
-            gates = _RecordingGates(net.threads, result=b'{"ok": true}')
-            with _serving(net, workspace, workspace, gates=_gates(gates, output_argument)) as b:
-                return _frames(net, b, _gate_call(b, str(workspace), kind=kind.value)), gates
-
-        frames, gates = _simulate_with(seed, program)
-
-        assert frames[-1] == {"exit": 3}
-        (run_kind, arguments, _cwd) = gates.runs[0]
-        assert run_kind is kind
-        files = [frame["file"] for frame in frames if "file" in frame]
-        if kind is GateKind.BENCHMARK and output_argument is not None:
-            # The wrapper that runs the gate accepts exactly this shape, and the broker removed it.
-            assert arguments[0] == output_argument
-            assert classify_benchmark_output(arguments[1]) is BenchmarkOutputKind.FRAMEWORK
-            assert not Path(arguments[1]).exists()
-            assert len(files) == 1
-            assert classify_benchmark_output(files[0]["path"]) is BenchmarkOutputKind.FRAMEWORK
-            assert base64.b64decode(files[0]["data"]) == b'{"ok": true}'
-            # The output names the file the agent can read.
-            output = b"".join(
-                base64.b64decode(frame["output"]) for frame in frames if "output" in frame
-            )
-            assert f"benchmark result file: {files[0]['path']}\n".encode() in output
-        else:
-            assert arguments == ()
-            assert files == []
-
-    def test_the_client_writes_the_relayed_file_and_names_it_in_the_output(
-        self,
-        sim: Sim,
-        tmp_path: Path,
-        workspace: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsysbinary: pytest.CaptureFixture[bytes],
-    ) -> None:
-        monkeypatch.chdir(workspace)
-
-        def program(net: _Network) -> int:
-            gates = _RecordingGates(net.threads, result=b"relayed")
-            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
-                _point_at(monkeypatch, broker)
-                return _run_client(net, ["--gate", "benchmark"])
-
-        status = _simulate(sim, program)
-        output = capsysbinary.readouterr().out.decode()
-        (line,) = [text for text in output.splitlines() if text.startswith("benchmark result")]
-        target = Path(line.removeprefix("benchmark result file: "))
-        try:
-            assert status == 3
-            assert target.read_bytes() == b"relayed"
-            assert list(target.parent.glob(f".{target.name}*")) == []
-        finally:
-            target.unlink(missing_ok=True)
-
-    def test_closing_the_connection_cancels_the_gate(
-        self, sim: Sim, tmp_path: Path, workspace: Path
-    ) -> None:
-        def program(net: _Network) -> tuple[dict[str, Any], bool]:
-            gates = _RecordingGates(net.threads, block=True)
-            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
-                client = _send_request(net, broker, _gate_call(broker, str(workspace)))
-                first = _read_frame(client)
-                client.close()
-                return first, gates.cancelled.wait(HANG_GUARD_S)
-
-        first, cancelled = _simulate(sim, program)
-
-        assert base64.b64decode(first["output"]) == b"gate accuracy\n"
-        assert cancelled
 
 
 def _simulate_with[T](seed: int | None, program: Callable[[_Network], T]) -> T:
@@ -766,13 +455,15 @@ class TestClient:
         assert execute(["--", "nvidia-smi"], stop=Stop()) == 2
         assert "no command broker" in capsys.readouterr().err
 
-    def test_an_unknown_gate_is_a_usage_error(
+    def test_the_client_has_no_gate_mode(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         monkeypatch.setenv(COMMAND_BROKER_SOCKET_ENV, "/nonexistent")
         monkeypatch.setenv(COMMAND_BROKER_TOKEN_ENV, "t")
-        assert execute(["--gate", "profile"], stop=Stop()) == 2
-        assert "--gate takes one of" in capsys.readouterr().err
+        with pytest.raises(SystemExit) as raised:
+            execute(["--gate", "accuracy"], stop=Stop())
+        assert raised.value.code == 2
+        assert "unrecognized arguments" in capsys.readouterr().err
 
     def test_a_dropped_connection_is_a_failure_not_a_success(
         self, sim: Sim, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

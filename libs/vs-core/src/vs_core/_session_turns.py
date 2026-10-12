@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from . import _session_checkpoints
+from ._acquisition_stall import stalled_acquisition
 from ._continuations import bounded_wait, wait_refused_at_turn_end
 from ._deadlines import bound_to_run, time_remains
 from ._evaluation_history import produce_history
@@ -1165,7 +1166,13 @@ def _after_ensure(
     if isinstance(closure, Proven):
         invocation = _current_invocation(grouped.state, session)
         if invocation is not None and invocation.phase == SessionPhase.ACQUIRING:
-            abandoned = invocation.model_copy(update={"phase": SessionPhase.TERMINAL})
+            # Never reached an executor; closure counts a turn drained only on an observation.
+            abandoned = invocation.model_copy(
+                update={
+                    "phase": SessionPhase.TERMINAL,
+                    "observation": stalled_acquisition(invocation, context.run.now_at),
+                }
+            )
             grouped = grouped.model_copy(
                 update={"state": _replace_invocation(grouped.state, abandoned)}
             )

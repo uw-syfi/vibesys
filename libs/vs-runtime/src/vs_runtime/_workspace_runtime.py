@@ -28,7 +28,6 @@ from vs_runtime.contracts import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from vs_runtime._agent_sessions import RuntimeWorkspaceAgentSessions
     from vs_runtime._local_validation import FrameworkValidationResult
     from vs_runtime._run_host import BlockingOperations
     from vs_runtime._trusted_evaluation import (
@@ -79,7 +78,6 @@ class RuntimeBenchmarkRun:
 class WorkspaceRuntime:
     """Composition-only bundle of capabilities sharing workspace ownership."""
 
-    agents: RuntimeWorkspaceAgentSessions
     workspaces: RuntimeWorkspaces
     commands: RuntimeCommands
     evaluation: RuntimeWorkspaceEvaluation

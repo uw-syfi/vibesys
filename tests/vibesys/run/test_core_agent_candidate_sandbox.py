@@ -92,10 +92,10 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
             )
             roots = given_to_client["backends"]
             assert isinstance(roots, dict)
-            root_served = lookup(host.run.workspaces.root.path) is None
+            root_served = lookup(host.workspaces.root.path) is None
             mapped: list[str] = []
             for _ in range(candidates):
-                candidate = await host.run.workspaces.create_candidate()
+                candidate = await host.workspaces.create_candidate()
                 path = candidate.path
                 sandbox: DockerSandbox | None = lookup(path)
                 assert sandbox is not None
@@ -191,8 +191,8 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
         ) as host:
             turns.root_containers = {c.container_id for c in engine.containers()}
             paths = [
-                host.run.workspaces.root.path,
-                *[(await host.run.workspaces.create_candidate()).path for _ in range(candidates)],
+                host.workspaces.root.path,
+                *[(await host.workspaces.create_candidate()).path for _ in range(candidates)],
             ]
             turns.candidate_containers = {
                 c.container_id for c in engine.containers()

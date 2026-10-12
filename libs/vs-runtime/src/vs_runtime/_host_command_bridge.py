@@ -1,16 +1,14 @@
 """What an editor container needs to reach a run's host command broker.
 
-Both Slurm run environments keep the agent in a Docker container and answer its
-requests on the host: trusted gates, and, when the operator enables it, the
-agent's own GPU jobs. The container receives the broker's Unix socket, the
-single-file client, and the variables the client reads. The broker, its token
-and the planned commands stay on the host.
+Both Slurm run environments keep the agent in a Docker container and, when the
+operator enables it, answer the agent's own GPU jobs on the host. The container
+receives the broker's Unix socket, the single-file client, and the variables the
+client reads. The broker and its token stay on the host.
 """
 
 from __future__ import annotations
 
 import secrets
-import shlex
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -27,7 +25,6 @@ from vs_sandbox.api.slurm import (
     COMMAND_BROKER_SOCKET_ENV,
     COMMAND_BROKER_TOKEN_ENV,
     HOST_COMMAND_CLIENT,
-    GateKind,
 )
 
 if TYPE_CHECKING:
@@ -39,12 +36,6 @@ _SHEBANG = "#!/usr/bin/env python3\n"
 #: Where the client appears in the container. Every image has it on ``PATH``,
 #: including a login shell's, which resets any ``PATH`` set through the environment.
 CLIENT_BIN_DIR = "/usr/local/bin"
-
-
-def planned_gates(accuracy_command: str | None, benchmark_command: str | None) -> tuple[str, ...]:
-    """Return the gate kinds the task plans, as the client names them."""
-    planned = {GateKind.ACCURACY: accuracy_command, GateKind.BENCHMARK: benchmark_command}
-    return tuple(kind.value for kind, command in planned.items() if command)
 
 
 def new_broker_socket_path() -> Path:
@@ -108,14 +99,11 @@ def cluster_editor_extras() -> EditorExtras:
 def agent_paths(
     sandbox: object,
     request: RunEnvironmentRequest,
-    *,
-    accuracy_command: str | None = None,
-    benchmark_command: str | None = None,
 ) -> AgentPaths:
-    """Return the agent's paths, with the accuracy and benchmark commands it is given, if any.
+    """Return the agent's paths.
 
-    A run whose agents request trusted evaluation through the evaluation tool gives
-    none: a command named here would only run unscored on the container's side.
+    The agents request trusted evaluation through the evaluation tool, so no accuracy
+    or benchmark command is named: it would only run unscored on the container's side.
     """
     objective = _materialize_effective_objective(request)
     return AgentPaths(
@@ -124,31 +112,5 @@ def agent_paths(
             if objective is not None
             else "OBJECTIVE.md"
         ),
-        accuracy_command=accuracy_command,
-        benchmark_command=benchmark_command,
         profiler_support=(request.profiler_support_name if request.profiler_support_path else None),
-    )
-
-
-def bridged_agent_paths(
-    sandbox: object,
-    request: RunEnvironmentRequest,
-    launcher: Path,
-    *,
-    accuracy: bool,
-    benchmark: bool,
-) -> AgentPaths:
-    """Return the agent's paths and gate commands for a container bridged to a broker.
-
-    A gate is offered (``launcher --gate KIND``) only when the task *planned* it.
-    """
-    return agent_paths(
-        sandbox,
-        request,
-        accuracy_command=(
-            shlex.join((str(launcher), "--gate", GateKind.ACCURACY.value)) if accuracy else None
-        ),
-        benchmark_command=(
-            shlex.join((str(launcher), "--gate", GateKind.BENCHMARK.value)) if benchmark else None
-        ),
     )

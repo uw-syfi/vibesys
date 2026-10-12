@@ -7,7 +7,7 @@
 import type {Hosts} from '@vibesys/feature-hosts/main';
 import type {RunControl} from '@vibesys/feature-run-control/main';
 import {shellWords} from '@vibesys/feature-start-run/state';
-import {type HostId, type HostKey, hostFromKey, hostKey, hostLabel} from '@vibesys/hosts';
+import {type HostKey, hostFromKey, hostKey, hostLabel} from '@vibesys/hosts';
 import {
   type ChromeState,
   WELCOME_EVENTS,
@@ -51,14 +51,17 @@ export class Desktop {
   #welcomeRenderer: string | null = null;
   /** The last Chrome mode published to the welcome renderer. */
   #publishedMode: ChromeState['mode'];
+  /** Fences a disk snapshot that overlaps a newer recent-run change event. */
+  #recentGeneration = 0;
 
   constructor(deps: DesktopDeps) {
     this.#deps = deps;
     this.#publishedMode = deps.window.mode;
     deps.settings.onRecentChanged(recent => {
+      const generation = ++this.#recentGeneration;
       const value = welcomeRecent(recent);
       deps.window.sendWelcome(WELCOME_EVENTS.recent, deps.welcome.recent(value));
-      void this.#watchRecent(recent);
+      void this.#watchRecent(recent, generation);
     });
     const welcome = deps.window.welcome.webContents;
     bindWelcomeIpc(
@@ -96,7 +99,10 @@ export class Desktop {
         deps.hosts.retireInspectionOwner(rendererGeneration);
         if (this.#welcomeRenderer === rendererGeneration) this.#welcomeRenderer = null;
         try {
-          await deps.hosts.cancelCheckoutOwner(rendererGeneration);
+          await Promise.all([
+            deps.hosts.cancelCheckoutOwner(rendererGeneration),
+            deps.hosts.retireOwner(rendererGeneration),
+          ]);
         } catch (error) {
           deps.log(`could not retire checkout changes: ${(error as Error).message}`);
         }
@@ -151,15 +157,13 @@ export class Desktop {
     }
   }
 
-  /** Watch the hosts of the recent runs, so their masters are warm and their statuses pushed. */
-  async #watchRecent(recent: RecentFile): Promise<void> {
-    for (const host of new Set(recent.runs.map(run => run.host))) {
-      const id: HostId = hostFromKey(host);
-      try {
-        if ((await this.#deps.hosts.checkout(id)) !== null) await this.#deps.hosts.watch(id);
-      } catch (error) {
-        this.#deps.log(`could not watch ${host}: ${(error as Error).message}`);
-      }
+  /** Reconcile the hosts of the bounded recent-run file unless a newer file already arrived. */
+  async #watchRecent(recent: RecentFile, generation: number): Promise<void> {
+    if (generation !== this.#recentGeneration) return;
+    try {
+      await this.#deps.hosts.recent([...new Set(recent.runs.map(run => hostFromKey(run.host)))]);
+    } catch (error) {
+      this.#deps.log(`could not watch recent hosts: ${(error as Error).message}`);
     }
   }
 
@@ -169,8 +173,9 @@ export class Desktop {
   }
 
   async #overview(): Promise<WelcomeOverview> {
+    const generation = ++this.#recentGeneration;
     const recent = await this.#deps.settings.recent();
-    void this.#watchRecent(recent);
+    void this.#watchRecent(recent, generation);
     const settingsProblem = await this.#deps.hosts.settingsProblem();
     return this.#deps.welcome.snapshot({
       settingsProblem,
@@ -190,7 +195,7 @@ export class Desktop {
       case 'hosts':
         return hosts.aliases();
       case 'host':
-        return hosts.host(request.host);
+        return hosts.host(request.host, rendererGeneration);
       case 'set-checkout':
         return hosts.setCheckout(request.host, request.path, {
           owner: rendererGeneration,

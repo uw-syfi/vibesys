@@ -14,13 +14,13 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from launch.composition import AGENT_TOOL_BINDINGS
+from launch.composition import profiler_server
 from vibesys.api.wiring import AgentToolContext
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.run.contracts import ProfilerKind
@@ -32,12 +32,8 @@ from vs_agent.api import (
     container_import_roots,
     containerize_server,
 )
-from vs_evaluation.api import EvaluationAgentRole, EvaluationGrant
-from vs_evaluation.api.tools import core_evaluation_mcp_descriptor, evaluation_mcp_descriptor
+from vs_evaluation.api.tools import core_evaluation_mcp_descriptor
 from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor
-
-if TYPE_CHECKING:
-    from vs_runtime.api import AgentToolBindingContext
 
 _PYTHON_NAMES = ("python", "python3")
 _expected_path = os.pathsep.join(container_import_roots())
@@ -56,22 +52,11 @@ def _spec(descriptor: ToolServerDescriptor) -> MCPServerSpec:
 
 def _launcher_descriptors() -> list[ToolServerDescriptor]:
     """What each server launcher in the product produces, for every profiler it can bind."""
-    grant = EvaluationGrant(
-        token="t" * 32,
-        principal_id="implementer",
-        role=EvaluationAgentRole.IMPLEMENTER,
-        scope_id="work",
-    )
-    descriptors = [
-        core_evaluation_mcp_descriptor("token", "/run/evaluation.sock"),
-        evaluation_mcp_descriptor(grant, "/run/evaluation.sock"),
-    ]
+    descriptors = [core_evaluation_mcp_descriptor("token", "/run/evaluation.sock")]
     for kind in ProfilerKind:
-        context = AgentToolContext(profiler_id=kind.value)
-        # The profiler binding reads only the context, not the session binding.
-        descriptors += AGENT_TOOL_BINDINGS["profiler"](
-            context, cast("AgentToolBindingContext", None)
-        )
+        server = profiler_server(AgentToolContext(profiler_id=kind.value))
+        if server is not None:
+            descriptors.append(server)
     return descriptors
 
 
@@ -208,7 +193,6 @@ def test_every_module_a_container_server_imports_needs_only_the_container_interp
 ):
     modules = [
         "vs_evaluation.agent_core_mcp",
-        "vs_evaluation.agent_mcp",
         *_server_framework_imports(),
     ]
 

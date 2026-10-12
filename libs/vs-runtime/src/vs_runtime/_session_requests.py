@@ -83,7 +83,6 @@ from vs_runtime._access_settlement import (
     AccessViolation,
     access_unproven,
 )
-from vs_runtime._agent_sessions import await_session_operation
 from vs_runtime._core_identity import CoreRequestId, ReceiptKey, core_identity, core_named
 from vs_runtime._core_requests import ExecutionContext, ExecutionOutcome, ExecutionResult
 from vs_runtime._observation_factory import (
@@ -101,6 +100,7 @@ from vs_runtime._receipt_store import (
     Transient,
     owner_key,
 )
+from vs_runtime._session_operation import await_session_operation
 
 if TYPE_CHECKING:
     from collections.abc import Callable

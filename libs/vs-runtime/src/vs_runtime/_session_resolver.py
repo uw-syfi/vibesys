@@ -99,7 +99,7 @@ class ProductionSessionResolver:
             raise RuntimeContractError(message)
         self._inputs = inputs
         self._roles = roles
-        self._renderer = inputs.renderer or TemplateRenderer(Path(__file__).parent / "prompts")
+        self._messages = TurnMessages(inputs.artifacts, inputs.renderer)
 
     def _role(self, role: RoleId) -> AgentRole | None:
         return self._roles.get(role.root)
@@ -178,6 +178,23 @@ class ProductionSessionResolver:
 
     def message(self, turn: TurnSpec, inputs: tuple[SessionInput, ...]) -> RenderedPrompt | None:
         """The turn message, or None when any artifact is missing, corrupt or unreadable."""
+        return self._messages.render(turn, inputs)
+
+
+class TurnMessages:
+    """Renders a turn's message from its prompts and the inputs reserved for it.
+
+    Operator steering reaches a turn here: every reserved input is a steer, and the template
+    shows every reserved input after the prompts, in reservation order.
+    """
+
+    def __init__(self, artifacts: ArtifactStore, renderer: TemplateRenderer | None = None) -> None:
+        """Read artifacts from ``artifacts``; ``renderer`` defaults to the packaged template."""
+        self._artifacts = artifacts
+        self._renderer = renderer or TemplateRenderer(Path(__file__).parent / "prompts")
+
+    def render(self, turn: TurnSpec, inputs: tuple[SessionInput, ...]) -> RenderedPrompt | None:
+        """The turn message, or None when any artifact is missing, corrupt or unreadable."""
         ordered = sorted(inputs, key=lambda item: (item.sequence, item.input_id.root))
         try:
             prompts = [self._text(ref) for ref in turn.prompts]
@@ -188,10 +205,10 @@ class ProductionSessionResolver:
                 self._text(dependency)
         except (ArtifactStoreError, UnicodeDecodeError, _MissingArtifactError):
             return None
-        return self._renderer.render_template(_TEMPLATE, prompts=prompts, inputs=texts)
+        return self._renderer.render_template(_TEMPLATE, prompts=prompts, steers=texts)
 
     def _text(self, ref: ArtifactRef) -> str:
-        content = self._inputs.artifacts.read_digest(ref.digest)
+        content = self._artifacts.read_digest(ref.digest)
         if content is None:
             raise _MissingArtifactError
         return content.decode()
@@ -260,6 +277,7 @@ __all__ = [
     "SessionExecutors",
     "SessionSpecFactory",
     "ToolServerSource",
+    "TurnMessages",
     "open_session_requests",
     "session_executors",
 ]
