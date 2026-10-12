@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal, get_args, get_origin, overload
 from ._outcomes import prove_outcome
 from ._values import (
     ImmutableSchemaError,
+    InstanceMemo,
     canonical_json,
     deeply_immutable,
     validate_immutable_schema,
@@ -83,6 +84,7 @@ class OperationRegistry:
     """Closed registered codec; changed schemas require explicit migration."""
 
     def __init__(self, registrations: tuple[OperationRegistration, ...] = ()) -> None:
+        self._checked_intents: InstanceMemo[bool] = InstanceMemo()
         self._registrations = registrations
         seen: set[str] = set()
         for index, registration in enumerate(registrations):
@@ -331,10 +333,16 @@ class OperationRegistry:
             if self._find(schema).descriptor != descriptor:
                 raise ContractError(("registry", descriptor.kind), "descriptor migration required")
         for intent in state.intents.intents:
+            if self._checked_intents.get(intent):
+                continue
             if isinstance(intent.request, ExecuteRegisteredOperation):
                 self.decode(intent.request.operation)
                 if intent.outcome_json is not None:
                     self.decode_outcome(intent.request.operation.schema_ref, intent.outcome_json)
+            if intent.model_config.get("frozen"):
+                # An intent is checked against this registry's codecs, and a frozen one never
+                # changes, so each durable write re-proves only the intents it adds.
+                self._checked_intents.put(intent, fact=True)
 
 
 def operation_result(operation_id: OperationId, event: RequestObserved) -> OperationResult:

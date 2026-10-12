@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import json
+import weakref
 from enum import Enum
-from functools import cache, lru_cache
+from functools import cache
 from hashlib import sha256
 from types import UnionType
-from typing import TYPE_CHECKING, Annotated, Literal, TypeAliasType, Union, get_args, get_origin
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Literal,
+    TypeAliasType,
+    Union,
+    get_args,
+    get_origin,
+)
 
 from pydantic import BaseModel
 
@@ -111,16 +120,51 @@ def _wire_names(model: type[BaseModel]) -> dict[str, str]:
     }
 
 
-#: Models whose immutability verdict is remembered, by value. Every durable write checks the
-#: whole run envelope, and each write shares almost all of its models with the last, so without
-#: this the check repeats the walk over the unchanged history on every step. The verdict of a
-#: frozen model depends only on its class and field values, which its hash and equality cover.
-_REMEMBERED_MODELS = 65536
+class InstanceMemo[Fact]:
+    """Remember one fact per live model instance, looked up by identity.
+
+    Every durable write checks and serializes the whole run envelope, and each write shares
+    almost all of its models with the last. Keying by value would hash the model on every
+    lookup, and a pydantic model's hash walks every field recursively, which costs as much as
+    the walk being saved. The identity of a live object is O(1) and cannot be reused while the
+    entry exists: a weak reference evicts the entry when the instance is collected, and a hit
+    must still resolve to the very same object. The facts remembered here (the verdict and
+    canonical text of a frozen model) depend only on the instance's class and field values,
+    which a frozen model never changes.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[int, tuple[weakref.ref[BaseModel], Fact]] = {}
+
+    def get(self, model: BaseModel) -> Fact | None:
+        """The remembered fact for this very instance, or None."""
+        entry = self._entries.get(id(model))
+        if entry is not None and entry[0]() is model:
+            return entry[1]
+        return None
+
+    def put(self, model: BaseModel, fact: Fact) -> None:
+        """Remember ``fact`` for ``model`` until it is collected."""
+        key = id(model)
+        entries = self._entries
+
+        def evict(ref: weakref.ref[BaseModel]) -> None:
+            current = entries.get(key)
+            if current is not None and current[0] is ref:
+                del entries[key]
+
+        entries[key] = (weakref.ref(model, evict), fact)
 
 
-@lru_cache(maxsize=_REMEMBERED_MODELS)
+_IMMUTABILITY_VERDICTS: InstanceMemo[bool] = InstanceMemo()
+
+
 def _frozen_model_is_deeply_immutable(model: BaseModel) -> bool:
-    return _walk_immutable(getattr(model, name) for name in _field_names(type(model)))
+    known = _IMMUTABILITY_VERDICTS.get(model)
+    if known is None:
+        known = _walk_immutable(getattr(model, name) for name in _field_names(type(model)))
+        _IMMUTABILITY_VERDICTS.put(model, known)
+    return known
 
 
 def deeply_immutable(value: object) -> bool:
@@ -134,6 +178,7 @@ def _walk_immutable(values: Iterable[object]) -> bool:
     # match a model, tuple, frozenset or Enum, so it only skips checks that
     # would fail.
     pending = list(values)
+    recall = _IMMUTABILITY_VERDICTS.get
     while pending:
         node = pending.pop()
         if type(node) in _IMMUTABLE_LEAF_TYPES:
@@ -141,11 +186,9 @@ def _walk_immutable(values: Iterable[object]) -> bool:
         if isinstance(node, BaseModel):
             if not node.model_config.get("frozen"):
                 return False
-            try:
+            known = recall(node)  # inlined: this is the hottest loop of every durable write
+            if known is None:
                 known = _frozen_model_is_deeply_immutable(node)
-            except TypeError:
-                # Unhashable: a field holds a list, dict or set, which is mutable.
-                return False
             if not known:
                 return False
         elif isinstance(node, tuple | frozenset):
@@ -155,23 +198,22 @@ def _walk_immutable(values: Iterable[object]) -> bool:
     return True
 
 
+_CANONICAL_TEXTS: InstanceMemo[str] = InstanceMemo()
+
+
 def canonical_json(value: BaseModel) -> str:
     """Keep ordered sequences and canonically sort every unordered collection.
 
-    A frozen value's text depends only on its class and fields, so it is remembered by value:
-    recovery proves the same recorded requests against their digests on every step.
+    A frozen value's text depends only on its class and fields, so it is remembered per
+    instance: recovery proves the same recorded requests against their digests on every step.
     """
-    if value.model_config.get("frozen"):
-        try:
-            return _frozen_canonical_json(value)
-        except TypeError:
-            pass  # unhashable: a field holds a list, dict or set; computed below, uncached
-    return _canonical_json(value)
-
-
-@lru_cache(maxsize=_REMEMBERED_MODELS)
-def _frozen_canonical_json(value: BaseModel) -> str:
-    return _canonical_json(value)
+    if not value.model_config.get("frozen"):
+        return _canonical_json(value)
+    text = _CANONICAL_TEXTS.get(value)
+    if text is None:
+        text = _canonical_json(value)
+        _CANONICAL_TEXTS.put(value, text)
+    return text
 
 
 def _canonical_json(value: BaseModel) -> str:
