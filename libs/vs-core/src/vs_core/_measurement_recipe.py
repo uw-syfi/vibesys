@@ -15,18 +15,16 @@ from typing import Literal
 from pydantic import Field
 
 from vs_core.types.common import ArtifactRef, RevisionRef, Value
-from vs_core.types.evaluation import MeasurementPlan, MeasurementStage
+from vs_core.types.evaluation import MeasurementPlan, MeasurementStage, StageRequirements
 
 type MeasurementPurpose = Literal["baseline", "local-validation", "official", "profile"]
 
 
-class StageBudget(Value):
+class StageBudget(StageRequirements):
     """One measurable stage and the seconds its execution may take."""
 
     stage_id: str = Field(min_length=1)
     execution_seconds: float = Field(ge=0)
-    required_outputs: tuple[str, ...] = ()
-    """What the stage's evidence must contain (see ``MeasurementStage.required_outputs``)."""
 
 
 class MeasurementRecipe(Value):
