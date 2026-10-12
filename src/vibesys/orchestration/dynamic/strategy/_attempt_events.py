@@ -131,7 +131,16 @@ def on_rejected(state: DynamicStrategyState, event: Rejected) -> DynamicStrategy
     index = _awaiting(state, event.decision_id.root)
     if index is None:
         return state
-    return fail(state, index, f"decision rejected: {event.code.value}: {event.detail}")
+    reason = f"decision rejected: {event.code.value}: {event.detail}"
+    record = state.attempts[index]
+    if record.phase is WorkPhase.SETTLE and record.settle_sent:
+        # Core refused the settlement itself: it will never send `AttemptSettled` and the
+        # workstream cannot ask again, so it ends here with its typed failure.
+        ended = record.failed(reason).model_copy(
+            update={"phase": WorkPhase.DONE, "awaiting": None, "step": Step.NEEDED}
+        )
+        return _put(state, index, ended)
+    return fail(state, index, reason)
 
 
 def on_ready(state: DynamicStrategyState, event: AttemptReady) -> DynamicStrategyState:

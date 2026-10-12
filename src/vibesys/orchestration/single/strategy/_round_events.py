@@ -48,6 +48,7 @@ from vs_core.api import (
     Rejected,
     ResumeAuthorized,
     RunView,
+    Settlement,
     SuspendedTurn,
     TurnCandidate,
     TurnCandidateFailed,
@@ -87,7 +88,7 @@ def fail(state: SingleStrategyState, record: RoundState, reason: str) -> SingleS
     if failed.owes_settlement:
         return _put(state, failed.model_copy(update={"phase": WorkPhase.SETTLE}))
     # An attempt core never admitted has nothing to settle: its slot is refunded and the
-    # round is not counted, so the designer's hypothesis is asked again from the ledger.
+    # round ends done; `retire` then counts it as failed in the ledger.
     return _put(state, failed.model_copy(update={"phase": WorkPhase.DONE}))
 
 
@@ -96,7 +97,17 @@ def on_rejected(state: SingleStrategyState, event: Rejected) -> SingleStrategySt
     record = _awaiting(state, event.decision_id.root)
     if record is None:
         return state
-    return fail(state, record, f"decision rejected: {event.code.value}: {event.detail}")
+    reason = f"decision rejected: {event.code.value}: {event.detail}"
+    if record.phase is WorkPhase.SETTLE and record.settle_sent:
+        # Core refused the settlement itself: it will never send `AttemptSettled` and the round
+        # cannot ask again, so the round ends here with its typed failure.
+        return _put(
+            state,
+            record.failed(reason).model_copy(
+                update={"phase": WorkPhase.DONE, "awaiting": None, "step": Step.NEEDED}
+            ),
+        )
+    return fail(state, record, reason)
 
 
 def on_ready(state: SingleStrategyState, event: AttemptReady) -> SingleStrategyState:
@@ -643,10 +654,36 @@ def on_settled(
         return state
     if record.failure == STOPPED:
         return _put(state, record.model_copy(update={"phase": WorkPhase.DONE, "awaiting": None}))
+    return _close(state, config, record, settlement)
+
+
+def retire(state: SingleStrategyState, config: SingleConfig) -> SingleStrategyState:
+    """Close a round that is done without core's settlement having closed it.
+
+    Whichever way a round reaches DONE (an attempt core never admitted, a settlement core
+    refused), it is closed from its state, not from the event that ended it: it is counted as
+    failed in the ledger, so the search moves on instead of asking for the same attempt again. A
+    round a stop ended is cleared without counting; the run is ending.
+    """
+    record = state.round
+    if record is None or record.phase is not WorkPhase.DONE:
+        return state
+    if record.failure == STOPPED:
+        return state.model_copy(update={"round": None})
+    return _close(state, config, record, None)
+
+
+def _close(
+    state: SingleStrategyState,
+    config: SingleConfig,
+    record: RoundState,
+    settlement: Settlement | None,
+) -> SingleStrategyState:
     ledger = context.ledger_of(state, config)
     response = context.response_of(record)
     benchmark, metric = _benchmark_outcome(record)
-    commit = None if settlement.candidate is None else settlement.candidate.revision_id.root
+    retained = None if settlement is None else settlement.candidate
+    commit = None if retained is None else retained.revision_id.root
     passed = record.passed and record.failure is None
     official = passed and record.official_reason is not None
     if response is not None and official and metric is not None:
@@ -677,7 +714,19 @@ def on_settled(
     closed = serial.record_round(closed, serial.focus_policy(config.attribution), passed=passed)
     encoded = rounds.encode(closed)
     benchmark_reading = reading_of(record.readings, EvidenceKind.BENCHMARK)
-    retained = settlement.candidate
+    outcomes = state.outcomes
+    if settlement is not None:
+        outcomes = (
+            *outcomes,
+            RoundOutcome(
+                round_number=record.number,
+                hypothesis_id=record.hypothesis_id,
+                settlement=settlement.settlement_id,
+                candidate=retained,
+                eligible=settlement.eligible,
+                metrics=() if benchmark_reading is None else benchmark_reading.metrics,
+            ),
+        )
     return state.model_copy(
         update={
             "search_json": encoded.search_json,
@@ -686,16 +735,6 @@ def on_settled(
             "round": None,
             "checkpoint": retained if retained is not None else state.checkpoint,
             "last_profile": context.last_profile_of(response) or state.last_profile,
-            "outcomes": (
-                *state.outcomes,
-                RoundOutcome(
-                    round_number=record.number,
-                    hypothesis_id=record.hypothesis_id,
-                    settlement=settlement.settlement_id,
-                    candidate=retained,
-                    eligible=settlement.eligible,
-                    metrics=() if benchmark_reading is None else benchmark_reading.metrics,
-                ),
-            ),
+            "outcomes": outcomes,
         }
     )

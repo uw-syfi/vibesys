@@ -143,9 +143,18 @@ def fail(state: IssueQueueStrategyState, reason: str) -> IssueQueueStrategyState
 
 def on_rejected(state: IssueQueueStrategyState, event: Rejected) -> IssueQueueStrategyState:
     """A decision core refused fails the job awaiting it."""
-    if _awaiting(state, event.decision_id.root) is None:
+    job = _awaiting(state, event.decision_id.root)
+    if job is None:
         return state
-    return fail(state, f"decision rejected: {event.code.value}: {event.detail}")
+    reason = f"decision rejected: {event.code.value}: {event.detail}"
+    if job.phase is Phase.SETTLE and job.settle_sent:
+        # Core refused the settlement itself: it will never send `AttemptSettled` and the job
+        # cannot ask again, so the job ends here with its typed failure.
+        ended = job.failed(reason).model_copy(
+            update={"phase": Phase.DONE, "awaiting": None, "step": Step.NEEDED}
+        )
+        return retire(_with(state, ended))
+    return fail(state, reason)
 
 
 def on_ready(state: IssueQueueStrategyState, event: AttemptReady) -> IssueQueueStrategyState:

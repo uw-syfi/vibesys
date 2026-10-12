@@ -100,9 +100,13 @@ class MultiStrategy:
             return Proposal(state=self.state, decisions=())
         state = turn_events.settle_retained(self.state, view, self.config)
         draft = Draft(view=view, config=self.config, state=state)
+        # A round is done in an event (a start core refused) or in `round_.decide` (an unstarted
+        # round a stop ends). Retiring follows from that state, never from the event kind.
+        draft.state = round_events.retire(draft.state, self.config)
         baseline.decide(draft)
         tracks.decide(draft)
         round_.decide(draft)
+        draft.state = round_events.retire(draft.state, self.config)
         run.decide(draft)
         return Proposal(state=draft.state, decisions=tuple(draft.decisions), wake_at=draft.wake_at)
 

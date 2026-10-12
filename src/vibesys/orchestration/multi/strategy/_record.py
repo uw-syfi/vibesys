@@ -40,7 +40,7 @@ def fail(state: MultiStrategyState, record: RoundState, reason: str) -> MultiStr
     if failed.owes_settlement:
         return put(state, failed.model_copy(update={"phase": WorkPhase.SETTLE}))
     # An attempt core never admitted has nothing to settle: its slot is refunded and the
-    # round is not counted, so the designer's hypothesis is asked again from the ledger.
+    # round ends done; `retire` then counts it as failed in the ledger.
     return put(state, failed.model_copy(update={"phase": WorkPhase.DONE}))
 
 
