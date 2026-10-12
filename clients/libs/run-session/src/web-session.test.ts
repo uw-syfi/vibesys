@@ -262,6 +262,27 @@ describe('WebSession robustness', () => {
     expect(transport.subscriptions).toHaveLength(0);
   });
 
+  test('close cancels a pending initial subscription without waiting for its deadline', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    transport.deferNextSubscribe();
+    const subscriptionStarted = transport.nextSubscription();
+    const starting = session.start();
+    await subscriptionStarted;
+
+    const closing = session.close();
+
+    // The event stream is fenced first, then transport cancellation starts in
+    // the same turn. No scheduler deadline or manual handshake release is part
+    // of teardown, and repeated callers join the same terminal operation.
+    expect(transport.closeCalls).toBe(1);
+    await Promise.all([starting, closing, session.close()]);
+    expect(transport.closeCalls).toBe(1);
+    expect(lifecycle.listenerCount('online')).toBe(0);
+    expect(lifecycle.listenerCount('visibilitychange')).toBe(0);
+    expect(lifecycle.listenerCount('offline')).toBe(0);
+  });
+
   test('a report made while the connection opens reaches the session', () => {
     const outage = disconnect('down when the page opened');
     const session = new WebSession({

@@ -9,6 +9,7 @@ import {hasRunEnded} from '@vibesys/run-state';
 import {recordsBenchmark} from '@vibesys/run-state/performance';
 import {DEFAULT_CHAT_THREAD_ID} from '@vibesys/run-state/transcript';
 import {
+  closeStreamAndTransport,
   DEFAULT_RECONNECT_DELAYS_MS,
   PersistentEventStream,
   type ScheduleTimeout,
@@ -319,6 +320,8 @@ export class SocketSessionController implements SessionController {
   #snapshotWatermark: {readonly runId: string; readonly sequence: number} | null = null;
   /** Sequence space the current stream fold belongs to; rebootstrap starts another. */
   #streamGeneration = 0;
+  /** The one terminal release every stop caller joins. */
+  #closing: Promise<void> | null = null;
 
   constructor(
     private readonly client: ServerTransport,
@@ -508,11 +511,13 @@ export class SocketSessionController implements SessionController {
     }
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.#closing !== null) return this.#closing;
     this.#designQuery.stop();
     this.#chatThreadCreateGeneration += 1;
-    await this.#stream.close();
-    await this.client.close();
+    const closing = closeStreamAndTransport(this.#stream, this.client);
+    this.#closing = closing;
+    return closing;
   }
 
   subscribe(listener: (state: SessionState) => void): () => void {

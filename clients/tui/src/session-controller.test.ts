@@ -3,6 +3,7 @@ import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {
+  BackendClientError,
   type ProtocolResponse,
   type RequestInput,
   type RunEvent,
@@ -126,6 +127,23 @@ describe('session controller', () => {
     );
     expect(controller.state.core.sequence).toBe(2);
     await controller.stop();
+    expect(transport.closed).toBe(true);
+  });
+
+  it('stops while the initial subscription handshake is pending', async () => {
+    const transport = new FakeTransport();
+    transport.deferSubscribe = true;
+    const controller = new SocketSessionController(transport);
+    const starting = controller.start();
+
+    const stopping = controller.stop();
+
+    // Stop fences event delivery, then closes the client in the same turn so
+    // its pending subscribe rejects. The handshake is never released by the
+    // test and no timeout advances; repeated stop callers join the same close.
+    expect(transport.closeCalls).toBe(1);
+    await Promise.all([starting, stopping, controller.stop()]);
+    expect(transport.closeCalls).toBe(1);
     expect(transport.closed).toBe(true);
   });
 
@@ -3662,6 +3680,8 @@ describe('stream reconnect', () => {
 
 class FakeTransport implements ServerTransport {
   closed = false;
+  closeCalls = 0;
+  deferSubscribe = false;
   deferSnapshot = false;
   /** Mutable so a test can change what a refetch returns mid-run. */
   experiments: NonNullable<ProtocolResponse['experiments']> = [];
@@ -3678,6 +3698,7 @@ class FakeTransport implements ServerTransport {
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
   #releaseSnapshot: (() => void) | null = null;
+  #rejectSubscribe: ((error: Error) => void) | null = null;
 
   constructor(
     private readonly responseEvents: RunEvent[] = [],
@@ -3755,12 +3776,21 @@ class FakeTransport implements ServerTransport {
     // the bootstrap means the client holds none of the history it asked for,
     // which is a reported fault rather than a socket closing behind a fold that
     // is already complete.
+    if (this.deferSubscribe) {
+      return new Promise((_resolve, reject) => {
+        this.#rejectSubscribe = reject;
+      });
+    }
     onMessage({type: 'event_batch', events: [], history_after_sequence: 0});
     return Promise.resolve({close: async () => undefined});
   }
 
   close(): Promise<void> {
+    this.closeCalls += 1;
     this.closed = true;
+    const reject = this.#rejectSubscribe;
+    this.#rejectSubscribe = null;
+    reject?.(new BackendClientError('disconnected', 'Client closed during subscription'));
     return Promise.resolve();
   }
 

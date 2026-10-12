@@ -44,3 +44,4 @@ export {
   type SubscribeOptions,
   subscribeRequest,
 } from './transport.js';
+export {closeStreamAndTransport} from './stream-shutdown.js';

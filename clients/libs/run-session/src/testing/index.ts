@@ -87,6 +87,7 @@ export class FakeTransport implements ControlTransport {
   readonly #subscriptionCloseWaiters: Array<(subscription: SubscriptionRecord) => void> = [];
   #deferNextSubscription = false;
   #releaseSubscription: (() => void) | null = null;
+  #rejectSubscription: ((error: Error) => void) | null = null;
   /**
    * How many upcoming dials connect without delivering their bootstrap batch,
    * as a socket that dies between `subscribed` and the first batch does: the
@@ -178,8 +179,9 @@ export class FakeTransport implements ControlTransport {
     };
     if (this.#deferNextSubscription) {
       this.#deferNextSubscription = false;
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve, reject) => {
         this.#releaseSubscription = resolve;
+        this.#rejectSubscription = reject;
       });
     }
     return subscription;
@@ -187,6 +189,10 @@ export class FakeTransport implements ControlTransport {
 
   async close(): Promise<void> {
     this.closeCalls++;
+    const reject = this.#rejectSubscription;
+    this.#releaseSubscription = null;
+    this.#rejectSubscription = null;
+    reject?.(new BackendClientError('disconnected', 'Client closed during subscription'));
   }
 
   /** Resolves when the stream makes its next dial. */
@@ -207,6 +213,7 @@ export class FakeTransport implements ControlTransport {
   releasePendingSubscribe(): void {
     const release = this.#releaseSubscription;
     this.#releaseSubscription = null;
+    this.#rejectSubscription = null;
     release?.();
   }
 }

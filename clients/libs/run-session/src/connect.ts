@@ -7,6 +7,7 @@ import {ServerError} from '@vibesys/contracts';
 import {
   type ControlChannelState,
   type ControlTransport,
+  closeStreamAndTransport,
   PersistentEventStream,
   type PersistentEventStreamOptions,
   type ScheduleTimeout,
@@ -54,6 +55,7 @@ function openRunConnection(
     ...(scheduleTimeout === undefined ? {} : {scheduleTimeout}),
   };
   const stream = new PersistentEventStream(transport, streamOptions);
+  let closing: Promise<void> | null = null;
   // The browser replays the whole log and exposes no backfill action, so the positive chunk is
   // dormant; it follows the configured tail so a future history action cannot drift from it.
   const reconciler = new StreamReconciler({backfillChunk: tail ?? 1});
@@ -90,9 +92,9 @@ function openRunConnection(
     retryIfDisconnected: () => stream.retryIfDisconnected(),
     rebootstrap: () => stream.rebootstrap(),
     redialControls: () => transport.reconnect(),
-    async close() {
-      await stream.close();
-      await transport.close();
+    close() {
+      closing ??= closeStreamAndTransport(stream, transport);
+      return closing;
     },
   };
 }
