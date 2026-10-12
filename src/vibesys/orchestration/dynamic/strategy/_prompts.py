@@ -91,7 +91,15 @@ class ProfileHistoryRow(Value):
     decision_impact: str
     status: ProfileHistoryStatus
     evidence_ids: tuple[EvidenceId, ...] = ()
+    # What an observed profile established, as typed values: the fields it measured,
+    # its decoded statistics (GPU-active fraction, top HIP API calls by time) and the
+    # artifacts it kept. None of it is cut; only the raw `diagnosis` text is.
+    captured_fields: tuple[str, ...] = ()
+    metrics: tuple[MetricRow, ...] = ()
+    artifacts: tuple[str, ...] = ()
+    # The tail of the capture's printed output, where its attribution tables end.
     diagnosis: str = ""
+    # Why a profile failed; empty unless `status` is failed.
     failure: str = ""
     detail_fence: str = "```"
 

@@ -143,7 +143,7 @@ def _history_row(record: HypothesisRecord, running: frozenset[str]) -> HistoryRo
     )
 
 
-def _profile_history_row(record: AttemptRecord) -> ProfileHistoryRow:
+def _profile_history_row(record: AttemptRecord, view: RunView) -> ProfileHistoryRow:
     """Project a profile attempt without copying its lifecycle into strategy state."""
     reading = next(
         (item for item in reversed(record.readings) if item.kind is EvidenceKind.PROFILING),
@@ -159,10 +159,13 @@ def _profile_history_row(record: AttemptRecord) -> ProfileHistoryRow:
         else ProfileHistoryStatus.RUNNING
     )
     diagnosis = "" if not observed or reading is None else reading.feedback
+    # A failure explanation belongs to a profile that failed; an observed one has none.
     failure = (
-        record.failure
+        ""
+        if status is not ProfileHistoryStatus.FAILED
+        else record.failure
         or ("" if reading is None or reading.passed else reading.feedback)
-        or ("profile produced no trusted evidence" if finished else "")
+        or "profile produced no trusted evidence"
     )
     detail = diagnosis or failure
     return ProfileHistoryRow(
@@ -174,8 +177,20 @@ def _profile_history_row(record: AttemptRecord) -> ProfileHistoryRow:
         decision_impact=_bounded(record.plan.decision_impact, _HISTORY_SUMMARY_CHARS),
         status=status,
         evidence_ids=tuple(item.evidence_id for item in record.evidence[:_PROFILE_EVIDENCE_IDS]),
-        diagnosis=_bounded(diagnosis, _HISTORY_FAILURE_CHARS),
-        failure=_bounded(failure, _HISTORY_FAILURE_CHARS),
+        captured_fields=record.plan.required_fields if observed else (),
+        metrics=() if not observed or reading is None else reading.metrics,
+        artifacts=(
+            ()
+            if not observed
+            else tuple(
+                artifact.artifact_id.root
+                for item in view.measurements
+                if item.key in record.evidence
+                for artifact in item.artifacts
+            )
+        ),
+        diagnosis=_tail(diagnosis, _HISTORY_FAILURE_CHARS),
+        failure=_tail(failure, _HISTORY_FAILURE_CHARS),
         detail_fence=_fence(detail),
     )
 
@@ -211,7 +226,9 @@ def planner_prompt(
     running = frozenset(item.plan.work_id for item in active(state))
     rows = tuple(_history_row(item, running) for item in state.hypotheses)
     profiles = tuple(
-        _profile_history_row(item) for item in state.attempts if item.plan.kind is WorkKind.PROFILE
+        _profile_history_row(item, view)
+        for item in state.attempts
+        if item.plan.kind is WorkKind.PROFILE
     )
     history = tuple(sorted((*rows, *profiles), key=lambda item: item.sequence))
     shown = history[-_HISTORY_ROWS:]

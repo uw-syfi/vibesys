@@ -33,7 +33,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
-from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
+from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
 from vs_slurm.api import (
     ClusterSubmitOutcome,
     FakeCluster,
@@ -72,6 +72,7 @@ class ScenarioCluster(FakeCluster):
         self.benchmark_exit: int | None = 0
         self.job_exit_code = 0
         self.benchmark_output = BENCHMARK_OUTPUT
+        self.profile_output = "profile captured\n"
         self.submissions: list[str] = []
         self.accepted = threading.Event()
 
@@ -86,7 +87,13 @@ class ScenarioCluster(FakeCluster):
         """Script the job's ending on first sight of its identity, then behave as Fake."""
         if isinstance(request, SlurmBatchRequest) and operation_id not in self.submissions:
             self.submissions.append(operation_id)
-            self.script(operation_id, states=self.states, result=self._result(request))
+            self.script(
+                operation_id,
+                states=self.states,
+                result=self._result(request),
+                # A profile stage stages back its output tree.
+                artifact_contents={f"{PROFILE_OUTPUT_ROOT}/result.json": "{}\n"},
+            )
         outcome = super().submit(request, operation_id=operation_id)
         self.accepted.set()
         return outcome
@@ -107,13 +114,14 @@ class ScenarioCluster(FakeCluster):
         skipped = False
         for stage in request.stages:
             exit_code = self.accuracy_exit if stage.name == "accuracy" else self.benchmark_exit
+            output = {"benchmark": self.benchmark_output, "profile": self.profile_output}.get(
+                stage.name, "ok"
+            )
             stages.append(
                 SlurmBatchStageResult(
                     name=stage.name,
                     exit_code=None if skipped else exit_code,
-                    stdout=""
-                    if skipped
-                    else (self.benchmark_output if stage.name == "benchmark" else "ok"),
+                    stdout="" if skipped else output,
                     stderr="",
                     elapsed_seconds=None if skipped else 1.0,
                     skipped=skipped,
@@ -156,8 +164,17 @@ def _config() -> SlurmConfig:
     )
 
 
-async def build_stack(root: Path, cluster: ScenarioCluster | None = None) -> Stack:
-    """Build the semantic Slurm executor over ``cluster``, reusing durable state under root."""
+async def build_stack(
+    root: Path,
+    cluster: ScenarioCluster | None = None,
+    *,
+    profile_command: tuple[str, ...] | None = None,
+) -> Stack:
+    """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
+
+    With ``profile_command`` the run can capture a profile, whose stdout is
+    ``cluster.profile_output``.
+    """
     cluster = cluster or ScenarioCluster()
     workspaces = _Candidates(FakeWorkspace(), supports_parallel_candidates=True)
     snapshot = await workspaces.root.snapshot("candidate")
@@ -170,6 +187,7 @@ async def build_stack(root: Path, cluster: ScenarioCluster | None = None) -> Sta
             config_path=root / "slurm.toml",
             accuracy_command=("python", "accuracy.py"),
             benchmark_command=("python", "benchmark.py"),
+            profile_command=profile_command,
         ),
         TrustedEvaluationPlan(
             accuracy_command="unused",
