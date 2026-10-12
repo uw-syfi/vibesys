@@ -82,6 +82,9 @@ class EvaluationInputs:
     benchmark_configured: bool
     profiling: bool
     profile_measurement: bool
+    profile_capture_withheld: bool
+    """A strategy that offers profile work was denied it: the plan names a profile command and a
+    profiler is chosen, but the run environment has no framework-side capture."""
     accuracy_seconds: float | None
     benchmark_seconds: float | None
     profile_seconds: float | None
@@ -93,6 +96,7 @@ def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
     receipt = run.artifacts.write(plan.model_dump_json().encode())
     identity = semantic_evaluation_identity(plan, run.facts, run.environment)
     profiling = run.facts.profiler_id != "none"
+    wants_profile_work = profiling and plan.profile_command is not None
     return EvaluationInputs(
         evaluator_digest=identity.evaluator.value,
         workload_digest=identity.workload.value,
@@ -103,9 +107,8 @@ def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
         accuracy_configured=run.facts.accuracy_configured,
         benchmark_configured=run.facts.benchmark_configured,
         profiling=profiling,
-        profile_measurement=profiling
-        and plan.profile_command is not None
-        and run.environment.captures_profile,
+        profile_measurement=wants_profile_work and run.environment.captures_profile,
+        profile_capture_withheld=wants_profile_work and not run.environment.captures_profile,
         accuracy_seconds=plan.accuracy_timeout_seconds,
         benchmark_seconds=plan.benchmark_timeout_seconds,
         profile_seconds=plan.profile_timeout_seconds,

@@ -303,9 +303,12 @@ def test_profile_work_is_offered_exactly_when_the_run_can_capture(
         profile_timeout_seconds=13 if manifest_command else None,
     )
     run = resolved(tmp_path, profiler_id=profiler_id, plan=plan, environment=view)
-    config = _policy_of(tmp_path, run)[0].strategy.config
+    policy = _policy_of(tmp_path, run)[0]
+    config = policy.strategy.config
 
     can_capture = view.captures_profile and manifest_command is not None
+    wants_profile = profiler_id != "none" and manifest_command is not None
+    assert policy.profile_capture_withheld == (wants_profile and not view.captures_profile)
     assert config.profiling == (profiler_id != "none" and can_capture)
     assert config.profile_measurement == config.profiling
 

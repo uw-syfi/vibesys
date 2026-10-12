@@ -135,6 +135,7 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         ),
         requirements=policy.requirements,
         agent_evaluation=_agent_evaluation(policy),
+        profile_capture_withheld=policy.profile_capture_withheld,
     )
 
 
