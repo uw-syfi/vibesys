@@ -78,6 +78,7 @@ from vibesys.events import (
     ToolCallData,
     ToolResultData,
     ToolResultPayload,
+    WinnerSelectedData,
     WorkspaceSnapshotData,
 )
 from vibesys.plugin_catalog import OrchestrationRegistry
@@ -151,6 +152,7 @@ __all__ = [
     "ToolCallData",
     "ToolResultData",
     "ToolResultPayload",
+    "WinnerSelectedData",
     "WorkspaceChange",
     "WorkspaceChangeKind",
     "WorkspaceSnapshotData",

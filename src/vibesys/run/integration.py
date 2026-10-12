@@ -19,10 +19,13 @@ from vibesys.events import (
     InvocationStartedData,
     PhaseData,
     RoundFinishedData,
+    WinnerSelectedData,
     json_value,
 )
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.event_journal import EventJournal
+from vs_core.api import RetainedCandidate, Selection
+from vs_runtime.api.core import RuntimeRecord
 from vs_runtime.api.infrastructure import (
     AgentExecutionLifecycleEvent,
     AgentExecutionStarted,
@@ -270,6 +273,35 @@ def _emit_round_finished(events: EventJournal, round_summary: _RoundProjection) 
     )
 
 
+def _selection_of(record: BaseModel | None) -> Selection | None:
+    """The result core's settlement state has chosen in a committed core record, if any.
+
+    Every strategy proposes its winner through core, so this one place sees all of them.
+    """
+    if not isinstance(record, RuntimeRecord):
+        return None
+    adoption = record.envelope.core.settlement.adoption
+    return None if adoption is None else adoption.selection
+
+
+def _emit_winner_selected(
+    events: EventJournal, before: Selection | None, after: Selection | None
+) -> None:
+    """Emit ``WINNER_SELECTED`` once per selection core newly records."""
+    if after is None or after == before:
+        return
+    candidate = isinstance(after, RetainedCandidate)
+    events.emit(
+        CoreEventType.WINNER_SELECTED,
+        status=EventStatus.COMPLETED,
+        data=WinnerSelectedData(
+            selection="candidate" if candidate else "baseline",
+            revision=after.revision.git_commit or after.revision.revision_id.root,
+            settlement_id=after.settlement_id.root if candidate else None,
+        ),
+    )
+
+
 class _CoreCommitObserver(_StateCommitObserver):
     """Publish a confirmed core commit: the committed-view hint, then its semantic events."""
 
@@ -278,6 +310,9 @@ class _CoreCommitObserver(_StateCommitObserver):
         self._integration.publish_committed_state(self._namespace, current)
         _emit_core_commit_events(
             self._integration.events, self._project(previous), self._project(current)
+        )
+        _emit_winner_selected(
+            self._integration.events, _selection_of(previous), _selection_of(current)
         )
 
 

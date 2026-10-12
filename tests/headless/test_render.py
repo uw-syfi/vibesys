@@ -14,6 +14,7 @@ from vibesys.api import (
     QuotaResumedData,
     RateLimitUpdateData,
     RunConfiguredData,
+    WinnerSelectedData,
     WorkspaceSnapshotData,
 )
 from vibesys.events import (
@@ -193,6 +194,19 @@ class TestFrameworkEvents:
         assert excluded.startswith("[git-tracking] excluded 7 unreadable path(s)")
         assert "/p4" in excluded
         assert "/p5" not in excluded
+
+    def test_winner_selection_names_the_result(self) -> None:
+        candidate = _render_event(
+            CoreEventType.WINNER_SELECTED,
+            WinnerSelectedData(selection="candidate", revision="c" * 40, settlement_id="s-1"),
+        )
+        baseline = _render_event(
+            CoreEventType.WINNER_SELECTED,
+            WinnerSelectedData(selection="baseline", revision="b" * 40),
+        )
+
+        assert candidate == f"[result] selected trusted winner {'c' * 12} (settlement s-1)\n"
+        assert baseline.startswith("[result] selected the trusted input unchanged")
 
     def test_run_configuration_header(self) -> None:
         out = _render_event(
