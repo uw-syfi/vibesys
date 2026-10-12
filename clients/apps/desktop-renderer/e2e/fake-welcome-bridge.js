@@ -102,6 +102,7 @@ function listing(host, facts) {
       },
     ],
     unreadable: [],
+    unverified: [],
   };
 }
 
