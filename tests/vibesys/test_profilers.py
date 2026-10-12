@@ -178,6 +178,15 @@ def test_cuda_kernel_writing_does_not_select_ncu_when_environment_lacks_it() -> 
     )
 
 
+def _expected_generic_auto(backend: ComputeBackend) -> ProfilerKind:
+    if backend is not ComputeBackend.CPU:
+        return ProfilerKind.NONE
+    return {
+        "Darwin": ProfilerKind.MACOS_CPU,
+        "Linux": ProfilerKind.LINUX_CPU,
+    }.get(platform.system(), ProfilerKind.NONE)
+
+
 def _expected_resolved(
     requested: ProfilerKind,
     *,
@@ -190,13 +199,7 @@ def _expected_resolved(
             raise ValueError
         return requested
     if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
-        if backend is not ComputeBackend.CPU:
-            return ProfilerKind.NONE
-        system = platform.system()
-        return {
-            "Darwin": ProfilerKind.MACOS_CPU,
-            "Linux": ProfilerKind.LINUX_CPU,
-        }.get(system, ProfilerKind.NONE)
+        return _expected_generic_auto(backend)
     if domain is DomainName.MICROSERVICES:
         return ProfilerKind.NONE
     if domain is DomainName.KERNEL_WRITING:
