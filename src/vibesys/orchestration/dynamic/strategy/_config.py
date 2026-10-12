@@ -11,7 +11,7 @@ from pydantic import Field
 from vibesys.candidates.api import CandidateConfig
 from vibesys.orchestration.dynamic.models import ProfileOffer
 from vs_core.api import ArtifactRef
-from vs_runtime.api import ProfileField
+from vs_evaluator_protocol.api import ProfileField
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.models import DynamicOptions

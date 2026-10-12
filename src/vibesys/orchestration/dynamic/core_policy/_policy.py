@@ -24,7 +24,7 @@ from vs_core.api import (
     RevisionRef,
 )
 from vs_core.api import RunFacts as CoreRunFacts
-from vs_runtime.api import ProfileField
+from vs_evaluator_protocol.api import ProfileField
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

@@ -13,7 +13,7 @@ from pydantic import Field
 from vibesys.metrics import MetricRow, PartialRow
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
 from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionRef, Value
-from vs_runtime.api import ProfileField
+from vs_evaluator_protocol.api import ProfileField
 
 
 class PromptTemplate(StrEnum):
