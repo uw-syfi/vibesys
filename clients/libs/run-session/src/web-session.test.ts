@@ -154,6 +154,10 @@ class FailingRecoveryConnection implements RunConnection {
     return Promise.resolve({run_id: 'run-1', sequence: 1, status: 'running'});
   }
 
+  loadIterations(): Promise<{readonly kind: 'unsupported'}> {
+    return Promise.resolve({kind: 'unsupported'});
+  }
+
   subscribe(handlers: RunStreamHandlers): Promise<void> {
     handlers.onBatch(
       eventBatch([event(1, 'server_ready')], {
@@ -240,7 +244,7 @@ describe('WebSession robustness', () => {
     transport.snapshots.push(snapshot.promise);
     const starting = session.start();
     await settle();
-    expect(transport.requests).toHaveLength(1);
+    expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(1);
 
     // A run-store subscriber that throws while the start-up snapshot folds: the machine's
     // applySnapshot action throws, so the machine stops with an error.
@@ -325,7 +329,7 @@ describe('WebSession robustness', () => {
     const refresh = deferred<ProtocolResponse>();
     transport.snapshots.push(refresh.promise);
     lifecycle.emit('online');
-    expect(transport.requests).toHaveLength(2);
+    expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(2);
     await session.close();
     const closed = session.getState();
     const published: string[] = [];
