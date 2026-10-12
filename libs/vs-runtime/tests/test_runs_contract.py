@@ -298,7 +298,8 @@ async def test_primary_terminal_outcome_survives_session_close_failure(
         is_resume=lambda request: request.resume,
     )
     handle = runs.start(Request(run_id="one"))
-    await execution.entered.wait()
+    result = asyncio.create_task(handle.result())
+    await arrival(execution.entered.wait(), result)
 
     if outcome == "execution-error":
         primary_error = ValueError("execution failure")
@@ -311,7 +312,7 @@ async def test_primary_terminal_outcome_survives_session_close_failure(
         expected_type = asyncio.CancelledError
 
     with pytest.raises(expected_type) as raised:
-        await handle.result()
+        await result
 
     if primary_error is not None:
         assert raised.value is primary_error
