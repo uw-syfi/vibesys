@@ -97,15 +97,12 @@ class Subject:
     default_world: Callable[[], World]
     """A fixed world in which the strategy runs its full course and adopts a candidate."""
     smallest_world: Callable[[], World]
-    """The shortest full run (fewest durable commits), which the exhaustive crash sweep uses."""
+    """The shortest full run (fewest durable commits), which the crash sweep uses."""
     issued: frozenset[str]
     """Request kinds the strategy's own decisions cause in a run that has no fault."""
     sweeps_crashes: bool = True
-    """Whether the exhaustive crash sweep runs on this subject (one run per durable boundary)."""
-    ci_stride: int = 1
-    """Every n-th boundary of a subject with `sweeps_crashes` False is swept in CI by
-    `test_conformance_crash_sampled.py`; the slow sweep there covers every boundary. A subject
-    whose run has so many commits that the exhaustive sweep would not fit CI's budget uses it."""
+    """Whether the crash sweep (C2) runs on this subject: at a sample of its durable boundaries
+    in CI, at every one under `pytest -m slow`."""
 
 
 # Kinds core issues only to recover from a fault, to cancel, or to resume a suspended turn.

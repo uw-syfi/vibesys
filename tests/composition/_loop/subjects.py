@@ -396,9 +396,7 @@ def _evolve_world(draw: st.DrawFn) -> Callable[[], World]:
     return lambda: EvolveWorld(throughputs, passes)
 
 
-def evolve_subject(
-    name: str, settings: EvolveConfig, *, sweeps_crashes: bool, ci_stride: int = 1
-) -> Subject:
+def evolve_subject(name: str, settings: EvolveConfig, *, sweeps_crashes: bool) -> Subject:
     """The evolve search under ``settings``."""
     return Subject(
         name=name,
@@ -407,7 +405,6 @@ def evolve_subject(
         schemas=evolve_reply_schemas(),
         worlds=_evolve_world(),
         sweeps_crashes=sweeps_crashes,
-        ci_stride=ci_stride,
         default_world=lambda: EvolveWorld((120.0, 80.0), (True,)),
         smallest_world=lambda: EvolveWorld((120.0,), (True,)),
         issued=frozenset(
@@ -461,8 +458,7 @@ SUBJECTS = {
         evolve_subject(
             "evolve",
             evolve_config(max_generations=1, children_per_generation=1, bootstrap_max_attempts=2),
-            sweeps_crashes=False,
-            ci_stride=8,
+            sweeps_crashes=True,
         ),
         # Concurrent children: the crash sweep covers a run whose slots overlap.
         evolve_subject(
@@ -476,9 +472,7 @@ SUBJECTS = {
                 profiler_support_name="linux_cpu_profiler",
                 profiler_mcp_name="vibesys-linux-cpu-profiler",
             ),
-            sweeps_crashes=False,
-            # 400 commits of overlapping slots: CI samples every 16th, the slow sweep takes all.
-            ci_stride=16,
+            sweeps_crashes=True,
         ),
         evolve_subject(
             "evolve-generations",
