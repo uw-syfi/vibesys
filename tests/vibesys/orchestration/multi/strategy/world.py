@@ -46,6 +46,8 @@ from vs_core.api import (
     ArtifactId,
     ArtifactRef,
     CloseSession,
+    ControlId,
+    ControlInput,
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
@@ -64,15 +66,17 @@ from vs_core.api import (
     ResumeSessionTurn,
     RetainRevision,
     RevisionRef,
+    RunControlEvent,
     RunEnvelope,
     RunFacts,
+    RunResultProposal,
     SessionId,
     SnapshotAndRetain,
     SubmitMeasurement,
     VerifyAdoption,
 )
 from vs_core.testing.drive import Answer, Harness, Running, Succeeded, Unknown
-from vs_dst.api import RunSetup
+from vs_dst.api import RunSetup, SimulatedRun, simulate
 from vs_runtime.api.core import handle_for
 
 if TYPE_CHECKING:
@@ -231,6 +235,8 @@ class MultiWorld:
         ends: Sequence[Ending] = ("wait",),
         polls: Sequence[int] = (0,),
         checkpoints: Sequence[str] = (),
+        attempt_cap: int | None = None,
+        stop_at: int | None = None,
         **settings: object,
     ) -> None:
         """Script a run.
@@ -250,7 +256,9 @@ class MultiWorld:
         ends once it validated its wait (with the waiting reply, the role's final result, or a
         reply that is not JSON); ``polls`` is how many polls the n-th evaluation job reports
         running (the last entry repeats). ``checkpoints`` answers the n-th checkpoint request
-        ``succeeded``, ``failed`` or ``retryable`` (cycling). Any other option is a
+        ``succeeded``, ``failed`` or ``retryable`` (cycling). ``attempt_cap`` lowers core's attempt limit, so core
+        refuses the starts past it (`Rejected`). ``stop_at`` has the operator's stop arrive while the
+        n-th request executes (0-based). Any other option is a
         `MultiConfig` field.
         """
         config = multi_config(**settings)
@@ -259,7 +267,9 @@ class MultiWorld:
             harness=Harness(
                 registry=multi_operation_registry(),
                 facts=FACTS,
-                limits=LIMITS,
+                limits=LIMITS
+                if attempt_cap is None
+                else LIMITS.model_copy(update={"max_attempts": attempt_cap}),
                 envelope_type=RunEnvelope[MultiStrategyState],
                 requirements=requirements_for(config),
                 lifecycle=frozenset({"suspend"}) if waits else frozenset(),
@@ -303,6 +313,9 @@ class MultiWorld:
         self._ends = tuple(ends)
         self._polls = tuple(polls)
         self._checkpoints = FaultyCheckpoints(self._answer, tuple(checkpoints))
+        self._stop_at = stop_at
+        self._shell: CoreRuntime[Any] | None = None
+        self._requests = 0
         self._started = 0
         self._submitted = 0
         self._validated = 0
@@ -316,10 +329,25 @@ class MultiWorld:
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
         """What the executors report for ``request``."""
+        self._maybe_stop(core)
         return self._checkpoints(request, core)
 
+    def _maybe_stop(self, core: CoreState) -> None:
+        position, self._requests = self._requests, self._requests + 1
+        if self._stop_at != position or self._shell is None:
+            return
+        self._shell.submit(
+            RunControlEvent(
+                control=ControlInput(control_id=ControlId(root="stop"), action="stop"),
+                now_at=core.run.now_at,
+                result=RunResultProposal(outcome="cancelled", reason="operator stop"),
+            ),
+            now_at=core.run.now_at,
+        )
+
     def attach(self, shell: CoreRuntime[Any], clock: VirtualClock) -> Enact | None:
-        """Serve the evaluation tool to this host's turns that wait (a host without waits has none)."""
+        """Hear the shell (a stop is submitted to it); serve the evaluation tool to waiting turns."""
+        self._shell = shell
         if not self._waits:
             return None
         return WaitingTurns(shell, clock, FACTS, self._waiting)
@@ -523,3 +551,12 @@ class MultiWorld:
                 ),
             )
         )
+
+
+def run_to_end(world: MultiWorld) -> SimulatedRun:
+    """Simulate ``world``, which must reach its terminal state without a halt or a liveness break."""
+    run = simulate(world)
+    assert run.finished
+    assert run.halted is None
+    assert not run.liveness_violations
+    return run
