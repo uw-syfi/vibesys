@@ -95,6 +95,7 @@ def search_over(state: EvolveStrategyState, config: EvolveConfig) -> bool:
 
 def decide(draft: Draft) -> None:
     """Open the next cold-start attempt or generation when nothing is in flight."""
+    admit(draft)
     state = draft.state
     if state.phase is not RunPhase.SEARCHING:
         return
@@ -107,6 +108,13 @@ def decide(draft: Draft) -> None:
         draft.update(slots=(open_bootstrap(state, draft),))
         return
     draft.state = admit_ready(open_generation(state, draft), draft.config)
+
+
+def admit(draft: Draft) -> bool:
+    """Admit the slots that are done; whether any was, so the caller can open what follows."""
+    before = draft.state
+    draft.state = admit_ready(before, draft.config)
+    return draft.state != before
 
 
 def admit_ready(state: EvolveStrategyState, config: EvolveConfig) -> EvolveStrategyState:

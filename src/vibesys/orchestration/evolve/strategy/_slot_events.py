@@ -38,7 +38,17 @@ def on_rejected(state: EvolveStrategyState, event: Rejected) -> EvolveStrategySt
     slot = awaiting(state, event.decision_id.root)
     if slot is None:
         return state
-    return fail(state, slot, f"decision rejected: {event.code.value}: {event.detail}")
+    reason = f"decision rejected: {event.code.value}: {event.detail}"
+    if slot.phase is WorkPhase.SETTLE and slot.settle_sent:
+        # Core refused the settlement itself: it will never send `AttemptSettled` and the slot
+        # cannot ask again, so the slot ends here without an individual.
+        return put(
+            state,
+            slot.failed(reason).model_copy(
+                update={"phase": WorkPhase.DONE, "awaiting": None, "step": Step.NEEDED}
+            ),
+        )
+    return fail(state, slot, reason)
 
 
 def on_ready(state: EvolveStrategyState, event: AttemptReady) -> EvolveStrategyState:

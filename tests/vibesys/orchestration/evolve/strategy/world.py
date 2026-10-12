@@ -53,6 +53,8 @@ from vs_core.api import (
     ArtifactId,
     ArtifactRef,
     CloseSession,
+    ControlId,
+    ControlInput,
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
@@ -71,8 +73,10 @@ from vs_core.api import (
     ResumeSessionTurn,
     RetainRevision,
     RevisionRef,
+    RunControlEvent,
     RunEnvelope,
     RunFacts,
+    RunResultProposal,
     SessionId,
     SnapshotAndRetain,
     SubmitMeasurement,
@@ -194,6 +198,8 @@ class EvolveWorld:
         wait_roles: Sequence[str] = ("mutator",),
         submit_only: Sequence[str] = (),
         checkpoints: Sequence[str] = (),
+        attempt_cap: int | None = None,
+        stop_at: int | None = None,
         **settings: object,
     ) -> None:
         """Script a run.
@@ -214,7 +220,10 @@ class EvolveWorld:
         role's final result, or a reply that is not JSON). A fresh turn of a role in
         ``submit_only`` submits and ends plainly, leaving the job running. ``checkpoints``
         answers the n-th checkpoint request ``succeeded``, ``failed`` or ``retryable``
-        (cycling). Any other option is an `EvolveConfig` field.
+        (cycling). ``attempt_cap`` lowers core's attempt limit below what the config needs, so
+        core refuses the starts past it (`Rejected`). ``stop_at`` has the operator's stop arrive
+        while the n-th request executes (0-based), as a control does mid-run. Any other option is
+        an `EvolveConfig` field.
         """
         config = evolve_config(**settings)
         self._bridge = bool(waits) or bool(submit_only)
@@ -223,7 +232,7 @@ class EvolveWorld:
             harness=Harness(
                 registry=evolve_operation_registry(),
                 facts=FACTS,
-                limits=_limits(config),
+                limits=_limits(config, attempt_cap),
                 envelope_type=RunEnvelope[EvolveStrategyState],
                 requirements=requirements_for(config),
                 lifecycle=frozenset({"suspend"}) if self._bridge else frozenset(),
@@ -254,6 +263,9 @@ class EvolveWorld:
         self._wait_roles = tuple(wait_roles)
         self._submit_only = tuple(submit_only)
         self._checkpoints = FaultyCheckpoints(self._answer, tuple(checkpoints))
+        self._stop_at = stop_at
+        self._shell: CoreRuntime[Any] | None = None
+        self._requests = 0
         self._started = 0
         self._submitted = 0
         self._running: dict[str, int] = {}
@@ -270,10 +282,25 @@ class EvolveWorld:
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
         """What the executors report for ``request``."""
+        self._maybe_stop(core)
         return self._checkpoints(request, core)
 
+    def _maybe_stop(self, core: CoreState) -> None:
+        position, self._requests = self._requests, self._requests + 1
+        if self._stop_at != position or self._shell is None:
+            return
+        self._shell.submit(
+            RunControlEvent(
+                control=ControlInput(control_id=ControlId(root="stop"), action="stop"),
+                now_at=core.run.now_at,
+                result=RunResultProposal(outcome="cancelled", reason="operator stop"),
+            ),
+            now_at=core.run.now_at,
+        )
+
     def attach(self, shell: CoreRuntime[Any], clock: VirtualClock) -> Enact | None:
-        """Serve the evaluation tool to this host's turns that use it (a host without has none)."""
+        """Hear the shell (a stop is submitted to it); serve the evaluation tool to turns using it."""
+        self._shell = shell
         if not self._bridge:
             return None
         return WaitingTurns(shell, clock, FACTS, self._acting, self.asked)
@@ -532,9 +559,9 @@ def run_to_end(world: EvolveWorld) -> SimulatedRun:
     return run
 
 
-def _limits(config: EvolveConfig) -> Limits:
-    """Generous bounds that still fit the run's own budgets."""
-    attempts = config.total_attempts
+def _limits(config: EvolveConfig, attempt_cap: int | None = None) -> Limits:
+    """Generous bounds that still fit the run's own budgets, unless ``attempt_cap`` lowers them."""
+    attempts = config.total_attempts if attempt_cap is None else attempt_cap
     return Limits(
         max_attempts=attempts,
         max_turns=60 * attempts,

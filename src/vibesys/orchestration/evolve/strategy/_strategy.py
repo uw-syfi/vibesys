@@ -92,8 +92,14 @@ class EvolveStrategy:
             return Proposal(state=self.state, decisions=())
         state = turn_events.settle_retained(self.state, view)
         draft = Draft(view=view, config=self.config, state=state)
-        generation.decide(draft)
-        slots.decide(draft)
+        # A slot can reach DONE in the settled reply folded above, in `slots.decide` (an unstarted
+        # slot a stop ends) or in a failure event. Admission follows from that state, never from
+        # the event kind: each pass admits what is done and opens what follows until nothing is.
+        while True:
+            generation.decide(draft)
+            slots.decide(draft)
+            if not generation.admit(draft):
+                break
         run.decide(draft)
         return Proposal(state=draft.state, decisions=tuple(draft.decisions), wake_at=draft.wake_at)
 
@@ -148,8 +154,7 @@ class EvolveStrategy:
         if isinstance(event, AttemptReady):
             return slot_events.on_ready(state, event)
         if isinstance(event, AttemptSettled):
-            settled = slot_events.on_settled(state, event)
-            return generation.admit_ready(settled, self.config)
+            return slot_events.on_settled(state, event)
         if isinstance(event, TurnSuspended):
             return turn_events.on_suspended(state, event)
         if isinstance(event, YieldPublicationFailed):
