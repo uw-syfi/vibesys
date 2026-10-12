@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hypothesis import strategies as st
 from tests.composition._loop.conformance import Subject, World
@@ -53,11 +53,7 @@ from tests.vibesys.orchestration.multi.strategy._replies import (
 from tests.vibesys.orchestration.multi.strategy._replies import reviewed as multi_reviewed
 from tests.vibesys.orchestration.multi.strategy._run import config as multi_config
 from tests.vibesys.orchestration.multi.strategy._run import harness as multi_harness
-from tests.vibesys.orchestration.single.strategy._executors import Executors as SingleExecutors
-from tests.vibesys.orchestration.single.strategy._replies import combined as single_combined
-from tests.vibesys.orchestration.single.strategy._replies import plan_reply as single_plan_reply
-from tests.vibesys.orchestration.single.strategy._run import config as single_config
-from tests.vibesys.orchestration.single.strategy._run import harness as single_harness
+from tests.vibesys.orchestration.single.strategy.world import SingleWorld
 
 from vibesys.orchestration.dynamic.core_policy.api import reply_schemas, requirements_for
 from vibesys.orchestration.dynamic.strategy.api import (
@@ -72,13 +68,11 @@ from vibesys.orchestration.issue_queue.core_policy.api import reply_schemas as p
 from vibesys.orchestration.issue_queue.strategy.api import IssueQueueConfig, IssueQueueStrategy
 from vibesys.orchestration.multi.core_policy.api import reply_schemas as multi_reply_schemas
 from vibesys.orchestration.multi.strategy.api import MultiConfig, MultiStrategy
-from vibesys.orchestration.single.core_policy.api import reply_schemas as single_reply_schemas
-from vibesys.orchestration.single.strategy.api import SingleConfig, SingleStrategy
 from vs_core.api import RunEnvelope
 from vs_core.testing.drive import Harness
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from vs_core.api import CoreState, Request
     from vs_core.testing.drive import Answer
@@ -156,44 +150,25 @@ def dynamic_subject(name: str, settings: DynamicConfig, *, sweeps_crashes: bool)
     )
 
 
-class SingleWorld:
-    """The single search's scripted executors, with each candidate's throughput drawn."""
-
-    def __init__(self, throughputs: tuple[float | None, ...], passes: tuple[bool, ...]) -> None:
-        self._throughputs = throughputs
-        self.executors = SingleExecutors(
-            planner=deque(single_plan_reply(f"h{n}") for n in range(8)),
-            implementer=deque(single_combined(passed=passes[n % len(passes)]) for n in range(8)),
-            benchmark=self.headline,
-        )
-
-    def headline(self, commit: str) -> float | None:
-        """The throughput the drawn table gives the candidate (a pure function of its commit)."""
-        return self._throughputs[int(commit, 16) % len(self._throughputs)]
-
-    def __call__(self, request: Request, core: CoreState) -> Answer:
-        """Answer as the scripted single executors do."""
-        return self.executors(request, core)
-
-
 @st.composite
-def _single_world(draw: st.DrawFn) -> Callable[[], World]:
+def _single_world(draw: st.DrawFn, settings: Mapping[str, Any]) -> Callable[[], World]:
     throughputs = tuple(draw(st.lists(st.sampled_from(_THROUGHPUTS), min_size=1, max_size=4)))
     passes = tuple(draw(st.lists(st.booleans(), min_size=1, max_size=3)))
-    return lambda: SingleWorld(throughputs, passes)
+    return lambda: SingleWorld(throughputs=throughputs, passes=passes, **settings)
 
 
-def single_subject(name: str, settings: SingleConfig, *, sweeps_crashes: bool) -> Subject:
-    """The single search under ``settings``."""
+def single_subject(name: str, settings: Mapping[str, Any], *, sweeps_crashes: bool) -> Subject:
+    """The single search under the strategy config ``settings``."""
+    setup = SingleWorld(**settings).setup
     return Subject(
         name=name,
-        new_strategy=lambda: SingleStrategy(config=settings),
-        harness=single_harness(settings),
-        schemas=single_reply_schemas(),
-        worlds=_single_world(),
+        new_strategy=setup.new_strategy,
+        harness=setup.harness,
+        schemas=setup.schemas,
+        worlds=_single_world(settings),
         sweeps_crashes=sweeps_crashes,
-        default_world=lambda: SingleWorld((120.0, 80.0), (True,)),
-        smallest_world=lambda: SingleWorld((120.0,), (True,)),
+        default_world=lambda: SingleWorld(throughputs=(120.0, 80.0), **settings),
+        smallest_world=lambda: SingleWorld(throughputs=(120.0,), **settings),
         issued=frozenset(
             {
                 "adopt_revision",
@@ -439,11 +414,9 @@ SUBJECTS = {
     for subject in (
         dynamic_subject("dynamic", _DYNAMIC_CONFIG, sweeps_crashes=False),
         dynamic_subject("dynamic-serial", _SERIAL_CONFIG, sweeps_crashes=True),
-        single_subject("single", single_config(max_rounds=1), sweeps_crashes=True),
+        single_subject("single", {"max_rounds": 1}, sweeps_crashes=True),
         single_subject(
-            "single-cadence",
-            single_config(max_rounds=3, official_eval_every=2),
-            sweeps_crashes=False,
+            "single-cadence", {"max_rounds": 3, "official_eval_every": 2}, sweeps_crashes=False
         ),
         plain_subject("plain", plain_config(max_rounds=1), sweeps_crashes=True),
         plain_subject(

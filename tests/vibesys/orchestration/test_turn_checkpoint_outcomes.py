@@ -14,8 +14,8 @@ from tests.vibesys.orchestration.multi.strategy._replies import (
     plan_reply as multi_plan_reply,
 )
 from tests.vibesys.orchestration.multi.strategy._run import config as multi_config
-from tests.vibesys.orchestration.single.strategy._replies import combined, plan_reply
-from tests.vibesys.orchestration.single.strategy._run import config as single_config
+from tests.vibesys.orchestration.single.strategy.world import implemented as combined
+from tests.vibesys.orchestration.single.strategy.world import plan_reply, single_config
 
 from vibesys.orchestration.dynamic.strategy.api import (
     DynamicStrategy,

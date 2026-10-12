@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from vs_core.api import RunStatus
+from vs_core.api.testing import Budget, liveness
 from vs_dst._crash_points import CrashKind, CrashPoint, crash_point_policy
 from vs_dst._effects import Effects, RecoverableExecutors
 from vs_dst._snapshots import (
@@ -15,6 +16,7 @@ from vs_dst._snapshots import (
     Snapshot,
     Snapshots,
 )
+from vs_dst._world import HostedWorld
 from vs_runtime.api.testing import (
     LEASE,
     FakePublicationDelivery,
@@ -29,11 +31,25 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import CoreState, Decision, OperationRegistry, SchemaRef, StrategyState
-    from vs_core.api.testing import Journal
-    from vs_dst._world import World
-    from vs_runtime.api.core import DispatchCapExceededError, RunStalledError
+    from vs_core.api import (
+        CoreState,
+        Decision,
+        OperationRegistry,
+        Request,
+        RunResultProposal,
+        SchemaRef,
+        StrategyState,
+    )
+    from vs_core.api.testing import Journal, Violation
+    from vs_dst._world import Enact, World
+    from vs_runtime.api.core import (
+        CoreRuntime,
+        DispatchCapExceededError,
+        ExecutionResult,
+        RunStalledError,
+    )
     from vs_runtime.api.testing import Script
+    from vs_sim.api.testing import VirtualClock
 
 FIRST_HOST_STARTS_AT = 1.0
 """The virtual time the first host starts at."""
@@ -68,7 +84,7 @@ class SimulatedRun:
         return self._run.core
 
     @property
-    def result(self) -> object:
+    def result(self) -> RunResultProposal | None:
         """The run's result: its outcome, once it has one."""
         return self._run.core.run.result
 
@@ -96,6 +112,16 @@ class SimulatedRun:
     def halted(self) -> DispatchCapExceededError | RunStalledError | None:
         """Why the loop gave up on the run (dispatch cap, stall), or None."""
         return self._run.halted
+
+    @property
+    def liveness_violations(self) -> tuple[Violation, ...]:
+        """The liveness invariants this run broke (`vs_core.testing.liveness`); none when live.
+
+        The run's journal is checked against its final core state with the retry budget of the
+        world's limits, expecting the run to end in its terminal state.
+        """
+        budget = Budget(retries=self._outside.world.setup.harness.limits.max_retries)
+        return tuple(liveness(self._run.journal, self._run.core, budget))
 
     @property
     def stopped(self) -> bool:
@@ -169,7 +195,7 @@ class SimulatedRun:
         self._snapshots.update(snapshots.by_point)
 
 
-def simulate(world: World, *, max_concurrent: int = 1, controlled: bool = False) -> SimulatedRun:
+def simulate(world: World) -> SimulatedRun:
     """Run ``world``'s strategy to the end of its run on the production shell and loop.
 
     The loop, the lease, the fence, the clock, the durable commit and the owner-event queue
@@ -178,10 +204,11 @@ def simulate(world: World, *, max_concurrent: int = 1, controlled: bool = False)
     of the initial world; `rerun_with_crash` runs the world once more to take the copies a crash
     sweep needs. A world that cannot be deep-copied raises `WorldNotCopyableError`.
 
-    ``max_concurrent`` is how many requests the loop executes at once; ``controlled`` gives it an
-    idle run-control channel, as a product run has.
+    How the host is arranged (its concurrency, a run-control channel) is the world's
+    `RunSetup`; a `HostedWorld` also hears each host's shell and clock.
     """
-    options = HostOptions(max_concurrent=max_concurrent, controlled=controlled)
+    setup = world.setup
+    options = HostOptions(max_concurrent=setup.max_concurrent, controlled=setup.controlled)
     store = RecordingStore()
     outside = OutsideWorld(store, FakePublicationDelivery(store), Effects(), world)
     pristine = outside.copy()  # also fails now, naming the world, if it cannot be copied
@@ -193,13 +220,17 @@ def _run_host(
     outside: OutsideWorld, options: HostOptions, clock_at: float, snapshots: Snapshots | None
 ) -> Run:
     """A new host (shell, strategy instance, executors) over ``outside``, run to the end."""
-    setup = outside.world.setup
+    world = outside.world
+    setup = world.setup
+    enactment = _Enactment(world)
     host = scripted_host(
         setup.new_strategy(),
-        outside.world,
+        world,
         setup.harness,
         setup.schemas,
-        replace(options, translator=_translator(outside.effects)),
+        replace(
+            options, translator=_translator(outside.effects, enactment), attach=enactment.attach
+        ),
         store=outside.store,
         delivery=outside.delivery,
         clock_at=clock_at,
@@ -209,8 +240,28 @@ def _run_host(
     return host.run()
 
 
-def _translator(effects: Effects) -> TranslatorFactory:
-    """Executors that record into, and answer inspections from, the shared ``effects`` ledger."""
+class _Enactment:
+    """How one host's executed requests are enacted: the world's say, once the host exists."""
+
+    def __init__(self, world: World) -> None:
+        self._world = world
+        self._enact: Enact | None = None
+
+    def attach(self, shell: CoreRuntime[Any], clock: VirtualClock) -> None:
+        """Let a `HostedWorld` bind this host's shell and clock."""
+        if isinstance(self._world, HostedWorld):
+            self._enact = self._world.attach(shell, clock)
+
+    async def __call__(self, request: Request, result: ExecutionResult) -> ExecutionResult:
+        """The result the shell is told for ``request``."""
+        return result if self._enact is None else await self._enact(request, result)
+
+
+def _translator(effects: Effects, enactment: _Enactment) -> TranslatorFactory:
+    """Executors that record into, and answer inspections from, the shared ``effects`` ledger.
+
+    What each request does on the host (see `HostedWorld`) passes through ``enactment``.
+    """
 
     def build(
         script: Script,
@@ -219,6 +270,10 @@ def _translator(effects: Effects) -> TranslatorFactory:
         schemas: Mapping[SchemaRef, type[BaseModel]],
         journal: Journal,
     ) -> RecoverableExecutors:
-        return RecoverableExecutors(script, core, registry, schemas, journal, effects)
+        class HostExecutors(RecoverableExecutors):
+            async def _enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
+                return await enactment(request, result)
+
+        return HostExecutors(script, core, registry, schemas, journal, effects)
 
     return build
