@@ -102,7 +102,8 @@ class ProfilerDefinition:
     tool: ProfilerTool | None = None
     # Tools of the profiler's MCP server that need a GPU driver in the process serving
     # them (the editor). They are offered only when the run environment says the editor
-    # has a GPU; capture and report-reading tools do not belong here.
+    # has a GPU, or when capture is routed elsewhere (remote); report-reading tools do not
+    # belong here.
     driver_tools: frozenset[str] = frozenset()
 
     @property
@@ -178,6 +179,24 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
             frozenset({DomainName.LLM_SERVING, DomainName.KERNEL_WRITING}),
             extra_support_kinds=frozenset({ProfilerKind.TORCH}),
             tool=ProfilerTool("rocprofv3", ProfilerSite.GPU_WORKLOAD),
+            driver_tools=frozenset(
+                {
+                    "profiling_capabilities",
+                    "profile_configured_timeline",
+                    "submit_configured_timeline",
+                    "capture_status",
+                    "await_capture",
+                    "cancel_capture",
+                    "profile_timeline",
+                    "profile_counters",
+                    "profile_kernel_deep",
+                    "profile_instructions",
+                    "profile_ops",
+                    "start_target",
+                    "stop_target",
+                    "targets",
+                }
+            ),
         ),
         ProfilerDefinition(ProfilerKind.OTEL, frozenset({DomainName.MICROSERVICES})),
         ProfilerDefinition(

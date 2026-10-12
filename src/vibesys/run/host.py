@@ -119,6 +119,7 @@ def _profiler_tool_offer(resources: _PreparedRun) -> ProfilerToolOffer:
     return profiler_tool_offer(
         ProfilerKind(resources.facts.profiler_id),
         editor_has_gpu=resources.environment_resources.view.editor_has_gpu,
+        captures_remotely=resources.environment_resources.view.profile_execution == "remote",
     )
 
 

@@ -9,6 +9,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from resources.profilers._common import capture_runtime
 from resources.profilers.ncu.server import build_server
+from resources.profilers.rocprof.server import build_server as build_rocprof
 
 from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
@@ -63,3 +64,34 @@ def test_withheld_tools_env_is_the_name_the_server_reads(monkeypatch: pytest.Mon
     assert capture_runtime.withheld_tools_from_env() == {"query_metrics", "other"}
     monkeypatch.delenv(WITHHELD_TOOLS_ENV)
     assert capture_runtime.withheld_tools_from_env() == frozenset()
+
+
+@given(editor_has_gpu=st.booleans(), captures_remotely=st.booleans())
+def test_rocprof_capture_tools_are_offered_iff_the_editor_has_a_gpu_or_capture_is_remote(
+    *, editor_has_gpu: bool, captures_remotely: bool
+) -> None:
+    offer = profiler_tool_offer(
+        ProfilerKind.ROCPROF, editor_has_gpu=editor_has_gpu, captures_remotely=captures_remotely
+    )
+    declared = PROFILER_DEFINITIONS[ProfilerKind.ROCPROF].driver_tools
+    names = _rocprof_tool_names(frozenset(offer.withheld))
+    if editor_has_gpu or captures_remotely:
+        assert offer.withheld == ()
+        assert declared <= names
+    else:
+        assert set(offer.withheld) == declared
+        assert not (declared & names)
+        # report-reading tools stay
+        assert {"summary", "kernels", "compare", "query"} <= names
+
+
+def test_rocprof_declares_every_gpu_launching_tool_the_server_registers() -> None:
+    all_names = _rocprof_tool_names(frozenset())
+    declared = PROFILER_DEFINITIONS[ProfilerKind.ROCPROF].driver_tools
+    assert declared <= all_names
+    launching = {n for n in all_names if n.startswith(("profile_", "submit_"))}
+    assert launching <= declared
+
+
+def _rocprof_tool_names(withheld: frozenset[str]) -> set[str]:
+    return {tool.name for tool in asyncio.run(build_rocprof(withheld=withheld).list_tools())}

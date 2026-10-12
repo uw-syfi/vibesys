@@ -46,13 +46,16 @@ class ProfilerToolOffer:
     reason: str = ""
 
 
-def profiler_tool_offer(kind: ProfilerKind, *, editor_has_gpu: bool) -> ProfilerToolOffer:
+def profiler_tool_offer(
+    kind: ProfilerKind, *, editor_has_gpu: bool, captures_remotely: bool = False
+) -> ProfilerToolOffer:
     """Withhold the tools that need a GPU driver when the editor has none.
 
-    The decision reads one run-environment fact (``RunEnvironmentView.editor_has_gpu``),
-    never an environment name; every profiler that declares ``driver_tools`` is covered.
+    The decision reads two run-environment facts (``RunEnvironmentView.editor_has_gpu`` and
+    ``profile_execution``), never an environment name. A capture routed to a remote target
+    needs no driver in the editor, so the tools that bridge it stay offered.
     """
-    if kind not in ACTIVE_PROFILER_KINDS or editor_has_gpu:
+    if kind not in ACTIVE_PROFILER_KINDS or editor_has_gpu or captures_remotely:
         return ProfilerToolOffer(())
     definition = profiler_definition(kind)
     withheld = tuple(sorted(definition.driver_tools))
