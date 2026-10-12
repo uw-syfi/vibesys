@@ -445,3 +445,23 @@ def test_the_retained_checkpoint_of_a_failed_round_is_work_in_progress(*, passed
     assert settle.eligible is passed
     if not passed:
         assert settle.retention == "wip"
+
+
+@PURE
+@given(exit_code=st.integers(1, 255), output=st.text(max_size=40))
+def test_a_failed_attribution_command_names_the_command_and_where_it_runs(
+    exit_code: int, output: str
+) -> None:
+    """The run ends at the baseline attribution, saying what ran, where, and why it failed."""
+    run = run_shell(
+        Executors(attribution=output, attribution_exit_code=exit_code),
+        max_rounds=2,
+        attribution={"command": ("bash", "attribute.sh"), "timeout_seconds": 10},
+    )
+    assert isinstance(run.state, MultiStrategyState)
+    error = run.state.design.last_error
+    assert error is not None
+    assert "`bash attribute.sh`" in error
+    assert f"exited with code {exit_code}" in error
+    assert "command environment" in error
+    assert ("Exit code 127 means" in error) == (exit_code == 127)

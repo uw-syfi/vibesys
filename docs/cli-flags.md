@@ -563,6 +563,13 @@ Each component has `name`, nonnegative `cost`, `share` between zero and one, and
 an optional `evidence` string list. This configuration is task capability, not
 a modality. Other loops ignore it.
 
+The command runs in the run's own command environment: under `--run-environment
+slurm` that is the editor container, not a Slurm job, so a Python environment that
+exists only on the host (or is exposed to GPU jobs through `read_only_paths`) is not
+there. Make the command self-contained in the workspace. When it fails, the run stops
+at the first capture and the error names the command, where it ran, and the output tail
+(exit code 127 means a program it calls was not found).
+
 `[agent].domain` in `vibesys.input.toml` supplies cross-cutting problem-space
 context for the agent and evolve loops. Registered domains include:
 
