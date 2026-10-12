@@ -3,8 +3,8 @@
 Role files injected into the base prompts for `domain = "database"`. Each
 `<role>.md` renders through Jinja with the uniform domain context (`modality`,
 `interface`, `reference_path`, `accuracy_command`, `benchmark_command`,
-`runtime_notes`, `profile_execution`, `workspace_sources`) and lands at the
-`{{ domain_<role> }}` injection point of the matching base template. A missing
+`runtime_notes`, `profile_execution`, `workspace_sources`) and lands in the
+`domain_sections[<role>]` slot of that role's prompts in every strategy. A missing
 role file injects nothing; `single_agent.md` is derived from `implementer.md` +
 `judge.md` when absent.
 

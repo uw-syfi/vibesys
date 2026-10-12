@@ -1,7 +1,8 @@
 {% from '_evaluations.j2' import trusted_evaluations %}
 {% from '_revision.j2' import rev %}
+{% from 'domain_section.j2' import domain_section %}
 {% include 'run_context.j2' %}
-
+{{ domain_section(domain_sections, 'judge') }}
 ## Authoritative inputs and trust boundary
 
 Hypothesis `{{ plan.hypothesis_id }}`{% if plan.title %} ({{ plan.title }}){% endif %}, round {{ round_number }}, attempt {{ retry }}.

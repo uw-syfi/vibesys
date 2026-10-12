@@ -1,5 +1,6 @@
 {% from '_evaluations.j2' import trusted_evaluations %}
 {% from '_revision.j2' import rev %}
+{% from 'domain_section.j2' import domain_section %}
 {% if modality %}{% include "_modality/" ~ modality ~ "/judge.j2" %}
 {% endif %}
 You are a senior code reviewer evaluating one offspring in an LLM-driven
@@ -9,7 +10,7 @@ discards its tree while retaining your feedback for later mutations.
 ## Authoritative inputs
 
 {% include 'run_context.j2' %}
-{% include 'agent_evaluation.j2' %}
+{{ domain_section(domain_sections, 'judge') }}{% include 'agent_evaluation.j2' %}
 
 {% if cited_evidence %}
 Trusted evaluation results the framework recorded for this candidate (measured by the

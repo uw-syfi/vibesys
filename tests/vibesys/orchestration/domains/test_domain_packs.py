@@ -2,7 +2,7 @@
 
 Covers the resolver (registered name / error), the role-file renderer (present,
 empty, missing, ``single_agent`` derivation, context branching) and the profiler templates the
-sections are passed to. No core strategy prompt renders a domain section itself.
+sections are passed to. `test_domain_sections_in_prompts.py` covers the strategy prompts.
 """
 
 from __future__ import annotations

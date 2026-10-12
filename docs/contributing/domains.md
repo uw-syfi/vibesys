@@ -38,17 +38,19 @@ src/vibesys/domains/my_domain/
 
   prompts/
     README.md        # optional human documentation
-    implementer.md   # injected as {{ domain_implementer }}
-    judge.md         # injected as {{ domain_judge }}
-    single_agent.md  # injected as {{ domain_single_agent }} (optional)
-    orchestrator.md  # injected as {{ domain_orchestrator }} (optional)
-    profiler.md      # injected as {{ domain_profiler }} (optional)
+    implementer.md   # the implementer prompts' domain section
+    judge.md         # the judge prompts' domain section
+    single_agent.md  # the single-agent round prompt's domain section (optional)
+    orchestrator.md  # the planner prompts' domain section (optional)
+    profiler.md      # the profiler prompts' domain section (optional)
 ```
 
 Rules:
 
-- **Inside the domain prompt directory, the filename is the address.** `implementer.md` maps to
-  `{{ domain_implementer }}`, `judge.md` maps to `{{ domain_judge }}`, and so on.
+- **Inside the domain prompt directory, the filename is the address.** The run's plan renders
+  each role file once into `domain_sections[<role>]`, and every strategy's prompt for that
+  role renders it in one fixed slot, right after the run context
+  (`prompts/core_protocol/domain_section.j2`). A strategy's own templates never name a domain.
 - **A missing role file injects nothing** for that role.
 - **`single_agent.md` is optional.** Omit it and it's derived automatically by
   concatenating `implementer.md` and `judge.md`: no third copy to hand-maintain.

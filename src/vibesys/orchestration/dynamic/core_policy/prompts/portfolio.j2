@@ -1,4 +1,5 @@
 {% from '_revision.j2' import rev %}
+{% from 'domain_section.j2' import domain_section %}
 {% from '_macros.j2' import metric, partial %}
 Schedule at most {{ capacity }} new workstreams for free slots. {{ in_flight }} other
 workstreams are still running (their history rows show non-terminal phases), and the
@@ -6,7 +7,7 @@ run may schedule {{ remaining }} more workstreams in total, including these. Eac
 workstream counts once, whether it starts a hypothesis or continues one.
 
 {% include 'run_context.j2' %}
-
+{{ domain_section(domain_sections, 'orchestrator') }}
 Assign work only where it can succeed: never assign edits to read-only inputs, and
 never plan work that needs target hardware outside trusted evaluation.
 

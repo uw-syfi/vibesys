@@ -5,6 +5,37 @@ Objective: Maximize measured token throughput without losing correctness.
 Accuracy command: uv run check-accuracy
 Benchmark command: uv run benchmark
 Runtime notes: Use CUDA with bfloat16.
+
+## LLM-serving profile capture
+
+Capture the benchmark's steady-state production path. For a one-process
+profiler, run the server under it and drive load from another shell. Discover
+flags with `--help`; benchmark CLIs need not share token/request/rate flags.
+
+For a local service: read objective, contract, manifest, and declared lifecycle;
+identify executable, port, and ownership without assuming filename/language;
+stop only identified stale processes; prewarm model/kernels; profile the server;
+drive a short representative declared benchmark; then stop and analyze it.
+
+For a compatible in-process adapter, the reference torch harness is:
+
+```
+python torch_profiler/analyze_torch_profile.py capture \
+  --model-dir /workspace --weights-dir /model \
+  --output /tmp/prof.json \
+  --warmup 3 --num-iters 20 --max-tokens 32 \
+  --prompt "The capital of France is"
+```
+
+Use it only when `VibeServeModel.from_pretrained(...)` and `.generate(...)`
+exercise the reviewed production mechanism. It captures device kernels, not
+HTTP, admission, scheduling, queueing, or service batching; do not extrapolate
+without end-to-end evidence or recreate the production hot path just for it.
+
+Capture-tool argument contracts are engine-specific: see
+`serving-systems/references/tooling/profiling-serving-engines.md` and
+`serving-systems/references/engines/`. ROCm:
+`serving-systems/references/platforms/rocm/profiler.md`.
 Profiler `torch` is available through the fixed `profiler` tool and executes on the local path.
 Configured load levels: [{"duration": 20, "max_tokens": 64, "rate": 4}]
 Prior performance records:

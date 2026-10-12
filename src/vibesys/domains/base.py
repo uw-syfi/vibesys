@@ -23,8 +23,8 @@ class DomainRole(StrEnum):
 
 
 # The roles a domain can contribute to. Each maps to a ``<role>.md`` file in the
-# domain prompt directory and a ``{{ domain_<role> }}`` injection point in the
-# corresponding base prompt.
+# domain prompt directory and the ``domain_sections[<role>]`` slot of that role's
+# prompts (`core_protocol/domain_section.j2`).
 DOMAIN_ROLES: tuple[DomainRole, ...] = tuple(DomainRole)
 
 

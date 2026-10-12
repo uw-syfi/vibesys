@@ -37,13 +37,13 @@ def render_domain_section(
     variable set for every role (``modality``, ``interface``, ``reference_path``,
     ``benchmark_command``, ``accuracy_command``, ``runtime_notes``,
     ``profile_execution``, and ``workspace_sources``; built by
-    ``_domain_render_context`` in ``loop.py``)
+    ``domain_prompt_sections`` in ``core_wiring``)
     so authors can branch on the run from any file.
     ``single_agent`` falls back to the rendered ``implementer`` and ``judge``
     sections, blank-line separated, when the directory has no explicit
     ``single_agent.md`` file. Leading and trailing
-    blank lines are stripped — the base template owns the spacing around the
-    ``{{ domain_<role> }}`` injection point.
+    blank lines are stripped — the slot template owns the spacing around the
+    section.
     """
     role_name = _coerce_role(role)
     raw = _load_role_file(domain.prompt_dir, role_name)
@@ -59,3 +59,13 @@ def render_domain_section(
     if not raw:
         return ""
     return render_string(raw, **context).strip("\n")
+
+
+def render_domain_sections(domain: DomainDefinition, **context: object) -> dict[DomainRole, str]:
+    """Every role's rendered section of ``domain``: ``""`` for a role the pack does not address.
+
+    The mapping always holds all of `DOMAIN_ROLES`, so a prompt template can index it by
+    role without a guard. ``context`` is the uniform variable set `render_domain_section`
+    documents.
+    """
+    return {role: render_domain_section(domain, role, **context) for role in DOMAIN_ROLES}

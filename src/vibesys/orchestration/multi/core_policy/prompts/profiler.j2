@@ -1,5 +1,5 @@
 {% set runtime_notes = environment_notes %}
-{% set domain_profiler = '' %}
+{% set domain_profiler = domain_sections['profiler'] %}
 {% include 'profilers/' ~ profiler_kind ~ '.j2' %}
 
 ## Recent campaign context

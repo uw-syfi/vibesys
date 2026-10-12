@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 
 import vibesys.orchestration.multi.core_policy.prompts as templates
 from vibesys.orchestration.multi.core_policy.api import run_prompt_variables
@@ -193,6 +194,7 @@ def _variables(context: Value, *, agent_evaluation: bool = True) -> dict[str, ob
     variables.pop("template")
     return {
         **run_prompt_variables(
+            domain_sections=EMPTY_DOMAIN_SECTIONS,
             objective=_OBJECTIVE,
             environment_notes="note",
             agent_evaluation=agent_evaluation,

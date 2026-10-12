@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
+
 import vibesys.orchestration.multi.core_policy.prompts as multi_templates
 from entrypoints.cli import _MODALITIES
 from vibesys.inputs import load_project_task
@@ -57,6 +59,7 @@ def test_kv_store_judge_prompt_mentions_resp2_not_http() -> None:
         "judge.j2",
         template_dir=_TEMPLATE_DIR,
         **run_prompt_variables(
+            domain_sections=EMPTY_DOMAIN_SECTIONS,
             objective="OBJ",
             environment_notes="",
             agent_evaluation=False,

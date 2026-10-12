@@ -12,6 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from vibesys.constants import DomainName
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_sections
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.run.evaluation_backend import semantic_evaluation_identity
 from vs_core.api import ArtifactId, ArtifactRef
@@ -24,6 +27,8 @@ from vs_runtime.api.core import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from vs_core.api import MeasurementRecipe, StrategyOperations
     from vs_runtime.api import ArtifactStore, RunFacts
     from vs_runtime.api.core import OperationPorts
@@ -34,6 +39,7 @@ __all__ = [
     "ParallelCandidateFacts",
     "ResolvedRun",
     "agent_evaluation_policy",
+    "domain_prompt_sections",
     "evaluation_inputs",
     "operation_catalog",
     "require_candidate_sandboxes",
@@ -152,3 +158,27 @@ def require_candidate_sandboxes(environment: ParallelCandidateFacts, *, loop: st
                 ),
             )
         )
+
+
+def domain_prompt_sections(
+    facts: RunFacts, *, modality: str | None = None, interface: str = "inprocess"
+) -> Mapping[str, str]:
+    """The run's domain pack as one rendered section per role, for the plan's prompt variables.
+
+    Every strategy's role prompts render ``domain_sections[<role>]`` in the same slot
+    (`core_protocol/domain_section.j2`), so a domain's contract text reaches every strategy
+    through this one path. The pack is addressed only by the run's domain; a role the pack
+    leaves out renders as an empty section.
+    """
+    sections = render_domain_sections(
+        resolve_domain(DomainName(facts.domain_id)),
+        modality=modality,
+        interface=interface,
+        reference_path=facts.reference_location,
+        benchmark_command=facts.benchmark_command,
+        accuracy_command=facts.accuracy_command,
+        runtime_notes=facts.environment_notes,
+        profile_execution=facts.profile_execution.value,
+        workspace_sources=facts.workspace_sources,
+    )
+    return {role.value: text for role, text in sections.items()}

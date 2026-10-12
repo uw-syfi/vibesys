@@ -1,0 +1,5 @@
+{# The one slot where a role's prompt renders its run's domain pack. `sections` is the plan's
+   `domain_sections` variable: one rendered text per role, empty when the pack addresses none.
+   The call replaces the blank line after the run context, so an empty section adds no bytes
+   and a section is set off by a blank line on each side. #}
+{% macro domain_section(sections, role) %}{% if sections[role] %}{{ "\n" ~ sections[role] ~ "\n" }}{% endif %}{% endmacro %}

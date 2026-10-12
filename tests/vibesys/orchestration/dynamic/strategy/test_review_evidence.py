@@ -14,6 +14,7 @@ from pathlib import Path
 
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
@@ -93,7 +94,10 @@ def _text(prompt: ReviewPrompt, *, agent_evaluation: bool = True) -> str:
         "review.j2",
         **variables,
         **run_prompt_variables(
-            objective="Raise throughput.", environment_notes="", agent_evaluation=agent_evaluation
+            domain_sections=EMPTY_DOMAIN_SECTIONS,
+            objective="Raise throughput.",
+            environment_notes="",
+            agent_evaluation=agent_evaluation,
         ),
     )
 
