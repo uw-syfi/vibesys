@@ -154,7 +154,6 @@ graph TD
     vs_dst --> vs_project
     vs_dst --> vs_runtime
     vs_dst --> vs_sim
-    vs_evaluation --> vs_async_ops
     vs_evaluation --> vs_evaluator_protocol
     vs_evaluation --> vs_mcp
     vs_evaluation --> vs_project
