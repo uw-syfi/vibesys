@@ -20,6 +20,7 @@ import type {HostId} from '@vibesys/hosts';
 import {WELCOME_EVENTS} from '@vibesys/ipc';
 import {remember, SettingsStore} from '@vibesys/settings';
 import {app, Menu, net, powerMonitor} from 'electron';
+import {AppLaunches} from './app-launches.js';
 import {AppLifecycle, realTimers} from './app-lifecycle.js';
 import {
   confineContents,
@@ -139,7 +140,6 @@ function main(): void {
   }
   registerAppScheme();
   let manager: ConnectionManager | null = null;
-  let desktop: Desktop | null = null;
   const lifecycle = new AppLifecycle({
     // Runs are detached and keep going; quitting ends this app's channels and ssh masters only.
     release: async () => manager?.[Symbol.asyncDispose](),
@@ -148,6 +148,7 @@ function main(): void {
     scheduleTimeout: realTimers,
     releaseBoundMs: RELEASE_BOUND_MS,
   });
+  const launches = new AppLaunches<LaunchPlan>(error => log(error.message));
   // One instance per user-data directory, the settings files' only writer: a second launch hands
   // its command line to this one (`second-instance`) and exits.
   if (!app.requestSingleInstanceLock()) {
@@ -156,8 +157,6 @@ function main(): void {
     return;
   }
   app.on('second-instance', (_event, argv, cwd) => {
-    if (desktop === null) return;
-    desktop.focus();
     let second: LaunchPlan;
     try {
       second = planFrom(argv, cwd);
@@ -165,7 +164,7 @@ function main(): void {
       log(`ignoring a second launch's arguments: ${(error as Error).message}`);
       return;
     }
-    desktop.open(second).catch((error: Error) => log(error.message));
+    launches.second(second);
   });
   app.on('will-quit', event => lifecycle.willQuit(event));
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => app.quit());
@@ -173,9 +172,9 @@ function main(): void {
   app.on('window-all-closed', () => app.quit());
   void app.whenReady().then(async () => {
     manager = await connectionManager();
-    desktop = await openWindow(manager);
+    const desktop = await openWindow(manager);
     try {
-      await desktop.open(plan);
+      await launches.ready(desktop, plan);
     } catch (error) {
       log((error as Error).message);
       lifecycle.quit(1);
