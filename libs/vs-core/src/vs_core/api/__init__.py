@@ -97,10 +97,12 @@ from vs_core._turn_chain import (
     TurnChain,
 )
 from vs_core._waitable import (
+    SuspendedTurn,
     Waitable,
     WaitableReply,
     WaitingForDependency,
     WaitingForEvaluation,
+    turn_reply,
 )
 from vs_core._waits import (
     Producer,
@@ -904,6 +906,7 @@ __all__ = [
     "SubmissionBudget",
     "SubmissionReceipt",
     "SubmitMeasurement",
+    "SuspendedTurn",
     "SuspensionRefusal",
     "TargetObservation",
     "TimedOut",
@@ -983,6 +986,7 @@ __all__ = [
     "trusted_keys",
     "turn_candidate",
     "turn_decision_id",
+    "turn_reply",
     "v2_to_v3_migration",
     "validate_startup",
     "validate_terminal_inputs",

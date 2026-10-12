@@ -7,6 +7,7 @@ No profiler is configured; do not attempt a profile.
 {% else %}
 Profiler `{{ facts.profiler_id }}` is available through the fixed `profiler` tool and executes on the {{ facts.profile_execution.value }} path.
 {% endif %}
+{% if facts.domain_id == "llm-serving" %}
 Configured load levels: {% if load_levels_json is none %}"discover a low, medium, high, and saturation workload"{% else %}{{ load_levels_json }}{% endif +%}
 Prior performance records:
 {% if prior %}
@@ -27,8 +28,31 @@ resource separately at low, medium, and saturation load. Compare with both the
 immediately prior result and the best recorded result.
 
 Profiling is optional, limited to one run, and must answer a specific unresolved
-bottleneck question. Do not attempt profiling when profiler is `none`. Always stop any process you started
-that this turn started, including after benchmark or profiling failure.
+bottleneck question. Do not attempt profiling when profiler is `none`. Always stop processes
+and release resources that this turn started, including after benchmark or profiling failure.
+{% else %}
+Configured workload hints: {% if load_levels_json is none %}"discover representative workloads from the objective and benchmark interface"{% else %}{{ load_levels_json }}{% endif +%}
+Prior performance records:
+{% if prior %}
+{% for record in prior %}
+- iteration {{ record.iteration }}: primary metric {{ record.throughput_trend }}{% if record.latency_trend %}, secondary metric {{ record.latency_trend }}{% endif %}, {{ record.new_issues }} issues filed; metrics {{ record.metrics_json }}
+{% endfor %}
+{% else %}
+none yet
+{% endif %}
+
+Treat configured workload hints as inputs to the benchmark, not as a universal workload shape.
+If no hints are configured, discover representative workloads from the objective and benchmark
+interface. Vary only supported dimensions, and stop when the measurements identify a stable
+limit or a failure boundary. Save and read structured benchmark output for every run. You work
+in your own checkout of the accumulated candidate, which is discarded when this evaluation
+ends, so scratch files and logs can go anywhere in it. Diagnose the limiting resource for each
+measured workload. Compare with both the immediately prior result and the best recorded result.
+
+Profiling is optional, limited to one run, and must answer a specific unresolved
+bottleneck question. Do not attempt profiling when profiler is `none`. Always release processes
+and resources that this turn started, including after benchmark or profiling failure.
+{% endif %}
 
 The board below lists every issue. Before filing, check it for the same work. File at
 most {{ max_new_issues }} non-duplicate issues in `new_issues`, ranked by impact over effort.
@@ -43,6 +67,7 @@ Return exactly one JSON object with this schema:
 {
   "analysis": "trend comparison, saturation, resource diagnosis",
   "metrics": {
+{% if facts.domain_id == "llm-serving" %}
     "load_levels": [{
       "target_rate": 1.0, "actual_rate": 1.0,
       "num_requests": 1, "num_completed": 1, "num_failed": 0,
@@ -52,11 +77,27 @@ Return exactly one JSON object with this schema:
                  "p95_ms": 1.0, "p99_ms": 1.0},
       "tpot": null, "total_latency": null
     }],
+{% else %}
+    "measurements": [
+      {"name": "the benchmark's metric name", "value": 1.0,
+       "unit": "the reported unit", "workload": "the measured workload"}
+    ],
+{% endif %}
     "extra": {}
   },
   "evaluator_feedback": ["measurement guidance for the next evaluator"],
   "new_issues": [{"type": "bug" | "feature" | "perf", "title": "...", "description": "..."}],
+{% if facts.domain_id == "llm-serving" %}
   "throughput_trend": "improved" | "regressed" | "mixed",
   "latency_trend": "improved" | "regressed" | "mixed"
+{% else %}
+  "primary_metric_trend": "improved" | "regressed" | "mixed",
+  "secondary_metric_trend": "improved" | "regressed" | "mixed" | null
+{% endif %}
 }
+{% if facts.domain_id == "llm-serving" %}
 Populate every metric from actual output. Do not fabricate measurements.
+{% else %}
+Populate every metric from actual output. Do not fabricate measurements or rename a metric to
+fit this example.
+{% endif %}

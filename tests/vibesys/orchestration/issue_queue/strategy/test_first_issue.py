@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.issue_queue.strategy._run import FACTS, config, harness
@@ -21,7 +23,40 @@ _WORDS = st.text(
     min_size=1,
     max_size=12,
 )
-OBJECTIVES = st.lists(_WORDS, min_size=1, max_size=40).map(" ".join)
+_LINE_TEXT = st.lists(_WORDS, min_size=1, max_size=12).map(" ".join)
+# Markdown headings, emphasis and labels that an OBJECTIVE.md commonly wraps around its text.
+_PREFIXES = st.sampled_from(
+    [
+        "",
+        "# ",
+        "## ",
+        "### ",
+        "**",
+        "*",
+        "_",
+        "# **",
+        "**Objective:** ",
+        "Objective: ",
+        "objective: ",
+        "OBJECTIVE:  ",
+        "## Objective: ",
+        "# Goal: ",
+        "Task: ",
+        "*Objective:* ",
+        "# *",
+    ]
+)
+_SUFFIXES = st.sampled_from(["", "**", "*", "_", ".", "!"])
+_LINES = st.one_of(
+    st.just(""),
+    st.just("   "),
+    st.tuples(_PREFIXES, _LINE_TEXT, _SUFFIXES).map("".join),
+)
+OBJECTIVES = (
+    st.lists(_LINES, min_size=1, max_size=6)
+    .map("\n".join)
+    .filter(lambda text: any(line.strip() for line in text.splitlines()))
+)
 
 
 def _first_decisions(objective: str) -> list[object]:
@@ -50,8 +85,18 @@ def test_the_first_issue_is_titled_from_the_objective_of_any_task(objective: str
     assert title
     assert "\n" not in title
     assert len(title) <= 80
-    assert title.removesuffix("...") in " ".join(objective.split())
+    assert not title.startswith(("#", "*"))
+    assert not re.match(r"objective\s*:", title, re.IGNORECASE)
+    markup_free = re.sub(r"[#*_]", "", objective)
+    assert title.removesuffix("...") in " ".join(markup_free.split())
     assert "inference server" not in title
+
+
+def test_a_markdown_objective_is_titled_as_plain_text() -> None:
+    objective = "# Objective: fast rowwise projection + softmax on one GPU\n\nWrite the kernel."
+    assert _created(_first_decisions(objective)).title == (
+        "fast rowwise projection + softmax on one GPU"
+    )
 
 
 def test_a_rowwise_kernel_task_is_not_seeded_with_a_serving_issue() -> None:

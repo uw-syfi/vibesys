@@ -103,7 +103,9 @@ def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
         accuracy_configured=run.facts.accuracy_configured,
         benchmark_configured=run.facts.benchmark_configured,
         profiling=profiling,
-        profile_measurement=profiling and plan.profile_command is not None,
+        profile_measurement=profiling
+        and plan.profile_command is not None
+        and run.environment.captures_profile,
         accuracy_seconds=plan.accuracy_timeout_seconds,
         benchmark_seconds=plan.benchmark_timeout_seconds,
         profile_seconds=plan.profile_timeout_seconds,

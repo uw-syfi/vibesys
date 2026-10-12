@@ -363,8 +363,8 @@ const EXTERNAL_CASES = {
   'XState in a foundation package': workspace => {
     workspace.contracts.files['src/index.ts'] += "import 'xstate';\n";
   },
-  'XState in a service package': workspace => {
-    workspace.connection.files['src/index.ts'] += "import {setup} from 'xstate';\n";
+  'XState in an app': workspace => {
+    workspace['web-app'].files['src/index.ts'] += "import {setup} from 'xstate';\n";
   },
   "XState in a feature's main-process entry": workspace => {
     workspace['stop-run'].files['src/main/index.ts'] += "import 'xstate';\n";
@@ -391,6 +391,9 @@ test('XState is allowed in a feature state and renderer entry and in a machine p
       'tsconfig.lib.json': project({include: ['src']}),
     },
   };
+  // The connection manager is a machine package: its host connection is a machine.
+  workspace.connection.manifest.dependencies.xstate = '5.33.2';
+  workspace.connection.files['src/index.ts'] += "import {setup} from 'xstate';\n";
   assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
 });
 
@@ -447,6 +450,24 @@ test('a bucket name is allowed above the domain layer and as part of a longer wo
   workspace['core-model'] = structuredClone(workspace.contracts);
   workspace['core-model'].manifest.name = '@vibesys/coresident';
   assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
+});
+
+test('a feature may publish its views stylesheet, as a dom asset only', async t => {
+  const workspace = validWorkspace();
+  const feature = workspace['stop-run'];
+  feature.manifest.vibesys.entries['./styles.css'] = 'dom';
+  feature.manifest.exports['./styles.css'] = {
+    '@vibesys/source': './src/renderer/styles.css',
+    default: './src/renderer/styles.css',
+  };
+  feature.files['src/renderer/styles.css'] = '.stop-button { color: red; }\n';
+  assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
+  feature.manifest.vibesys.entries['./styles.css'] = 'neutral';
+  const errors = packageGraphErrors(await materialize(t, workspace));
+  assert.deepEqual(
+    errors.map(error => error.split(':')[0]),
+    ['feature-entries'],
+  );
 });
 
 test('a stylesheet entry is a dom asset with no project', async t => {

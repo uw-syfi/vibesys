@@ -21,7 +21,13 @@ Every issue on the board, for context (do not work on any other):
 
 You work in your own checkout of the accumulated candidate; earlier closed issues are
 already in it. Inspect the accuracy checker and benchmark interface before changing their
-integration points. Make the minimum sufficient change, then run the relevant pytest,
+integration points. Inspect the reference implementation and configuration, implement its model
+architecture and local weight loading directly, and do not substitute a ready-made model class
+or generic wrapper. Preserve the checker-facing `VibeServeModel.from_pretrained(model_dir,
+device, dtype)` and `generate(input_ids, max_new_tokens=N)` interfaces, `/health`, and
+`/v1/completions`; every generated model token must produce a non-empty streaming delta. Use
+the configured accelerator and dtype, load weights only from `/model`, and do not fetch model
+data from the internet. Make the minimum sufficient change, then run the relevant pytest,
 accuracy, benchmark, and streaming checks. Return exactly one JSON object matching:
 {"reply":{"summary": "...", "files_touched": ["..."], "self_check": "..."}}
 

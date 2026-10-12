@@ -3,11 +3,15 @@
  *
  * It owns its long-lived control channel, every run channel it opened, and every helper process it
  * started, all released by one `AsyncDisposableStack` under one `AbortSignal`: closing the
- * connection aborts what is in flight and resolves once every channel's process has exited. The
- * link itself (an ssh master) is shared by every connection to the host, so its owner is the
- * `ConnectionManager`. The connection performs the machine's requests (link, `hello`, `ping`, and
- * the check that is the failing operation), each under its own `AbortSignal` the machine can abort,
- * and feeds their typed outcomes back as events. It makes no lifecycle decision of its own.
+ * connection stops the machine (which stops what is in flight and cancels every timer) and resolves
+ * once every channel's process has exited. The link itself (an ssh master) is shared by every
+ * connection to the host, so its owner is the `ConnectionManager`. The connection provides the
+ * machine's operations (link, `hello`, `ping`, and the check that is the failing operation) as
+ * invoked actors, and its timers as the actor's clock. It makes no lifecycle decision of its own.
+ *
+ * A control channel an operation opens is that operation's until the machine accepts the outcome
+ * and installs it (`installControl`); one the machine does not accept (`discard`) or stopped
+ * waiting for (the operation's signal aborted) is closed here, never installed.
  *
  * Callers never retry: `request` and `openRun` wait until the host is ready, and reject with the
  * machine's terminal reason (offline, auth-needed, incompatible, closed) or with the failure itself.
@@ -18,18 +22,18 @@
  */
 
 import type {InstanceList} from '@vibesys/contracts/host-helper';
+import {clockFrom} from '@vibesys/machine';
 import type {ScheduleTimeout} from '@vibesys/transport';
+import {type Actor, createActor, fromPromise} from 'xstate';
 import {
   type Cause,
+  type CheckTarget,
   type ConnectionConfig,
   type ConnectionEvent,
-  type ConnectionRequest,
-  type ConnectionState,
-  INITIAL,
-  type Operation,
+  connectionMachine,
+  type Opened,
   type Phase,
   phaseOf,
-  step,
 } from '../state/host-connection.js';
 import {
   type Body,
@@ -49,6 +53,9 @@ export interface HostConnectionOptions {
   readonly scheduleTimeout: ScheduleTimeout;
   readonly log: (message: string) => void;
 }
+
+/** What the app may tell a connection: a wake or a network change, or the user's retry. */
+export type OutsideEvent = Extract<ConnectionEvent, {type: 'wake' | 'user-retry'}>;
 
 /** A guarded request's explicit write-boundary result. */
 type GuardedRequestResult<T> =
@@ -77,9 +84,22 @@ function asConnectionError(error: unknown): ConnectionError {
   return new ConnectionError('link', error instanceof Error ? error.message : String(error));
 }
 
+/** Run `operation`, rejecting only with a `ConnectionError`, whose reason the machine decides on. */
+async function typed<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw asConnectionError(error);
+  }
+}
+
 /** Throw when `signal` aborted: the machine no longer waits for this operation. */
 function stillWanted(signal: AbortSignal): void {
   if (signal.aborted) throw new ConnectionError('link', 'the operation was abandoned');
+}
+
+function samePhase(left: Phase, right: Phase): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 export class HostConnection implements AsyncDisposable {
@@ -88,10 +108,10 @@ export class HostConnection implements AsyncDisposable {
   readonly #options: HostConnectionOptions;
   readonly #stack = new AsyncDisposableStack();
   readonly #abort = new AbortController();
-  readonly #timers = new Map<number, () => void>();
-  /** The operations in flight, by id, each with what aborts it. */
-  readonly #ops = new Map<number, AbortController>();
+  readonly #actor: Actor<typeof connectionMachine>;
   readonly #runs = new Set<HelperChannel>();
+  /** Control channels opened by an operation and not yet installed or closed. */
+  readonly #opened = new Set<HelperChannel>();
   /** The exits of every helper process this connection started that has not exited yet. */
   readonly #exits = new Set<Promise<number | null>>();
   readonly #phaseListeners = new Set<(phase: Phase) => void>();
@@ -99,7 +119,9 @@ export class HostConnection implements AsyncDisposable {
   readonly #watchers = new Set<(listing: InstanceList) => void>();
   readonly #waiters = new Set<{resolve: () => void; reject: (error: Error) => void}>();
   readonly #unheld = new Set<() => void>();
-  #state: ConnectionState = INITIAL;
+  /** The last listing each opened channel pushed, delivered once the machine installs it. */
+  readonly #latest = new WeakMap<HelperChannel, InstanceList>();
+  #phase: Phase = {kind: 'idle'};
   #control: HelperChannel | null = null;
   #listing: InstanceList | null = null;
   #closing: Promise<void> | null = null;
@@ -108,25 +130,65 @@ export class HostConnection implements AsyncDisposable {
   constructor(options: HostConnectionOptions) {
     this.#options = options;
     this.where = `${options.checkout} on ${options.link.host}`;
-    // Released in reverse: the channels, and every process, after what is in flight was aborted.
+    const {link} = options;
+    const machine = connectionMachine.provide({
+      actors: {
+        link: fromPromise(({input, signal}) =>
+          typed(async () => {
+            await link.establish(input.interactive, signal);
+            stillWanted(signal);
+          }),
+        ),
+        handshake: fromPromise(({signal}) => typed(() => this.#openControl(signal))),
+        ping: fromPromise(() => typed(() => this.#pingControl())),
+        check: fromPromise(({input, signal}) => typed(() => this.#check(input.target, signal))),
+      },
+      actions: {
+        release: () => void this.#release(),
+        installControl: (_, {opened}) => this.#install(opened),
+        discard: (_, {opened}) => void this.#discard(opened),
+      },
+      guards: {
+        current: (_, {opened}) => this.#current(opened),
+      },
+    });
+    this.#actor = createActor(machine, {
+      input: {config: options.config},
+      clock: clockFrom(options.scheduleTimeout),
+    });
+    this.#actor.on('run-unreachable', ({instanceId, detail}) => {
+      for (const listener of this.#unreachable) listener(instanceId, detail);
+    });
+    this.#actor.subscribe(snapshot => {
+      const phase = phaseOf(snapshot);
+      // A heartbeat re-enters ready: only a phase that reads differently is a change.
+      if (samePhase(phase, this.#phase)) return;
+      this.#phase = phase;
+      this.#phaseChanged(phase);
+    });
+    // Released in reverse: the channels, and every process, after the machine stopped.
     this.#stack.defer(async () => {
-      const channels = [...this.#runs, ...(this.#control === null ? [] : [this.#control])];
+      const channels = [
+        ...this.#runs,
+        ...this.#opened,
+        ...(this.#control === null ? [] : [this.#control]),
+      ];
       this.#runs.clear();
+      this.#opened.clear();
       this.#control = null;
       await Promise.all(channels.map(channel => channel[Symbol.asyncDispose]()));
       await Promise.all(this.#exits);
     });
+    // Stopping the machine stops every operation (aborting its signal) and cancels every timer.
     this.#stack.defer(() => {
       this.#abort.abort();
-      for (const op of this.#ops.values()) op.abort();
-      this.#ops.clear();
-      for (const cancel of this.#timers.values()) cancel();
-      this.#timers.clear();
+      this.#actor.stop();
     });
+    this.#actor.start();
   }
 
   get phase(): Phase {
-    return phaseOf(this.#state);
+    return this.#phase;
   }
 
   /** The checkout the control channel's helper runs from, once it answered `hello`. */
@@ -160,16 +222,9 @@ export class HostConnection implements AsyncDisposable {
     return () => this.#unheld.delete(listener);
   }
 
-  /** Feed the machine an event from outside: a wake, a network change, the user's retry. */
-  dispatch(event: ConnectionEvent): void {
-    const before = phaseOf(this.#state);
-    const {state, requests} = step(this.#state, event, this.#options.config);
-    const after = phaseOf(state);
-    // A heartbeat re-enters ready: only a phase that reads differently is a change.
-    const changed = JSON.stringify(after) !== JSON.stringify(before);
-    this.#state = state;
-    for (const request of requests) this.#run(request);
-    if (changed) this.#phaseChanged(after);
+  /** Tell the machine about a wake, a network change, or the user's retry. */
+  dispatch(event: OutsideEvent): void {
+    this.#send(event);
   }
 
   /** Hear every phase change; returns the unsubscribe. */
@@ -197,9 +252,9 @@ export class HostConnection implements AsyncDisposable {
 
   /** Resolve once the host is ready, opening the connection if it is idle. */
   ready(): Promise<void> {
-    if (this.#state.phase.kind === 'idle') this.dispatch({type: 'open'});
-    if (this.#state.phase.kind === 'ready') return Promise.resolve();
-    const terminal = terminalError(this.phase);
+    if (this.#phase.kind === 'idle') this.#send({type: 'open'});
+    if (this.#phase.kind === 'ready') return Promise.resolve();
+    const terminal = terminalError(this.#phase);
     if (terminal !== null) return Promise.reject(terminal);
     return new Promise((resolve, reject) => this.#waiters.add({resolve, reject}));
   }
@@ -238,13 +293,6 @@ export class HostConnection implements AsyncDisposable {
     }
   }
 
-  /** Write one request to the already-ready control channel. */
-  #request<T extends string>(body: Body & {readonly type: T}): Promise<ReplyOf<T>> {
-    const control = this.#control;
-    if (control === null) throw new ConnectionError('link', 'the control channel is down');
-    return control.request(body) as Promise<ReplyOf<T>>;
-  }
-
   /**
    * A run channel to `instanceId`, relaying the run protocol, with the run id the helper reported:
    * one dial once the host is ready. A dial that fails is reported to the machine with its real
@@ -259,26 +307,32 @@ export class HostConnection implements AsyncDisposable {
       return await this.#connectRun(instanceId, this.#abort.signal);
     } catch (error) {
       const failure = asConnectionError(error);
-      this.dispatch({
-        type: 'run-ended',
-        instanceId,
-        cause: failure.reason,
-        detail: failure.message,
-      });
+      this.#send({type: 'run-ended', instanceId, cause: failure.reason, detail: failure.message});
       throw failure;
     }
   }
 
   /** Close for good; resolves once every channel this connection started has ended. */
   async [Symbol.asyncDispose](): Promise<void> {
-    this.dispatch({type: 'close'});
+    this.#send({type: 'close'});
     await this.#release();
+  }
+
+  #send(event: ConnectionEvent): void {
+    this.#actor.send(event);
   }
 
   /** Release everything, once; every caller waits for the same release. */
   #release(): Promise<void> {
     this.#closing ??= this.#stack.disposeAsync();
     return this.#closing;
+  }
+
+  /** Write one request to the already-ready control channel. */
+  #request<T extends string>(body: Body & {readonly type: T}): Promise<ReplyOf<T>> {
+    const control = this.#control;
+    if (control === null) throw new ConnectionError('link', 'the control channel is down');
+    return control.request(body) as Promise<ReplyOf<T>>;
   }
 
   async #connectRun(
@@ -297,7 +351,7 @@ export class HostConnection implements AsyncDisposable {
     }
     connected.stream.once('error', error => {
       const cause: Cause = error instanceof ConnectionError ? error.reason : 'link';
-      this.dispatch({type: 'run-ended', instanceId, cause, detail: error.message});
+      this.#send({type: 'run-ended', instanceId, cause, detail: error.message});
     });
     return connected;
   }
@@ -330,24 +384,20 @@ export class HostConnection implements AsyncDisposable {
   }
 
   /**
-   * Open the control channel and its registry watch; its end is reported to the machine. A channel
-   * that answers after `signal` aborted (the machine stopped waiting) is closed, never installed.
+   * Open a control channel and its registry watch for the machine to install. It is the
+   * operation's own resource until then: when the machine stops waiting (`signal` aborts) before
+   * installing it, it is closed here.
    */
   async #openControl(signal: AbortSignal): Promise<HelperChannel> {
-    const lifetime = AbortSignal.any([this.#abort.signal, signal]);
-    const channel = await this.#openChannel(lifetime, signal);
-    let published = false;
-    let ended = false;
+    const channel = await this.#openChannel(this.#abort.signal, signal);
+    this.#opened.add(channel);
+    signal.addEventListener('abort', () => void this.#discard(channel), {once: true});
+    // Pushes reach watchers only once the machine installed this channel (`#install`).
     channel.onPush(push => {
+      this.#latest.set(channel, push.listing);
+      if (this.#control !== channel) return;
       this.#listing = push.listing;
       for (const watcher of this.#watchers) watcher(push.listing);
-    });
-    void channel.ended.then(failure => {
-      ended = true;
-      if (this.#control !== channel) return;
-      this.#control = null;
-      const cause: Cause = failure?.reason ?? 'link';
-      this.dispatch({type: 'control-ended', cause, detail: failure?.message ?? 'the helper ended'});
     });
     try {
       stillWanted(signal);
@@ -355,117 +405,74 @@ export class HostConnection implements AsyncDisposable {
         await channel.request({type: 'instances.watch'});
       }
       stillWanted(signal);
-      if (ended || !channel.active) {
+      if (!channel.active)
         throw new ConnectionError('link', 'the helper ended during control setup');
-      }
-      const previous = this.#control;
-      this.#control = channel;
-      published = true;
-      if (previous !== null) void previous[Symbol.asyncDispose]();
-    } finally {
-      if (!published) await channel[Symbol.asyncDispose]();
+    } catch (error) {
+      // The operation fails only once its helper is gone, so a retry never overlaps it.
+      await this.#discard(channel);
+      throw error;
     }
     return channel;
   }
 
-  /**
-   * Perform one machine operation and return its synchronous success check. No channel-end
-   * continuation can interleave between that check and the machine accepting the outcome.
-   */
-  async #perform(operation: Operation, signal: AbortSignal): Promise<() => void> {
-    const {link} = this.#options;
-    switch (operation.kind) {
-      case 'link':
-        await link.establish(operation.interactive, signal);
-        stillWanted(signal);
-        return () => {};
-      case 'handshake': {
-        const control = await this.#openControl(signal);
-        return () => this.#assertControl(control, signal);
-      }
-      case 'ping': {
-        const control = await this.#pingControl();
-        return () => this.#assertControl(control, signal);
-      }
-      case 'check': {
-        await link.establish(false, signal);
-        stillWanted(signal);
-        if (this.#control === null) await this.#openControl(signal);
-        const control = await this.#pingControl();
-        stillWanted(signal);
-        if (operation.target.kind === 'run') {
-          // The check is the operation that failed: a fresh run.connect to the same run.
-          const lifetime = AbortSignal.any([this.#abort.signal, signal]);
-          const {stream} = await this.#connectRun(operation.target.instanceId, lifetime);
-          stream.destroy();
-        }
-        return () => this.#assertControl(control, signal);
-      }
-    }
+  /** Whether the channel an outcome opened (or, when it opened none, the control) still serves. */
+  #current(opened: Opened | undefined): boolean {
+    const channel = (opened as HelperChannel | null | undefined) ?? this.#control;
+    return channel?.active === true;
   }
 
-  /** Reject a stale operation outcome before the state machine can accept it as success. */
-  #assertControl(control: HelperChannel, signal: AbortSignal): void {
+  /** The machine accepted an operation that opened a control channel: it becomes the control. */
+  #install(opened: Opened): void {
+    if (opened === null) return;
+    const channel = opened as HelperChannel;
+    this.#opened.delete(channel);
+    const previous = this.#control;
+    this.#control = channel;
+    if (previous !== null && previous !== channel) void previous[Symbol.asyncDispose]();
+    const latest = this.#latest.get(channel);
+    if (latest !== undefined) {
+      this.#listing = latest;
+      for (const watcher of this.#watchers) watcher(latest);
+    }
+    void channel.ended.then(failure => {
+      if (this.#control !== channel) return;
+      this.#control = null;
+      const cause: Cause = failure?.reason ?? 'link';
+      this.#send({type: 'control-ended', cause, detail: failure?.message ?? 'the helper ended'});
+    });
+  }
+
+  /** Close a channel an operation opened that will not be installed; resolves once it ended. */
+  async #discard(opened: Opened): Promise<void> {
+    if (opened === null) return;
+    const channel = opened as HelperChannel;
+    if (!this.#opened.delete(channel)) return;
+    await channel[Symbol.asyncDispose]();
+  }
+
+  async #check(target: CheckTarget, signal: AbortSignal): Promise<Opened> {
+    await this.#options.link.establish(false, signal);
     stillWanted(signal);
-    if (this.#control !== control || !control.active) {
-      throw new ConnectionError('link', 'the helper ended during the connection operation');
-    }
-  }
-
-  async #pingControl(): Promise<HelperChannel> {
-    const control = this.#control;
-    if (control === null) throw new ConnectionError('link', 'the control channel is down');
-    await control.request({type: 'ping'});
-    return control;
-  }
-
-  #run(request: ConnectionRequest): void {
-    switch (request.type) {
-      case 'perform': {
-        const {op} = request;
-        const abort = new AbortController();
-        this.#ops.set(op, abort);
-        const failed = (error: unknown): void => {
-          this.#ops.delete(op);
-          const failure = asConnectionError(error);
-          this.dispatch({type: 'failed', op, cause: failure.reason, detail: failure.message});
-        };
-        // An aborted operation's outcome still arrives; the machine ignores it by its id.
-        void this.#perform(request.operation, abort.signal).then(accept => {
-          try {
-            accept();
-            this.#ops.delete(op);
-            this.dispatch({type: 'succeeded', op});
-          } catch (error) {
-            failed(error);
-          }
-        }, failed);
-        return;
+    const opened = this.#control === null ? await this.#openControl(signal) : null;
+    try {
+      await this.#pingControl(opened ?? this.#control);
+      stillWanted(signal);
+      if (target.kind === 'run') {
+        // The check is the operation that failed: a fresh run.connect to the same run.
+        const lifetime = AbortSignal.any([this.#abort.signal, signal]);
+        const {stream} = await this.#connectRun(target.instanceId, lifetime);
+        stream.destroy();
       }
-      case 'abort':
-        this.#ops.get(request.op)?.abort();
-        this.#ops.delete(request.op);
-        return;
-      case 'schedule':
-        this.#timers.set(
-          request.timer,
-          this.#options.scheduleTimeout(() => {
-            this.#timers.delete(request.timer);
-            this.dispatch({type: 'timer-fired', timer: request.timer});
-          }, request.delayMs),
-        );
-        return;
-      case 'cancel':
-        this.#timers.get(request.timer)?.();
-        this.#timers.delete(request.timer);
-        return;
-      case 'run-unreachable':
-        for (const listener of this.#unreachable) listener(request.instanceId, request.detail);
-        return;
-      case 'release':
-        void this.#release();
-        return;
+    } catch (error) {
+      await this.#discard(opened);
+      throw error;
     }
+    return opened;
+  }
+
+  async #pingControl(channel = this.#control): Promise<void> {
+    if (channel === null) throw new ConnectionError('link', 'the control channel is down');
+    await channel.request({type: 'ping'});
   }
 
   #phaseChanged(phase: Phase): void {

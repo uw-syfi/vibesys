@@ -1223,7 +1223,7 @@ layer = "loops"
 depends_on = ["vs_core", "vs_issue_tracker"]
 
 [[interfaces]]
-expose = ["ImplementerReplyModel", "IssueImplementerResult", "IssueJudgeResult", "IssuePerfEvalResult", "IssueQueueOptions", "JudgeReplyModel", "LatencyStats", "LoadLevel", "LoadLevelMetrics", "NewBug", "NewIssue", "PerfMetrics", "PerformanceTrend", "ThroughputStats", "perf_result_model"]
+expose = ["GenericIssuePerfEvalResult", "ImplementerReplyModel", "IssueImplementerResult", "IssueJudgeResult", "IssuePerfEvalResult", "IssueQueueOptions", "JudgeReplyModel", "LatencyStats", "LoadLevel", "LoadLevelMetrics", "NewBug", "NewIssue", "PerfMetrics", "PerformanceTrend", "ThroughputStats", "perf_result_model"]
 from = ["vibesys.orchestration.issue_queue.models"]
 
 [[modules]]

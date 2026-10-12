@@ -82,7 +82,7 @@ function renderDemo(
 function renderLive(webSocketUrl: string, browserSession: string | null): void {
   const url = webSocketUrlWithSession(webSocketUrl, browserSession);
   const session = new WebSession({
-    lifecycle: browserLifecycle,
+    lifecycle: browserLifecycle(),
     connect: connectRun(hooks => openTransport(url, hooks)),
   });
   reactRoot.render(<StrictMode>{createLiveApp(session)}</StrictMode>);

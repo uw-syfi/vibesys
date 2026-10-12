@@ -48,6 +48,7 @@ class TaskRunHandle[Event, Result, Session: RunExecution[object]]:
         self._session: Session | None = None
         self._execution: asyncio.Task[object] | None = None
         self._cancel_requested = False
+        self._cancellation_cleanup_note: str | None = None
 
     @property
     def session(self) -> Session:
@@ -87,9 +88,11 @@ class TaskRunHandle[Event, Result, Session: RunExecution[object]]:
         if execution is None:
             message = "run execution has not been started"
             raise RuntimeError(message)
+        primary_error: BaseException | None = None
         try:
             return cast("Result", await asyncio.shield(execution))
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as error:
+            primary_error = error
             # Event-loop shutdown cancels both owned tasks. Shielding prevents
             # the completion task from cancelling execution a second time
             # while execution is already releasing its async resources.
@@ -100,8 +103,24 @@ class TaskRunHandle[Event, Result, Session: RunExecution[object]]:
                 except asyncio.CancelledError:
                     continue
             raise
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
-            self.session.close()
+            try:
+                self.session.close()
+            except BaseException as cleanup_error:
+                if primary_error is None:
+                    raise
+                cleanup_note = (
+                    "run session cleanup also failed: "
+                    f"{type(cleanup_error).__name__}: {cleanup_error}"
+                )
+                primary_error.add_note(cleanup_note)
+                if isinstance(primary_error, asyncio.CancelledError):
+                    # asyncio recreates a task's cancellation exception for
+                    # each awaiter, so retain diagnostics for result().
+                    self._cancellation_cleanup_note = cleanup_note
 
     def _settled(self, task: asyncio.Task[Result]) -> None:
         # Retrieve failure even if nobody awaits result; result still re-raises.
@@ -145,7 +164,12 @@ class TaskRunHandle[Event, Result, Session: RunExecution[object]]:
         if self._task is None:
             message = "run handle has not been started"
             raise RuntimeError(message)
-        return await asyncio.shield(self._task)
+        try:
+            return await asyncio.shield(self._task)
+        except asyncio.CancelledError as error:
+            if self._cancellation_cleanup_note is not None:
+                error.add_note(self._cancellation_cleanup_note)
+            raise
 
     @property
     def active(self) -> bool:

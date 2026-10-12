@@ -30,12 +30,20 @@ if TYPE_CHECKING:
     import pytest
 
 
-def _run(root: Path, *, waits: tuple[bool, ...], polls: tuple[int, ...], rounds: int) -> Run:
+def _run(
+    root: Path,
+    *,
+    waits: tuple[bool, ...],
+    polls: tuple[int, ...],
+    rounds: int,
+    ends: tuple[str, ...] = ("wait",),
+) -> Run:
     bridge = new_bridge(root)
     script = WaitingTurns(
         planner=deque(plan_reply(f"h{n}") for n in range(rounds + 4)),
         implementer=deque(combined() for _ in range(40)),
         decide=lambda n: waits[n % len(waits)],
+        ends=lambda n: ends[n % len(ends)],
         polls=list(polls),
         unchanged_after_first_retain=True,
     )
@@ -81,3 +89,46 @@ def test_a_run_ends_whatever_its_turns_wait_for(
     assert finished.core.run.status == RunStatus.TERMINAL
     for attempt in finished.core.attempts.attempts:
         assert attempt.phase == AttemptPhase.TERMINAL
+
+
+@settings(max_examples=10, deadline=None, derandomize=True, database=None)
+@given(
+    ends=st.lists(st.sampled_from(("wait", "result", "invalid")), min_size=1, max_size=4).map(
+        tuple
+    ),
+    rounds=st.integers(1, 2),
+    polls=st.integers(0, 8),
+)
+def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
+    tmp_path_factory: pytest.TempPathFactory, ends: tuple[str, ...], rounds: int, polls: int
+) -> None:
+    """Core holds a turn that validated a wait as suspended, so no reply may be accepted.
+
+    A turn that ends with its final result or an invalid reply instead of the waiting reply
+    must still yield: accepting or correcting it would request a turn core refuses, which
+    halts the run (`run_shell` raises the halt). So the strategy's decisions must not depend on
+    which reply the suspended turn ended with: they equal those of a run whose turns all end
+    with the waiting reply.
+    """
+
+    def run(chosen: tuple[str, ...]) -> Run:
+        return _run(
+            tmp_path_factory.mktemp("ends"),
+            waits=(True,),
+            polls=(polls,),
+            rounds=rounds,
+            ends=chosen,
+        )
+
+    finished = run(ends)
+
+    assert finished.core.run.status == RunStatus.TERMINAL
+    for attempt in finished.core.attempts.attempts:
+        assert attempt.phase == AttemptPhase.TERMINAL
+    if "invalid" not in ends:
+        # Whether core records a wait on an invalid reply is core's own rule, so only the other
+        # replies are compared.
+        assert finished.core.evaluation.continuations != ()
+        assert [type(item).__name__ for item in finished.decisions] == [
+            type(item).__name__ for item in run(("wait",)).decisions
+        ]

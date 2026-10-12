@@ -58,6 +58,13 @@ a job. The profiler broker exists only for the SSH transport, so a
 local-transport run without agent GPU commands offers no ad hoc ROCprof capture,
 and no profiler.
 
+A trusted profile capture needs the task's `[profile]` command. With an operator
+`[vibesys.service]` the service runs under the profiler and that command is the load
+driven against it. Without a service the command is itself the profiled target: it runs to
+completion under the profiler and is never signalled, so it must exit by itself. A run that
+cannot capture (no profile command, or no remote profiling) is not offered profile
+workstreams, and its start log says so.
+
 ### Agent GPU commands (optional)
 
 On a host that is itself a Slurm submit node (`[slurm.transport] kind = "local"`),

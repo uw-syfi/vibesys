@@ -203,6 +203,11 @@ class RunEnvironmentView:
     cluster_evaluation: ClusterEvaluationFacts | None = None
 
     @property
+    def captures_profile(self) -> bool:
+        """Whether the run can capture a profile: the one fact every profile offer reads."""
+        return self.cluster_evaluation is not None and self.cluster_evaluation.captures_profile
+
+    @property
     def parallel_candidate_obstacle(self) -> str | None:
         """Why this session cannot open an isolated session per candidate, or ``None``.
 

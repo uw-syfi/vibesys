@@ -55,7 +55,8 @@ clients/
   transport-node/   @vibesys/transport-node   stdio / unix socket / ssh channel  -> transport
   ipc/              @vibesys/ipc              typed main <-> renderer messages, the welcome
                                               requests' parsers per feature      -> hosts, runs
-  connection/       @vibesys/connection       host connection manager            -> contracts, transport, hosts
+  connection/       @vibesys/connection       host connection manager            -> contracts, transport, hosts,
+                                                                                    machine
   settings/         @vibesys/settings         settings store, atomic files       -> hosts, runs
   features/<x>/     @vibesys/feature-<x>      run-view, gateway-connect, replay, hosts,
                                               start-run, run-control, recent-runs
@@ -79,7 +80,7 @@ flowchart BT
   run-session["run-session (L2)"] --> contracts & run-state & transport & store & machine
   transport-node["transport-node (L2, Node)"] --> transport
   ipc["ipc (L3)"] --> hosts & runs
-  connection["connection (L3, Node)"] --> contracts & transport & hosts
+  connection["connection (L3, Node)"] --> contracts & transport & hosts & machine
   settings["settings (L3, Node)"] --> hosts & runs
   features["feature-* (L4)"] --> run-session & runs & hosts & ipc & ui & store
   features -. "./main only" .-> connection & settings
@@ -105,7 +106,7 @@ This refines the sketch in the brief in three places. `ui` and `store` sit in `f
 is the mechanical form of "no domain dependencies", so the layer rule enforces rule 6 for them with
 no special case. `transport-node`, `connection`, and `settings` get ranks of their own (`domain` and
 `service`) because each depends on another package the sketch places at the same level
-(`transport-node` on `transport`, `connection` on `transport` and `hosts`, `settings` and `ipc` on
+(`transport-node` on `transport`, `connection` on `transport`, `hosts`, and `machine`, `settings` and `ipc` on
 `hosts` and `runs`). And `hosts` sits in
 `core`, one rank below `runs`, because a run names the host it runs on (a recent run's status reads
 its host's listing; the stop flow is keyed by host) while a host never names a run's model.
@@ -151,6 +152,10 @@ runtime. A feature package has up to three entries:
 - `./main` (`node`): the main-process controller that answers the feature's requests with
   `@vibesys/connection` and `@vibesys/settings` (`Hosts`, `RunControl`). `apps/desktop-main` routes
   each request `@vibesys/ipc` parsed to the controller of the feature that owns it.
+
+A feature may also publish `./styles.css`, the stylesheet of the views it renders (a `dom` asset,
+like `@vibesys/ui`'s `./tokens.css`); an app imports the stylesheets of the features it composes and
+keeps only its own layout in its stylesheet, so a feature's look moves with the feature.
 
 A feature publishes only the entries it has. Its pure core is `./state` when it needs nothing
 beyond `ES2022`; a core that needs a DOM global (`@vibesys/feature-gateway-connect` parses with
@@ -214,7 +219,7 @@ checker (`EXTERNAL_DEPENDENCIES`, rule `external-dependencies`):
 | `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, features' `./renderer`, browser and renderer apps |
 | `electron` | `node` and `preload` entries of features (`./main`) and apps (`desktop-main`) |
 | `@opentui/core` | `node` entries of apps (the deprecated `tui`) |
-| `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine` and `run-session` (its session machine). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
+| `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine`, `connection` (its host connection machine), and `run-session` (its session machine). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
 | Node builtins (`node:*` and bare names) | `node` entries |
 
 A package that declares one of them in `dependencies` must have an entry allowed to use it. Knip
@@ -304,22 +309,29 @@ coordinate through events they `raise`, which every region takes in the next ste
 read the state before it. A `reenter` transition declared on a region exits the whole parallel
 state, so re-enter a region's child from the child itself. An actor notifies its observers on
 every event, also one that changed nothing, so a shell that publishes changes compares snapshots
-by identity.
+by identity. An outcome can go stale between the operation's end and the machine taking it (a
+channel the operation opened ends in between): guard `onDone` with a guard the shell provides, and
+give it a fallback transition whose action hands the resource back, as `@vibesys/connection`'s
+`current` guard and `discard` action do. A `fromPromise` signal aborts when its actor stops before
+its outcome was delivered, so an operation disposes what it opened on that abort. The pure
+`transition` keeps taking events in a final state, which the live actor does not: a model stops
+generating events once the snapshot's `status` is `done`.
 
 **Where XState may appear** is rule 9: the `external-dependencies` table confines the import, and
-two GritQL rules (wired in `biome.json`) keep features' `state/` and `effects/` free of
-`setTimeout`, `setInterval`, and `AbortController`, and keep migrated control-state packages off
-`createStore` (except their fold modules, such as `run-session`'s `run.ts`). The features still on
-the reducer kernel are migrated one per change. Until then the two effects modules that hand-roll a
-timer or an abort controller (`hosts`' path completion, `gateway-connect`'s attempt) are listed as
-exclusions in `biome.json`, a list that only shrinks; the remaining migrations and those exclusions
-are tracked in #1969.
+two GritQL rules (wired in `biome.json`) keep features' `state/` and `effects/` (and
+`connection`'s `state/`) free of `setTimeout`, `setInterval`, and `AbortController`, and keep
+migrated control-state packages (`run-control`, `connection`, `run-session`) off `createStore`
+(except their fold modules, such as `run-session`'s `run.ts`). The features still on the reducer
+kernel are migrated one per change. Until then the two effects modules that hand-roll a timer or
+an abort controller (`hosts`' path completion, `gateway-connect`'s attempt) are listed as
+exclusions in `biome.json`, a list that only shrinks; the remaining migrations and those
+exclusions are tracked in #1969.
 
 | Control state | Form | Status |
 | --- | --- | --- |
 | `run-session`'s session lifecycle (`sessionMachine`, `WebSession`) | machine | migrated (#2071) |
 | `feature-run-control`'s commands and banner | machine | migrated (#1950) |
-| `@vibesys/connection`'s connection manager (`connection/src/state`) | pure `state + event -> state + requests` core | one change; `connection` joins `MACHINE_PACKAGES` with it |
+| `@vibesys/connection`'s `HostConnection` | machine | migrated (phase 8) |
 | `feature-start-run`, `feature-hosts`, `feature-gateway-connect`, `feature-replay` screen stores | reducer with reply tokens | one feature per change |
 
 ## Build model
@@ -414,11 +426,11 @@ names a missing or extra one.
 | `@vibesys/run-session` | domain | exists: the run fold's wiring (`runStep`), the session lifecycle (`sessionMachine`, three parallel regions: start-up, recovery, and the fenced replacement snapshot), its ports, the run connection over a control transport (`connectRun`), and `WebSession`, with `./testing` (an in-memory control transport and page lifecycle, and `sessionWith`) | domain split (#1949) |
 | `@vibesys/entities` | domain | deleted: split into `hosts` and `runs`; task arguments (`shellWords`) moved into `@vibesys/feature-start-run` | domain split (#1949) |
 | `@vibesys/ipc` | service | exists: the run page's bridge (port messages, their validation, the preload contract web's desktop shell reads) and the welcome view's channels, events, and payloads, with each feature's requests (channels, bridge slice, and the parser the main process runs) in `welcome/<feature>.ts`, and `./testing` (random window states for store models); depends on `hosts`, `runs` | domain packages (phase 5 of #1878); per-feature parsers with phase 8 |
-| `@vibesys/connection` | service | exists (`.`, `node`): the connection manager (`ConnectionManager`, `HostConnection`: a pure `state/` machine and a `shell/` owning the links, channels, and timers), the ssh and local links, the bootstrap, and `connectionStatus`, with `./testing` (`FakeHelper`, `FakeLink`, and the `HostConnection` contract suite); depends on `contracts`, `transport`, `hosts` | desktop main process (phase 8 of #1878) |
+| `@vibesys/connection` | service | exists (`.`, `node`): the connection manager (`ConnectionManager`, `HostConnection`: an XState machine in `state/` and a `shell/` owning the links, channels, and the machine's clock), the ssh and local links, the bootstrap, and `connectionStatus`, with `./testing` (`FakeHelper`, `FakeLink`, and the `HostConnection` contract suite); depends on `contracts`, `transport`, `hosts` | desktop main process (phase 8 of #1878) |
 | `@vibesys/settings` | service | exists (`.`, `node`): the settings store (`hosts.json`, `recent.json`; one writer, atomic replace), with `./testing` (`FakeSettingsFilesystem`); depends on `hosts`, `runs` | desktop main process (phase 8 of #1878) |
 | `@vibesys/feature-run-view`, `@vibesys/feature-gateway-connect`, `@vibesys/feature-replay` | feature | exist: the run page's transcript, rounds, status, and banners (`./state`, `./renderer`; the live session is `@vibesys/run-session`); the browser's gateway connect form (`./renderer`); the recorded-run load (`./state`, `./renderer`) | feature packages (phase 6 of #1878) |
 | `@vibesys/feature-hosts`, `@vibesys/feature-start-run`, `@vibesys/feature-run-control`, `@vibesys/feature-recent-runs` | feature | exist, renderer side (`./state`, `./renderer`): the host panel, checkout form, sign-in, "Connect to host", and path completion; the "Start a run" sheet; the title strip, stop, force stop, resume, and the banner; Recent. Each feature's effects call only the slice of `@vibesys/ipc`'s welcome bridge its `./state` declares. `feature-hosts` and `feature-run-control` also publish their main-process controllers (`./main`: `Hosts`; `RunControl` with its relay and stop flow) | desktop renderer (phase 7 of #1878); `./main` with the main-process split (phase 8) |
-| `apps/web` | app | exists: composition only, on the per-entry layout (one `dom` entry, no exports): the browser entry and boot decision, the desktop shell's run page (`desktop-main.tsx` and the bridge transport), the one backend adapter, storage and lifecycle. Its run connection (`connectRun`) is now `@vibesys/run-session`'s; the desktop run page stays here until the run page's stylesheet is the features' own (`./styles.css`) rather than this app's, so moving it to `apps/desktop-renderer` copies nothing | feature packages (phase 6 of #1878) |
+| `apps/web` | app | exists: composition only, on the per-entry layout (one `dom` entry, no exports): the browser entry and boot decision, the desktop shell's run page (`desktop-main.tsx` and the bridge transport), the one backend adapter, storage and lifecycle. Its run connection (`connectRun`) is `@vibesys/run-session`'s and the run page's styles are the features' own (`./styles.css`). The desktop run page still moves to `apps/desktop-renderer`: what remains is the page lifecycle (`platform/lifecycle.ts`) and the live run page's composition (`createLiveApp`), which both apps would use, the bridge transport (`desktop-shell.ts`), and a second Vite page in that app's build, which `apps/desktop-main`'s `copy-ui.mjs` then copies | feature packages (phase 6 of #1878) |
 | `apps/desktop-renderer` | app | exists: composition only (one `dom` entry, no exports): the welcome view's entry, its stores wired to the welcome preload's bridge, and the view composed from the desktop features | desktop renderer (phase 7 of #1878) |
 | `apps/desktop-main` | app | exists: composition only (Electron main, `.`, `node`): the lifecycle, page confinement, the window, launch arguments, and the welcome requests routed to the features' `./main` controllers; and the two sandboxed preloads (`./preload-run`, `./preload-welcome`, `preload`). Its build copies the two page bundles into `dist/ui` | desktop main process (phase 8 of #1878) |
 | `@vibesys/backend-client` | core | deleted: split into `transport` and `transport-node` | backend-client split (#1910) |

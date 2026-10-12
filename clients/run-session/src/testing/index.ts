@@ -232,7 +232,7 @@ export function healthy(): ReturnType<WebSession['getState']> {
  * channel has somewhere to report.
  */
 export function sessionWith(
-  lifecycle: FakeLifecycle,
+  lifecycle: BrowserLifecycle,
   options: RunConnectionOptions = {},
 ): {
   readonly session: WebSession;

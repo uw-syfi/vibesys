@@ -20,8 +20,8 @@ resource separately at low, medium, and saturation load. Compare with both the
 immediately prior result and the best recorded result.
 
 Profiling is optional, limited to one run, and must answer a specific unresolved
-bottleneck question. Do not attempt profiling when profiler is `none`. Always stop any process you started
-that this turn started, including after benchmark or profiling failure.
+bottleneck question. Do not attempt profiling when profiler is `none`. Always stop processes
+and release resources that this turn started, including after benchmark or profiling failure.
 
 The board below lists every issue. Before filing, check it for the same work. File at
 most 2 non-duplicate issues in `new_issues`, ranked by impact over effort.

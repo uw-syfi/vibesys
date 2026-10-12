@@ -345,6 +345,19 @@ errors (`reasoning: String should have at most 2000 characters`), for a reply
 that does not validate as the response model; `FakeAgentClient` and the
 vs-runtime `FakeRun` session do the same, so tests see production behavior.
 
+### A reply that is too large or degenerate is the same failure
+
+A model can stop making progress and keep emitting whitespace inside an open JSON
+value for minutes, while the provider CLI retries the stream and the turn never
+ends. `vs_agent.reply_limits` declares the bound: a reply may hold at most
+`MAX_REPLY_BYTES` of text and no run of more than `MAX_WHITESPACE_RUN` whitespace
+characters. The first text event that crosses a limit interrupts the turn, and the
+turn raises `AgentOutputSchemaError` whose `.detail` names the breach
+(`oversized_reply` or `degenerate_reply`), so the one correction turn above
+handles it. A reply that arrives only as a final result is checked the same way,
+and `FakeAgentClient` applies the same limits. The limits are VibeSys policy, so
+they live in `vs_agent`, not agentshim.
+
 ### Retired after a turn, or replaced during one
 
 A reset says the conversation is gone, not when it went. The two cases differ

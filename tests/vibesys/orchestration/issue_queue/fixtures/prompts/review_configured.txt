@@ -14,12 +14,14 @@ Benchmark command: uv run benchmark
 Runtime notes: Use CUDA with bfloat16.
 
 Performance improvement is out of scope for this verdict. Inspect the candidate without
-editing it, run its pytest tests, and use the accuracy checker when one is configured. A
-failing required correctness check requires a fail verdict.
+editing it, run its pytest tests, and use the accuracy checker when one is configured. Inspect
+the model architecture, local weight loading, accelerator and dtype placement, and the
+checker-facing `VibeServeModel` interface. A failing required correctness or accuracy check
+requires a fail verdict.
 
-Run the candidate end to end the way the task uses it as a smoke test. When the benchmark is
-configured, run a short sanity workload and require a positive throughput and every metric the
-benchmark reports to be present.
+Start the real service for an end-to-end `/health` and completion-stream smoke test. When the
+benchmark is configured, run a short sanity workload and require positive token throughput
+plus non-null TTFT and TPOT. Require a non-empty streaming delta for every generated model token.
 
 For an unrelated bug, check the board below first and report at most one bug in `new_issues`
 (type `bug`), with `## Background`, `## Acceptance criteria` and `## Notes` in its

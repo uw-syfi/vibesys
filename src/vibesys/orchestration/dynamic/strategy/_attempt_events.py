@@ -70,6 +70,7 @@ from vs_core.api import (
     ResumeAuthorized,
     RevisionRef,
     RunView,
+    SuspendedTurn,
     TurnCandidate,
     TurnCandidateFailed,
     TurnCandidatePending,
@@ -81,6 +82,7 @@ from vs_core.api import (
     ledger_refs,
     may_resubmit,
     trusted_keys,
+    turn_reply,
 )
 
 _IMPLEMENTER_REPLY = WaitableReply[ImplementerResult]
@@ -675,12 +677,12 @@ def _answered(
     event: TurnResult,
 ) -> DynamicStrategyState:
     role = Role.JUDGE if state.attempts[index].phase is WorkPhase.REVIEW else Role.IMPLEMENTER
-    reply = _decode(role, event.output_json or "")
+    reply = turn_reply(event, lambda payload: _decode(role, payload))
     if isinstance(reply, str):
         return _correct(state, index, config, reply, event.invocation) or fail(
             state, index, f"invalid {role.value} reply"
         )
-    if isinstance(reply, WaitingForEvaluation):
+    if isinstance(reply, WaitingForEvaluation | SuspendedTurn):
         if not event.suspending:
             # Core recorded no wait (it refused it, or the host lost it), so no
             # TurnSuspended will come: waiting for one would stall the run.

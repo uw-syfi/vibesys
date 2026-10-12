@@ -40,7 +40,10 @@ def evaluated(*titles: str, kinds: tuple[str, ...] = (), **extra: object) -> str
                         "num_completed": 4,
                         "num_failed": 0,
                         "duration": 1.0,
-                        "throughput": {"request_throughput": 4.0, "token_throughput": 40.0},
+                        "throughput": {
+                            "request_throughput": 4.0,
+                            "token_throughput": 40.0,
+                        },
                     }
                 ],
                 "extra": {},
@@ -57,5 +60,29 @@ def evaluated(*titles: str, kinds: tuple[str, ...] = (), **extra: object) -> str
             "throughput_trend": "improved",
             "latency_trend": "mixed",
             **extra,
+        }
+    )
+
+
+def generic_evaluated() -> str:
+    """A domain-neutral performance evaluator reply."""
+    return json.dumps(
+        {
+            "analysis": "The candidate processes more work per second.",
+            "metrics": {
+                "measurements": [
+                    {
+                        "name": "operations_per_second",
+                        "value": 4.0,
+                        "unit": "ops/s",
+                        "workload": "default",
+                    }
+                ],
+                "extra": {},
+            },
+            "evaluator_feedback": ["measure more"],
+            "new_issues": [],
+            "primary_metric_trend": "improved",
+            "secondary_metric_trend": None,
         }
     )

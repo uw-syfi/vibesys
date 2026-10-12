@@ -84,6 +84,13 @@ from vs_agent.provider_policy import (
     cli_mcp_config_files,
     cli_skill_dirs,
 )
+from vs_agent.reply_limits import (
+    MAX_REPLY_BYTES,
+    MAX_WHITESPACE_RUN,
+    ReplyBreach,
+    ReplyGuard,
+    reply_breach,
+)
 from vs_agent.runner import describe_validation_error, parse_typed_response
 from vs_agent.selection import AgentSelection
 from vs_agent.session_environment import (
@@ -153,6 +160,8 @@ __all__ = [
     "CONTAINER_SERVER_PACKAGES",
     "DEFAULT_CLI_PROVIDER",
     "DOCKER_PROVIDER_ENV",
+    "MAX_REPLY_BYTES",
+    "MAX_WHITESPACE_RUN",
     "NODE_VERSION",
     "NULL_AGENT_EVENT_SINK",
     "NULL_SKILL_SELECTION",
@@ -215,6 +224,8 @@ __all__ = [
     "QuotaResumeReason",
     "ReadinessProbe",
     "ReadinessProblem",
+    "ReplyBreach",
+    "ReplyGuard",
     "RoundProgress",
     "SessionConfigurationError",
     "SessionPersistenceError",
@@ -246,6 +257,7 @@ __all__ = [
     "native_schema_problems",
     "parse_typed_response",
     "reap_orphaned_agents",
+    "reply_breach",
     "session_env_allowlist",
     "session_environment",
     "task_agent_host_resources",

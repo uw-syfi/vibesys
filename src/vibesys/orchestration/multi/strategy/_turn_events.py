@@ -47,6 +47,7 @@ from vs_core.api import (
     ResumeAuthorized,
     RevisionRef,
     RunView,
+    SuspendedTurn,
     TurnCandidate,
     TurnCandidateFailed,
     TurnCandidatePending,
@@ -56,6 +57,7 @@ from vs_core.api import (
     TurnSuspended,
     WaitableReply,
     WaitingForEvaluation,
+    turn_reply,
 )
 
 _IMPLEMENTER = WaitableReply[ImplementerResponse]
@@ -130,11 +132,11 @@ def _answered(
     payload = event.output_json
     if role is None or payload is None:
         return state
-    reply = _decode(role, payload)
+    reply = turn_reply(event, lambda text: _decode(role, text))
     if isinstance(reply, str):
         correction = ReplyCorrectionPrompt(role=_ROLE_NAMES[role], error=reply)
         return _corrected(state, config, record, event, correction)
-    if isinstance(reply, WaitingForEvaluation):
+    if isinstance(reply, WaitingForEvaluation | SuspendedTurn):
         return _waiting(state, view, config, record, event)
     if isinstance(reply, JudgeResponse):
         judged = record.model_copy(update={"judge_invocation": event.invocation})

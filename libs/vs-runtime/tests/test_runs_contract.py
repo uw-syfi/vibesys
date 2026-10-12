@@ -279,6 +279,51 @@ async def test_failure_settles_events_and_preserves_error(launch: Launch, *, cle
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("implementation", [InProcessRuns, FakeRuns], ids=["in-process", "fake"])
+@pytest.mark.parametrize("outcome", ["execution-error", "forced-cancellation"])
+async def test_primary_terminal_outcome_survives_session_close_failure(
+    implementation: type[InProcessRuns[Request, int, int, RunExecution[int]]],
+    outcome: Literal["execution-error", "forced-cancellation"],
+) -> None:
+    """Keep the run's terminal outcome when synchronous session cleanup also fails."""
+    execution = FakeExecution(
+        lambda _event: None,
+        asyncio.Event(),
+        asyncio.Event(),
+        close_failure=RuntimeError("cleanup failure"),
+    )
+    runs = implementation(
+        lambda _request, _sink: execution,
+        identity=lambda request: request.run_id,
+        is_resume=lambda request: request.resume,
+    )
+    handle = runs.start(Request(run_id="one"))
+    result = asyncio.create_task(handle.result())
+    await arrival(execution.entered.wait(), result)
+
+    if outcome == "execution-error":
+        primary_error = ValueError("execution failure")
+        execution.failure = primary_error
+        execution.release.set()
+        expected_type: type[BaseException] = ValueError
+    else:
+        handle.cancel()
+        primary_error = None
+        expected_type = asyncio.CancelledError
+
+    with pytest.raises(expected_type) as raised:
+        await result
+
+    if primary_error is not None:
+        assert raised.value is primary_error
+    assert raised.value.__notes__ == [
+        "run session cleanup also failed: RuntimeError: cleanup failure"
+    ]
+    assert execution.closes == 1
+    assert runs.list_active() == ()
+
+
+@pytest.mark.asyncio
 async def test_registry_validation_and_resume(launch: Launch) -> None:
     runs, execution = launch
     with pytest.raises(KeyError):
@@ -326,13 +371,16 @@ async def test_simultaneous_subscribers_each_receive_complete_history(launch: La
 
 
 @pytest.mark.asyncio
-async def test_cancellation_cleanup_failure_remains_observable(launch: Launch) -> None:
+async def test_cancellation_survives_cleanup_failure(launch: Launch) -> None:
     runs, execution = launch
     execution.close_failure = ValueError("cleanup failure")
     handle = runs.start(Request(run_id="one"))
     handle.cancel()
-    with pytest.raises(ValueError, match="cleanup failure"):
+    with pytest.raises(asyncio.CancelledError) as raised:
         await handle.result()
+    assert raised.value.__notes__ == [
+        "run session cleanup also failed: ValueError: cleanup failure"
+    ]
     assert execution.closes == 1
     assert [event async for event in handle.events()] == []
 
