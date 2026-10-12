@@ -19,8 +19,8 @@
  * is the record of what it collected, so the gate reads the runner's answer instead of scraping
  * its console summary.
  *
- * `--max-concurrency 1` and the source condition live here rather than in each package's `test`
- * script, so the packages cannot drift apart on them. The runner deliberately takes test roots and nothing else:
+ * `--max-concurrency 1`, the per-test bound and the source condition live here rather than in each
+ * package's `test` script, so the packages cannot drift apart on them. The runner deliberately takes test roots and nothing else:
  * a bun flag that changed which files run (`-t`, `--bail`, `--only`) would make the gate report
  * the rest of the suite as missing, so ad-hoc runs call `bun test` directly.
  */
@@ -32,11 +32,21 @@ import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const RUNNER = 'bun';
+/**
+ * The per-test bound, in milliseconds. It only guards against a hang: no test waits on time (they
+ * run on fakes and virtual clocks), so a test that reaches it is stuck, not slow. Bun's 5 s default
+ * is too close to legitimate work: a model-based machine test folds 300 seeds of up to 60 steps
+ * (about 1 s alone on a developer machine) and took 5.3 and 6.6 s on a CI runner while turbo ran
+ * the other packages' suites beside it. 60 s is far above that and still ends a stuck run quickly.
+ */
+const PER_TEST_BOUND_MS = 60_000;
 const RUNNER_ARGUMENTS = [
   'test',
   '--conditions=@vibesys/source',
   '--max-concurrency',
   '1',
+  '--timeout',
+  String(PER_TEST_BOUND_MS),
   '--reporter=junit',
 ];
 const REPORT_FILE = 'collected.xml';
