@@ -12,10 +12,12 @@ from tests.vibesys.orchestration.issue_queue.strategy.world import (
     judged,
 )
 
+from vibesys.orchestration.issue_queue.strategy.api import IssueQueueStrategyState
 from vs_core.api import Rejected, RejectionCode
 
 CAPTURE = captured(
-    IssueQueueWorld(implementer=[implemented()], judge=[judged()], perf=[evaluated()])
+    IssueQueueWorld(implementer=[implemented()], judge=[judged()], perf=[evaluated()]),
+    IssueQueueStrategyState,
 )
 
 

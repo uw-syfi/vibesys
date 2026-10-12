@@ -7,6 +7,7 @@ from hypothesis import strategies as st
 from tests.support.strategy_capture import captured
 from tests.vibesys.orchestration.single.strategy.world import SingleWorld, run_to_end
 
+from vibesys.orchestration.single.strategy.api import SingleStrategyState
 from vs_core.api import Rejected, RejectionCode
 
 RUNS = settings(max_examples=40, deadline=None, derandomize=True, database=None)
@@ -30,7 +31,7 @@ def test_every_way_a_round_ends_leads_to_a_typed_terminal_state(
     run_to_end(SingleWorld(max_rounds=rounds, attempt_cap=cap, stop_at=stop_at))
 
 
-CAPTURE = captured(SingleWorld(max_rounds=1))
+CAPTURE = captured(SingleWorld(max_rounds=1), SingleStrategyState)
 
 
 @given(code=st.sampled_from(RejectionCode))

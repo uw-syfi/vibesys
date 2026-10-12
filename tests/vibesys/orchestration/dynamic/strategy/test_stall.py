@@ -7,9 +7,10 @@ from hypothesis import strategies as st
 from tests.support.strategy_capture import captured
 from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 
+from vibesys.orchestration.dynamic.strategy.api import DynamicStrategyState
 from vs_core.api import Rejected, RejectionCode
 
-CAPTURE = captured(DynamicWorld())
+CAPTURE = captured(DynamicWorld(), DynamicStrategyState)
 
 
 @given(code=st.sampled_from(RejectionCode))
