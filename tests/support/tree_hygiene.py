@@ -17,10 +17,14 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from pathlib import Path
 
+    from _pytest.terminal import TerminalReporter
+
 _TOOLING = frozenset({"__pycache__", "build", "dist", "node_modules"})
-_STASH = pytest.StashKey[frozenset[str]]()
+_BEFORE = pytest.StashKey[frozenset[str]]()
+_LEAKED = pytest.StashKey[list[str]]()
 
 
 def top_level_entries(root: Path) -> frozenset[str]:
@@ -37,21 +41,31 @@ def top_level_entries(root: Path) -> frozenset[str]:
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Record the root's entries; xdist workers leave the check to the controller."""
     if not hasattr(session.config, "workerinput"):
-        session.config.stash[_STASH] = top_level_entries(session.config.rootpath)
+        session.config.stash[_BEFORE] = top_level_entries(session.config.rootpath)
 
 
-def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Fail the session when it added entries to the repository root."""
-    before = session.config.stash.get(_STASH, None)
-    if before is None:
-        return
-    leaked = sorted(top_level_entries(session.config.rootpath) - before)
-    if not leaked:
-        return
-    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
-    if reporter is not None:
-        reporter.write_line(
-            f"ERROR: tests left new entries in the repository root: {leaked}", red=True
+@pytest.hookimpl(wrapper=True)
+def pytest_runtestloop(session: pytest.Session) -> Generator[None, object, object]:
+    """Compare the root once the tests are done, before session-finish tooling writes its output.
+
+    Tooling that records results at session finish (shard durations, reports)
+    runs after this point, so it never needs an allow-list entry.
+    """
+    result = yield
+    before = session.config.stash.get(_BEFORE, None)
+    if before is not None:
+        leaked = sorted(top_level_entries(session.config.rootpath) - before)
+        if leaked:
+            session.config.stash[_LEAKED] = leaked
+            session.testsfailed += 1
+    return result
+
+
+def pytest_terminal_summary(terminalreporter: TerminalReporter, config: pytest.Config) -> None:
+    """Name the leaked entries in the summary, which xdist and ``-q`` both show."""
+    leaked = config.stash.get(_LEAKED, None)
+    if leaked:
+        terminalreporter.section("repository root leak", sep="=", red=True)
+        terminalreporter.write_line(
+            f"tests left new entries in the repository root: {leaked}", red=True
         )
-    if exitstatus == pytest.ExitCode.OK:
-        session.exitstatus = pytest.ExitCode.TESTS_FAILED
