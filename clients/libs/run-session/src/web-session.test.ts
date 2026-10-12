@@ -1893,10 +1893,20 @@ describe('WebSession', () => {
     // second socket whose handle could later be orphaned by the first one.
     session.reattach();
     session.reattach();
+    await settle();
     expect(transport.subscriptions).toHaveLength(1);
 
     transport.releasePendingSubscribe();
     await starting;
+
+    // The already-delivered initial generation must retire the first reattach
+    // owner. A later request therefore starts its own fresh subscription rather
+    // than remaining stranded behind a transition that can never complete.
+    transport.silentDials = 1;
+    session.reattach();
+    await settle();
+    expect(transport.subscriptions).toHaveLength(2);
+
     await session.close();
     expect(initial.closed).toBe(true);
     expect(transport.subscriptions.every(subscription => subscription.closed)).toBe(true);

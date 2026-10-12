@@ -41,8 +41,9 @@ export type StreamRebootstrapDisposition =
   /** The stream is closed or has not been subscribed. */
   | 'inactive';
 
-type StreamRecovery = 'idle' | 'bootstrap' | 'retry' | 'rebootstrap';
+type StreamRecovery = 'idle' | 'initial' | 'bootstrap' | 'retry' | 'rebootstrap';
 type ActiveStreamRecovery = Exclude<StreamRecovery, 'idle'>;
+type QueuedStreamRecovery = Extract<StreamRecovery, 'retry' | 'rebootstrap'>;
 
 export interface PersistentEventStreamCallbacks {
   /**
@@ -171,10 +172,11 @@ export class PersistentEventStream {
   #disconnectError: Error | null = null;
   /** The one reconnect operation that currently owns the stream's dial slot. */
   #recovery: StreamRecovery = 'idle';
-  /** Stronger intent retained until an in-flight cursor retry releases that slot. */
-  #rebootstrapQueued = false;
-  /** A cursor retry requested while another recovery still owns the dial slot. */
-  #retryQueued = false;
+  /**
+   * At most one recovery intent retained behind the active dial. A fresh
+   * bootstrap dominates a cursor retry because it can satisfy both requests.
+   */
+  #queuedRecovery: QueuedStreamRecovery | null = null;
   /** Whether the current dial owner has already reported that its connection failed. */
   #recoveryFailed = false;
 
@@ -197,11 +199,18 @@ export class PersistentEventStream {
     // A wake or explicit reattach can arrive while its handshake is pending;
     // both are already satisfied by this sequence-zero attempt and must not
     // create a second socket whose handle can race the first one home.
-    this.#recovery = 'bootstrap';
+    this.#recovery = 'initial';
+    this.#recoveryFailed = false;
+    let recovered = false;
     try {
-      await this.#bootstrapDial();
+      recovered = await this.#bootstrapDial();
     } finally {
       this.#recovery = 'idle';
+      // The sequence-zero connection already satisfies every request that
+      // arrived behind it. Only a failed initial attempt owes the retained
+      // intent another pass through the ordinary recovery entry points.
+      if (this.#closed || recovered) this.#queuedRecovery = null;
+      else this.#drainQueuedRecovery();
     }
   }
 
@@ -222,8 +231,7 @@ export class PersistentEventStream {
    */
   async close(): Promise<void> {
     this.#closed = true;
-    this.#rebootstrapQueued = false;
-    this.#retryQueued = false;
+    this.#queuedRecovery = null;
     if (this.#cancelReconnect !== null) {
       this.#cancelReconnect();
       this.#cancelReconnect = null;
@@ -498,19 +506,13 @@ export class PersistentEventStream {
       }
     } finally {
       this.#recovery = 'idle';
-      if (this.#rebootstrapQueued) {
-        this.#rebootstrapQueued = false;
-        this.rebootstrap();
-      } else if (this.#retryQueued) {
-        this.#retryQueued = false;
-        this.retry();
-      }
+      this.#drainQueuedRecovery();
     }
   }
 
   #markRecovered(): void {
     this.#backoff.reset();
-    if (this.#retryQueued) return;
+    if (this.#queuedRecovery === 'retry') return;
     this.#disconnectError = null;
     this.#disconnectedReported = false;
     this.#emit({status: 'connected'});
@@ -527,7 +529,36 @@ export class PersistentEventStream {
 
   /** Whether teardown or a stronger queued intent superseded this recovery. */
   #recoverySuperseded(): boolean {
-    return this.#closed || this.#rebootstrapQueued;
+    return this.#closed || (this.#recovery !== 'initial' && this.#queuedRecovery === 'rebootstrap');
+  }
+
+  /** Retain one intent, without letting a later cursor retry weaken a fresh request. */
+  #queueRecovery(recovery: QueuedStreamRecovery): boolean {
+    if (this.#queuedRecovery === 'rebootstrap' || this.#queuedRecovery === recovery) return false;
+    this.#queuedRecovery = recovery;
+    return true;
+  }
+
+  /** Release the dial slot before replaying its one retained intent through the public policy. */
+  #drainQueuedRecovery(): void {
+    const queued = this.#queuedRecovery;
+    this.#queuedRecovery = null;
+    if (queued === 'rebootstrap') this.rebootstrap();
+    else if (queued === 'retry') this.retry();
+  }
+
+  /** Classify a fresh request that overlaps the sequence-zero bootstrap. */
+  #initialRebootstrapDisposition(): StreamRebootstrapDisposition {
+    // A healthy bootstrap batch establishes the fresh generation before some
+    // transports return its subscription handle. The caller can already fence
+    // and validate that generation, so report it as current rather than retain
+    // an intent that initial success would discard. A disconnect after that
+    // batch but before the handle settles has already killed the generation;
+    // preserve the explicit recovery in that composition just as for any
+    // other failed initial attempt.
+    if (this.#bootstrapped && !this.#recoveryFailed) return 'current';
+    this.#queueRecovery('rebootstrap');
+    return 'transitioning';
   }
 
   /**
@@ -544,12 +575,15 @@ export class PersistentEventStream {
   rebootstrap(): StreamRebootstrapDisposition {
     if (this.#closed || this.#callbacks === null) return 'inactive';
     if (this.#recovery !== 'idle') {
+      if (this.#recovery === 'initial') return this.#initialRebootstrapDisposition();
       // A fresh bootstrap is stronger than a cursor retry. It is also a new
       // attempt once the active fresh dial has already reported failure, even
       // if that dial's subscribe promise has not retired its handle yet.
       const failedFreshRecovery = this.#recovery === 'rebootstrap' && this.#recoveryFailed;
-      if ((this.#recovery === 'retry' || failedFreshRecovery) && !this.#rebootstrapQueued) {
-        this.#rebootstrapQueued = true;
+      if (
+        (this.#recovery === 'retry' || failedFreshRecovery) &&
+        this.#queueRecovery('rebootstrap')
+      ) {
         // The pending cursor dial cannot be cancelled through StreamTransport,
         // but its callbacks can be fenced immediately. When its handle arrives,
         // #dial observes the retired token and closes it before the fresh pass.
@@ -559,7 +593,9 @@ export class PersistentEventStream {
       // caller's current generation, even while its subscription handle is
       // still pending. Coalescing another request must not make consumers
       // retire state that belongs to that already-observed generation.
-      return !this.#rebootstrapQueued && this.#recovery !== 'retry' && this.#bootstrapped
+      return this.#queuedRecovery !== 'rebootstrap' &&
+        this.#recovery !== 'retry' &&
+        this.#bootstrapped
         ? 'current'
         : 'transitioning';
     }
@@ -586,6 +622,10 @@ export class PersistentEventStream {
   retry(): void {
     if (this.#closed || this.#callbacks === null) return;
     if (this.#recovery !== 'idle') {
+      if (this.#recovery === 'initial') {
+        if (this.#active().shouldReconnect()) this.#queueRecovery('retry');
+        return;
+      }
       // A snapshot can prove the new stream incomplete after its terminal
       // socket has already closed, while the fresh dial still owns this slot.
       // Retain one weaker intent so finally reevaluates shouldReconnect after
@@ -597,7 +637,7 @@ export class PersistentEventStream {
         this.#disconnectError !== null &&
         this.#active().shouldReconnect()
       ) {
-        this.#retryQueued = true;
+        this.#queueRecovery('retry');
       }
       return;
     }

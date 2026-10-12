@@ -1062,14 +1062,166 @@ describe('PersistentEventStream', () => {
     // The pending attempt is already a fresh bootstrap. Neither the stronger
     // public recovery verb nor a lifecycle retry may open a competing socket.
     expect(stream.rebootstrap()).toBe('transitioning');
+    expect(stream.rebootstrap()).toBe('transitioning');
+    stream.retry();
     stream.retry();
     expect(transport.subscribeCalls).toHaveLength(1);
 
     transport.releasePendingSubscribe();
     await subscribing;
+    await stream.settle();
+    expect(transport.subscribeCalls).toHaveLength(1);
     await stream.close();
     expect(transport.subscriptions.every(subscription => subscription.closed)).toBe(true);
     expect(states).toEqual([]);
+  });
+
+  it('reports a delivered initial bootstrap as current while its handle is pending', async () => {
+    const transport = new StubTransport();
+    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    transport.deliverOnNextSubscribe([event(1, 'agent_output_chunk', 'initial\n')], 0);
+    transport.deferNextSubscribe();
+
+    const subscribing = stream.subscribe(callbacks);
+    expect(messages).toHaveLength(1);
+
+    // Delivery establishes the fresh generation even though the transport has
+    // not returned its handle. A reattach must adopt that generation rather
+    // than claim a transition whose queued intent initial success will discard.
+    expect(stream.rebootstrap()).toBe('current');
+    expect(stream.rebootstrap()).toBe('current');
+    expect(transport.subscribeCalls).toHaveLength(1);
+
+    transport.releasePendingSubscribe();
+    await subscribing;
+    await stream.settle();
+    expect(transport.subscribeCalls).toHaveLength(1);
+    await stream.close();
+  });
+
+  it('retains fresh recovery when a delivered initial bootstrap fails before its handle settles', async () => {
+    const transport = new StubTransport();
+    const {callbacks, states} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    transport.deliverOnNextSubscribe([event(1, 'agent_output_chunk', 'initial\n')], 0);
+    transport.deferNextSubscribe();
+
+    const subscribing = stream.subscribe(callbacks);
+    transport.sever(new Error('initial stream failed after bootstrap'));
+
+    // The batch alone would make this generation current, but its subsequent
+    // disconnect has already fenced it. Keep the explicit fresh intent behind
+    // the still-pending handle instead of stranding the page disconnected.
+    expect(stream.rebootstrap()).toBe('transitioning');
+    expect(stream.rebootstrap()).toBe('transitioning');
+    expect(transport.subscribeCalls).toHaveLength(1);
+
+    transport.releasePendingSubscribe();
+    await subscribing;
+    await stream.settle();
+    expect(transport.subscribeCalls).toEqual([
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+    ]);
+    expect(transport.subscriptions[0]?.closed).toBe(true);
+    expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+    await stream.close();
+  });
+
+  it('drains one retained wake after the initial bootstrap handshake fails', async () => {
+    const transport = new StubTransport();
+    const initialFailure = new Error('initial handshake failed');
+    transport.deferNextSubscribeFailure(initialFailure);
+    const {callbacks, states} = harness({cursor: 7, reconnect: true, storeId: 'old-store'});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+
+    const subscribing = stream.subscribe(callbacks);
+    stream.retry();
+    stream.retry();
+    expect(transport.subscribeCalls).toHaveLength(1);
+
+    transport.releasePendingSubscribe();
+    await subscribing;
+    await stream.settle();
+
+    // No bootstrap batch landed, so the retained cursor retry must recover from
+    // sequence zero, with the configured tail, rather than resume old-store.
+    expect(transport.subscribeCalls).toEqual([
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+    ]);
+    expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+    await stream.close();
+  });
+
+  it('drains one explicit fresh attach after the initial bootstrap handshake fails', async () => {
+    const transport = new StubTransport();
+    transport.deferNextSubscribeFailure(new Error('initial handshake failed'));
+    const {callbacks, states} = harness({cursor: 0, reconnect: false});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+
+    const subscribing = stream.subscribe(callbacks);
+    expect(stream.rebootstrap()).toBe('transitioning');
+    expect(stream.rebootstrap()).toBe('transitioning');
+    expect(transport.subscribeCalls).toHaveLength(1);
+
+    transport.releasePendingSubscribe();
+    await subscribing;
+    await stream.settle();
+
+    // Explicit fresh recovery ignores automatic-redial policy, as it does
+    // after every later outage.
+    expect(transport.subscribeCalls).toEqual([
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+    ]);
+    expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+    await stream.close();
+  });
+
+  it('coalesces initial recovery intent and lets fresh attach dominate wake', async () => {
+    const transport = new StubTransport();
+    transport.deferNextSubscribeFailure(new Error('initial handshake failed'));
+    const env = {cursor: 0, reconnect: true};
+    const {callbacks} = harness(env);
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+
+    const subscribing = stream.subscribe(callbacks);
+    stream.retry();
+    stream.retry();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    expect(stream.rebootstrap()).toBe('transitioning');
+    // A later weaker request cannot downgrade the retained fresh attach.
+    stream.retry();
+    env.reconnect = false;
+
+    transport.releasePendingSubscribe();
+    await subscribing;
+    await stream.settle();
+    expect(transport.subscribeCalls).toHaveLength(2);
+    await stream.settle();
+    expect(transport.subscribeCalls).toHaveLength(2);
+    await stream.close();
+  });
+
+  it('close discards recovery intent retained by the initial bootstrap', async () => {
+    const transport = new StubTransport();
+    transport.deferNextSubscribeFailure(new Error('initial handshake failed'));
+    const {callbacks, states} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+
+    const subscribing = stream.subscribe(callbacks);
+    stream.retry();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    const closing = stream.close();
+
+    transport.releasePendingSubscribe();
+    await Promise.all([subscribing, closing]);
+    await stream.settle();
+    expect(transport.subscribeCalls).toHaveLength(1);
+    expect(states).toEqual([]);
+    expect(stream.rebootstrap()).toBe('inactive');
   });
 
   it('does not reconnect once closed', async () => {

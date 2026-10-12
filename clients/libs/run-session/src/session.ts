@@ -172,6 +172,10 @@ const OPEN = '#session.open';
  * self-transition of `loading`: a re-entry declared on the region would exit all of `open`.
  */
 const ESTABLISH = [
+  {
+    guard: and(['loadingStore', 'recovering']),
+    actions: 'shareReplacementWithRecovery',
+  },
   {guard: 'loadingStore'},
   {
     guard: 'startupRecovering',
@@ -457,6 +461,13 @@ export const sessionMachine = setup({
     issueReplacement: assign(({context, event}, {owner}: {readonly owner: LoadOwner}) =>
       event.type === 'stream-established' ? issueReplacement(context, event.storeId, owner) : {},
     ),
+    /** Let a recovery await the same-store fenced load instead of starting a duplicate request. */
+    shareReplacementWithRecovery: assign(({context}) => ({
+      replacement: {
+        ...context.replacement,
+        owner: startupOwns(context.replacement.owner) ? 'startup-recovery' : 'recovery',
+      },
+    })),
     beginIterationQuery: assign(({event}) => {
       const storeId = iterationStoreId(event);
       return storeId === null ? {} : beginIterationQuery(storeId);
