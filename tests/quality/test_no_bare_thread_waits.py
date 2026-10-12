@@ -18,17 +18,8 @@ REPO = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = (REPO / "tests", *sorted((REPO / "libs").glob("*/tests")))
 WAITING_METHODS = {"wait", "get"}
 
-# A fake's own gate, set by the creating test in a `finally`, so it opens on every path.
-_RELEASED_BY_FINALLY = "a fake's release gate, set in the creating test's finally block"
 
-ALLOWED: dict[str, tuple[int, str]] = {
-    "libs/vs-runtime/tests/test_agent_journal_concurrency.py": (
-        1,
-        "the turn's done callback puts a sentinel, so the read returns even if the turn fails",
-    ),
-    "libs/vs-runtime/tests/test_agent_sessions.py": (1, _RELEASED_BY_FINALLY),
-    "libs/vs-runtime/tests/test_prepared_conversations.py": (1, _RELEASED_BY_FINALLY),
-}
+ALLOWED: dict[str, tuple[int, str]] = {}
 
 
 def bare_thread_waits(source: str) -> list[int]:
