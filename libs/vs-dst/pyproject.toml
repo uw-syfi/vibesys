@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=70.1", "wheel>=0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-dst"
+version = "0.1.0"
+description = "Deterministic simulation tests of the VibeSys run lifecycle with cheap crash sweeps"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2",
+    "vs-core",
+    "vs-project",
+    "vs-runtime",
+    "vs-sim",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vs_dst = ["py.typed"]
+
+[tool.uv.sources]
+vs-core = { workspace = true }
+vs-project = { workspace = true }
+vs-runtime = { workspace = true }
+vs-sim = { workspace = true }

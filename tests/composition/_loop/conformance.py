@@ -8,7 +8,7 @@ property. Nothing here names a concrete strategy.
 
 The pure tier uses no Fakes, clocks or asyncio: `Tape` records every `decide` and `on_event`
 call of a run on the production shell's scripted executors, and the properties are
-evaluated over the recorded (state, view) pairs. The crash tier lives in `_crash.py`.
+evaluated over the recorded (state, view) pairs. The crash tier lives in `test_conformance_crash.py`, on vs-dst.
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ class Subject:
     """Request kinds the strategy's own decisions cause in a run that has no fault."""
     sweeps_crashes: bool = True
     """Whether the crash sweep (C2) runs on this subject: at a sample of its durable boundaries
-    in CI, at every one under `pytest -m slow`."""
+    in CI, at every one under `--dst-crash-points=all`."""
 
 
 # Kinds core issues only to recover from a fault, to cancel, or to resume a suspended turn.

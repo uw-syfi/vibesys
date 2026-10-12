@@ -8,6 +8,7 @@ happened and its acknowledgement was lost).
 
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING, Any, Literal
 
 from vs_issue_tracker.core import Issue, IssueStatus, IssueType, _MemoryBoard
@@ -28,6 +29,14 @@ class FakeIssueTracker(_MemoryBoard):
         """Open an empty board; ``faults`` is consulted around every operation."""
         super().__init__()
         self.faults = faults
+
+    def __deepcopy__(self, memo: dict[int, object]) -> FakeIssueTracker:
+        """An independent board with the same issues; the lock is the one thing not copied."""
+        clone = type(self).__new__(type(self))
+        memo[id(self)] = clone
+        for name, value in vars(self).items():
+            setattr(clone, name, type(value)() if name == "_lock" else copy.deepcopy(value, memo))
+        return clone
 
     def _around[T](self, operation: str, perform: Callable[[], T]) -> T:
         if self.faults is not None:

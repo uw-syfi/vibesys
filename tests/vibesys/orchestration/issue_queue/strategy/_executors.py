@@ -7,10 +7,12 @@ across a restart and a scripted fault can lose an acknowledgement after a write 
 
 from __future__ import annotations
 
+import copy
 import hashlib
+import shutil
 import tempfile
 from collections import Counter, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -146,19 +148,29 @@ class Executors:
     # Whether the trusted accuracy gate passes for a commit.
     accuracy: Callable[[str], bool] = lambda _commit: True
     owner: IssueBoardOwner = field(init=False)
-    operations: RegisteredOperationRequests = field(init=False)
     # Requests the real operation executor was handed, so an inspection of one is its to answer.
     operation_ids: set[str] = field(default_factory=set)
     # The order in which workspaces retained a revision: a later one built on the earlier ones,
     # so it is the better candidate of this world (the issue queue adopts its last tip).
     ranks: dict[str, int] = field(default_factory=dict)
-    _disk: tempfile.TemporaryDirectory[str] = field(init=False, repr=False)
+    _operations: RegisteredOperationRequests | None = field(default=None, init=False, repr=False)
+    _disk: tempfile.TemporaryDirectory[str] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.owner = IssueBoardOwner(self.tracker, self.progress, Texts())
-        self._disk = tempfile.TemporaryDirectory()
-        root = Path(self._disk.name)
-        (root / "project").mkdir()
+
+    @property
+    def operations(self) -> RegisteredOperationRequests:
+        """The real operation executor over receipts on disk, built when a run first needs it."""
+        if self._operations is None:
+            self._disk = tempfile.TemporaryDirectory()
+            root = Path(self._disk.name)
+            (root / "project").mkdir()
+            self._operations = self._build_operations(root)
+        return self._operations
+
+    def _build_operations(self, root: Path) -> RegisteredOperationRequests:
+        """The operation executor over the board's owner and the receipts under ``root``."""
         namespace = Project.open(root / "project").state.state_store_namespace("run")
         registrations = operation_roles(OPERATIONS)
         board = tuple(
@@ -173,11 +185,39 @@ class Executors:
             },
             extra=board,
         )
-        self.operations = RegisteredOperationRequests(
+        return RegisteredOperationRequests(
             catalog,
             NamespaceOperationReceipts(ReceiptStore(namespace)),
             ObservationFactory(ReceiptStore(namespace)),
         )
+
+    @property
+    def receipts_directory(self) -> str | None:
+        """Where the receipts of the real operation executor are, once a run has needed them."""
+        return None if self._disk is None else self._disk.name
+
+    def __deepcopy__(self, memo: dict[int, object]) -> Executors:
+        """The world as it stands: its scripts, board and receipts, independent of this one."""
+        clone = copy.copy(self)
+        memo[id(self)] = clone
+        clone.become_copy_of(self, memo)
+        return clone
+
+    def become_copy_of(self, source: Executors, memo: dict[int, object]) -> None:
+        """Hold a copy of ``source``'s state: the board is copied and the owner built over it.
+
+        The receipts are files, so a source that has used them is copied with its own directory
+        holding the same ones, and the operation executor is built over that.
+        """
+        for name in _COPIED_FIELDS:
+            setattr(self, name, copy.deepcopy(getattr(source, name), memo))
+        self.owner = IssueBoardOwner(self.tracker, self.progress, Texts())
+        self._operations = self._disk = None
+        if source.receipts_directory is not None:
+            self._disk = tempfile.TemporaryDirectory()
+            root = Path(self._disk.name)
+            shutil.copytree(source.receipts_directory, root, dirs_exist_ok=True)
+            self._operations = self._build_operations(root)
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
         self.seen.append(request)
@@ -317,6 +357,11 @@ class Executors:
             return reply
         self.agent_calls += 1
         return Succeeded(output_json=reply, resource_id=_lease(request.turn.session.session_id))
+
+
+_COPIED_FIELDS = tuple(
+    item.name for item in fields(Executors) if item.name not in {"owner", "_operations", "_disk"}
+)
 
 
 class WorldTranslator(ScriptedExecutors):

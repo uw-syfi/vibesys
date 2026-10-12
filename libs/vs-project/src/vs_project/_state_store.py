@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import fcntl
 import os
 from contextlib import contextmanager
@@ -82,6 +83,17 @@ class FakeStateStore(StoreOperations):
         super().__init__(fault_plan, lease_fault_plan, observation_fault_plan)
         self._contents: bytes | None = None
         self._lock = RLock()
+
+    def __deepcopy__(self, memo: dict[int, object]) -> FakeStateStore:
+        """An independent store holding the same document and the same place in its fault plans.
+
+        The lock is the one attribute that is not data: the copy gets a new lock of its own kind.
+        """
+        clone = type(self).__new__(type(self))
+        memo[id(self)] = clone
+        for name, value in vars(self).items():
+            setattr(clone, name, type(value)() if name == "_lock" else copy.deepcopy(value, memo))
+        return clone
 
     def replace_document(self, contents: bytes) -> None:
         """Replace the stored document bytes, including deliberately damaged ones."""

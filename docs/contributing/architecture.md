@@ -150,6 +150,10 @@ graph TD
     vs_agent --> vs_prompts
     vs_agent --> vs_sandbox
     vs_agent --> vs_sim
+    vs_dst --> vs_core
+    vs_dst --> vs_project
+    vs_dst --> vs_runtime
+    vs_dst --> vs_sim
     vs_evaluation --> vs_async_ops
     vs_evaluation --> vs_evaluator_protocol
     vs_evaluation --> vs_mcp

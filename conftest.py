@@ -19,6 +19,7 @@ from tests.support.scratch_tree import remove_scratch_tree
 # `--shard=I/N` splits the suite across CI runners (see tests/support/sharding.py).
 pytest_plugins = [
     "vs_sim_pytest",
+    "vs_dst_pytest",
     "tests.support.isolated_environment",
     "tests.support.cwd_hygiene",
     "tests.support.path_hygiene",

@@ -55,6 +55,7 @@ source_roots = [
     "libs/vs-mcp/src",
     "libs/vs-faults/src",
     "libs/vs-sim/src",
+    "libs/vs-dst/src",
 ]
 exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "build", "dist", ".venv"]
 # Also freeze imports that exist only under TYPE_CHECKING.
@@ -694,6 +695,13 @@ path = "vs_sim.api.testing"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.fakes", "vs_sim.faults", "vs_sim.file_effects", "vs_sim.gate", "vs_sim.host_clock", "vs_sim.manual", "vs_sim.pairwise", "vs_sim.seeds", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
 
+# Test-support simulation of the run lifecycle (store, commits, executors, effects) above vs_sim.
+# Nothing in production depends on it.
+[[modules]]
+path = "vs_dst"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vs_sim.api", "vs_sim.api.testing"]
+
 [[modules]]
 path = "vs_sim.blocking"
 layer = "prompts_and_lower_libs"
@@ -908,6 +916,10 @@ from = ["vs_faults"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_sim"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_dst"]
 
 [[interfaces]]
 expose = ["PluginProjection", "ProfilerKind", "ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]

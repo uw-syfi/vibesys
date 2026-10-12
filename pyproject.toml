@@ -68,6 +68,7 @@ vs_slurm = ["py.typed"]
 vs_mcp = ["py.typed"]
 vs_faults = ["py.typed"]
 vs_sim = ["py.typed"]
+vs_dst = ["py.typed"]
 
 [dependency-groups]
 dev = [
@@ -85,6 +86,7 @@ dev = [
     "pytest-xdist",
     "respx",
     "vs-bench",
+    "vs-dst",
     # Pinned exactly (not `>=`): a routine lock refresh with a floating bound
     # could silently change what CI enforces under the strict rule set below.
     "ruff==0.15.12",
@@ -98,7 +100,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "sdk/vs-bench/tests"]
+testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "sdk/vs-bench/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
 # below, so `uv run pytest` reports coverage locally without needing the full
 # flag string CI uses. CI layers on `--cov-report=xml`, `--cov-report=json`,
@@ -108,7 +110,7 @@ testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/te
 # remain queued behind fast tests. CI explicitly selects loadgroup to keep
 # shared native-build fixtures on one worker.
 addopts = "-ra -p no:tach --import-mode=importlib --dist load --maxschedchunk=1 --cov --cov-report=term-missing -m 'not slow and not native_build'"
-pythonpath = [".", "packaging", "libs/vs-sim/pytest_plugin"]
+pythonpath = [".", "packaging", "libs/vs-sim/pytest_plugin", "libs/vs-dst/pytest_plugin"]
 # A test still running after this many seconds dumps every thread's stack to
 # stderr (xdist workers inherit the controller's stderr, so it reaches the CI
 # log). It never kills or fails the test, so it is a diagnostic and not a
@@ -148,7 +150,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_bench"]
+source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_bench"]
 relative_files = true
 omit = [
     # Module execution stubs contain only a guarded call into a measured
@@ -228,7 +230,7 @@ baseline = "tests/quality/isolation_baseline.jsonl"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
+src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "libs/vs-dst/src", "libs/vs-dst/pytest_plugin", "libs/vs-dst/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
 # resources/skills/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
@@ -374,6 +376,8 @@ root = [
     "libs/vs-faults/src",
     "libs/vs-sim/src",
     "libs/vs-sim/pytest_plugin",
+    "libs/vs-dst/src",
+    "libs/vs-dst/pytest_plugin",
     "sdk/vs-bench/src",
 ]
 
@@ -416,6 +420,9 @@ include = [
     "libs/vs-sim/src",
     "libs/vs-sim/pytest_plugin",
     "libs/vs-sim/tests",
+    "libs/vs-dst/src",
+    "libs/vs-dst/pytest_plugin",
+    "libs/vs-dst/tests",
     "sdk/vs-bench/src",
     "sdk/vs-bench/tests",
 ]
@@ -431,4 +438,5 @@ members = ["sdk/*", "libs/*"]
 
 [tool.uv.sources]
 vs-bench = { workspace = true }
+vs-dst = { workspace = true }
 vs-core = { workspace = true }

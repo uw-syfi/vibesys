@@ -20,6 +20,7 @@ members = [
     "vs-async-ops",
     "vs-bench",
     "vs-core",
+    "vs-dst",
     "vs-evaluation",
     "vs-evaluator-protocol",
     "vs-faults",
@@ -2927,6 +2928,7 @@ dev = [
     { name = "twine" },
     { name = "ty" },
     { name = "vs-bench" },
+    { name = "vs-dst" },
 ]
 test = [
     { name = "hypothesis" },
@@ -2970,6 +2972,7 @@ dev = [
     { name = "twine" },
     { name = "ty", specifier = "==0.0.75" },
     { name = "vs-bench", editable = "sdk/vs-bench" },
+    { name = "vs-dst", editable = "libs/vs-dst" },
 ]
 test = [
     { name = "hypothesis" },
@@ -3049,6 +3052,27 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+
+[[package]]
+name = "vs-dst"
+version = "0.1.0"
+source = { editable = "libs/vs-dst" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "vs-core" },
+    { name = "vs-project" },
+    { name = "vs-runtime" },
+    { name = "vs-sim" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-core", editable = "libs/vs-core" },
+    { name = "vs-project", editable = "libs/vs-project" },
+    { name = "vs-runtime", editable = "libs/vs-runtime" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
+]
 
 [[package]]
 name = "vs-evaluation"

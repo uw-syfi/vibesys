@@ -418,14 +418,29 @@ LEASE = 1000.0
 MAX_DISPATCHES = 400
 
 
+type TranslatorFactory = Callable[
+    [
+        Script,
+        Callable[[], CoreState],
+        OperationRegistry,
+        Mapping[SchemaRef, type[BaseModel]],
+        Journal,
+    ],
+    ScriptedExecutors,
+]
+"""Builds the executors of a host from the script, a read of core's state, the operation codec,
+the reply types and the journal; a `ScriptedExecutors` subclass is one."""
+
+
 @dataclass(frozen=True)
 class HostOptions:
     """How the production host around the strategy is arranged for one run."""
 
     max_concurrent: int = 1
     """Requests the loop executes at once."""
-    translator: type[ScriptedExecutors] = ScriptedExecutors
-    """The executors' class; a test whose turns reach a real host service subclasses it."""
+    translator: TranslatorFactory = ScriptedExecutors
+    """The executors' factory; a test whose turns reach a real host service subclasses
+    `ScriptedExecutors` and passes the class."""
     attach: Callable[[CoreRuntime[Any], VirtualClock], None] | None = None
     """Hears the shell and clock once they exist."""
     controlled: bool = False
@@ -435,18 +450,65 @@ class HostOptions:
     """Lifecycle capabilities the run offers its strategy (such as ``suspend``)."""
 
 
-def drive_shell[S: StrategyState](
+@dataclass
+class ScriptedHost[S: StrategyState]:
+    """One production host (shell, loop config, clock) over a store, ready to run."""
+
+    shell: CoreRuntime[S]
+    host: CoreRunHost
+    config: RunLoopConfig
+    clock: VirtualClock
+    decisions: list[Decision]
+    journal: Journal
+
+    def run(self) -> Run:
+        """Start the host over its store (a new run, or the one the store holds) and drive it.
+
+        An exception that is not the loop's own backstop or an operator stop (a host that
+        died, for one) propagates.
+        """
+        start_core(self.host, self.config)
+        halted = None
+        stopped = False
+        try:
+            run_virtual(self.clock, drive_core(self.host, self.config))
+        except RunStopped:
+            stopped = True
+        except (DispatchCapExceededError, RunStalledError) as error:
+            # These are the loop's backstops. Return the run so the liveness check names the
+            # invariant it broke and the requests that led there.
+            halted = error
+        return Run(
+            core=self.shell.record.envelope.core,
+            state=self.shell.record.envelope.strategy,
+            decisions=self.decisions,
+            journal=self.journal,
+            halted=halted,
+            stopped=stopped,
+        )
+
+
+def scripted_host[S: StrategyState](  # noqa: PLR0913  # lint-waiver: LW-994707 [PLR0913]; a restarted host inherits the dead one's store, delivery and start time beside the run's description.
+    # > Bundling the three inherited values into one holder adds a type that only this signature uses, and splitting the function would repeat the shell wiring it exists to share.
     strategy: Strategy[S],
     script: Script,
     harness: Harness,
     schemas: Mapping[SchemaRef, type[BaseModel]],
     host_options: HostOptions | None = None,
-) -> Run:
-    """Run ``strategy`` to the end of its run on the production shell and loop."""
+    *,
+    store: FakeStateStore | None = None,
+    delivery: FakePublicationDelivery | None = None,
+    clock_at: float = 1.0,
+) -> ScriptedHost[S]:
+    """A production shell and loop over ``strategy`` with every executor answered by ``script``.
+
+    ``store`` and ``delivery`` default to new ones; pass the ones a dead host left to start its
+    successor over them. ``clock_at`` is the new host's virtual time.
+    """
     options = host_options or HostOptions()
     decisions: list[Decision] = []
     recorded = RecordingStrategy(strategy, decisions)
-    store = FakeStateStore()
+    store = FakeStateStore() if store is None else store
     journal = Journal()
     shell: CoreRuntime[S] = CoreRuntime(
         store,
@@ -463,7 +525,7 @@ def drive_shell[S: StrategyState](
     )
     if isinstance(script, Admitting):
         script.admit = lambda event, now_at: shell.admit(event, now_at=now_at)
-    clock = VirtualClock(1.0)
+    clock = VirtualClock(clock_at)
     if options.attach is not None:
         options.attach(shell, clock)
     controls = (
@@ -475,32 +537,27 @@ def drive_shell[S: StrategyState](
         if options.controlled
         else None
     )
-    host = CoreRunHost(shell, FakePublicationDelivery(store), clock, controls)
+    host = CoreRunHost(
+        shell, FakePublicationDelivery(store) if delivery is None else delivery, clock, controls
+    )
     config = RunLoopConfig(
         host_id="scenario",
         lease_duration=LEASE,
         max_dispatches=MAX_DISPATCHES,
         max_concurrent=options.max_concurrent,
     )
-    start_core(host, config)
-    halted = None
-    stopped = False
-    try:
-        run_virtual(clock, drive_core(host, config))
-    except RunStopped:
-        stopped = True
-    except (DispatchCapExceededError, RunStalledError) as error:
-        # These are the loop's backstops. Return the run so the liveness check names the
-        # invariant it broke and the requests that led there.
-        halted = error
-    return Run(
-        core=shell.record.envelope.core,
-        state=shell.record.envelope.strategy,
-        decisions=decisions,
-        journal=journal,
-        halted=halted,
-        stopped=stopped,
-    )
+    return ScriptedHost(shell, host, config, clock, decisions, journal)
+
+
+def drive_shell[S: StrategyState](
+    strategy: Strategy[S],
+    script: Script,
+    harness: Harness,
+    schemas: Mapping[SchemaRef, type[BaseModel]],
+    host_options: HostOptions | None = None,
+) -> Run:
+    """Run ``strategy`` to the end of its run on the production shell and loop."""
+    return scripted_host(strategy, script, harness, schemas, host_options).run()
 
 
 class _IgnoredTransitions:

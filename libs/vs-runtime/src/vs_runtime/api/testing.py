@@ -19,8 +19,11 @@ from vs_runtime._shell_kit import (
     Run,
     Script,
     ScriptedExecutors,
+    ScriptedHost,
+    TranslatorFactory,
     drive_shell,
     request_executors,
+    scripted_host,
 )
 from vs_runtime.fake_docker_daemon import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_runtime.fakes import (
@@ -119,10 +122,13 @@ __all__ = [
     "Run",
     "Script",
     "ScriptedExecutors",
+    "ScriptedHost",
+    "TranslatorFactory",
     "TurnResponder",
     "daemon_docker_config",
     "daemon_engine",
     "drive_shell",
     "request_executors",
+    "scripted_host",
     "unconfined_host_environment",
 ]

@@ -5,57 +5,37 @@ instance restarts over the store the dead one left, and the executors keep their
 must reach the result an uninterrupted run reaches, end in an equal strategy state, and execute
 no request identity twice. The boundaries are the commits of the subject's smallest full run.
 
-Each crash re-runs the whole run, so crashing at every commit costs a full run per commit. CI
-crashes at `CI_BOUNDARIES` evenly spaced commits, always including the first and the last (the
-policy of #1491: CI samples, the slow tier is exhaustive); `pytest -m slow` crashes at every one,
-split into interleaved chunks so the workers share it.
+The crash points tried are the suite's one setting (`--dst-crash-points`): CI samples, the
+nightly job tries every commit (the policy of #1491). Trying every commit of the largest subject
+takes longer than one test may (`faulthandler_timeout` in `pyproject.toml`), so the exhaustive
+setting splits each sweep into interleaved parts that the workers share.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
-from tests.composition._loop import _crash as crash
+from tests.composition._loop.dst_world import SubjectWorld
 from tests.composition._loop.subjects import SUBJECTS
 
-from vs_sim.api.testing import evenly_spaced
+from vs_dst.api import EVERY_POINT, CrashKind, crash_point_policy, simulate
 
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
-
-CI_BOUNDARIES = 12
-CHUNKS = 6
 SUBJECT_NAMES = sorted(name for name, subject in SUBJECTS.items() if subject.sweeps_crashes)
+PARTS = 4 if crash_point_policy() == EVERY_POINT else 1
 
 
-def _sweep(name: str, point: crash.CrashPoint, choose: Callable[[int], Iterable[int]]) -> None:
-    """Crash ``name``'s smallest run at the commits ``choose`` picks from its count, and compare."""
+@pytest.mark.parametrize("name", SUBJECT_NAMES)
+@pytest.mark.parametrize("kind", list(CrashKind))
+@pytest.mark.parametrize("part", range(PARTS))
+def test_c2_a_restart_after_any_crash_finishes_the_same_run(
+    name: str, kind: CrashKind, part: int
+) -> None:
     subject = SUBJECTS[name]
-    reference = crash.run_with_crash(subject, subject.smallest_world(), None, point)
-    assert reference.crashed == 0
-    for index in choose(reference.commits):
-        survived = crash.run_with_crash(subject, subject.smallest_world(), index, point)
-        assert survived.crashed == 1, f"commit {index} did not crash the host"
-        assert survived.core.run.result == reference.core.run.result, f"commit {index}"
-        assert survived.state == reference.state, f"commit {index}"
-        executed = survived.effects.executed
-        assert len(executed) == len(set(executed)), f"commit {index}: an effect ran twice"
+    normal = simulate(SubjectWorld(subject, subject.smallest_world()))
+    assert normal.finished
 
-
-@pytest.mark.parametrize("name", SUBJECT_NAMES)
-@pytest.mark.parametrize("point", list(crash.CrashPoint))
-def test_c2_a_crash_at_a_sample_of_the_commits_replays_to_the_same_run(
-    name: str, point: crash.CrashPoint
-) -> None:
-    _sweep(name, point, lambda commits: evenly_spaced(commits, CI_BOUNDARIES))
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize("name", SUBJECT_NAMES)
-@pytest.mark.parametrize("point", list(crash.CrashPoint))
-@pytest.mark.parametrize("chunk", range(CHUNKS))
-def test_c2_a_crash_at_every_commit_of_a_run_replays_to_the_same_run(
-    name: str, point: crash.CrashPoint, chunk: int
-) -> None:
-    _sweep(name, point, lambda commits: range(chunk, commits, CHUNKS))
+    for crash in normal.crash_points(kind)[part::PARTS]:
+        recovered = normal.rerun_with_crash(crash)
+        assert recovered.finished, crash
+        assert recovered.result == normal.result, crash
+        assert recovered.state == normal.state, crash
+        assert recovered.no_effect_ran_twice(), crash
