@@ -15,9 +15,8 @@ from tests.support.workspace_world import RUN_ID
 
 from vibesys.events import CoreEvent, CoreEventType, WinnerSelectedData
 from vibesys.run.integration import LocalRunIntegration
-from vs_core.api import RetainedCandidate
 from vs_project.api import StoredEnvelope
-from vs_runtime.api.core import RuntimeRecord
+from vs_runtime.api.core import RuntimeRecord, winner_selection
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -71,15 +70,13 @@ async def test_winner_selection_is_announced_once_with_the_selection_core_record
         process.shell.start("host-a", now_at=0.0, lease_duration=LEASE)
         assert await drive(process, start=1.0) is None
 
-        adoption = process.shell.record.envelope.core.settlement.adoption
-        assert adoption is not None
+        chosen = winner_selection(process.shell.record)
+        assert chosen is not None
         announced = [event.data for event in heard if event.type is CoreEventType.WINNER_SELECTED]
-        assert len(announced) == 1
-        data = announced[0]
-        assert isinstance(data, WinnerSelectedData)
-        assert data.revision == (
-            adoption.selection.revision.git_commit or adoption.selection.revision.revision_id.root
-        )
-        assert data.selection == (
-            "candidate" if isinstance(adoption.selection, RetainedCandidate) else "baseline"
-        )
+        assert announced == [
+            WinnerSelectedData(
+                selection=chosen.selection,
+                revision=chosen.revision,
+                settlement_id=chosen.settlement_id,
+            )
+        ]

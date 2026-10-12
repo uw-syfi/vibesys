@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -13,7 +13,14 @@ from pydantic import (
     model_validator,
 )
 
-from vs_core.api import ContractError, OperationRegistry, RunEnvelope, StrategyEvent, StrategyState
+from vs_core.api import (
+    ContractError,
+    OperationRegistry,
+    RetainedCandidate,
+    RunEnvelope,
+    StrategyEvent,
+    StrategyState,
+)
 from vs_project.api import StoreFence
 from vs_runtime._core_requests import ExecutionLease, OwnerEvent
 
@@ -167,3 +174,36 @@ def append_publication(
     if publication.sequence != len(rows) + 1:
         raise ContractError(("sequence",), "publication sequence gap or conflict")
     return PublicationHistory(schema_version=1, publications=(*rows, publication)).publications
+
+
+class WinnerSelection(BaseModel):
+    """The run result core's settlement state has chosen, as plain data for a frontend.
+
+    ``selection`` says whether a retained candidate or the unchanged trusted input was
+    chosen; ``revision`` is the commit (or revision id) that becomes the result and
+    ``settlement_id`` names the settled attempt behind a candidate.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    selection: Literal["candidate", "baseline"]
+    revision: str = Field(min_length=1)
+    settlement_id: str | None = None
+
+
+def winner_selection(record: RuntimeRecord[Any] | None) -> WinnerSelection | None:
+    """The selection a committed record holds, or None before any strategy proposed a winner.
+
+    Every strategy proposes through core, so this is the one place that sees all of them.
+    """
+    if record is None:
+        return None
+    adoption = record.envelope.core.settlement.adoption
+    if adoption is None:
+        return None
+    chosen = adoption.selection
+    revision = chosen.revision.git_commit or chosen.revision.revision_id.root
+    if isinstance(chosen, RetainedCandidate):
+        return WinnerSelection(
+            selection="candidate", revision=revision, settlement_id=chosen.settlement_id.root
+        )
+    return WinnerSelection(selection="baseline", revision=revision)
