@@ -219,7 +219,7 @@
 {"path": "src/server/transport/discovery.py", "rule": "socket_io", "count": 1}
 {"path": "src/server/transport/unix_jsonl.py", "rule": "socket", "count": 2}
 {"path": "src/server/transport/unix_jsonl.py", "rule": "socket_io", "count": 1}
-{"path": "src/server/transport/websocket.py", "rule": "executor", "count": 5}
+{"path": "src/server/transport/websocket.py", "rule": "executor", "count": 1}
 {"path": "src/server/transport/websocket.py", "rule": "socket_io", "count": 1}
 {"path": "src/server/transport/websocket.py", "rule": "threading", "count": 19}
 {"path": "src/vibesys/events.py", "rule": "wall_clock", "count": 1}
