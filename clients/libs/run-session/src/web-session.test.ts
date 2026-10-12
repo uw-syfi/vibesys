@@ -363,6 +363,62 @@ describe('WebSession robustness', () => {
     expect(session.getState()).toBe(closed);
     expect(published).toEqual([]);
   });
+
+  test('aborts each snapshot request when a replacement or close supersedes its actor', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    await session.start();
+    const subscription = transport.subscriptions[0];
+    if (subscription === undefined) throw new Error('Initial subscription did not open');
+
+    const storeTwo = deferred<ProtocolResponse>();
+    const storeThree = deferred<ProtocolResponse>();
+    transport.snapshots.push(storeTwo.promise, storeThree.promise);
+    subscription.onMessage(
+      eventBatch([event(1, 'server_ready')], {
+        store_id: 'store-2',
+        through_sequence: 1,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    await settle();
+
+    const firstIndex = transport.requests.findIndex(
+      (request, index) =>
+        index > 0 && request.type === 'query.snapshot' && request.expected_store_id === 'store-2',
+    );
+    expect(firstIndex).toBeGreaterThan(0);
+    const firstSignal = transport.requestOptions[firstIndex]?.signal;
+    expect(firstSignal?.aborted).toBe(false);
+
+    subscription.onMessage(
+      eventBatch([event(1, 'server_ready')], {
+        store_id: 'store-3',
+        through_sequence: 1,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    await settle();
+
+    const secondIndex = transport.requests.findIndex(
+      request => request.type === 'query.snapshot' && request.expected_store_id === 'store-3',
+    );
+    expect(secondIndex).toBeGreaterThan(firstIndex);
+    const secondSignal = transport.requestOptions[secondIndex]?.signal;
+    expect(firstSignal?.aborted).toBe(true);
+    expect(secondSignal?.aborted).toBe(false);
+
+    await session.close();
+    expect(secondSignal?.aborted).toBe(true);
+
+    // This Fake deliberately ignores cancellation and may settle late. Issue fencing still keeps
+    // those replies inert, while production transports release the request when the signal aborts.
+    storeTwo.resolve(snapshotResponse({sequence: 1, status: 'completed'}));
+    storeThree.resolve(snapshotResponse({sequence: 1, status: 'completed'}));
+    await settle();
+  });
 });
 
 describe('WebSession', () => {

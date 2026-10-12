@@ -63,11 +63,6 @@ export interface WebSessionOptions {
   readonly lifecycle: BrowserLifecycle;
 }
 
-/** An operation's stop signal: aborted once the machine left the state that owned the operation. */
-interface Stoppable {
-  readonly aborted: boolean;
-}
-
 /** The new foreign-run rejection produced by one run-fold transition, if any. */
 function runIdentityRejection(previous: CoreState, current: CoreState): Error | null {
   const before = previous.diagnostics.find(item => item.id === 'core-state:run-identity-mismatch');
@@ -351,7 +346,7 @@ export class WebSession {
    * dials before the snapshot request is queued. A fresh bootstrap loads no snapshot here: its
    * snapshot is fenced to the store its first batch establishes.
    */
-  async #refresh(mode: StreamRecovery, signal: Stoppable): Promise<RefreshOutcome> {
+  async #refresh(mode: StreamRecovery, signal: AbortSignalLike): Promise<RefreshOutcome> {
     try {
       this.#connection.redialControls();
     } catch (error) {
@@ -370,10 +365,10 @@ export class WebSession {
    * While the load is still owned (its operation not stopped), the rejection is recorded in the
    * fold, which changes only the fold's diagnostics.
    */
-  async #loadSnapshot(signal: Stoppable, storeId?: string): Promise<SnapshotResult> {
+  async #loadSnapshot(signal: AbortSignalLike, storeId?: string): Promise<SnapshotResult> {
     let snapshot: RunSnapshot;
     try {
-      snapshot = await this.#connection.loadSnapshot(storeId);
+      snapshot = await this.#connection.loadSnapshot(storeId, signal);
     } catch (error) {
       if (isSnapshotStoreReplaced(error)) {
         return {ok: false, error, reason: 'store-replaced'};

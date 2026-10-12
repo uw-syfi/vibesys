@@ -62,11 +62,14 @@ function openRunConnection(
   const reconciler = new StreamReconciler({backfillChunk: tail ?? 1});
   let iterationCapability: 'unknown' | 'supported' | 'unsupported' = 'unknown';
   return {
-    async loadSnapshot(storeId) {
-      const response = await transport.request({
-        type: 'query.snapshot',
-        ...(storeId === undefined ? {} : {expected_store_id: storeId}),
-      });
+    async loadSnapshot(storeId, signal) {
+      const response = await transport.request(
+        {
+          type: 'query.snapshot',
+          ...(storeId === undefined ? {} : {expected_store_id: storeId}),
+        },
+        {signal},
+      );
       if (response.ok !== true || response.snapshot === null || response.snapshot === undefined) {
         throw new ServerError(
           response.error ?? 'Server did not return a run snapshot',

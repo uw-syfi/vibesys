@@ -57,8 +57,11 @@ export type RunCommandOutcome =
 
 /** The run behind one control transport: its snapshot and its persistent event stream. */
 export interface RunConnection {
-  /** Load an unfenced snapshot, or require the event store established by a stream batch. */
-  loadSnapshot(storeId?: string): Promise<RunSnapshot>;
+  /**
+   * Load an unfenced snapshot, or require the event store established by a stream batch. The
+   * owning state aborts `signal` when a newer load, recovery, or close supersedes this request.
+   */
+  loadSnapshot(storeId: string | undefined, signal: AbortSignalLike): Promise<RunSnapshot>;
   /** Load one page of the policy-owned iteration tree from the stream's store generation. */
   loadIterations(
     cursor: string | null,
