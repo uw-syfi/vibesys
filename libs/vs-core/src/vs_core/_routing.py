@@ -58,6 +58,8 @@ from .types.intents import (
     RecoveryStarted,
     RequestObserved,
     RequestPrepared,
+    RequestUndispatchable,
+    RetryDue,
 )
 from .types.kernel import (
     CoreEvent,
@@ -229,6 +231,8 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | RecoveryStarted()
             | RecoveryReady()
             | ReconciliationDeadline()
+            | RetryDue()
+            | RequestUndispatchable()
             | OperationRetireRequested()
             | DecisionCompleted()
         ):

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._adoption import view as adoption_view
+from ._intent_ledger import next_retry_at
 from ._intent_recovery import next_reconciliation_at
 from .types.common import ChargeKind
 from .types.intents import (
@@ -159,6 +160,8 @@ def project(state: CoreState) -> RunView:
         controls=run.controls,
         adoption=adoption_view(state.settlement, state.intents),
         next_observe_at=_earliest(
-            next_observe_at(state.evaluation), next_reconciliation_at(state.intents)
+            next_observe_at(state.evaluation),
+            next_reconciliation_at(state.intents),
+            next_retry_at(state.intents),
         ),
     )

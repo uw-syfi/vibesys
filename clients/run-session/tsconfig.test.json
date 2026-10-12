@@ -24,9 +24,6 @@
       "path": "../contracts/tsconfig.testing.json"
     },
     {
-      "path": "../machine/tsconfig.testing.json"
-    },
-    {
       "path": "../store/tsconfig.testing.json"
     },
     {

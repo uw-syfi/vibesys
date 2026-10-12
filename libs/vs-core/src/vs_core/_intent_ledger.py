@@ -25,6 +25,7 @@ from ._proofs import (
     ProofField,
     Proven,
     accepted_receipt_for,
+    dependency_failed,
     fresh_observation,
     observation_for,
     released_owner,
@@ -57,9 +58,12 @@ from .types.intents import (
     IntentsState,
     OperationResult,
     OperationRetireRequested,
+    RecoveryPhase,
     ReissueProof,
     RequestObserved,
     RequestPrepared,
+    RequestUndispatchable,
+    RetryDue,
     TargetObservation,
     request_lifecycle,
 )
@@ -101,17 +105,22 @@ def advance(
     """Consume the five ledger events; recovery events belong to Intents B."""
     match event:
         case RequestPrepared():
-            return _prepared(state, context, event)
+            change = _prepared(state, context, event)
         case DispatchAuthorized():
-            return _dispatched(state, event)
+            change = _dispatched(state, event)
         case RequestObserved():
-            return _observed(state, context, event)
+            change = _observed(state, context, event)
         case DecisionDependencyResolved():
-            return _dependency_resolved(state, context, event)
+            change = _dependency_resolved(state, context, event)
         case OperationRetireRequested():
-            return _retire(state, context, event)
+            change = _retire(state, context, event)
+        case RetryDue():
+            change = _retry(state, context, event)
+        case RequestUndispatchable():
+            change = _undispatchable(state, context, event)
         case _:
             raise ContractValidationError("event.kind", "event is owned by intent recovery")
+    return change
 
 
 def _unique(state: IntentsState, identity: RequestId) -> Intent | None:
@@ -321,7 +330,12 @@ def _reissue(state: IntentsState, intent: Intent) -> AreaChange[IntentsState]:
     and the replay equals the straight run.
     """
     reissued = intent.model_copy(
-        update={"phase": IntentPhase.PREPARED, "observation": None, "sequence": None}
+        update={
+            "phase": IntentPhase.PREPARED,
+            "observation": None,
+            "sequence": None,
+            "retry_at": None,
+        }
     )
     return AreaChange(state=_replace(state, reissued))
 
@@ -379,10 +393,16 @@ def _refine(
     return AreaChange(state=_replace(state, updated))
 
 
-RETRYABLE_FAILURES = frozenset(
-    {ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED}
-)
-"""Observation statuses that keep an intent DISPATCHED and wait for a retry nobody drives."""
+RETRY_BACKOFF = 1.0
+"""Seconds of core time before the first retry; each further retry waits twice as long."""
+
+RETRY_BACKOFF_CAP = 30.0
+"""The longest wait between two attempts of one request, in seconds of core time."""
+
+
+def retry_delay(retries: int) -> float:
+    """Core seconds to wait before attempt number ``retries + 1``: 1, 2, 4, ... capped."""
+    return min(RETRY_BACKOFF * 2 ** max(retries - 1, 0), RETRY_BACKOFF_CAP)
 
 
 def _retry_limit(context: IntentsContext, intent: Intent) -> int:
@@ -392,9 +412,7 @@ def _retry_limit(context: IntentsContext, intent: Intent) -> int:
     return context.run.limits.max_retries
 
 
-def _next_phase(
-    context: IntentsContext, intent: Intent, observation: Observation
-) -> tuple[IntentPhase, int]:
+def _next_phase(intent: Intent, observation: Observation) -> tuple[IntentPhase, int]:
     """Only a conclusive observation closes; everything else keeps the intent open."""
     if _conclusive(observation) and not (
         observation.status == ObservationStatus.SUCCEEDED and not observation.accepted
@@ -403,19 +421,94 @@ def _next_phase(
     if observation.status == ObservationStatus.UNKNOWN or observation.terminal:
         # Unknown, or success whose acceptance is unproven: inspect before any retry.
         return IntentPhase.RECONCILING, intent.retry_count
-    if observation.status in RETRYABLE_FAILURES:
-        retries = intent.retry_count + 1
-        if retries > _retry_limit(context, intent):
-            return IntentPhase.BLOCKED, intent.retry_count
-        return IntentPhase.DISPATCHED, retries
+    if observation.retryable:
+        return IntentPhase.DISPATCHED, intent.retry_count + 1
     return IntentPhase.DISPATCHED, intent.retry_count
 
 
-def _record(intent: Intent, facts: Facts, phase: IntentPhase, retries: int) -> Intent:
+def _exhausted(context: IntentsContext, intent: Intent, facts: Facts) -> Facts:
+    """The conclusive failure a request ends with once its retries are used up.
+
+    The executor said, ``retry_limit + 1`` times, that it did not run the request. That is a
+    conclusive failure, so the owner of the request hears it as one (for a checkpoint, as a
+    declined checkpoint) instead of waiting on a retry that will not come. The sequence moves
+    up by one so a redelivery of the retryable answer stays inert.
+    """
+    observation = facts.observation
+    if not observation.retryable or intent.retry_count + 1 <= _retry_limit(context, intent):
+        return facts
+    return TargetObservation(
+        observation=observation.model_copy(
+            update={
+                "event_id": EventId(root=f"retries-exhausted:{intent.request_id.root}"),
+                "sequence": observation.sequence + 1,
+                "accepted": False,
+                "terminal": True,
+                "released": True,
+                "children_complete": True,
+            }
+        ),
+        setup_failure=SetupFailureKind.UNKNOWN,
+    )
+
+
+def due_retries(state: IntentsState, now_at: float) -> tuple[RetryDue, ...]:
+    """One retry per request whose backoff has passed at core time ``now_at``."""
+    return tuple(
+        RetryDue(request_id=intent.request_id, now_at=now_at)
+        for intent in state.intents
+        if (due := intent.retry_wait_until) is not None and due <= now_at
+    )
+
+
+def next_retry_at(state: IntentsState) -> float | None:
+    """The earliest core time at which a ``ClockAdvanced`` sends a request out again."""
+    return min(
+        (due for row in state.intents if (due := row.retry_wait_until) is not None), default=None
+    )
+
+
+def _retry(
+    state: IntentsState, context: IntentsContext, event: RetryDue
+) -> AreaChange[IntentsState]:
+    """Send a retryably failed request out again, unchanged, once its backoff has passed.
+
+    Recovery owns every open request while it gates the run, so a retry waits for it.
+    """
+    intent = _unique(state, event.request_id)
+    due = None if intent is None else intent.retry_wait_until
+    if (
+        intent is None
+        or due is None
+        or max(context.run.now_at, event.now_at) < due
+        or state.recovery.phase != RecoveryPhase.READY
+    ):
+        return AreaChange(state=state)
+    return _reissue(state, intent)
+
+
+def _undispatchable(
+    state: IntentsState, context: IntentsContext, event: RequestUndispatchable
+) -> AreaChange[IntentsState]:
+    """Close a prepared request whose dependencies failed for good, as an unsent cancellation."""
+    intent = _unique(state, event.request_id)
+    if (
+        intent is None
+        or intent.phase != IntentPhase.PREPARED
+        or not dependency_failed(intent.request, context.run.receipts, state)
+    ):
+        return AreaChange(state=state)
+    return _cancel_prepared(state, context, (intent,))
+
+
+def _record(
+    intent: Intent, facts: Facts, phase: IntentPhase, retries: int, retry_at: float | None
+) -> Intent:
     observation = facts.observation
     update: dict[str, object] = {
         "phase": phase,
         "retry_count": retries,
+        "retry_at": retry_at,
         "sequence": observation.sequence,
         "observation": observation,
         "setup_failure": facts.setup_failure,
@@ -434,8 +527,14 @@ def _record(intent: Intent, facts: Facts, phase: IntentPhase, retries: int) -> I
 def _advance_phase(
     state: IntentsState, context: IntentsContext, intent: Intent, facts: Facts
 ) -> AreaChange[IntentsState]:
-    phase, retries = _next_phase(context, intent, facts.observation)
-    updated = _record(intent, facts, phase, retries)
+    facts = _exhausted(context, intent, facts)
+    phase, retries = _next_phase(intent, facts.observation)
+    retry_at = (
+        context.run.now_at + retry_delay(retries)
+        if phase == IntentPhase.DISPATCHED and facts.observation.retryable
+        else None
+    )
+    updated = _record(intent, facts, phase, retries, retry_at)
     state = _replace(state, updated)
     signals = owner_signals(context, updated, facts)
     events: tuple[StrategyEvent, ...] = ()
@@ -536,7 +635,7 @@ def _unsent_cancellation(context: IntentsContext, intent: Intent) -> TargetObser
             event_id=EventId(root=f"cancelled-unsent:{intent.request_id.root}"),
             request_id=intent.request_id,
             scope=request.scope,
-            sequence=0,
+            sequence=0 if intent.observation is None else intent.observation.sequence + 1,
             observed_at=context.run.now_at,
             status=ObservationStatus.CANCELLED,
             accepted=False,

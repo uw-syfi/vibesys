@@ -105,7 +105,10 @@ from vs_core._waitable import (
     turn_reply,
 )
 from vs_core._waits import (
+    RESOLUTIONS,
+    Outcome,
     Producer,
+    Resolution,
     Wait,
     WaitingPhase,
     WaitKind,
@@ -349,6 +352,8 @@ from vs_core.types.intents import (
     Request,
     RequestObserved,
     RequestPrepared,
+    RequestUndispatchable,
+    RetryDue,
     TargetObservation,
 )
 from vs_core.types.job_observations import (
@@ -534,6 +539,7 @@ __all__ = [
     "INTERPRET_SUFFIX",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
     "RENDER_SUFFIX",
+    "RESOLUTIONS",
     "RETAIN_SUFFIX",
     "TURN_FAILURE_DETAIL_LIMIT",
     "VALIDATE_LOCAL_SUFFIX",
@@ -772,6 +778,7 @@ __all__ = [
     "OperationSchemaRef",
     "OperationView",
     "OperationWire",
+    "Outcome",
     "OwnedJob",
     "OwnershipSettled",
     "ParentVerification",
@@ -816,7 +823,9 @@ __all__ = [
     "RequestObserved",
     "RequestPrepared",
     "RequestTurn",
+    "RequestUndispatchable",
     "ReservedInputOccurrence",
+    "Resolution",
     "ResourceId",
     "RestoreRevision",
     "ResumeAuthorizationReceipt",
@@ -828,6 +837,7 @@ __all__ = [
     "RetentionReceipt",
     "RetentionRequired",
     "RetireRequested",
+    "RetryDue",
     "RevisionAuthority",
     "RevisionId",
     "RevisionNumber",

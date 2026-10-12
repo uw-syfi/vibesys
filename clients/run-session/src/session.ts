@@ -1,41 +1,88 @@
 /**
- * The live session's connection core as a machine: start-up (event stream, then a store-fenced
- * snapshot), what the stream and the control channel report, and the single-flight recovery that a
- * browser wake or an explicit Reattach starts. Control state, so a machine
- * (docs/contributing/clients-architecture.md, "State"); the shell (`web-session.ts`) provides its
- * operations and actions through the run connection.
+ * The live session's connection core: start-up (event stream, then a store-fenced snapshot), what the stream
+ * and the control channel report, and the single-flight recovery that a browser wake or an
+ * explicit Reattach starts. Pure: the shell (`web-session.ts`) performs each request through
+ * the transport and dispatches the reply with the request's token.
  *
- * `open` has three parallel regions, each owning one invoked operation: `startup` the first
- * subscription's handshake, `recovery` the refresh (a control redial, then a snapshot), and
- * `replacement` the snapshot fenced to the stream store a batch established. Leaving a state stops
- * its operation, and a stopped operation never reports, so no reply is matched by a token. The
- * regions affect each other only through the internal `session.*` events they raise.
- *
- * Two orderings remain data. A snapshot is applied only when its load was issued after the newest
- * one applied or fenced (`issued`, `applied`), so a slow start-up snapshot cannot overwrite a newer
- * refresh's, and a stream replacement fences every load issued before it. And each stale cause is
- * numbered (`problemEpoch`): a snapshot clears only the causes that existed when its load began.
- *
- * A load reports success only for a snapshot the run fold would accept (the shell dry-runs the
- * fold), so a successful load is proof of the current run. Rejected projection evidence (a foreign
- * batch, or a snapshot rejected after its check) keeps the page stale through stream reconnects
- * until a later fenced snapshot succeeds; a transient connection fault never erases it.
+ * The shell reports a loaded snapshot as successful only after the run fold accepted it for the
+ * reply token this core still awaits. This core can therefore treat a successful reply as proof of
+ * the current run without trusting transport success independently of projection acceptance.
  */
 
 import type {RunSnapshot} from '@vibesys/contracts';
-import {unprovided} from '@vibesys/machine';
+import {only, type Step} from '@vibesys/store';
 import type {ControlChannelState, StreamConnectionState} from '@vibesys/transport';
-import {and, assign, not, raise, type SnapshotFrom, setup, stateIn} from 'xstate';
 import type {WebSessionState, WebSessionStatus} from './connection.js';
 
 /** How a recovery restarts the event stream: resume where it was, or a fresh bootstrap. */
-export type StreamRecovery = 'retry' | 'rebootstrap';
+type StreamRecovery = 'retry' | 'rebootstrap';
 
 /** Whether the page could reach anything now: a hidden tab or an offline browser waits. */
 export interface Reachability {
   readonly visible: boolean;
   readonly online: boolean;
 }
+
+type Startup =
+  | {readonly kind: 'idle'}
+  | {
+      readonly kind: 'subscribing';
+      readonly token: number;
+      readonly subscribed: boolean;
+      readonly snapshot: 'waiting' | 'loaded' | 'failed';
+    }
+  | {readonly kind: 'done'};
+
+/**
+ * Recovery is single-flight, but its intent is monotone while that flight owns the control redial
+ * and the snapshot: a lifecycle retry cannot weaken a fresh bootstrap the user asked for.
+ */
+type Recovery =
+  | {readonly kind: 'none'}
+  | {
+      readonly kind: 'refreshing';
+      readonly token: number;
+      readonly intent: StreamRecovery;
+      readonly phase: 'preparing' | 'establishing' | 'snapshot';
+      /** Failure generation visible when this recovery began. */
+      readonly problemEpoch: number;
+    };
+
+/** The snapshot that validates one reconciler-proven replacement stream generation. */
+type ReplacementSnapshot =
+  | {readonly kind: 'none'}
+  | {
+      readonly kind: 'loading';
+      readonly token: number;
+      readonly storeId: string;
+      /** Flights whose completion depends on this fenced generation. */
+      readonly owner: 'startup' | 'startup-recovery' | 'recovery' | 'replacement';
+      /** Failure generation visible when this fenced query began. */
+      readonly problemEpoch: number;
+    };
+
+type StreamProblem = 'none' | 'snapshot' | 'connection' | 'projection';
+
+export type SessionState =
+  | {
+      readonly kind: 'open';
+      readonly view: WebSessionState;
+      readonly startup: Startup;
+      readonly recovery: Recovery;
+      readonly replacement: ReplacementSnapshot;
+      /** Whether the current stream generation has connection proof. */
+      readonly streamConnected: boolean;
+      /** Whether the newest fenced snapshot proof is usable. */
+      readonly streamSnapshot: 'none' | 'trusted' | 'failed';
+      /** Owner and monotone order of the newest reason the stream is stale. */
+      readonly streamProblem: StreamProblem;
+      readonly problemEpoch: number;
+      /** The newest snapshot token accepted or superseded; 0 before the first. */
+      readonly applied: number;
+      readonly next: number;
+    }
+  /** Closed: every later report and reply is dropped. */
+  | {readonly kind: 'closed'; readonly view: WebSessionState; readonly next: number};
 
 /** A snapshot load's result: the snapshot, or why it could not be loaded. */
 export type SnapshotResult =
@@ -47,29 +94,29 @@ export type SnapshotResult =
       readonly reason?: 'store-replaced';
     };
 
-/** A refresh redials the control channel, then reloads the snapshot (a retry) or not (a rebootstrap). */
-export type RefreshOutcome =
+/** A refresh redials the control channel, then reloads the snapshot. */
+type RefreshOutcome =
   | {readonly kind: 'redial-failed'; readonly error: Error}
   | {readonly kind: 'ready'}
   | {readonly kind: 'snapshot'; readonly result: SnapshotResult};
 
-/** Which flights wait on a fenced snapshot load: they settle together when it does. */
-type LoadOwner = 'startup' | 'startup-recovery' | 'recovery' | 'replacement';
-
-type StreamProblem = 'none' | 'snapshot' | 'connection' | 'projection';
-
-export type SessionEvent =
+export type SessionAction =
   | {readonly type: 'start'}
+  | {readonly type: 'subscribe-reply'; readonly token: number; readonly error: Error | null}
+  | {readonly type: 'refresh-reply'; readonly token: number; readonly outcome: RefreshOutcome}
   /** A first or replacement batch established the store a snapshot can fence to. */
   | {readonly type: 'stream-established'; readonly storeId: string}
+  | {
+      readonly type: 'replacement-snapshot-reply';
+      readonly token: number;
+      readonly storeId: string;
+      readonly result: SnapshotResult;
+    }
   /** The event stream changed state. */
   | {readonly type: 'stream'; readonly state: StreamConnectionState}
   /** The stream reported a fault in band (a protocol error), or could not be recovered. */
   | {readonly type: 'fault'; readonly error: Error}
-  /**
-   * The run fold rejected data as belonging to another run: a stream batch, or a snapshot whose
-   * identity changed between its load's check and its fold.
-   */
+  /** Core-state rejected one stream batch as belonging to another run. */
   | {readonly type: 'projection-rejected'; readonly error: Error}
   /** The control channel changed state (the shell drops repeats of the same state). */
   | {readonly type: 'controls'; readonly state: ControlChannelState}
@@ -82,648 +129,464 @@ export type SessionEvent =
   | {readonly type: 'reconnect-controls'}
   | {readonly type: 'close'};
 
-/** What one region tells its siblings; raised inside the machine, never sent by the shell. */
-type InternalEvent =
-  /** A fenced load settled (not with `store-replaced`): its owners settle with it. */
-  | {readonly type: 'session.snapshot-settled'; readonly owner: LoadOwner; readonly ok: boolean}
-  /** A fenced load found its store replaced: a fresh generation must be established first. */
-  | {readonly type: 'session.store-replaced'; readonly owner: LoadOwner}
-  /** The stream dropped or faulted: a fresh stream still establishing has failed. */
-  | {readonly type: 'session.stream-failed'};
+export type SessionRequest =
+  | {readonly kind: 'subscribe'; readonly token: number}
+  /** Redial the control channel (inert when healthy), then reload the snapshot. */
+  | {readonly kind: 'refresh'; readonly token: number; readonly mode: StreamRecovery}
+  | {
+      readonly kind: 'load-replacement-snapshot';
+      readonly token: number;
+      readonly storeId: string;
+    }
+  | {readonly kind: 'recover-stream'; readonly mode: 'retry'}
+  | {readonly kind: 'recover-stream'; readonly mode: 'rebootstrap'}
+  /** Retry only if the newly applied snapshot is ahead of the event fold. */
+  | {readonly kind: 'reevaluate-stream'}
+  | {readonly kind: 'redial-controls'}
+  | {readonly kind: 'close'};
 
-export interface SessionContext {
-  readonly view: WebSessionState;
-  /** Whether the current stream generation has connection proof. */
-  readonly streamConnected: boolean;
-  /** Whether the newest fenced snapshot proof is usable. */
-  readonly streamSnapshot: 'none' | 'trusted' | 'failed';
-  /** Owner of the newest reason the stream is stale. */
-  readonly streamProblem: StreamProblem;
-  /** The number of stale causes recorded so far, which orders them against snapshot loads. */
-  readonly problemEpoch: number;
-  /** The issue number of the newest snapshot load. */
-  readonly issued: number;
-  /** The newest load applied or fenced; a load issued at or below it is never applied. */
-  readonly applied: number;
-  /** Start-up's snapshot, while `startup` is subscribing. */
-  readonly startupSnapshot: 'waiting' | 'loaded' | 'failed';
-  /** The recovery flight, while `recovery` is refreshing: monotone intent, monotone while owned. */
-  readonly recovery: {
-    readonly intent: StreamRecovery;
-    /** The issue number of the refresh's snapshot load. */
-    readonly issue: number;
-    /** Stale causes visible when this recovery began. */
-    readonly problemEpoch: number;
-  };
-  /** The fenced load, while `replacement` is loading. */
-  readonly replacement: {
-    readonly issue: number;
-    readonly storeId: string;
-    readonly owner: LoadOwner;
-    /** Stale causes visible when this load began. */
-    readonly problemEpoch: number;
-  };
-}
+type Open = Extract<SessionState, {kind: 'open'}>;
+type SessionStep = Step<SessionState, SessionRequest>;
 
-/** A settled snapshot load: which issue it was, what it returned, and the causes it saw. */
-interface Settled {
-  readonly issue: number;
-  readonly result: SnapshotResult;
-  readonly observedProblemEpoch: number;
-}
-
-const INITIAL_CONTEXT: SessionContext = {
+export const SESSION_INITIAL: SessionState = {
+  kind: 'open',
   view: {hasSnapshot: false, status: 'connecting', error: null, controls: {status: 'connected'}},
+  startup: {kind: 'idle'},
+  recovery: {kind: 'none'},
+  replacement: {kind: 'none'},
   streamConnected: false,
   streamSnapshot: 'none',
   streamProblem: 'none',
   problemEpoch: 0,
-  issued: 0,
   applied: 0,
-  startupSnapshot: 'waiting',
-  recovery: {intent: 'retry', issue: 0, problemEpoch: 0},
-  replacement: {issue: 0, storeId: '', owner: 'replacement', problemEpoch: 0},
+  next: 1,
 };
 
-const OPEN = '#session.open';
-
-/**
- * A batch established `storeId`: unless the load in flight is for it already, (re)start the fenced
- * load, owned by the flights still waiting on a snapshot. On both of `replacement`'s states, as a
- * self-transition of `loading`: a re-entry declared on the region would exit all of `open`.
- */
-const ESTABLISH = [
-  {guard: 'loadingStore'},
-  {
-    guard: 'startupRecovering',
-    target: 'loading',
-    reenter: true,
-    actions: {type: 'issueReplacement', params: {owner: 'startup-recovery'}},
-  },
-  {
-    guard: 'startupWaiting',
-    target: 'loading',
-    reenter: true,
-    actions: {type: 'issueReplacement', params: {owner: 'startup'}},
-  },
-  {
-    guard: 'recovering',
-    target: 'loading',
-    reenter: true,
-    actions: {type: 'issueReplacement', params: {owner: 'recovery'}},
-  },
-  {
-    target: 'loading',
-    reenter: true,
-    actions: {type: 'issueReplacement', params: {owner: 'replacement'}},
-  },
-] as const;
-
-export function toError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
-}
-
-/** The context with the stream's status (and its error) set; the same context when unchanged. */
-function withStatus(
-  context: SessionContext,
-  status: WebSessionStatus,
-  error: Error | null,
-): SessionContext {
-  if (context.view.status === status && context.view.error === error) return context;
-  return {...context, view: {...context.view, status, error}};
+/** The state with the stream's status (and its error) set; the same state when unchanged. */
+function withStatus(state: Open, status: WebSessionStatus, error: Error | null): Open {
+  if (state.view.status === status && state.view.error === error) return state;
+  return {...state, view: {...state.view, status, error}};
 }
 
 /** Record a new stale cause so older asynchronous evidence cannot erase it. */
-function withProblem(
-  context: SessionContext,
-  problem: Exclude<StreamProblem, 'none'>,
-  error: Error,
-): SessionContext {
+function withProblem(state: Open, problem: Exclude<StreamProblem, 'none'>, error: Error): Open {
   return withStatus(
-    {...context, streamProblem: problem, problemEpoch: context.problemEpoch + 1},
+    {...state, streamProblem: problem, problemEpoch: state.problemEpoch + 1},
     'stale',
     error,
   );
 }
 
-/** Add a transient connection fault without erasing stronger snapshot or projection evidence. */
-function connectionFailed(context: SessionContext, error: Error): SessionContext {
-  return context.streamProblem === 'snapshot' || context.streamProblem === 'projection'
-    ? context
-    : withProblem(context, 'connection', error);
-}
-
-/** The stream lost its connection: stale with `error`, unless a stronger cause already owns it. */
-function streamLost(context: SessionContext, error: Error): SessionContext {
-  return connectionFailed({...context, streamConnected: false}, error);
-}
-
-/** The snapshot a settled load applies: a loaded one issued after the newest applied, else null. */
-function applies(context: SessionContext, settled: Settled | null): RunSnapshot | null {
-  if (settled === null) return null;
-  const {issue, result} = settled;
-  return result.ok && issue > context.applied ? result.snapshot : null;
-}
-
 /**
- * A load settled: on success the snapshot is trusted unless a newer one already was; on failure
- * the page goes stale. A load issued at or below `applied` was retired before it settled, by a
- * proven replacement or a newer snapshot, so its failure is dropped as much as its success.
+ * The awaited snapshot reply `token` settled: on success its already-folded projection is trusted
+ * unless a newer one superseded it; on failure the page goes stale.
  */
-function snapshotSettled(context: SessionContext, settled: Settled): SessionContext {
-  const {issue, result, observedProblemEpoch} = settled;
-  if (issue <= context.applied) return context;
+function snapshotSettled(
+  state: Open,
+  token: number,
+  result: SnapshotResult,
+  observedProblemEpoch: number,
+): Step<Open, SessionRequest> {
+  // A proven stream replacement or a newer snapshot reply can retire an older
+  // request before it settles. Its failure belongs to the retired generation
+  // just as much as its success does, so drop both before changing the view.
+  if (token <= state.applied) return only(state);
   if (!result.ok) {
-    return withProblem({...context, streamSnapshot: 'failed'}, 'snapshot', result.error);
+    return only(withProblem({...state, streamSnapshot: 'failed'}, 'snapshot', result.error));
   }
-  const shown = context.view.hasSnapshot
-    ? context
-    : {...context, view: {...context.view, hasSnapshot: true}};
+  const shown = state.view.hasSnapshot
+    ? state
+    : {...state, view: {...state.view, hasSnapshot: true}};
   // This response may retire only the stale evidence that existed when its query began. A stream
   // close or protocol fault reported afterward owns the view until newer connection evidence.
   const supersedesProblem =
     shown.streamProblem !== 'none' && shown.problemEpoch <= observedProblemEpoch;
-  const trusted: SessionContext = {
+  const trusted = {
     ...shown,
-    streamSnapshot: 'trusted',
-    streamProblem: supersedesProblem ? 'none' : shown.streamProblem,
-    applied: issue,
+    streamSnapshot: 'trusted' as const,
+    streamProblem: supersedesProblem ? ('none' as const) : shown.streamProblem,
+    applied: token,
   };
-  return trusted.streamProblem === 'none' && trusted.streamConnected
-    ? withStatus(trusted, 'connected', null)
-    : trusted;
-}
-
-/** The stream reported: connected (which may clear a connection problem), or dropped. */
-function streamReported(context: SessionContext, state: StreamConnectionState): SessionContext {
-  // Every drop is reported, on an ended run too: `connectionBanners` decides what to show, and
-  // suppressing it here left an ended run's empty transcript unexplained (#1044).
-  if (state.status !== 'connected') return streamLost(context, state.error);
-  const connected = context.streamConnected ? context : {...context, streamConnected: true};
-  // Only connection evidence retires a connection problem: a live socket does not make a failed
-  // snapshot or rejected foreign-run data trustworthy.
-  return context.streamSnapshot === 'trusted' &&
-    (context.streamProblem === 'none' || context.streamProblem === 'connection')
-    ? withStatus({...connected, streamProblem: 'none'}, 'connected', null)
-    : connected;
-}
-
-const reachable = (reach: Reachability): boolean => reach.visible && reach.online;
-
-/** A healthy ended stream stays inert; a stale one can always ask for a fresh bootstrap. */
-function mayReattach(
-  context: SessionContext,
-  event: Extract<SessionEvent, {type: 'reattach'}>,
-): boolean {
-  return reachable(event.reach) && (context.view.status === 'stale' || !event.runEnded);
-}
-
-/** Whether a fenced load's owner includes the recovery flight. */
-const recoveryOwns = (owner: LoadOwner): boolean =>
-  owner === 'recovery' || owner === 'startup-recovery';
-
-/** Whether a fenced load's owner includes start-up. */
-const startupOwns = (owner: LoadOwner): boolean =>
-  owner === 'startup' || owner === 'startup-recovery';
-
-/** A load whose store was replaced before the server acquired its snapshot. */
-const storeReplaced = (result: SnapshotResult): boolean =>
-  !result.ok && result.reason === 'store-replaced';
-
-/** The stream recovery a settled refresh asks for: a fresh bootstrap first, or a retry. */
-function refreshEstablishes(context: SessionContext, outcome: RefreshOutcome): boolean {
-  return (
-    context.recovery.intent === 'rebootstrap' ||
-    outcome.kind === 'ready' ||
-    (outcome.kind === 'snapshot' && storeReplaced(outcome.result))
+  return only(
+    trusted.streamProblem === 'none' && trusted.streamConnected
+      ? withStatus(trusted, 'connected', null)
+      : trusted,
   );
 }
 
-/** The refresh's snapshot as a settled load; null for a refresh that loaded none. */
-function refreshSettled(context: SessionContext, outcome: RefreshOutcome): Settled | null {
-  if (outcome.kind !== 'snapshot') return null;
+/** Start a snapshot load only after the stream has established the store that fences it. */
+function streamEstablished(state: Open, storeId: string): SessionStep {
+  if (state.replacement.kind === 'loading' && state.replacement.storeId === storeId) {
+    return only(state);
+  }
+  const startupWaiting =
+    state.startup.kind === 'subscribing' && state.startup.snapshot === 'waiting';
+  const owner = startupWaiting
+    ? state.recovery.kind === 'refreshing'
+      ? 'startup-recovery'
+      : 'startup'
+    : state.recovery.kind === 'refreshing'
+      ? 'recovery'
+      : 'replacement';
+  const token = state.next;
   return {
-    issue: context.recovery.issue,
-    result: outcome.result,
-    observedProblemEpoch: context.recovery.problemEpoch,
+    state: {
+      ...state,
+      next: token + 1,
+      // Every earlier load began before this replacement was observed. Fence
+      // those replies without pretending that their snapshots describe it.
+      applied: Math.max(state.applied, token - 1),
+      recovery:
+        (owner === 'recovery' || owner === 'startup-recovery') &&
+        state.recovery.kind === 'refreshing'
+          ? {...state.recovery, phase: 'snapshot'}
+          : state.recovery,
+      replacement: {kind: 'loading', token, storeId, owner, problemEpoch: state.problemEpoch},
+    },
+    requests: [{kind: 'load-replacement-snapshot', token, storeId}],
   };
 }
 
-/** The fenced load as a settled load. */
-function replacementSettled(context: SessionContext, result: SnapshotResult): Settled {
+function replacementRecovery(
+  state: Open,
+  owner: ReplacementSnapshot & {kind: 'loading'},
+): Recovery {
+  if (owner.owner === 'startup' || owner.owner === 'startup-recovery') return state.recovery;
+  if (state.recovery.kind === 'refreshing') {
+    return {...state.recovery, intent: 'rebootstrap', phase: 'establishing'};
+  }
   return {
-    issue: context.replacement.issue,
-    result,
-    observedProblemEpoch: context.replacement.problemEpoch,
+    kind: 'refreshing',
+    token: owner.token,
+    intent: 'rebootstrap',
+    phase: 'establishing',
+    problemEpoch: state.problemEpoch,
   };
 }
 
-/** Issue a fenced load for `storeId`: every earlier load began before this store was proven. */
-function issueReplacement(
-  context: SessionContext,
-  storeId: string,
-  owner: LoadOwner,
-): Partial<SessionContext> {
-  const issue = context.issued + 1;
-  return {
-    issued: issue,
-    applied: Math.max(context.applied, issue - 1),
-    replacement: {issue, storeId, owner, problemEpoch: context.problemEpoch},
+function settleReplacementOwner(
+  state: Open,
+  owner: ReplacementSnapshot & {kind: 'loading'},
+  result: SnapshotResult,
+): Open {
+  // A later fenced success supersedes a failed startup snapshot even when its recovery owner was
+  // acquired after startup. The pending subscription handle can then finish startup from this
+  // trusted generation. A failure owned by another flight must not erase an earlier success; the
+  // stream proof markers still prevent that handle from clearing the new failure.
+  const settlesStartup =
+    state.startup.kind === 'subscribing' &&
+    (result.ok || owner.owner === 'startup' || owner.owner === 'startup-recovery');
+  if (settlesStartup || owner.owner === 'startup-recovery' || owner.owner === 'recovery') {
+    return {
+      ...state,
+      startup: settlesStartup
+        ? {...state.startup, snapshot: result.ok ? 'loaded' : 'failed'}
+        : state.startup,
+      // A recovery that supplied startup's first usable generation is not a
+      // second flight. Retire both owners together so the next wake or
+      // explicit Reattach can start another recovery.
+      recovery:
+        owner.owner === 'startup-recovery' || owner.owner === 'recovery'
+          ? {kind: 'none'}
+          : state.recovery,
+    };
+  }
+  return state;
+}
+
+function finishStartupSnapshot(state: Open, result: SnapshotResult): Open {
+  if (
+    state.startup.kind !== 'subscribing' ||
+    !state.startup.subscribed ||
+    state.startup.snapshot === 'waiting'
+  ) {
+    return state;
+  }
+  const done: Open = {...state, startup: {kind: 'done'}};
+  if (!result.ok) return done;
+  return state.streamConnected && state.streamProblem === 'none'
+    ? withStatus(done, 'connected', null)
+    : done;
+}
+
+/** Accept the snapshot only while the replacement generation that requested it is current. */
+function replacementSnapshotSettled(
+  state: Open,
+  action: Extract<SessionAction, {type: 'replacement-snapshot-reply'}>,
+): SessionStep {
+  const {replacement} = state;
+  if (
+    replacement.kind !== 'loading' ||
+    replacement.token !== action.token ||
+    replacement.storeId !== action.storeId
+  ) {
+    return only(state);
+  }
+  const settled: Open = {...state, replacement: {kind: 'none'}};
+  if (!action.result.ok && action.result.reason === 'store-replaced') {
+    // The authoritative boundary proved that a still-newer store won between
+    // the stream bootstrap and this query. Keep no candidate for the retired
+    // store and establish a new generation before asking again.
+    return {
+      state: {...settled, recovery: replacementRecovery(settled, replacement)},
+      requests: [{kind: 'recover-stream', mode: 'rebootstrap'}],
+    };
+  }
+  const ownerSettled = settleReplacementOwner(settled, replacement, action.result);
+  const snapshot = snapshotSettled(
+    ownerSettled,
+    action.token,
+    action.result,
+    replacement.problemEpoch,
+  );
+  const finished = {
+    ...snapshot,
+    state: finishStartupSnapshot(snapshot.state, action.result),
   };
+  // Applying higher post-replacement evidence changes shouldReconnect. Ask the
+  // stream owner to reevaluate even if its terminal socket closed while this
+  // snapshot was in flight. A failed or superseded load carries no such proof.
+  return action.result.ok && replacement.owner !== 'startup'
+    ? {...finished, requests: [...finished.requests, {kind: 'reevaluate-stream'}]}
+    : finished;
 }
 
-/** Issue a refresh with `intent`. */
-function issueRefresh(context: SessionContext, intent: StreamRecovery): Partial<SessionContext> {
-  const issue = context.issued + 1;
-  return {issued: issue, recovery: {intent, issue, problemEpoch: context.problemEpoch}};
-}
-
-/** Start-up's handshake succeeded after its snapshot settled: connected if both are good. */
-function startupSubscribed(context: SessionContext): SessionContext {
-  const connected = {...context, streamConnected: true};
-  return context.startupSnapshot === 'loaded' &&
-    context.streamSnapshot === 'trusted' &&
-    context.streamProblem === 'none'
-    ? withStatus(connected, 'connected', null)
-    : connected;
-}
-
-/** Start-up's snapshot settled after its handshake: connected if the stream is too. */
-function startupSnapshotLoaded(context: SessionContext, ok: boolean): SessionContext {
-  return ok && context.streamConnected && context.streamProblem === 'none'
-    ? withStatus(context, 'connected', null)
-    : context;
-}
-
-export const sessionMachine = setup({
-  types: {
-    context: {} as SessionContext,
-    events: {} as SessionEvent | InternalEvent,
-  },
-  actors: {
-    /** Subscribe the event stream; settles when the first subscription's handshake does. */
-    subscribe: unprovided<void>('subscribe'),
-    /** Redial the control channel, then load the snapshot unless `mode` rebootstraps. */
-    refresh: unprovided<RefreshOutcome, {readonly mode: StreamRecovery}>('refresh'),
-    /** Load the snapshot fenced to the stream store `storeId`. */
-    loadReplacementSnapshot: unprovided<SnapshotResult, {readonly storeId: string}>(
-      'loadReplacementSnapshot',
-    ),
-  },
-  actions: {
-    /**
-     * Fold `snapshot` into the run; null (an older or a failed load) does nothing. The load already
-     * reported a snapshot of another run as failed; one the fold still rejects comes back as
-     * `projection-rejected`.
-     */
-    applySnapshot: (_, _params: {readonly snapshot: RunSnapshot | null}) => undefined,
-    /** Restart the stream; a failure comes back as a `fault`. */
-    recoverStream: (_, _params: {readonly mode: StreamRecovery}) => undefined,
-    /** Retry the stream if the applied snapshot is ahead of the event fold. */
-    reevaluateStream: (_, _params: {readonly applied: boolean}) => undefined,
-    /** Redial the control channel now; a failure comes back as a `fault`. */
-    redialControls: () => undefined,
-    /** Release the connection and the page's listeners. */
-    closeShell: () => undefined,
-    /** A load settled (null: none did): the view, and the newest load applied. */
-    settleSnapshot: assign(({context}, settled: Settled | null) =>
-      settled === null ? context : snapshotSettled(context, settled),
-    ),
-    /** Issue the fenced load for the store the event established, owned by `owner`. */
-    issueReplacement: assign(({context, event}, {owner}: {readonly owner: LoadOwner}) =>
-      event.type === 'stream-established' ? issueReplacement(context, event.storeId, owner) : {},
-    ),
-  },
-  guards: {
-    /** The fenced load in flight is for this store already. */
-    loadingStore: and([
-      stateIn(`${OPEN}.replacement.loading`),
-      ({context, event}) =>
-        event.type === 'stream-established' && context.replacement.storeId === event.storeId,
-    ]),
-    /** Start-up subscribed or subscribing, and its snapshot is still to come. */
-    startupWaiting: and([
-      stateIn(`${OPEN}.startup.subscribing`),
-      ({context}) => context.startupSnapshot === 'waiting',
-    ]),
-    recovering: stateIn(`${OPEN}.recovery.refreshing`),
-    startupRecovering: and([
-      stateIn(`${OPEN}.startup.subscribing`),
-      ({context}) => context.startupSnapshot === 'waiting',
-      stateIn(`${OPEN}.recovery.refreshing`),
-    ]),
-  },
-}).createMachine({
-  id: 'session',
-  context: INITIAL_CONTEXT,
-  initial: 'open',
-  states: {
-    open: {
-      type: 'parallel',
-      on: {
-        close: {target: 'closed', actions: 'closeShell'},
-        stream: [
-          {
-            guard: ({event}) => event.state.status === 'connected',
-            actions: assign(({context, event}) => streamReported(context, event.state)),
-          },
-          {
-            actions: [
-              assign(({context, event}) => streamReported(context, event.state)),
-              raise({type: 'session.stream-failed'}),
-            ],
-          },
-        ],
-        fault: {
-          actions: [
-            assign(({context, event}) => streamLost(context, event.error)),
-            raise({type: 'session.stream-failed'}),
-          ],
-        },
-        // Only a later fenced snapshot, issued after this cause, can retire it.
-        'projection-rejected': {
-          actions: assign(({context, event}) => withProblem(context, 'projection', event.error)),
-        },
-        controls: {
-          actions: assign(({context, event}) => ({view: {...context.view, controls: event.state}})),
-        },
-        offline: {
-          // Offline is this browser's reachability: it cannot make an ended run's complete
-          // transcript incomplete.
-          guard: ({event}) => !event.runEnded,
-          actions: assign(({context}) => streamLost(context, new Error('Network is offline'))),
-        },
-        // Not a refresh: a channel that reported a drop has a redial armed already, and only the
-        // transport's `reconnect` cancels that backoff and dials now.
-        'reconnect-controls': {actions: 'redialControls'},
-      },
-      states: {
-        startup: {
-          initial: 'idle',
-          states: {
-            idle: {on: {start: {target: 'subscribing'}}},
-            subscribing: {
-              initial: 'handshake',
-              states: {
-                handshake: {
-                  invoke: {
-                    id: 'subscribe',
-                    src: 'subscribe',
-                    onDone: [
-                      {
-                        guard: ({context}) => context.startupSnapshot === 'waiting',
-                        target: 'subscribed',
-                        actions: assign({streamConnected: true}),
-                      },
-                      {
-                        target: `${OPEN}.startup.done`,
-                        actions: assign(({context}) => startupSubscribed(context)),
-                      },
-                    ],
-                    onError: {
-                      target: `${OPEN}.startup.done`,
-                      actions: assign(({context, event}) =>
-                        withProblem(
-                          {...context, streamConnected: false},
-                          'connection',
-                          toError(event.error),
-                        ),
-                      ),
-                    },
-                  },
-                  on: {
-                    'session.snapshot-settled': {
-                      guard: ({event}) => event.ok || startupOwns(event.owner),
-                      actions: assign(({event}) => ({
-                        startupSnapshot: event.ok ? ('loaded' as const) : ('failed' as const),
-                      })),
-                    },
-                  },
-                },
-                subscribed: {
-                  on: {
-                    'session.snapshot-settled': {
-                      guard: ({event}) => event.ok || startupOwns(event.owner),
-                      target: `${OPEN}.startup.done`,
-                      actions: assign(({context, event}) =>
-                        startupSnapshotLoaded(
-                          {...context, startupSnapshot: event.ok ? 'loaded' : 'failed'},
-                          event.ok,
-                        ),
-                      ),
-                    },
-                  },
-                },
-              },
-            },
-            done: {},
-          },
-        },
-        recovery: {
-          initial: 'none',
-          states: {
-            none: {
-              on: {
-                wake: {
-                  guard: ({event}) => reachable(event.reach),
-                  target: 'refreshing',
-                  actions: assign(({context}) => issueRefresh(context, 'retry')),
-                },
-                reattach: {
-                  guard: ({context, event}) => mayReattach(context, event),
-                  target: 'refreshing',
-                  actions: assign(({context}) => issueRefresh(context, 'rebootstrap')),
-                },
-                'session.store-replaced': {
-                  guard: ({event}) => !startupOwns(event.owner),
-                  target: 'refreshing.establishing',
-                  actions: assign(({context}) => ({
-                    recovery: {
-                      intent: 'rebootstrap' as const,
-                      issue: context.replacement.issue,
-                      problemEpoch: context.problemEpoch,
-                    },
-                  })),
-                },
-              },
-            },
-            refreshing: {
-              initial: 'preparing',
-              on: {
-                // Single flight, monotone intent: a Reattach upgrades the flight in progress.
-                reattach: {
-                  guard: ({context, event}) =>
-                    mayReattach(context, event) && context.recovery.intent !== 'rebootstrap',
-                  actions: assign(({context}) => ({
-                    recovery: {...context.recovery, intent: 'rebootstrap' as const},
-                  })),
-                },
-                // A proven store hands this flight to its fenced snapshot; a refresh reply that
-                // began before the replacement is dropped by leaving `preparing`.
-                'stream-established': {guard: not('loadingStore'), target: '.snapshot'},
-                // A recovery that supplied the fenced generation retires with it, so the next wake
-                // or Reattach can start another.
-                'session.snapshot-settled': {
-                  guard: ({event}) => recoveryOwns(event.owner),
-                  target: 'none',
-                },
-                'session.store-replaced': {
-                  guard: ({event}) => !startupOwns(event.owner),
-                  target: '.establishing',
-                  actions: assign(({context}) => ({
-                    recovery: {...context.recovery, intent: 'rebootstrap' as const},
-                  })),
-                },
-              },
-              states: {
-                preparing: {
-                  invoke: {
-                    id: 'refresh',
-                    src: 'refresh',
-                    input: ({context}) => ({mode: context.recovery.intent}),
-                    onDone: [
-                      {
-                        guard: ({event}) => event.output.kind === 'redial-failed',
-                        target: '#session.open.recovery.none',
-                        actions: assign(({context, event}) =>
-                          event.output.kind === 'redial-failed'
-                            ? withProblem(context, 'connection', event.output.error)
-                            : context,
-                        ),
-                      },
-                      {
-                        guard: ({context, event}) => refreshEstablishes(context, event.output),
-                        target: 'establishing',
-                        actions: {type: 'recoverStream', params: {mode: 'rebootstrap'}},
-                      },
-                      {
-                        target: '#session.open.recovery.none',
-                        actions: [
-                          {
-                            type: 'applySnapshot',
-                            params: ({context, event}) => ({
-                              snapshot: applies(context, refreshSettled(context, event.output)),
-                            }),
-                          },
-                          {
-                            type: 'settleSnapshot',
-                            params: ({context, event}) => refreshSettled(context, event.output),
-                          },
-                          {type: 'recoverStream', params: {mode: 'retry'}},
-                        ],
-                      },
-                    ],
-                    onError: {
-                      target: '#session.open.recovery.none',
-                      actions: assign(({context, event}) =>
-                        withProblem(context, 'connection', toError(event.error)),
-                      ),
-                    },
-                  },
-                },
-                /** A fresh stream is dialing; its first batch hands the flight to `snapshot`. */
-                establishing: {
-                  on: {'session.stream-failed': {target: '#session.open.recovery.none'}},
-                },
-                /** The flight waits on the fenced load of the store its stream established. */
-                snapshot: {},
-              },
-            },
-          },
-        },
-        replacement: {
-          initial: 'none',
-          states: {
-            none: {on: {'stream-established': ESTABLISH}},
-            loading: {
-              on: {'stream-established': ESTABLISH},
-              invoke: {
-                id: 'loadReplacementSnapshot',
-                src: 'loadReplacementSnapshot',
-                input: ({context}) => ({storeId: context.replacement.storeId}),
-                onDone: [
-                  {
-                    // The authoritative boundary proved that a still-newer store won between the
-                    // stream bootstrap and this query. Keep no candidate for the retired store and
-                    // establish a new generation before asking again.
-                    guard: ({event}) => storeReplaced(event.output),
-                    target: 'none',
-                    actions: [
-                      raise(({context}) => ({
-                        type: 'session.store-replaced' as const,
-                        owner: context.replacement.owner,
-                      })),
-                      {type: 'recoverStream', params: {mode: 'rebootstrap'}},
-                    ],
-                  },
-                  {
-                    target: 'none',
-                    actions: [
-                      {
-                        type: 'applySnapshot',
-                        params: ({context, event}) => ({
-                          snapshot: applies(context, replacementSettled(context, event.output)),
-                        }),
-                      },
-                      // Applying higher post-replacement evidence changes whether a closed stream
-                      // should reconnect: the stream owner reevaluates, even if its terminal socket
-                      // closed while this snapshot was in flight.
-                      {
-                        type: 'reevaluateStream',
-                        params: ({context, event}) => ({
-                          applied:
-                            context.replacement.owner !== 'startup' &&
-                            applies(context, replacementSettled(context, event.output)) !== null,
-                        }),
-                      },
-                      {
-                        type: 'settleSnapshot',
-                        params: ({context, event}) => replacementSettled(context, event.output),
-                      },
-                      raise(({context, event}) => ({
-                        type: 'session.snapshot-settled' as const,
-                        owner: context.replacement.owner,
-                        ok: event.output.ok,
-                      })),
-                    ],
-                  },
-                ],
-                onError: {
-                  target: 'none',
-                  actions: [
-                    {
-                      type: 'settleSnapshot',
-                      params: ({context, event}) =>
-                        replacementSettled(context, {ok: false, error: toError(event.error)}),
-                    },
-                    raise(({context}) => ({
-                      type: 'session.snapshot-settled' as const,
-                      owner: context.replacement.owner,
-                      ok: false,
-                    })),
-                  ],
-                },
-              },
-            },
-          },
-        },
+function recover(state: Open, mode: StreamRecovery, reach: Reachability): SessionStep {
+  if (!reach.visible || !reach.online) return only(state);
+  if (state.recovery.kind === 'refreshing') {
+    if (mode === 'rebootstrap' && state.recovery.intent !== 'rebootstrap') {
+      return only({...state, recovery: {...state.recovery, intent: mode}});
+    }
+    return only(state);
+  }
+  const token = state.next;
+  return {
+    state: {
+      ...state,
+      next: token + 1,
+      recovery: {
+        kind: 'refreshing',
+        token,
+        intent: mode,
+        phase: 'preparing',
+        problemEpoch: state.problemEpoch,
       },
     },
-    /** Closed: every later report and reply is dropped. */
-    closed: {type: 'final'},
-  },
-});
-
-export type SessionSnapshot = SnapshotFrom<typeof sessionMachine>;
-
-/** Whether start-up has either completed its fenced handoff or failed (or the session ended). */
-export function sessionStartupSettled(snapshot: SessionSnapshot): boolean {
-  return snapshot.status !== 'active' || snapshot.matches({open: {startup: 'done'}});
+    requests: [{kind: 'refresh', token, mode}],
+  };
 }
 
-/** The stream's status and its error agree: stale exactly when there is an error. */
-export function sessionInvariants(snapshot: SessionSnapshot): string[] {
-  const {status, error} = snapshot.context.view;
+type StartupAction = Extract<SessionAction, {type: 'start' | 'subscribe-reply'}>;
+
+/** Start-up: establish the stream store, then load a snapshot fenced to it. */
+function startupStep(state: Open, action: StartupAction): SessionStep {
+  const {startup} = state;
+  if (action.type === 'start') {
+    if (startup.kind !== 'idle') return only(state);
+    const token = state.next;
+    return {
+      state: {
+        ...state,
+        next: token + 1,
+        startup: {kind: 'subscribing', token, subscribed: false, snapshot: 'waiting'},
+      },
+      requests: [{kind: 'subscribe', token}],
+    };
+  }
+  if (startup.kind !== 'subscribing' || startup.token !== action.token) return only(state);
+  if (action.error !== null) {
+    return only(
+      withProblem(
+        {...state, startup: {kind: 'done'}, streamConnected: false},
+        'connection',
+        action.error,
+      ),
+    );
+  }
+  if (startup.snapshot === 'waiting') {
+    return only({...state, startup: {...startup, subscribed: true}, streamConnected: true});
+  }
+  const done: Open = {...state, startup: {kind: 'done'}, streamConnected: true};
+  return startup.snapshot === 'loaded' &&
+    state.streamSnapshot === 'trusted' &&
+    state.streamProblem === 'none'
+    ? only(withStatus(done, 'connected', null))
+    : only(done);
+}
+
+/** A refresh settled: release the flight and hand recovery to the stream. */
+function refreshSettled(state: Open, token: number, outcome: RefreshOutcome): SessionStep {
+  if (
+    state.recovery.kind !== 'refreshing' ||
+    state.recovery.token !== token ||
+    state.recovery.phase !== 'preparing'
+  ) {
+    return only(state);
+  }
+  if (outcome.kind === 'redial-failed') {
+    return only(withProblem({...state, recovery: {kind: 'none'}}, 'connection', outcome.error));
+  }
+  if (
+    state.recovery.intent === 'rebootstrap' ||
+    (outcome.kind === 'snapshot' &&
+      !outcome.result.ok &&
+      outcome.result.reason === 'store-replaced')
+  ) {
+    return {
+      state: {...state, recovery: {...state.recovery, phase: 'establishing'}},
+      requests: [{kind: 'recover-stream', mode: 'rebootstrap'}],
+    };
+  }
+  if (outcome.kind === 'ready') {
+    return {
+      state: {...state, recovery: {...state.recovery, phase: 'establishing'}},
+      requests: [{kind: 'recover-stream', mode: 'rebootstrap'}],
+    };
+  }
+  const problemEpoch = state.recovery.problemEpoch;
+  const settled: Open = {...state, recovery: {kind: 'none'}};
+  const refreshed = snapshotSettled(settled, token, outcome.result, problemEpoch);
+  return {
+    state: refreshed.state,
+    requests: [...refreshed.requests, {kind: 'recover-stream', mode: 'retry'}],
+  };
+}
+
+type Report = Extract<
+  SessionAction,
+  {type: 'stream' | 'fault' | 'projection-rejected' | 'controls' | 'offline'}
+>;
+
+/** A fresh stream failed before its first batch could hand recovery to a fenced snapshot. */
+function releaseFailedEstablishment(state: Open): Open {
+  return state.recovery.kind === 'refreshing' && state.recovery.phase === 'establishing'
+    ? {...state, recovery: {kind: 'none'}}
+    : state;
+}
+
+/** Add a transient connection fault without erasing stronger projection evidence. */
+function connectionFailed(state: Open, error: Error): Open {
+  return state.streamProblem === 'snapshot' || state.streamProblem === 'projection'
+    ? state
+    : withProblem(state, 'connection', error);
+}
+
+/** What the stream, the control channel, or the browser reported. */
+function reported(state: Open, action: Report): Open {
+  switch (action.type) {
+    case 'stream':
+      // Every drop is reported, on an ended run too: `connectionBanners` decides what to show,
+      // and suppressing it here left an ended run's empty transcript unexplained (#1044).
+      if (action.state.status === 'connected') {
+        const connected = state.streamConnected ? state : {...state, streamConnected: true};
+        return state.streamSnapshot === 'trusted' &&
+          (state.streamProblem === 'none' || state.streamProblem === 'connection')
+          ? withStatus({...connected, streamProblem: 'none'}, 'connected', null)
+          : connected;
+      }
+      return connectionFailed(
+        releaseFailedEstablishment({...state, streamConnected: false}),
+        action.state.error,
+      );
+    case 'fault':
+      return connectionFailed(
+        releaseFailedEstablishment({...state, streamConnected: false}),
+        action.error,
+      );
+    case 'projection-rejected':
+      // A live socket does not make discarded foreign-run data trustworthy. Only a later fenced
+      // snapshot for a fresh generation can retire this fault.
+      return withProblem(state, 'projection', action.error);
+    case 'controls':
+      return {...state, view: {...state.view, controls: action.state}};
+    case 'offline':
+      // Offline is this browser's reachability: it cannot make an ended run's complete
+      // transcript incomplete.
+      return action.runEnded
+        ? state
+        : connectionFailed({...state, streamConnected: false}, new Error('Network is offline'));
+  }
+}
+
+export function sessionStep(state: SessionState, action: SessionAction): SessionStep {
+  if (state.kind === 'closed') return only(state);
+  switch (action.type) {
+    case 'start':
+    case 'subscribe-reply':
+      return startupStep(state, action);
+    case 'refresh-reply':
+      return refreshSettled(state, action.token, action.outcome);
+    case 'stream-established':
+      return streamEstablished(state, action.storeId);
+    case 'replacement-snapshot-reply':
+      return replacementSnapshotSettled(state, action);
+    case 'stream':
+    case 'fault':
+    case 'projection-rejected':
+    case 'controls':
+    case 'offline':
+      return only(reported(state, action));
+    case 'wake':
+      return recover(state, 'retry', action.reach);
+    case 'reattach':
+      // A healthy ended stream stays inert; a stale one can always ask for a fresh bootstrap,
+      // because the fault is evidence the transcript is incomplete.
+      if (state.view.status !== 'stale' && action.runEnded) return only(state);
+      return recover(state, 'rebootstrap', action.reach);
+    case 'reconnect-controls':
+      // Not a refresh: a channel that reported a drop has a redial armed already, and only the
+      // transport's `reconnect` cancels that backoff and dials now.
+      return {state, requests: [{kind: 'redial-controls'}]};
+    case 'close':
+      return {
+        state: {kind: 'closed', view: state.view, next: state.next},
+        requests: [{kind: 'close'}],
+      };
+  }
+}
+
+/** The token each reply slot awaits, by the reply that answers it; closed awaits nothing. */
+export function sessionAwaited(state: SessionState): {
+  readonly subscribe: number | null;
+  readonly refresh: number | null;
+  readonly replacement: number | null;
+} {
+  if (state.kind === 'closed') {
+    return {subscribe: null, refresh: null, replacement: null};
+  }
+  const {startup, recovery, replacement} = state;
+  return {
+    subscribe: startup.kind === 'subscribing' ? startup.token : null,
+    refresh: recovery.kind === 'refreshing' ? recovery.token : null,
+    replacement: replacement.kind === 'loading' ? replacement.token : null,
+  };
+}
+
+/** Whether a successful snapshot reply still owns the right to enter the run fold. */
+export function sessionAcceptsSnapshot(
+  state: SessionState,
+  slot: 'refresh' | 'replacement',
+  token: number,
+): boolean {
+  if (state.kind === 'closed' || token <= state.applied) return false;
+  if (slot === 'replacement') {
+    return state.replacement.kind === 'loading' && state.replacement.token === token;
+  }
+  return (
+    state.recovery.kind === 'refreshing' &&
+    state.recovery.token === token &&
+    state.recovery.phase === 'preparing' &&
+    state.recovery.intent === 'retry'
+  );
+}
+
+/** Whether start-up has either completed its fenced handoff or failed. */
+export function sessionStartupSettled(state: SessionState): boolean {
+  return state.kind === 'closed' || state.startup.kind === 'done';
+}
+
+export function sessionInvariants(state: SessionState): string[] {
+  const {status, error} = state.view;
   if ((status === 'stale') === (error !== null)) return [];
   return [`status ${status} with error ${error === null ? 'null' : 'set'}`];
 }

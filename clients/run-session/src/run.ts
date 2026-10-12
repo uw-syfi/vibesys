@@ -1,19 +1,16 @@
 /**
  * The run fold: the run's `CoreState`, advanced by `@vibesys/run-state`'s reducers. A snapshot, a batch the
  * stream reconciler placed, or a replayed run's events each fold in one step that asks for no I/O.
- * A data fold, so a plain reducer on `@vibesys/store` (docs/contributing/clients-architecture.md,
- * "State"); this is the package's one fold module.
  */
 
 import type {EventBatchMessage, RunEvent, RunSnapshot} from '@vibesys/contracts';
 import {
   type CoreState,
-  initialCoreState,
   reduceEventBatch,
   reduceEventRebootstrap,
   reduceSnapshot,
 } from '@vibesys/run-state';
-import {createStore, only, type Step, type Store} from '@vibesys/store';
+import {only, type Step} from '@vibesys/store';
 import type {BatchReconciliation} from '@vibesys/transport';
 
 export type RunAction =
@@ -48,11 +45,4 @@ export function runStep(state: CoreState, action: RunAction): Step<CoreState, ne
       );
     }
   }
-}
-
-/** The run fold's store: what the run page renders as the run. */
-export type RunStore = Store<CoreState, RunAction>;
-
-export function createRunStore(): RunStore {
-  return createStore(runStep, initialCoreState(), () => undefined);
 }

@@ -152,29 +152,21 @@ OPEN_AFTER_BLOCK_GAP = (
 )
 KNOWN_OPEN: frozenset[tuple[str, Reply]] = frozenset(
     {
-        ("close_attempt_scope", Reply.RETRYABLE_ONCE),
         ("close_attempt_scope", Reply.SILENT),
         ("close_attempt_scope", Reply.UNKNOWN_ONCE),
-        ("close_session", Reply.RETRYABLE_ONCE),
         ("close_session", Reply.SILENT),
         ("close_session", Reply.UNKNOWN_ONCE),
-        ("discard_workspace", Reply.RETRYABLE_ONCE),
         ("discard_workspace", Reply.SILENT),
         ("discard_workspace", Reply.UNKNOWN_ONCE),
-        ("ensure_session", Reply.RETRYABLE_ONCE),
         ("ensure_session", Reply.SILENT),
         ("ensure_session", Reply.UNKNOWN_ONCE),
-        ("ensure_workspace", Reply.RETRYABLE_ONCE),
         ("ensure_workspace", Reply.SILENT),
         ("ensure_workspace", Reply.UNKNOWN_ONCE),
         ("execute_registered_operation", Reply.SILENT),
-        ("observe_owned_job", Reply.RETRYABLE_ONCE),
         ("observe_owned_job", Reply.SILENT),
         ("observe_owned_job", Reply.UNKNOWN_ONCE),
-        ("retain_revision", Reply.RETRYABLE_ONCE),
         ("retain_revision", Reply.SILENT),
         ("retain_revision", Reply.UNKNOWN_ONCE),
-        ("snapshot_and_retain", Reply.RETRYABLE_ONCE),
         ("snapshot_and_retain", Reply.SILENT),
         ("snapshot_and_retain", Reply.UNKNOWN_ONCE),
         ("verify_adoption", Reply.SILENT),
@@ -183,23 +175,11 @@ KNOWN_OPEN: frozenset[tuple[str, Reply]] = frozenset(
 
 
 # Of the known-open pairs, the ones that are run. Every kind is shown open by its `silent` answer
-# (the strongest: Unknown every time). `retryable_once` reaches the block through the retry
-# bound rather than the reconciliation bound, so it is also run where its path through core
-# differs (branch coverage of these runs over the whole matrix); `unknown_once` takes the
-# Unknown path `silent` already takes. The rest are not run, since each fails the same way.
-RETRY_PATH_DIFFERS = (
-    "close_session",
-    "ensure_session",
-    "ensure_workspace",
-    "observe_owned_job",
-    "snapshot_and_retain",
-)
-SHOWN_OPEN: frozenset[tuple[str, Reply]] = (
-    frozenset(
-        {(kind, Reply.SILENT) for kind, _ in KNOWN_OPEN}
-        | {(kind, Reply.RETRYABLE_ONCE) for kind in RETRY_PATH_DIFFERS}
-    )
-    & KNOWN_OPEN
+# (the strongest: Unknown every time); `unknown_once` takes the Unknown path `silent` already
+# takes, so the rest are not run, since each fails the same way. A retryable answer is not
+# listed: core retries it with a bound and then fails the request, so every kind concludes.
+SHOWN_OPEN: frozenset[tuple[str, Reply]] = frozenset(
+    {(kind, Reply.SILENT) for kind, _ in KNOWN_OPEN}
 )
 
 

@@ -16,6 +16,8 @@ from .types.intents import (
     RecoveryStarted,
     RequestObserved,
     RequestPrepared,
+    RequestUndispatchable,
+    RetryDue,
 )
 
 if TYPE_CHECKING:
@@ -57,6 +59,8 @@ EVENT_TO_SUBAREA: Mapping[type[IntentsEvent], Reducer] = MappingProxyType(
         RecoveryStarted: _intent_recovery.advance,
         RecoveryReady: _intent_recovery.advance,
         ReconciliationDeadline: _intent_recovery.advance,
+        RetryDue: _intent_ledger.advance,
+        RequestUndispatchable: _intent_ledger.advance,
     }
 )
 

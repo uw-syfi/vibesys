@@ -7,11 +7,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_core.api import (
+    RESOLUTIONS,
     AttemptBudget,
     AttemptId,
     AttemptPhase,
     AttemptsState,
     AttemptView,
+    ClockAdvanced,
     ContinuationPhase,
     DispatchTurn,
     EventId,
@@ -20,6 +22,7 @@ from vs_core.api import (
     Observation,
     ObservationStatus,
     ObservePacing,
+    Outcome,
     Producer,
     RecoveryBarrier,
     RecoveryCheck,
@@ -36,10 +39,12 @@ from vs_core.api import (
     WorkspacePlan,
     orphan_waits,
     phase_waits,
+    step,
     waits,
 )
 
 from .test_intent_recovery import (
+    fixture_digest,
     initial_state,
     pending_intent,
     recovering_state,
@@ -241,3 +246,51 @@ def test_a_closing_attempt_still_listing_a_job_that_has_been_released_is_an_orph
 def test_a_closing_attempt_waiting_on_a_job_that_still_runs_is_named_by_the_job() -> None:
     state, _ = _closing_over(job_ended=False)
     assert [w for w in waits(state) if w.waiter == WaitKind.RELEASE_DEPENDENCY] == []
+
+
+def _prepared_behind_failed_dependency() -> CoreState:
+    """A request prepared after the request it depends on had already failed for good."""
+    failed = pending_intent("dependency", IntentPhase.COMPLETED)
+    answer = Observation(
+        event_id=EventId(root="dependency-failed"),
+        request_id=failed.request_id,
+        scope=failed.request.scope,
+        sequence=1,
+        observed_at=1.0,
+        status=ObservationStatus.FAILED,
+        accepted=False,
+        terminal=True,
+    )
+    failed = failed.model_copy(update={"observation": answer, "sequence": 1})
+    dependent = pending_intent("dependent", IntentPhase.PREPARED)
+    request = dependent.request.model_copy(update={"depends_on": (failed.request_id,)})
+    dependent = dependent.model_copy(
+        update={"request": request, "payload_digest": fixture_digest(request)}
+    )
+    state = initial_state()
+    return state.model_copy(
+        update={"intents": state.intents.model_copy(update={"intents": (failed, dependent)})}
+    )
+
+
+def test_a_prepared_request_behind_a_failed_dependency_has_no_dispatcher_and_is_cancelled() -> None:
+    """Dispatch is refused for good once a dependency failed, so nothing would ever send it.
+
+    The step closes it unsent, as it does for dependents that were already prepared when
+    the dependency failed, instead of leaving the run to idle until its deadline.
+    """
+    state = _prepared_behind_failed_dependency()
+    assert [w.waiter for w in orphan_waits(state)] == [WaitKind.DISPATCH]
+    result = step(state, ClockAdvanced(now_at=2.0))
+    dependent = result.state.intents.intents[1]
+    assert dependent.phase == IntentPhase.COMPLETED
+    assert dependent.observation is not None
+    assert dependent.observation.status == ObservationStatus.CANCELLED
+    assert not dependent.observation.accepted
+    assert orphan_waits(result.state) == ()
+
+
+def test_every_kind_of_wait_declares_how_core_ends_it_when_nothing_else_does() -> None:
+    """A new ``WaitKind`` cannot be added without saying what resolves it."""
+    assert set(RESOLUTIONS) == set(WaitKind)
+    assert all(resolution.outcome in Outcome for resolution in RESOLUTIONS.values())

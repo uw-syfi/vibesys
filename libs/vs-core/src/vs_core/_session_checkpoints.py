@@ -18,7 +18,7 @@ from ._proofs import (
     request_matches,
 )
 from ._session_scope import attempt_for, proven_invocation, scope_active
-from ._waits import draining_without_cancel, stalled_checkpoint_waits
+from ._waits import awaiting_refund, draining_without_cancel, stalled_checkpoint_waits
 from .types.attempts import SnapshotAndRetain
 from .types.common import (
     AttemptId,
@@ -435,7 +435,10 @@ def _end_interrupt(
 ) -> AreaChange[SessionsState]:
     """Close a draining interruption whose checkpoint cannot come: blocked, with the reason."""
     claim = next(row for row in state.interrupts if row.invocation == invocation.invocation)
-    reason, decline = _stall_reason(state, context, invocation)
+    if claim.phase == "checkpointed":
+        reason, decline = CheckpointFailure.REFUND_UNAPPLIED, None
+    else:
+        reason, decline = _stall_reason(state, context, invocation)
     blocked = claim.model_copy(update={"phase": "blocked"})
     state = state.model_copy(
         update={
@@ -470,7 +473,9 @@ def end_stalled_checkpoint_waits(
         # The step raises a stall only for an invocation `stalled_checkpoint_waits` names, so
         # this guards a stall submitted from outside against waits that still have a producer.
         return AreaChange(state=state), None
-    interrupted = draining_without_cancel(state, event.invocation)
+    interrupted = draining_without_cancel(state, event.invocation) or awaiting_refund(
+        state, event.invocation
+    )
     ended: Invocation | None = None
     change: AreaChange[SessionsState] = AreaChange(state=state)
     if invocation.pending_suspension is not None:

@@ -56,6 +56,7 @@ class Run:
         self.answered: set[str] = set()
         self.dispatched: set[str] = set()  # snapshot requests the shell has dispatched
         self.fed = 0
+        self.clock = 10.0
 
     @property
     def invocation(self) -> core.Invocation:
@@ -77,27 +78,52 @@ class Run:
                 core.DispatchAuthorized(request_id=snapshot.request_id),
                 reducers=REDUCERS,
             ).state
-        # The invariant under test holds after every step, not only at the end of a run.
-        assert [
-            wait
-            for wait in core.orphan_waits(self.state)
-            if wait.waiter == core.WaitKind.YIELD_PUBLICATION
-        ] == []
+        # The invariant under test holds after every step, not only at the end of a run:
+        # no wait of any kind is left without something that will end it.
+        assert core.orphan_waits(self.state) == ()
         return result
+
+    def outstanding(self) -> list[core.SnapshotAndRetain]:
+        """The checkpoint requests the executor has been asked and has not yet concluded."""
+        return [
+            row.request
+            for row in self.state.intents.intents
+            if isinstance(row.request, core.SnapshotAndRetain)
+            and row.phase != core.IntentPhase.COMPLETED
+            and row.request.request_id is not None
+            and row.request.request_id.root not in self.answered
+        ]
+
+    def wait_out_retries(self, limit: int = 40) -> None:
+        """An executor that answers every ask retryably: time passes, the core asks again."""
+        for _ in range(limit):
+            asked = self.outstanding()
+            if not asked:
+                return
+            for snapshot in asked:
+                self.answer(snapshot, core.ObservationStatus.FAILED, retained=False, terminal=False)
+            self.clock += 31.0
+            self.feed(core.ClockAdvanced(now_at=self.clock))
 
     def end_turn(self) -> None:
         _, _, suspension = yield_state("dispatch")
         self.feed(terminal_yield(self.state, self.request, suspension))
 
     def answer(
-        self, snapshot: core.SnapshotAndRetain, status: core.ObservationStatus, *, retained: bool
+        self,
+        snapshot: core.SnapshotAndRetain,
+        status: core.ObservationStatus,
+        *,
+        retained: bool,
+        terminal: bool | None = None,
     ) -> None:
         """The workspace executor's answer; a terminal answer to a request is final."""
         assert snapshot.request_id is not None
         key = snapshot.request_id.root
         if key in self.answered:
             return
-        terminal = status != core.ObservationStatus.UNKNOWN
+        if terminal is None:
+            terminal = status != core.ObservationStatus.UNKNOWN
         if terminal:
             self.answered.add(key)
         revision = REVISION if retained and status == core.ObservationStatus.SUCCEEDED else None
@@ -220,14 +246,16 @@ def _assert_resolved(run: Run, *, answered_checkpoint: bool) -> None:
 
 ACCESS = st.sampled_from([core.Access.READ_ONLY, core.Access.WRITE_CANDIDATE])
 PHASES = st.sampled_from(list(core.AttemptPhase))
+# The retryable answer is a failure the executor does not call final (terminal=False).
 ANSWERS = st.sampled_from(
     [
-        (core.ObservationStatus.SUCCEEDED, True),
-        (core.ObservationStatus.SUCCEEDED, False),
-        (core.ObservationStatus.FAILED, False),
-        (core.ObservationStatus.REJECTED, False),
-        (core.ObservationStatus.CANCELLED, False),
-        (core.ObservationStatus.UNKNOWN, False),
+        (core.ObservationStatus.SUCCEEDED, True, True),
+        (core.ObservationStatus.SUCCEEDED, False, True),
+        (core.ObservationStatus.FAILED, False, True),
+        (core.ObservationStatus.FAILED, False, False),
+        (core.ObservationStatus.REJECTED, False, True),
+        (core.ObservationStatus.CANCELLED, False, True),
+        (core.ObservationStatus.UNKNOWN, False, False),
     ]
 )
 
@@ -240,7 +268,7 @@ class Scenario:
     charged: bool
     phase: core.AttemptPhase
     peer_writer: bool
-    answers: tuple[tuple[core.ObservationStatus, bool], ...]
+    answers: tuple[tuple[core.ObservationStatus, bool, bool], ...]
     retire: Literal["cancel", "park", "settle"] | None
     replay: bool
 
@@ -284,9 +312,9 @@ def test_a_turn_that_asked_to_wait_is_suspended_or_failed_whatever_the_checkpoin
     except core.ContractError:
         return  # a world the attempt's own phase refuses to take a turn in
     owner = run.state.attempts.attempts[0]
-    for status, retained in answers:
+    for status, retained, terminal in answers:
         for snapshot in list(run.snapshots):
-            run.answer(snapshot, status, retained=retained)
+            run.answer(snapshot, status, retained=retained, terminal=terminal)
         if retire_between is not None and owner.admission_id is not None:
             run.feed(
                 core.RetireRequested(
@@ -302,6 +330,7 @@ def test_a_turn_that_asked_to_wait_is_suspended_or_failed_whatever_the_checkpoin
         before = run.state
         run.end_turn()
         assert run.state.model_copy(update={"revision": before.revision}) == before
+    run.wait_out_retries()
     _assert_resolved(run, answered_checkpoint=bool(answers))
 
 
@@ -426,3 +455,29 @@ def test_a_stall_naming_a_suspension_with_a_producer_changes_nothing() -> None:
     )
     assert result.state.sessions == before.sessions
     assert result.events == ()
+
+
+def test_a_checkpoint_answered_retryably_every_time_is_retried_then_fails_with_a_named_reason() -> (
+    None
+):
+    """The reported spin (#2154): a retryable answer left the intent dispatched with no driver.
+
+    Core asks again after a growing delay, at most ``max_retries`` more times, and then the
+    checkpoint concludes as failed and the turn ends with the executor's failure named.
+    """
+    run = _world()
+    run.end_turn()
+    [first] = run.snapshots
+    asks = 0
+    for _ in range(40):
+        asked = run.outstanding()
+        if not asked:
+            break
+        asks += 1
+        run.wait_out_retries(limit=1)
+    assert asks == run.state.run.limits.max_retries + 1
+    assert core.orphan_waits(run.state) == ()
+    assert run.invocation.pending_suspension is None
+    [failure] = run.failures()
+    assert failure.reason == core.CheckpointFailure.CHECKPOINT_DECLINED
+    assert {row.request_id for row in run.snapshots} == {first.request_id}

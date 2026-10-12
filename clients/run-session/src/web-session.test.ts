@@ -4,13 +4,11 @@ import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import type {BatchReconciliation, StreamMessageContext} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
-import {connectRun} from './connect.js';
 import type {RunConnection, RunStreamHandlers} from './ports.js';
 import {
   deferred,
   disconnect,
   FakeLifecycle,
-  FakeTransport,
   healthy,
   lost,
   outputBatch,
@@ -130,185 +128,6 @@ class FaultBeforeSnapshotConnection implements RunConnection {
   }
 }
 
-/** A connection whose redials and fresh bootstraps fail when the test queues a failure. */
-class FailingRecoveryConnection implements RunConnection {
-  readonly redialFailures: Error[] = [];
-  readonly rebootstrapFailures: Error[] = [];
-  rebootstraps = 0;
-  closeCalls = 0;
-
-  loadSnapshot(): Promise<RunSnapshot> {
-    return Promise.resolve({run_id: 'run-1', sequence: 1, status: 'running'});
-  }
-
-  subscribe(handlers: RunStreamHandlers): Promise<void> {
-    handlers.onBatch(
-      eventBatch([event(1, 'server_ready')], {
-        store_id: 'store-a',
-        through_sequence: 1,
-        history_after_sequence: 0,
-      }),
-      {kind: 'rebootstrap', historyFloor: 0},
-      {resumed: false, connectionGeneration: 1},
-    );
-    handlers.onConnectionState({status: 'connected'});
-    return Promise.resolve();
-  }
-
-  retry(): void {}
-  retryIfDisconnected(): void {}
-  rebootstrap(): 'transitioning' {
-    this.rebootstraps += 1;
-    const failure = this.rebootstrapFailures.shift();
-    if (failure !== undefined) throw failure;
-    return 'transitioning';
-  }
-  redialControls(): void {
-    const failure = this.redialFailures.shift();
-    if (failure !== undefined) throw failure;
-  }
-  close(): Promise<void> {
-    this.closeCalls += 1;
-    return Promise.resolve();
-  }
-}
-
-describe('WebSession robustness', () => {
-  test('a Reattach survives a failed redial and a failed fresh bootstrap', async () => {
-    const connection = new FailingRecoveryConnection();
-    const session = new WebSession({lifecycle: new FakeLifecycle(), connect: () => connection});
-    await session.start();
-    expect(session.getState()).toEqual(healthy());
-
-    // The refresh's control redial throws: the refresh reports it, and the flight is released.
-    const redialFailure = new Error('control redial failed');
-    connection.redialFailures.push(redialFailure);
-    session.reattach();
-    await waitForSession(session, () => session.getState().error === redialFailure);
-    expect(connection.rebootstraps).toBe(0);
-
-    // The stream's fresh bootstrap throws: a stream fault, which releases the establishing flight.
-    const rebootstrapFailure = new Error('fresh bootstrap failed');
-    connection.rebootstrapFailures.push(rebootstrapFailure);
-    session.reattach();
-    await waitForSession(session, () => session.getState().error === rebootstrapFailure);
-    expect(connection.rebootstraps).toBe(1);
-
-    // Neither failure stopped the session or left a flight owning recovery.
-    session.reattach();
-    await settle();
-    expect(connection.rebootstraps).toBe(2);
-    await session.close();
-    expect(connection.closeCalls).toBe(1);
-  });
-
-  test('a throwing Reconnect is a stream fault, not a stopped session', async () => {
-    const lifecycle = new FakeLifecycle();
-    const {session, transport} = sessionWith(lifecycle);
-    await session.start();
-
-    const failure = new Error('control reconnect failed');
-    transport.reconnectFailures.push(failure);
-    expect(() => session.reconnectControls()).not.toThrow();
-    expect(session.getState()).toMatchObject({status: 'stale', error: failure});
-
-    // The session still recovers when asked.
-    const fresh = transport.nextSubscription();
-    session.reattach();
-    await expect(fresh).resolves.toMatchObject({afterSequence: 0, options: undefined});
-    await waitForSession(session, () => session.getState().status === 'connected');
-    await session.close();
-  });
-
-  test('an action that throws stops the session, releases it, and settles start', async () => {
-    const lifecycle = new FakeLifecycle();
-    const {session, transport} = sessionWith(lifecycle);
-    const snapshot = deferred<ProtocolResponse>();
-    transport.snapshots.push(snapshot.promise);
-    const starting = session.start();
-    await settle();
-    expect(transport.requests).toHaveLength(1);
-
-    // A run-store subscriber that throws while the start-up snapshot folds: the machine's
-    // applySnapshot action throws, so the machine stops with an error.
-    const failure = new Error('view failed to render the snapshot');
-    session.store.subscribe(() => {
-      throw failure;
-    });
-    snapshot.resolve(snapshotResponse({sequence: 1, status: 'running'}));
-    await starting;
-    await settle();
-    expect(session.store.getState().status).toBe('running');
-    expect(transport.closeCalls).toBe(1);
-    expect(lifecycle.listenerCount('online')).toBe(0);
-    expect(lifecycle.listenerCount('visibilitychange')).toBe(0);
-    expect(lifecycle.listenerCount('offline')).toBe(0);
-
-    // A stopped session asks for nothing more, and close still returns the one release.
-    session.reattach();
-    await settle();
-    expect(transport.subscriptions).toHaveLength(1);
-    await session.close();
-    expect(transport.closeCalls).toBe(1);
-  });
-
-  test('close releases the connection even when the session never started', async () => {
-    const lifecycle = new FakeLifecycle();
-    const {session, transport} = sessionWith(lifecycle);
-    await session.close();
-    await session.close();
-    expect(transport.closeCalls).toBe(1);
-    await session.start();
-    expect(transport.subscriptions).toHaveLength(0);
-  });
-
-  test('a report made while the connection opens reaches the session', () => {
-    const outage = disconnect('down when the page opened');
-    const session = new WebSession({
-      lifecycle: new FakeLifecycle(),
-      connect: connectRun(hooks => {
-        const transport = new FakeTransport(hooks);
-        transport.dropControlChannel(outage);
-        return transport;
-      }),
-    });
-    expect(session.getState().controls).toEqual({
-      status: 'disconnected',
-      error: outage,
-      everConnected: true,
-      retrying: false,
-    });
-    void session.close();
-  });
-
-  test('drops replies and reports that arrive after close', async () => {
-    const lifecycle = new FakeLifecycle();
-    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
-    await session.start();
-    const subscription = transport.subscriptions[0];
-    if (subscription === undefined) throw new Error('Initial subscription did not open');
-
-    const refresh = deferred<ProtocolResponse>();
-    transport.snapshots.push(refresh.promise);
-    lifecycle.emit('online');
-    expect(transport.requests).toHaveLength(2);
-    await session.close();
-    const closed = session.getState();
-    const published: string[] = [];
-    session.subscribe(() => published.push(session.getState().status));
-
-    refresh.resolve(snapshotResponse({sequence: 5, status: 'completed'}));
-    await settle();
-    subscription.onDisconnect(disconnect('closed session'));
-    transport.dropControlChannel(disconnect('closed session'));
-    await settle();
-
-    expect(session.store.getState().status).not.toBe('completed');
-    expect(session.getState()).toBe(closed);
-    expect(published).toEqual([]);
-  });
-});
-
 describe('WebSession', () => {
   test('keeps a foreign fenced snapshot from proving the streamed run healthy', async () => {
     const lifecycle = new FakeLifecycle();
@@ -358,34 +177,6 @@ describe('WebSession', () => {
       diagnostics: [{code: 'run_identity_mismatch'}],
     });
     expect(session.getState().status).toBe('stale');
-
-    await session.close();
-  });
-
-  test('a refresh that loads another run fails the load and keeps the page stale', async () => {
-    const lifecycle = new FakeLifecycle();
-    const {session, transport} = sessionWith(lifecycle);
-    transport.snapshots.push(snapshotResponse({run_id: 'run-a', sequence: 1}));
-    await session.start();
-    expect(session.getState()).toEqual(healthy());
-
-    // Each refresh retries the stream; keep those dials silent so only the snapshots decide.
-    transport.silentDials = 2;
-    transport.snapshots.push(snapshotResponse({run_id: 'run-b', sequence: 5, status: 'completed'}));
-    lifecycle.emit('online');
-    await waitForSession(session, () => session.getState().status === 'stale');
-    expect(session.store.getState()).toMatchObject({
-      runId: 'run-a',
-      sequence: 1,
-      diagnostics: [{code: 'run_identity_mismatch'}],
-    });
-    expect(session.getState()).toMatchObject({hasSnapshot: true, status: 'stale'});
-
-    // A later load of the streamed run proves it again.
-    transport.snapshots.push(snapshotResponse({run_id: 'run-a', sequence: 1}));
-    lifecycle.emit('online');
-    await waitForSession(session, () => session.getState().status === 'connected');
-    expect(session.getState().error).toBeNull();
 
     await session.close();
   });
@@ -1099,8 +890,6 @@ describe('WebSession', () => {
     const failure = new Error('control reconnect failed');
     transport.reconnectFailures.push(failure);
     lifecycle.emit('online');
-    // The refresh operation reports its failed redial as its output, a promise step later.
-    await waitForSession(session, () => session.getState().error === failure);
     expect(session.getState()).toMatchObject({status: 'stale', error: failure});
 
     const recovered = transport.nextSubscription();

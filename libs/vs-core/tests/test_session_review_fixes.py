@@ -172,7 +172,9 @@ def test_repeated_checkpoint_event_emits_one_refund_request(repeats: int, charge
     for _ in range(repeats):
         state = core.step(state, event, reducers=reducers).state
     assert len(seen) == 1
-    assert state.sessions.interrupts[0].phase == "checkpointed"
+    # The counting attempts reducer never applies the refund, so the claim that waited on it
+    # is ended as blocked rather than left checkpointed.
+    assert state.sessions.interrupts[0].phase == "blocked"
 
 
 # P2: a refund the budget can no longer cover blocks the claim with no request.
