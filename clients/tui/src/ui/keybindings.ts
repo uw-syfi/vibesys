@@ -289,6 +289,15 @@ export function bindKeybindings(
       }
       return;
     }
+    // Ctrl+L is global across the live panes, including a focused docked chat.
+    // Foreground modal handlers above retain their input ownership, but a
+    // docked chat is a peer pane and must not shadow the route back to the log.
+    if (key.ctrl && key.name === 'l') {
+      controller.live();
+      viewport.scrollTo(viewport.scrollHeight);
+      key.preventDefault();
+      return;
+    }
     // Persistent errors belong to the surface behind a modal. Escape closes
     // the foreground chat/menu/picker/viewer/overlay first, then reaches the
     // banner or command input on the next press. The palette and notepad make
@@ -525,12 +534,6 @@ export function bindKeybindings(
       actions.toggleSelectedTool()
     ) {
       actions.revealSelectedEntry();
-      key.preventDefault();
-      return;
-    }
-    if (key.ctrl && key.name === 'l') {
-      controller.live();
-      viewport.scrollTo(viewport.scrollHeight);
       key.preventDefault();
       return;
     }

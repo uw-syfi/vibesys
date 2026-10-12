@@ -114,6 +114,21 @@ function pressKey(name: string): KeyEvent {
   });
 }
 
+function pressCtrlKey(name: string): KeyEvent {
+  return new KeyEvent({
+    name,
+    ctrl: true,
+    meta: false,
+    shift: false,
+    option: false,
+    sequence: '',
+    number: false,
+    raw: '',
+    eventType: 'press',
+    source: 'raw',
+  });
+}
+
 function bound(state: SessionState): {keyInput: FakeKeyInput; calls: string[]} {
   const keyInput = new FakeKeyInput();
   const {controller, calls} = recordingController(state);
@@ -151,6 +166,44 @@ describe('F4 pane zoom', () => {
     // The palette is modal: the key is swallowed rather than left to fall
     // through to the panes, the same claim every other modal already has.
     expect(key.defaultPrevented).toBe(true);
+  });
+});
+
+describe('Ctrl+L live routing', () => {
+  it('returns from a hypothesis summary to the experiment log', () => {
+    const {keyInput, calls} = bound({
+      ...initialSessionState(),
+      hypothesisDetail: {entryKey: 'H-01', selectedRound: 1},
+    });
+
+    const key = pressCtrlKey('l');
+    keyInput.emit(key);
+
+    expect(calls).toEqual(['live']);
+    expect(key.defaultPrevented).toBe(true);
+  });
+
+  it('returns to the experiment log while the docked chat has focus', () => {
+    const {keyInput, calls} = bound({
+      ...initialSessionState(),
+      layout: {right: null, focus: 'chat', zoomedPane: null},
+    });
+
+    const key = pressCtrlKey('l');
+    keyInput.emit(key);
+
+    expect(calls).toEqual(['live']);
+    expect(key.defaultPrevented).toBe(true);
+  });
+
+  it('leaves Ctrl+L with a modal chat rather than closing the foreground modal', () => {
+    const {keyInput, calls} = bound({...initialSessionState(), chatOpen: true});
+
+    const key = pressCtrlKey('l');
+    keyInput.emit(key);
+
+    expect(calls).toEqual([]);
+    expect(key.defaultPrevented).toBe(false);
   });
 });
 
