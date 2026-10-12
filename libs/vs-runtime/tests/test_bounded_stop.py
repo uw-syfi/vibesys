@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from pathlib import Path
 
 import pytest
 from hypothesis import given
@@ -212,7 +213,7 @@ async def test_gated_evaluation_refuses_new_work_after_a_stop() -> None:
     channel = create_run_control_channel(FakeRunControlEventSink())
     inner = FakeEvaluation()
     evaluation = stop_gated_evaluation(inner, channel)
-    workspace = FakeWorkspace(workspace_id="candidate")
+    workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
     await evaluation.accuracy(workspace)
 
     channel.request_stop()
@@ -236,7 +237,7 @@ async def test_gated_evaluation_cancels_a_running_evaluation_at_the_stop() -> No
     inner = FakeEvaluation()
     gate = inner.gate("benchmark", 0)
     evaluation = stop_gated_evaluation(inner, channel)
-    workspace = FakeWorkspace(workspace_id="candidate")
+    workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
 
     running = asyncio.create_task(evaluation.benchmark(workspace))
     await arrival(gate.entered.wait(), running)
@@ -253,7 +254,7 @@ async def test_gated_evaluation_returns_a_result_that_finishes_before_any_stop()
     channel = create_run_control_channel(FakeRunControlEventSink())
     inner = FakeEvaluation()
     evaluation = stop_gated_evaluation(inner, channel)
-    workspace = FakeWorkspace(workspace_id="candidate")
+    workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
 
     result = await evaluation.benchmark(workspace)
 

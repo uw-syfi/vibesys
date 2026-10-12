@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tests.support.docker_environment import fake_docker_environment
@@ -22,8 +23,6 @@ from vs_runtime.api.infrastructure import AgentPaths, RunEnvironmentView, Truste
 from vs_runtime.api.testing import FakeEvidenceLedger, FakeWorkspace, FakeWorkspaces
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from pydantic import BaseModel, JsonValue
 
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
@@ -120,7 +119,7 @@ def resolved(
 
 def ports(root: Path, run: ResolvedRun) -> OperationPorts:
     """The runtime ports of the production owners, over the in-memory workspace fake."""
-    workspaces = FakeWorkspaces(FakeWorkspace())
+    workspaces = FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))
     return OperationPorts(
         renderer=TemplateRenderer(root, fallback_roots=(CORE_PROTOCOL_DIR,)),
         artifacts=run.artifacts,

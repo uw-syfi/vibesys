@@ -561,7 +561,7 @@ class FakeWorkspace:
     def __init__(
         self,
         *,
-        path: Path = Path(),
+        path: Path,
         workspace_id: str | None = None,
         revision: str | None = "fake-revision",
         trusted_input_baseline: str | None = None,

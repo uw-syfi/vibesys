@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from hypothesis import given
@@ -34,24 +35,31 @@ def test_scripted_benchmarks_return_or_raise_in_call_order(script: list[float | 
         observed: list[float | None] = []
         for _ in script:
             try:
-                observed.append((await evaluation.benchmark(FakeWorkspace())).metric_value)
+                observed.append(
+                    (
+                        await evaluation.benchmark(FakeWorkspace(path=Path("/workspace")))
+                    ).metric_value
+                )
             except _ScriptedFailureError:
                 observed.append(None)
         return observed
 
     assert asyncio.run(drain()) == script
-    assert asyncio.run(evaluation.benchmark(FakeWorkspace())) == evaluation.default_benchmark
+    assert (
+        asyncio.run(evaluation.benchmark(FakeWorkspace(path=Path("/workspace"))))
+        == evaluation.default_benchmark
+    )
 
 
 def test_root_benchmarks_use_their_own_script_whatever_the_interleaving() -> None:
     evaluation = FakeEvaluation()
     evaluation.script_root_benchmark(_reading(1.0))
     evaluation.script_benchmark(_reading(2.0))
-    candidate = FakeWorkspace(workspace_id="candidate")
+    candidate = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
 
     async def scenario() -> tuple[float | None, float | None]:
         first = await evaluation.benchmark(candidate)
-        root = await evaluation.benchmark(FakeWorkspace())
+        root = await evaluation.benchmark(FakeWorkspace(path=Path("/workspace")))
         return first.metric_value, root.metric_value
 
     assert asyncio.run(scenario()) == (2.0, 1.0)
@@ -66,7 +74,9 @@ def test_gate_holds_one_call_until_released() -> None:
         finished: list[float | None] = []
 
         async def call() -> None:
-            finished.append((await evaluation.benchmark(FakeWorkspace())).metric_value)
+            finished.append(
+                (await evaluation.benchmark(FakeWorkspace(path=Path("/workspace")))).metric_value
+            )
 
         first = asyncio.ensure_future(call())
         second = asyncio.ensure_future(call())
@@ -87,7 +97,9 @@ def test_gate_holds_one_call_until_released() -> None:
 def test_gate_notes_whether_a_cancellation_found_the_workspace_live(*, discard_first: bool) -> None:
     evaluation = FakeEvaluation()
     gate = evaluation.gate("accuracy", 0)
-    workspaces = FakeWorkspaces(FakeWorkspace(), supports_parallel_candidates=True)
+    workspaces = FakeWorkspaces(
+        FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
+    )
 
     async def scenario() -> None:
         candidate = await workspaces.create_candidate()

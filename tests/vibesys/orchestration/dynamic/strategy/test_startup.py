@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from tests.vibesys.orchestration.dynamic.strategy._run import config
 
@@ -24,9 +24,6 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.testing import FakeEvidenceLedger, FakeWorkspace, FakeWorkspaces
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 _ROLES = {
     "dynamic.render_role_artifacts": OperationRole.RENDER_ARTIFACTS,
     "dynamic.verify_parent_revision": OperationRole.VERIFY_REVISION,
@@ -41,7 +38,7 @@ def test_production_owners_cover_every_operation_the_strategy_requires(tmp_path:
     registrations = {
         _ROLES[item.descriptor.kind]: item for item in dynamic_operation_registrations()
     }
-    workspaces = FakeWorkspaces(FakeWorkspace())
+    workspaces = FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))
     ports = OperationPorts(
         renderer=TemplateRenderer(tmp_path, fallback_roots=(CORE_PROTOCOL_DIR,)),
         artifacts=ArtifactStore(namespace),

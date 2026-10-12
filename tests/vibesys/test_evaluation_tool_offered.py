@@ -7,6 +7,7 @@ role is given.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -30,8 +31,6 @@ from vs_runtime.api.core import (
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from vs_runtime.api import AgentRole
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
 
@@ -52,7 +51,7 @@ def _bridge(tmp_path: Path) -> AgentEvaluationBridge:
         tmp_path / "evaluation.sock",
         policy,
         ScopeWorkspaces(
-            cast("RuntimeWorkspaces", FakeWorkspaces(FakeWorkspace())),
+            cast("RuntimeWorkspaces", FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))),
             StoreWorkspaceReceipts(ReceiptStore(namespace)),
         ),
         AgentEvaluationRecords(OwedSubmissions(ReceiptStore(namespace)), SynthesizedEvidence()),

@@ -400,7 +400,7 @@ async def test_interpret_rejects_a_request_without_embedded_refs_naming_the_fiel
 def _retain_owner(
     retained: set[str], known: set[str]
 ) -> tuple[RetainRevisionOwner, FakeWorkspace, FakeWorkspaces]:
-    workspace = FakeWorkspace()
+    workspace = FakeWorkspace(path=Path("/workspace"))
     workspaces = FakeWorkspaces(workspace)
     for revision in known - retained:
         workspaces.add_dangling_revision(revision)
@@ -537,7 +537,7 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
         evidence = ReceiptEvidenceLedger(ReceiptStore(namespace))
         recorded = _evidence(7, value=3.0)
         evidence.record(RequestId(root=SOURCE), recorded, "official")
-        workspaces = FakeWorkspaces(FakeWorkspace())
+        workspaces = FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))
         ports = OperationPorts(
             renderer=TemplateRenderer(base),
             artifacts=ArtifactStore(namespace),

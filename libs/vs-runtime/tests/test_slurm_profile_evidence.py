@@ -32,6 +32,7 @@ from vs_sandbox.api.slurm import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 pytestmark = pytest.mark.asyncio
@@ -40,9 +41,14 @@ _HANDLE = "profile-1"
 
 
 @pytest.fixture(autouse=True)
-def _scratch_cwd(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Candidates are directories under the working directory; keep their output out of the repo."""
-    monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
+def _cwd_stays_untouched(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[None]:
+    """Evaluating a candidate writes only under the stack's root, never the working directory."""
+    cwd = tmp_path_factory.mktemp("cwd")
+    monkeypatch.chdir(cwd)
+    yield
+    assert sorted(cwd.iterdir()) == []
 
 
 _TERMINAL = frozenset({EvaluationState.SUCCEEDED, EvaluationState.FAILED})

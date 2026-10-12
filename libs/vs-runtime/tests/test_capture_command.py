@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Literal
 
 import pytest
@@ -39,7 +40,8 @@ def _owner(
     retained: set[str], *, parallel: bool = True
 ) -> tuple[CaptureCommandOwner, FakeWorkspaces, FakeCommands]:
     workspaces = FakeWorkspaces(
-        FakeWorkspace(known_revisions=retained), supports_parallel_candidates=parallel
+        FakeWorkspace(path=Path("/workspace"), known_revisions=retained),
+        supports_parallel_candidates=parallel,
     )
     commands = FakeCommands()
     return CaptureCommandOwner(workspaces, commands, workspaces, _commit_of), workspaces, commands
@@ -127,7 +129,8 @@ async def test_a_host_that_dies_mid_capture_leaves_nothing_after_the_replay(iden
     """
     retained = {"r1"}
     workspaces = FakeWorkspaces(
-        FakeWorkspace(known_revisions=retained), supports_parallel_candidates=True
+        FakeWorkspace(path=Path("/workspace"), known_revisions=retained),
+        supports_parallel_candidates=True,
     )
     hanging = _HangingCommands()
     dying = CaptureCommandOwner(workspaces, hanging, workspaces, _commit_of)

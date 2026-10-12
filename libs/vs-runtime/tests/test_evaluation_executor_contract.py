@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import pytest
@@ -46,7 +47,6 @@ from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-    from pathlib import Path
 
 pytestmark = pytest.mark.asyncio
 
@@ -93,7 +93,9 @@ async def _local(root: Path, script: _Script) -> _World:
     else:
         evaluation.default_accuracy = AccuracyEvaluation(executed=True)
     gate = evaluation.gate("accuracy", 0) if script is _Script.HOLD_FIRST_STAGE else None
-    workspaces = FakeWorkspaces(FakeWorkspace(), supports_parallel_candidates=True)
+    workspaces = FakeWorkspaces(
+        FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
+    )
     snapshot = await workspaces.root.snapshot("candidate")
 
     async def running() -> None:

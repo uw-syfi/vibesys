@@ -271,7 +271,7 @@ def scenarios(root: Path, namespace: StateNamespace) -> tuple[OperationScenario,
     templates.mkdir(exist_ok=True)
     (templates / "greeting.j2").write_text("hello {{ who }}\n")
     store = ArtifactStore(namespace)
-    workspace = FakeWorkspace(known_revisions={"abc"})
+    workspace = FakeWorkspace(path=root / "workspace", known_revisions={"abc"})
     workspaces = FakeWorkspaces(workspace)
     artifacts = root_artifacts(namespace)
     board = FakeIssueTracker()

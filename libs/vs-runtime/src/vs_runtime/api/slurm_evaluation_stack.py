@@ -179,7 +179,9 @@ async def build_stack(
     ``cluster.profile_output``.
     """
     cluster = cluster or ScenarioCluster()
-    workspaces = _Candidates(FakeWorkspace(), supports_parallel_candidates=True)
+    workspaces = _Candidates(
+        FakeWorkspace(path=root / "workspace"), supports_parallel_candidates=True
+    )
     snapshot = await workspaces.root.snapshot("candidate")
     state = scratch_state_directory(root, "evaluation")
     namespace = StateNamespace(project_root=root, root=state, portable=False)

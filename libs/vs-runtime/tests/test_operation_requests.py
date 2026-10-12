@@ -607,7 +607,7 @@ async def test_parent_verification_checks_retention_not_that_the_revision_export
     retained: set[str], dangling: set[str], asked: str
 ) -> None:
     """A commit that exists but is not retained (dangling) must not verify."""
-    workspaces = FakeWorkspaces(FakeWorkspace(known_revisions=retained))
+    workspaces = FakeWorkspaces(FakeWorkspace(path=Path("/workspace"), known_revisions=retained))
     for revision in dangling:
         workspaces.add_dangling_revision(revision)
     owner = VerifyRevisionOwner(workspaces, workspaces, commit_of)

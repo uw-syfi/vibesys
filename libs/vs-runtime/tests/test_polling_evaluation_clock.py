@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -16,7 +18,7 @@ def test_availability_is_observed_at_the_injected_clock_time(start: float, step:
     clock = ManualClock(start)
     executor = PollingEvaluationExecutor(
         FakeEvaluation(run_id="run-1"),
-        FakeWorkspaces(FakeWorkspace(), supports_parallel_candidates=True),
+        FakeWorkspaces(FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True),
         clock=clock,
     )
 

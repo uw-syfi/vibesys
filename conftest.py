@@ -22,6 +22,7 @@ pytest_plugins = [
     "vs_dst_pytest",
     "tests.support.isolated_environment",
     "tests.support.cwd_hygiene",
+    "tests.support.tree_hygiene",
     "tests.support.path_hygiene",
     "tests.support.sharding",
 ]
