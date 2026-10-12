@@ -62,7 +62,9 @@ from vs_runtime.api.core import (
     EVALUATION_TOOL_ID,
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
+    AgentEvaluationRecords,
     OwedSubmissions,
+    ReceiptEvidenceLedger,
     ReceiptStore,
     ScopeWorkspaces,
     StoreWorkspaceReceipts,
@@ -241,7 +243,10 @@ async def scenario(tmp_path: Path, *, submissions: int = 1) -> AsyncIterator[Sce
             tmp_path / "evaluation.sock",
             POLICY,
             ScopeWorkspaces(workspaces, StoreWorkspaceReceipts(ReceiptStore(receipts))),
-            OwedSubmissions(ReceiptStore(receipts)),
+            AgentEvaluationRecords(
+                OwedSubmissions(ReceiptStore(receipts)),
+                ReceiptEvidenceLedger(ReceiptStore(receipts)),
+            ),
         )
         resolvers[0].bridge = bridge
         bridges.append(bridge)

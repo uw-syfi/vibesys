@@ -14,7 +14,7 @@ from pydantic import Field
 
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
 from vibesys.serial_search.api import PlanEvidence
-from vs_core.api import RevisionRef, Value
+from vs_core.api import EvidenceRef, RevisionRef, Value
 
 
 class PromptTemplate(StrEnum):
@@ -200,6 +200,8 @@ class JudgePrompt(Value):
     benchmark_enabled: bool = True
     modality: str | None = None
     interface: str = "inprocess"
+    # The trusted evaluations the candidate was measured by, stated at render time.
+    cited_evidence: tuple[EvidenceRef, ...] = ()
 
 
 type PromptContext = Annotated[

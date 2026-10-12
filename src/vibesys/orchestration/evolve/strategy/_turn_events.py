@@ -351,7 +351,7 @@ def on_resume(state: EvolveStrategyState, event: ResumeAuthorized) -> EvolveStra
                 role=_PROTOCOL_ROLE[role],
                 retained_revision=slot.candidate,
                 timed_out=event.timeout is not None,
-                evidence=tuple(item.evidence_id for item in event.evidence),
+                cited_evidence=event.evidence,
                 repeated_failure=None
                 if event.repeated_failure is None
                 else str(event.repeated_failure),

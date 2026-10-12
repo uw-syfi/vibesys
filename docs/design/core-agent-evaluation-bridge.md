@@ -50,8 +50,9 @@ of "this candidate's evaluation"; the bridge keeps no second one. When a call fi
 budget for its identity that would not admit another submission (the earlier submission is
 running, or ended and cannot be redone), core records the call as a repeat
 (`AgentCall.repeat`) naming the earlier submission and its deadline, charges nothing, and
-the reply carries the same handle (`repeat: true`), plus `outcome` and the evidence ids
-when it has ended. A released, retryable infrastructure failure is not a repeat: the next
+the reply carries the same handle (`repeat: true`), plus `outcome`, the evidence ids and
+`stages` (each stage's verdict and measured values with unit and direction, read from the
+evidence ledger) when it has ended. A released, retryable infrastructure failure is not a repeat: the next
 call is a real retry and is charged. A call for another candidate is another charge.
 
 Who may read whose evaluation: every role that holds the scope. A workstream's roles
@@ -59,7 +60,9 @@ Who may read whose evaluation: every role that holds the scope. A workstream's r
 gets the evaluation its implementer made, and the other way round. Another attempt's
 evaluation is not readable, even for identical content: its evidence and its budget belong
 to that attempt, and sharing them would let siblings of a population read each other's
-measurements. A reply is a handle and evidence ids, never another scope's data.
+measurements. A reply is a handle, evidence ids and the measurements those records hold, never another
+scope's data. The resumed turn's prompt and the judge's prompt state the same measurements,
+because the measured number is not withheld from any role that holds the scope.
 
 Owed submissions (#1868, #2021) are only the promise that a reply the agent never read is
 returned on the retry; they hold the call and core says what it decided. They do not decide

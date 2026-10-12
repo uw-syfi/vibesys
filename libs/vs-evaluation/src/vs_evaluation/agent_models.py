@@ -459,6 +459,26 @@ class EvaluationStageOutcome(BaseModel):
     partial_measurement: PartialMeasurement | None = None
     # The end of the stage's own summary, where a failure states its cause.
     summary_tail: str | None = Field(default=None, max_length=MAX_STAGE_SUMMARY_TAIL_CHARS)
+    # The accepted evidence record this conclusion reads, when it came from one.
+    evidence_id: str | None = None
+
+    @classmethod
+    def of(cls, evidence: TrustedEvidence) -> EvaluationStageOutcome:
+        """The one projection of an accepted record that agents see.
+
+        Every agent-visible statement of a stage's result (the evaluation tool's reply, the
+        evaluation snapshot) is built here from the record, so a field added to the record
+        reaches them together and no consumer copies values by hand.
+        """
+        summary = evidence.semantic_summary
+        return cls(
+            kind=evidence.kind,
+            outcome=evidence.outcome,
+            metrics=evidence.metrics,
+            partial_measurement=evidence.partial_measurement,
+            summary_tail=summary[-MAX_STAGE_SUMMARY_TAIL_CHARS:] if summary else None,
+            evidence_id=evidence.evidence_id,
+        )
 
 
 class EvaluationOperationSnapshot(BaseModel):
@@ -548,7 +568,8 @@ class SubmittedReply(BaseModel):
     evaluation's, nothing was charged, and whichever role of the scope submitted it first.
     ``outcome`` names how it ended (``succeeded``, ``failed``, ...) when it has; it is None
     while the evaluation runs. A finished evaluation needs no wait: ``evidence`` lists the
-    ids of the records it produced, as the resume of a wait would.
+    ids of the records it produced, as the resume of a wait would, and ``stages`` carries what
+    they measured, so the agent never has to guess a number from an opaque id.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -557,6 +578,13 @@ class SubmittedReply(BaseModel):
     repeat: bool = False
     outcome: str | None = Field(default=None, min_length=1)
     evidence: tuple[str, ...] = ()
+    stages: tuple[EvaluationStageOutcome, ...] = Field(
+        default=(),
+        description=(
+            "What each finished stage measured: its verdict, every metric with value, unit "
+            "and direction, and the end of its summary, generated from the trusted record."
+        ),
+    )
 
 
 class StatusReply(BaseModel):

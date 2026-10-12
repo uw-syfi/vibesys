@@ -15,6 +15,7 @@ from vibesys.orchestration.evolve.strategy._prompts import (
 )
 from vibesys.orchestration.evolve.strategy._state import EvolveStrategyState, SlotState
 from vibesys.orchestration.profilers import ProfilerKind
+from vs_core.api import EvidenceRef
 
 
 def _peers(state: EvolveStrategyState, identifiers: tuple[int, ...]) -> tuple[Individual, ...]:
@@ -59,13 +60,18 @@ def mutate_prompt(
     )
 
 
-def judge_prompt(slot: SlotState, config: EvolveConfig) -> JudgePrompt:
+def judge_prompt(
+    slot: SlotState, config: EvolveConfig, cited_evidence: tuple[EvidenceRef, ...]
+) -> JudgePrompt:
     """The review brief for the slot's candidate."""
     if slot.candidate is None:
         message = "a review needs the mutator's candidate"
         raise RuntimeError(message)
     return JudgePrompt(
-        candidate=slot.candidate, modality=config.modality, interface=config.interface
+        candidate=slot.candidate,
+        modality=config.modality,
+        interface=config.interface,
+        cited_evidence=cited_evidence,
     )
 
 

@@ -34,6 +34,8 @@ from vs_core.api import (
     EvidenceRef,
     ObservationStatus,
     RequestId,
+    RunView,
+    Scope,
     Value,
 )
 
@@ -52,6 +54,7 @@ __all__ = [
     "Objective",
     "PartialRow",
     "accept_readings",
+    "judged_evidence",
     "reading_of",
 ]
 
@@ -412,3 +415,21 @@ def accept_readings(
             return f"reading {reading.evidence_id.root} repeated"
         accepted.append(AcceptedReading(**reading.model_dump(), source_request=ref.source_request))
     return tuple(accepted)
+
+
+def judged_evidence(view: RunView, scope: Scope) -> tuple[EvidenceRef, ...]:
+    """The trusted evaluations a workstream's roles measured, oldest first.
+
+    A judge reviews the candidate its implementer built in the same scope, and an agent measures
+    it through the evaluation tool; core records each result as trusted `local-validation`
+    evidence of that scope. A prompt cites these as ``cited_evidence`` so the runtime states
+    what they measured (value, unit, direction, verdict) from the evidence ledger.
+    """
+    held = (
+        item
+        for item in view.measurements
+        if item.provenance == "trusted"
+        and item.purpose == "local-validation"
+        and item.scope == scope
+    )
+    return tuple(sorted(held, key=lambda item: item.observation_sequence))

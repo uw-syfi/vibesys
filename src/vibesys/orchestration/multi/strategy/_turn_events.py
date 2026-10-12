@@ -376,7 +376,7 @@ def on_resume(state: MultiStrategyState, event: ResumeAuthorized) -> MultiStrate
             role=_ROLE_NAMES[role],
             retained_revision=record.candidate,
             timed_out=event.timeout is not None,
-            evidence=tuple(item.evidence_id for item in event.evidence),
+            cited_evidence=event.evidence,
             repeated_failure=None
             if event.repeated_failure is None
             else str(event.repeated_failure),

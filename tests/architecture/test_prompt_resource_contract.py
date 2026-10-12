@@ -533,6 +533,22 @@ def core_policy_context() -> dict[str, object]:
         "buildable": (),
         "history": (),
         "evidence": (),
+        # What `RenderArtifactsOwner` binds for each cited record, read from the evidence ledger.
+        "cited_evidence": (
+            {
+                "evidence_id": "e1",
+                "kind": "benchmark",
+                "revision": revision,
+                "status": "succeeded",
+                "passed": True,
+                "stage": "benchmark",
+                "metrics": (
+                    {"name": "throughput", "value": 3001.7, "direction": "max", "unit": "calls/s"},
+                ),
+                "partial": None,
+                "feedback": "",
+            },
+        ),
         "offer_snapshot": "fixture-offer",
         "base_accuracy_passed": True,
         "repeated_failure": None,

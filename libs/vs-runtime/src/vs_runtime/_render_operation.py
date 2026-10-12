@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 from jinja2.exceptions import TemplateError
 
 from vs_core.api import ArtifactId, ArtifactRef
+from vs_runtime._evidence_operations import reading_mapping
 from vs_runtime._operation_catalog import Applied, Inspection, NotApplied
 
 if TYPE_CHECKING:
@@ -22,10 +23,30 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import OperationRequest
+    from vs_core.api import EvidenceRef, OperationRequest
     from vs_prompts.api import TemplateRenderer
     from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._core_requests import ExecutionContext
+    from vs_runtime._evidence_ledger import EvidenceLookup
+
+
+CITED_EVIDENCE = "cited_evidence"
+"""The context field that names evidence records a prompt states the results of.
+
+A context declares ``cited_evidence: tuple[EvidenceRef, ...]``; the template receives the
+same name bound to one mapping per record (``evidence_id``, ``kind``, ``revision``,
+``status``, ``passed``, ``stage``, ``metrics`` with name, value, direction and unit,
+``partial`` and ``feedback``), built from the ledger by the projection the evidence
+interpretation uses. ``passed`` is None for a record the ledger holds no reading of.
+"""
+
+_UNREAD: Mapping[str, object] = {
+    "passed": None,
+    "stage": None,
+    "metrics": (),
+    "partial": None,
+    "feedback": "",
+}
 
 
 class RenderRequest(Protocol):
@@ -44,11 +65,18 @@ class RenderArtifactsOwner:
         renderer: TemplateRenderer,
         store: ArtifactStore,
         variables: Mapping[str, object] | None = None,
+        evidence: EvidenceLookup | None = None,
     ) -> None:
-        """Bind the template root, the artifact store and the run-level template variables."""
+        """Bind the template root, the artifact store, the run-level variables and the ledger.
+
+        ``evidence`` is the ledger accepted results are recorded in. A context that cites
+        evidence (see ``CITED_EVIDENCE``) has each citation read from it at render time, so a
+        prompt states what was measured and no strategy has to carry the numbers.
+        """
         self._renderer = renderer
         self._store = store
         self._variables = dict(variables or {})
+        self._evidence = evidence
 
     def _render(self, request: OperationRequest) -> tuple[bytes, ArtifactId] | None:
         render = cast("RenderRequest", request)
@@ -59,11 +87,34 @@ class RenderArtifactsOwner:
             **{name: getattr(context, name) for name in type(context).model_fields},
         }
         variables.pop("template", None)
+        if CITED_EVIDENCE in variables:
+            variables[CITED_EVIDENCE] = self._readings(variables[CITED_EVIDENCE])
         try:
             text = self._renderer.render_template(f"{template}.j2", **variables)
         except TemplateError:
             return None
         return text.encode(), ArtifactId(root=f"render:{render.subject}:{render.ordinal}")
+
+    def _readings(self, cited: object) -> tuple[Mapping[str, object], ...]:
+        """Each cited record as the fields a prompt states; an unread record says so, never a guess."""
+        refs = cast("tuple[EvidenceRef, ...]", cited)
+        entries = (
+            None if self._evidence is None else self._evidence.lookup(ref.key) for ref in refs
+        )
+        return tuple(
+            {
+                **(
+                    reading_mapping(ref, entry.evidence)
+                    if entry is not None and entry.purpose == ref.purpose
+                    else _UNREAD
+                ),
+                "evidence_id": ref.evidence_id.root,
+                "kind": ref.kind.value,
+                "revision": ref.candidate,
+                "status": ref.status.value,
+            }
+            for ref, entry in zip(refs, entries, strict=True)
+        )
 
     def _outcome(self, content: bytes, artifact_id: ArtifactId) -> Mapping[str, object]:
         digest = hashlib.sha256(content).hexdigest()

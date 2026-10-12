@@ -45,6 +45,7 @@ from vibesys.orchestration.issue_queue.strategy.api import (
     role_id,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
+from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
     AgentCapability,
@@ -202,6 +203,7 @@ def issue_queue_core_policy() -> CorePolicy:
         ),
         retention_label=RETENTION_LABEL,
         prompt_templates=Path(prompts.__file__).parent,
+        prompt_fallback_roots=(CORE_PROTOCOL_DIR,),
         owned_operations=board_entries,
     )
 

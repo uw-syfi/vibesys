@@ -12,7 +12,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from vs_core.api import EvidenceId, RevisionRef, Value
+from vs_core.api import EvidenceRef, RevisionRef, Value
 
 
 class PromptTemplate(StrEnum):
@@ -62,6 +62,8 @@ class ReviewPrompt(Value):
     summary: str
     files_touched: tuple[str, ...] = ()
     self_check: str = ""
+    # The trusted evaluations this issue's candidate was measured by, stated at render time.
+    cited_evidence: tuple[EvidenceRef, ...] = ()
 
 
 class PriorPerformance(Value):
@@ -92,7 +94,7 @@ class ResumePrompt(Value):
     role: Literal["implementer", "judge", "perf-evaluator"]
     retained_revision: RevisionRef | None
     timed_out: bool
-    evidence: tuple[EvidenceId, ...] = ()
+    cited_evidence: tuple[EvidenceRef, ...] = ()
     repeated_failure: str | None = None
 
 

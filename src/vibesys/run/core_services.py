@@ -29,6 +29,7 @@ from vs_runtime.api import ArtifactStore, CorePlan, CoreRunContext, OwnedOperati
 from vs_runtime.api.core import (
     EVALUATION_TOOL_ID,
     AgentEvaluationBridge,
+    AgentEvaluationRecords,
     CombinedToolServers,
     CoreStartup,
     IgnoreCommits,
@@ -200,8 +201,9 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         _refuse_unbridged_tools(
             resources.roles, bridged=plan.agent_evaluation is not None, stateless=stateless.tool_ids
         )
-        bridge = _agent_bridge(plan, resources, receipt_store)
-        catalog = _catalog(policy, plan, resources, artifacts, ReceiptEvidenceLedger(receipt_store))
+        evidence = ReceiptEvidenceLedger(receipt_store)
+        bridge = _agent_bridge(plan, resources, receipt_store, evidence)
+        catalog = _catalog(policy, plan, resources, artifacts, evidence)
         catalog.require_owned(plan.strategy.declaration)
         resolver = ProductionSessionResolver(
             ResolverInputs(
@@ -341,7 +343,10 @@ def _refuse_unbridged_tools(
 
 
 def _agent_bridge(
-    plan: CorePlan, resources: CoreResources, receipts: ReceiptStore
+    plan: CorePlan,
+    resources: CoreResources,
+    receipts: ReceiptStore,
+    evidence: ReceiptEvidenceLedger,
 ) -> AgentEvaluationBridge | None:
     """The in-turn evaluation tool service, when the plan offers the tool."""
     if plan.agent_evaluation is None:
@@ -350,7 +355,7 @@ def _agent_bridge(
         evaluation_socket_path(resources.project.root, resources.run_id),
         plan.agent_evaluation,
         ScopeWorkspaces(resources.workspaces, StoreWorkspaceReceipts(receipts)),
-        OwedSubmissions(receipts),
+        AgentEvaluationRecords(OwedSubmissions(receipts), evidence),
         resources.evaluation_diagnostics,
     )
 

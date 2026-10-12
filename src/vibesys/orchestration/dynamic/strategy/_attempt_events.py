@@ -744,7 +744,7 @@ def on_resume(state: DynamicStrategyState, event: ResumeAuthorized) -> DynamicSt
             role=role.value,  # type: ignore[arg-type]
             retained_revision=record.candidate,
             timed_out=event.timeout is not None,
-            evidence=tuple(item.evidence_id for item in event.evidence),
+            cited_evidence=event.evidence,
             repeated_failure=None
             if event.repeated_failure is None
             else str(event.repeated_failure),

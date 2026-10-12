@@ -1033,7 +1033,7 @@ expose = ["splice_steering"]
 from = ["vibesys.steering"]
 
 [[interfaces]]
-expose = ["AcceptedReading", "EvidenceReading", "FrameworkBenchmarkOutcome", "Measurement", "MetricComparison", "MetricRow", "MetricSpace", "Objective", "PartialRow", "accept_readings", "reading_of"]
+expose = ["AcceptedReading", "EvidenceReading", "FrameworkBenchmarkOutcome", "Measurement", "MetricComparison", "MetricRow", "MetricSpace", "Objective", "PartialRow", "accept_readings", "judged_evidence", "reading_of"]
 from = ["vibesys.metrics"]
 
 [[interfaces]]
@@ -1264,7 +1264,7 @@ expose = ["CORE_ROLES", "IMPLEMENTER", "JUDGE", "PERF_EVALUATOR", "issue_queue_c
 # stores the recipe, opens the tracker, builds the operation catalog and declares the roles.
 path = "vibesys.issue_queue_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.core_wiring", "vibesys.issue_queue_board", "vibesys.orchestration.issue_queue.core_policy", "vibesys.orchestration.issue_queue.models", "vibesys.orchestration.issue_queue.strategy", "vibesys.plugin_registration"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.prompts", "vibesys.core_roles", "vibesys.core_wiring", "vibesys.issue_queue_board", "vibesys.orchestration.issue_queue.core_policy", "vibesys.orchestration.issue_queue.models", "vibesys.orchestration.issue_queue.strategy", "vibesys.plugin_registration"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic.parents"
