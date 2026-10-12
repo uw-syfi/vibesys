@@ -13,7 +13,13 @@ from pydantic import (
     model_validator,
 )
 
-from vs_evaluation.agent_evidence import EvidenceKind
+from vs_evaluation.agent_evidence import (
+    EvidenceKind,
+    EvidenceMetric,
+    EvidenceOutcome,
+    PartialMeasurement,
+    TrustedEvidence,
+)
 from vs_evaluation.models import ProfileField
 
 
@@ -102,6 +108,46 @@ class WaitReply(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["wait_validated"] = "wait_validated"
     handles: tuple[str, ...]
+
+
+MAX_STAGE_SUMMARY_TAIL_CHARS = 600
+
+
+class EvaluationStageOutcome(BaseModel):
+    """The trusted conclusion of one stage that recorded evidence.
+
+    ``outcome`` is the stage's verdict: a benchmark that ran but missed its
+    requirement is ``failed`` even though its evidence was recorded.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: EvidenceKind
+    outcome: EvidenceOutcome
+    metrics: tuple[EvidenceMetric, ...] = ()
+    # What a failed stage measured before it stopped, as its evaluator reported it.
+    partial_measurement: PartialMeasurement | None = None
+    # The end of the stage's own summary, where a failure states its cause.
+    summary_tail: str | None = Field(default=None, max_length=MAX_STAGE_SUMMARY_TAIL_CHARS)
+    # The accepted evidence record this conclusion reads, when it came from one.
+    evidence_id: str | None = None
+
+    @classmethod
+    def of(cls, evidence: TrustedEvidence) -> EvaluationStageOutcome:
+        """The one projection of an accepted record that agents see.
+
+        Every agent-visible statement of a stage's result (the evaluation tool's reply, the
+        evaluation snapshot) is built here from the record, so a field added to the record
+        reaches them together and no consumer copies values by hand.
+        """
+        summary = evidence.semantic_summary
+        return cls(
+            kind=evidence.kind,
+            outcome=evidence.outcome,
+            metrics=evidence.metrics,
+            partial_measurement=evidence.partial_measurement,
+            summary_tail=summary[-MAX_STAGE_SUMMARY_TAIL_CHARS:] if summary else None,
+            evidence_id=evidence.evidence_id,
+        )
 
 
 class SubmittedReply(BaseModel):
