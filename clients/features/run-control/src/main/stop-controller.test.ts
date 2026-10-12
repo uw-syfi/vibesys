@@ -146,14 +146,39 @@ describe('StopController', () => {
     await w.controller.request(TARGET, false);
     expect(w.controller.views()[KEY]).toMatchObject({phase: 'stopping', text: 'Stopping…'});
     // Still listed: still stopping, and a second request does nothing.
-    w.controller.observeLive(HOST, new Set([TARGET.instanceId]));
+    w.controller.observeListing(HOST, {instances: [record(TARGET.instanceId, 'run-1')]});
     await w.controller.request(TARGET, false);
     expect(w.asked).toHaveLength(1);
     expect(w.controller.views()[KEY]?.phase).toBe('stopping');
     // Another host's registry says nothing about this run.
-    w.controller.observeLive('local', new Set());
+    w.controller.observeListing('local', {instances: []});
     expect(w.controller.views()[KEY]?.phase).toBe('stopping');
-    w.controller.observeLive(HOST, new Set());
+    w.controller.observeListing(HOST, {instances: []});
+    expect(w.controller.views()[KEY]?.phase).toBe('ended');
+  });
+
+  test.each([
+    'unverified',
+    'unreadable',
+  ] as const)('an accepted stop stays pending through a %s observation and completes after absence', async uncertain => {
+    const w = await world({
+      stop: async (_host, id) => ({
+        kind: 'answered',
+        result: {id, outcome: 'stopping', route: 'control_socket'},
+      }),
+    });
+    await w.controller.request(TARGET, false);
+
+    w.controller.observeListing(HOST, {
+      instances: [],
+      unverified: uncertain === 'unverified' ? [TARGET.instanceId] : [],
+      unreadable: uncertain === 'unreadable' ? [{id: TARGET.instanceId, version: 5}] : [],
+    });
+    expect(w.controller.views()[KEY]).toMatchObject({phase: 'stopping', text: 'Stopping…'});
+
+    w.controller.observeListing(HOST, {instances: [record(TARGET.instanceId, 'run-1')]});
+    expect(w.controller.views()[KEY]?.phase).toBe('stopping');
+    w.controller.observeListing(HOST, {instances: []});
     expect(w.controller.views()[KEY]?.phase).toBe('ended');
   });
 

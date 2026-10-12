@@ -23,6 +23,7 @@ export {
   type HostListing,
   type HostRun,
   hostListing,
+  type InstanceObservation,
+  instanceObservation,
   instancePhaseText,
-  liveRecord,
 } from './listing.js';

@@ -1,11 +1,12 @@
 /**
  * The stop flows of every run the app has been asked to stop: one `StopState` per run, driven by
  * `stopStep`. It asks the user (`confirm`), runs the stop through the run's host, and learns that a
- * run has ended from the registry's pushes (`observeLive`) or from the connection (`runEnded`). No timers:
- * the caller reports what it sees and is told, through `changed`, when a view must be redrawn.
+ * run has ended from the registry's pushes (`observeListing`) or from the connection (`runEnded`).
+ * No timers: the caller reports what it sees and is told, through `changed`, when a view must be
+ * redrawn.
  */
-import type {InstanceStopResult} from '@vibesys/contracts/host-helper';
-import type {HostKey} from '@vibesys/hosts';
+import type {InstanceList, InstanceStopResult} from '@vibesys/contracts/host-helper';
+import {type HostKey, instanceObservation} from '@vibesys/hosts';
 import {
   confirmText,
   STOP_IDLE,
@@ -132,11 +133,19 @@ export class StopController {
     }
   }
 
-  /** Every accepted stop of `host` whose server `live` (the registry's live ids) no longer lists is over. */
-  observeLive(host: HostKey, live: ReadonlySet<string>): void {
+  /** End accepted stops only when `listing` proves the server ended or is absent. */
+  observeListing(host: HostKey, listing: InstanceList): void {
     for (const [key, state] of [...this.#states]) {
       const [stopHost, instanceId = ''] = key.split('\n');
-      if (stopHost !== host || live.has(instanceId)) continue;
+      if (stopHost !== host) continue;
+      const observation = instanceObservation(listing, instanceId);
+      if (
+        observation.kind === 'live' ||
+        observation.kind === 'unverified' ||
+        observation.kind === 'unreadable'
+      ) {
+        continue;
+      }
       if (state.phase === 'stopping' && state.accepted) this.#step(key, {type: 'ended'});
     }
   }

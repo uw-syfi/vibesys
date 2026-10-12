@@ -19,6 +19,7 @@ import {
   type LiveInstanceRecord,
   type PathEntry,
   parseHelperRequest,
+  type UnreadableRecord,
 } from '@vibesys/contracts/host-helper';
 import {ConnectionError} from '../shell/helper-channel.js';
 import type {Link} from '../shell/link.js';
@@ -85,6 +86,8 @@ export const ECHO_SERVER: RunServer = stream =>
 export interface FakeHost {
   readonly instances: LiveInstanceRecord[];
   readonly ended: LiveInstanceRecord[];
+  readonly unreadable: UnreadableRecord[];
+  readonly unverified: string[];
   /** Project directories and their tasks. */
   readonly projects: Map<string, readonly string[]>;
   /** Directories and the directories in them. */
@@ -121,6 +124,8 @@ export class FakeHelper {
   readonly host: FakeHost = {
     instances: [],
     ended: [],
+    unreadable: [],
+    unverified: [],
     projects: new Map(),
     directories: new Map(),
     runs: new Map(),
@@ -213,7 +218,51 @@ export class FakeHelper {
 
   /** Publish a live record; watches push it. */
   publish(live: LiveInstanceRecord): void {
+    this.host.unreadable.splice(
+      0,
+      this.host.unreadable.length,
+      ...this.host.unreadable.filter(entry => entry.id !== live.id),
+    );
+    this.host.unverified.splice(
+      0,
+      this.host.unverified.length,
+      ...this.host.unverified.filter(id => id !== live.id),
+    );
     this.host.instances.push(live);
+    this.changed();
+  }
+
+  /** Replace a live record with an observation whose lock could not be read. */
+  unverify(id: string): void {
+    this.host.instances.splice(
+      0,
+      this.host.instances.length,
+      ...this.host.instances.filter(entry => entry.id !== id),
+    );
+    this.host.unreadable.splice(
+      0,
+      this.host.unreadable.length,
+      ...this.host.unreadable.filter(entry => entry.id !== id),
+    );
+    if (!this.host.unverified.includes(id)) this.host.unverified.push(id);
+    this.changed();
+  }
+
+  /** Replace a live record with one this helper cannot interpret. */
+  makeUnreadable(id: string, version = 5): void {
+    this.host.instances.splice(
+      0,
+      this.host.instances.length,
+      ...this.host.instances.filter(entry => entry.id !== id),
+    );
+    this.host.unverified.splice(
+      0,
+      this.host.unverified.length,
+      ...this.host.unverified.filter(entry => entry !== id),
+    );
+    if (!this.host.unreadable.some(entry => entry.id === id)) {
+      this.host.unreadable.push({id, version});
+    }
     this.changed();
   }
 
@@ -245,8 +294,8 @@ export class FakeHelper {
       version: 4,
       instances: [...this.host.instances],
       ended: [...this.host.ended],
-      unreadable: [],
-      unverified: [],
+      unreadable: [...this.host.unreadable],
+      unverified: [...this.host.unverified],
     };
   }
 

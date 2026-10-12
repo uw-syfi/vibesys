@@ -2,7 +2,12 @@
  * A host's runs, as its registry lists them, and the pure projection of what a host's helper
  * reports into that model.
  */
-import type {InstanceList, LiveInstanceRecord, RunPhase} from '@vibesys/contracts/host-helper';
+import type {
+  InstanceList,
+  LiveInstanceRecord,
+  RunPhase,
+  UnreadableRecord,
+} from '@vibesys/contracts/host-helper';
 import type {ConnectionStatus} from './connection-status.js';
 import type {HostKey} from './host.js';
 
@@ -36,6 +41,19 @@ export type HostListing =
       readonly host: HostKey;
       readonly connection: ConnectionStatus;
     };
+
+type ListedHost = Extract<HostListing, {readonly kind: 'listed'}>;
+
+/** What one coherent registry listing proves about an instance. */
+export type InstanceObservation<Record, Unreadable = string> =
+  | {readonly kind: 'live'; readonly record: Record}
+  | {readonly kind: 'ended'; readonly record: Record}
+  /** Its lock could not be read, so liveness is unknown. */
+  | {readonly kind: 'unverified'}
+  /** Its record cannot be interpreted by this app, so liveness is unknown. */
+  | {readonly kind: 'unreadable'; readonly record: Unreadable}
+  /** The listing contains no evidence for this id. */
+  | {readonly kind: 'absent'};
 
 const STAGES: Readonly<Record<NonNullable<RunPhase['stage']>, string>> = {
   resolving: 'Resolving',
@@ -82,7 +100,38 @@ export function hostListing(host: HostKey, listing: InstanceList): HostListing {
   };
 }
 
-/** The live record of `instanceId` in `listing`, if there is one. */
-export function liveRecord(listing: InstanceList, instanceId: string): LiveInstanceRecord | null {
-  return listing.instances.find(record => record.id === instanceId) ?? null;
+/**
+ * The registry's observation for `instanceId`, shared by transport and view projections.
+ *
+ * A valid record is stronger evidence than an overlapping uncertainty bucket (real registry
+ * listings partition ids, but keeping precedence here makes every consumer agree even on a
+ * synthesized listing). Without one, unverified wins over unreadable because a failed lock read
+ * cannot establish what record owns the id. Absence alone is the only remaining verdict.
+ */
+export function instanceObservation(
+  listing: InstanceList,
+  instanceId: string,
+): InstanceObservation<LiveInstanceRecord, UnreadableRecord>;
+export function instanceObservation(
+  listing: ListedHost,
+  instanceId: string,
+): InstanceObservation<HostRun>;
+export function instanceObservation(
+  listing: InstanceList | ListedHost,
+  instanceId: string,
+): InstanceObservation<LiveInstanceRecord | HostRun, UnreadableRecord | string> {
+  const live = ('instances' in listing ? listing.instances : listing.live).find(
+    record => record.id === instanceId,
+  );
+  if (live !== undefined) return {kind: 'live', record: live};
+
+  const ended = (listing.ended ?? []).find(record => record.id === instanceId);
+  if (ended !== undefined) return {kind: 'ended', record: ended};
+  if ((listing.unverified ?? []).includes(instanceId)) return {kind: 'unverified'};
+
+  const unreadable = (listing.unreadable ?? []).find(record =>
+    typeof record === 'string' ? record === instanceId : record.id === instanceId,
+  );
+  if (unreadable !== undefined) return {kind: 'unreadable', record: unreadable};
+  return {kind: 'absent'};
 }

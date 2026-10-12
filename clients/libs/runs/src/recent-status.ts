@@ -3,7 +3,7 @@
  * (`HostListing`) and those runs: each recent run's status, and the project directories to offer.
  * Pure functions of pushed data; the host is never asked again for them.
  */
-import type {HostKey, HostListing, HostRun} from '@vibesys/hosts';
+import {type HostKey, type HostListing, type HostRun, instanceObservation} from '@vibesys/hosts';
 
 /** A run the user attached to, as the views list it. */
 export interface RecentRun {
@@ -38,6 +38,16 @@ export function recentStatus(run: RecentRun, listing: HostListing | undefined): 
     entry => entry.runId === run.runId && entry.projectRoot === run.project,
   );
   if (live !== undefined) return {kind: 'live', instanceId: live.id, status: live.status};
+  if (run.instanceId !== null) {
+    const observed = instanceObservation(listing, run.instanceId);
+    if (observed.kind === 'unverified' || observed.kind === 'unreadable') {
+      return {kind: 'unknown'};
+    }
+  } else if (listing.unverified.length > 0 || listing.unreadable.length > 0) {
+    // V2 recent entries predate durable instance ids. Any uncertain row could be this run's
+    // current server, so absence cannot prove that the run ended.
+    return {kind: 'unknown'};
+  }
   // A run resumed and ended again has several tombstones: its latest server says how it ended.
   const ended = listing.ended
     .filter(entry => entry.runId === run.runId && entry.projectRoot === run.project)

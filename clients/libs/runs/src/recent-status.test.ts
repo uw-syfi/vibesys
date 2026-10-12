@@ -68,6 +68,68 @@ describe('recentStatus', () => {
     expect(recentStatus(RECENT, undefined)).toEqual({kind: 'unknown'});
   });
 
+  test.each([
+    'unverified',
+    'unreadable',
+  ] as const)('a recent run whose current instance is %s stays unknown instead of offering Resume', uncertain => {
+    const listing: HostListing = {
+      kind: 'listed',
+      host: 'ssh:gpu',
+      live: [],
+      // An older server for this logical run is not evidence that its current server ended.
+      ended: [server(1, 1, 'stopped')],
+      unreadable: uncertain === 'unreadable' ? [RECENT.instanceId ?? ''] : [],
+      unverified: uncertain === 'unverified' ? [RECENT.instanceId ?? ''] : [],
+    };
+
+    expect(recentStatus(RECENT, listing)).toEqual({kind: 'unknown'});
+    expect(
+      recentStatus(RECENT, {
+        ...listing,
+        live: [server(10, 10, 'running')],
+        unreadable: [],
+        unverified: [],
+      }),
+    ).toEqual({kind: 'live', instanceId: '00000000000a', status: 'running'});
+  });
+
+  test.each([
+    'unverified',
+    'unreadable',
+  ] as const)('a migrated recent run without an instance id stays unknown while any row is %s', uncertain => {
+    const migrated: RecentRun = {...RECENT, instanceId: null};
+    const listing: HostListing = {
+      kind: 'listed',
+      host: 'ssh:gpu',
+      live: [],
+      ended: [server(1, 1, 'stopped')],
+      unreadable: uncertain === 'unreadable' ? ['ffffffffffff'] : [],
+      unverified: uncertain === 'unverified' ? ['ffffffffffff'] : [],
+    };
+
+    expect(recentStatus(migrated, listing)).toEqual({kind: 'unknown'});
+  });
+
+  test('a migrated recent run can be considered ended when the listing has no uncertainty', () => {
+    const migrated: RecentRun = {...RECENT, instanceId: null};
+    const ended = server(1, 1, 'stopped');
+    const listing: HostListing = {
+      kind: 'listed',
+      host: 'ssh:gpu',
+      live: [],
+      ended: [ended],
+      unreadable: [],
+      unverified: [],
+    };
+
+    expect(recentStatus(migrated, listing)).toEqual({
+      kind: 'ended',
+      instanceId: ended.id,
+      status: 'stopped',
+      reason: null,
+    });
+  });
+
   test('an ended run keeps its durable locator after its tombstone expires', () => {
     const other = server(9, 9, 'failed');
     const listing: HostListing = {

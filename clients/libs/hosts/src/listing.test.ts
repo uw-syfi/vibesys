@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import type {InstanceList} from '@vibesys/contracts/host-helper';
-import {hostListing, instancePhaseText} from './listing.js';
+import {type HostRun, hostListing, instanceObservation, instancePhaseText} from './listing.js';
 
 describe('instancePhaseText', () => {
   test('a starting run reads as its stage and progress, so a long image build is visible', () => {
@@ -110,5 +110,47 @@ describe('hostListing', () => {
       expect(result.unreadable).toEqual([...unreadableIds].sort());
       expect(result.unverified).toEqual([...unverifiedIds].sort());
     }
+  });
+});
+
+describe('instanceObservation', () => {
+  const TARGET = 'target';
+  const KINDS = ['live', 'ended', 'unverified', 'unreadable'] as const;
+  const run = (id: string): HostRun => ({
+    id,
+    projectRoot: '/p',
+    runId: `run-${id}`,
+    status: 'running',
+    startedAt: 1,
+    reason: null,
+  });
+  const when = <T>(mask: number, bit: number, value: T): T[] => ((mask & bit) === 0 ? [] : [value]);
+
+  test('valid records win overlaps, then unverified, unreadable, and absence in that order', () => {
+    for (let mask = 0; mask < 16; mask += 1) {
+      const listing = {
+        kind: 'listed' as const,
+        host: 'local' as const,
+        live: when(mask, 1, run(TARGET)),
+        ended: when(mask, 2, run(TARGET)),
+        unverified: when(mask, 4, TARGET),
+        unreadable: when(mask, 8, TARGET),
+      };
+
+      const expected = KINDS.find((_kind, index) => (mask & (1 << index)) !== 0) ?? 'absent';
+      expect(instanceObservation(listing, TARGET).kind).toBe(expected);
+    }
+  });
+
+  test('unrelated ids never change the target observation', () => {
+    const listing = {
+      kind: 'listed' as const,
+      host: 'local' as const,
+      live: [run('live')],
+      ended: [run('ended')],
+      unverified: ['unverified'],
+      unreadable: ['unreadable'],
+    };
+    expect(instanceObservation(listing, TARGET)).toEqual({kind: 'absent'});
   });
 });

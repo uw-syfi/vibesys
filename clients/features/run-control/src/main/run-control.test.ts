@@ -6,6 +6,7 @@ import {
   HostConnection,
 } from '@vibesys/connection';
 import {FakeLink, record} from '@vibesys/connection/testing';
+import type {InstanceList} from '@vibesys/contracts/host-helper';
 import type {ConnectionStatus} from '@vibesys/hosts';
 import {exactResumeRunId} from '@vibesys/runs';
 import type {StoredRecentRun} from '@vibesys/settings';
@@ -182,6 +183,23 @@ async function status(runs: RunControl, kind: ConnectionStatus['kind']): Promise
   expect(runs.attached()?.connection.kind).toBe(kind);
 }
 
+/** Perform `change`, then resolve once the connection has delivered its resulting listing. */
+async function observeListing(
+  connection: HostConnection,
+  expected: (listing: InstanceList) => boolean,
+  change: () => void,
+): Promise<void> {
+  let release = (): void => {};
+  const observed = new Promise<void>(resolve => {
+    release = connection.watchInstances(listing => {
+      if (expected(listing)) resolve();
+    });
+  });
+  change();
+  await observed;
+  release();
+}
+
 describe('RunControl over the FakeHelper', () => {
   test('regression: a start while the host listing is already held binds the run, not an ended one', async () => {
     const w = world();
@@ -213,6 +231,52 @@ describe('RunControl over the FakeHelper', () => {
     await status(w.runs, 'connected');
     w.link.helper.end('00000000000a');
     await status(w.runs, 'run-ended');
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test.each([
+    ['unverified', 'could not confirm whether run'],
+    ['unreadable', 'cannot be read by this VibeSys version'],
+  ] as const)('attaching to an %s instance reports uncertainty instead of saying it ended', async (uncertain, message) => {
+    const w = world();
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+    if (uncertain === 'unverified') w.link.helper.unverify(RUN_A);
+    else w.link.helper.makeUnreadable(RUN_A);
+
+    await expect(w.runs.attach(HOST, RUN_A)).rejects.toThrow(message);
+    expect(w.runs.attached()).toBeNull();
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test.each([
+    'unverified',
+    'unreadable',
+  ] as const)('an attached run survives live → %s → live registry observations', async uncertain => {
+    const w = world();
+    const live = record(RUN_A, 'run-a', '/p');
+    w.link.helper.publish(live);
+    await w.runs.attach(HOST, RUN_A);
+    expect(w.runs.attached()?.connection.kind).toBe('connected');
+
+    await observeListing(
+      w.connection,
+      listing =>
+        uncertain === 'unverified'
+          ? (listing.unverified ?? []).includes(RUN_A)
+          : (listing.unreadable ?? []).some(entry => entry.id === RUN_A),
+      () => {
+        if (uncertain === 'unverified') w.link.helper.unverify(RUN_A);
+        else w.link.helper.makeUnreadable(RUN_A);
+      },
+    );
+    expect(w.runs.attached()?.connection.kind).toBe('connected');
+
+    await observeListing(
+      w.connection,
+      listing => listing.instances.some(entry => entry.id === RUN_A),
+      () => w.link.helper.publish(live),
+    );
+    expect(w.runs.attached()?.connection.kind).toBe('connected');
     await w.connection[Symbol.asyncDispose]();
   });
 

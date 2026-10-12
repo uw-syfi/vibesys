@@ -27,7 +27,7 @@ import {
   hostFromKey,
   hostKey,
   hostLabel,
-  liveRecord,
+  instanceObservation,
 } from '@vibesys/hosts';
 import type {ChromeState, StartOutcome} from '@vibesys/ipc';
 import type {ResumeRunId, StopView} from '@vibesys/runs';
@@ -165,9 +165,23 @@ export class RunControl {
       if (!this.#owns(generation)) return;
       const {listing} = await connection.request({type: 'instances.list'});
       if (!this.#owns(generation)) return;
-      const record = liveRecord(listing, instanceId);
-      if (record === null) throw new Error(`no live run ${instanceId} on ${hostLabel(id)}`);
-      transferred = await this.#bind(generation, id, lease, record, task);
+      const observation = instanceObservation(listing, instanceId);
+      switch (observation.kind) {
+        case 'live':
+          transferred = await this.#bind(generation, id, lease, observation.record, task);
+          break;
+        case 'unverified':
+          throw new Error(
+            `${hostLabel(id)} could not confirm whether run ${instanceId} is still live`,
+          );
+        case 'unreadable':
+          throw new Error(
+            `run ${instanceId} on ${hostLabel(id)} cannot be read by this VibeSys version`,
+          );
+        case 'ended':
+        case 'absent':
+          throw new Error(`no live run ${instanceId} on ${hostLabel(id)}`);
+      }
     } catch (error) {
       this.#forgetIntended(generation);
       throw error;
@@ -529,12 +543,23 @@ export class RunControl {
 
   #listing(binding: Binding, listing: InstanceList): void {
     const host = hostKey(binding.id);
-    this.#stops.observeLive(host, new Set(listing.instances.map(record => record.id)));
+    this.#stops.observeListing(host, listing);
     if (this.#run !== binding) return;
-    const live = liveRecord(listing, binding.instanceId) !== null;
-    const ended = (listing.ended ?? []).some(record => record.id === binding.instanceId);
-    if (live) binding.seenLive = true;
-    else if (ended || binding.seenLive) this.#ended(binding);
+    const observation = instanceObservation(listing, binding.instanceId);
+    switch (observation.kind) {
+      case 'live':
+        binding.seenLive = true;
+        break;
+      case 'ended':
+        this.#ended(binding);
+        break;
+      case 'absent':
+        if (binding.seenLive) this.#ended(binding);
+        break;
+      case 'unverified':
+      case 'unreadable':
+        break;
+    }
   }
 
   #ended(binding: Binding): void {
