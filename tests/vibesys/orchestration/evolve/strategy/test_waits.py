@@ -23,7 +23,7 @@ from tests.vibesys.orchestration.evolve.strategy._waiting_turns import (
 )
 
 from vs_core.api import AttemptPhase, RunStatus, Settle, Withdraw
-from vs_runtime.api.testing import HostOptions, Run
+from vs_runtime.api.testing import HostOptions, Run, Script
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,17 +31,13 @@ if TYPE_CHECKING:
     import pytest
 
 
-# A parameter bundle would rewrite every call of this shared helper for one more fault knob; the
-# knobs are independent keyword-only axes of one generated run, so the long signature is the plain form.
-def _run(  # noqa: PLR0913
+def _world(
     root: Path,
     *,
     waits: tuple[bool | str, ...],
     polls: tuple[int, ...],
-    parallelism: int,
     roles: tuple[str, ...] = ("mutator", "judge"),
-    checkpoints: tuple[str, ...] = (),
-) -> Run:
+) -> tuple[WaitingTurns, HostOptions]:
     """A run whose ``roles`` may wait; a lone mutator's resumed turn leaves the tree as it was."""
     bridge = new_bridge(root)
     script = WaitingTurns(
@@ -60,13 +56,30 @@ def _run(  # noqa: PLR0913
         controlled=True,
         lifecycle=frozenset({"suspend"}),
     )
+    return script, host
+
+
+def _play(script: Script, host: HostOptions, parallelism: int) -> Run:
     return run_shell(
-        with_checkpoints(script, checkpoints),
+        script,
         host=host,
         max_generations=1,
         children_per_generation=2,
         max_parallelism=parallelism,
     )
+
+
+def _run(
+    root: Path,
+    *,
+    waits: tuple[bool | str, ...],
+    polls: tuple[int, ...],
+    parallelism: int,
+    roles: tuple[str, ...] = ("mutator", "judge"),
+) -> Run:
+    """A run whose ``roles`` may wait; a lone mutator's resumed turn leaves the tree as it was."""
+    script, host = _world(root, waits=waits, polls=polls, roles=roles)
+    return _play(script, host, parallelism)
 
 
 def test_a_child_whose_turn_waited_adopts_the_candidate_it_checkpointed(tmp_path: Path) -> None:
@@ -152,6 +165,12 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
         ]
 
 
+def _run_with_checkpoints(root: Path, checkpoints: tuple[str, ...], polls: int) -> Run:
+    """A one-generation run whose waiting turn finds its checkpoint answered per ``checkpoints``."""
+    script, host = _world(root, waits=(True,), polls=(polls,), roles=("mutator",))
+    return _play(with_checkpoints(script, checkpoints), host, 1)
+
+
 @settings(max_examples=10, deadline=None, derandomize=True, database=None)
 @given(checkpoints=CHECKPOINTS, polls=st.integers(0, 3))
 def test_a_run_ends_whatever_the_checkpoint_of_a_waiting_turn_does(
@@ -160,18 +179,11 @@ def test_a_run_ends_whatever_the_checkpoint_of_a_waiting_turn_does(
     """A turn that asked to wait is suspended or failed with a reason, never left waiting.
 
     Core publishes the suspension only once the turn's workspace is checkpointed. Whether
-    the executor retains it, fails it for good or fails it transiently, the run must reach
+    the executor retains the workspace or fails the checkpoint, the run must reach
     terminal with every attempt closed and no wait left without something to end it
     (`run_shell` asserts the last).
     """
-    finished = _run(
-        tmp_path_factory.mktemp("checkpoints"),
-        waits=(True,),
-        polls=(polls,),
-        parallelism=1,
-        roles=("mutator",),
-        checkpoints=checkpoints,
-    )
+    finished = _run_with_checkpoints(tmp_path_factory.mktemp("checkpoints"), checkpoints, polls)
 
     assert finished.core.run.status == RunStatus.TERMINAL
     for attempt in finished.core.attempts.attempts:
@@ -182,14 +194,7 @@ def test_a_declined_checkpoint_fails_the_waiting_turn_instead_of_stalling_the_ru
     tmp_path: Path,
 ) -> None:
     """Every checkpoint fails: the turn cannot be suspended, and the run still ends."""
-    finished = _run(
-        tmp_path,
-        waits=(True,),
-        polls=(1,),
-        parallelism=1,
-        roles=("mutator",),
-        checkpoints=("failed",),
-    )
+    finished = _run_with_checkpoints(tmp_path, ("failed",), 1)
 
     assert finished.core.run.status == RunStatus.TERMINAL
     assert finished.core.evaluation.continuations == ()
