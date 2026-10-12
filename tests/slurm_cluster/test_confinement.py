@@ -87,6 +87,18 @@ def test_a_job_has_a_writable_tmpdir_even_when_the_requested_tmpdir_is_absent_fr
     assert result.output.endswith("ok\nok\nok\nok\n/tmp\n")
 
 
+def test_a_login_shell_in_a_job_can_write_the_tmpdir_that_the_host_sets(
+    gpu_run: OpenRun,
+) -> None:
+    """Regression: a host's profile.d reset TMPDIR to a path the job's namespace lacked."""
+    result = gpu_run.agent(
+        'TMPDIR=/nonexistent-host-scratch "$VIBESYS_GPU" -- bash -lc \'touch "$TMPDIR/x" && echo ok\''
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.output.endswith("ok\n")
+
+
 def test_a_job_runs_as_the_unprivileged_host_user_in_its_own_pid_namespace(
     gpu_run: OpenRun,
 ) -> None:

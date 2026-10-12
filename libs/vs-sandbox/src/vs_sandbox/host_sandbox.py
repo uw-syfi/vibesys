@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import enum
 import os
+import posixpath
 import shutil
 import sys
 from abc import ABC, abstractmethod
@@ -259,6 +260,24 @@ class HostSandbox(WorkspaceSandbox):
     bwrap_path: str = field(kw_only=True)
     system_read_roots: tuple[str, ...] = _SYSTEM_READ_ROOTS
     gpu_device_nodes: tuple[Path, ...] = field(default_factory=tuple)
+    #: Absolute scratch directories the host's own startup files point
+    #: ``TMPDIR``/``TMP``/``TEMP`` at (see :func:`_host_temp_dirs`). Each gets a
+    #: private writable tmpfs in the namespace, next to ``/tmp``.
+    temp_dirs: tuple[str, ...] = ()
+
+    def _temp_dir_mounts(self) -> list[str]:
+        """Return the ``--tmpfs`` arguments for the host's scratch paths.
+
+        A login shell inside the job re-runs the host's startup files, which may
+        reset TMPDIR to a host scratch path (``/raid/tmp``) after the ``--setenv``
+        below. Whatever the shell picks must be writable, so every such path is
+        also a private tmpfs; the variables then work whoever sets them.
+        """
+        mounts: list[str] = []
+        for temp_dir in self.temp_dirs:
+            if temp_dir != _PRIVATE_TMP:
+                mounts += ["--tmpfs", temp_dir]
+        return mounts
 
     def wrap(self, argv: list[str], cwd: Path | str | None = None) -> list[str]:
         """Return *argv* wrapped so it runs inside the confinement namespace.
@@ -286,6 +305,7 @@ class HostSandbox(WorkspaceSandbox):
             "--tmpfs",
             _PRIVATE_TMP,
         ]
+        cmd += self._temp_dir_mounts()
         # The inherited TMPDIR names a host path (a node-local scratch disk, say)
         # that does not exist in the namespace, so tools that need scratch space
         # (Nsight Compute, compilers) fail. Point every convention at the
@@ -747,6 +767,34 @@ def _requested_linux_backend(env: dict[str, str]) -> LinuxBackend:
         ) from None
 
 
+def _absolute_temp_dirs(values: Iterable[str]) -> list[str]:
+    """Return the normalised absolute, non-root paths among *values*, in order."""
+    dirs: list[str] = []
+    for value in values:
+        path = posixpath.normpath(value.strip()) if value.strip() else ""
+        if path.startswith("/") and path != "/" and path not in dirs:
+            dirs.append(path)
+    return dirs
+
+
+def _host_temp_dirs(env: Mapping[str, str], probe: CommandProbe) -> tuple[str, ...]:
+    """Return the scratch directories this host's shells will name in ``TMPDIR`` and kin.
+
+    Two sources: the environment :func:`build` was given, and a login shell's,
+    because site files such as ``/etc/profile.d/*.sh`` set these only for login
+    shells and a job's ``bash -lc`` re-runs them. The login probe is one short
+    ``bash`` start; if it cannot run, the environment's values still apply.
+    """
+    values = [env.get(name, "") for name in _TEMP_ENV_NAMES]
+    result = probe.run(
+        ["bash", "-lc", "printf '%s\\n' " + " ".join(f'"${name}"' for name in _TEMP_ENV_NAMES)],
+        timeout_seconds=10,
+    )
+    if result is not None and result.returncode == 0:
+        values += result.stdout.splitlines()[-len(_TEMP_ENV_NAMES) :]
+    return tuple(_absolute_temp_dirs(values))
+
+
 def _bwrap_confines(bwrap: str, probe: CommandProbe) -> bool:
     """Return whether *bwrap* can actually create a namespace on this host.
 
@@ -781,6 +829,7 @@ def _build_linux(
                 gpu_device_nodes=(
                     () if options.env.get(GPU_DEVICES_ENV) == "none" else tuple(_gpu_device_nodes())
                 ),
+                temp_dirs=_host_temp_dirs(options.env, options.probe),
                 build_env=options.env,
             )
         reason = (
