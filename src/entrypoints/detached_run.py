@@ -133,11 +133,22 @@ class RecordPublisher:
             self._publish(ended_at=self._clock.now())
 
     def _flush(self, wait: float) -> None:
-        self._threads.sleep(wait)
-        with self._lock:
-            self._flush_scheduled = False
-            if self._held is not None:
-                self._publish(phase=self._held)
+        """Write the held phase once the interval since the latest write has passed.
+
+        Another write may land while this worker sleeps (and restart the
+        interval), so the remaining wait is recomputed from the latest write
+        each time the worker wakes, rather than trusting the wait it was
+        spawned with.
+        """
+        while True:
+            self._threads.sleep(wait)
+            with self._lock:
+                wait = self._written_at + PROGRESS_WRITE_INTERVAL_SECONDS - self._threads.now()
+                if self._held is None or wait <= 0:
+                    self._flush_scheduled = False
+                    if self._held is not None:
+                        self._publish(phase=self._held)
+                    return
 
     def _publish(self, **update: object) -> None:
         """Write the record with ``update``; the caller holds ``self._lock``."""

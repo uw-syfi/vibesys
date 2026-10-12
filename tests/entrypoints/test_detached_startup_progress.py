@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from itertools import pairwise
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from entrypoints.detached_run import PROGRESS_WRITE_INTERVAL_SECONDS, RecordPublisher
@@ -125,6 +125,8 @@ def test_a_build_failure_leaves_a_tombstone_failed_in_building_image() -> None:
     )
 
 
+_CLOCK_ROUNDING_SECONDS = 1e-9
+
 _FACTS = st.one_of(
     st.builds(_building, st.integers(0, 13)),
     st.builds(StartupFact, stage=st.sampled_from(StartupStage)),
@@ -133,6 +135,10 @@ _FACTS = st.one_of(
 
 
 @settings(max_examples=40, deadline=None)
+# A progress write that lands as the flush worker wakes restarts the interval;
+# the worker must not then write the next held phase at the same instant.
+@example(steps=[(0.0, _building(0)), (0.0, _building(1)), (1.0, _building(0)), (0.0, _building(1))])
+@example(steps=[(0.1, _building(1)), (0.4, _building(0)), (0.9, _building(1)), (0.9, _building(0))])
 @given(steps=st.lists(st.tuples(st.sampled_from([0.0, 0.1, 0.4, 0.9, 1.0, 3.0]), _FACTS)))
 def test_progress_writes_are_paced_and_the_record_ends_on_the_folded_phase(
     steps: list[tuple[float, StartupFact | RunStatus]],
@@ -165,4 +171,5 @@ def test_progress_writes_are_paced_and_the_record_ends_on_the_folded_phase(
     assert writes[-1][1] == folded
     for (before_at, before), (at, phase) in pairwise(writes):
         if (phase.status, phase.stage) == (before.status, before.stage):
-            assert at - before_at >= PROGRESS_WRITE_INTERVAL_SECONDS
+            # Times are sums of floats (4.1 - 3.1 is 0.9999999999999996), so allow rounding error.
+            assert at - before_at >= PROGRESS_WRITE_INTERVAL_SECONDS - _CLOCK_ROUNDING_SECONDS
