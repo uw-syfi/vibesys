@@ -63,6 +63,7 @@ class StageRequirements(Value):
 
     @model_serializer(mode="wrap")
     def omit_empty_requirements(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        """Serialize, leaving out ``required_outputs`` when it is empty."""
         data: dict[str, object] = handler(self)
         if not data.get("required_outputs"):
             data.pop("required_outputs", None)
