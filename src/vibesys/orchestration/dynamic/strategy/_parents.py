@@ -77,14 +77,21 @@ def _evidence(view: RunView) -> dict[EvidenceKey, EvidenceRef]:
 
 
 def retained_revisions(view: RunView) -> frozenset[RevisionRef]:
-    """Every revision core retained: attempt checkpoints and candidate settlements."""
-    held = {checkpoint.revision for attempt in view.attempts for checkpoint in attempt.checkpoints}
-    held.update(
+    """Every revision the run itself retained: candidate settlements that kept their candidate.
+
+    An attempt's checkpoint is not enough. It is owned by the attempt that took it, and the
+    executor only lets a *different* attempt build on a revision once the run owns it, which
+    happens when the producing attempt's closure retains the candidate. Core records the
+    settlement only after that closure released, so the settlement is the one signal that
+    the revision is a revision of this run. Offering a checkpoint earlier let a planner name
+    a parent whose run-ownership was still being written, and the child's workspace request
+    was then rejected as permanent.
+    """
+    return frozenset(
         item.candidate
         for item in view.settlements
         if item.candidate is not None and item.retention != "discard"
     )
-    return frozenset(held)
 
 
 def _names_revision(evidence: EvidenceRef | None, revision: RevisionRef) -> bool:

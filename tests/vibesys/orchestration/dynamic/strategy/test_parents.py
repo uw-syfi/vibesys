@@ -12,6 +12,7 @@ from tests.vibesys.orchestration.dynamic.strategy._views import (
     empty_view,
     partial,
     snapshot,
+    view_checkpointing,
     view_proving,
 )
 
@@ -196,3 +197,20 @@ def test_equal_observed_partials_choose_comparable_progress_then_stable_receipt(
     view = view_proving(first, second)
     catalog = _catalog((second, first))
     assert next(row.snapshot for row in options(catalog, view) if row.best_partial) == first
+
+
+@given(st.lists(st.floats(min_value=1.0, max_value=100.0), min_size=1, max_size=4, unique=True))
+def test_a_checkpoint_of_a_closing_attempt_is_never_offered_as_a_parent(
+    values: list[float],
+) -> None:
+    """The run owns a revision only when the attempt's closure retained it (its settlement).
+
+    Until then the executor refuses a different attempt's workspace on that revision as
+    permanently not a revision of the run, so the planner must not be offered it.
+    """
+    rows = tuple(snapshot(value, ordinal) for ordinal, value in enumerate(values, 1))
+    checkpointed = view_checkpointing(*rows)
+    assert all(ingest((), row, checkpointed) == () for row in rows)
+    assert options(rows, checkpointed) == ()
+    settled = view_proving(*rows)
+    assert {item.snapshot for item in options(rows, settled)} == set(rows)

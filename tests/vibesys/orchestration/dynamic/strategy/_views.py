@@ -11,11 +11,16 @@ from vibesys.orchestration.dynamic.strategy.api import (
     PartialRow,
 )
 from vs_core.api import (
+    AttemptBudget,
+    AttemptCheckpoint,
     AttemptId,
+    AttemptPhase,
     AttemptRef,
+    AttemptView,
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
+    ItemId,
     ObservationStatus,
     RequestId,
     RevisionId,
@@ -25,6 +30,8 @@ from vs_core.api import (
     Scope,
     Settlement,
     SettlementId,
+    WorkspaceMode,
+    WorkspacePlan,
     project,
 )
 from vs_core.testing.builders import initial_state
@@ -128,3 +135,32 @@ def view_proving(*snapshots: ParentSnapshot, retained: bool = True) -> RunView:
         if retained
     )
     return base.model_copy(update={"measurements": tuple(measurements), "settlements": settlements})
+
+
+def view_checkpointing(*snapshots: ParentSnapshot) -> RunView:
+    """A view whose evidence proves the snapshots but only still-running attempts hold them.
+
+    Each revision is a checkpoint of a closing attempt and appears in no settlement, which is
+    the state before the producing attempt's closure has retained it for the run.
+    """
+    proved = view_proving(*snapshots, retained=False)
+    attempts = tuple(
+        AttemptView(
+            attempt_id=AttemptId(root=f"attempt-{index}"),
+            item_id=ItemId(root=f"item-{index}"),
+            generation=0,
+            phase=AttemptPhase.CLOSING,
+            workspace=WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=proved.facts.baseline),
+            budget=AttemptBudget(),
+            checkpoints=(
+                AttemptCheckpoint(
+                    invocation=None,
+                    request_id=RequestId(root=f"checkpoint-{index}"),
+                    revision=item.revision,
+                    retention="candidate",
+                ),
+            ),
+        )
+        for index, item in enumerate(snapshots)
+    )
+    return proved.model_copy(update={"attempts": attempts})
