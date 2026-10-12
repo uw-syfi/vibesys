@@ -406,7 +406,7 @@ def render_packaged_prompts(installed: Path) -> int:
         "tool_paths": (("ncu", "/usr/local/cuda/bin/ncu"),),
     }
     context["prompts"] = ("Review the candidate.",)
-    context["inputs"] = ({"mode": "steer", "text": "Focus on the cache."},)
+    context["steers"] = ({"mode": "steer", "text": "Focus on the cache."},)
     hidden = (
         build_project_path_policy(workspace, evaluator_source=None).resolve(workspace).hidden_paths
     )

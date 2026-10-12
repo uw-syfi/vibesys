@@ -184,7 +184,7 @@ class ProductionSessionResolver:
 class TurnMessages:
     """Renders a turn's message from its prompts and the inputs reserved for it.
 
-    Operator steering reaches a turn here: a steer is a reserved input, and the template
+    Operator steering reaches a turn here: every reserved input is a steer, and the template
     shows every reserved input after the prompts, in reservation order.
     """
 
@@ -205,7 +205,7 @@ class TurnMessages:
                 self._text(dependency)
         except (ArtifactStoreError, UnicodeDecodeError, _MissingArtifactError):
             return None
-        return self._renderer.render_template(_TEMPLATE, prompts=prompts, inputs=texts)
+        return self._renderer.render_template(_TEMPLATE, prompts=prompts, steers=texts)
 
     def _text(self, ref: ArtifactRef) -> str:
         content = self._artifacts.read_digest(ref.digest)
