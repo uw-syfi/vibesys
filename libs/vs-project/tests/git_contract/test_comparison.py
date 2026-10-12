@@ -119,6 +119,18 @@ def test_uncommitted_paths_list_modified_staged_and_untracked_files_individually
     assert repo.uncommitted_paths(["fresh"]) == ("fresh/one.txt", "fresh/two.txt")
 
 
+def test_uncommitted_paths_report_a_path_once_when_it_is_staged_and_untracked(
+    sandbox: ContractProject,
+) -> None:
+    # Git prints "D  a.txt" and "?? a.txt" for a staged deletion whose file was recreated.
+    sandbox.start({"a.txt": "1\n"})
+    sandbox.delete("a.txt")
+    sandbox.repo.stage_all(["."])
+    sandbox.write("a.txt", "2\n")
+    assert sandbox.repo.uncommitted_paths(["."]) == ("a.txt",)
+    assert sandbox.repo.changed_since("HEAD", ["."]) == ("a.txt",)
+
+
 def test_changed_since_unions_committed_and_uncommitted_paths(sandbox: ContractProject) -> None:
     base = sandbox.start({"a.txt": "1\n", "b.txt": "1\n", "tests/t.py": "1\n"})
     sandbox.write("a.txt", "2\n")
@@ -166,7 +178,7 @@ def test_worktree_matches_compares_tracked_untracked_and_optionally_ignored(
     assert repo.worktree_matches(head, ["."], include_ignored=False)
     assert not repo.worktree_matches(head, ["."], include_ignored=True)
 
-    (sandbox.root / "a.txt").unlink()
+    sandbox.delete("a.txt")
     assert not repo.worktree_matches(head, ["."], include_ignored=False)
 
 

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import GitCommandError, GitRepository
@@ -35,6 +35,7 @@ class _Operation:
     kind: Literal[
         "write",
         "delete",
+        "recreate",
         "stage",
         "stage_dir",
         "unstage",
@@ -59,6 +60,7 @@ _OPERATIONS = st.builds(
             "write",
             "write",
             "delete",
+            "recreate",
             "stage",
             "stage_dir",
             "unstage",
@@ -91,6 +93,13 @@ def _delete(repo: GitRepository, root: Path, operation: _Operation, step: int) -
     (root / operation.path).unlink(missing_ok=True)
 
 
+def _recreate(repo: GitRepository, root: Path, operation: _Operation, step: int) -> None:
+    """Stage the deletion of a path, then write it again (status lists it twice in Git)."""
+    _delete(repo, root, operation, step)
+    repo.stage_all(["."])
+    _write(repo, root, operation, step)
+
+
 def _restore(repo: GitRepository, root: Path, operation: _Operation, step: int) -> None:
     del root, step
     history = repo.recent_subjects(10)
@@ -105,6 +114,7 @@ def _clean(repo: GitRepository, root: Path, operation: _Operation, step: int) ->
 _EFFECTS: dict[str, Callable[[GitRepository, Path, _Operation, int], None]] = {
     "write": _write,
     "delete": _delete,
+    "recreate": _recreate,
     "stage": lambda repo, _root, _op, _step: repo.stage_all(["."]),
     "stage_dir": lambda repo, _root, _op, _step: repo.stage_all(["dir"]),
     "unstage": lambda repo, _root, op, _step: repo.unstage([op.path]),
@@ -139,9 +149,19 @@ def _observe(repo: GitRepository) -> tuple[object, ...]:
     )
 
 
+def _assert_each_path_once(repo: GitRepository) -> None:
+    paths = repo.uncommitted_paths(["."])
+    assert paths == tuple(sorted(set(paths))), paths
+
+
 # Each step spawns Git processes in the CLI implementation, so the example count is
 # fixed small instead of following the Hypothesis profile.
 @settings(max_examples=8)
+@example(
+    # Regression: a staged deletion of a tracked path plus the same path recreated
+    # untracked is two status lines but one path.
+    operations=[_Operation(kind="delete"), _Operation(kind="stage"), _Operation(kind="write")]
+)
 @given(operations=st.lists(_OPERATIONS, min_size=1, max_size=7))
 def test_sequences_agree_with_the_oracle_and_keep_their_invariants(
     factory: RepositoryFactory,
@@ -168,6 +188,8 @@ def test_sequences_agree_with_the_oracle_and_keep_their_invariants(
             accepted = _apply(subject, roots[0], operation, step)
             assert _apply(oracle, roots[1], operation, step) == accepted, operation
             assert _observe(subject) == _observe(oracle), operation
+            _assert_each_path_once(subject)
+            _assert_each_path_once(oracle)
 
             head_after = subject.head()
             if operation.kind not in {"commit", "commit_only", "switch", "switch_new"}:

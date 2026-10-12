@@ -17,11 +17,11 @@ from __future__ import annotations
 
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import GitCommandError, GitRepository, StagingError
@@ -76,6 +76,7 @@ class _Op:
         "write",
         "write_exec",
         "delete",
+        "recreate",
         "file_over_dir",
         "gitignore",
         "stage",
@@ -108,6 +109,7 @@ _OPS = st.builds(
             "write",
             "write_exec",
             "delete",
+            "recreate",
             "file_over_dir",
             "gitignore",
             "stage",
@@ -192,6 +194,7 @@ def _apply_to(repo: GitRepository, root: Path, op: _Op, step: int) -> None:
         return
     specs = list(_SPEC_SETS[op.specs])
     actions: dict[str, Callable[[], object]] = {
+        "recreate": lambda: _recreate(repo, root, op),
         "stage": lambda: repo.stage_all(specs),
         "stage_force": lambda: repo.stage_all(specs, force=True),
         "unstage": lambda: repo.unstage(specs),
@@ -209,6 +212,13 @@ def _apply_to(repo: GitRepository, root: Path, op: _Op, step: int) -> None:
         "excludes": lambda: repo.add_excludes(_PATTERN_SETS[op.ordinal % len(_PATTERN_SETS)]),
     }
     actions[op.kind]()
+
+
+def _recreate(repo: GitRepository, root: Path, op: _Op) -> None:
+    """Stage the deletion of a path, then write it again (status lists it twice in Git)."""
+    (root / op.path).unlink(missing_ok=True)
+    repo.stage_all(["."])
+    _apply_to_files(root, replace(op, kind="write"))
 
 
 def _attempt(repo: GitRepository, root: Path, op: _Op, step: int) -> str:
@@ -297,6 +307,11 @@ def _start(root: Path, make: RepositoryFactory) -> GitRepository:
 # Each step starts Git processes in the CLI implementation, so the count is fixed small.
 # ``VIBESYS_GIT_CONTRACT_EXAMPLES`` raises it for a long local run.
 @settings(max_examples=int(os.environ.get("VIBESYS_GIT_CONTRACT_EXAMPLES", "12")), deadline=None)
+@example(
+    # Regression: a staged deletion plus the same path recreated untracked is two
+    # status lines but one path in ``uncommitted_paths``.
+    operations=[_Op(kind="delete"), _Op(kind="stage"), _Op(kind="write")]
+)
 @given(operations=st.lists(_OPS, min_size=1, max_size=12))
 def test_wide_sequences_agree_with_the_oracle(
     factory: RepositoryFactory, oracle_factory: RepositoryFactory, operations: list[_Op]

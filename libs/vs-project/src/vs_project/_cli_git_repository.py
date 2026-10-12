@@ -303,7 +303,9 @@ class CliGitRepository:
             ["status", "--porcelain=v1", "--untracked-files=all", "--", *pathspecs]
         )
         prefix = self._prefix()
-        return tuple(sorted(self._status_paths(status.stdout, prefix)))
+        # A path can have two status lines (``D `` staged deletion plus ``??`` recreated
+        # file), but the contract reports each path once.
+        return tuple(sorted(set(self._status_paths(status.stdout, prefix))))
 
     def unversioned_paths(self, *, include_ignored: bool) -> tuple[str, ...]:
         found: set[str] = set()
