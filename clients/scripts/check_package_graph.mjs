@@ -118,11 +118,7 @@ const FEATURE_STYLESHEET = {'./styles.css': 'dom'};
  * machine). Folds (`store`, `run-state`), models (`hosts`, `runs`), primitives
  * (`ui`), and the wire packages (`contracts`, `transport`, `ipc`) never import XState.
  */
-export const MACHINE_PACKAGES = [
-  '@vibesys/machine',
-  '@vibesys/connection',
-  '@vibesys/run-session',
-];
+export const MACHINE_PACKAGES = ['@vibesys/machine', '@vibesys/connection', '@vibesys/run-session'];
 const ALL_RUNTIMES = Object.keys(RUNTIMES);
 
 /**
