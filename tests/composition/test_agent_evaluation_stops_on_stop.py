@@ -20,6 +20,7 @@ from vs_runtime.api.core import CoreRunHost, RunControlBridge, RunLoopConfig, dr
 from vs_runtime.api.infrastructure import RunStopped, RuntimeRunControlChannel
 from vs_runtime.api.testing import ProbedRunClock
 from vs_sim.api.testing import VirtualClock, clock_from
+from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,20 +39,16 @@ class _NoSteers:
         del ref, text
 
 
-class _StopsWhen(ProbedRunClock):
-    """A run clock that asks for a stop at the first sleep after ``condition`` holds."""
+class _OnSleep(ProbedRunClock):
+    """A run clock that runs ``act`` after each sleep of the loop."""
 
-    def __init__(
-        self, inner: VirtualClock, condition: Callable[[], bool], stop: Callable[[], None]
-    ) -> None:
+    def __init__(self, inner: VirtualClock, act: Callable[[], None]) -> None:
         super().__init__(inner)
-        self._condition = condition
-        self._stop = stop
+        self._act = act
 
     async def sleep(self, seconds: float) -> None:
         await super().sleep(seconds)
-        if self._condition():
-            self._stop()
+        self._act()
 
 
 async def _stopped_run(
@@ -97,8 +94,16 @@ async def test_a_stop_while_an_agent_evaluation_runs_starts_no_further_work(tmp_
             at_stop.append(len(holder[0].world.cluster.submissions))
             channel.request_stop()
 
-    clock = _StopsWhen(clock_from(1.0), lambda: len(holder[0].world.cluster.submissions) >= 2, stop)
-    async with scenario(tmp_path, timed=(clock, 30.0)) as played:
+    def act() -> None:
+        cluster = holder[0].world.cluster
+        if cluster.submissions:
+            # The baseline measurement was scripted to end at once; the agent's job never does.
+            cluster.states = (SlurmJobStatus.RUNNING,) * 100_000
+        if len(cluster.submissions) >= 2:
+            stop()
+
+    clock = _OnSleep(clock_from(1.0), act)
+    async with scenario(tmp_path) as played:
         holder.append(played)
         process, stopped = await _stopped_run(played, clock, channel)
         submitted_at_stop = at_stop[0]
@@ -113,3 +118,9 @@ async def test_a_stop_while_an_agent_evaluation_runs_starts_no_further_work(tmp_
         reply = SOCKET_REPLY.validate_json((await played.bridge[0].answer(frame))[0])
         assert isinstance(reply, SocketFailure), "a stopped run admits no new agent submission"
         assert len(cluster.submissions) == submitted_at_stop
+        # The host closes the evaluation executor when the run exits, which cancels every job
+        # still on the cluster, the agent's included.
+        assert cluster.cancelled == []
+        for evaluation in played.world.evaluations:
+            await evaluation.close()
+        assert sorted(cluster.cancelled) == sorted(cluster.submissions[1:])
