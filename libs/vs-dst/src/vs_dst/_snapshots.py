@@ -24,6 +24,17 @@ if TYPE_CHECKING:
     from vs_runtime.api.testing import FakePublicationDelivery
 
 
+class NondeterministicWorldError(RuntimeError):
+    """Running the same world twice did not make the same number of commits."""
+
+    def __init__(self, world: object, first: int, second: int) -> None:
+        name = f"{type(world).__module__}.{type(world).__qualname__}"
+        super().__init__(
+            f"{name} is not deterministic: its run made {first} commits, and the same run "
+            f"again made {second}, so a crash point of one is not a crash point of the other"
+        )
+
+
 class WorldNotCopyableError(TypeError):
     """A crash sweep copies the world at every commit, and this world cannot be copied."""
 
@@ -98,19 +109,21 @@ class RecordingStore(FakeStateStore):
 
 
 class Snapshots:
-    """A copy of the outside world at each boundary of the run being watched."""
+    """A copy of the outside world at each wanted boundary of the run being watched."""
 
-    def __init__(self, outside: OutsideWorld) -> None:
-        """Copy ``outside`` at every commit once `watch` has said whose decisions to count."""
+    def __init__(self, outside: OutsideWorld, wanted: frozenset[CrashPoint]) -> None:
+        """Copy ``outside`` at the ``wanted`` points once `watch` has said whose decisions to count."""
         self._outside = outside
+        self._wanted = wanted
         self._decisions: list[Decision] = []
         self.by_point: dict[CrashPoint, Snapshot] = {}
 
     def watch(self, store: RecordingStore, decisions: list[Decision]) -> None:
-        """Start copying at every commit of ``store``; ``decisions`` is what the host proposes into."""
+        """Start watching the commits of ``store``; ``decisions`` is what the host proposes into."""
         self._decisions = decisions
         store.watcher = self
 
     def take(self, point: CrashPoint) -> None:
-        """Copy the outside world as it stands at ``point``."""
-        self.by_point[point] = Snapshot(self._outside.copy(), len(self._decisions))
+        """Copy the outside world as it stands at ``point``, if the sweep wants that point."""
+        if point in self._wanted:
+            self.by_point[point] = Snapshot(self._outside.copy(), len(self._decisions))

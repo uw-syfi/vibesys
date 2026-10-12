@@ -39,12 +39,17 @@ def test_a_restart_after_any_crash_finishes_the_same_run():
 
 A host that dies loses its memory, so what a crash leaves behind is the outside world: the
 store, the effects ledger, the publication delivery and the world's own position.
-While `simulate` runs, it copies exactly those (one `copy.deepcopy`, so objects that share a
-reference keep sharing it) just before and just after every commit. `rerun_with_crash(point)`
-starts a new host (a new `CoreRuntime` over a new strategy instance) on a copy of that, after the
-dead host's lease has expired, and runs it to the end. The prefix of the run is not run again,
-so a sweep costs the sum of the suffixes instead of a whole run per crash point.
-Nothing from the dead host is copied: its memory is gone by definition.
+`simulate` runs the world once with no copying (it takes one copy of the initial world up front,
+which also rejects a world that cannot be copied) and counts commits, so a test that never
+crashes the run pays nothing extra. The first `rerun_with_crash` runs the world once more from
+that pristine copy and copies the outside world (one `copy.deepcopy`, so objects that share a
+reference keep sharing it) just before and just after each commit the policy chose; if that run
+makes a different number of commits it raises `NondeterministicWorldError`. A point inside the run
+that the policy did not choose gets a run of its own; a point outside it raises `ValueError`.
+`rerun_with_crash(point)` then starts a new host (a new `CoreRuntime` over a new strategy
+instance) on a copy of that, after the dead host's lease has expired, and runs it to the end. The
+prefix is not run again, so a sweep costs the sum of the suffixes. Nothing from the dead host is
+copied: its memory is gone by definition.
 
 A recovered run reports the decisions of both hosts; its `journal` is the new host's.
 

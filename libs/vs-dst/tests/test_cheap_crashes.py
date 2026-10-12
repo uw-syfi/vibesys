@@ -7,13 +7,27 @@ run again with the host killed at that commit, which is the slow way that copies
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, ClassVar
+
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_dst.api import EVERY_POINT, simulate, using_crash_point_policy
+from vs_core.api import EnsureWorkspace
+from vs_core.api.testing import Unknown
+from vs_dst.api import (
+    EVERY_POINT,
+    NondeterministicWorldError,
+    simulate,
+    using_crash_point_policy,
+)
 
 from ._scratch import run_with_crash
 from ._tiny import TinyWorld
+
+if TYPE_CHECKING:
+    from vs_core.api import CoreState, Request
+    from vs_core.api.testing import Answer
 
 
 @settings(deadline=None, max_examples=3)
@@ -59,3 +73,24 @@ def test_a_crash_case_leaves_the_reference_run_and_its_snapshots_as_they_were() 
     assert first.core == second.core
     assert first.executed_effects == second.executed_effects
     assert normal.no_effect_ran_twice()
+
+
+class DriftingWorld(TinyWorld):
+    """A world that answers differently once a flag outside its copied state is set."""
+
+    drifted: ClassVar[bool] = False
+
+    def __call__(self, request: Request, core: CoreState) -> Answer:
+        if self.drifted and isinstance(request, EnsureWorkspace):
+            return Unknown()
+        return super().__call__(request, core)
+
+
+def test_a_world_whose_second_run_differs_is_refused_as_nondeterministic() -> None:
+    normal = simulate(DriftingWorld(1))
+    DriftingWorld.drifted = True
+    try:
+        with pytest.raises(NondeterministicWorldError, match="DriftingWorld is not deterministic"):
+            normal.rerun_with_crash(normal.crash_points()[0])
+    finally:
+        DriftingWorld.drifted = False
