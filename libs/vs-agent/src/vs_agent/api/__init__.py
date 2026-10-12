@@ -290,20 +290,18 @@ def __getattr__(name: str) -> object:
         )
 
         return agent_supports_tool_servers
-    if name == "native_schema_problems":
+    if name in {"native_schema", "native_schema_problems"}:
         # Reads agentshim's provider profiles; importing it at module import
         # would load agentshim into every consumer of this package.
         from vs_agent.shim_turns import (  # noqa: PLC0415  # lint-waiver: LW-010310 [PLC0415]; keep agentshim unloaded for consumers of vs_agent.api that never check a schema, like the other lazy names here.
+            native_schema,
             native_schema_problems,
         )
 
-        return native_schema_problems
-    if name == "native_schema":
-        from vs_agent.shim_turns import (  # noqa: PLC0415  # lint-waiver: LW-010310 [PLC0415]; keep agentshim unloaded for consumers of vs_agent.api that never check a schema, like the other lazy names here.
-            native_schema,
-        )
-
-        return native_schema
+        return {
+            "native_schema": native_schema,
+            "native_schema_problems": native_schema_problems,
+        }[name]
     if name in {"OrphanReapError", "reap_orphaned_agents"}:
         # The reaper builds agentshim confinements, and importing agentshim at
         # module import would load it into every consumer of this package.
