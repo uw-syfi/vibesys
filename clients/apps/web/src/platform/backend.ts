@@ -1,7 +1,7 @@
 /**
  * The run page's one path to the backend. It is the only module of `apps/web`, and of the features
  * it composes, that imports @vibesys/transport's runtime values or calls `fetch`
- * (`clients/.dependency-cruiser.mjs` and `clients/lint-rules/web-fetch-only-in-backend.grit` hold
+ * (`clients/.dependency-cruiser.mjs` and `clients/tools/lint-rules/web-fetch-only-in-backend.grit` hold
  * it to that): the control transport (a WebSocket, or the desktop shell's bridge shaped as one)
  * that `@vibesys/run-session`'s `connectRun` runs the run over, the gateway's capability exchange,
  * and the replay fixture. It is also the
