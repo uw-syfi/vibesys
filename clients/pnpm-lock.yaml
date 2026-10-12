@@ -393,6 +393,9 @@ importers:
       '@vibesys/contracts':
         specifier: workspace:*
         version: link:../../libs/contracts
+      happy-dom:
+        specifier: 20.14.5
+        version: 20.14.5
       react-dom:
         specifier: 19.1.1
         version: 19.1.1(react@19.1.1)

@@ -10,6 +10,8 @@ export type {WebSessionState, WebSessionStatus} from './connection.js';
 export type {
   BrowserLifecycle,
   PageVisibility,
+  RunCommand,
+  RunCommandOutcome,
   RunConnection,
   RunStreamHandlers,
   TransportHooks,
