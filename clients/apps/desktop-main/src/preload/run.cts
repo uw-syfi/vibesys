@@ -76,7 +76,10 @@ class PortConnection implements DesktopSocket {
 
   send(data: string): void {
     if (this.#closed) return;
-    if (!this.#opened || typeof data !== 'string') return this.#fail();
+    if (!this.#opened || typeof data !== 'string') {
+      this.#fail();
+      return;
+    }
     const bytes = frameBytes(data);
     if (bytes > this.#windowBytes || bytes > this.#windowBytes - this.#queuedBytes) {
       this.#fail();
@@ -154,11 +157,7 @@ class PortConnection implements DesktopSocket {
   }
 
   #credited(bytes: number): void {
-    if (
-      !this.#opened ||
-      !validCredit(bytes) ||
-      bytes > this.#windowBytes - this.#sendCredit
-    ) {
+    if (!this.#opened || !validCredit(bytes) || bytes > this.#windowBytes - this.#sendCredit) {
       this.#fail();
       return;
     }

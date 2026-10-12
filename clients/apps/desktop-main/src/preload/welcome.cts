@@ -93,7 +93,8 @@ if (process.type === 'renderer') {
     createWelcomePreload({
       platform: process.platform,
       invoke: (channel, ...args) => electron.ipcRenderer.invoke(channel, ...args),
-      on: (channel, listener) => electron.ipcRenderer.on(channel, (_event, value) => listener(value)),
+      on: (channel, listener) =>
+        electron.ipcRenderer.on(channel, (_event, value) => listener(value)),
     }),
   );
 }
