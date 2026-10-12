@@ -11,7 +11,7 @@ is not published as a separate Python distribution.
 
 ## Concepts
 
-The public API provides three related checks:
+The public API provides four related checks:
 
 - `TemplateRenderer` renders `.j2` files and template strings with
   `jinja2.StrictUndefined`: a template referencing a variable no caller
@@ -29,6 +29,12 @@ The public API provides three related checks:
   every required small fragment, an empty file is a deliberate skip" to any
   per-key fragment set: the same contract `ComputeBackend` fragments need,
   without hardcoding that enum.
+- `reply_fields` turns the JSON Schema an agent receives for its reply into the
+  `reply` template variable. `{{ reply.parent_hypothesis_id }}` renders the
+  backticked field name (`{{ reply.perf_metric.name }}` the bare name), and a
+  name the schema does not offer raises `UnknownReplyFieldError`. The reply
+  schema, trimmed by the run's capabilities, is the one source of truth for
+  field names; templates keep the judgment about how to fill them.
 
 ## Usage
 

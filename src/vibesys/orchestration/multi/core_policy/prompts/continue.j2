@@ -39,7 +39,7 @@ hypothesis, falsifier, minimum, invariants, paid cap, evidence/workload identity
 or correctness/lifecycle/evaluation gates. It grants scope, not authority.
 Tally cumulative paid work from your own records; rounds/reviews/retries do not
 replenish it. If spent or new authority is needed, make no paid call and return
-a terminal outcome with empty `next_step`.
+a terminal outcome with empty {{ reply.next_step }}.
 
 {% if feedback %}
 ## New review/framework feedback
@@ -50,7 +50,7 @@ a terminal outcome with empty `next_step`.
 ## Framework validation failure
 
 {% if validation_failure.recipe_unusable %}
-Your `validation_recipe_artifact` could not be used: {{ validation_failure.error }}. Set it to
+Your {{ reply.validation_recipe_artifact }} could not be used: {{ validation_failure.error }}. Set it to
 the workspace-relative path of a JSON file that follows the contract below, or omit it. This is
 an input error in your reply, not a failure of the candidate or of the framework.
 {% else %}
@@ -105,9 +105,9 @@ Relate only custom-gate counters with the same scope/owner; cheaply test positiv
 zero, mixed cases. Preserve valid rows, workload/accounting/admission, cleanup.
 Give each retained row a production selector; official evaluation must activate
 that arm, or it must be the default.
-`next_step` is bounded same-mechanism work, never a framework gate; otherwise
+{{ reply.next_step }} is bounded same-mechanism work, never a framework gate; otherwise
 empty. Reuse unchanged-input validation PASSes. New/changed local/static
-checks require a conforming `validation_recipe_artifact` (see the contract below); exclude
+checks require a conforming {{ reply.validation_recipe_artifact }} (see the contract below); exclude
 target, deployment, benchmark, profiler, and official-evaluator commands.
 
 {% include '_validation_contract.j2' %}

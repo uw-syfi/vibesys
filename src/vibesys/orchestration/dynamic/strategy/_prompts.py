@@ -6,14 +6,24 @@ Each context mirrors the variables of one existing dynamic template.
 """
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
 from vibesys.metrics import MetricRow, PartialRow
 from vibesys.orchestration.dynamic.models import ProfileField
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
-from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionRef, Value
+from vs_core.api import (
+    EvidenceId,
+    EvidenceKind,
+    ObservationStatus,
+    RevisionRef,
+    RolePromptContext,
+    SchemaRef,
+    Value,
+)
+
+from ._schemas import IMPLEMENTER_REPLY, JUDGE_REPLY, PLANNER_REPLY, PROFILER_REPLY
 
 
 class PromptTemplate(StrEnum):
@@ -108,8 +118,10 @@ class ProfileHistoryRow(Value):
 type WorkstreamHistoryRow = HistoryRow | ProfileHistoryRow
 
 
-class PlannerPrompt(Value):
+class PlannerPrompt(RolePromptContext):
     """Free-slot planning request."""
+
+    reply_schema: ClassVar[SchemaRef | None] = PLANNER_REPLY
 
     template: Literal[PromptTemplate.PORTFOLIO] = PromptTemplate.PORTFOLIO
     capacity: int = Field(ge=0)
@@ -128,8 +140,10 @@ class PlannerPrompt(Value):
     profile_fields: tuple[ProfileField, ...] = ()
 
 
-class PlannerCorrectionPrompt(Value):
+class PlannerCorrectionPrompt(RolePromptContext):
     """The planning request again, with why the previous plan was not accepted."""
+
+    reply_schema: ClassVar[SchemaRef | None] = PLANNER_REPLY
 
     template: Literal[PromptTemplate.PORTFOLIO_CORRECTION] = PromptTemplate.PORTFOLIO_CORRECTION
     planner: PlannerPrompt
@@ -137,8 +151,10 @@ class PlannerCorrectionPrompt(Value):
     scheduled: int = Field(ge=0)
 
 
-class ImplementPrompt(Value):
+class ImplementPrompt(RolePromptContext):
     """One isolated hypothesis implementation request."""
+
+    reply_schema: ClassVar[SchemaRef | None] = IMPLEMENTER_REPLY
 
     template: Literal[PromptTemplate.IMPLEMENT] = PromptTemplate.IMPLEMENT
     hypothesis_id: str
@@ -178,8 +194,10 @@ class ReviewEvaluation(Value):
     feedback_cut: bool = False
 
 
-class ReviewPrompt(Value):
+class ReviewPrompt(RolePromptContext):
     """Independent review of one exact candidate snapshot."""
+
+    reply_schema: ClassVar[SchemaRef | None] = JUDGE_REPLY
 
     template: Literal[PromptTemplate.REVIEW] = PromptTemplate.REVIEW
     hypothesis_id: str
@@ -192,8 +210,10 @@ class ReviewPrompt(Value):
     """Every trusted evaluation of ``candidate``, oldest first; empty when none exists yet."""
 
 
-class ProfilePrompt(Value):
+class ProfilePrompt(RolePromptContext):
     """Measurement-only request to the profiler of one existing revision."""
+
+    reply_schema: ClassVar[SchemaRef | None] = PROFILER_REPLY
 
     template: Literal[PromptTemplate.PROFILE_REQUEST] = PromptTemplate.PROFILE_REQUEST
     question: str

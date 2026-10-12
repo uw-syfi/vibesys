@@ -16,7 +16,7 @@ change the first plan.
 {% endif %}
 
 {% if profiler_kind == 'none' %}
-Standalone profiling is disabled. Set `need_profile=false`; record any missing
+Standalone profiling is disabled. Set `{{ reply.need_profile.name }}=false`; record any missing
 visibility as uncertainty for the design call rather than requesting capture.
 {% else %}
 The framework can run `{{ profiler_kind }}` profiling through its
@@ -46,11 +46,11 @@ one cheap check to settle it; leave no long-lived process behind and never
 stand in for a benchmark run.
 
 If it does not build or run, no profile is possible however useful its evidence
-would be: set `need_profile=false` and record that the next round's work is to
+would be: set `{{ reply.need_profile.name }}=false` and record that the next round's work is to
 make it run. If it does run, decide on evidentiary value alone, weighing that
 round 1 holds no measurement at all, so a profile is the only way this
 campaign's first plan can target a measured bottleneck rather than a guessed
-one. If the check is inconclusive, prefer `need_profile=false`: a skipped
+one. If the check is inconclusive, prefer `{{ reply.need_profile.name }}=false`: a skipped
 profile costs one round of unmeasured planning, while profiling a candidate
 that does not run spends an expensive turn on a summary with no measurement
 behind it.

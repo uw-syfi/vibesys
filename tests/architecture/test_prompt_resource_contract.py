@@ -71,7 +71,7 @@ from vibesys.run.workspace_policy import (
 from vs_evaluation.api import ProfileField
 from vs_issue_tracker.api import Issue, IssueStatus, IssueType
 from vs_project.api import Project
-from vs_prompts.api import resolve_free_variables
+from vs_prompts.api import reply_fields, resolve_free_variables
 from vs_runtime.api import LocalValidationEvaluation, RunFacts, SkillFact
 from vs_runtime.api.infrastructure import (
     ModalEnvironmentFacts,
@@ -433,6 +433,15 @@ def render_packaged_prompts(installed: Path) -> int:
         and path.name != "README.md"
     )
     assert templates
+    # Every field any template reads from a reply variable, so the file renders: whether a
+    # strategy's reply offers that field is the prompt tests' concern, not packaging's.
+    referenced = {
+        name
+        for path in templates
+        for name in re.findall(r"\b(?:implementer_)?reply\.(\w+)", path.read_text("utf-8"))
+    }
+    offered = reply_fields({"properties": {name: {} for name in referenced}})
+    context["reply"] = context["implementer_reply"] = offered
     for path in templates:
         # Release resources may ship unrelated third-party Jinja files; only package
         # prompt trees form this renderer's contract.

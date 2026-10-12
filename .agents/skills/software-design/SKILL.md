@@ -125,7 +125,10 @@ section.
     call a checked sink. A prompt that points the agent at written text takes
     the proof of the write as data (a `ProgressEntry` from `ProgressLog.append`)
     and guards the pointer on it; `tests/architecture/test_progress_pointers.py`
-    enforces this.
+    enforces this. A template names a reply field only as `{{ reply.<field> }}`,
+    derived from that turn's capability-trimmed reply schema, so the schema stays
+    the source of truth for names and a dangling reference fails the render;
+    `tests/architecture/test_prompt_reply_fields.py` enforces this.
 13. **Lint suppressions are explicit opt-outs.** First consider reasonable
     lint-compliant fixes. Suppress only when those fixes would make the design
     more hacky than retaining the current code. In the source rationale, list

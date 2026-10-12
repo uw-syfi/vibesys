@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.prompt_context import profiler_reply
 
 import vibesys.orchestration.multi.core_policy.prompts as multi_templates
 from vibesys.prompts import render_template
@@ -19,6 +20,7 @@ def _render(kind: str, benchmark_command: str | None) -> str:
     return render_template(
         f"profilers/{kind}.j2",
         template_dir=_TEMPLATE_DIR,
+        reply=profiler_reply(),
         profile_focus="",
         benchmark_command=benchmark_command,
         modality="",

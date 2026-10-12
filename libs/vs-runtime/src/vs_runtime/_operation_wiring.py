@@ -42,9 +42,12 @@ from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
+    from pydantic import BaseModel
+
     from vs_core.api import (
         OperationRegistration,
         RevisionRef,
+        SchemaRef,
         StrategyDeclaration,
         StrategyOperations,
     )
@@ -129,6 +132,7 @@ class OperationPorts:
     retention_label: str
     variables: Mapping[str, object] = field(default_factory=dict)
     commands: Commands | None = None
+    replies: Mapping[SchemaRef, type[BaseModel]] = field(default_factory=dict)
 
 
 def _command_owner(role: OperationRole, ports: OperationPorts) -> OperationOwner | None:
@@ -153,7 +157,7 @@ def production_owners(
         match role:
             case OperationRole.RENDER_ARTIFACTS:
                 owners[role] = RenderArtifactsOwner(
-                    ports.renderer, ports.artifacts, ports.variables, ports.evidence
+                    ports.renderer, ports.artifacts, ports.variables, ports.evidence, ports.replies
                 )
             case OperationRole.VERIFY_REVISION:
                 owners[role] = VerifyRevisionOwner(ports.workspaces, ports.ledger, ports.commit_of)

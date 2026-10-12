@@ -26,6 +26,7 @@ from tests.vibesys.orchestration.dynamic.core_policy.test_prompt_templates impor
     _CONTEXTS,
     _ROOT,
 )
+from tests.vibesys.orchestration.dynamic.prompt_variables import context_variables
 
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.strategy.api import PromptTemplate
@@ -85,8 +86,7 @@ def _plan_variables(root: Path, notes: str) -> dict[str, object]:
 
 
 def _render(template: PromptTemplate, context: BaseModel, run_variables: dict[str, object]) -> str:
-    variables = {name: getattr(context, name) for name in type(context).model_fields}
-    variables.pop("template")
+    variables = context_variables(context)
     return TemplateRenderer(_ROOT, fallback_roots=(CORE_PROTOCOL_DIR,)).render_template(
         f"{template.value}.j2", **{**run_variables, **variables}
     )

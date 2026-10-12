@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.prompt_context import context_variables
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
     COMMIT,
     bounds_of,
@@ -296,9 +297,8 @@ def _render(strategy: _Strategy, plan: CorePlan, context: BaseModel) -> str:
     core = strategy.plugin.core
     assert core is not None
     renderer = TemplateRenderer(core.prompt_templates, fallback_roots=core.prompt_fallback_roots)
-    fields = {name: getattr(context, name) for name in type(context).model_fields}
-    template = str(fields.pop("template"))
-    return renderer.render_template(f"{template}.j2", **plan.prompt_variables, **fields)
+    fields = context_variables(context, plan.reply_schemas)
+    return renderer.render_template(f"{context.template}.j2", **plan.prompt_variables, **fields)
 
 
 def _own_text(text: str) -> str:

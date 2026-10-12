@@ -55,7 +55,7 @@ and submit in this turn, so the framework measures something real. Submit that s
 {% if agent_evaluation %}for trusted evaluation{% else %}as your nomination{% endif %} before you attempt
 the rest of the task. If you cannot finish a step, do not end the turn on partial work:
 state the concrete blocker (the exact file, function, check or error that stops you) and,
-in `next_step`, the narrower step that would get past it.
+in {{ reply.next_step }}, the narrower step that would get past it.
 
 Inspect referenced artifacts only as needed. Keep evidence in files and return compact
 references with their applicable revision. Implement and run the cheapest checks that
@@ -70,8 +70,8 @@ rerun a local check on files that already passed it. When a check output is long
 it to a file and read the file, instead of rerunning the check to see another part of it.
 After a failure, change the code before you run the check again.
 
-Return only schema-valid JSON with one `reply` object. In that object, set
-`summary`, `outcome` (use `nominated` only when the candidate is ready for independent
-review and framework gates), `evidence` and, when the outcome is
-`implementation_failed`, `next_step`.
+Return only schema-valid JSON with one {{ reply.reply }} object. In that object, set
+{{ reply.summary }}, {{ reply.outcome }} (use `nominated` only when the candidate is ready for independent
+review and framework gates), {{ reply.evidence }} and, when the outcome is
+`implementation_failed`, {{ reply.next_step }}.
 {% include 'agent_evaluation.j2' %}

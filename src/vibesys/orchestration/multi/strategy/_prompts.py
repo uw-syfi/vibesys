@@ -7,14 +7,18 @@ the implementer's claims for the judge) is rendered from the typed rows below, b
 round's workspace is an isolated child of a revision and holds no progress files.
 """
 
+from collections.abc import Mapping
 from enum import StrEnum
-from typing import Annotated, Literal
+from types import MappingProxyType
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
 from vibesys.serial_search.api import PlanEvidence
-from vs_core.api import EvidenceRef, RevisionRef, Value
+from vs_core.api import EvidenceRef, RevisionRef, RolePromptContext, SchemaRef, Value
+
+from ._schemas import IMPLEMENTER_REPLY, JUDGE_REPLY, PLANNER_REPLY, PRE_ROUND_REPLY, PROFILER_REPLY
 
 
 class PromptTemplate(StrEnum):
@@ -28,8 +32,10 @@ class PromptTemplate(StrEnum):
     JUDGE = "judge"
 
 
-class PreRoundPrompt(Value):
+class PreRoundPrompt(RolePromptContext):
     """The routing decision before a new hypothesis: is fresh profile evidence wanted?"""
+
+    reply_schema: ClassVar[SchemaRef | None] = PRE_ROUND_REPLY
 
     template: Literal[PromptTemplate.PRE_ROUND] = PromptTemplate.PRE_ROUND
     round_number: int = Field(gt=0)
@@ -42,8 +48,10 @@ class PreRoundPrompt(Value):
     exhaustion_round: int | None = None
 
 
-class ProfilerPrompt(Value):
+class ProfilerPrompt(RolePromptContext):
     """One advisory profiling turn: where to look and where to write bounded evidence."""
+
+    reply_schema: ClassVar[SchemaRef | None] = PROFILER_REPLY
 
     template: Literal[PromptTemplate.PROFILER] = PromptTemplate.PROFILER
     round_number: int = Field(gt=0)
@@ -56,8 +64,10 @@ class ProfilerPrompt(Value):
     evidence_directory: str
 
 
-class PlanPrompt(PlanEvidence):
+class PlanPrompt(PlanEvidence, RolePromptContext):
     """One new-hypothesis planning request."""
+
+    reply_schema: ClassVar[SchemaRef | None] = PLANNER_REPLY
 
     template: Literal[PromptTemplate.PLAN] = PromptTemplate.PLAN
     base_revision: RevisionRef
@@ -146,8 +156,10 @@ class GateFacts(Value):
     approved_perf_unit: str | None = None
 
 
-class ImplementPrompt(Value):
+class ImplementPrompt(RolePromptContext):
     """The first implementation request of a hypothesis, or a retry of it."""
+
+    reply_schema: ClassVar[SchemaRef | None] = IMPLEMENTER_REPLY
 
     template: Literal[PromptTemplate.IMPLEMENT] = PromptTemplate.IMPLEMENT
     round_number: int = Field(gt=0)
@@ -167,8 +179,10 @@ class ImplementPrompt(Value):
     interface: str = "inprocess"
 
 
-class ContinuePrompt(Value):
+class ContinuePrompt(RolePromptContext):
     """A bounded continuation of a hypothesis the implementer asked to keep working on."""
+
+    reply_schema: ClassVar[SchemaRef | None] = IMPLEMENTER_REPLY
 
     template: Literal[PromptTemplate.CONTINUE] = PromptTemplate.CONTINUE
     round_number: int = Field(gt=0)
@@ -183,8 +197,13 @@ class ContinuePrompt(Value):
     pareto_archive_conflict: ArchiveConflictView | None = None
 
 
-class JudgePrompt(Value):
+class JudgePrompt(RolePromptContext):
     """The independent review of one implementer reply."""
+
+    reply_schema: ClassVar[SchemaRef | None] = JUDGE_REPLY
+    described_replies: ClassVar[Mapping[str, SchemaRef]] = MappingProxyType(
+        {"implementer_reply": IMPLEMENTER_REPLY}
+    )
 
     template: Literal[PromptTemplate.JUDGE] = PromptTemplate.JUDGE
     round_number: int = Field(gt=0)

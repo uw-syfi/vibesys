@@ -72,7 +72,7 @@ proof or duplicate measurement of a trustworthy retained parent row.
    compatible initialized state.
 6. Prefer source/static review and small discriminating diagnostics. Do not
    duplicate an adequately documented long run or framework-owned official gate.
-7. Audit `validation_recipe_artifact` against its contract (version 1 JSON recipes) without executing it.
+7. Audit {{ implementer_reply.validation_recipe_artifact }} against its contract (version 1 JSON recipes) without executing it.
    Allow only bounded, non-mutating local/static checks with complete determining
    inputs—never target, deployment, benchmark, profiler, or official-evaluator
    work. After PASS the framework executes/reuses it and records immutable
@@ -123,15 +123,15 @@ fresh canonical artifact; targeted evidence cannot establish an official score.
 
 ## Verdict by declared outcome
 
-- `nominated`: PASS only when ready for framework gates; `next_step` empty.
-- `supported`: PASS only if complete and `next_step` empty.
+- `nominated`: PASS only when ready for framework gates; {{ implementer_reply.next_step }} empty.
+- `supported`: PASS only if complete and {{ implementer_reply.next_step }} empty.
 - `continue`: PASS credible incremental evidence with one justified, bounded,
   same-mechanism next step; final success criteria need not yet hold.
 - `disproven`: PASS fair activation plus direct falsification with no false win.
 - `implementation_failed`, `inconclusive`, or `blocked`: PASS only when concrete
   evidence supports the classification and the blocker prevented a fair test.
 
-A `next_step` that changes mechanism, requests generic exploration, or is merely
+A {{ implementer_reply.next_step }} that changes mechanism, requests generic exploration, or is merely
 optional must be empty so control returns to the designer. The same applies
 when it needs fresh authority or would exceed a cumulative hypothesis cap; a
 retry, review, or new round does not replenish paid work. Framework gates are
@@ -140,5 +140,5 @@ invariants hold and a row is genuinely nondominated,
 require `pareto_frontier` even if the causal minimum was missed.
 
 PASS only when analysis, verified evidence, declared outcome, and disposition
-are mutually consistent. Put every actionable failure in `feedback`. Return only
+are mutually consistent. Put every actionable failure in {{ reply.feedback }}. Return only
 the schema-valid JSON object; the framework records it.

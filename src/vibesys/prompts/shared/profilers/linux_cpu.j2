@@ -48,7 +48,7 @@ The benchmark command is documented in `OBJECTIVE.md`.
 3. Use the returned counters and hot symbols, or call `summary(output_dir=...)`,
    to identify where CPU time goes.
 4. Separately run the uninstrumented benchmark with its JSON output option and
-   use the OBJECTIVE's headline field for `perf_metric`.
+   use the OBJECTIVE's headline field for {{ reply.perf_metric }}.
 
 For native queue workloads, distinguish trusted runner overhead from candidate
 library symbols when symbol information permits. Look for producer/consumer hot

@@ -383,6 +383,7 @@ def _catalog(
         retention_label=policy.retention_label,
         variables=plan.prompt_variables,
         commands=resources.commands,
+        replies=plan.reply_schemas,
     )
     owned = (
         ()

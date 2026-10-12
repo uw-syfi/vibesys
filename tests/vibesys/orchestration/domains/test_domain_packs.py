@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from tests.support.prompt_context import profiler_reply
 
 import vibesys.orchestration.multi.core_policy.prompts as multi_templates
 from vibesys.constants import DomainName
@@ -378,6 +379,7 @@ def test_torch_profiler_remote_capture_is_provider_neutral() -> None:
     local = render_template(
         "profilers/torch.j2",
         template_dir=_TEMPLATE_DIR,
+        reply=profiler_reply(),
         **common,
         domain_profiler=_serving_profiler("local"),
         profile_execution="local",
@@ -385,6 +387,7 @@ def test_torch_profiler_remote_capture_is_provider_neutral() -> None:
     remote = render_template(
         "profilers/torch.j2",
         template_dir=_TEMPLATE_DIR,
+        reply=profiler_reply(),
         **common,
         domain_profiler=_serving_profiler("remote"),
         profile_execution="remote",

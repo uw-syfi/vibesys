@@ -175,7 +175,7 @@ from vs_runtime._receipt_store import (
     owner_key,
     result_type_name,
 )
-from vs_runtime._render_operation import RenderArtifactsOwner
+from vs_runtime._render_operation import RenderArtifactsOwner, reply_variable
 from vs_runtime._request_inspection import (
     NOT_TARGET_FACTS,
     Inspected,
@@ -403,6 +403,7 @@ __all__ = [
     "production_owners",
     "receipt_executor_kinds",
     "reject_legacy_resume",
+    "reply_variable",
     "report_turns",
     "resolve_core_resume",
     "result_type_name",

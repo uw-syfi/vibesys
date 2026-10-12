@@ -17,10 +17,15 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
+from tests.vibesys.orchestration.issue_queue.strategy.world import issue_queue_config
 
 from vibesys.orchestration.evolve.core_policy.api import prompts as evolve_prompts
+from vibesys.orchestration.evolve.core_policy.api import reply_schemas as evolve_replies
 from vibesys.orchestration.evolve.strategy.api import JudgePrompt as EvolveJudgePrompt
 from vibesys.orchestration.issue_queue.core_policy.api import prompts as issue_queue_prompts
+from vibesys.orchestration.issue_queue.core_policy.api import (
+    reply_schemas as issue_queue_replies,
+)
 from vibesys.orchestration.issue_queue.strategy.api import (
     IssueDetail,
     ReviewPrompt,
@@ -119,6 +124,10 @@ def _record(
     return ref, evidence
 
 
+# The reply types of both strategies whose prompts cite evidence; their schema names differ.
+_REPLIES = {**evolve_replies(), **issue_queue_replies(issue_queue_config())}
+
+
 def _render(
     root: Path,
     roots: tuple[Path, ...],
@@ -133,7 +142,11 @@ def _render(
     ledger = FakeEvidenceLedger()
     ledger.record(ref.source_request, evidence, ref.purpose)
     owner = RenderArtifactsOwner(
-        TemplateRenderer(roots[0], fallback_roots=roots[1:]), store, variables, ledger
+        TemplateRenderer(roots[0], fallback_roots=roots[1:]),
+        store,
+        variables,
+        ledger,
+        _REPLIES,
     )
     fence = ExecutionContext(
         fence=HostFence(host_id=HostId(root="host"), epoch=1), now_at=1.0, payload_digest="d"

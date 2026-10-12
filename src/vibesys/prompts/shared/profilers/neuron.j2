@@ -77,20 +77,20 @@ Cite concrete numbers from the analysis output as evidence.
 
 ## Performance metric — use the OBJECTIVE's named headline field, exactly
 
-`perf_metric` is the round's headline performance number that the framework's plateau detector and round-over-round comparisons trust. Plateau detection compares the raw float across rounds — **so the unit must not change between rounds**. A unit flip (tok/s → latency_ms, etc.) silently breaks the comparison.
+{{ reply.perf_metric }} is the round's headline performance number that the framework's plateau detector and round-over-round comparisons trust. Plateau detection compares the raw float across rounds — **so the unit must not change between rounds**. A unit flip (tok/s → latency_ms, etc.) silently breaks the comparison.
 
 **Process** (do these in order):
 
 1. The OBJECTIVE block above names the headline field — look for a line like `Headline metric: <field_name>` referencing a specific JSON field of the benchmark tool's output. This is the only authoritative source for the field name.
 2. Run the benchmark with `--output-json /tmp/bench.json` (or the equivalent flag — discover via `--help`, do not guess).
-3. Read **that exact field** from the benchmark JSON. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units.
+3. Read **that exact field** from the benchmark JSON. Set {{ reply.perf_metric }} to its numeric value and {{ reply.perf_unit }} to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units.
 
 **Forbidden**:
 
 - Picking a different field because you "think it's more meaningful". The OBJECTIVE is authoritative.
-- Reporting per-forward timings or single-step extrapolations as `perf_metric` — use them only in `analysis` / `bottlenecks` text.
+- Reporting per-forward timings or single-step extrapolations as {{ reply.perf_metric }} — use them only in {{ reply.analysis }} / {{ reply.bottlenecks }} text.
 
-If you cannot run the benchmark this round, set `perf_metric: null` rather than substituting a derived number.
+If you cannot run the benchmark this round, set `{{ reply.perf_metric.name }}: null` rather than substituting a derived number.
 
 ## Output
 

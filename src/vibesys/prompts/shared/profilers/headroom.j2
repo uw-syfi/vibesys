@@ -44,7 +44,7 @@ entry point in this order:
 Write reports under `profile/` for the current round so later rounds
 can `compare` against them. Use only capture interfaces present when this turn
 started. If no capture entry point exists, do not fabricate a report or
-hand-write JSON; report the missing capability in `analysis` and name the
+hand-write JSON; report the missing capability in {{ reply.analysis }} and name the
 smallest contract the implementer must add (a capture command producing the
 schema documented in `{{ profiler_support_name }}/analyze_headroom.py`).
 
@@ -93,18 +93,18 @@ optimization loop blocked on new profiler infrastructure.
 The profiler is read-only and does not create a new candidate. If the run's evidence
 already contains a recent accepted canonical evaluation for the current
 candidate, do **not** rerun that expensive sweep merely to populate this
-response. The framework already tracks the accepted value. Set `perf_metric`
-and `perf_unit` to `null`, and cite the existing value only as context in
-`analysis`.
+response. The framework already tracks the accepted value. Set {{ reply.perf_metric }}
+and {{ reply.perf_unit }} to `null`, and cite the existing value only as context in
+{{ reply.analysis }}.
 
 Per-kernel times, bucket totals, and speed-of-light ratios from the headroom
-report are analysis evidence, never `perf_metric`. A fresh headline metric is
+report are analysis evidence, never {{ reply.perf_metric }}. A fresh headline metric is
 appropriate only when no accepted evaluation exists; in that case run the
 canonical benchmark with its documented output flag and report the exact field
 `OBJECTIVE.md` names (look for a line like `Headline metric: <field_name>`),
-with `perf_unit` set to that field's name.
+with {{ reply.perf_unit }} set to that field's name.
 
-If you cannot run the benchmark this round, set `perf_metric: null` rather
+If you cannot run the benchmark this round, set `{{ reply.perf_metric.name }}: null` rather
 than substituting a derived number.
 
 ## Output
@@ -120,4 +120,4 @@ Return exactly one JSON object. Do not wrap in markdown fences.
 }
 
 IMPORTANT: Base your analysis on actual report data returned by the MCP tools.
-Do not fabricate numbers. If capture failed, say so plainly in `analysis`.
+Do not fabricate numbers. If capture failed, say so plainly in {{ reply.analysis }}.

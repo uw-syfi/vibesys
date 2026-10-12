@@ -12,10 +12,11 @@ from pathlib import Path
 
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.prompt_context import context_variables
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 
 import vibesys.orchestration.evolve.core_policy.prompts as templates
-from vibesys.orchestration.evolve.core_policy.api import run_prompt_variables
+from vibesys.orchestration.evolve.core_policy.api import reply_schemas, run_prompt_variables
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.orchestration.evolve.strategy.api import (
     JudgePrompt,
@@ -81,8 +82,7 @@ _PROFILER = st.builds(
 
 
 def _render(template: PromptTemplate, context: Value, *, agent_evaluation: bool = True) -> str:
-    variables = {name: getattr(context, name) for name in type(context).model_fields}
-    variables.pop("template")
+    variables = context_variables(context, reply_schemas())
     text = _RENDERER.render_template(
         f"{template.value}.j2",
         **run_prompt_variables(

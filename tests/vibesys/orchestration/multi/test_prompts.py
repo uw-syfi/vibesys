@@ -13,10 +13,11 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.prompt_context import context_variables
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 
 import vibesys.orchestration.multi.core_policy.prompts as templates
-from vibesys.orchestration.multi.core_policy.api import run_prompt_variables
+from vibesys.orchestration.multi.core_policy.api import reply_schemas, run_prompt_variables
 from vibesys.orchestration.multi.strategy.api import (
     ArchiveConflictView,
     ConflictMetric,
@@ -186,8 +187,7 @@ _PLANNING = st.builds(
 
 
 def _variables(context: Value, *, agent_evaluation: bool = True) -> dict[str, object]:
-    variables = {name: getattr(context, name) for name in context.model_fields}
-    variables.pop("template")
+    variables = context_variables(context, reply_schemas())
     return {
         **run_prompt_variables(
             domain_sections=EMPTY_DOMAIN_SECTIONS,

@@ -103,7 +103,7 @@ is a profiler failure.
 If no remote profiling command is available, report that profiling could not be
 captured and explain which entry point or command the implementer must add.
 
-If a remote profiling command fails (entrypoint missing, function errors, JSON empty, returned dict missing required keys, etc.), record the exact error in `analysis` and surface the missing contract as a `suggestions` item. A profile run that produces fabricated or unrelated numbers is worse than a profile run that admits it could not capture.
+If a remote profiling command fails (entrypoint missing, function errors, JSON empty, returned dict missing required keys, etc.), record the exact error in {{ reply.analysis }} and surface the missing contract as a {{ reply.suggestions }} item. A profile run that produces fabricated or unrelated numbers is worse than a profile run that admits it could not capture.
 {% else %}
 ### `profile_ops`: generic in-process capture (preferred)
 
@@ -192,9 +192,9 @@ error.
 The profiler is read-only and does not create a new candidate. If the run's evidence
 already contains a recent accepted canonical evaluation for the current
 candidate, do **not** rerun that expensive sweep merely to populate this
-response. The framework already tracks the accepted value. Set `perf_metric`
-and `perf_unit` to `null`, and cite the existing value only as context in
-`analysis`.
+response. The framework already tracks the accepted value. Set {{ reply.perf_metric }}
+and {{ reply.perf_unit }} to `null`, and cite the existing value only as context in
+{{ reply.analysis }}.
 
 Run only the targeted load needed to capture the requested profile. A fresh
 headline metric is appropriate only when no accepted evaluation exists and the
@@ -203,15 +203,15 @@ In that exceptional case:
 
 1. The OBJECTIVE block above (rendered verbatim from `OBJECTIVE.md`) names the headline field: look for a line like `Headline metric: <field_name>` referencing a specific JSON field of the benchmark tool's output. This is the only authoritative source for the field name.
 2. Run the canonical benchmark with its documented output flag.
-3. Read **that exact field** from the benchmark JSON. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units: round N's perf_unit must equal round N-1's perf_unit unless the OBJECTIVE itself changed.
+3. Read **that exact field** from the benchmark JSON. Set {{ reply.perf_metric }} to its numeric value and {{ reply.perf_unit }} to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units: round N's perf_unit must equal round N-1's perf_unit unless the OBJECTIVE itself changed.
 
 **Forbidden**:
 
 - Picking a different field from the benchmark output because you "think it's more meaningful". The OBJECTIVE is authoritative.
-- Reporting per-replay timings, per-kernel throughput, or single-operation extrapolations as `perf_metric`: they ignore end-to-end effects and can misrepresent real behavior. Use them only in `analysis` and `bottlenecks` text.
+- Reporting per-replay timings, per-kernel throughput, or single-operation extrapolations as {{ reply.perf_metric }}: they ignore end-to-end effects and can misrepresent real behavior. Use them only in {{ reply.analysis }} and {{ reply.bottlenecks }} text.
 - Recording the secondary/parenthetical number ("also: …") that the benchmark may print alongside the primary metric for human readers.
 
-If you cannot run the benchmark this round, set `perf_metric: null` rather than substituting a derived number.
+If you cannot run the benchmark this round, set `{{ reply.perf_metric.name }}: null` rather than substituting a derived number.
 
 ## Output
 
@@ -225,4 +225,4 @@ Return exactly one JSON object. Do not wrap in markdown fences.
   "perf_unit": "<unit string or null>"
 }
 
-IMPORTANT: Base your analysis on actual profiler data returned by the MCP tools. Do not fabricate numbers. {% if profile_execution == "remote" %}If remote dispatch failed, say so plainly in `analysis` rather than profiling synthetic weights or unrelated code paths.{% endif %}
+IMPORTANT: Base your analysis on actual profiler data returned by the MCP tools. Do not fabricate numbers. {% if profile_execution == "remote" %}If remote dispatch failed, say so plainly in {{ reply.analysis }} rather than profiling synthetic weights or unrelated code paths.{% endif %}

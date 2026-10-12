@@ -122,8 +122,18 @@ class WorkstreamPlan(BaseModel):
     pass_criteria: str = Field(
         min_length=1, description="Observable evidence that the implementation meets its goal."
     )
-    continue_hypothesis: bool = False
-    evidence: tuple[EvidenceReference, ...] = Field(default=(), max_length=8)
+    continue_hypothesis: bool = Field(
+        default=False,
+        description=(
+            "False for a new hypothesis ID; true to continue the existing hypothesis "
+            "that has this ID."
+        ),
+    )
+    evidence: tuple[EvidenceReference, ...] = Field(
+        default=(),
+        max_length=8,
+        description="Measurements this workstream rests on, cited by location and measured revision.",
+    )
     parent_hypothesis_id: AgentId | None = Field(
         default=None,
         description=(
@@ -283,7 +293,9 @@ class StrategyReason(StrEnum):
 class PlannerHypothesisUpdate(HypothesisStrategyUpdate):
     """A strategic decision with a required machine-readable reason."""
 
-    reason_kind: StrategyReason
+    reason_kind: StrategyReason = Field(
+        description="Machine-readable category of why this direction is retired."
+    )
 
 
 class PortfolioPlan(BaseModel):

@@ -8,13 +8,15 @@ rows below.
 """
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
-from vs_core.api import EvidenceRef, RevisionRef, Value
+from vs_core.api import EvidenceRef, RevisionRef, RolePromptContext, SchemaRef, Value
+
+from ._schemas import JUDGE_REPLY, MUTATOR_REPLY, PROFILER_REPLY
 
 
 class PromptTemplate(StrEnum):
@@ -32,8 +34,10 @@ class ObjectiveAxis(Value):
     direction: Literal["max", "min"]
 
 
-class MutatePrompt(Value):
+class MutatePrompt(RolePromptContext):
     """One mutation request: a cold start, a repair of an earlier cold start, or a child."""
+
+    reply_schema: ClassVar[SchemaRef | None] = MUTATOR_REPLY
 
     template: Literal[PromptTemplate.MUTATE] = PromptTemplate.MUTATE
     base_revision: RevisionRef
@@ -49,8 +53,10 @@ class MutatePrompt(Value):
     interface: str = "inprocess"
 
 
-class JudgePrompt(Value):
+class JudgePrompt(RolePromptContext):
     """The independent review of one offspring."""
+
+    reply_schema: ClassVar[SchemaRef | None] = JUDGE_REPLY
 
     template: Literal[PromptTemplate.JUDGE] = PromptTemplate.JUDGE
     candidate: RevisionRef
@@ -59,8 +65,10 @@ class JudgePrompt(Value):
     cited_evidence: tuple[EvidenceRef, ...] = ()
 
 
-class ProfilerPrompt(Value):
+class ProfilerPrompt(RolePromptContext):
     """One advisory profiling turn of a passing offspring."""
+
+    reply_schema: ClassVar[SchemaRef | None] = PROFILER_REPLY
 
     template: Literal[PromptTemplate.PROFILER] = PromptTemplate.PROFILER
     candidate: RevisionRef

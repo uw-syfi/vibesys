@@ -14,6 +14,7 @@ from pathlib import Path
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
+from tests.vibesys.orchestration.dynamic.prompt_variables import context_variables
 from tests.vibesys.orchestration.dynamic.strategy._views import empty_view, evidence_ref, revision
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
@@ -58,8 +59,7 @@ _CONFIG = DynamicConfig(
 
 
 def _text(prompt: PlannerPrompt) -> str:
-    variables = {name: getattr(prompt, name) for name in type(prompt).model_fields}
-    variables.pop("template")
+    variables = context_variables(prompt)
     root = Path(templates.__file__).parent
     return TemplateRenderer(root, fallback_roots=(CORE_PROTOCOL_DIR,)).render_template(
         "portfolio.j2",

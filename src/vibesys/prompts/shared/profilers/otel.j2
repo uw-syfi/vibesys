@@ -70,9 +70,9 @@ The benchmark command is documented in `OBJECTIVE.md`.
    run's critical path separately and compare only graphs with matching
    workload identity and window count. Treat large
    span-count changes as a possible coverage or sampling change.
-5. Report the benchmark's declared `primary_value` as `perf_metric`; internal
+5. Report the benchmark's declared `primary_value` as {{ reply.perf_metric }}; internal
    span latency is diagnostic evidence, not the scored result.
-6. In `analysis`, show the request breakdown you actually measured: the
+6. In {{ reply.analysis }}, show the request breakdown you actually measured: the
    representative waterfall as ordered `offset_ms +duration_ms service:operation`
    lines, and the critical-path contributors with their share of root latency.
    Report `omitted_*` counts when the bounded views truncate evidence.

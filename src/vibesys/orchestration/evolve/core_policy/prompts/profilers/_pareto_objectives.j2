@@ -2,9 +2,9 @@
 
 ## Pareto-frontier mode — emit *all* configured metrics
 
-This run is in Pareto-frontier mode. In addition to the headline `perf_metric` / `perf_unit`, populate the `metrics` field of `ProfilerSummary` with the numeric value of EVERY objective listed below — read each one from the benchmark tool's JSON output, do not derive, do not invert.
+This run is in Pareto-frontier mode. In addition to the headline {{ reply.perf_metric }} / {{ reply.perf_unit }}, populate the {{ reply.metrics }} field of `ProfilerSummary` with the numeric value of EVERY objective listed below — read each one from the benchmark tool's JSON output, do not derive, do not invert.
 
-Objectives to report (use these exact key names in `metrics`):
+Objectives to report (use these exact key names in {{ reply.metrics }}):
 
 {% for item in objectives %}
 - `{{ item.name }}` ({{ "maximize" if item.direction == "max" else "minimize" }})

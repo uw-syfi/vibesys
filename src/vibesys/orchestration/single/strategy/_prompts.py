@@ -8,13 +8,15 @@ of a revision and holds no progress files.
 """
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
 from vibesys.serial_search.api import PlanEvidence
-from vs_core.api import RevisionRef, Value
+from vs_core.api import RevisionRef, RolePromptContext, SchemaRef
+
+from ._schemas import IMPLEMENTER_REPLY, PLANNER_REPLY
 
 
 class PromptTemplate(StrEnum):
@@ -24,15 +26,19 @@ class PromptTemplate(StrEnum):
     ROUND = "round"
 
 
-class PlanPrompt(PlanEvidence):
+class PlanPrompt(PlanEvidence, RolePromptContext):
     """One new-hypothesis planning request."""
+
+    reply_schema: ClassVar[SchemaRef | None] = PLANNER_REPLY
 
     template: Literal[PromptTemplate.PLAN] = PromptTemplate.PLAN
     base_revision: RevisionRef
 
 
-class RoundPrompt(Value):
+class RoundPrompt(RolePromptContext):
     """One implementation, self-review and profile request for the open round."""
+
+    reply_schema: ClassVar[SchemaRef | None] = IMPLEMENTER_REPLY
 
     template: Literal[PromptTemplate.ROUND] = PromptTemplate.ROUND
     round_number: int = Field(gt=0)

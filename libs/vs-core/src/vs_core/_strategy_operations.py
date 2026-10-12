@@ -18,7 +18,9 @@ registrations, the registry, the role mapping and the schema references.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field
@@ -54,6 +56,21 @@ class RenderedArtifacts(Value):
     status: Status
     prompts: tuple[ArtifactRef, ...] = ()
     tool_policy: ArtifactRef | None = None
+
+
+class RolePromptContext(Value):
+    """A prompt context for a turn that answers with a reply schema.
+
+    ``reply_schema`` names the schema the agent receives for the turn this prompt starts.
+    The renderer derives the template's ``reply`` variable from that schema as the run
+    offers it, so a template names reply fields only through ``reply`` and never types
+    them. A context for a turn with no reply schema keeps the default and gets no ``reply``.
+    """
+
+    reply_schema: ClassVar[SchemaRef | None] = None
+    described_replies: ClassVar[Mapping[str, SchemaRef]] = MappingProxyType({})
+    """Replies of other turns this prompt describes (a judge reads the implementer's reply),
+    by the template variable that offers each one's fields."""
 
 
 class RenderRoleArtifactsBase[C: Value](OperationRequest):

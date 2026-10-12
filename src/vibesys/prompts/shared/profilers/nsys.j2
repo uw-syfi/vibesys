@@ -70,21 +70,21 @@ Capture is a long-running shell step — do it before calling the MCP tools.
 
 ## Performance metric — use the OBJECTIVE's named headline field, exactly
 
-`perf_metric` is the round's headline performance number that the framework's plateau detector and round-over-round comparisons trust. Plateau detection compares the raw float across rounds — **so the unit must not change between rounds**. A unit flip (tok/s → latency_ms, etc.) silently breaks the comparison.
+{{ reply.perf_metric }} is the round's headline performance number that the framework's plateau detector and round-over-round comparisons trust. Plateau detection compares the raw float across rounds — **so the unit must not change between rounds**. A unit flip (tok/s → latency_ms, etc.) silently breaks the comparison.
 
 **Process** (do these in order):
 
 1. The OBJECTIVE block above (rendered verbatim from `OBJECTIVE.md`) names the headline field — look for a line like `Headline metric: <field_name>` referencing a specific JSON field of the benchmark tool's output. This is the only authoritative source for the field name.
 2. Run the benchmark with `--output-json /tmp/bench.json` (or the equivalent flag — discover via `--help`, do not guess).
-3. Read **that exact field** from the benchmark JSON. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units — round N's perf_unit must equal round N-1's perf_unit unless the OBJECTIVE itself changed.
+3. Read **that exact field** from the benchmark JSON. Set {{ reply.perf_metric }} to its numeric value and {{ reply.perf_unit }} to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units — round N's perf_unit must equal round N-1's perf_unit unless the OBJECTIVE itself changed.
 
 **Forbidden**:
 
 - Picking a different field from the benchmark output because you "think it's more meaningful". The OBJECTIVE is authoritative.
-- Reporting per-replay timings, per-kernel throughput, or single-operation extrapolations as `perf_metric` — they ignore end-to-end effects and can misrepresent real behavior. Use them only in `analysis` and `bottlenecks` text.
+- Reporting per-replay timings, per-kernel throughput, or single-operation extrapolations as {{ reply.perf_metric }} — they ignore end-to-end effects and can misrepresent real behavior. Use them only in {{ reply.analysis }} and {{ reply.bottlenecks }} text.
 - Recording the secondary/parenthetical number ("also: …") that the benchmark may print alongside the primary metric for human readers.
 
-If you cannot run the benchmark this round, set `perf_metric: null` rather than substituting a derived number.
+If you cannot run the benchmark this round, set `{{ reply.perf_metric.name }}: null` rather than substituting a derived number.
 
 ## Output
 

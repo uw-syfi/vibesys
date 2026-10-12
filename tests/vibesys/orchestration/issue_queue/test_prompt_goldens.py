@@ -11,7 +11,9 @@ import json
 from pathlib import Path
 
 import pytest
+from tests.support.prompt_context import context_variables
 from tests.vibesys.golden.helpers import assert_exact_text
+from tests.vibesys.orchestration.issue_queue.strategy.world import issue_queue_config
 
 from vibesys.core_wiring import domain_prompt_sections
 from vibesys.issue_queue_board import IssueQueueTexts
@@ -21,6 +23,7 @@ from vibesys.orchestration.issue_queue.core_policy.api import (
     RunBounds,
     build_core_policy,
     prompts,
+    reply_schemas,
 )
 from vibesys.orchestration.issue_queue.models import IssueQueueOptions
 from vibesys.orchestration.issue_queue.strategy.api import (
@@ -150,11 +153,10 @@ def _render(context: PromptContext | str, facts: RunFacts) -> str:
     }
     if isinstance(context, str):
         return IssueQueueTexts(variables).issue_body(context)
-    fields = {name: getattr(context, name) for name in type(context).model_fields}
-    template = str(fields.pop("template"))
+    replies = reply_schemas(issue_queue_config(domain_id=facts.domain_id))
     return TemplateRenderer(
         Path(prompts.__file__).parent, fallback_roots=(CORE_PROTOCOL_DIR,)
-    ).render_template(f"{template}.j2", **variables, **fields)
+    ).render_template(f"{context.template}.j2", **variables, **context_variables(context, replies))
 
 
 @pytest.mark.parametrize("name", sorted(_CASES))

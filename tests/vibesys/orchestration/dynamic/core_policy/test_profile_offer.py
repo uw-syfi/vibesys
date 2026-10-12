@@ -13,6 +13,7 @@ from pathlib import Path
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
+from tests.vibesys.orchestration.dynamic.prompt_variables import context_variables
 from tests.vibesys.orchestration.dynamic.strategy._replies import plan_reply, profile
 from tests.vibesys.orchestration.dynamic.strategy._run import config
 
@@ -83,8 +84,7 @@ def _prompt(fields: tuple[ProfileField, ...]) -> PlannerPrompt:
 
 
 def _variables(context: PlannerPrompt | PlannerCorrectionPrompt) -> dict[str, object]:
-    variables = {name: getattr(context, name) for name in type(context).model_fields}
-    variables.pop("template")
+    variables = context_variables(context)
     return {
         **run_prompt_variables(
             domain_sections=EMPTY_DOMAIN_SECTIONS,

@@ -86,7 +86,7 @@ Standalone profiling is disabled for this run. Use existing evidence and do not
 invoke profiler tools.
 {% else %}
 The run's profiler is `{{ profiler_id }}`. Capture with it when its commands exist in your
-environment; a profile you cannot capture is uncertainty to report in `profile_analysis`, not a
+environment; a profile you cannot capture is uncertainty to report in {{ reply.profile_analysis }}, not a
 reason to FAIL.
 Record `observer_effect_fraction` against a comparable uninstrumented control.
 If headline metrics differ by more than 10%, the capture is qualitative and

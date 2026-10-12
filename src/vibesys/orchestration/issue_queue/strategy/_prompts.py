@@ -8,11 +8,13 @@ issue as a list from the prompt, not from files.
 """
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from vs_core.api import EvidenceRef, RevisionRef, Value
+from vs_core.api import EvidenceRef, RevisionRef, RolePromptContext, SchemaRef, Value
+
+from ._schemas import IMPLEMENTER_REPLY, JUDGE_REPLY, PERF_REPLY
 
 
 class PromptTemplate(StrEnum):
@@ -42,8 +44,10 @@ class IssueDetail(IssueBrief):
     description: str
 
 
-class ImplementPrompt(Value):
+class ImplementPrompt(RolePromptContext):
     """One bounded implementation attempt of one issue."""
+
+    reply_schema: ClassVar[SchemaRef | None] = IMPLEMENTER_REPLY
 
     template: Literal[PromptTemplate.IMPLEMENT] = PromptTemplate.IMPLEMENT
     issue: IssueDetail
@@ -53,8 +57,10 @@ class ImplementPrompt(Value):
     analysis: str | None = None
 
 
-class ReviewPrompt(Value):
+class ReviewPrompt(RolePromptContext):
     """Independent review of one issue's candidate."""
+
+    reply_schema: ClassVar[SchemaRef | None] = JUDGE_REPLY
 
     template: Literal[PromptTemplate.REVIEW] = PromptTemplate.REVIEW
     issue: IssueDetail
@@ -76,8 +82,10 @@ class PriorPerformance(Value):
     new_issues: int = Field(ge=0)
 
 
-class PerformancePrompt(Value):
+class PerformancePrompt(RolePromptContext):
     """One measured performance assessment and the issues it may file."""
+
+    reply_schema: ClassVar[SchemaRef | None] = PERF_REPLY
 
     template: Literal[PromptTemplate.PERFORMANCE] = PromptTemplate.PERFORMANCE
     iteration: int = Field(gt=0)

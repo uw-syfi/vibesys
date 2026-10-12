@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from tests.support.prompt_context import profiler_reply
 
 import vibesys.orchestration.multi.core_policy.prompts as multi_templates
 from vibesys.constants import DomainName
@@ -97,6 +98,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
         "profiler_nsys": render_template(
             "profilers/nsys.j2",
             template_dir=_TEMPLATE_DIR,
+            reply=profiler_reply(),
             profile_focus="queue benchmark hotspots",
             benchmark_command=context["benchmark_command"],
             modality=context["modality"],
@@ -111,6 +113,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
         "profiler_torch": render_template(
             "profilers/torch.j2",
             template_dir=_TEMPLATE_DIR,
+            reply=profiler_reply(),
             profile_focus="queue benchmark hotspots",
             benchmark_command=context["benchmark_command"],
             modality=context["modality"],
@@ -125,6 +128,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
         "profiler_neuron": render_template(
             "profilers/neuron.j2",
             template_dir=_TEMPLATE_DIR,
+            reply=profiler_reply(),
             profile_focus="queue benchmark hotspots",
             benchmark_command=context["benchmark_command"],
             modality=context["modality"],
@@ -208,6 +212,7 @@ def test_llm_serving_profiler_prompts_point_to_engine_and_rocm_references() -> N
         rendered = render_template(
             template_name,
             template_dir=_TEMPLATE_DIR,
+            reply=profiler_reply(),
             profile_focus="serving benchmark hotspots",
             benchmark_command=context["benchmark_command"],
             modality=context["modality"],
@@ -228,6 +233,7 @@ def test_microservice_otel_profiler_uses_critical_path_as_diagnostic_evidence() 
     rendered = render_template(
         "profilers/otel.j2",
         template_dir=_TEMPLATE_DIR,
+        reply=profiler_reply(),
         profile_focus="microservice latency",
         benchmark_command=context["benchmark_command"],
         domain_profiler=_domain_section(DomainName.MICROSERVICES, "profiler", context),

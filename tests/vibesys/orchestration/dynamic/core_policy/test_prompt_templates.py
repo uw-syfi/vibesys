@@ -15,6 +15,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
+from tests.vibesys.orchestration.dynamic.prompt_variables import context_variables
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
 from vibesys.orchestration.dynamic.core_policy.api import (
@@ -39,6 +40,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
 from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate
 from vs_core.api import RevisionId, RevisionRef
 from vs_prompts.api import TemplateRenderer
+from vs_runtime.api import ProfileField
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -81,6 +83,7 @@ _PLANNER = st.builds(
     baseline=_METRICS,
     input_failure=st.none() | _TEXT,
     profiling=st.booleans(),
+    profile_fields=st.lists(st.sampled_from(ProfileField), unique=True).map(tuple),
 )
 _CONTEXTS: dict[PromptTemplate | CoreProtocolTemplate, st.SearchStrategy[PromptContext]] = {
     PromptTemplate.PORTFOLIO: _PLANNER,
@@ -134,8 +137,7 @@ _CONTEXTS: dict[PromptTemplate | CoreProtocolTemplate, st.SearchStrategy[PromptC
 
 
 def _variables(context: BaseModel, *, agent_evaluation: bool = False) -> dict[str, object]:
-    variables = {name: getattr(context, name) for name in type(context).model_fields}
-    variables.pop("template")
+    variables = context_variables(context)
     return {
         **run_prompt_variables(
             domain_sections=EMPTY_DOMAIN_SECTIONS,

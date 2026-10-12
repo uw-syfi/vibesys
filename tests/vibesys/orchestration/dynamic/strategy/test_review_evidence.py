@@ -14,6 +14,7 @@ from pathlib import Path
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
+from tests.vibesys.orchestration.dynamic.prompt_variables import context_variables
 from tests.vibesys.orchestration.dynamic.strategy._replies import reviewed
 from tests.vibesys.orchestration.dynamic.strategy._views import empty_view, evidence_ref, revision
 from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
@@ -70,8 +71,7 @@ def _review_prompts(run: SimulatedRun) -> list[ReviewPrompt]:
 
 
 def _text(prompt: ReviewPrompt, *, agent_evaluation: bool = True) -> str:
-    variables = {name: getattr(prompt, name) for name in type(prompt).model_fields}
-    variables.pop("template")
+    variables = context_variables(prompt)
     root = Path(templates.__file__).parent
     return TemplateRenderer(root, fallback_roots=(CORE_PROTOCOL_DIR,)).render_template(
         "review.j2",

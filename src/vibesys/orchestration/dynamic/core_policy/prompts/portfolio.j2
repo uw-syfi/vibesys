@@ -41,24 +41,24 @@ Buildable candidates, pinned to exact retained, accuracy-verified revisions:
 `latest_verified` and `best_partial` are distinct: `best_partial` marks the best
 observed value within a matching comparison, not a passing metric or adoption
 authority. Compare values only within matching quantity, unit and direction.
-For a new implementation sibling, set `parent_hypothesis_id` and `parent_revision` to
-one exact offered pair. A null `parent_hypothesis_id` with no revision selects the base
+For a new implementation sibling, set {{ reply.parent_hypothesis_id }} and {{ reply.parent_revision }} to
+one exact offered pair. A null {{ reply.parent_hypothesis_id }} with no revision selects the base
 revision. An invalid selection requires correction and never silently starts from base.
 Each sibling has its own workspace and session.
 {% endif %}
 Workstreams in one reply are independent: a parent must be an offered buildable
 candidate, never another workstream of this reply.{% if not buildable %} No candidate is
-offered as a parent now, so leave `parent_hypothesis_id` null.{% endif %}
+offered as a parent now, so leave {{ reply.parent_hypothesis_id }} null.{% endif %}
 
 For work that must change code, add a feature, fix correctness, or produce a
-candidate, choose an implement workstream: `kind` "implement", `hypothesis_id`,
-`title` (implementation goal), `hypothesis` (the claim to test), `task` (concrete
-changes), and `pass_criteria` (observable success). Set `continue_hypothesis` to false
-for a new ID and true to continue an existing one; `parent_hypothesis_id` selects its
-starting candidate, and `evidence` cites measurements by location and measured revision.
+candidate, choose an implement workstream: {{ reply.kind }} "implement", {{ reply.hypothesis_id }},
+{{ reply.title }} (implementation goal), {{ reply.hypothesis }} (the claim to test), {{ reply.task }} (concrete
+changes), and {{ reply.pass_criteria }} (observable success). Set {{ reply.continue_hypothesis }} to false
+for a new ID and true to continue an existing one; {{ reply.parent_hypothesis_id }} selects its
+starting candidate, and {{ reply.evidence }} cites measurements by location and measured revision.
 A measurement applies only to the revision it measured.
 
-Every implement workstream must start with a first measurable step: begin its `task` with
+Every implement workstream must start with a first measurable step: begin its {{ reply.task }} with
 the smallest change to the claim that one implementer turn can finish and submit for
 trusted evaluation, then say what follows. An architecture-scale hypothesis is split so
 that its first step already produces a measurement. A workstream whose implementer turns
@@ -67,24 +67,24 @@ same task again, narrow it to a first step that fits one turn.
 
 Fill every free slot: a slot left free idles until a running workstream finishes.
 {% if profiling %}
-For measurement-only work, choose a profile workstream: `kind` "profile", a new
-`profile_id`, `target_hypothesis_id` (a listed buildable candidate, or null for the base
-revision), `question` (what uncertainty to measure on that existing revision), and
-`decision_impact` (which next decision depends on the answer). A profile cannot change
+For measurement-only work, choose a profile workstream: {{ reply.kind }} "profile", a new
+{{ reply.profile_id }}, {{ reply.target_hypothesis_id }} (a listed buildable candidate, or null for the base
+revision), {{ reply.question }} (what uncertainty to measure on that existing revision), and
+{{ reply.decision_impact }} (which next decision depends on the answer). A profile cannot change
 code or produce a candidate.
 {% if profile_fields %}
-A profile may list `required_fields`, the measurements its answer must contain. This run's
+A profile may list {{ reply.required_fields }}, the measurements its answer must contain. This run's
 capture supplies only {{ profile_fields | join(', ') }}: list nothing else.
 {% else %}
-This run's capture supplies no named measurement field: leave `required_fields` empty.
+This run's capture supplies no named measurement field: leave {{ reply.required_fields }} empty.
 {% endif %}
 {% endif %}
 Choose workstreams that investigate distinct mechanisms or competing hypotheses. Do not
 split one implementation into parallel fragments and do not assign duplicate
 hypothesis IDs. New IDs must not occur in the history. A continued workstream must
-reuse its existing ID and set `continue_hypothesis`. Use `hypothesis_updates` to park
+reuse its existing ID and set {{ reply.continue_hypothesis }}. Use {{ reply.hypothesis_updates }} to park
 or abandon completed directions when evidence makes that decision clear; every update
-needs `reason_kind` and a nonempty `reason`.
+needs {{ reply.reason_kind }} and a nonempty {{ reply.reason }}.
 
 The framework provides isolated candidate workspaces, runs independent reviews, and
 owns trusted evaluation and winner adoption. Only evaluated, accepted candidates can
@@ -144,8 +144,8 @@ Older hypothesis IDs (omitted above; reuse one only to continue it): {{ older_id
 {% endif %}
 
 Answer with the structured response, filling its top-level fields directly:
-`reasoning` (why this portfolio), `workstreams` (one entry per new workstream), and
-`hypothesis_updates` (parks and abandonments; empty when there are none). Do not wrap
+{{ reply.reasoning }} (why this portfolio), {{ reply.workstreams }} (one entry per new workstream), and
+{{ reply.hypothesis_updates }} (parks and abandonments; empty when there are none). Do not wrap
 the plan in another field or write it as JSON text inside a field. Each workstream entry
 carries every field listed above. This reply is valid; its values are placeholders, and your
 hypothesis IDs must not occur in the history:

@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from jinja2.exceptions import TemplateError
 
-from vs_core.api import ArtifactId, ArtifactRef
+from vs_core.api import ArtifactId, ArtifactRef, RolePromptContext
+from vs_prompts.api import reply_fields
 from vs_runtime._evidence_operations import reading_mapping
 from vs_runtime._operation_catalog import Applied, Inspection, NotApplied
 
@@ -23,12 +24,15 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import EvidenceRef, OperationRequest
-    from vs_prompts.api import TemplateRenderer
+    from vs_core.api import EvidenceRef, OperationRequest, SchemaRef
+    from vs_prompts.api import ReplyFields, TemplateRenderer
     from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._core_requests import ExecutionContext
     from vs_runtime._evidence_ledger import EvidenceLookup
 
+
+REPLY_VARIABLE = "reply"
+"""The template variable that names the reply fields the turn is offered."""
 
 CITED_EVIDENCE = "cited_evidence"
 """The context field that names evidence records a prompt states the results of.
@@ -49,6 +53,32 @@ _UNREAD: Mapping[str, object] = {
 }
 
 
+def reply_variable(
+    context: BaseModel, replies: Mapping[SchemaRef, type[BaseModel]]
+) -> Mapping[str, ReplyFields]:
+    """The reply template variables of a prompt context, or nothing for a turn without a reply.
+
+    ``reply`` holds the fields of the JSON Schema the agent receives for the context's reply
+    schema in this run (the reply type after the run's capabilities trimmed it), so a
+    template can name only fields the agent is offered. A context that describes other turns'
+    replies gets each under its own variable.
+    """
+    if not isinstance(context, RolePromptContext):
+        return {}
+    named = dict(context.described_replies)
+    if context.reply_schema is not None:
+        named[REPLY_VARIABLE] = context.reply_schema
+    return {name: _fields_of(schema, replies) for name, schema in named.items()}
+
+
+def _fields_of(schema: SchemaRef, replies: Mapping[SchemaRef, type[BaseModel]]) -> ReplyFields:
+    model = replies.get(schema)
+    if model is None:
+        message = f"no reply type is registered for schema {schema.name!r}"
+        raise LookupError(message)
+    return reply_fields(model.model_json_schema())
+
+
 class RenderRequest(Protocol):
     """The request shape this owner serves, declared by the strategy that issues it."""
 
@@ -66,17 +96,23 @@ class RenderArtifactsOwner:
         store: ArtifactStore,
         variables: Mapping[str, object] | None = None,
         evidence: EvidenceLookup | None = None,
+        replies: Mapping[SchemaRef, type[BaseModel]] | None = None,
     ) -> None:
         """Bind the template root, the artifact store, the run-level variables and the ledger.
 
         ``evidence`` is the ledger accepted results are recorded in. A context that cites
         evidence (see ``CITED_EVIDENCE``) has each citation read from it at render time, so a
         prompt states what was measured and no strategy has to carry the numbers.
+
+        ``replies`` are the run's reply types by schema. A context that names the schema its
+        turn answers with (``RolePromptContext``) gets ``reply``, the fields that schema offers
+        in this run, so the template never types a field name.
         """
         self._renderer = renderer
         self._store = store
         self._variables = dict(variables or {})
         self._evidence = evidence
+        self._replies = dict(replies or {})
 
     def _render(self, request: OperationRequest) -> tuple[bytes, ArtifactId] | None:
         render = cast("RenderRequest", request)
@@ -87,6 +123,7 @@ class RenderArtifactsOwner:
             **{name: getattr(context, name) for name in type(context).model_fields},
         }
         variables.pop("template", None)
+        variables.update(reply_variable(context, self._replies))
         if CITED_EVIDENCE in variables:
             variables[CITED_EVIDENCE] = self._readings(variables[CITED_EVIDENCE])
         try:

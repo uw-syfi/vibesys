@@ -15,6 +15,10 @@ Two correctness properties every consumer gets for free:
 this discriminator must define every required small fragment, an empty file
 is a deliberate skip" to any per-key fragment set.
 
+:class:`~vs_prompts.api.ReplyFields` is the ``reply`` template variable for a turn with a
+reply schema: ``{{ reply.some_field }}`` renders the backticked field name and fails
+rendering when the schema does not offer the field.
+
 :class:`~vs_prompts.api.RenderedPrompt` is the typed result of a render. Only
 the renderer constructs one, so agent-bound text can be told apart from text
 assembled in Python.
@@ -29,14 +33,24 @@ from vs_prompts.contract import (
 )
 from vs_prompts.fragments import FragmentFamily
 from vs_prompts.renderer import RenderedPrompt, TemplateRenderer
+from vs_prompts.reply_fields import (
+    ReplyField,
+    ReplyFields,
+    UnknownReplyFieldError,
+    reply_fields,
+)
 
 __all__ = [
     "ContractViolation",
     "FragmentFamily",
     "RenderedPrompt",
+    "ReplyField",
+    "ReplyFields",
     "TemplateContract",
     "TemplateRenderer",
+    "UnknownReplyFieldError",
     "UnresolvedInclude",
     "filter_skip_marked",
+    "reply_fields",
     "resolve_free_variables",
 ]
