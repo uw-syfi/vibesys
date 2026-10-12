@@ -317,7 +317,7 @@ def test_registration_rejects_a_duplicate_operation_role(tmp_path: Path) -> None
 
 def test_a_plugin_without_a_core_policy_is_refused() -> None:
     with pytest.raises(TypeError, match="core"):
-        OrchestrationPlugin(id="neither", agents=(), options=EmptyOptions)  # type: ignore[call-arg]
+        OrchestrationPlugin(id="neither", agents=(), options=EmptyOptions)  # ty: ignore[missing-argument]
 
 
 def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> None:

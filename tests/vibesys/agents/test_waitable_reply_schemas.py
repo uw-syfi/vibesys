@@ -39,8 +39,7 @@ from vibesys.orchestration.single.strategy.api import IMPLEMENTER_REPLY as SINGL
 from vibesys.prompts import render_template
 from vs_agent.api import AgentClient, native_schema_problems
 from vs_agent.api.testing import FakeExecutor, fake_agentshim_launcher, scripted_turn
-from vs_core.api import ArtifactId, ArtifactRef, WaitableReply
-from vs_evaluation.api import ProfilerAgentResult
+from vs_core.api import ArtifactId, ArtifactRef
 from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
@@ -93,13 +92,6 @@ _ISSUE_QUEUE_JUDGE = {
     "verdict": "pass",
     "new_issues": (),
 }
-_RUNTIME_PROFILER_RESULT = {
-    "outcome": "observed",
-    "narrative": "The launch path dominates.",
-    "evidence_ids": ["a" * 64],
-}
-_RUNTIME_PROFILER_REPLY = WaitableReply[ProfilerAgentResult]
-
 _AFFECTED_ROLES: tuple[tuple[str, type[BaseModel], dict[str, object]], ...] = (
     ("dynamic-implementer", _DYNAMIC[DYNAMIC_IMPLEMENTER_REPLY], _IMPLEMENTER),
     ("dynamic-profiler", _DYNAMIC[DYNAMIC_PROFILER_REPLY], _IMPLEMENTER),
@@ -115,7 +107,6 @@ _AFFECTED_ROLES: tuple[tuple[str, type[BaseModel], dict[str, object]], ...] = (
         _ISSUE_QUEUE_IMPLEMENTER,
     ),
     ("issue-queue-judge", _ISSUE_QUEUE[ISSUE_QUEUE_JUDGE_REPLY], _ISSUE_QUEUE_JUDGE),
-    ("runtime-profiler", _RUNTIME_PROFILER_REPLY, _RUNTIME_PROFILER_RESULT),
 )
 
 
@@ -176,7 +167,6 @@ def test_pre_envelope_wait_replies_remain_compatible(
         (_EVOLVE[EVOLVE_JUDGE_REPLY], []),
         (_ISSUE_QUEUE[ISSUE_QUEUE_IMPLEMENTER_REPLY], []),
         (_ISSUE_QUEUE[ISSUE_QUEUE_JUDGE_REPLY], []),
-        (_RUNTIME_PROFILER_REPLY, []),
     ],
 )
 def test_waitable_schemas_have_no_root_union_or_unresolved_reference(
@@ -226,19 +216,6 @@ def test_waitable_replies_reach_codex_as_native_schemas(
             '{"reply":{"kind":"waiting_for_evaluation","handles":["<handle>"]}}',
         ),
         (
-            render_template(
-                "shared/profiler_turn_prompt.j2",
-                candidate_snapshot_id="snapshot-a",
-                request="Find the bottleneck.",
-                evaluation_suspension=True,
-            ),
-            '{"reply":{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}}',
-        ),
-        (
-            render_template("shared/profiler_resume_prompt.j2", results=()),
-            '{"reply":{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}}',
-        ),
-        (
             TemplateRenderer(Path(issue_queue_prompts.__file__).parent).render_template(
                 "agent_evaluation.j2", agent_evaluation=True
             ),
@@ -247,8 +224,6 @@ def test_waitable_replies_reach_codex_as_native_schemas(
     ],
     ids=(
         "shared-role-fragment",
-        "runtime-profiler-turn",
-        "runtime-profiler-resume",
         "issue-queue-role-fragment",
     ),
 )
