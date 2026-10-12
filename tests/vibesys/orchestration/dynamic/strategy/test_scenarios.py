@@ -155,11 +155,10 @@ def test_a_wait_the_run_never_recorded_ends_its_turn_whichever_wait_it_names(
     attribute. A wait the run recorded none for (these scripted turns never submitted anything),
     or a kind the schema rejects outright, ends its turn as a bad reply and the run still ends.
     """
-    replies = {
-        "implementer": [_wait_on(kind), implemented()],
-        "judge": [_wait_on(kind), reviewed()],
-    }
-    world = DynamicWorld(**{role: replies[role]})
+    if role == "implementer":
+        world = DynamicWorld(implementer=[_wait_on(kind), implemented()])
+    else:
+        world = DynamicWorld(judge=[_wait_on(kind), reviewed()])
     run = simulate(world)
 
     assert run.finished

@@ -53,9 +53,11 @@ from vs_dst.api import SimulatedRun, simulate
 from vs_prompts.api import TemplateRenderer
 
 
-def _world(**changes: object) -> DynamicWorld:
+def _world(*, agent_evaluation: bool = False, throughput: float | None = 100.0) -> DynamicWorld:
     # A rejected candidate is never measured again, so only the agent's own evaluation exists.
-    return DynamicWorld(judge=[reviewed(passed=False)], **changes)
+    return DynamicWorld(
+        judge=[reviewed(passed=False)], agent_evaluation=agent_evaluation, throughputs=(throughput,)
+    )
 
 
 def _review_prompts(run: SimulatedRun) -> list[ReviewPrompt]:
@@ -84,7 +86,7 @@ def _text(prompt: ReviewPrompt, *, agent_evaluation: bool = True) -> str:
 
 
 def test_the_judge_is_given_the_evidence_id_verdicts_and_metric_of_an_accepted_evaluation() -> None:
-    run = simulate(_world(agent_evaluation=True, throughputs=(123.0,)))
+    run = simulate(_world(agent_evaluation=True, throughput=123.0))
 
     assert run.finished
     assert not run.liveness_violations
@@ -110,7 +112,7 @@ def test_the_judge_is_given_the_evidence_id_verdicts_and_metric_of_an_accepted_e
 
 
 def test_a_failed_benchmark_reaches_the_judge_with_what_it_measured() -> None:
-    run = simulate(_world(agent_evaluation=True, throughputs=(None,)))
+    run = simulate(_world(agent_evaluation=True, throughput=None))
 
     assert run.finished
     assert not run.liveness_violations

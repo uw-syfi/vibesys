@@ -126,7 +126,7 @@ class DynamicWorld:
     taken mid-run continues from where the run stood.
     """
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-994710 [PLR0913,PLR0915]; each option is one independent fact of the scripted world, and a test names the ones it varies.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-994720 [PLR0913]; each option is one independent fact of the scripted world, and a test names the ones it varies.
         # > Grouping them in a holder would make every test build the holder before the world.
         self,
         *,
@@ -188,6 +188,10 @@ class DynamicWorld:
         """
         selected = config(**settings)
         hosted = bool(waits) or bool(submit_only)
+        capabilities: frozenset[LifecycleCapability] = frozenset(lifecycle)
+        if hosted:
+            suspend: LifecycleCapability = "suspend"
+            capabilities |= {suspend}
         self.setup = RunSetup(
             new_strategy=lambda: DynamicStrategy(config=selected),
             harness=Harness(
@@ -197,8 +201,7 @@ class DynamicWorld:
                 envelope_type=RunEnvelope[DynamicStrategyState],
                 requirements=requirements_for(selected),
                 deadline_at=deadline_at,
-                lifecycle=frozenset(lifecycle)
-                | (frozenset({"suspend"}) if hosted else frozenset()),
+                lifecycle=capabilities,
             ),
             schemas=reply_schemas(selected),
             # A turn that waits is resumed while other requests run, and the evaluation it waits

@@ -22,6 +22,8 @@ from vs_core.testing.drive import Failed, Running
 from vs_dst.api import simulate
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from vs_core.api import CoreState, Request
     from vs_core.testing.drive import Answer
 
@@ -32,8 +34,18 @@ class SlowCandidateJobs(DynamicWorld):
     The input's own measurement is never slow, so the run starts as any run does.
     """
 
-    def __init__(self, *, running_polls: int, ends_failed: bool, **options: object) -> None:
-        super().__init__(polls=(0,), **options)
+    def __init__(
+        self,
+        *,
+        running_polls: int,
+        ends_failed: bool,
+        agent_evaluation: bool,
+        implementer: Sequence[str],
+        judge: Sequence[str],
+    ) -> None:
+        super().__init__(
+            polls=(0,), agent_evaluation=agent_evaluation, implementer=implementer, judge=judge
+        )
         self._running_polls = running_polls
         self._ends_failed = ends_failed
         self._polled: Counter[str] = Counter()
