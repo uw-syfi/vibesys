@@ -47,7 +47,17 @@ from vs_core.api import (
     RunState,
     validate_startup,
 )
-from vs_runtime.api.infrastructure import TrustedEvaluationPlan
+from vs_runtime.api.infrastructure import (
+    AgentPaths,
+    ClusterEvaluationFacts,
+    RunEnvironmentView,
+    TrustedEvaluationPlan,
+)
+from vs_sandbox.api.slurm import (
+    SlurmEvaluationPlan,
+    load_slurm_operator_settings,
+    trusted_profile_command,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -73,8 +83,16 @@ def _policy(
     profiler_id: str = "none",
     plan: TrustedEvaluationPlan | None = None,
 ) -> tuple[DynamicCorePolicy, ResolvedRun]:
+    return _policy_of(root, resolved(root, profiler_id=profiler_id, plan=plan), options, config)
+
+
+def _policy_of(
+    root: Path,
+    run: ResolvedRun,
+    options: dict[str, JsonValue] | None = None,
+    config: dict[str, object] | None = None,
+) -> tuple[DynamicCorePolicy, ResolvedRun]:
     request = run_request(root, options, config)
-    run = resolved(root, profiler_id=profiler_id, plan=plan)
     parsed = options_of(request)
     assert isinstance(parsed, DynamicOptions)
     return resolve_core_policy(parsed, bounds_of(request), run), run
@@ -185,11 +203,15 @@ def test_capabilities_of_the_run_override_the_config_defaults(tmp_path: Path) ->
         profile_command="profile",
         profile_timeout_seconds=13,
     )
-    policy, _ = _policy(
+    policy, _ = _policy_of(
         tmp_path,
+        resolved(
+            tmp_path,
+            profiler_id="nsys",
+            plan=plan,
+            environment=_slurm_view(tmp_path, service=True),
+        ),
         config={"evaluation": {"queue_allowance_seconds": 77}},
-        profiler_id="nsys",
-        plan=plan,
     )
     config = policy.strategy.config
 
@@ -214,6 +236,78 @@ def test_a_profiler_without_trusted_capture_does_not_offer_profile_work(tmp_path
 
     assert not config.profiling
     assert not config.profile_measurement
+
+
+_OPERATOR = """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/runs"
+job_timeout_seconds = 1800
+
+[slurm.transport]
+kind = "ssh"
+host = "cluster"
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+setup_script = "/remote/setup.sh"
+"""
+_SERVICE = """
+[vibesys.service]
+command = ["python", "-m", "engine.server", "--port", "VIBESYS_DYNAMIC_PORT"]
+readiness_url = "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/health"
+startup_timeout_seconds = 700
+"""
+
+
+def _slurm_view(
+    root: Path, *, service: bool, profile_command: tuple[str, ...] | None = ("profile",)
+) -> RunEnvironmentView:
+    """The view of a real Slurm run whose capture command comes from the production wiring."""
+    path = root / "slurm.toml"
+    path.write_text(_OPERATOR + (_SERVICE if service else ""), encoding="utf-8")
+    settings = load_slurm_operator_settings(path)
+    capture = trusted_profile_command(
+        settings.config, settings.policy, profile_command, profiler_tree="profiler"
+    )
+    plan = SlurmEvaluationPlan(config_path=path, profile_command=capture)
+    return RunEnvironmentView(
+        paths=AgentPaths(),
+        env_kind="slurm",
+        cluster_evaluation=ClusterEvaluationFacts(settings, plan),
+    )
+
+
+def _environments(root: Path) -> dict[str, RunEnvironmentView]:
+    return {
+        "host": RunEnvironmentView(paths=AgentPaths()),
+        "slurm-no-command": _slurm_view(root, service=False, profile_command=None),
+        "slurm-command-only": _slurm_view(root, service=False),
+        "slurm-service": _slurm_view(root, service=True),
+    }
+
+
+@pytest.mark.parametrize(
+    "environment", ["host", "slurm-no-command", "slurm-command-only", "slurm-service"]
+)
+@pytest.mark.parametrize("profiler_id", ["none", "rocprof"])
+@pytest.mark.parametrize("manifest_command", [None, "profile"])
+def test_profile_work_is_offered_exactly_when_the_run_can_capture(
+    tmp_path: Path, environment: str, profiler_id: str, manifest_command: str | None
+) -> None:
+    """A planner is never offered a profile workstream the run cannot capture and measure."""
+    view = _environments(tmp_path)[environment]
+    plan = TrustedEvaluationPlan(
+        accuracy_command="true",
+        accuracy_timeout_seconds=11,
+        profile_command=manifest_command,
+        profile_timeout_seconds=13 if manifest_command else None,
+    )
+    run = resolved(tmp_path, profiler_id=profiler_id, plan=plan, environment=view)
+    config = _policy_of(tmp_path, run)[0].strategy.config
+
+    can_capture = view.captures_profile and manifest_command is not None
+    assert config.profiling == (profiler_id != "none" and can_capture)
+    assert config.profile_measurement == config.profiling
 
 
 def test_an_unset_run_budget_is_an_unbounded_deadline(tmp_path: Path) -> None:

@@ -89,7 +89,11 @@ def bounds_of(request: RunRequest) -> RunBounds:
 
 
 def resolved(
-    root: Path, *, profiler_id: str = "none", plan: TrustedEvaluationPlan | None = None
+    root: Path,
+    *,
+    profiler_id: str = "none",
+    plan: TrustedEvaluationPlan | None = None,
+    environment: RunEnvironmentView | None = None,
 ) -> ResolvedRun:
     project = Project.open(root)
     store = ArtifactStore(project.state.state_store_namespace("policy"))
@@ -108,7 +112,7 @@ def resolved(
             benchmark_command="python benchmark.py",
             benchmark_timeout_seconds=600,
         ),
-        environment=RunEnvironmentView(paths=AgentPaths()),
+        environment=environment or RunEnvironmentView(paths=AgentPaths()),
         baseline_commit=COMMIT,
         artifacts=store,
     )

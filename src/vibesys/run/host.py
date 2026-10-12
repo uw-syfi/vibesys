@@ -119,6 +119,10 @@ def _tool_context(resources: _PreparedRun) -> AgentToolContext:
     )
 
 
+_NO_PROFILE_CAPTURE_NOTE = (
+    "[profiler] this run cannot capture a profile (it needs a Slurm run environment with "
+    "remote profiling and a profile command), so profile workstreams are not offered."
+)
 _EVALUATION_CLEANUP_FAILURE = "evaluation agent cleanup failed"
 _SERVICES_CLEANUP_FAILURE = "evaluation and profiler services did not close"
 
@@ -298,6 +302,10 @@ class _ProductHostFactory:
         )
         evaluation = stop_gated_evaluation(evaluation, self.integration.control)
         if self.plugin.core is not None:
+            if resources.facts.profiler_id != "none" and not (
+                resources.environment_resources.view.captures_profile
+            ):
+                logger.lprint(_NO_PROFILE_CAPTURE_NOTE)
             self.core_services = self._core_services(
                 resources, workspace_resources, session_store, agent_runtime, evaluation, ownership
             )
@@ -671,8 +679,8 @@ class _ProductHostFactory:
         lifecycle: frozenset[LifecycleCapability] = frozenset()
         if view.cluster_evaluation is not None:
             capacity = view.cluster_evaluation.evaluation_capacity
-            if view.cluster_evaluation.captures_profile:
-                lifecycle = frozenset({"profile-capture"})
+        if view.captures_profile:
+            lifecycle = frozenset({"profile-capture"})
         config = self.request.config
         return CoreEnvironment(
             view=view,
