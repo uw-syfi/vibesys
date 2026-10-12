@@ -338,11 +338,11 @@ def _reading_life(raw: SlurmStatus) -> JobLife | None:
     return _life_of_state(state, exit_code, attempt, text)
 
 
-_RANK = {Unknown: -1, Queued: 0, Running: 1, Completing: 2, Ended: 3}
+_RANK = {"unknown": -1, "queued": 0, "running": 1, "completing": 2, "ended": 3}
 
 
 def _rank(life: JobLife) -> int:
-    return _RANK[type(life)]
+    return _RANK[life.kind]
 
 
 def advance_with_notice(prev: JobLife, seen: JobLife) -> Step:

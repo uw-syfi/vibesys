@@ -47,11 +47,11 @@ _RAW: st.SearchStrategy[SlurmStatus] = st.one_of(
     st.just(NotInQueue()),
     st.just(NoAccountingRow()),
 )
-_RANK = {Unknown: -1, Queued: 0, Running: 1, Completing: 2, Ended: 3}
+_RANK = {"unknown": -1, "queued": 0, "running": 1, "completing": 2, "ended": 3}
 
 
 def _order(life: JobLife) -> tuple[int, int]:
-    return (life.attempt, _RANK[type(life)])
+    return (life.attempt, _RANK[life.kind])
 
 
 @given(raws=st.lists(_RAW, max_size=30))
