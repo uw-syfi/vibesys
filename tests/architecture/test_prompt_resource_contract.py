@@ -410,6 +410,7 @@ def render_packaged_prompts(installed: Path) -> int:
         "max_gpus": 2,
         "max_time_minutes": 2,
         "read_only_paths": ("/data/models",),
+        "tool_paths": (("ncu", "/usr/local/cuda/bin/ncu"),),
     }
     context["prompts"] = ("Review the candidate.",)
     context["inputs"] = ({"mode": "steer", "text": "Focus on the cache."},)
