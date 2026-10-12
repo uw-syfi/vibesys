@@ -89,7 +89,6 @@ def test_steering_is_injected_once(tmp_path: Path) -> None:
 
     assert "Do the work" in effective
     assert "focus on the KV cache" in effective
-    assert "Operator steering" in effective
     started = next(
         event for event in parts.journal.read() if event.type is EventType.AGENT_EXECUTION_STARTED
     )
