@@ -192,6 +192,11 @@ allowlist = [
     "src/vibesys/orchestration/dynamic/strategy/_planner.py",
     "src/vibesys/orchestration/dynamic/strategy/_run.py",
     "src/vibesys/orchestration/dynamic/strategy/_settlement.py",
+    # PolicyCapacityGate was installed only by the deleted legacy agent-session runtime,
+    # and its scenario tests (test_quota_pause.py) went with it. The core run path does not
+    # install a capacity gate yet, so nothing exercises it. Remove this entry when the core
+    # path installs the gate (with its tests) or the module is deleted.
+    "libs/vs-runtime/src/vs_runtime/_capacity_gate.py",
 ]
 
 [tool.vibesys.file_length]
