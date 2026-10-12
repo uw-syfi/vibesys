@@ -836,7 +836,7 @@ def test_source_launcher_rebuilds_on_run_state_source_change(
 ) -> None:
     root = _make_checkout(tmp_path)
     dist = root / "clients" / "tui" / "dist"
-    core_source = root / "clients" / "run-state" / "src" / "index.ts"
+    core_source = root / "clients" / "libs" / "run-state" / "src" / "index.ts"
     core_source.parent.mkdir(parents=True)
     core_source.write_text("export {};\n")
     _set_mtime(root / "clients" / "tui" / "src" / "app.ts", 1000)
