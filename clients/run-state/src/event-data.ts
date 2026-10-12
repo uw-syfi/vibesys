@@ -133,6 +133,7 @@ const EVENT_DATA_HANDLERS = {
   workspace_snapshot: ignoredEventData,
   run_configured: ignoredEventData,
   framework_warning: ignoredEventData,
+  winner_selected: ignoredEventData,
 } satisfies Record<EventDataKind, EventDataHandlers>;
 
 export function eventDataHandlers(data: RunEvent['data']): EventDataHandlers | null | undefined {

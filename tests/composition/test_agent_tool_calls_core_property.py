@@ -34,6 +34,7 @@ from hypothesis import strategies as st
 from pydantic import TypeAdapter
 from tests.support.owed_submissions import owed_namespace
 from tests.support.skeleton_strategy import ATTEMPT, DECLARATION, DIGEST
+from tests.support.synthesized_evidence import SynthesizedEvidence
 from tests.support.waiting_loop_strategy import LoopState, LoopStrategy
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 
@@ -62,6 +63,7 @@ from vs_project.api import FakeStateStore
 from vs_runtime.api.core import (
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
+    AgentEvaluationRecords,
     CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
@@ -600,7 +602,11 @@ def _play(
 
     def make_bridge() -> AgentEvaluationBridge:
         bridge = AgentEvaluationBridge(
-            Path("unused.sock"), POLICY, workspaces, ledgers[-1], diagnostics.append
+            Path("unused.sock"),
+            POLICY,
+            workspaces,
+            AgentEvaluationRecords(ledgers[-1], SynthesizedEvidence()),
+            diagnostics.append,
         )
         bridge.attach(views[-1], clock)
         return bridge

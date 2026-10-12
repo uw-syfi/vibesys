@@ -61,6 +61,7 @@ class CoreEventType(StrEnum):
     WORKSPACE_SNAPSHOT = "workspace_snapshot"
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
+    WINNER_SELECTED = "winner_selected"
     ASYNC_OPERATION_LIFECYCLE = "async_operation_lifecycle"
 
     # Run-control transitions (see `vs_runtime.api.infrastructure.RunControlChannel`):
@@ -530,6 +531,20 @@ class FrameworkWarningData(EventPayload):
     source_label: str | None = None
 
 
+class WinnerSelectedData(EventPayload):
+    """The run's result was chosen: a retained candidate, or the unchanged trusted input.
+
+    ``selection`` says which; ``revision`` is the revision that becomes the run's result and
+    ``settlement_id`` names the settled attempt that produced a candidate (None for the baseline).
+    Emitted once per selection, when core records it, before adoption is verified.
+    """
+
+    kind: Literal["winner_selected"] = "winner_selected"
+    selection: Literal["candidate", "baseline"]
+    revision: str
+    settlement_id: str | None = None
+
+
 class AsyncOperationLifecycleData(EventPayload):
     """Backend-neutral lifecycle fact for host-owned asynchronous work."""
 
@@ -573,6 +588,7 @@ CoreEventData = Annotated[
     | WorkspaceSnapshotData
     | RunConfiguredData
     | FrameworkWarningData
+    | WinnerSelectedData
     | AsyncOperationLifecycleData,
     Field(discriminator="kind"),
 ]

@@ -264,7 +264,8 @@ export type EventType =
   | "gate_finished"
   | "workspace_snapshot"
   | "run_configured"
-  | "framework_warning";
+  | "framework_warning"
+  | "winner_selected";
 export type Text2 = string;
 /**
  * Lifecycle and command states reported in events.
@@ -313,6 +314,7 @@ export type Data =
       | WorkspaceSnapshotData
       | RunConfiguredData
       | FrameworkWarningData
+      | WinnerSelectedData
     )
   | null;
 export type Kind1 = "chat";
@@ -523,6 +525,10 @@ export type Detail4 = string | null;
  */
 export type FrameworkSource4 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel2 = string | null;
+export type Kind38 = "winner_selected";
+export type Selection = "candidate" | "baseline";
+export type Revision2 = string;
+export type SettlementId = string | null;
 /**
  * True when the recording boundary cut variable-size payload fields to keep this event within MAX_SERIALIZED_RUN_EVENT_BYTES.
  */
@@ -1534,6 +1540,16 @@ export interface FrameworkWarningData {
   detail?: Detail4;
   source?: FrameworkSource4;
   source_label?: SourceLabel2;
+  [k: string]: unknown;
+}
+/**
+ * The run's result was chosen: a retained candidate, or the unchanged trusted input.
+ */
+export interface WinnerSelectedData {
+  kind: Kind38;
+  selection: Selection;
+  revision: Revision2;
+  settlement_id?: SettlementId;
   [k: string]: unknown;
 }
 /**

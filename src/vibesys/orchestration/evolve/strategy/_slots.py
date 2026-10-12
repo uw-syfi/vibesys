@@ -10,6 +10,7 @@ dispatched or a slot is held stay in core.
 """
 
 from vibesys.candidates.api import STOPPED, stages
+from vibesys.metrics import judged_evidence
 from vibesys.orchestration.evolve.strategy import _context as context
 from vibesys.orchestration.evolve.strategy import _ids as ids
 from vibesys.orchestration.evolve.strategy._draft import (
@@ -164,7 +165,8 @@ def _body(draft: Draft, slot: SlotState, role: Role) -> PromptContext:
     if role is Role.MUTATOR:
         return context.mutate_prompt(draft.state, slot, draft.config)
     if role is Role.JUDGE:
-        return context.judge_prompt(slot, draft.config)
+        scope = attempt_scope(draft.view, slot.attempt, slot.generation)
+        return context.judge_prompt(slot, draft.config, judged_evidence(draft.view, scope))
     return context.profile_prompt(slot, draft.config)
 
 

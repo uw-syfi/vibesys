@@ -16,6 +16,7 @@ from vs_runtime._agent_evaluation import (
     EVALUATION_TOOL_ID,
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
+    AgentEvaluationRecords,
     AgentWorkspaces,
     ScopeWorkspaces,
     SnapshotWorkspace,
@@ -56,6 +57,8 @@ from vs_runtime._core_record import (
     PublicationContext,
     PublicationHistory,
     RuntimeRecord,
+    WinnerSelection,
+    winner_selection,
 )
 from vs_runtime._core_requests import (
     HAND_ROLLED_ROLES,
@@ -241,6 +244,7 @@ __all__ = [
     "AdmissionBusyError",
     "AgentEvaluationBridge",
     "AgentEvaluationPolicy",
+    "AgentEvaluationRecords",
     "AgentWorkspaces",
     "Applied",
     "AttemptBinding",
@@ -378,6 +382,7 @@ __all__ = [
     "TurnYields",
     "ValidateLocalOwner",
     "VerifyRevisionOwner",
+    "WinnerSelection",
     "WorkspaceReceipts",
     "WorkspaceRequests",
     "as_target",
@@ -404,4 +409,5 @@ __all__ = [
     "settle",
     "start_core",
     "start_core_awaiting_lease",
+    "winner_selection",
 ]

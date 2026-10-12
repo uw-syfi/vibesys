@@ -49,7 +49,7 @@ def build_core_evaluation_tools(*, socket_path: Path, token: str) -> tuple[ToolS
             "candidate with the same content that this workstream already submitted (by "
             "you, the implementer or the reviewer) returns that evaluation's handle with "
             "repeat=true and charges nothing; if it already ended the reply has its "
-            "outcome and evidence ids and there is nothing to wait for. Otherwise end "
+            "outcome, evidence ids and what each stage measured (value, unit, direction) and there is nothing to wait for. Otherwise end "
             "the turn with waiting_for_evaluation: the run resumes you once when the "
             "evaluation ends. There is nothing to poll.",
             EvidenceKindsArgs,

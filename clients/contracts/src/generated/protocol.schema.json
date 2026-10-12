@@ -1410,7 +1410,8 @@
         "gate_finished",
         "workspace_snapshot",
         "run_configured",
-        "framework_warning"
+        "framework_warning",
+        "winner_selected"
       ],
       "title": "EventType",
       "type": "string"
@@ -3698,6 +3699,7 @@
                   "tool_call": "#/$defs/ToolCallData",
                   "tool_result": "#/$defs/ToolResultData",
                   "usage_update": "#/$defs/UsageUpdateData",
+                  "winner_selected": "#/$defs/WinnerSelectedData",
                   "workspace_snapshot": "#/$defs/WorkspaceSnapshotData"
                 },
                 "propertyName": "kind"
@@ -3810,6 +3812,9 @@
                 },
                 {
                   "$ref": "#/$defs/FrameworkWarningData"
+                },
+                {
+                  "$ref": "#/$defs/WinnerSelectedData"
                 }
               ]
             },
@@ -4721,6 +4726,48 @@
         "input_tokens"
       ],
       "title": "UsageUpdateData",
+      "type": "object"
+    },
+    "WinnerSelectedData": {
+      "description": "The run's result was chosen: a retained candidate, or the unchanged trusted input.",
+      "properties": {
+        "kind": {
+          "const": "winner_selected",
+          "default": "winner_selected",
+          "title": "Kind",
+          "type": "string"
+        },
+        "selection": {
+          "enum": [
+            "candidate",
+            "baseline"
+          ],
+          "title": "Selection",
+          "type": "string"
+        },
+        "revision": {
+          "title": "Revision",
+          "type": "string"
+        },
+        "settlement_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Settlement Id"
+        }
+      },
+      "required": [
+        "kind",
+        "selection",
+        "revision"
+      ],
+      "title": "WinnerSelectedData",
       "type": "object"
     },
     "WorkspaceSnapshotData": {

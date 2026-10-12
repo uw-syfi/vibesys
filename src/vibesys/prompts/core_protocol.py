@@ -13,7 +13,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from vs_core.api import EvidenceId, RevisionRef, Value
+from vs_core.api import EvidenceRef, RevisionRef, Value
 
 
 class CoreProtocolTemplate(StrEnum):
@@ -31,7 +31,7 @@ class ResumePrompt(Value):
     role: Literal["implementer", "judge", "profiler"]
     retained_revision: RevisionRef | None
     timed_out: bool
-    evidence: tuple[EvidenceId, ...] = ()
+    cited_evidence: tuple[EvidenceRef, ...] = ()
     repeated_failure: str | None = None
 
 

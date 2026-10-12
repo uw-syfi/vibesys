@@ -7,6 +7,7 @@ facts such as whether a turn is dispatched or a slot is held stay in core.
 """
 
 from vibesys.candidates.api import STOPPED
+from vibesys.metrics import judged_evidence
 from vibesys.orchestration.issue_queue.strategy import _board as board
 from vibesys.orchestration.issue_queue.strategy._draft import (
     Draft,
@@ -192,6 +193,9 @@ def _context(draft: Draft, job: Job, role: Role) -> PromptContext:
             summary=job.summary,
             files_touched=job.files_touched,
             self_check=job.self_check,
+            cited_evidence=judged_evidence(
+                draft.view, attempt_scope(draft.view, job.attempt, job.generation)
+            ),
         )
     return PerformancePrompt(
         iteration=job.iteration,

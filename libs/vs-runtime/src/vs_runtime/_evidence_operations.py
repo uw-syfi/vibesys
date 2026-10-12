@@ -81,7 +81,7 @@ class InterpretEvidenceOwner:
                 return _rejected_readings()
             if entry.purpose != ref.purpose:
                 return _rejected_readings()
-            readings.append(_reading(ref, entry.evidence))
+            readings.append(reading_mapping(ref, entry.evidence))
         return {"status": "succeeded", "readings": tuple(readings)}
 
 
@@ -90,7 +90,8 @@ def _rejected_readings() -> Mapping[str, object]:
     return {"status": "rejected", "readings": ()}
 
 
-def _reading(ref: EvidenceRef, evidence: TrustedEvidence) -> Mapping[str, object]:
+def reading_mapping(ref: EvidenceRef, evidence: TrustedEvidence) -> Mapping[str, object]:
+    """The one projection of an accepted record into the fields a reader decodes."""
     partial = evidence.partial_measurement
     progress = None if partial is None else partial.progress
     return {

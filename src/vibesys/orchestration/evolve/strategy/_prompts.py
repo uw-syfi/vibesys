@@ -14,7 +14,7 @@ from pydantic import Field
 
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
-from vs_core.api import RevisionRef, Value
+from vs_core.api import EvidenceRef, RevisionRef, Value
 
 
 class PromptTemplate(StrEnum):
@@ -57,6 +57,8 @@ class JudgePrompt(Value):
     candidate: RevisionRef
     modality: str | None = None
     interface: str = "inprocess"
+    # The trusted evaluations the offspring was measured by, stated at render time.
+    cited_evidence: tuple[EvidenceRef, ...] = ()
 
 
 class ProfilerPrompt(Value):

@@ -1,4 +1,5 @@
 {% from '_revision.j2' import rev %}
+{% from '_evaluations.j2' import trusted_evaluations %}
 Continue your suspended {{ role }} turn in this same provider session.
 {% if retained_revision %}
 The retained workspace revision is `{{ rev(retained_revision) }}`. Check the tree before
@@ -13,9 +14,11 @@ this suspension, not the evaluation job, and supplies no passing or failing resu
 {% else %}
 Every evaluation you awaited is terminal.
 {% endif %}
-{% if evidence %}
+{% if cited_evidence %}
 Accepted evidence for the original submitted candidate, not a measurement of later
-workspace edits: {{ evidence | map(attribute='root') | join(', ') }}
+workspace edits. These are the trusted results; report them as measured:
+
+{{ trusted_evaluations(cited_evidence) }}
 {% endif %}
 {% if repeated_failure %}
 

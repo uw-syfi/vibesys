@@ -16,6 +16,7 @@ from vibesys.api import (
     QuotaResumedData,
     RateLimitUpdateData,
     RunConfiguredData,
+    WinnerSelectedData,
     WorkspaceSnapshotData,
 )
 
@@ -26,17 +27,21 @@ _SHA_ABBREV = 12
 def format_framework_event(event: CoreEvent) -> str | None:
     """Return the terminal rendering of a framework event, or None."""
     data = event.data
-    if isinstance(data, GateStartedData):
-        return _format_gate_started(data)
-    if isinstance(data, GateFinishedData):
-        return _format_gate_finished(data, failed=event.status is EventStatus.FAILED)
-    if isinstance(data, WorkspaceSnapshotData):
-        return _format_workspace_snapshot(data)
-    if isinstance(data, RunConfiguredData):
-        return _format_run_configured(data)
-    if isinstance(data, FrameworkWarningData):
-        return _format_framework_warning(data)
-    return None
+    text: str | None = None
+    match data:
+        case GateStartedData():
+            text = _format_gate_started(data)
+        case GateFinishedData():
+            text = _format_gate_finished(data, failed=event.status is EventStatus.FAILED)
+        case WorkspaceSnapshotData():
+            text = _format_workspace_snapshot(data)
+        case RunConfiguredData():
+            text = _format_run_configured(data)
+        case FrameworkWarningData():
+            text = _format_framework_warning(data)
+        case WinnerSelectedData():
+            text = _format_winner_selected(data)
+    return text
 
 
 def format_rate_limit_event(event: CoreEvent) -> str | None:
@@ -148,3 +153,10 @@ def _format_framework_warning(data: FrameworkWarningData) -> str:
     if data.detail:
         return f"[warn] {data.summary}: {data.detail}"
     return f"[warn] {data.summary}"
+
+
+def _format_winner_selected(data: WinnerSelectedData) -> str:
+    revision = data.revision[:_SHA_ABBREV]
+    if data.selection == "baseline":
+        return f"[result] selected the trusted input unchanged: no candidate beat it ({revision})"
+    return f"[result] selected trusted winner {revision} (settlement {data.settlement_id})"
