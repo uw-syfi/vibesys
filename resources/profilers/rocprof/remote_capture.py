@@ -28,7 +28,7 @@ import capture_runtime  # noqa: E402  # LW-930101; the preceding path setup must
 
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
-import analyze_rocprof  # noqa: E402  # LW-930103; the preceding path setup must run before this import
+import analyze_rocprof  # noqa: E402  # LW-930190; the preceding path setup must run before this import
 import capture  # noqa: E402  # LW-930102; the preceding path setup must run before this import
 
 # The host's `vs_sandbox.slurm_profile.PROFILE_STATS_PREFIX` names the same line; a test
