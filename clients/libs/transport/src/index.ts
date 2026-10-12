@@ -37,6 +37,7 @@ export {
   StreamReconciler,
   type StreamReconcilerOptions,
 } from './stream-reconciler.js';
+export {closeStreamAndTransport} from './stream-shutdown.js';
 export {
   type ControlTransport,
   type EventSubscription,
@@ -44,4 +45,3 @@ export {
   type SubscribeOptions,
   subscribeRequest,
 } from './transport.js';
-export {closeStreamAndTransport} from './stream-shutdown.js';
