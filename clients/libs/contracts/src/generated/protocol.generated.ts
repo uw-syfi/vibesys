@@ -538,9 +538,9 @@ export type Detail4 = string | null;
  */
 export type FrameworkSource4 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel2 = string | null;
-export type Kind38 = "winner_selected";
+export type Kind39 = "winner_selected";
 export type Selection = "candidate" | "baseline";
-export type Revision2 = string;
+export type Revision3 = string;
 export type SettlementId = string | null;
 /**
  * True when the recording boundary cut variable-size payload fields to keep this event within MAX_SERIALIZED_RUN_EVENT_BYTES.
@@ -637,7 +637,7 @@ export type Reset = boolean;
 export type RemovedHypothesisIds = string[];
 export type ExperimentsReady = boolean | null;
 export type Iterations = IterationSlice | IterationUnavailable | null;
-export type Kind39 = "page";
+export type Kind40 = "page";
 export type SchemaVersion = 1;
 export type RunId4 = string;
 export type ProjectionRevision = string;
@@ -663,7 +663,7 @@ export type Direction = ("max" | "min") | null;
 export type HeadlineMetrics = IterationMetric[];
 export type Items = IterationSummary[];
 export type NextCursor = string | null;
-export type Kind40 = "unavailable";
+export type Kind41 = "unavailable";
 export type SchemaVersion1 = 1;
 /**
  * Closed reasons why a policy cannot expose iteration navigation.
@@ -1616,9 +1616,9 @@ export interface FrameworkWarningData {
  * The run's result was chosen: a retained candidate, or the unchanged trusted input.
  */
 export interface WinnerSelectedData {
-  kind: Kind38;
+  kind: Kind39;
   selection: Selection;
-  revision: Revision2;
+  revision: Revision3;
   settlement_id?: SettlementId;
   [k: string]: unknown;
 }
@@ -1725,7 +1725,7 @@ export interface ExperimentUpdate {
  * One bounded page, with enough identity to reject stale merges.
  */
 export interface IterationSlice {
-  kind?: Kind39;
+  kind?: Kind40;
   schema_version?: SchemaVersion;
   run_id: RunId4;
   projection_revision: ProjectionRevision;
@@ -1760,7 +1760,7 @@ export interface IterationMetric {
  * Typed absence, kept distinct from a supported empty tree.
  */
 export interface IterationUnavailable {
-  kind?: Kind40;
+  kind?: Kind41;
   schema_version?: SchemaVersion1;
   reason: IterationUnavailableReason;
 }
