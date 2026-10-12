@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
-from vs_agent.api import Attribution, ProviderSwitch, QuotaPlan
+from vs_agent.api import Attribution, CapacityGated, ProviderSwitch, QuotaPlan
 from vs_runtime._fallback import ProviderFallback
 from vs_runtime._quota_policy import (
     PAUSE_FOR_OPERATOR,
@@ -15,12 +15,14 @@ from vs_runtime._quota_policy import (
     WaitFor,
     decide_quota,
 )
+from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import NoReturn
 
     from vs_agent.api import (
+        AgentClientProtocol,
         AgentEventSink,
         AgentQuotaError,
         AgentTurnRequest,
@@ -192,3 +194,21 @@ class PolicyCapacityGate:
         """End the turn in flight with the quota error."""
         self._events.quota_abandoned(error, reason, context)
         raise error
+
+
+def install_capacity_gate(
+    client: AgentClientProtocol,
+    *,
+    control: RunControlChannel,
+    events: AgentEventSink,
+    handling: CapacityHandling,
+) -> None:
+    """Make ``client`` apply the run's quota policy when its provider has no capacity.
+
+    Every client a run builds goes through here, so a quota stop pauses, waits or fails
+    the same way for all of them. A client that cannot take a gate (no ``CapacityGated``
+    capability) lets the quota error propagate, as a run without a policy would.
+    """
+    if isinstance(client, CapacityGated):
+        timer = handling.timer or ControlCapacityTimer(control, SystemClock().now)
+        client.set_capacity_gate(PolicyCapacityGate(control, events, handling, timer))

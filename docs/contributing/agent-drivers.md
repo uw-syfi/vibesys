@@ -155,8 +155,9 @@ exhausted windows the turn reported, else `None`.
 `AgentClient` hands the error to a `CapacityGate` when one is installed
 (`set_capacity_gate`, an optional `CapacityGated` capability) and sends the same
 turn again on the same live session when the gate returns; the gate raises to end
-the turn. Without a gate the error propagates. The run installs
-`PolicyCapacityGate` (`vs_runtime`), configured by `[agent.quota]`
+the turn. Without a gate the error propagates. The run host installs
+`PolicyCapacityGate` (`vs_runtime`) on every client it builds, through
+`install_capacity_gate`, configured by `[agent.quota]`
 (`QuotaPolicy`, decided by the pure `decide_quota`). Under `pause` it publishes
 the typed `quota_paused` event, requests the run's cooperative pause (so the
 server reports PAUSING, then PAUSED), parks until the run resumes, then
@@ -166,15 +167,13 @@ provider's reset time plus a margin, else `retry_seconds`, cut to what is left o
 spent or the reset lies beyond it, it publishes `quota_abandoned` and raises the
 quota error, so the turn fails as it did before. A stop request ends any wait.
 
-Under `fallback`, or when an operator resumes a paused run with the fallback
-(`command.resume` with `fallback: true`, `RunControlChannel.resume_with_fallback`),
-the gate records the replaced provider in the run's `ProviderFallback` and publishes
-`provider_switched`. The turn in flight ends with the quota error, because a
-session cannot change provider. `RuntimeWorkspaceAgentSessions.create_session` applies
-the substitution to the configuration it resolves, so the next session of a role is a
-fresh conversation on the fallback provider and model (per-role model and
-reasoning-effort overrides named the old provider's models and are dropped). A
-session still open on the replaced provider abandons its next capacity stop at once. A run that waited and resumed has the same experiment
+A run drives every role through one agent client bound to one provider, so it
+cannot open a session on another provider: the run host refuses a configured
+`fallback_provider` at startup, naming the key, rather than accepting and ignoring it
+(`policy = "fallback"` needs one, so it is refused too). The gate and
+`ProviderFallback` still implement the switch for a host whose sessions can change
+provider: the gate records the replaced provider, publishes `provider_switched` and
+ends the turn in flight with the quota error. A run that waited and resumed has the same experiment
 state as one that never stopped, because the paused turn is the same invocation
 held in place. The `quota_paused` event is the operator notification: headless
 prints a `[quota]` line, and a consumer of the event stream (the event-hooks

@@ -31,12 +31,14 @@ from vs_runtime.api import PollingEvaluationExecutor
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
+    CapacityHandling,
     QuotaPolicy,
     RunHostComponents,
     WorkspaceResourceFactory,
     bounded_stop,
     create_model_request_reconciler,
     create_workspace_runtime,
+    install_capacity_gate,
     open_run_host,
     release_all,
     stop_gated_evaluation,
@@ -154,7 +156,7 @@ class _ProductHostFactory:
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
         )
-        _require_distinct_fallback(self.request.config.agent.quota.to_policy(), agent_specs)
+        _require_supported_fallback(self.request.config.agent.quota.to_policy(), agent_specs)
         resources = open_run_resources(
             self.request,
             self.integration,
@@ -334,6 +336,7 @@ class _ProductHostFactory:
             )
         )
         ownership.callback(environment.close)
+        events = CoreAgentEventSink(self.integration.events.record)
         client = self.agent_client_factory(
             spec=base,
             session_store=session_store,
@@ -356,9 +359,15 @@ class _ProductHostFactory:
             host_resources=(*environment.host_resources,),
             project_path_policy=environment.project_path_policy,
             require_host_sandbox=not environment.use_docker,
-            events=CoreAgentEventSink(self.integration.events.record),
+            events=events,
         )
         ownership.callback(client.close)
+        install_capacity_gate(
+            client,
+            control=self.integration.control,
+            events=events,
+            handling=CapacityHandling.for_policy(self.request.config.agent.quota.to_policy()),
+        )
         # Every core session shares one run-scoped journal, named by a fixed member key.
         invocations = self.invocation_store_factory(
             project.state, AgentSessionKey.for_member("core", "run")
@@ -572,8 +581,14 @@ def _candidate_agent_sandbox(runtime: WorkspaceRuntime, path: Path) -> DockerSan
     return cast("DockerSandbox | None", runtime.workspaces.agent_sandbox_at(path))
 
 
-def _require_distinct_fallback(policy: QuotaPolicy, agent_specs: Mapping[str, AgentSpec]) -> None:
-    """Reject a fallback provider that some role already runs on, before the run starts."""
+def _require_supported_fallback(policy: QuotaPolicy, agent_specs: Mapping[str, AgentSpec]) -> None:
+    """Reject a fallback a core run cannot honor, before the run starts.
+
+    A core run drives every role through one agent client bound to one provider, so it
+    cannot open a session on another provider. A fallback is therefore refused rather than
+    accepted and ignored; a fallback that is a role's own provider is refused first, since
+    it could never be a switch.
+    """
     if policy.fallback is None:
         return
     for role_id, spec in agent_specs.items():
@@ -583,3 +598,10 @@ def _require_distinct_fallback(policy: QuotaPolicy, agent_specs: Mapping[str, Ag
                 f"role {role_id!r} already runs on; a fallback must be a different provider"
             )
             raise ValueError(message)
+    message = (
+        f"agent.quota.fallback_provider {policy.fallback.provider!r}: a run drives every role "
+        "through one agent client on one provider, so it cannot switch provider on a quota "
+        "stop; remove agent.quota.fallback_provider and fallback_model (policy = 'fallback' "
+        "needs them, so use 'pause', 'wait' or 'fail')"
+    )
+    raise ValueError(message)

@@ -15,7 +15,8 @@ from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from vibesys.api._session import run_plugin
-from vibesys.config import Config
+from vibesys.composition import resolve_agent_specs
+from vibesys.config import AgentCfg, Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind, ProfilerPreflightResult
@@ -25,7 +26,12 @@ from vibesys.run.core_services import CoreCompositionError
 from vibesys.run.evaluation_identity import semantic_evaluation_identity
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
-from vs_agent.api import AgentCapabilities
+from vs_agent.api import (
+    AgentCapabilities,
+    AgentQuotaError,
+    AgentTurnRequest,
+    QuotaCondition,
+)
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_core.api import (
     Capabilities,
@@ -58,7 +64,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.run.core_services import CoreServices
-    from vs_agent.api import AgentClientProtocol
+    from vs_agent.api import AgentClientProtocol, CapacityGate
     from vs_core.api import Strategy
 
 DIGEST_LENGTH = 64
@@ -92,6 +98,18 @@ def _render_registration() -> OperationRegistration:
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
     return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+
+
+class _GateRecordingClient(FakeAgentClient):
+    """A resumable fake client that remembers every capacity gate it was given."""
+
+    def __init__(self) -> None:
+        super().__init__(capabilities=AgentCapabilities(provider_session_resume=True))
+        self.gates: list[CapacityGate] = []
+
+    def set_capacity_gate(self, gate: CapacityGate) -> None:
+        self.gates.append(gate)
+        super().set_capacity_gate(gate)
 
 
 def _policy(
@@ -281,6 +299,88 @@ def test_a_fallback_that_is_the_providers_own_fails_at_startup_naming_the_key(
         {
             "model": {"name": "core-test"},
             "agent": {"quota": {"fallback_provider": "claude", "fallback_model": "opus"}},
+        }
+    )
+
+    with pytest.raises(ValueError, match=r"agent\.quota\.fallback_provider"):
+        _open(tmp_path, client_factory=_resumable_client, journal=True, config=config)()
+
+
+def _built_clients(tmp_path: Path, config: Config) -> list[_GateRecordingClient]:
+    built: list[_GateRecordingClient] = []
+
+    def factory(**_kwargs: object) -> _GateRecordingClient:
+        built.append(_GateRecordingClient())
+        return built[-1]
+
+    _open(tmp_path, client_factory=factory, journal=True, config=config)()
+    return built
+
+
+def test_every_client_the_core_path_builds_gets_the_runs_quota_gate(tmp_path: Path) -> None:
+    clients = _built_clients(tmp_path, Config.model_validate({"model": {"name": "core-test"}}))
+
+    assert clients
+    assert all(len(client.gates) == 1 for client in clients)
+
+
+def test_the_quota_policy_of_the_config_reaches_the_gate(tmp_path: Path) -> None:
+    """Under ``fail`` a quota stop ends the turn at once, where ``pause`` would hold it."""
+    config = Config.model_validate(
+        {"model": {"name": "core-test"}, "agent": {"quota": {"policy": "fail"}}}
+    )
+    [client] = _built_clients(tmp_path, config)
+    [gate] = client.gates
+    error = AgentQuotaError("claude", QuotaCondition.QUOTA_EXHAUSTED, "limit", None)
+
+    with pytest.raises(AgentQuotaError):
+        gate.wait_for_capacity(
+            error,
+            AgentTurnRequest(message="m", label=None, invocation_id=None),
+            role="r",
+            attempt=1,
+        )
+
+
+# Every `[agent]` key and a value that differs from its default. The key set is compared
+# with the config model, so a key added or removed must be classified here; `quota` is
+# consumed by the gate tests above, the rest show up in the specs the run resolves.
+_AGENT_KEY_SAMPLES: dict[str, object] = {
+    "backend": "stub",
+    "cli_provider": "gemini",
+    "cli_timeout": 17,
+    "env_passthrough": ("SOME_TOKEN",),
+    "quota": {"policy": "fail"},
+    "roles": {"implementer": {"model": "role-model"}},
+}
+
+
+def test_every_agent_config_key_is_classified_as_consumed() -> None:
+    assert set(_AGENT_KEY_SAMPLES) == set(AgentCfg.model_fields)
+
+
+@pytest.mark.parametrize("key", [key for key in _AGENT_KEY_SAMPLES if key != "quota"])
+def test_a_changed_agent_config_key_changes_the_specs_the_run_resolves(key: str) -> None:
+    role = AgentRole(id="implementer", system_prompt="Implement.")
+
+    def specs(config: Config) -> object:
+        return resolve_agent_specs(config, (role,), backend=None, provider=None)
+
+    base = Config.model_validate({"model": {"name": "core-test"}})
+    changed = Config.model_validate(
+        {"model": {"name": "core-test"}, "agent": {key: _AGENT_KEY_SAMPLES[key]}}
+    )
+
+    assert specs(changed) != specs(base)
+
+
+def test_a_fallback_a_core_run_cannot_switch_to_fails_at_startup_naming_the_key(
+    tmp_path: Path,
+) -> None:
+    config = Config.model_validate(
+        {
+            "model": {"name": "core-test"},
+            "agent": {"quota": {"fallback_provider": "codex", "fallback_model": "gpt-5"}},
         }
     )
 

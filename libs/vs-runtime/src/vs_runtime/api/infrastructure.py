@@ -38,7 +38,7 @@ from vs_runtime._bundled_paths import (
     resolve_bundled_tree,
     resolve_packaged_tree,
 )
-from vs_runtime._capacity_gate import CapacityHandling, CapacityTimer
+from vs_runtime._capacity_gate import CapacityHandling, CapacityTimer, install_capacity_gate
 from vs_runtime._container_runtime_policy import DockerInDockerUnsupportedError
 from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
 from vs_runtime._environment_startup import (
@@ -585,6 +585,7 @@ __all__ = [
     "evaluator_container_setup",
     "find_job_tool",
     "image_features",
+    "install_capacity_gate",
     "job_failure",
     "load_evaluator_package",
     "load_skill_frontmatter",
