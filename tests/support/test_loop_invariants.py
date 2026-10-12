@@ -170,14 +170,14 @@ def test_a_prompt_naming_a_missing_run_path_is_flagged(tmp_path: Path) -> None:
 
 
 def test_work_after_a_stop_and_an_overrun_are_flagged() -> None:
-    submitted = {"operation_kind": "evaluation", "operation_id": "e1", "state": "submitted"}
+    stop_at = datetime.fromisoformat("2026-10-03T18:00:10+00:00").timestamp()
     events = [
         _event("stop_requested", 10),
-        _event("async_operation_lifecycle", 12, data=submitted),
         _finished("cancelled", 50),
     ]
+    envelope = _envelope("terminal", "cancelled", submitted_at=[stop_at + 2])
 
-    assert _invariants(RunRecords(events=events), stop_grace_s=30.0) == [
+    assert _invariants(RunRecords.from_core(events, envelope), stop_grace_s=30.0) == [
         Invariant.EVALUATION_AFTER_STOP,
         Invariant.STOP_OVERRAN,
     ]

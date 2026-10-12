@@ -899,11 +899,7 @@ expose = ["PLUGIN", "REGISTRATION"]
 from = ["vibesys.orchestration.dynamic"]
 
 [[interfaces]]
-expose = ["ProfilerEvaluationAccess", "RuntimeProfilerTurnProvision"]
-from = ["vibesys.run.profiler_agent"]
-
-[[interfaces]]
-expose = ["EvidenceResultIdentity", "EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "agent_evaluation", "evidence_identity", "semantic_evaluation_identity"]
+expose = ["SemanticEvaluationIdentity", "semantic_evaluation_identity"]
 from = ["vibesys.run.evaluation_identity"]
 
 [[interfaces]]
@@ -1178,7 +1174,7 @@ depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.prompts", "vibesys
 [[modules]]
 path = "vibesys.orchestration.dynamic.parents"
 layer = "orchestration_host"
-depends_on = ["vs_evaluation.api", "vs_runtime"]
+depends_on = ["vs_evaluation.api"]
 
 [[interfaces]]
 expose = ["api", "api\\..*"]
