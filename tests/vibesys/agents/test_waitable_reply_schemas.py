@@ -17,6 +17,9 @@ from vibesys.orchestration.dynamic.strategy.api import (
     PROFILER_REPLY as DYNAMIC_PROFILER_REPLY,
 )
 from vibesys.orchestration.dynamic.strategy.api import DynamicConfig
+from vibesys.orchestration.evolve.core_policy.api import reply_schemas as evolve_schemas
+from vibesys.orchestration.evolve.strategy.api import JUDGE_REPLY as EVOLVE_JUDGE_REPLY
+from vibesys.orchestration.evolve.strategy.api import MUTATOR_REPLY as EVOLVE_MUTATOR_REPLY
 from vibesys.orchestration.issue_queue.core_policy import prompts as issue_queue_prompts
 from vibesys.orchestration.issue_queue.core_policy.api import (
     reply_schemas as issue_queue_schemas,
@@ -50,6 +53,7 @@ _DYNAMIC = dynamic_schemas(
         max_rounds=1,
     )
 )
+_EVOLVE = evolve_schemas()
 _SINGLE = single_schemas()
 _MULTI = multi_schemas()
 _ISSUE_QUEUE = issue_queue_schemas(
@@ -75,6 +79,8 @@ _SINGLE_RESULT = {
     "profile_analysis": "",
 }
 _MULTI_IMPLEMENTER = {"summary": "done", "expected_behavior": "faster"}
+_EVOLVE_MUTATOR = {"summary": "did it", "hypothesis": "because", "expected_behavior": "faster"}
+_EVOLVE_JUDGE = {"analysis": "checked", "feedback": "", "verdict": "pass"}
 _MULTI_JUDGE = {"analysis": "checked", "feedback": "", "verdict": "pass"}
 _ISSUE_QUEUE_IMPLEMENTER = {
     "summary": "done",
@@ -98,6 +104,8 @@ _AFFECTED_ROLES: tuple[tuple[str, type[BaseModel], dict[str, object]], ...] = (
     ("dynamic-implementer", _DYNAMIC[DYNAMIC_IMPLEMENTER_REPLY], _IMPLEMENTER),
     ("dynamic-profiler", _DYNAMIC[DYNAMIC_PROFILER_REPLY], _IMPLEMENTER),
     ("dynamic-judge", _DYNAMIC[DYNAMIC_JUDGE_REPLY], _JUDGE),
+    ("evolve-mutator", _EVOLVE[EVOLVE_MUTATOR_REPLY], _EVOLVE_MUTATOR),
+    ("evolve-judge", _EVOLVE[EVOLVE_JUDGE_REPLY], _EVOLVE_JUDGE),
     ("single-implementer", _SINGLE[SINGLE_IMPLEMENTER_REPLY], _SINGLE_RESULT),
     ("multi-implementer", _MULTI[MULTI_IMPLEMENTER_REPLY], _MULTI_IMPLEMENTER),
     ("multi-judge", _MULTI[MULTI_JUDGE_REPLY], _MULTI_JUDGE),
@@ -164,6 +172,8 @@ def test_pre_envelope_wait_replies_remain_compatible(
             ],
         ),
         (_MULTI[MULTI_JUDGE_REPLY], []),
+        (_EVOLVE[EVOLVE_MUTATOR_REPLY], []),
+        (_EVOLVE[EVOLVE_JUDGE_REPLY], []),
         (_ISSUE_QUEUE[ISSUE_QUEUE_IMPLEMENTER_REPLY], []),
         (_ISSUE_QUEUE[ISSUE_QUEUE_JUDGE_REPLY], []),
         (_RUNTIME_PROFILER_REPLY, []),

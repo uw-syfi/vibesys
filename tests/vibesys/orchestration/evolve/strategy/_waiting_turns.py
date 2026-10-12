@@ -51,6 +51,8 @@ if TYPE_CHECKING:
     from vs_sim.api.testing import VirtualClock
 
 WAITING = json.dumps({"kind": "waiting_for_evaluation", "handles": ["h"]})
+ENVELOPED_WAITING = json.dumps({"reply": json.loads(WAITING)})
+"""The wait in the object-rooted form the shared protocol prompt tells the agent to answer with."""
 _ROLE = AgentRole(
     id="agent", system_prompt="agent", extra_tools=(AgentTool(id=EVALUATION_TOOL_ID),)
 )
@@ -107,7 +109,7 @@ class WaitingTurns(Executors):
     decide: Callable[[int], bool] = lambda _ordinal: True
     ends: Callable[[int], str] = lambda _ordinal: "wait"
     """How the n-th waiting turn ends once it has validated its wait: with the waiting reply
-    (``"wait"``), the role's final result (``"result"``) or a reply that is not valid JSON
+    (``"wait"`` bare, ``"wait_enveloped"`` in the ``reply`` envelope), the role's final result (``"result"``) or a reply that is not valid JSON
     (``"invalid"``). Core records the wait either way, because the tool call made it."""
     roles: tuple[str, ...] = ("mutator",)
     delay: Callable[[int], int] = lambda _ordinal: 0
@@ -168,7 +170,7 @@ class WaitingTurns(Executors):
             assert isinstance(answer, Succeeded)
             assert answer.output_json is not None
             return answer.output_json
-        return {"wait": WAITING, "invalid": "not json"}[ending]
+        return {"wait": WAITING, "wait_enveloped": ENVELOPED_WAITING, "invalid": "not json"}[ending]
 
 
 def attach_for(
