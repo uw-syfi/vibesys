@@ -80,6 +80,7 @@ function cases(random: Seeded): Case[] {
       {kind: 'set-checkout', host, path, change: token},
     ],
     [bridge => bridge.cancelCheckout(token), {kind: 'cancel-checkout', change: token}],
+    [bridge => bridge.cancelInspection(token), {kind: 'cancel-inspection', inspection: token}],
     [bridge => bridge.signIn(key), {kind: 'sign-in', host}],
     [bridge => bridge.complete(key, directory), {kind: 'complete', host, directory}],
     [

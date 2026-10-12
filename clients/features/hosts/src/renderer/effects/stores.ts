@@ -40,6 +40,10 @@ export function createInspectorStore(
           bridge.inspect(request.host, request.instance, request.includeLog, request.token),
         ).then(result => dispatch({type: 'inspection-reply', token: request.token, result}));
         return;
+      case 'cancel-inspection':
+        // Closing only revokes the matching main-process lease. A later inspection may proceed.
+        void settled(bridge.cancelInspection(request.token));
+        return;
       case 'copy':
         void copy(request.value).then(
           () =>

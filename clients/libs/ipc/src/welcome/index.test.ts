@@ -40,7 +40,7 @@ function checkAccepted(request: WelcomeRequest): void {
   if (request.kind === 'set-checkout' || request.kind === 'cancel-checkout') {
     expect(Number.isSafeInteger(request.change) && request.change > 0).toBe(true);
   }
-  if (request.kind === 'inspect') {
+  if (request.kind === 'inspect' || request.kind === 'cancel-inspection') {
     expect(Number.isSafeInteger(request.inspection) && request.inspection > 0).toBe(true);
   }
   if (request.kind === 'resume') expect(isRunId(request.run)).toBe(true);
@@ -120,6 +120,13 @@ describe('parseWelcomeRequest', () => {
     ).toThrow('an inspection is named by a positive integer');
     expect(() => parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '../etc'])).toThrow(
       '12-digit instance id',
+    );
+    expect(parseWelcomeRequest(WELCOME_CHANNELS.cancelInspection, [9])).toEqual({
+      kind: 'cancel-inspection',
+      inspection: 9,
+    });
+    expect(() => parseWelcomeRequest(WELCOME_CHANNELS.cancelInspection, [0])).toThrow(
+      'an inspection is named by a positive integer',
     );
   });
 

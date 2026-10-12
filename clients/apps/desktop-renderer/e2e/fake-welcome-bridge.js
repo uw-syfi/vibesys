@@ -135,6 +135,7 @@ Object.defineProperty(window, 'vibesysWelcome', {
     },
     setCheckout: async () => ok('/src/vibesys'),
     cancelCheckout: async () => ok(null),
+    cancelInspection: async () => ok(null),
     signIn: async () => ok(null),
     tasks: async () => ok(['queue']),
     complete: async (_host, directory) =>

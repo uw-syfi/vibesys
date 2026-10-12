@@ -49,6 +49,7 @@ class FakeWelcomeBridge implements WelcomeBridge {
     readonly reply: Deferred<WelcomeResult<string>>;
   }> = [];
   readonly cancelledCheckouts: number[] = [];
+  readonly cancelledInspections: number[] = [];
   readonly inspectionReplies: Array<Deferred<WelcomeResult<WelcomeInspection>>> = [];
   checkout = '/c';
   readonly #chrome: Array<(event: WelcomeEvent<ChromeState>) => void> = [];
@@ -70,6 +71,10 @@ class FakeWelcomeBridge implements WelcomeBridge {
   cancelCheckout = (change: number) => {
     this.cancelledCheckouts.push(change);
     return this.#ask('cancel-checkout', null);
+  };
+  cancelInspection = (inspection: number) => {
+    this.cancelledInspections.push(inspection);
+    return this.#ask('cancel-inspection', null);
   };
   signIn = (host: HostKey) => this.#ask(`sign-in ${host}`, null);
   tasks = (host: HostKey, project: string) => this.#ask(`tasks ${host} ${project}`, ['spsc']);
@@ -280,6 +285,8 @@ describe('loadWelcomeStores', () => {
 
     bridge.pushChrome(chrome('attached'));
     expect(stores.inspector.getState()).toMatchObject({target: null, load: {kind: 'idle'}});
+    await settle();
+    expect(bridge.cancelledInspections).toEqual([1]);
 
     reply.resolve({ok: true, value: inspection()});
     await settle();

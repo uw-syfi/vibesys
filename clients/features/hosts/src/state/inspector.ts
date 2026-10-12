@@ -65,6 +65,7 @@ export type InspectorRequest =
       readonly instance: string;
       readonly includeLog: boolean;
     }
+  | {readonly kind: 'cancel-inspection'; readonly token: number}
   | {readonly kind: 'copy'; readonly token: number; readonly label: string; readonly value: string};
 
 function load(state: InspectorState, includeLog: boolean): Step<InspectorState, InspectorRequest> {
@@ -110,8 +111,13 @@ export function inspectorStep(
         },
         false,
       );
-    case 'close':
-      return only({...INSPECTOR_CLOSED, next: state.next + 1});
+    case 'close': {
+      const requests =
+        state.load.kind === 'loading'
+          ? [{kind: 'cancel-inspection' as const, token: state.load.token}]
+          : [];
+      return {state: {...INSPECTOR_CLOSED, next: state.next + 1}, requests};
+    }
     case 'load-log':
       return load(state, true);
     case 'refresh':

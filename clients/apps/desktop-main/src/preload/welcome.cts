@@ -22,6 +22,7 @@ const CHANNELS: Channels = {
   host: 'vibesys:welcome:host',
   setCheckout: 'vibesys:welcome:set-checkout',
   cancelCheckout: 'vibesys:welcome:cancel-checkout',
+  cancelInspection: 'vibesys:welcome:cancel-inspection',
   signIn: 'vibesys:welcome:sign-in',
   complete: 'vibesys:welcome:complete',
   inspect: 'vibesys:welcome:inspect',
@@ -66,6 +67,7 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     host: host => call(CHANNELS.host, host),
     setCheckout: (host, path, change) => call(CHANNELS.setCheckout, host, path, change),
     cancelCheckout: change => call(CHANNELS.cancelCheckout, change),
+    cancelInspection: inspection => call(CHANNELS.cancelInspection, inspection),
     signIn: host => call(CHANNELS.signIn, host),
     complete: (host, directory) => call(CHANNELS.complete, host, directory),
     inspect: (host, instance, includeLog, inspection) =>

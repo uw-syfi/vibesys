@@ -282,4 +282,55 @@ describe('Hosts inspection changes', () => {
       hosts.inspect(LOCAL, instance, false, {owner: '10:100', sequence: 2}),
     ).rejects.toThrow('inspection owner was retired');
   });
+
+  test('closing an inspector revokes only its pending locator write', async () => {
+    const directory = '/settings';
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: join(directory, 'hosts.json'),
+      recentPath: join(directory, 'recent.json'),
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateRecent(current =>
+      remember(current, {
+        host: 'local',
+        project: '/p',
+        task: null,
+        runId: 'run-1',
+        instanceId: null,
+        attachedAt: 1,
+      }),
+    );
+    const link = new FakeLink();
+    const instance = '000000000001';
+    link.helper.publish(record(instance, 'run-1'));
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+    });
+    const held = link.helper.deferNext('instances.inspect');
+    const change = {owner: '10:100', sequence: 1};
+
+    const inspecting = hosts.inspect(LOCAL, instance, false, change);
+    await held.received;
+    hosts.cancelInspection(change);
+    held.release();
+    await inspecting;
+
+    expect((await settings.recent()).runs[0]?.instanceId).toBeNull();
+    await hosts.inspect(LOCAL, instance, false, {owner: change.owner, sequence: 2});
+    expect((await settings.recent()).runs[0]?.instanceId).toBe(instance);
+  });
 });

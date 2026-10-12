@@ -66,6 +66,12 @@ export interface InspectionChangeId {
   readonly sequence: number;
 }
 
+/** The latest inspection operation for a renderer document and whether it may persist. */
+interface InspectionLease {
+  readonly sequence: number;
+  readonly active: boolean;
+}
+
 export class Hosts {
   readonly #deps: HostsDeps;
   readonly #sshConfigFilesystem: SshConfigFilesystem;
@@ -73,8 +79,8 @@ export class Hosts {
   readonly #watched = new Map<HostKey, () => void>();
   /** Checkout validations that still own permission to persist, by renderer-document operation. */
   readonly #checkoutChanges = new Map<string, CheckoutChange>();
-  /** Latest inspection sequence admitted for each renderer document. */
-  readonly #inspectionChanges = new Map<string, number>();
+  /** Latest inspection lease admitted for each renderer document. */
+  readonly #inspectionChanges = new Map<string, InspectionLease>();
   /** Renderer documents whose outstanding inspection writes have been revoked. */
   readonly #retiredInspectionOwners = new Set<string>();
 
@@ -284,16 +290,33 @@ export class Hosts {
     this.#retiredInspectionOwners.add(owner);
   }
 
+  /** Revoke one pending inspection, without preventing a later inspection from this document. */
+  cancelInspection(change: InspectionChangeId): void {
+    const lease = this.#inspectionChanges.get(change.owner);
+    if (lease?.sequence === change.sequence) {
+      this.#inspectionChanges.set(change.owner, {...lease, active: false});
+    }
+  }
+
+  /** Revoke this document's current inspection when Chrome leaves the welcome surface. */
+  cancelInspectionOwner(owner: string): void {
+    const lease = this.#inspectionChanges.get(owner);
+    if (lease !== undefined) this.#inspectionChanges.set(owner, {...lease, active: false});
+  }
+
   #claimInspection(change: InspectionChangeId): () => boolean {
     if (this.#retiredInspectionOwners.has(change.owner)) {
       throw new Error('the inspection owner was retired');
     }
     const latest = this.#inspectionChanges.get(change.owner);
-    if (latest !== undefined && change.sequence <= latest) {
+    if (latest !== undefined && change.sequence <= latest.sequence) {
       throw new Error('the inspection was superseded');
     }
-    this.#inspectionChanges.set(change.owner, change.sequence);
-    return () => this.#inspectionChanges.get(change.owner) === change.sequence;
+    this.#inspectionChanges.set(change.owner, {sequence: change.sequence, active: true});
+    return () => {
+      const lease = this.#inspectionChanges.get(change.owner);
+      return lease?.sequence === change.sequence && lease.active;
+    };
   }
 
   #watch(key: HostKey, connection: HostConnection): void {

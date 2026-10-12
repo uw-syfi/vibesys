@@ -20,6 +20,7 @@ export const HOSTS_CHANNELS = {
   host: 'vibesys:welcome:host',
   setCheckout: 'vibesys:welcome:set-checkout',
   cancelCheckout: 'vibesys:welcome:cancel-checkout',
+  cancelInspection: 'vibesys:welcome:cancel-inspection',
   signIn: 'vibesys:welcome:sign-in',
   complete: 'vibesys:welcome:complete',
   inspect: 'vibesys:welcome:inspect',
@@ -32,6 +33,8 @@ export interface HostsWelcomeBridge {
   /** Change a checkout under `change`, so losing renderer intent can cancel the main-process work. */
   setCheckout(host: HostKey, path: string, change: number): Promise<WelcomeResult<string>>;
   cancelCheckout(change: number): Promise<WelcomeResult<null>>;
+  /** Revoke a still-pending inspection before it can persist its diagnostic locator. */
+  cancelInspection(inspection: number): Promise<WelcomeResult<null>>;
   signIn(host: HostKey): Promise<WelcomeResult<null>>;
   /** The directories that complete `directory` (a path ending in `/`) on `host`. */
   complete(host: HostKey, directory: string): Promise<WelcomeResult<PathCompletion>>;
@@ -54,6 +57,7 @@ export type HostsRequest =
       readonly change: number;
     }
   | {readonly kind: 'cancel-checkout'; readonly change: number}
+  | {readonly kind: 'cancel-inspection'; readonly inspection: number}
   | {readonly kind: 'sign-in'; readonly host: HostId}
   /** List `directory` (a path ending in `/`) for completion. */
   | {readonly kind: 'complete'; readonly host: HostId; readonly directory: string}
@@ -99,6 +103,8 @@ export function parseHostsRequest(
       };
     case HOSTS_CHANNELS.cancelCheckout:
       return {kind: 'cancel-checkout', change: operationToken(first, 'checkout change')};
+    case HOSTS_CHANNELS.cancelInspection:
+      return {kind: 'cancel-inspection', inspection: operationToken(first, 'inspection')};
     case HOSTS_CHANNELS.signIn:
       return {kind: 'sign-in', host: hostFromKey(first)};
     case HOSTS_CHANNELS.complete:

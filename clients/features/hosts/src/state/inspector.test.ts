@@ -91,7 +91,9 @@ describe('inspector state', () => {
   test('closing invalidates an in-flight answer and clears log consent', () => {
     const loading = inspectorStep(INSPECTOR_CLOSED, {type: 'open', target}).state;
     const token = loading.load.kind === 'loading' ? loading.load.token : 0;
-    const closed = inspectorStep(loading, {type: 'close'}).state;
+    const closing = inspectorStep(loading, {type: 'close'});
+    const closed = closing.state;
+    expect(closing.requests).toEqual([{kind: 'cancel-inspection', token}]);
     const late = inspectorStep(closed, {
       type: 'inspection-reply',
       token,
