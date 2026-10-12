@@ -90,11 +90,6 @@ PURE_EXPORTS = {
     "functools": frozenset(
         {"cache", "cached_property", "cmp_to_key", "lru_cache", "partial", "reduce", "wraps"}
     ),
-    # `weakref.ref` and `id` are approved for one use: a memo keyed by the identity of a live
-    # frozen value (`vs_core._values.InstanceMemo`). The key is never observable, a hit must
-    # resolve to the very same object, and a hit returns what recomputation would, so no result
-    # depends on addresses or collection timing.
-    "weakref": frozenset({"ref"}),
     "hashlib": frozenset(
         {
             "blake2b",
@@ -357,7 +352,6 @@ PURE_BUILTINS = frozenset(
         "True",
         "getattr",
         "hasattr",
-        "id",
         "Exception",
         "ArithmeticError",
         "AssertionError",
@@ -766,11 +760,28 @@ class PurityVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+#: Violations that one module is approved to contain, as (rule, subject) pairs.
+#: `vs_core._values.InstanceMemo` remembers a fact per live frozen value, keyed by `id` with a
+#: weak reference that evicts the entry. A hit is proven by `ref() is obj`, so it returns exactly
+#: what recomputing would and no result depends on addresses or collection timing. Nothing else
+#: in the pure scope may use `id` or `weakref`.
+MODULE_EXEMPTIONS = {
+    "libs/vs-core/src/vs_core/_values.py": frozenset(
+        {
+            ("banned-import", "weakref"),
+            ("builtin", "id"),
+            ("effect-path", "weakref.ref"),
+        }
+    ),
+}
+
+
 def scan_source(path: str, source: str) -> tuple[Violation, ...]:
     """Return stable violations; syntax errors fail closed."""
     visitor = PurityVisitor(path)
     visitor.visit(ast.parse(source, filename=path))
-    return tuple(visitor.violations)
+    approved = MODULE_EXEMPTIONS.get(path, frozenset())
+    return tuple(v for v in visitor.violations if (v.rule, v.subject) not in approved)
 
 
 def scan_value_exports(root: Path) -> tuple[Violation, ...]:
