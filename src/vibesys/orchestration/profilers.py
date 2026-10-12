@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import platform
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, FiniteFloat
@@ -54,6 +55,30 @@ _KERNEL_WRITING_PROFILERS: dict[ComputeBackend, ProfilerKind] = {
 }
 
 
+class ProfilerSite(StrEnum):
+    """The place in a run where a profiler's tool executes.
+
+    The values are the run environment's own site names (``vs_runtime`` ``ToolSite``); a
+    test keeps the two enums identical, because policy cannot import the runtime.
+    """
+
+    AGENT_SHELL = "agent_shell"
+    GPU_WORKLOAD = "gpu_workload"
+
+
+@dataclass(frozen=True)
+class ProfilerTool:
+    """The executable a profiler drives and the site of the run where it executes.
+
+    Run start asks the selected run environment whether it can run ``executable`` at
+    ``site``; a profiler whose tool cannot run there is refused (or, for ``auto``, not
+    chosen) with an error naming both, instead of being offered and failing in every turn.
+    """
+
+    executable: str
+    site: ProfilerSite
+
+
 @dataclass(frozen=True)
 class ProfilerDefinition:
     """Behavioral declaration for a runnable profiler.
@@ -72,6 +97,9 @@ class ProfilerDefinition:
     # ProfilerKind with its own ProfilerDefinition; the staged sibling
     # directory name is that definition's own ``support_name``.
     extra_support_kinds: frozenset[ProfilerKind] = frozenset()
+    # The executable the profiler needs and where it runs; ``None`` for a profiler that
+    # is pure Python on the agent's interpreter and needs no external program.
+    tool: ProfilerTool | None = None
 
     @property
     def support_name(self) -> str:
@@ -126,11 +154,16 @@ class ProfilerPreflightResult:
 PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
     definition.kind: definition
     for definition in (
-        ProfilerDefinition(ProfilerKind.NSYS, frozenset({DomainName.LLM_SERVING})),
+        ProfilerDefinition(
+            ProfilerKind.NSYS,
+            frozenset({DomainName.LLM_SERVING}),
+            tool=ProfilerTool("nsys", ProfilerSite.GPU_WORKLOAD),
+        ),
         ProfilerDefinition(
             ProfilerKind.NCU,
             frozenset({DomainName.KERNEL_WRITING}),
             backends=frozenset({ComputeBackend.CUDA}),
+            tool=ProfilerTool("ncu", ProfilerSite.GPU_WORKLOAD),
         ),
         # The rocprof MCP server also exposes the torch analyzer's tools
         # (torch.profiler traces are a useful cross-check alongside rocprofv3
@@ -139,6 +172,7 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
             ProfilerKind.ROCPROF,
             frozenset({DomainName.LLM_SERVING, DomainName.KERNEL_WRITING}),
             extra_support_kinds=frozenset({ProfilerKind.TORCH}),
+            tool=ProfilerTool("rocprofv3", ProfilerSite.GPU_WORKLOAD),
         ),
         ProfilerDefinition(ProfilerKind.OTEL, frozenset({DomainName.MICROSERVICES})),
         ProfilerDefinition(
@@ -147,8 +181,18 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
             requires_domain_torch_support=True,
         ),
         ProfilerDefinition(ProfilerKind.NEURON, frozenset({DomainName.LLM_SERVING})),
-        ProfilerDefinition(ProfilerKind.MACOS_CPU, frozenset({DomainName.GENERIC})),
-        ProfilerDefinition(ProfilerKind.LINUX_CPU, frozenset({DomainName.GENERIC})),
+        # The native CPU profilers drive a program in the agent's own shell, so they run
+        # only where that shell has the program (the host, or an image that ships it).
+        ProfilerDefinition(
+            ProfilerKind.MACOS_CPU,
+            frozenset({DomainName.GENERIC}),
+            tool=ProfilerTool("sample", ProfilerSite.AGENT_SHELL),
+        ),
+        ProfilerDefinition(
+            ProfilerKind.LINUX_CPU,
+            frozenset({DomainName.GENERIC}),
+            tool=ProfilerTool("perf", ProfilerSite.AGENT_SHELL),
+        ),
         # Analyzes a target-captured kernel headroom report (observed vs
         # roofline speed-of-light per kernel). Scoped to LLM serving, where
         # kernel-level roofline analysis drives the optimization loop.
@@ -475,7 +519,9 @@ __all__ = [
     "ProfilerDefinition",
     "ProfilerKind",
     "ProfilerPreflightResult",
+    "ProfilerSite",
     "ProfilerSummary",
+    "ProfilerTool",
     "UnsupportedProfilerError",
     "allowed_profiler_kinds",
     "coerce_profiler_kind",

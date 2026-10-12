@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import sys
 
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
@@ -64,6 +65,7 @@ from vs_runtime._environment_startup import (
 )
 from vs_runtime._image_features import image_features
 from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_TOOLS_ROOT,
@@ -568,6 +570,10 @@ class RunEnvironment(Protocol):
         """Whether the profiler's tool must exist on this host."""
         ...
 
+    def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
+        """Where this environment runs *executable* at *site*, or why it cannot."""
+        ...
+
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve environment facts without starting owned resources."""
         ...
@@ -641,6 +647,14 @@ class HostEnvironment(_NoopWorkspaceRecovery):
     ) -> None:
         """Take the host-sandbox builder, a seam for substituting the platform's."""
         self._build_sandbox = build_sandbox
+
+    def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
+        """Find *executable* on the host's ``PATH``: the agent and its workload both run there."""
+        del site
+        found = shutil.which(executable)
+        if found is None:
+            return ToolLocation.missing(f"`{executable}` is not on the host's PATH")
+        return ToolLocation.found(found)
 
     @classmethod
     def from_options(cls, options: Mapping[str, object]) -> HostEnvironment:
@@ -813,6 +827,11 @@ class DockerEnvironment:
         """Configure Docker execution from its image settings."""
         self.config = config
         self.backend_image = config.image
+
+    def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
+        """Assume the run image provides *executable*: the container is both sites."""
+        del site
+        return assumed_tool(executable)
 
     @classmethod
     def from_options(cls, options: Mapping[str, object]) -> DockerEnvironment:
@@ -1253,6 +1272,11 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         self.config = config
         self.model_volume: str | None = config.model_volume
         self.backend_image = config.image
+
+    def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
+        """Assume the Modal image provides *executable* where the deployment runs."""
+        del site
+        return assumed_tool(executable)
 
     @classmethod
     def from_options(cls, options: Mapping[str, object]) -> ModalEnvironment:
