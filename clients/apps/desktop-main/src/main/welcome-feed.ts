@@ -38,6 +38,11 @@ export class WelcomeFeed {
     return this.#next(value);
   }
 
+  /** Forget a host that no visible panel or recent run retains. */
+  retireHost(host: HostKey): void {
+    this.#listings.delete(host);
+  }
+
   /**
    * Capture all synchronous owner state and the exact sequence that covers it.
    *

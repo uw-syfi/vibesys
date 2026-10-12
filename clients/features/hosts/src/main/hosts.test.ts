@@ -2,6 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
 import {ConnectionManager} from '@vibesys/connection';
 import {FakeLink} from '@vibesys/connection/testing';
+import type {HostId, HostListing} from '@vibesys/hosts';
 import {SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -9,6 +10,8 @@ import {Hosts, type SshConfigFilesystem} from './index.js';
 
 const SSH_CONFIG = '/home/test/.ssh/config';
 const LOCAL = {kind: 'local'} as const;
+const ALPHA = {kind: 'ssh', alias: 'alpha'} as const;
+const BETA = {kind: 'ssh', alias: 'beta'} as const;
 const CONFIG = {delaysMs: [1], deadlineMs: 60_000, heartbeatMs: 15_000};
 
 /** An explicit SSH-config read result, with every requested path recorded. */
@@ -26,6 +29,57 @@ class FakeSshConfigFilesystem implements SshConfigFilesystem {
 
 function fileError(code: string): Error {
   return Object.assign(new Error(`${code}: ${SSH_CONFIG}`), {code});
+}
+
+/** Hold exactly one numbered settings read so another intent can deterministically pass it. */
+class DeferredReadFilesystem extends FakeSettingsFilesystem {
+  readonly received: Promise<void>;
+  readonly #received: () => void;
+  readonly #released: Promise<void>;
+  readonly #release: () => void;
+  readonly #heldRead: number;
+  #reads = 0;
+
+  constructor(files: Readonly<Record<string, string>>, heldRead = 1) {
+    super(files);
+    this.#heldRead = heldRead;
+    let received = (): void => {};
+    let release = (): void => {};
+    this.received = new Promise(resolve => {
+      received = resolve;
+    });
+    this.#released = new Promise(resolve => {
+      release = resolve;
+    });
+    this.#received = received;
+    this.#release = release;
+  }
+
+  override async readText(path: string): Promise<string> {
+    this.#reads += 1;
+    if (this.#reads === this.#heldRead) {
+      this.#received();
+      await this.#released;
+    }
+    return super.readText(path);
+  }
+
+  release(): void {
+    this.#release();
+  }
+}
+
+async function configuredSettings(
+  settings: SettingsStore,
+  hosts: readonly HostId[],
+): Promise<void> {
+  for (const host of hosts) {
+    await settings.updateHosts(current =>
+      withHostSettings(current, host, {
+        checkout: `/checkouts/${host.kind === 'local' ? 'local' : host.alias}`,
+      }),
+    );
+  }
 }
 
 /** The public Hosts feature over a Fake SSH-config filesystem; no connection is opened. */
@@ -50,6 +104,7 @@ function subject(filesystem: SshConfigFilesystem): Hosts {
     sshConfigPath: SSH_CONFIG,
     sshConfigFilesystem: filesystem,
     push: () => {},
+    retire: () => {},
   });
 }
 
@@ -112,8 +167,9 @@ describe('Hosts checkout changes', () => {
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
       push: () => {},
+      retire: () => {},
     });
-    await hosts.host(LOCAL);
+    await hosts.host(LOCAL, '10:100');
     await manager.existing('local')?.ready();
 
     const held = filesystem.deferNextWrite();
@@ -160,8 +216,9 @@ describe('Hosts checkout changes', () => {
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
       push: () => {},
+      retire: () => {},
     });
-    await hosts.host(LOCAL);
+    await hosts.host(LOCAL, '10:100');
     await manager.existing('local')?.ready();
 
     const held = filesystem.deferNextReplaceAfterCommit();
@@ -175,5 +232,202 @@ describe('Hosts checkout changes', () => {
     expect(settingsFor(await settings.hosts(), LOCAL)?.checkout).toBe('/new');
     expect(link.helper.checkouts).toEqual(['/existing', '/new', '/new']);
     expect(manager.existing('local')?.checkoutRoot).toBe('/src/vibesys');
+  });
+});
+
+describe('Hosts desired set', () => {
+  test('switching panels releases a host absent from the bounded recent set', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await configuredSettings(settings, [ALPHA, BETA]);
+    const links = new Map<string, FakeLink>();
+    await using manager = new ConnectionManager({
+      linkFor: host => {
+        const link = new FakeLink();
+        links.set(host.kind === 'local' ? 'local' : host.alias, link);
+        return link;
+      },
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const pushed: HostListing[] = [];
+    const retired: string[] = [];
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      push: listing => pushed.push(listing),
+      retire: host => retired.push(host),
+    });
+
+    await hosts.host(ALPHA, '10:100');
+    const alphaConnection = manager.existing('ssh:alpha');
+    await alphaConnection?.ready();
+    await hosts.host(BETA, '10:100');
+    await alphaConnection?.[Symbol.asyncDispose]();
+
+    expect(manager.existing('ssh:alpha')).toBeNull();
+    expect(manager.existing('ssh:beta')).not.toBeNull();
+    expect(links.get('alpha')?.released).toBe(1);
+    expect(retired).toEqual(['ssh:alpha']);
+    expect(pushed.filter(listing => listing.host === 'ssh:beta').at(0)).toEqual({
+      kind: 'unavailable',
+      host: 'ssh:beta',
+      connection: {kind: 'connecting'},
+    });
+  });
+
+  test('recent and visible intent form one set, independently of update order', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await configuredSettings(settings, [ALPHA, BETA]);
+    const links = new Map<string, FakeLink>();
+    await using manager = new ConnectionManager({
+      linkFor: host => {
+        const link = new FakeLink();
+        links.set(host.kind === 'local' ? 'local' : host.alias, link);
+        return link;
+      },
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      push: () => {},
+      retire: () => {},
+    });
+
+    await hosts.host(ALPHA, '10:100');
+    const alpha = manager.existing('ssh:alpha');
+    await hosts.recent([ALPHA, BETA]);
+    await hosts.host(BETA, '10:100');
+    expect(manager.existing('ssh:alpha')).toBe(alpha);
+
+    await hosts.recent([]);
+    await alpha?.[Symbol.asyncDispose]();
+    expect(manager.existing('ssh:alpha')).toBeNull();
+    expect(links.get('alpha')?.released).toBe(1);
+    expect(manager.existing('ssh:beta')).not.toBeNull();
+  });
+
+  test('a late checkout read cannot reinstall an obsolete visible host or listing', async () => {
+    const settingsPath = '/settings/hosts.json';
+    const filesystem = new DeferredReadFilesystem({
+      [settingsPath]: JSON.stringify({
+        version: 2,
+        hosts: {
+          'ssh:alpha': {checkout: '/checkouts/alpha'},
+          'ssh:beta': {checkout: '/checkouts/beta'},
+        },
+      }),
+    });
+    const settings = new SettingsStore({
+      settingsPath,
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    const created: string[] = [];
+    await using manager = new ConnectionManager({
+      linkFor: host => {
+        created.push(host.kind === 'local' ? 'local' : host.alias);
+        return new FakeLink();
+      },
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const pushed: HostListing[] = [];
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      push: listing => pushed.push(listing),
+      retire: () => {},
+    });
+
+    const obsolete = hosts.host(ALPHA, '10:100');
+    await filesystem.received;
+    await hosts.host(BETA, '10:100');
+    filesystem.release();
+    await obsolete;
+
+    expect(created).toEqual(['beta']);
+    expect(manager.existing('ssh:alpha')).toBeNull();
+    expect(manager.existing('ssh:beta')).not.toBeNull();
+    expect(new Set(pushed.map(listing => listing.host))).toEqual(new Set(['ssh:beta']));
+    expect(pushed.at(0)).toEqual({
+      kind: 'unavailable',
+      host: 'ssh:beta',
+      connection: {kind: 'connecting'},
+    });
+  });
+
+  test('checkout refresh finishes the desired set after fencing an older recent read', async () => {
+    const settingsPath = '/settings/hosts.json';
+    const filesystem = new DeferredReadFilesystem(
+      {
+        [settingsPath]: JSON.stringify({
+          version: 2,
+          hosts: {
+            'ssh:alpha': {checkout: '/checkouts/alpha'},
+            'ssh:beta': {checkout: '/checkouts/beta'},
+          },
+        }),
+      },
+      2,
+    );
+    const settings = new SettingsStore({
+      settingsPath,
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await using manager = new ConnectionManager({
+      linkFor: () => new FakeLink(),
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      push: () => {},
+      retire: () => {},
+    });
+    await hosts.host(ALPHA, '10:100');
+
+    const olderRecent = hosts.recent([ALPHA, BETA]);
+    await filesystem.received;
+    await hosts.setCheckout(ALPHA, '/checkouts/alpha-new', {owner: '10:100', sequence: 1});
+
+    expect(manager.existing('ssh:alpha')).not.toBeNull();
+    expect(manager.existing('ssh:beta')).not.toBeNull();
+    filesystem.release();
+    await olderRecent;
+    expect(manager.existing('ssh:beta')).not.toBeNull();
   });
 });

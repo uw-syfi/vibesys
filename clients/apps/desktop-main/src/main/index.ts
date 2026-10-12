@@ -95,6 +95,7 @@ async function openWindow(manager: ConnectionManager): Promise<Desktop> {
     localCheckout: REPOSITORY_ROOT,
     sshConfigPath: join(homedir(), '.ssh', 'config'),
     push: listing => window.sendWelcome(WELCOME_EVENTS.listing, welcome.listing(listing)),
+    retire: host => welcome.retireHost(host),
   });
   const runs: RunControl = new RunControl({
     connection: id => hosts.connection(id),

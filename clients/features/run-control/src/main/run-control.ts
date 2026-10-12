@@ -10,7 +10,12 @@
  * when the connection recovers.
  */
 
-import {connectionStatus, type HostConnection, type Phase} from '@vibesys/connection';
+import {
+  type ConnectionLease,
+  connectionStatus,
+  type HostConnection,
+  type Phase,
+} from '@vibesys/connection';
 import type {
   DetachedLaunchFailure,
   InstanceList,
@@ -38,8 +43,8 @@ interface RunPage {
 }
 
 export interface RunControlDeps {
-  /** The one connection to `id`. */
-  connection(id: HostId): Promise<HostConnection>;
+  /** Lease the one connection to `id`; the caller releases or transfers every lease. */
+  connection(id: HostId): Promise<ConnectionLease>;
   /** Open a new run page for a run on `hostLabel`, replacing the previous one. */
   openPage(hostLabel: string): RunPage;
   /** Ask the user; resolves true on "yes". */
@@ -107,8 +112,8 @@ export class RunControl {
     this.#deps = deps;
     this.#stops = new StopController({
       stop: async (host, instanceId, force, current) => {
-        const connection = await deps.connection(hostFromKey(host));
-        const attempt = await connection.requestIfCurrent(
+        await using lease = await deps.connection(hostFromKey(host));
+        const attempt = await lease.connection.requestIfCurrent(
           {type: 'run.stop', instance_id: instanceId, force},
           current,
         );
@@ -152,17 +157,22 @@ export class RunControl {
   /** Attach to registry run `instanceId` on `id`. */
   async attach(id: HostId, instanceId: string, task: string | null = null): Promise<void> {
     const generation = this.#claim({id, instanceId});
+    let lease: ConnectionLease | null = null;
+    let transferred = false;
     try {
-      const connection = await this.#deps.connection(id);
+      lease = await this.#deps.connection(id);
+      const connection = lease.connection;
       if (!this.#owns(generation)) return;
       const {listing} = await connection.request({type: 'instances.list'});
       if (!this.#owns(generation)) return;
       const record = liveRecord(listing, instanceId);
       if (record === null) throw new Error(`no live run ${instanceId} on ${hostLabel(id)}`);
-      await this.#bind(generation, id, connection, record, task);
+      transferred = await this.#bind(generation, id, lease, record, task);
     } catch (error) {
       this.#forgetIntended(generation);
       throw error;
+    } finally {
+      if (!transferred) await lease?.[Symbol.asyncDispose]();
     }
   }
 
@@ -269,42 +279,48 @@ export class RunControl {
     resume: Resume,
     intent: StartIntent,
   ): Promise<StartOutcome> {
-    const connection = await this.#deps.connection(id);
-    if (!this.#active(intent)) return 'cancelled';
-    const {launch} = await connection.request({
-      type: 'run.start',
-      project,
-      task,
-      args: [...args],
-      resume,
-    });
-    let record: LiveInstanceRecord;
-    let alreadyLive = false;
-    if (isFailure(launch)) {
-      if (launch.live_instance == null) throw new Error(failureMessage(launch));
-      // `--resume` of a run another server drives: attach to that one instead.
-      record = launch.live_instance;
-      alreadyLive = true;
-    } else {
-      record = launch;
+    const lease = await this.#deps.connection(id);
+    let transferred = false;
+    try {
+      const connection = lease.connection;
+      if (!this.#active(intent)) return 'cancelled';
+      const {launch} = await connection.request({
+        type: 'run.start',
+        project,
+        task,
+        args: [...args],
+        resume,
+      });
+      let record: LiveInstanceRecord;
+      let alreadyLive = false;
+      if (isFailure(launch)) {
+        if (launch.live_instance == null) throw new Error(failureMessage(launch));
+        // `--resume` of a run another server drives: attach to that one instead.
+        record = launch.live_instance;
+        alreadyLive = true;
+      } else {
+        record = launch;
+      }
+      if (!this.#active(intent)) {
+        // Stop only the run this launch created, never one that was already live.
+        if (!alreadyLive) await this.#stopSuperseded(id, record, intent.cancelled);
+        return 'cancelled';
+      }
+      this.#intend(intent.generation, id, record.id);
+      this.#deps.log(
+        alreadyLive
+          ? `the run is already live as ${record.id}; attaching to it`
+          : `started run ${record.run_id} as ${record.id}`,
+      );
+      transferred = await this.#bind(intent.generation, id, lease, record, task);
+      if (!transferred) {
+        if (!alreadyLive) await this.#stopSuperseded(id, record, intent.cancelled);
+        return 'cancelled';
+      }
+      return 'started';
+    } finally {
+      if (!transferred) await lease[Symbol.asyncDispose]();
     }
-    if (!this.#active(intent)) {
-      // Stop only the run this launch created, never one that was already live.
-      if (!alreadyLive) await this.#stopSuperseded(id, record, intent.cancelled);
-      return 'cancelled';
-    }
-    this.#intend(intent.generation, id, record.id);
-    this.#deps.log(
-      alreadyLive
-        ? `the run is already live as ${record.id}; attaching to it`
-        : `started run ${record.run_id} as ${record.id}`,
-    );
-    const bound = await this.#bind(intent.generation, id, connection, record, task);
-    if (!bound) {
-      if (!alreadyLive) await this.#stopSuperseded(id, record, intent.cancelled);
-      return 'cancelled';
-    }
-    return 'started';
   }
 
   /** Stop the unattached run this launch created: cancel or supersession is the confirmation. */
@@ -393,14 +409,12 @@ export class RunControl {
   async #bind(
     generation: number,
     id: HostId,
-    connection: HostConnection,
+    lease: ConnectionLease,
     record: LiveInstanceRecord,
     task: string | null,
   ): Promise<boolean> {
     if (!this.#owns(generation)) return false;
-    // Remembering crosses an await. Lease this exact connection before it so a checkout change
-    // cannot replace and close the connection that this still-current attach is about to bind.
-    const releaseHold = connection.hold();
+    const connection = lease.connection;
     let bound = false;
     try {
       await this.#remember(generation, {
@@ -414,7 +428,7 @@ export class RunControl {
       this.#releaseBinding();
       const page = this.#deps.openPage(hostLabel(id));
       // The provisional lease becomes the binding's lease. It is released once by `release`.
-      const releases: (() => void)[] = [releaseHold];
+      const releases: (() => void)[] = [() => void lease[Symbol.asyncDispose]()];
       const binding: Binding = {
         id,
         instanceId: record.id,
@@ -430,20 +444,24 @@ export class RunControl {
         },
       };
       this.#run = binding;
+      bound = true;
       this.#settleAdoption(id, record.id, true);
       // Subscribed once the binding exists: a listing the connection already holds arrives at once.
-      releases.push(
-        connection.onPhase(phase => this.#phase(binding, phase)),
-        connection.watchInstances(listing => this.#listing(binding, listing)),
+      const addRelease = (release: () => void): void => {
+        if (this.#run === binding) releases.push(release);
+        else release();
+      };
+      addRelease(connection.onPhase(phase => this.#phase(binding, phase)));
+      addRelease(connection.watchInstances(listing => this.#listing(binding, listing)));
+      addRelease(
         connection.onRunUnreachable(instanceId => {
           if (instanceId === binding.instanceId) this.#ended(binding);
         }),
       );
       this.#deps.changed();
-      bound = true;
       return true;
     } finally {
-      if (!bound) releaseHold();
+      if (!bound) await lease[Symbol.asyncDispose]();
     }
   }
 

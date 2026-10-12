@@ -6,6 +6,7 @@
  */
 import {readFile} from 'node:fs/promises';
 import {
+  type ConnectionLease,
   type ConnectionManager,
   connectionStatus,
   HelperRequestError,
@@ -17,6 +18,7 @@ import {
   type HostKey,
   type HostListing,
   type HostSummary,
+  hostFromKey,
   hostKey,
   hostLabel,
   hostListing,
@@ -35,6 +37,8 @@ export interface HostsDeps {
   readonly sshConfigFilesystem?: SshConfigFilesystem;
   /** Send a host's listing to the welcome view. */
   readonly push: (listing: HostListing) => void;
+  /** Forget a host's retained listing when it leaves the desired set. */
+  readonly retire: (host: HostKey) => void;
 }
 
 /** The filesystem operation needed to read the user's SSH config. */
@@ -55,18 +59,20 @@ interface CheckoutChangeId {
 export class Hosts {
   readonly #deps: HostsDeps;
   readonly #sshConfigFilesystem: SshConfigFilesystem;
-  /** Hosts whose registry the view hears, by key, with what stops hearing it. */
-  readonly #watched = new Map<HostKey, () => void>();
+  /** Hosts whose registry the view hears, each with the lease that keeps its resources alive. */
+  readonly #watched = new Map<HostKey, WatchedHost>();
   /** Checkout validations that still own permission to persist, by renderer-document operation. */
   readonly #checkoutChanges = new Map<string, CheckoutChange>();
+  /** The current panel, owned by the renderer document that selected it. */
+  #visible: {readonly owner: string; readonly host: HostKey} | null = null;
+  /** Hosts mentioned by the bounded recent-run file. */
+  #recent = new Set<HostKey>();
+  /** Advances before every desired-set change, fencing async checkout reads. */
+  #generation = 0;
 
   constructor(deps: HostsDeps) {
     this.#deps = deps;
     this.#sshConfigFilesystem = deps.sshConfigFilesystem ?? NODE_SSH_CONFIG_FILESYSTEM;
-    // A new connection for a watched host (its checkout changed) is watched in its place.
-    deps.manager.onConnection((key, connection) => {
-      if (this.#watched.has(key)) this.#watch(key, connection);
-    });
   }
 
   /** Why the settings file is ignored, reading it afresh; null when it is fine or absent. */
@@ -94,25 +100,34 @@ export class Hosts {
     return id.kind === 'local' ? this.#deps.localCheckout : null;
   }
 
-  /** The one connection to `id`, from its checkout; rejects when none is set. */
-  async connection(id: HostId): Promise<HostConnection> {
+  /** Lease the connection to `id`, from its checkout; rejects when none is set. */
+  async connection(id: HostId): Promise<ConnectionLease> {
     const checkout = await this.checkout(id);
     if (checkout === null) throw new Error(`Set the VibeSys checkout for ${hostLabel(id)} first.`);
-    return this.#deps.manager.connection(id, checkout);
+    return this.#deps.manager.acquire(id, checkout);
   }
 
-  /** `id` as its panel shows it; from now on its runs are pushed to the view. */
-  async host(id: HostId): Promise<HostSummary> {
-    const checkout = await this.checkout(id);
-    if (checkout !== null) await this.watch(id);
-    return {key: hostKey(id), label: hostLabel(id), checkout};
-  }
-
-  /** Push `id`'s runs to the view as its helper reports them, opening its connection (no prompt). */
-  async watch(id: HostId): Promise<void> {
+  /** `id` as its panel shows it; `owner`'s previous panel stops retaining its host. */
+  async host(id: HostId, owner: string): Promise<HostSummary> {
     const key = hostKey(id);
-    if (this.#watched.has(key)) return;
-    this.#watch(key, await this.connection(id));
+    this.#visible = {owner, host: key};
+    const generation = this.#changed();
+    const checkout = await this.checkout(id);
+    await this.#reconcile(generation, new Map([[key, {id, checkout}]]));
+    return {key, label: hostLabel(id), checkout};
+  }
+
+  /** Reconcile the hosts named by the bounded recent-run file with the current visible host. */
+  async recent(hosts: readonly HostId[]): Promise<void> {
+    this.#recent = new Set(hosts.map(hostKey));
+    await this.#reconcile(this.#changed());
+  }
+
+  /** Release the visible intent owned by a renderer document that went away. */
+  async retireOwner(owner: string): Promise<void> {
+    if (this.#visible?.owner !== owner) return;
+    this.#visible = null;
+    await this.#reconcile(this.#changed());
   }
 
   /**
@@ -126,8 +141,8 @@ export class Hosts {
     const operation = new CheckoutChange(this.#deps.manager.candidate(id, checkout));
     this.#checkoutChanges.set(key, operation);
     try {
-      await operation.candidate.ready();
-      const root = operation.candidate.checkoutRoot;
+      const candidate = await operation.ready();
+      const root = candidate.checkoutRoot;
       await operation.closeCandidate();
       operation.assertCurrent();
       const outcome = await this.#deps.settings.updateHosts(
@@ -136,7 +151,7 @@ export class Hosts {
       );
       if (outcome === 'cancelled') operation.assertCurrent();
       operation.committed();
-      if (this.#watched.has(hostKey(id))) this.#deps.manager.connection(id, checkout);
+      if (this.#desired().has(hostKey(id))) await this.#refresh(id, checkout);
       return root ?? checkout;
     } catch (error) {
       if (operation.cancelled())
@@ -185,9 +200,9 @@ export class Hosts {
   /** The tasks `project` defines on `id`. */
   async tasks(id: HostId, project: unknown): Promise<string[]> {
     const path = validHostPath(project, 'the project directory');
-    const connection = await this.connection(id);
+    await using lease = await this.connection(id);
     try {
-      const reply = await connection.request({type: 'tasks.list', project: path});
+      const reply = await lease.connection.request({type: 'tasks.list', project: path});
       return reply.tasks.tasks.map(task => task.name);
     } catch (error) {
       throw plain(error, `Could not read the tasks of ${path}`);
@@ -196,10 +211,10 @@ export class Hosts {
 
   /** The directories in `directory` (a path ending in `/`, or `~/`) on `id`. */
   async complete(id: HostId, directory: string): Promise<PathCompletion> {
-    const connection = await this.connection(id);
+    await using lease = await this.connection(id);
     let reply: PathsCompleteReply;
     try {
-      reply = await connection.request({type: 'paths.complete', prefix: directory});
+      reply = await lease.connection.request({type: 'paths.complete', prefix: directory});
     } catch (error) {
       throw plain(error, `Could not list ${directory}`);
     }
@@ -215,8 +230,11 @@ export class Hosts {
     };
   }
 
-  #watch(key: HostKey, connection: HostConnection): void {
-    this.#watched.get(key)?.();
+  #install(key: HostKey, lease: ConnectionLease): void {
+    const connection = lease.connection;
+    // A host returning to the set must overwrite any renderer cache before its old listing could
+    // be drawn. A fresh listing, if already known, follows synchronously.
+    this.#deps.push({kind: 'unavailable', host: key, connection: {kind: 'connecting'}});
     const push = this.#deps.push;
     const stopListing = connection.watchInstances(listing => push(hostListing(key, listing)));
     const stopPhase = connection.onPhase(phase => {
@@ -224,11 +242,99 @@ export class Hosts {
         push({kind: 'unavailable', host: key, connection: connectionStatus(phase)});
       }
     });
-    this.#watched.set(key, () => {
-      stopListing();
-      stopPhase();
+    this.#watched.set(key, {
+      lease,
+      stop: () => {
+        stopListing();
+        stopPhase();
+      },
     });
   }
+
+  #desired(): Set<HostKey> {
+    const desired = new Set(this.#recent);
+    if (this.#visible !== null) desired.add(this.#visible.host);
+    return desired;
+  }
+
+  /** Advance intent and synchronously stop forwarding every host that just became obsolete. */
+  #changed(): number {
+    const generation = ++this.#generation;
+    const desired = this.#desired();
+    for (const [key, watched] of this.#watched) {
+      if (desired.has(key)) continue;
+      this.#watched.delete(key);
+      watched.stop();
+      this.#deps.retire(key);
+      void watched.lease[Symbol.asyncDispose]();
+    }
+    return generation;
+  }
+
+  async #reconcile(
+    generation: number,
+    known = new Map<HostKey, {readonly id: HostId; readonly checkout: string | null}>(),
+  ): Promise<void> {
+    for (const key of this.#desired()) {
+      if (generation !== this.#generation) return;
+      if (this.#watched.has(key)) continue;
+      await this.#acquireDesired(key, generation, known.get(key));
+    }
+  }
+
+  async #acquireDesired(
+    key: HostKey,
+    generation: number,
+    supplied: {readonly id: HostId; readonly checkout: string | null} | undefined,
+  ): Promise<void> {
+    const id = supplied?.id ?? hostFromKey(key);
+    const checkout = supplied === undefined ? await this.checkout(id) : supplied.checkout;
+    if (!this.#current(key, generation) || checkout === null) return;
+    const lease = await this.#deps.manager.acquire(id, checkout);
+    if (!this.#current(key, generation) || this.#watched.has(key)) {
+      await lease[Symbol.asyncDispose]();
+      return;
+    }
+    try {
+      this.#install(key, lease);
+    } catch (error) {
+      await lease[Symbol.asyncDispose]();
+      throw error;
+    }
+  }
+
+  #current(key: HostKey, generation: number): boolean {
+    return generation === this.#generation && this.#desired().has(key);
+  }
+
+  async #refresh(id: HostId, checkout: string): Promise<void> {
+    const key = hostKey(id);
+    const generation = ++this.#generation;
+    const lease = await this.#deps.manager.acquire(id, checkout);
+    if (generation !== this.#generation || !this.#desired().has(key)) {
+      await lease[Symbol.asyncDispose]();
+      return;
+    }
+    const previous = this.#watched.get(key);
+    previous?.stop();
+    this.#watched.delete(key);
+    try {
+      this.#install(key, lease);
+    } catch (error) {
+      await lease[Symbol.asyncDispose]();
+      await previous?.lease[Symbol.asyncDispose]();
+      throw error;
+    }
+    await previous?.lease[Symbol.asyncDispose]();
+    // Refresh advanced the generation that fences older reads. Fill every other member of the
+    // current union so a concurrent recent-host reconciliation cannot leave one unwatched.
+    await this.#reconcile(generation);
+  }
+}
+
+interface WatchedHost {
+  readonly lease: ConnectionLease;
+  readonly stop: () => void;
 }
 
 function isMissingFile(error: unknown): boolean {
@@ -237,14 +343,14 @@ function isMissingFile(error: unknown): boolean {
 
 /** One checkout validation and the permission it must still own at the settings commit boundary. */
 class CheckoutChange {
-  readonly candidate: HostConnection;
   readonly settled: Promise<void>;
+  readonly #candidate: Promise<HostConnection>;
   #resolveSettled: () => void = () => undefined;
   #state: 'current' | 'cancelled' | 'committed' = 'current';
   #closing: Promise<void> | null = null;
 
-  constructor(candidate: HostConnection) {
-    this.candidate = candidate;
+  constructor(candidate: Promise<HostConnection>) {
+    this.#candidate = candidate;
     this.settled = new Promise(resolve => {
       this.#resolveSettled = resolve;
     });
@@ -272,8 +378,21 @@ class CheckoutChange {
     this.#resolveSettled();
   }
 
+  async ready(): Promise<HostConnection> {
+    const candidate = await this.#candidate;
+    this.assertCurrent();
+    await candidate.ready();
+    this.assertCurrent();
+    return candidate;
+  }
+
   closeCandidate(): Promise<void> {
-    this.#closing ??= this.candidate[Symbol.asyncDispose]();
+    // Acquisition itself may reject when the manager is closing. Cleanup must not replace the
+    // primary error from `ready`, but a candidate that was built always remains this operation's.
+    this.#closing ??= this.#candidate.then(
+      candidate => candidate[Symbol.asyncDispose](),
+      () => undefined,
+    );
     return this.#closing;
   }
 }
