@@ -28,6 +28,8 @@ from vibesys.api.request import RunEnvironmentSpec, load_task
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vibesys.api import CoreEvent
+
 _SLURM_LOCAL = """[slurm]
 name = "test-cluster"
 remote_workspace_root = "/shared/vibesys"
@@ -151,10 +153,16 @@ def test_session_construction_refuses_a_host_command_whose_interpreter_is_missin
     request = _request(
         tmp_path, "host", "profile-guided-single-agent", ["no-such-interpreter", "attribute.py"]
     )
+    events: list[CoreEvent] = []
+
+    def record(event: CoreEvent) -> None:
+        events.append(event)
+
     with pytest.raises(ConfigurationError) as error:
         create_session(
             request,
-            sink=lambda _event: None,
+            sink=record,
             settings=LaunchSettings(backend_factory=host_container_backend),
         )
     assert error.value.diagnostic.code == "attribution_command_unavailable"
+    assert not events
