@@ -774,25 +774,25 @@ class TestCleanupOnExit:
         assert "abc123" not in _live_containers
 
     @pytest.mark.parametrize(
-        ("returncode", "stderr", "released"),
+        ("returncode", "stderr", "outcome"),
         [
-            (0, "", True),
-            (1, "Error response from daemon: No such container: abc123", True),
+            (0, "", "released"),
+            (1, "Error response from daemon: No such container: abc123", "released"),
             (
                 1,
                 "Error response from daemon: removal of container abc123 is already in progress",
-                True,
+                "released",
             ),
-            (1, "daemon unavailable", False),
-            (1, "", False),
-            (125, "Error: no such container", False),
+            (1, "daemon unavailable", "kept"),
+            (1, "", "kept"),
+            (125, "Error: no such container", "kept"),
         ],
     )
     def test_cleanup_and_stop_agree_on_when_a_container_is_released(
         self,
         returncode: int,
         stderr: str,
-        released: bool,  # noqa: FBT001  # LW-test; a parametrized expectation, not a control flag.
+        outcome: str,
         tmp_path: Path,
     ) -> None:
         """Regression: atexit cleanup kept a container whose removal was already in progress.
@@ -822,6 +822,7 @@ class TestCleanupOnExit:
             finally:
                 _live_containers.pop("abc123", None)
 
+        released = outcome == "released"
         assert settled_by("stop") is released
         assert settled_by("cleanup") is released
 

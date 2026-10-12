@@ -57,5 +57,14 @@ agents need.
   `modal_model_setup`, and the `slurm_*` modules (broker, executor, policy,
   profile). They are evaluator dispatch, not `SandboxKind`s; run environments
   in `vs_runtime` select them.
+- Raw status of an external system is interpreted in exactly one translator
+  per system, and every other module reads its typed life: `skypilot_states`
+  (cluster and queued-job status, `sky logs` exit codes), `docker_states`
+  (the result of `docker rm -f`), and the translator section of
+  `modal_evaluator` (container listings, the exec exit-code marker, health).
+  Each is pure and total, never guesses (an unrecognised or missing status is
+  `Unknown(raw)`, never a near match or a default), and the job and container
+  lives only move forward, with the end final. Modal's lives sit inside the
+  helper because it is mounted into the runtime as a single stdlib-only file.
 - `vs_sandbox.api.evaluator_helpers` locates the installed Modal and SkyPilot
   helper programs that runtime composition mounts into remote sandboxes.
