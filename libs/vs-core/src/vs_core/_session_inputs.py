@@ -81,7 +81,10 @@ def _matches(item: SessionInput, invocation: Invocation, context: SessionsContex
     if isinstance(target, InvocationInputTarget):
         return target.invocation == invocation.invocation
     if isinstance(target, ScopeInputTarget):
-        return target.scope == invocation.scope
+        # The run is the ancestor of every attempt scope, so an input addressed to the run
+        # reaches whichever of its invocations reserves first.
+        run_scope = Scope(owner=context.run.run_id, generation=context.run.generation)
+        return target.scope in (invocation.scope, run_scope)
     owner = attempt_for(context, invocation.scope)
     return owner is not None and owner.item_id == target.item_id
 

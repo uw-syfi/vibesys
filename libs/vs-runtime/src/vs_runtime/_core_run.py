@@ -50,6 +50,7 @@ from vs_core.api import (
 )
 from vs_runtime._core_loop import LeaseUnavailableError
 from vs_runtime._run_control import RunStopped
+from vs_runtime._steer_delivery import SteerConsumption, steer_input, unrecorded_steers
 from vs_sim.api import SleepingClock, SystemClock
 
 if TYPE_CHECKING:
@@ -207,6 +208,7 @@ class RunControlBridge:
         self._steer = steer
         self._stop_result = stop_result
         self._count = 0
+        self._consumption = SteerConsumption()
         self._started = False
         self._paused = False
         self._stopped = False
@@ -219,16 +221,23 @@ class RunControlBridge:
         """
         return self._channel.on_stop_requested(listener)
 
-    def poll(self, core: CoreState, now_at: float) -> tuple[RunControlEvent, ...]:
-        """Controls requested since the last poll, in submission order."""
+    def poll(self, core: CoreState, now_at: float) -> tuple[CoreEvent, ...]:
+        """Controls requested since the last poll, in submission order.
+
+        Each steer control is followed by the session input that delivers it to the next
+        turn (``_steer_delivery``), and a steer control whose input core never recorded
+        gets that input too.
+        """
+        self._consumption.newly_delivered(core, self._report_consumed)
         if not self._started:
             self._started = True
             self._count = len(core.run.controls)
             self._paused = core.run.status == RunStatus.PAUSED
             self._stopped = any(c.action == "stop" for c in core.run.controls)
-        events: list[RunControlEvent] = [
-            self._event("steer", now_at, text=text) for text in self._channel.take_pending_steer()
-        ]
+        events: list[CoreEvent] = list(unrecorded_steers(core, now_at))
+        for text in self._channel.take_pending_steer():
+            control = self._event("steer", now_at, text=text)
+            events += (control, steer_input(core, control.control, now_at))
         if self._stopped:
             return tuple(events)
         if self._channel.stop_requested():
@@ -238,6 +247,11 @@ class RunControlBridge:
             self._paused = not self._paused
             events.append(self._event("pause" if self._paused else "resume", now_at))
         return tuple(events)
+
+    def _report_consumed(self, role: str, round_label: str, execution_id: str) -> None:
+        self._channel.notify_steer_consumed(
+            agent_kind=role, round_label=round_label, execution_id=execution_id
+        )
 
     def _event(
         self,

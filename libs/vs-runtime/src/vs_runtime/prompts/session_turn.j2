@@ -3,7 +3,7 @@
 
 {% endfor %}
 {% if inputs %}
-New input since the last turn:
+New input from the operator since the last turn. Treat it as high-priority guidance for the work you do now:
 {% for item in inputs %}
 - ({{ item.mode }}) {{ item.text | trim }}
 {% endfor %}

@@ -39,8 +39,10 @@ from vs_core.api import (
     Proposal,
     ReleaseDependency,
     ResourceId,
+    RunControlEvent,
     RunResultProposal,
     RunStatus,
+    SessionInputReceived,
     WorkspaceMode,
     WorkspacePlan,
 )
@@ -533,6 +535,8 @@ def test_the_control_bridge_emits_one_ordered_event_per_change(operations: list[
         else:
             channel.queue_steer(operation.removeprefix("steer:"))
         events.extend(bridge.poll(core, now_at=1.0))
+    inputs = [event.input for event in events if isinstance(event, SessionInputReceived)]
+    events = [event for event in events if isinstance(event, RunControlEvent)]
     identities = [event.control.control_id.root for event in events]
     assert identities == [f"control-{n}" for n in range(1, len(events) + 1)]
     actions = [event.control.action for event in events]
@@ -547,3 +551,8 @@ def test_the_control_bridge_emits_one_ordered_event_per_change(operations: list[
         if event.control.action == "steer":
             assert event.control.artifact is not None
             assert event.control.artifact.digest in steers.texts
+    # Every steer becomes exactly one run-wide next-turn input, in the same order.
+    assert [item.artifact for item in inputs] == [
+        event.control.artifact for event in events if event.control.action == "steer"
+    ]
+    assert len({item.input_id for item in inputs}) == len(inputs)

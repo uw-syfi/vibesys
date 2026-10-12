@@ -9,7 +9,7 @@ import shlex
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -1024,7 +1024,7 @@ def _capture_command() -> tuple[str, ...]:
     )
 
 
-async def _profile_capture_options(outputs: tuple[str, ...]) -> dict[str, object]:
+async def _profile_capture_options(outputs: tuple[str, ...]) -> dict[str, Any]:
     """The capture request the cluster was asked to run for a profile plan requiring ``outputs``."""
     async with world(profile_command=_capture_command()) as w:
         base = plan(stages=("profile",), candidate=w.stack.snapshot)
@@ -1043,7 +1043,7 @@ async def _profile_capture_options(outputs: tuple[str, ...]) -> dict[str, object
 async def test_a_profile_plans_required_fields_reach_the_capture_request() -> None:
     selected = await _profile_capture_options(("hip_api_timing",))
 
-    assert selected["options"]["hip_api"] is True  # type: ignore[index]
+    assert selected["options"]["hip_api"] is True
     assert selected["required_fields"] == ["hip_api_timing"]
 
 
