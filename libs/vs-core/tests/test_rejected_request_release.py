@@ -30,6 +30,7 @@ _VACANT = (ObservationStatus.REJECTED, ObservationStatus.FAILED, ObservationStat
 
 def _answer(request: Request, sequence: int) -> RequestObserved:
     """The executor's conclusive success for a request core asked it to run."""
+    assert request.request_id is not None
     return RequestObserved(
         observation=Observation(
             event_id=EventId(root=f"answer-{sequence}"),
@@ -54,6 +55,7 @@ def _drain(state: CoreState, requests: tuple[Request, ...]) -> CoreState:
         if not pending:
             return state
         request = pending.pop(0)
+        assert request.request_id is not None
         state = step(state, DispatchAuthorized(request_id=request.request_id)).state
         result = step(state, _answer(request, sequence))
         state = result.state

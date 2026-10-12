@@ -127,10 +127,11 @@ def _vacant_workspace_request(intent: Intent | None) -> bool:
     The executor marks such an answer neither ``released`` nor ``children_complete`` (there is
     nothing to release and no manifest), so ``_released`` can never hold for it.
     """
-    observation = None if intent is None else intent.observation
+    if intent is None or not isinstance(intent.request, EnsureWorkspace | RestoreRevision):
+        return False
+    observation = intent.observation
     return bool(
         observation is not None
-        and isinstance(intent.request, EnsureWorkspace | RestoreRevision)
         and observation.terminal
         and not observation.accepted
         and observation.resource_id is None
