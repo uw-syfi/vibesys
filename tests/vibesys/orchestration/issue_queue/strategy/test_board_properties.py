@@ -8,16 +8,21 @@ performance evaluations.
 from __future__ import annotations
 
 import json
-from collections import deque
 from itertools import groupby
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors
-from tests.vibesys.orchestration.issue_queue.strategy._replies import evaluated, implemented, judged
-from tests.vibesys.orchestration.issue_queue.strategy._run import FACTS, config, harness, run_shell
+from tests.vibesys.orchestration.issue_queue.strategy.world import (
+    FACTS,
+    IssueQueueWorld,
+    evaluated,
+    implemented,
+    issue_queue_config,
+    issue_queue_harness,
+    judged,
+)
 
 from vibesys.orchestration.issue_queue.models import (
     JudgeReplyModel,
@@ -34,6 +39,7 @@ from vibesys.orchestration.issue_queue.strategy.api import (
 from vibesys.orchestration.issue_queue.strategy.api import PerformanceRecord as Record
 from vs_core.api import Operation, Proposal, StartAttempt, project
 from vs_core.testing.drive import new_run
+from vs_dst.api import simulate
 from vs_issue_tracker.api import IssueRow, IssueStatus, IssueType, ReadBoard
 
 _KINDS = ["bug", "feature", "perf"]
@@ -77,9 +83,9 @@ def test_an_evaluator_reply_files_at_most_its_cap_of_issues_of_known_types(
 
 
 def _decide(state: IssueQueueStrategyState) -> list[object]:
-    settings_ = config()
+    settings_ = issue_queue_config()
     strategy = IssueQueueStrategy(config=settings_)
-    view = project(new_run(strategy, harness(settings_)))
+    view = project(new_run(strategy, issue_queue_harness(settings_)))
     return list(strategy.bind(state).decide(view).decisions)
 
 
@@ -121,9 +127,9 @@ def _blocked_queue(statuses: list[IssueStatus]) -> bool:
 
 
 def _proposal(state: IssueQueueStrategyState) -> Proposal[IssueQueueStrategyState]:
-    settings_ = config(max_rounds=MAX_ROUNDS)
+    settings_ = issue_queue_config(max_rounds=MAX_ROUNDS)
     strategy = IssueQueueStrategy(config=settings_)
-    return strategy.bind(state).decide(project(new_run(strategy, harness(settings_))))
+    return strategy.bind(state).decide(project(new_run(strategy, issue_queue_harness(settings_))))
 
 
 STATUSES = st.lists(st.sampled_from(list(IssueStatus)), max_size=6)
@@ -187,26 +193,31 @@ def test_after_an_evaluation_a_quiet_board_succeeds_and_otherwise_the_round_budg
 @settings(max_examples=10, deadline=None, derandomize=True, database=None)
 @given(cap=st.integers(1, 3), humans=st.integers(0, 5))
 def test_no_round_works_more_issues_than_the_cap(cap: int, humans: int) -> None:
-    executors = Executors(
-        implementer=deque(implemented() for _ in range(40)),
-        judge=deque(judged() for _ in range(40)),
-        perf=deque(evaluated() for _ in range(8)),
+    world = IssueQueueWorld(
+        implementer=[implemented() for _ in range(40)],
+        judge=[judged() for _ in range(40)],
+        perf=[evaluated() for _ in range(8)],
+        max_issues_per_round=cap,
+        max_rounds=3,
     )
     for number in range(humans):
-        executors.tracker.create(
+        world.tracker.create(
             type=IssueType.FEATURE,
             title=f"filed by a person {number}",
             description="d",
             created_by="human",
             iteration=0,
         )
-    trace = run_shell(executors, max_issues_per_round=cap, max_rounds=3)
+    run = simulate(world)
+    assert run.finished
+    assert run.halted is None
+    assert not run.liveness_violations
     kinds = [
         JobKind.PERF if decision.attempt_id.root.startswith("attempt:perf") else JobKind.ISSUE
-        for decision in trace.decisions
+        for decision in run.decisions
         if isinstance(decision, StartAttempt)
     ]
     for kind, group in groupby(kinds):
         if kind is JobKind.ISSUE:
             assert len(list(group)) <= cap
-    assert bootstrap_title(FACTS.objective) in [issue.title for issue in executors.tracker.list()]
+    assert bootstrap_title(FACTS.objective) in world.titles()

@@ -8,16 +8,20 @@ envelope codec, and the state is a tree of immutable values.
 
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors, WorldTranslator
-from tests.vibesys.orchestration.issue_queue.strategy._replies import evaluated, implemented, judged
-from tests.vibesys.orchestration.issue_queue.strategy._run import config, harness, limits
+from tests.vibesys.orchestration.issue_queue.strategy.world import (
+    IssueQueueWorld,
+    evaluated,
+    implemented,
+    issue_queue_config,
+    issue_queue_harness,
+    issue_queue_limits,
+    judged,
+)
 
-from vibesys.orchestration.issue_queue.core_policy.api import reply_schemas
 from vibesys.orchestration.issue_queue.strategy.api import (
     STATE_SCHEMA,
     IssueQueueStrategy,
@@ -40,7 +44,7 @@ from vs_core.api import (
     Withdraw,
 )
 from vs_core.testing.drive import new_run
-from vs_runtime.api.testing import HostOptions, drive_shell
+from vs_dst.api import simulate
 
 if TYPE_CHECKING:
     from vs_core.api import Proposal, RunView, StrategyEvent
@@ -77,22 +81,22 @@ class CapturingStrategy:
 
 
 def _captured() -> tuple[IssueQueueStrategy, Capture]:
-    settings = config()
+    world = IssueQueueWorld(
+        implementer=[implemented(f"turn {n}") for n in range(4)],
+        judge=[judged(passed=False), judged(bugs=("a bug",)), judged()],
+        perf=[evaluated("more"), evaluated()],
+    )
     capture = Capture()
-    executors = Executors(
-        implementer=deque(implemented(f"turn {n}") for n in range(4)),
-        judge=deque([judged(passed=False), judged(bugs=("a bug",)), judged()]),
-        perf=deque([evaluated("more"), evaluated()]),
+    strategy = IssueQueueStrategy(config=world.config)
+    # Every host's strategy records the pairs it is asked to decide on.
+    world.setup = replace(
+        world.setup,
+        new_strategy=lambda: CapturingStrategy(IssueQueueStrategy(config=world.config), capture),
     )
-    strategy = IssueQueueStrategy(config=settings)
-    finished = drive_shell(
-        CapturingStrategy(strategy, capture),
-        executors,
-        harness(settings),
-        reply_schemas(settings),
-        HostOptions(translator=WorldTranslator),
-    )
-    assert finished.halted is None
+    run = simulate(world)
+    assert run.finished
+    assert run.halted is None
+    assert not run.liveness_violations
     return strategy, capture
 
 
@@ -118,9 +122,9 @@ def test_deciding_again_from_the_state_it_proposed_changes_nothing() -> None:
 
 
 def test_every_reached_state_round_trips_the_envelope_codec() -> None:
-    settings = config()
+    settings = issue_queue_config()
     codec = plain_operation_registry()
-    core = new_run(STRATEGY, harness(settings))
+    core = new_run(STRATEGY, issue_queue_harness(settings))
     for state, _ in CAPTURE.pairs:
         saved = RunEnvelope[IssueQueueStrategyState](
             schema_version=ENVELOPE_SCHEMA_VERSION,
@@ -139,8 +143,8 @@ def test_every_reached_state_round_trips_the_envelope_codec() -> None:
 
 @pytest.mark.parametrize("field_name", ["max_rounds", "max_attempts_per_issue"])
 def test_the_derived_limits_cover_the_attempts_the_config_allows(field_name: str) -> None:
-    settings = config(**{field_name: 3})
-    assert limits(settings).max_attempts == settings.max_attempts
+    settings = issue_queue_config(**{field_name: 3})
+    assert issue_queue_limits(settings).max_attempts == settings.max_attempts
 
 
 def test_after_an_operator_stop_the_strategy_starts_no_new_work() -> None:

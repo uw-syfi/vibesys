@@ -6,7 +6,11 @@ import re
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.issue_queue.strategy._run import FACTS, config, harness
+from tests.vibesys.orchestration.issue_queue.strategy.world import (
+    FACTS,
+    issue_queue_config,
+    issue_queue_harness,
+)
 
 from vibesys.orchestration.issue_queue.strategy.api import (
     BoardState,
@@ -60,10 +64,10 @@ OBJECTIVES = (
 
 
 def _first_decisions(objective: str) -> list[object]:
-    settings_ = config()
+    settings_ = issue_queue_config()
     strategy = IssueQueueStrategy(config=settings_)
     facts = FACTS.model_copy(update={"objective": objective})
-    view = project(new_run(strategy, harness(settings_, facts=facts)))
+    view = project(new_run(strategy, issue_queue_harness(settings_, facts=facts)))
     state = IssueQueueStrategyState(cursor=Cursor.START, board=BoardState(fresh=True))
     return list(strategy.bind(state).decide(view).decisions)
 

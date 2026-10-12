@@ -21,16 +21,16 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
 )
 from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, LIMITS, config
 from tests.vibesys.orchestration.evolve.strategy.world import EvolveWorld
-from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors as PlainExecutors
-from tests.vibesys.orchestration.issue_queue.strategy._replies import (
+from tests.vibesys.orchestration.issue_queue.strategy.world import (
+    IssueQueueWorld,
+)
+from tests.vibesys.orchestration.issue_queue.strategy.world import (
     evaluated as plain_evaluated,
 )
-from tests.vibesys.orchestration.issue_queue.strategy._replies import (
+from tests.vibesys.orchestration.issue_queue.strategy.world import (
     implemented as plain_implemented,
 )
-from tests.vibesys.orchestration.issue_queue.strategy._replies import judged as plain_judged
-from tests.vibesys.orchestration.issue_queue.strategy._run import config as plain_config
-from tests.vibesys.orchestration.issue_queue.strategy._run import harness as plain_harness
+from tests.vibesys.orchestration.issue_queue.strategy.world import judged as plain_judged
 from tests.vibesys.orchestration.multi.strategy.world import (
     PROFILER,
     RECIPE,
@@ -46,8 +46,6 @@ from vibesys.orchestration.dynamic.strategy.api import (
     DynamicStrategyState,
     dynamic_operation_registry,
 )
-from vibesys.orchestration.issue_queue.core_policy.api import reply_schemas as plain_reply_schemas
-from vibesys.orchestration.issue_queue.strategy.api import IssueQueueConfig, IssueQueueStrategy
 from vs_core.api import RunEnvelope
 from vs_core.testing.drive import Harness
 
@@ -229,27 +227,28 @@ def multi_subject(
     )
 
 
-class PlainWorld(PlainExecutors):
+def _plain_world(
+    passes: tuple[bool, ...], filings: tuple[tuple[str, ...], ...], settings: Mapping[str, Any]
+) -> IssueQueueWorld:
     """The issue queue's scripted roles and its board, which is a real owner over a fake tracker.
 
     The board operations are answered by `IssueBoardOwner.perform`, so a run reads and writes a
     board that keeps its state across the suite's restarts; the judge and the performance
     evaluator also file issues the run then works.
     """
-
-    def __init__(self, passes: tuple[bool, ...], filings: tuple[tuple[str, ...], ...]) -> None:
-        super().__init__(
-            implementer=deque(plain_implemented(f"turn {n}") for n in range(24)),
-            judge=deque(
-                plain_judged(passed=passes[n % len(passes)], bugs=filings[n % len(filings)][:1])
-                for n in range(24)
-            ),
-            perf=deque(plain_evaluated(*filings[n % len(filings)]) for n in range(8)),
-        )
+    return IssueQueueWorld(
+        implementer=[plain_implemented(f"turn {n}") for n in range(24)],
+        judge=[
+            plain_judged(passed=passes[n % len(passes)], bugs=filings[n % len(filings)][:1])
+            for n in range(24)
+        ],
+        perf=[plain_evaluated(*filings[n % len(filings)]) for n in range(8)],
+        **settings,
+    )
 
 
 @st.composite
-def _plain_world(draw: st.DrawFn) -> Callable[[], World]:
+def _plain_worlds(draw: st.DrawFn, settings: Mapping[str, Any]) -> Callable[[], World]:
     passes = tuple(draw(st.lists(st.booleans(), min_size=1, max_size=3)))
     filings = tuple(
         draw(
@@ -260,19 +259,20 @@ def _plain_world(draw: st.DrawFn) -> Callable[[], World]:
             )
         )
     )
-    return lambda: PlainWorld(passes, filings)
+    return lambda: _plain_world(passes, filings, settings)
 
 
-def plain_subject(name: str, settings: IssueQueueConfig, *, sweeps_crashes: bool) -> Subject:
-    """The issue queue (`plain`) under ``settings``."""
+def plain_subject(name: str, settings: Mapping[str, Any], *, sweeps_crashes: bool) -> Subject:
+    """The issue queue (`plain`) under the strategy config ``settings``."""
+    setup = IssueQueueWorld(**settings).setup
     return Subject(
         name=name,
-        new_strategy=lambda: IssueQueueStrategy(config=settings),
-        harness=plain_harness(settings),
-        schemas=plain_reply_schemas(settings),
-        worlds=_plain_world(),
-        default_world=lambda: PlainWorld((True,), (("a",),)),
-        smallest_world=lambda: PlainWorld((True,), ((),)),
+        new_strategy=setup.new_strategy,
+        harness=setup.harness,
+        schemas=setup.schemas,
+        worlds=_plain_worlds(settings),
+        default_world=lambda: _plain_world((True,), (("a",),), settings),
+        smallest_world=lambda: _plain_world((True,), ((),), settings),
         sweeps_crashes=sweeps_crashes,
         issued=frozenset(
             {
@@ -344,9 +344,9 @@ SUBJECTS = {
         single_subject(
             "single-cadence", {"max_rounds": 3, "official_eval_every": 2}, sweeps_crashes=False
         ),
-        plain_subject("plain", plain_config(max_rounds=1), sweeps_crashes=True),
+        plain_subject("plain", {"max_rounds": 1}, sweeps_crashes=True),
         plain_subject(
-            "plain-rounds", plain_config(max_rounds=2, max_issues_per_round=2), sweeps_crashes=False
+            "plain-rounds", {"max_rounds": 2, "max_issues_per_round": 2}, sweeps_crashes=False
         ),
         multi_subject("multi", {"max_rounds": 1}, sweeps_crashes=True),
         multi_subject(

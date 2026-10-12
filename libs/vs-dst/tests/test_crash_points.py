@@ -88,10 +88,36 @@ def test_a_point_that_is_not_one_of_the_run_is_refused_by_name() -> None:
         normal.rerun_with_crash(CrashPoint(CrashKind.AFTER_COMMIT, 9999))
 
 
-def test_a_recovered_run_offers_no_crash_points_of_its_own() -> None:
-    normal = simulate(TinyWorld(1))
+def test_a_recovered_run_offers_the_crash_points_of_its_own_hosts_and_can_be_crashed_again() -> (
+    None
+):
+    normal = simulate(TinyWorld(2))
+    first = normal.crash_points()[len(normal.crash_points()) // 2]
+    recovered = normal.rerun_with_crash(first)
 
-    assert normal.rerun_with_crash(normal.crash_points()[0]).crash_points() == ()
+    points = recovered.crash_points()
+
+    assert points
+    assert all(point.commit > first.commit for point in points)
+    for second in points:
+        again = recovered.rerun_with_crash(second)
+        assert again.finished, (first, second)
+        assert again.result == normal.result, (first, second)
+        assert again.no_effect_ran_twice(), (first, second)
+        assert {d.decision_id for d in again.decisions} == {
+            d.decision_id for d in normal.decisions
+        }, (first, second)
+    with pytest.raises(ValueError, match="is not a crash point"):
+        recovered.rerun_with_crash(first)
+
+
+def test_a_recovered_run_reads_back_the_world_it_left() -> None:
+    normal = simulate(TinyWorld(2))
+
+    recovered = normal.rerun_with_crash(normal.crash_points()[3])
+
+    assert recovered.world is not normal.world
+    assert type(recovered.world) is TinyWorld
 
 
 @pytest.fixture

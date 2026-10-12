@@ -35,7 +35,8 @@ def test_a_restart_after_any_crash_finishes_the_same_run():
 - `simulate(world) -> SimulatedRun`: runs the whole
   run on the production shell (`vs_runtime`'s `CoreRuntime` and loop, a virtual clock, an
   in-memory store, a publication delivery, and executors that seal what each effect did).
-- `SimulatedRun`: `result`, `state`, `core`, `decisions`, `journal`, `finished`, `halted`,
+- `SimulatedRun`: `result`, `world` (the world as the run left it, for a test that reads the far
+  side back), `state`, `core`, `decisions`, `journal`, `finished`, `halted`,
   `stopped`, `liveness_violations` (the invariants of `vs_core.testing.liveness` the run broke,
   empty when it is live; a test asserts it is empty, nothing checks it behind the scenes),
   `commits`, `executed_effects`, `no_effect_ran_twice()`, `crash_points()` and
@@ -60,7 +61,9 @@ instance) on a copy of that, after the dead host's lease has expired, and runs i
 prefix is not run again, so a sweep costs the sum of the suffixes. Nothing from the dead host is
 copied: its memory is gone by definition.
 
-A recovered run reports the decisions of both hosts; its `journal` is the new host's.
+A recovered run reports the decisions of every host so far; its `journal` is the new host's.
+It offers the crash points of its own hosts, so it can be crashed again (a second death during
+recovery).
 
 ## Which crash points a suite tries
 

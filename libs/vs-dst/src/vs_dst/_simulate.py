@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from vs_core.api import RunStatus
@@ -55,6 +55,17 @@ FIRST_HOST_STARTS_AT = 1.0
 """The virtual time the first host starts at."""
 
 
+@dataclass(frozen=True)
+class Start:
+    """Where a run's first host started within the whole run: all of it for a first host."""
+
+    clock_at: float = FIRST_HOST_STARTS_AT
+    commits: int = 0
+    """How many commits earlier hosts made."""
+    decisions: tuple[Decision, ...] = ()
+    """What earlier hosts decided."""
+
+
 class SimulatedRun:
     """One whole run, finished, and the means to ask what a crash of it would have done."""
 
@@ -63,19 +74,19 @@ class SimulatedRun:
         run: Run,
         outside: OutsideWorld,
         options: HostOptions,
-        pristine: OutsideWorld | None,
-        earlier_decisions: tuple[Decision, ...] = (),
+        pristine: OutsideWorld,
+        started: Start | None = None,
     ) -> None:
         """Wrap a finished host's ``run`` over the ``outside`` world it left.
 
-        ``pristine`` is a copy of the outside world from before the run, which crash cases are
-        taken from; a recovered run has none.
+        ``pristine`` is the outside world as this run's first host found it, which crash cases
+        are taken from; ``started`` says where in the whole run that was.
         """
         self._run = run
         self._outside = outside
         self._options = options
         self._pristine = pristine
-        self._earlier_decisions = earlier_decisions
+        self._started = Start() if started is None else started
         self._snapshots: dict[CrashPoint, Snapshot] = {}
 
     @property
@@ -89,6 +100,15 @@ class SimulatedRun:
         return self._run.core.run.result
 
     @property
+    def world(self) -> World:
+        """The world as this run left it: what it handed out and what it did to the far side.
+
+        A recovered run has a world of its own (a copy of the outside world at its crash
+        point), so a test reads what a crash left behind from it.
+        """
+        return self._outside.world
+
+    @property
     def state(self) -> StrategyState:
         """The strategy state the shell last persisted."""
         return self._run.state
@@ -96,7 +116,7 @@ class SimulatedRun:
     @property
     def decisions(self) -> tuple[Decision, ...]:
         """Every decision any host of the run proposed, in order."""
-        return (*self._earlier_decisions, *self._run.decisions)
+        return (*self._started.decisions, *self._run.decisions)
 
     @property
     def journal(self) -> Journal:
@@ -148,11 +168,14 @@ class SimulatedRun:
 
         A sample on pull requests, every boundary under ``--dst-crash-points=all``. ``kind``
         keeps one kind of point (a suite splits a long sweep that way). A run that started from a
-        crash has none of its own. Choosing costs nothing: the run only counted its commits.
+        crash offers the commits its own hosts made, so it can be crashed again. Choosing costs
+        nothing: the run only counted its commits.
         """
-        if self._pristine is None:
-            return ()
-        points = crash_point_policy().choose(self.commits)
+        first = self._started.commits
+        points = tuple(
+            replace(point, commit=point.commit + first)
+            for point in crash_point_policy().choose(self.commits - first)
+        )
         return points if kind is None else tuple(p for p in points if p.kind is kind)
 
     def rerun_with_crash(self, point: CrashPoint) -> SimulatedRun:
@@ -166,8 +189,11 @@ class SimulatedRun:
         every point `crash_points()` offers (it raises `NondeterministicWorldError` if that run
         makes a different number of commits). A point the policy did not offer, but that is
         within the run, gets a run of its own; a point outside the run raises `ValueError`.
+
+        A recovered run can be crashed in turn: its points are those of its own hosts, and the
+        run it results in reports the decisions of every host so far.
         """
-        if self._pristine is None or not 0 <= point.commit < self.commits:
+        if not self._started.commits <= point.commit < self.commits:
             message = f"{point} is not a crash point of this run"
             raise ValueError(message)
         if point not in self._snapshots:
@@ -176,20 +202,20 @@ class SimulatedRun:
         snapshot = self._snapshots[point]
         outside = snapshot.outside.copy()
         # The next host starts after the dead one's lease has expired.
-        run = _run_host(outside, self._options, FIRST_HOST_STARTS_AT + LEASE + 1, None)
-        return SimulatedRun(
-            run,
-            outside,
-            self._options,
-            pristine=None,
-            earlier_decisions=tuple(self._run.decisions[: snapshot.decisions]),
+        clock_at = self._started.clock_at + LEASE + 1
+        run = _run_host(outside, self._options, clock_at, None)
+        started = Start(
+            clock_at=clock_at,
+            commits=snapshot.outside.store.commits,
+            decisions=(*self._started.decisions, *self._run.decisions[: snapshot.decisions]),
         )
+        return SimulatedRun(run, outside, self._options, snapshot.outside, started)
 
     def _take_snapshots(self, pristine: OutsideWorld, wanted: frozenset[CrashPoint]) -> None:
         """Run the world again from its start, copying the outside world at the ``wanted`` points."""
         outside = pristine.copy()
         snapshots = Snapshots(outside, wanted)
-        _run_host(outside, self._options, FIRST_HOST_STARTS_AT, snapshots)
+        _run_host(outside, self._options, self._started.clock_at, snapshots)
         if outside.store.commits != self.commits:
             raise NondeterministicWorldError(outside.world, self.commits, outside.store.commits)
         self._snapshots.update(snapshots.by_point)
