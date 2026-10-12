@@ -29,3 +29,10 @@ class AgentOrchestrationOptions(BaseModel):
     # Seconds to wait before asking an agent again after the provider connection dropped its
     # turn; doubles with each further drop of the same turn.
     turn_drop_backoff_seconds: Annotated[float, Field(gt=0, le=600)] = 5.0
+
+
+def attribution_command_of(options: BaseModel) -> tuple[str, ...] | None:
+    """The profile-guided attribution command a policy's options select, or ``None``."""
+    if isinstance(options, AgentOrchestrationOptions) and options.profile_guided is not None:
+        return options.profile_guided.command
+    return None

@@ -21,6 +21,7 @@ from vibesys.inputs import (
     synthesize_input_bundle,
     with_operator_constraints,
 )
+from vibesys.orchestration.agent_options import attribution_command_of
 from vibesys.repository import (
     REPOSITORY_SLUG,
     generate_experiment_name,
@@ -98,9 +99,9 @@ def validate_descriptor(
 
 def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry) -> None:
     """Reject invalid execution settings and policy role keys before host probes."""
-    validate_execution_request(request)
     registration = registry.resolve(request.orchestration.id)
-    registration.parse_options(request.orchestration)
+    options = registration.parse_options(request.orchestration)
+    validate_execution_request(request, attribution_command=attribution_command_of(options))
     resolve_agent_specs(
         request.config,
         registration.plugin.agents,

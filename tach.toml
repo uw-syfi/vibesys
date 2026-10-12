@@ -237,7 +237,7 @@ depends_on = ["vibesys.api._session", "vibesys.api.auxiliary", "vibesys.api.cont
 
 [[modules]]
 path = "vibesys.api._session"
-depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.core_run", "vibesys.run.host", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox", "vs_mcp", "vs_sim.api"]
+depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.core_run", "vibesys.run.host", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.orchestration.agent_options", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox", "vs_mcp", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.api.auxiliary"

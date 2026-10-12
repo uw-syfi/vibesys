@@ -672,6 +672,9 @@ class HostEnvironment(_NoopWorkspaceRecovery):
     def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
         """Find *executable* on the host's ``PATH``: the agent and its workload both run there."""
         del site
+        if os.sep in executable:
+            # A path names a file in the run's workspace, which this environment does not own.
+            return ToolLocation.found(executable)
         found = shutil.which(executable)
         if found is None:
             return ToolLocation.missing(f"`{executable}` is not on the host's PATH")

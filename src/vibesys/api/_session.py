@@ -13,6 +13,7 @@ from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.api.store import open_run_store
 from vibesys.composition import resolve_agent_specs
 from vibesys.events import CoreEventType, EventStatus, RunFailedData, RunStartedData
+from vibesys.orchestration.agent_options import attribution_command_of
 from vibesys.plugin_catalog import project_run
 from vibesys.run.core_run import RunEnd, drive_core_run, ensure_not_legacy_resume
 from vibesys.run.host import open_product_core_host, open_product_run_host
@@ -155,7 +156,6 @@ class _LocalRunSession:
         registry: OrchestrationRegistry,
         implementations: SessionImplementations,
     ) -> None:
-        validate_run_request(request)
         self._request = request
         self._implementations = implementations
         self._sink = sink
@@ -163,6 +163,9 @@ class _LocalRunSession:
         self._registration = self._registry.resolve(request.orchestration.id)
         # Descriptor validation precedes integration and run resource setup.
         self._plugin_options = self._registration.parse_options(request.orchestration)
+        validate_run_request(
+            request, attribution_command=attribution_command_of(self._plugin_options)
+        )
         resolve_agent_specs(
             request.config,
             self._registration.plugin.agents,

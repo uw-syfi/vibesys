@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.composition import agent_spec_from_config
@@ -186,8 +187,36 @@ def resolve_run_profiler(
     return resolved
 
 
-def validate_run_request(request: RunRequest) -> None:
-    """Validate placement, profiler policy, and workload before opening run resources."""
+def _require_attribution_runnable(command: tuple[str, ...], environment: RunEnvironment) -> None:
+    """Refuse a profile-guided attribution command the run's command environment cannot run.
+
+    The command runs through the run's command runner, in the agent's shell (the editor
+    container under Slurm), so the environment is asked about that site. Offering it where
+    it cannot run would fail the same way (exit 127) in every attribution capture.
+    """
+    location = environment.locate_tool(command[0], ToolSite.AGENT_SHELL)
+    if not location.available:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="attribution_command_unavailable",
+                stage="profiler_validation",
+                message=(
+                    f"[profile_guided] command {shlex.join(command)!r} cannot run here: "
+                    f"{location.reason}. Use a run environment whose command runner has the "
+                    "task's tools, or remove [profile_guided]."
+                ),
+            )
+        )
+
+
+def validate_run_request(
+    request: RunRequest, *, attribution_command: tuple[str, ...] | None = None
+) -> None:
+    """Validate placement, profiler policy, and workload before opening run resources.
+
+    *attribution_command* is the profile-guided strategy's command, when the selected
+    orchestration has one; it must be runnable in the run's command environment.
+    """
     if request.runs_dir is not None:
         try:
             Project.validate_collection_root(request.runs_dir)
@@ -201,6 +230,8 @@ def validate_run_request(request: RunRequest) -> None:
             ) from exc
     environment = build_run_environment(request.run_environment or make_run_environment_spec())
     resolve_run_profiler(request, environment, preflight=False)
+    if attribution_command is not None:
+        _require_attribution_runnable(attribution_command, environment)
 
 
 __all__ = ["native_profiler_preflight", "resolve_run_profiler", "validate_run_request"]
