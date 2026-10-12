@@ -433,7 +433,7 @@ class SlurmCluster:
             return ClusterUnknown(
                 operation_id=None, job_id=job_id, reason="scheduler state unknown"
             )
-        if status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
+        if status.active:
             self._runner.cancel_job(job_id)
         return ClusterCancelRequested(operation_id=None, job_id=job_id)
 
@@ -453,7 +453,7 @@ class SlurmCluster:
             observed = self.inspect(target, by_job_id=by_job_id)
         if isinstance(observed, ClusterUnknown):
             return observed
-        if observed.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
+        if observed.status.active:
             return ClusterUnknown(
                 operation_id=observed.operation_id,
                 job_id=observed.job_id,
@@ -764,9 +764,7 @@ class SlurmCluster:
         return ClusterObservation(
             operation_id=operation_id,
             job_id=job_id,
-            status=status,
-            phase=reading.phase,
-            attempt=reading.attempt,
+            life=reading.life,
             pending_reason=reading.reason if status == SlurmJobStatus.PENDING else None,
             estimated_start=(reading.estimated_start if status == SlurmJobStatus.PENDING else None),
             handle=handle,

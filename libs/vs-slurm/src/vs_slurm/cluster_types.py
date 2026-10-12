@@ -18,6 +18,7 @@ from .runner import (
     SlurmJobStatus,
     SlurmPhase,
 )
+from .scheduler_states import JobLife, phase_of, status_of
 
 ClusterHandle: TypeAlias = SlurmJobHandle | SlurmBatchHandle
 ClusterResult: TypeAlias = SlurmJobResult | SlurmBatchResult
@@ -111,18 +112,10 @@ class ClusterObservation(_Outcome):
     kind: Literal["observed"] = "observed"
     operation_id: str | None
     job_id: str
-    status: Literal[
-        SlurmJobStatus.PENDING,
-        SlurmJobStatus.RUNNING,
-        SlurmJobStatus.COMPLETED,
-        SlurmJobStatus.FAILED,
-        SlurmJobStatus.CANCELLED,
-    ]
-    # Finer than ``status``: tells a tearing-down job (COMPLETING) from a computing one.
-    phase: SlurmPhase = SlurmPhase.UNKNOWN
-    # Scheduler restart count when the scheduler reports it, else 0. A higher
-    # attempt makes a drop from RUNNING back to PENDING a requeue, not a regression.
-    attempt: int = 0
+    # What the scheduler's readings made of the job. ``status``, ``phase`` and
+    # ``attempt`` project it; a higher attempt makes a drop from RUNNING back to
+    # PENDING a requeue, not a regression. Never Unknown: that is ClusterUnknown.
+    life: JobLife
     pending_reason: str | None = None
     estimated_start: str | None = None
     handle: ClusterHandle | None = None
@@ -130,6 +123,28 @@ class ClusterObservation(_Outcome):
     # stage at this index is the one running. None when not observed (not a
     # batch, not computing, or the read failed): callers must not assume stage 0.
     completed_stages: int | None = None
+
+    @model_validator(mode="after")
+    def _known_life(self) -> ClusterObservation:
+        if self.life.kind == "unknown":
+            message = "an observation needs a known life; an unknown one is ClusterUnknown"
+            raise ValueError(message)
+        return self
+
+    @property
+    def status(self) -> SlurmJobStatus:
+        """The public status of the life."""
+        return status_of(self.life)
+
+    @property
+    def phase(self) -> SlurmPhase:
+        """The phase of the life."""
+        return phase_of(self.life)
+
+    @property
+    def attempt(self) -> int:
+        """The scheduler attempt of the life."""
+        return self.life.attempt
 
 
 class ClusterCancelRequested(_Outcome):

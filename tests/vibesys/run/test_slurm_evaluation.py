@@ -52,8 +52,8 @@ from vs_slurm.api import (
     SlurmJobHandle,
     SlurmJobRunner,
     SlurmJobStatus,
-    SlurmPhase,
     SlurmSshTransport,
+    life_for_status,
 )
 
 if TYPE_CHECKING:
@@ -64,14 +64,6 @@ if TYPE_CHECKING:
 
 # The blocking wait runs on a worker thread of the Slurm runner, so its latches are the OS's.
 _THREADS = OsThreads()
-_PHASES = {
-    SlurmJobStatus.PENDING: SlurmPhase.PENDING,
-    SlurmJobStatus.RUNNING: SlurmPhase.RUNNING,
-    SlurmJobStatus.COMPLETED: SlurmPhase.ENDED,
-    SlurmJobStatus.FAILED: SlurmPhase.ENDED,
-    SlurmJobStatus.CANCELLED: SlurmPhase.ENDED,
-    SlurmJobStatus.UNKNOWN: SlurmPhase.UNKNOWN,
-}
 
 
 class _World:
@@ -256,7 +248,7 @@ class _Runner(SlurmJobRunner):
                 self.job_status = (
                     SlurmJobStatus.COMPLETED if self.job_exit_code == 0 else SlurmJobStatus.FAILED
                 )
-        return SchedulerReading(status=self.job_status, phase=_PHASES[self.job_status])
+        return SchedulerReading(life_for_status(self.job_status))
 
     def wait_batch(
         self,

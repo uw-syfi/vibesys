@@ -38,10 +38,19 @@ from .remote_operations import (
     operation_job_name,
 )
 from .scheduler_states import (
+    INITIAL_LIFE,
+    JobLife,
+    NotInQueue,
+    QueueRow,
     SlurmJobStatus,
     SlurmPhase,
-    classify,
+    Unknown,
+    needs_accounting,
+    observe,
     parse_accounting_row,
+    parse_queue_row,
+    phase_of,
+    status_of,
 )
 from .staging import _ContentStageError, _stage_tree, _TreeStageRequest
 
@@ -50,7 +59,6 @@ if TYPE_CHECKING:
     from threading import Event
 
 _JOB_ID = re.compile(r"Submitted batch job ([0-9]+)")
-_ACCOUNTING_FIELD_COUNT = 2
 # The allocation's own exit status when its server never answered the readiness probe
 # (it exited or hung while starting), so no stage ran. The job script writes it.
 SERVICE_NOT_READY_EXIT_CODE = 70
@@ -161,20 +169,31 @@ class SlurmBatchRequest:
     cancel_event: Event | None = None
 
 
-_PUBLIC_TERMINAL_STATES = frozenset(
-    {SlurmJobStatus.COMPLETED, SlurmJobStatus.FAILED, SlurmJobStatus.CANCELLED}
-)
-
-
 @dataclass(frozen=True)
 class SchedulerReading:
-    """One scheduler observation: the only product of the raw-state mapping."""
+    """One scheduler observation: a job life and the queue's evidence for it.
 
-    status: SlurmJobStatus
-    phase: SlurmPhase
+    ``status``, ``phase`` and ``attempt`` are projections of ``life``.
+    """
+
+    life: JobLife
     reason: str | None = None
     estimated_start: str | None = None
-    attempt: int = 0
+
+    @property
+    def status(self) -> SlurmJobStatus:
+        """The public status of the life."""
+        return status_of(self.life)
+
+    @property
+    def phase(self) -> SlurmPhase:
+        """The phase of the life."""
+        return phase_of(self.life)
+
+    @property
+    def attempt(self) -> int:
+        """The scheduler attempt of the life."""
+        return self.life.attempt
 
 
 class SlurmArtifactTarget(BaseModel):
@@ -355,11 +374,7 @@ class SlurmJobWaitResult(BaseModel):
     @property
     def terminal(self) -> bool:
         """Whether the scheduler reported a terminal job state."""
-        return self.status in {
-            SlurmJobStatus.COMPLETED,
-            SlurmJobStatus.FAILED,
-            SlurmJobStatus.CANCELLED,
-        }
+        return self.status.terminal
 
 
 class SlurmError(RuntimeError):
@@ -964,7 +979,7 @@ class SlurmJobRunner:
             if cancel_event is not None and cancel_event.is_set():
                 raise SlurmError.cancelled(handle.job_id)
             status = self.poll(handle)
-            if status in _PUBLIC_TERMINAL_STATES:
+            if status.terminal:
                 return SlurmJobWaitResult(handle=handle, status=status, timed_out=False)
             remaining = deadline - self._clock()
             if remaining <= 0:
@@ -1172,46 +1187,34 @@ class SlurmJobRunner:
         # purges it after MinJobAge (300 s by default) and ``squeue -j`` then fails
         # with "Invalid job id specified". A failed queue read is therefore not a
         # verdict; sacct decides, and only both failing (or sacct knowing nothing
-        # of a job the queue could not be read for) leaves the state unknown.
+        # of a job the queue could not be read for) leaves the state unknown. The
+        # translator decides what each reading means and whether sacct must be asked.
         queue_failure: SlurmError | None = None
         try:
-            active = self._queue_state(job_id)
+            queue = parse_queue_row(self._queue_state(job_id))
         except SlurmError as exc:
-            queue_failure, active = exc, ""
-        queued = None
-        if active:
-            fields = active.splitlines()[0].split("|")
-            reason = fields[1].strip() if len(fields) > 1 else None
-            start = fields[2].strip() if len(fields) > _ACCOUNTING_FIELD_COUNT else None
-            queued = _reading(
-                fields[0].strip().upper(),
-                reason=reason or None,
-                estimated_start=None if start in {None, "", "N/A", "Unknown"} else start,
-            )
-            if queued.phase is not SlurmPhase.COMPLETING:
-                return queued
+            queue_failure, queue = exc, NotInQueue()
+        life = observe(INITIAL_LIFE, queue)
+        if not needs_accounting(life):
+            return _queue_reading(life, queue)
         try:
             accounting = self._read_scheduler(f"sacct -n -P -X -j {job_id} --format=State,ExitCode")
         except SlurmError:
             # Accounting only refines what the queue said (a COMPLETING job may have
             # ended). Without it the queue reading stands; with no queue reading
             # either, the job's state is unknown and the failure is the answer.
-            if queued is None:
+            if isinstance(life, Unknown) and life.raw is None:
                 raise
-            return queued
-        parsed = parse_accounting_row(accounting)
-        if parsed is not None:
-            ended = _reading(parsed[0], exit_code=parsed[1])
-            # Slurm keeps a finished or cancelled job in COMPLETING for 20 to 40 s
-            # while the node tears down, but accounting already records its final
-            # state, and the job script has exited. The job has ended for every
-            # purpose of this API; waiting for the queue to forget it only delays
-            # the result.
-            if queued is None or ended.phase is SlurmPhase.ENDED:
-                return ended
-        if queue_failure is not None:
-            raise queue_failure
-        return queued if queued is not None else _reading("UNKNOWN")
+            return _queue_reading(life, queue)
+        row = parse_accounting_row(accounting)
+        refined = observe(life, row)
+        # Slurm keeps a finished or cancelled job in COMPLETING for 20 to 40 s
+        # while the node tears down, but accounting already records its final
+        # state, and the job script has exited. Joining the accounting row ends the
+        # life; waiting for the queue to forget it would only delay the result.
+        if refined != INITIAL_LIFE or queue_failure is None:
+            return _queue_reading(refined, queue)
+        raise queue_failure
 
     def _queue_state(self, job_id: str) -> str:
         """The queue's line for the job."""
@@ -1239,7 +1242,7 @@ class SlurmJobRunner:
         """
         self._validate_handle(handle)
         status = observed if observed is not None else self.poll(handle)
-        if status not in _PUBLIC_TERMINAL_STATES:
+        if not status.terminal:
             raise SlurmError.job_not_terminal(handle.job_id)
         failures: list[str] = []
         exit_code = None
@@ -1944,17 +1947,11 @@ def _distinct_tail(path: Path) -> str:
     return "\n".join(reversed(kept))
 
 
-def _reading(
-    raw_state: str, *, exit_code: str | None = None, **evidence: str | None
-) -> SchedulerReading:
-    """The single raw-state to public-status and phase mapping every read path uses."""
-    phase, status = classify(raw_state, exit_code)
-    return SchedulerReading(
-        status=status,
-        phase=phase,
-        reason=evidence.get("reason"),
-        estimated_start=evidence.get("estimated_start"),
-    )
+def _queue_reading(life: JobLife, queue: QueueRow | NotInQueue) -> SchedulerReading:
+    """A reading of *life*, carrying the queue's reason and start estimate when it listed the job."""
+    if isinstance(queue, NotInQueue):
+        return SchedulerReading(life)
+    return SchedulerReading(life, reason=queue.reason, estimated_start=queue.estimated_start)
 
 
 def _read_exit_code(path: Path) -> int:

@@ -42,9 +42,18 @@ from .runner import (
     SlurmJobRequest,
     SlurmJobResult,
     SlurmJobStatus,
-    SlurmPhase,
     SlurmSubmissionRejectedError,
     _safe_relative_path,
+)
+from .scheduler_states import (
+    Completing,
+    Ended,
+    EndOutcome,
+    JobLife,
+    Queued,
+    Running,
+    life_for_status,
+    status_of,
 )
 from .staging import _ContentStageError
 
@@ -157,18 +166,18 @@ class _Timeline:
     def exits_at(self) -> float:
         return self.attempts[-1].ends_at
 
-    def natural(self, now: float) -> tuple[SlurmJobStatus, SlurmPhase, int]:
+    def natural(self, now: float) -> JobLife:
         """The scheduler state at ``now`` if nobody cancels."""
         last = len(self.attempts) - 1
         for index, attempt in enumerate(self.attempts):
             if now < attempt.running_from:
-                return SlurmJobStatus.PENDING, SlurmPhase.PENDING, index
+                return Queued(attempt=index)
             if now < attempt.ends_at:
-                return SlurmJobStatus.RUNNING, SlurmPhase.RUNNING, index
+                return Running(attempt=index)
             if index == last:
                 if now < attempt.ends_at + self.completing_s:
-                    return SlurmJobStatus.RUNNING, SlurmPhase.COMPLETING, index
-                return self.terminal, SlurmPhase.ENDED, index
+                    return Completing(attempt=index)
+                return life_for_status(self.terminal, index)
         raise AssertionError  # unreachable: the loop returns on the last attempt
 
     def progress(self, now: float) -> float:
@@ -179,30 +188,18 @@ class _Timeline:
             return 0.0
         return min(max(0.0, (now - attempt.running_from) / length), 1 - 1e-9)
 
-    def state(
-        self, now: float, cancelled_at: float | None
-    ) -> tuple[SlurmJobStatus, SlurmPhase, int]:
+    def state(self, now: float, cancelled_at: float | None) -> JobLife:
         """The scheduler state at ``now``, with a cancellation at ``cancelled_at``."""
         if cancelled_at is None or cancelled_at >= self.exits_at:
             return self.natural(now)
-        _, phase_then, attempt = self.natural(cancelled_at)
+        then = self.natural(cancelled_at)
         if now < cancelled_at:
             return self.natural(now)
-        if phase_then is SlurmPhase.PENDING:
-            return SlurmJobStatus.CANCELLED, SlurmPhase.ENDED, attempt
+        if isinstance(then, Queued):
+            return Ended(outcome=EndOutcome.CANCELLED, attempt=then.attempt)
         if now < cancelled_at + self.completing_s:
-            return SlurmJobStatus.RUNNING, SlurmPhase.COMPLETING, attempt
-        return SlurmJobStatus.CANCELLED, SlurmPhase.ENDED, attempt
-
-
-_STATES_PHASE = {
-    SlurmJobStatus.PENDING: SlurmPhase.PENDING,
-    SlurmJobStatus.RUNNING: SlurmPhase.RUNNING,
-    SlurmJobStatus.COMPLETED: SlurmPhase.ENDED,
-    SlurmJobStatus.FAILED: SlurmPhase.ENDED,
-    SlurmJobStatus.CANCELLED: SlurmPhase.ENDED,
-    SlurmJobStatus.UNKNOWN: SlurmPhase.UNKNOWN,
-}
+            return Completing(attempt=then.attempt)
+        return Ended(outcome=EndOutcome.CANCELLED, attempt=then.attempt)
 
 
 @dataclass
@@ -479,8 +476,9 @@ class FakeCluster:
         job.acceptance_observed = True
         job.accepted_published = True
         script = self._scripts[job.operation_id]
-        status, phase, attempt = self._observe(job, script)
+        life = self._observe(job, script)
         identity = job_handle(job.handle).job_id
+        status = status_of(life)
         if status == SlurmJobStatus.UNKNOWN:
             return ClusterUnknown(
                 operation_id=job.operation_id, job_id=identity, reason="scheduler state unknown"
@@ -488,20 +486,18 @@ class FakeCluster:
         return ClusterObservation(
             operation_id=job.operation_id,
             job_id=identity,
-            status=status,
-            phase=phase,
-            attempt=attempt,
+            life=life,
             pending_reason=script.pending_reason if status == SlurmJobStatus.PENDING else None,
             estimated_start=script.estimated_start if status == SlurmJobStatus.PENDING else None,
             handle=job.handle,
-            completed_stages=self._completed_stages(job, phase),
+            completed_stages=self._completed_stages(job, life),
         )
 
-    def _completed_stages(self, job: _Job, phase: SlurmPhase) -> int | None:
+    def _completed_stages(self, job: _Job, life: JobLife) -> int | None:
         """Stages finished so far, spread evenly over the run, for a computing batch."""
         if (
             job.timeline is None
-            or phase is not SlurmPhase.RUNNING
+            or not isinstance(life, Running)
             or not isinstance(job.handle, SlurmBatchHandle)
             or len(job.handle.stages) < _MULTI_STAGE
         ):
@@ -509,7 +505,7 @@ class FakeCluster:
         stages = len(job.handle.stages)
         return min(stages - 1, int(job.timeline.progress(self.clock.now()) * stages))
 
-    def _observe(self, job: _Job, script: _Script) -> tuple[SlurmJobStatus, SlurmPhase, int]:
+    def _observe(self, job: _Job, script: _Script) -> JobLife:
         """The job's state now: from the clock, or the next scripted observation."""
         if job.timeline is not None:
             return job.timeline.state(self.clock.now(), job.cancelled_at)
@@ -529,7 +525,7 @@ class FakeCluster:
             current = states[min(script.index, len(states) - 1)]
             if current in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
                 job.cancelled = True
-        return status, _STATES_PHASE[status], 0
+        return life_for_status(status)
 
     def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
         """Record cancellation intent, leaving confirmation to inspect."""
@@ -582,7 +578,7 @@ class FakeCluster:
             return ClusterUnknown(
                 operation_id=observation.operation_id, reason="operation not found"
             )
-        if observation.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
+        if observation.status.active:
             return ClusterUnknown(
                 operation_id=job.operation_id,
                 job_id=observation.job_id,

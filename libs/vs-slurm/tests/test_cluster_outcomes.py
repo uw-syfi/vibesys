@@ -18,6 +18,7 @@ from vs_slurm.api import (
     SlurmBatchStageResult,
     SlurmJobResult,
     SlurmJobStatus,
+    life_for_status,
 )
 
 
@@ -25,12 +26,13 @@ from vs_slurm.api import (
 def test_scheduler_status_has_exactly_one_observation_representation(
     status: SlurmJobStatus,
 ) -> None:
-    values = {"operation_id": "operation", "job_id": "42", "status": status}
+    values = {"operation_id": "operation", "job_id": "42", "life": life_for_status(status)}
     if status is SlurmJobStatus.UNKNOWN:
         with pytest.raises(ValidationError):
             ClusterObservation.model_validate(values)
     else:
         observed = ClusterObservation.model_validate(values)
+        assert observed.status is status
         assert ClusterObservation.model_validate_json(observed.model_dump_json()) == observed
 
 

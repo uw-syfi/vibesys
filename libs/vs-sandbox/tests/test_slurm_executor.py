@@ -45,6 +45,8 @@ from vs_slurm.api import (
     ClusterSubmitted,
     ClusterTarget,
     ClusterUnknown,
+    Ended,
+    EndOutcome,
     FakeCluster,
     FakeConnector,
     SlurmBatchHandle,
@@ -59,7 +61,6 @@ from vs_slurm.api import (
     SlurmJobRequest,
     SlurmJobRunner,
     SlurmJobStatus,
-    SlurmPhase,
     SlurmSshTransport,
     validate_cluster_operation_id,
 )
@@ -481,8 +482,7 @@ class _TombstonedSubmissionCluster(FakeCluster):
             return ClusterObservation(
                 operation_id=target,
                 job_id=self._late_job_id,
-                status=SlurmJobStatus.CANCELLED,
-                phase=SlurmPhase.ENDED,
+                life=Ended(outcome=EndOutcome.CANCELLED),
             )
         return ClusterUnknown(operation_id=target, reason="submission acceptance unresolved")
 

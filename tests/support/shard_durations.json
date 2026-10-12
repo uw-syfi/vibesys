@@ -330,7 +330,6 @@
  "libs/vs-slurm/tests/test_fake_cluster_timing.py": 0.77,
  "libs/vs-slurm/tests/test_fake_connector.py": 6.43,
  "libs/vs-slurm/tests/test_fake_shell.py": 1.83,
- "libs/vs-slurm/tests/test_phase_register.py": 0.09,
  "libs/vs-slurm/tests/test_run_cancels_abandoned_jobs.py": 0.14,
  "libs/vs-slurm/tests/test_shell_join.py": 0.46,
  "libs/vs-slurm/tests/test_trace_replay.py": 8.67,

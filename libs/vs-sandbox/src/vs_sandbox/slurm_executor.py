@@ -40,6 +40,7 @@ from vs_evaluation.api import (
 from vs_project.api import atomic_write_bytes
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
+    INITIAL_LIFE,
     SERVICE_NOT_READY_EXIT_CODE,
     ClusterCollected,
     ClusterConflict,
@@ -47,17 +48,22 @@ from vs_slurm.api import (
     ClusterRejected,
     ClusterSubmitted,
     ClusterUnknown,
-    MergedPhase,
-    PhaseRegister,
+    Completing,
+    Ended,
+    EndOutcome,
+    JobLife,
+    Queued,
+    Running,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
     SlurmBatchStage,
     SlurmError,
     SlurmJobStatus,
-    SlurmPhase,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
+    Unknown,
+    advance_with_notice,
     validate_cluster_operation_id,
 )
 
@@ -96,34 +102,32 @@ class _SchedulerView:
     staged: bool = False
 
 
-def _scheduler_view(
-    phase: SlurmPhase, status: SlurmJobStatus, *, canceling: bool = False
-) -> _SchedulerView:
-    """The one mapping from an ordered scheduler phase to what the evaluation reports.
+def _scheduler_view(life: JobLife, *, canceling: bool = False) -> _SchedulerView:
+    """The one mapping from an ordered job life to what the evaluation reports.
 
     ``canceling`` is true once this executor has sent scancel for the job: a
     job that still computes or tears down is then CANCELING, not RUNNING.
     """
     active = EvaluationState.CANCELING if canceling else EvaluationState.RUNNING
-    match phase:
-        case SlurmPhase.PENDING:
+    match life:
+        case Queued():
             # An accepted job still queued in the scheduler is an active
             # evaluation. Queueing is a poll-phase fact, never a lifecycle
             # regression to local-admission QUEUED, and no stage is running yet.
             return _SchedulerView(active, PollPhase.QUEUED)
-        case SlurmPhase.RUNNING:
+        case Running():
             return _SchedulerView(active, PollPhase.RUNNING, staged=not canceling)
-        case SlurmPhase.COMPLETING:
+        case Completing():
             # The job script has exited (or been killed); the node is tearing down.
             return _SchedulerView(active, PollPhase.RUNNING)
-        case SlurmPhase.ENDED if status is SlurmJobStatus.CANCELLED:
+        case Ended(outcome=EndOutcome.CANCELLED):
             return _SchedulerView(EvaluationState.CANCELED, PollPhase.ENDED)
-        case SlurmPhase.ENDED:
+        case Ended():
             return _SchedulerView(None, PollPhase.ENDED)
-        case SlurmPhase.UNKNOWN:
+        case Unknown():
             return _SchedulerView(None, PollPhase.UNKNOWN)
         case _:
-            assert_never(phase)
+            assert_never(life)
 
 
 @dataclass(frozen=True)
@@ -356,7 +360,7 @@ class SlurmEvaluationExecutor:
         # scancel request does not prove that the allocation has stopped.
         self._terminated_jobs: set[str] = set()
         # One order per evaluation over every scheduler reading, whichever path made it.
-        self._registers: dict[str, PhaseRegister] = {}
+        self._lives: dict[str, JobLife] = {}
         # Evaluations for which scancel was acknowledged, and the scancel-sent job ids.
         self._canceling: set[str] = set()
         self._cancel_sent: set[str] = set()
@@ -482,19 +486,19 @@ class SlurmEvaluationExecutor:
         inspected = await self._in_thread(self._cluster.inspect, target)
         if not isinstance(inspected, ClusterObservation):
             return ExecutorPoll(phase=PollPhase.UNKNOWN, detail=inspected.reason)
-        view, merged = self._scheduler_view(handle_id, inspected)
+        view, life = self._scheduler_view(handle_id, inspected)
         match view.phase:
             case PollPhase.QUEUED:
                 return ExecutorPoll(
                     phase=PollPhase.QUEUED,
-                    attempt=merged.attempt,
+                    attempt=life.attempt,
                     pending_reason=inspected.pending_reason,
                     estimated_start=inspected.estimated_start,
                 )
             case PollPhase.RUNNING:
                 return ExecutorPoll(
                     phase=PollPhase.RUNNING,
-                    attempt=merged.attempt,
+                    attempt=life.attempt,
                     current_stage=self._running_stage(handle_id, durable.request, inspected)
                     if view.staged
                     else None,
@@ -502,7 +506,7 @@ class SlurmEvaluationExecutor:
             case PollPhase.ENDED if view.lifecycle is EvaluationState.CANCELED:
                 return ExecutorPoll(
                     phase=PollPhase.ENDED,
-                    attempt=merged.attempt,
+                    attempt=life.attempt,
                     terminal=ExecutorObservation(state=EvaluationState.CANCELED),
                 )
             case _:
@@ -511,7 +515,7 @@ class SlurmEvaluationExecutor:
                     durable,
                     durable.handle or inspected.handle,
                     inspected,
-                    attempt=merged.attempt,
+                    attempt=life.attempt,
                 )
 
     async def _poll_terminal(
@@ -934,11 +938,7 @@ class SlurmEvaluationExecutor:
         while True:
             observed = await self._inspect_cancellation_safe(handle_id, handle)
             if isinstance(observed, ClusterObservation):
-                if observed.status in {
-                    SlurmJobStatus.COMPLETED,
-                    SlurmJobStatus.FAILED,
-                    SlurmJobStatus.CANCELLED,
-                }:
+                if observed.status.terminal:
                     return observed.status
                 active = self._lifecycle_observation(handle_id, observed, request)
                 if active is not None:
@@ -950,27 +950,25 @@ class SlurmEvaluationExecutor:
 
     def _scheduler_view(
         self, handle_id: str, observed: ClusterObservation
-    ) -> tuple[_SchedulerView, MergedPhase]:
-        """Order one reading per attempt, then interpret it. Every read path comes here."""
-        merged = self._registers.setdefault(handle_id, PhaseRegister()).merge(
-            observed.phase, attempt=observed.attempt
-        )
-        if merged.anomaly is not None:
+    ) -> tuple[_SchedulerView, JobLife]:
+        """Join one reading into the job's held life, then interpret it. Every read path comes here."""
+        step = advance_with_notice(self._lives.get(handle_id, INITIAL_LIFE), observed.life)
+        self._lives[handle_id] = step.life
+        if step.notice is not None:
             _LOG.warning(
-                "evaluation %s: scheduler reading %s at attempt %d was not applied (%s)",
+                "evaluation %s: scheduler reading %s was not applied (%s)",
                 handle_id,
-                observed.phase.value,
-                observed.attempt,
-                merged.anomaly.value,
+                observed.life,
+                step.notice.value,
             )
-        if merged.requeued:
+        if step.requeued:
             _LOG.info(
-                "evaluation %s: scheduler requeued the job (attempt %d)", handle_id, merged.attempt
+                "evaluation %s: scheduler requeued the job (attempt %d)",
+                handle_id,
+                step.life.attempt,
             )
-        view = _scheduler_view(
-            merged.phase, observed.status, canceling=handle_id in self._canceling
-        )
-        return view, merged
+        view = _scheduler_view(step.life, canceling=handle_id in self._canceling)
+        return view, step.life
 
     def _lifecycle_observation(
         self, handle_id: str, observed: ClusterObservation, request: EvaluationRequest
@@ -1141,11 +1139,7 @@ class SlurmEvaluationExecutor:
         left = self._confirmations_left.setdefault(handle_id, self._cancel_confirmations)
         for _ in range(max(left, 1)):
             observed = await self._finish_in_thread(self._cluster.inspect, target)
-            if isinstance(observed, ClusterObservation) and observed.status in {
-                SlurmJobStatus.COMPLETED,
-                SlurmJobStatus.FAILED,
-                SlurmJobStatus.CANCELLED,
-            }:
+            if isinstance(observed, ClusterObservation) and observed.status.terminal:
                 self._terminated_jobs.add(observed.job_id)
                 return _CancelConfirmed()
             left = max(0, left - 1)

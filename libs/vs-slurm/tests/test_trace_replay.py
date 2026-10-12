@@ -14,7 +14,9 @@ from pydantic import ValidationError
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     CANCEL_REACTIONS,
+    INITIAL_LIFE,
     LIFETIMES,
+    AccountingRow,
     ClusterCancelRequested,
     ClusterObservation,
     ClusterUnknown,
@@ -30,6 +32,7 @@ from vs_slurm.api import (
     SlurmRawState,
     TraceConnector,
     TraceStep,
+    observe,
     phase_of,
 )
 
@@ -101,7 +104,9 @@ def test_a_lifetime_never_goes_backwards_for_any_polling_schedule(
         step = trace.at(elapsed)
         raw = step.queue_state or step.accounting_state
         assert raw is not None
-        seen.append(_PHASE_ORDER[phase_of(raw.split()[0])])
+        seen.append(
+            _PHASE_ORDER[phase_of(observe(INITIAL_LIFE, AccountingRow(raw.split()[0], "0:0")))]
+        )
     assert seen == sorted(seen)
 
 
@@ -249,13 +254,13 @@ _DOCUMENTED_STATES = {
     "NODE_FAIL": (_E, _JS.FAILED),
     "OUT_OF_MEMORY": (_E, _JS.FAILED),
     "PENDING": (_P, _JS.PENDING),
-    "PREEMPTED": (_E, _JS.CANCELLED),
+    "PREEMPTED": (_E, _JS.FAILED),
     "REQUEUE_FED": (_P, _JS.PENDING),
     "REQUEUE_HOLD": (_P, _JS.PENDING),
     "REQUEUED": (_P, _JS.PENDING),
     "RESIZING": (_R, _JS.RUNNING),
     "RESV_DEL_HOLD": (_P, _JS.PENDING),
-    "REVOKED": (_E, _JS.CANCELLED),
+    "REVOKED": (_E, _JS.FAILED),
     "RUNNING": (_R, _JS.RUNNING),
     "SIGNALING": (_R, _JS.RUNNING),
     "SPECIAL_EXIT": (_E, _JS.FAILED),
@@ -297,7 +302,7 @@ def test_the_state_mapping_covers_exactly_the_documented_states() -> None:
     """Mechanism: ad hoc name sets silently sent an unlisted state to UNKNOWN."""
     assert {state.split()[0] for state in _DOCUMENTED_STATES} == {s.value for s in SlurmRawState}
     for state, (phase, _status) in _DOCUMENTED_STATES.items():
-        assert phase_of(state.split()[0]) is phase
+        assert phase_of(observe(INITIAL_LIFE, AccountingRow(state.split()[0], "0:0"))) is phase
 
 
 @pytest.mark.parametrize(("state", "expected"), _DOCUMENTED_STATES.items())

@@ -19,6 +19,8 @@ from hypothesis.stateful import RuleBasedStateMachine, initialize, precondition,
 
 from vs_sim.api.testing import wait_until_started_sync
 from vs_slurm.api import (
+    INITIAL_LIFE,
+    AccountingRow,
     Cluster,
     ClusterCancelRequested,
     ClusterCollected,
@@ -41,7 +43,10 @@ from vs_slurm.api import (
     SlurmJobResult,
     SlurmJobRunner,
     SlurmJobStatus,
+    SlurmRawState,
     SlurmTreeArtifact,
+    advance_with_notice,
+    observe,
 )
 
 # test-isolation: public executable transport Fake configures production contract scenarios.
@@ -331,6 +336,48 @@ def test_pending_running_and_terminal_observations_include_queue_details(case: _
     completed = case.cluster.inspect("transition")
     assert isinstance(completed, ClusterObservation)
     assert completed.status is SlurmJobStatus.COMPLETED
+
+
+_S = SlurmJobStatus
+_SCRIPTED_LIVES = [
+    (_S.PENDING, _S.RUNNING, _S.COMPLETED),
+    (_S.PENDING, _S.PENDING, _S.RUNNING, _S.RUNNING, _S.FAILED),
+    (_S.RUNNING, _S.CANCELLED),
+    (_S.PENDING, _S.CANCELLED),
+]
+
+
+@pytest.mark.parametrize("states", _SCRIPTED_LIVES)
+def test_observed_lives_obey_the_translator_contract(
+    case: _Case, states: tuple[SlurmJobStatus, ...]
+) -> None:
+    """Fake and production report lives Slurm itself could: forward only, final once ended.
+
+    Slurm never un-ends a job, never moves it to an earlier phase within an attempt,
+    and ends it with an outcome its documented states name; no implementation may
+    report a cleaner history than that.
+    """
+    case.script("lives", states=states)
+    submitted = case.cluster.submit(_request(case), operation_id="lives")
+    assert isinstance(submitted, ClusterSubmitted)
+    producible = {
+        observe(INITIAL_LIFE, AccountingRow(state.value, "1:0")) for state in SlurmRawState
+    }
+
+    held = INITIAL_LIFE
+    for _ in range(len(states) + 2):
+        observed = case.cluster.inspect("lives")
+        assert isinstance(observed, ClusterObservation)
+        step = advance_with_notice(held, observed.life)
+        assert step.notice is None, (held, observed.life)
+        held = step.life
+        if observed.status.terminal:
+            assert observed.life in producible | {
+                observe(INITIAL_LIFE, AccountingRow("COMPLETED", "0:0"))
+            }
+    assert held.attempt == 0
+    assert held == observed.life
+    assert observed.status is states[-1]
 
 
 def test_unknown_identity_stays_unknown(case: _Case) -> None:
