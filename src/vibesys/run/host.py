@@ -22,6 +22,7 @@ from vibesys.events import (
 )
 from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.run.agent_events import CoreAgentEventSink
+from vibesys.run.contracts import ProfilerKind
 from vibesys.run.core_services import (
     CoreCompositionError,
     CoreEnvironment,
@@ -38,6 +39,7 @@ from vibesys.run.evaluation_backend import (
 )
 from vibesys.run.measurement_events import CoreMeasurementEvents
 from vibesys.run.profiler_agent import ProfilerEvaluationAccess, RuntimeProfilerTurnProvision
+from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profiler_tool_offer
 from vibesys.run.resources import _StateBinding, open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vibesys.steering import splice_steering
@@ -113,10 +115,19 @@ type StatelessToolServer = Callable[[object], ToolServerDescriptor | None]
 """The server of a tool that holds no run state, for a run's tool context; None if it has none."""
 
 
-def _tool_context(resources: _PreparedRun) -> AgentToolContext:
-    return AgentToolContext(
-        resources.facts.profiler_id, resources.environment_resources.view.profiler_mcp_env
+def _profiler_tool_offer(resources: _PreparedRun) -> ProfilerToolOffer:
+    return profiler_tool_offer(
+        ProfilerKind(resources.facts.profiler_id),
+        editor_has_gpu=resources.environment_resources.view.editor_has_gpu,
     )
+
+
+def _tool_context(resources: _PreparedRun) -> AgentToolContext:
+    env = resources.environment_resources.view.profiler_mcp_env
+    withheld = _profiler_tool_offer(resources).withheld
+    if withheld:
+        env = (*env, (WITHHELD_TOOLS_ENV, ",".join(withheld)))
+    return AgentToolContext(resources.facts.profiler_id, env)
 
 
 _NO_PROFILE_CAPTURE_NOTE = (
@@ -260,6 +271,9 @@ class _ProductHostFactory:
             ),
             root_agent_environment_opener=self._root_agent_environment_opener(),
         )
+        offer = _profiler_tool_offer(resources)
+        if offer.withheld:
+            logger.lprint(f"[profiler] {offer.reason}.")
         tool_context = _tool_context(resources)
         agent_runtime = self._agent_runtime(
             resources,

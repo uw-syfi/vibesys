@@ -435,6 +435,7 @@ def test_the_profiler_follows_the_capability_not_the_environment_name(tmp_path: 
         try:
             assert (session.view.profile_execution == "remote") is remote
             assert bool(session.view.profiler_mcp_env) is remote
+            assert session.view.editor_has_gpu is False
             assert (tmp_path / "logs" / "slurm-capture-plan.json").exists() is remote
         finally:
             session.close()

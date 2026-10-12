@@ -189,6 +189,10 @@ class RunEnvironmentView:
     # Where a profiler must execute to observe the production hot path. Prompt
     # templates branch on this capability rather than on a concrete provider.
     profile_execution: Literal["local", "remote"] = "local"
+    # Whether the container the agent and its tool servers run in has a GPU driver. A
+    # run environment whose GPU work happens elsewhere (Slurm jobs) sets it False, so
+    # tools that need the driver in the editor are withheld rather than offered to fail.
+    editor_has_gpu: bool = True
     # Why a session whose editor sits in its own container still cannot open one
     # session per candidate, or ``None`` when nothing stops it. A reason is
     # worth stating: ``supports_parallel_candidate_evaluation`` follows from

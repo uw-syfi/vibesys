@@ -1851,3 +1851,13 @@ def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirro
     outcome.setup_tail = setup_tail
 
     return _finish(outcome=outcome, **finish_kwargs)
+
+
+WITHHELD_TOOLS_ENV = "VIBESYS_PROFILER_WITHHELD_TOOLS"
+"""Comma-separated tool names the run does not offer; the product sets it in the server env."""
+
+
+def withheld_tools_from_env() -> frozenset[str]:
+    """Tools this server must not register, as named by the run (``$VIBESYS_PROFILER_WITHHELD_TOOLS``)."""
+    raw = os.environ.get(WITHHELD_TOOLS_ENV, "")
+    return frozenset(name for name in (part.strip() for part in raw.split(",")) if name)

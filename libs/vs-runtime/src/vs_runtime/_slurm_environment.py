@@ -505,6 +505,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                     host_device_reselect=False,
                     env_kind="slurm",
                     profile_execution="remote" if remote_profiling else "local",
+                    editor_has_gpu=False,
                     framework_setup_timeout_seconds=config.job_timeout_seconds,
                     profiler_mcp_env=profiler_mcp[0],
                     profiler_mcp_resources=profiler_mcp[1],

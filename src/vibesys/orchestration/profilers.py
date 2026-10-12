@@ -100,6 +100,10 @@ class ProfilerDefinition:
     # The executable the profiler needs and where it runs; ``None`` for a profiler that
     # is pure Python on the agent's interpreter and needs no external program.
     tool: ProfilerTool | None = None
+    # Tools of the profiler's MCP server that need a GPU driver in the process serving
+    # them (the editor). They are offered only when the run environment says the editor
+    # has a GPU; capture and report-reading tools do not belong here.
+    driver_tools: frozenset[str] = frozenset()
 
     @property
     def support_name(self) -> str:
@@ -164,6 +168,7 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
             frozenset({DomainName.KERNEL_WRITING}),
             backends=frozenset({ComputeBackend.CUDA}),
             tool=ProfilerTool("ncu", ProfilerSite.GPU_WORKLOAD),
+            driver_tools=frozenset({"query_metrics"}),
         ),
         # The rocprof MCP server also exposes the torch analyzer's tools
         # (torch.profiler traces are a useful cross-check alongside rocprofv3
