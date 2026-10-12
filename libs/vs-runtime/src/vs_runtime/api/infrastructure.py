@@ -241,6 +241,7 @@ from vs_runtime._skills import (
 )
 from vs_runtime._slurm_environment import SlurmEnvironment
 from vs_runtime._state import CommittedStateObserver, create_state
+from vs_runtime._tool_location import ToolLocation, ToolSite
 from vs_runtime._trusted_evaluation import (
     ProtocolBenchmarkContract,
     ScalarBenchmarkContract,
@@ -603,6 +604,8 @@ __all__ = [
     "StopTimer",
     "Switch",
     "TerminalSignal",
+    "ToolLocation",
+    "ToolSite",
     "TrustedAccuracyResult",
     "TrustedBenchmarkContract",
     "TrustedBenchmarkDecoding",

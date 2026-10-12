@@ -441,6 +441,10 @@ class CheckpointFailure(StrEnum):
     """A checkpoint came back but core could not act on it: the scope stopped accepting
     work, or the checkpoint no longer matched the turn."""
 
+    REFUND_UNAPPLIED = "refund_unapplied"
+    """An interruption retained its checkpoint, but the attempt would not apply its refund
+    (the charge, a limit or the attempt's state no longer allowed it)."""
+
 
 def _failure_detail(reason: CheckpointFailure, decline: CheckpointDecline | None) -> str:
     return reason.value if decline is None else f"{reason.value} ({decline.value})"

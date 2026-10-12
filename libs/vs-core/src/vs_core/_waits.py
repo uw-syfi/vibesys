@@ -6,6 +6,11 @@ a request the shell still holds, an event committed but not yet applied (the out
 timer. A wait with none of these is an orphan: nothing will ever end it, so the run would sit
 until its deadline. ``orphan_waits`` reports it at the step that created it.
 
+Reporting is not enough, so every kind also declares in ``RESOLUTIONS`` what core does when
+a wait of that kind would be an orphan: fail the waiter with a named reason, retry with a
+bound and then fail, or (a known gap, listed as such) halt the run loudly. The step runs
+those resolutions at quiescence, so a generated world never ends a step with an orphan.
+
 A phase that waits on the strategy or the operator (idle, checkpointed, parked) is not
 listed: the strategy's next proposal or the run deadline ends it. Each phase enum is matched
 exhaustively below, so a new phase fails the type check and ``test_waits`` until someone
@@ -15,10 +20,17 @@ says whether it waits and what ends the wait.
 from __future__ import annotations
 
 from enum import StrEnum
+from types import MappingProxyType
 from typing import TYPE_CHECKING, assert_never
 
+from ._proofs import dependency_failed
 from .types.attempts import AttemptPhase, SnapshotAndRetain
-from .types.common import LifecycleClass, ObservationStatus, RunStatus, Value
+from .types.common import (
+    LifecycleClass,
+    ObservationStatus,
+    RunStatus,
+    Value,
+)
 from .types.evaluation import (
     ContinuationPhase,
     InspectOwnedJob,
@@ -40,11 +52,11 @@ from .types.sessions import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from .types.common import InvocationRef, RequestId
-    from .types.intents import Intent, Request
-    from .types.kernel import CoreEvent, CoreState
+    from .types.intents import Intent, IntentsState, Request
+    from .types.kernel import CoreEvent, CoreState, DecisionReceipt
     from .types.sessions import SessionsState, SessionView
 
 
@@ -57,6 +69,9 @@ class WaitKind(StrEnum):
     RELEASE_DEPENDENCY = "release-dependency"
     YIELD_PUBLICATION = "yield-publication"
     INTERRUPT = "interrupt"
+    REFUND = "refund"
+    DISPATCH = "dispatch"
+    RETRY = "retry"
 
 
 class Producer(StrEnum):
@@ -67,12 +82,75 @@ class Producer(StrEnum):
     TIMER = "timer"
 
 
+class Outcome(StrEnum):
+    """What core does with a wait that nothing can end, declared once per wait kind."""
+
+    FAILS_WITH_REASON = "fails-with-reason"
+    """The step ends the wait with a failure event that names the reason (see ``RESOLUTIONS``)."""
+
+    RETRIES_THEN_FAILS = "retries-then-fails"
+    """Core retries the request a bounded number of times with backoff, then fails it."""
+
+    HALTS_THE_RUN = "halts-the-run"
+    """No resolver exists yet: the shell halts loudly with the orphan named (a known gap)."""
+
+
+class Resolution(Value):
+    """How one kind of wait is ended when nothing live can end it."""
+
+    outcome: Outcome
+    reason: str
+    """The named reason the strategy or operator sees, or what the gap is for a halt."""
+
+
 class Wait(Value):
     """One waiting entity and the producer that will end its wait, or None for an orphan."""
 
     waiter: WaitKind
     subject: str
     producer: Producer | None = None
+
+
+RESOLUTIONS: Mapping[WaitKind, Resolution] = MappingProxyType(
+    {
+        WaitKind.YIELD_PUBLICATION: Resolution(
+            outcome=Outcome.FAILS_WITH_REASON,
+            reason="YieldPublicationFailed(checkpoint_declined | no_checkpoint | unpublishable)",
+        ),
+        WaitKind.INTERRUPT: Resolution(
+            outcome=Outcome.FAILS_WITH_REASON,
+            reason="InterruptFailed(checkpoint_declined | no_checkpoint | unpublishable)",
+        ),
+        WaitKind.REFUND: Resolution(
+            outcome=Outcome.FAILS_WITH_REASON, reason="InterruptFailed(refund_unapplied)"
+        ),
+        WaitKind.DISPATCH: Resolution(
+            outcome=Outcome.FAILS_WITH_REASON,
+            reason="the request is cancelled unsent; its owner hears a conclusive failure",
+        ),
+        WaitKind.RETRY: Resolution(
+            outcome=Outcome.RETRIES_THEN_FAILS,
+            reason="after Limits.max_retries retries the request ends failed, not accepted",
+        ),
+        WaitKind.SESSION: Resolution(
+            outcome=Outcome.HALTS_THE_RUN,
+            reason="an intent blocked by its reconciliation bound is not routed to the session",
+        ),
+        WaitKind.RECOVERY_CHECK: Resolution(
+            outcome=Outcome.HALTS_THE_RUN,
+            reason="a recovery check whose inspection was lost has no deadline of its own",
+        ),
+        WaitKind.OWNED_JOB: Resolution(
+            outcome=Outcome.HALTS_THE_RUN,
+            reason="a job whose poll was blocked at its bound is not routed to the job",
+        ),
+        WaitKind.RELEASE_DEPENDENCY: Resolution(
+            outcome=Outcome.HALTS_THE_RUN,
+            reason="a release recorded after the attempt stopped listening is not re-announced",
+        ),
+    }
+)
+"""The outcome of every wait kind that has no live resolver. A new kind must declare one."""
 
 
 def intent_waits(phase: IntentPhase) -> bool:
@@ -347,14 +425,26 @@ def draining_without_cancel(sessions: SessionsState, invocation: InvocationRef) 
     )
 
 
+def awaiting_refund(sessions: SessionsState, invocation: InvocationRef) -> bool:
+    """Whether an interruption of *invocation* retained its checkpoint and waits to refund.
+
+    The refund is applied by a signal inside the step that retained the checkpoint, so a claim
+    still in this phase when the step is over has nothing left that could refund it.
+    """
+    return any(
+        row.invocation == invocation and row.phase == "checkpointed" for row in sessions.interrupts
+    )
+
+
 def _checkpoint_waiters(sessions: SessionsState) -> tuple[InvocationRef, ...]:
-    """Every invocation with a wait that only its checkpoint (or turn inspection) can end."""
+    """Every invocation with a wait that its checkpoint (or turn inspection) or refund can end."""
     return tuple(
         dict.fromkeys(
             turn.invocation
             for turn in sessions.invocations
             if turn.pending_suspension is not None
             or draining_without_cancel(sessions, turn.invocation)
+            or awaiting_refund(sessions, turn.invocation)
         )
     )
 
@@ -373,12 +463,32 @@ def stalled_checkpoint_waits(
     return tuple(
         invocation
         for invocation in _checkpoint_waiters(sessions)
-        if not any(intent_waits(row.phase) for row in _checkpoint_intents(intents, invocation))
-        and not any(
-            isinstance(request, SnapshotAndRetain | SnapshotAndRetainRun | InspectTurn)
-            and request.invocation == invocation
-            for request in in_flight
+        if awaiting_refund(sessions, invocation)
+        or (
+            not any(intent_waits(row.phase) for row in _checkpoint_intents(intents, invocation))
+            and not any(
+                isinstance(request, SnapshotAndRetain | SnapshotAndRetainRun | InspectTurn)
+                and request.invocation == invocation
+                for request in in_flight
+            )
         )
+    )
+
+
+def undispatchable_requests(
+    intents: IntentsState, receipts: tuple[DecisionReceipt, ...]
+) -> tuple[RequestId, ...]:
+    """The prepared requests whose declared dependencies failed for good, so no dispatch can follow.
+
+    A dependent is cancelled when its dependency fails, but one prepared after that is never
+    reached by that cancellation. Dispatch authorization refuses it forever (a failed
+    dependency is final), so the step cancels it unsent. The acceptance of the request's own
+    decision is established when it is registered and is not re-checked here.
+    """
+    return tuple(
+        row.request_id
+        for row in intents.intents
+        if row.phase == IntentPhase.PREPARED and dependency_failed(row.request, receipts, intents)
     )
 
 
@@ -406,7 +516,40 @@ def _yield_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
             )
             for kind in kinds
         )
+        if awaiting_refund(core.sessions, invocation.invocation):
+            # The refund is a signal of the step that retained the checkpoint: no request,
+            # event or timer outlives that step, so a claim still waiting has no producer.
+            found.append(
+                Wait(
+                    waiter=WaitKind.REFUND,
+                    subject=invocation.invocation.invocation_id.root,
+                    producer=None,
+                )
+            )
     return found
+
+
+def _dispatch_waits(core: CoreState) -> list[Wait]:
+    """A prepared request waits for the shell to dispatch it, which core must be able to allow."""
+    undispatchable = set(undispatchable_requests(core.intents, core.run.receipts))
+    return [
+        Wait(
+            waiter=WaitKind.DISPATCH,
+            subject=row.request_id.root,
+            producer=None if row.request_id in undispatchable else Producer.PENDING_REQUEST,
+        )
+        for row in core.intents.intents
+        if row.phase == IntentPhase.PREPARED
+    ]
+
+
+def _retry_waits(core: CoreState) -> list[Wait]:
+    """A retryably failed request waits for its backoff timer, which core's clock tick fires."""
+    return [
+        Wait(waiter=WaitKind.RETRY, subject=row.request_id.root, producer=Producer.TIMER)
+        for row in core.intents.intents
+        if row.retry_wait_until is not None
+    ]
 
 
 def _observes(intent: Intent, resource: object) -> bool:
@@ -428,6 +571,8 @@ def waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[Wait, ...]
         *_job_waits(core, pending),
         *_release_waits(core),
         *_yield_waits(core, pending),
+        *_dispatch_waits(core),
+        *_retry_waits(core),
     )
 
 
@@ -439,12 +584,18 @@ def orphan_waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[Wai
 
 
 __all__ = [
+    "RESOLUTIONS",
+    "Outcome",
     "Producer",
+    "Resolution",
     "Wait",
     "WaitKind",
     "WaitingPhase",
+    "awaiting_refund",
+    "draining_without_cancel",
     "orphan_waits",
     "phase_waits",
     "stalled_checkpoint_waits",
+    "undispatchable_requests",
     "waits",
 ]

@@ -255,6 +255,8 @@ def test_failed_completion_rejects_already_prepared_dependent_and_notifies_inten
         DecisionSubmitted(decision=decision, expected_revision=1),
         core.operation_trace(queued.state, decision),
     )
+    dependent_id = dependent.requests[0].request_id
+    assert dependent_id is not None
     completion = core.DecisionCompleted(
         decision_id=start.decision_id, status=core.CompletionStatus(status)
     )
@@ -275,6 +277,10 @@ def test_failed_completion_rejects_already_prepared_dependent_and_notifies_inten
                 ),
                 TraceFrame(
                     signal=notification, change=core.IntentsChange(state=dependent.state.intents)
+                ),
+                TraceFrame(
+                    signal=core.RequestUndispatchable(request_id=dependent_id),
+                    change=core.IntentsChange(state=dependent.state.intents),
                 ),
             )
         ),

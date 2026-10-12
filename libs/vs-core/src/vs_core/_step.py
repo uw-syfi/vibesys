@@ -15,8 +15,6 @@ from ._deadlines import bound_to_run, bounded_decision
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
 from ._proofs import (
-    Missing,
-    ProofReason,
     Proven,
     accepted_receipt_for,
     committed_stop,
@@ -26,12 +24,13 @@ from ._proofs import (
     observation_for,
     occupied_episode,
     operation_for,
+    request_dependency_status,
 )
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
 from ._values import digest
-from ._waits import stalled_checkpoint_waits
+from ._waits import stalled_checkpoint_waits, undispatchable_requests
 from .types.attempts import (
     AttemptAdmitted,
     AttemptPhase,
@@ -95,6 +94,7 @@ from .types.intents import (
     Request,
     RequestObserved,
     RequestPrepared,
+    RequestUndispatchable,
     request_lifecycle,
 )
 from .types.kernel import (
@@ -639,17 +639,27 @@ def _signal_admission(
 def _stall_entries(
     state: CoreState, in_flight: Sequence[Request], seen: set[tuple[Area, str]]
 ) -> list[_Pending]:
-    """One pending stall signal per checkpoint wait that nothing can end, once per step.
+    """One pending signal per wait that nothing can end, once per step.
 
-    A stall already raised in this step is not raised again: if its reducer could not end the
-    wait (an ambiguous record it refuses to act on), the wait stays visible to the orphan
-    check instead of the step looping on it.
+    The waits are a checkpoint wait without a producer (``CheckpointStalled``) and a prepared
+    request that can never be dispatched (``RequestUndispatchable``). A signal already raised
+    in this step is not raised again: if its reducer could not end the wait (an ambiguous
+    record it refuses to act on), the wait stays visible to the orphan check instead of the
+    step looping on it.
     """
     if state.run.status == RunStatus.TERMINAL:
         return []
     signals = (
-        CheckpointStalled(invocation=invocation)
-        for invocation in stalled_checkpoint_waits(state.sessions, state.intents.intents, in_flight)
+        *(
+            CheckpointStalled(invocation=invocation)
+            for invocation in stalled_checkpoint_waits(
+                state.sessions, state.intents.intents, in_flight
+            )
+        ),
+        *(
+            RequestUndispatchable(request_id=request_id)
+            for request_id in undispatchable_requests(state.intents, state.run.receipts)
+        ),
     )
     return [
         (signal, None, (), _signal_admission(state, signal))
@@ -757,19 +767,7 @@ def _registered_transition(
 
 def dependency_status(state: CoreState, request: Request) -> DependencyStatus:
     """Prepared requests remain fenced until all semantic prerequisites succeed."""
-    if request.decision_id is not None and not isinstance(
-        accepted_receipt_for(state.run.receipts, request.decision_id, None), Proven
-    ):
-        return DependencyStatus.FAILED
-    proof = dependencies_for(request, state.run.receipts, state.intents)
-    if isinstance(proof, Proven):
-        return DependencyStatus.SUCCEEDED
-    if isinstance(proof, Missing) and proof.reason in (
-        ProofReason.UNRESOLVED,
-        ProofReason.ABSENT_REQUEST,
-    ):
-        return DependencyStatus.PENDING
-    return DependencyStatus.FAILED
+    return request_dependency_status(request, state.run.receipts, state.intents)
 
 
 def _complete_decision(

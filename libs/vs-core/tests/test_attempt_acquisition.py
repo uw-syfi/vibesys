@@ -34,6 +34,7 @@ from vs_core.api import (
     ChargeKind,
     ChargeReceipt,
     CheckpointDecline,
+    CheckpointFailure,
     CloseAttemptScope,
     Continuation,
     ContinuationId,
@@ -57,6 +58,7 @@ from vs_core.api import (
     Intent,
     IntentPhase,
     InterruptClaim,
+    InterruptFailed,
     Invocation,
     InvocationChargeRequested,
     InvocationCheckpointed,
@@ -2665,7 +2667,8 @@ def test_interruption_replacement_requires_every_durable_proof(
     )
     assert result.state.attempts == state.attempts
     assert result.requests == ()
-    assert result.events == ()
+    # A claim planted as checkpointed with no refund coming is ended, never left waiting.
+    assert [type(row) for row in result.events] == ([InterruptFailed] if proof == "phase" else [])
 
 
 @pytest.mark.parametrize("charge_class", ["paid", "free"])
@@ -2756,7 +2759,11 @@ def test_invalid_refund_cannot_emit_exhaustion_feedback(capacity: int, bad_proof
     )
     result = step(reload_state(state), event)
     assert result.state.attempts == state.attempts
-    assert result.events == ()
+    # The refund is refused without exhaustion feedback; the claim that waited on it is
+    # ended with a named reason instead of staying checkpointed.
+    [failed] = result.events
+    assert isinstance(failed, InterruptFailed)
+    assert failed.reason == CheckpointFailure.REFUND_UNAPPLIED
     assert result.requests == ()
 
 

@@ -7,6 +7,7 @@ revision again, and that current invocation's checkpoint is authoritative.
 
 from __future__ import annotations
 
+import json
 from collections import deque
 from typing import TYPE_CHECKING
 
@@ -37,12 +38,17 @@ def _world(
     waits: tuple[bool | str, ...],
     polls: tuple[int, ...],
     roles: tuple[str, ...] = ("mutator", "judge"),
+    enveloped: bool = False,
 ) -> tuple[WaitingTurns, HostOptions]:
     """A run whose ``roles`` may wait; a lone mutator's resumed turn leaves the tree as it was."""
     bridge = new_bridge(root)
+
+    def wrapped(reply: str) -> str:
+        return json.dumps({"reply": json.loads(reply)}) if enveloped else reply
+
     script = WaitingTurns(
-        mutator=deque(mutated() for _ in range(40)),
-        judge=deque(reviewed() for _ in range(40)),
+        mutator=deque(wrapped(mutated()) for _ in range(40)),
+        judge=deque(wrapped(reviewed()) for _ in range(40)),
         roles=roles,
         decide=lambda n: bool(waits[n % len(waits)]),
         ends=lambda n: "wait" if waits[n % len(waits)] is True else str(waits[n % len(waits)]),
@@ -121,9 +127,9 @@ def test_a_run_ends_whatever_its_turns_wait_for(
 
 @settings(max_examples=10, deadline=None, derandomize=True, database=None)
 @given(
-    ends=st.lists(st.sampled_from(("wait", "result", "invalid")), min_size=1, max_size=4).map(
-        tuple
-    ),
+    ends=st.lists(
+        st.sampled_from(("wait", "wait_enveloped", "result", "invalid")), min_size=1, max_size=4
+    ).map(tuple),
     polls=st.integers(0, 8),
     roles=st.sampled_from((("mutator", "judge"), ("judge",), ("mutator",))),
 )
@@ -198,3 +204,40 @@ def test_a_declined_checkpoint_fails_the_waiting_turn_instead_of_stalling_the_ru
 
     assert finished.core.run.status == RunStatus.TERMINAL
     assert finished.core.evaluation.continuations == ()
+
+
+@settings(max_examples=6, deadline=None, derandomize=True, database=None)
+@given(
+    enveloped=st.booleans(),
+    waits=st.lists(st.booleans(), min_size=1, max_size=3).map(tuple),
+    ends=st.sampled_from(("wait", "wait_enveloped")),
+)
+def test_a_role_may_answer_in_the_bare_or_the_enveloped_form(
+    tmp_path_factory: pytest.TempPathFactory,
+    *,
+    enveloped: bool,
+    waits: tuple[bool, ...],
+    ends: str,
+) -> None:
+    """The shared prompt tells agents to wrap waits in ``reply``; results may be wrapped too.
+
+    Both forms of a wait or a final result are the same reply: the run's decisions equal those
+    of a run whose agents answer in the bare form, and no offspring is discarded for a schema error.
+    """
+
+    def run(*, wrap: bool, end: str) -> Run:
+        script, host = _world(
+            tmp_path_factory.mktemp("forms"),
+            waits=tuple(end if w else False for w in waits),
+            polls=(1,),
+            enveloped=wrap,
+        )
+        return _play(script, host, 2)
+
+    finished = run(wrap=enveloped, end=ends)
+    baseline = run(wrap=False, end="wait")
+
+    assert finished.core.run.status == RunStatus.TERMINAL
+    assert [type(item).__name__ for item in finished.decisions] == [
+        type(item).__name__ for item in baseline.decisions
+    ]

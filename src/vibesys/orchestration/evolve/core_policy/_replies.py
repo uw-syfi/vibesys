@@ -4,24 +4,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, RootModel
-
 from vibesys.orchestration.evolve.models import JudgeResponse, MutatorResponse
 from vibesys.orchestration.evolve.strategy.api import JUDGE_REPLY, MUTATOR_REPLY, PROFILER_REPLY
 from vibesys.orchestration.profilers import ProfilerSummary
-from vs_core.api import Waitable
+from vs_core.api import WaitableReply
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from pydantic import BaseModel
+
     from vs_core.api import SchemaRef
 
 
-class MutatorReplyModel(RootModel[Waitable[MutatorResponse]]):
+class MutatorReplyModel(WaitableReply[MutatorResponse]):
     """The mutator's turn ends with a result or a wait for evaluations."""
 
 
-class JudgeReplyModel(RootModel[Waitable[JudgeResponse]]):
+class JudgeReplyModel(WaitableReply[JudgeResponse]):
     """The judge's turn ends with a verdict or a wait for evaluations."""
 
 

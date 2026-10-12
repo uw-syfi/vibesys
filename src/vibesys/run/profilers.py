@@ -19,6 +19,7 @@ from vs_project.api import Project, ProjectLayoutError
 from vs_runtime.api.infrastructure import (
     NativeCpuProfilerKind,
     RunEnvironment,
+    ToolSite,
     build_run_environment,
     make_run_environment_spec,
     preflight_native_cpu_profiler,
@@ -54,6 +55,51 @@ def native_profiler_preflight(kind: ProfilerKind) -> ProfilerPreflightResult:
     )
 
 
+def profiler_tool_problem(kind: ProfilerKind, environment: RunEnvironment) -> str | None:
+    """Why the environment cannot run *kind*'s tool at the site it needs, or ``None``.
+
+    The message names the profiler, the executable, the site and the environment's reason,
+    so an unrunnable profiler is refused at run start instead of failing in every turn.
+    """
+    if kind not in ACTIVE_PROFILER_KINDS:
+        return None
+    definition = profiler_definition(kind)
+    if definition.tool is None:
+        return None
+    location = environment.locate_tool(
+        definition.tool.executable, ToolSite(definition.tool.site.value)
+    )
+    if location.available:
+        return None
+    return (
+        f"profiler {kind.value!r} needs `{definition.tool.executable}` at the "
+        f"{definition.tool.site.value.replace('_', ' ')}, but {location.reason}."
+    )
+
+
+def _require_runnable_tool(
+    request: RunRequest,
+    environment: RunEnvironment,
+    resolved: ProfilerKind,
+    log: Callable[[str], None] | None,
+) -> ProfilerKind:
+    """Refuse an explicit profiler whose tool cannot run here; ``auto`` falls back to none."""
+    problem = profiler_tool_problem(resolved, environment)
+    if problem is None:
+        return resolved
+    if request.profiler_kind is not ProfilerKind.AUTO:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="profiler_tool_unavailable",
+                stage="profiler_validation",
+                message=f"--profiler {resolved.value}: {problem}",
+            )
+        )
+    if log is not None:
+        log(f"[profiler] {problem} --profiler auto is falling back to 'none'.")
+    return ProfilerKind.NONE
+
+
 def resolve_run_profiler(
     request: RunRequest,
     environment: RunEnvironment,
@@ -87,6 +133,7 @@ def resolve_run_profiler(
     resolved = choice.kind
     if choice.reason is not None and log is not None:
         log(f"[profiler] --profiler auto chose 'none': {choice.reason}.")
+    resolved = _require_runnable_tool(request, environment, resolved, log)
     if preflight and environment.requires_local_profiler_preflight:
         result = preflight_profiler_kind(resolved, native_preflight=native_preflight)
         if not result.usable:

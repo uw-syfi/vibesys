@@ -140,6 +140,8 @@ EXPECTED_TARGET = {
                 "dispatch_authorized",
                 "decision_dependency_resolved",
                 "operation_retire_requested",
+                "retry_due",
+                "request_undispatchable",
             ),
         ),
         (

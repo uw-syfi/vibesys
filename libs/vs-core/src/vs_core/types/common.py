@@ -355,6 +355,12 @@ class ObservationStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+RETRYABLE_FAILURES = frozenset(
+    {ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED}
+)
+"""Statuses that, on a non-terminal observation, say the executor did not run the request."""
+
+
 class RunStatus(StrEnum):
     """Run status lifecycle contract."""
 
@@ -691,6 +697,11 @@ class Observation(Value):
     child_manifest: ChildManifest | None = None
     admission_id: DecisionId | None = None
     diagnostic: str = ""
+
+    @property
+    def retryable(self) -> bool:
+        """A failure the executor reports as not run and not final: send the request again."""
+        return not self.terminal and self.status in RETRYABLE_FAILURES
 
     @property
     def descendants(self) -> tuple[ResourceId, ...]:

@@ -76,3 +76,47 @@ def test_a_live_checkpoint_keeps_the_interruption_waiting() -> None:
     waits = [wait for wait in core.waits(state) if wait.waiter == core.WaitKind.INTERRUPT]
     assert [wait.producer for wait in waits] == [core.Producer.PENDING_REQUEST]
     assert snapshot.request_id is not None
+
+
+def test_an_interruption_whose_checkpoint_keeps_answering_retryably_is_retried_then_fails() -> None:
+    """A retryable answer is asked again after a delay, a bounded number of times (#2154).
+
+    Without that the checkpoint stayed dispatched with nobody to ask again, the clock ticked
+    to the run deadline, and the interruption never ended. After every step no wait of any
+    kind is an orphan, and the interruption ends failed with the named reason.
+    """
+    state, snapshot = _interrupted_until_checkpoint()
+    assert snapshot.request_id is not None
+    limit = state.run.limits.max_retries
+    clock = 10.0
+    asks = 0
+    events: list[core.StrategyEvent] = []
+    for sequence in range(2, 80):
+        if asks > limit + 1:
+            break
+        phase = next(
+            row.phase for row in state.intents.intents if row.request_id == snapshot.request_id
+        )
+        if phase == core.IntentPhase.PREPARED:
+            state = core.step(state, core.DispatchAuthorized(request_id=snapshot.request_id)).state
+            asks += 1
+            answer = turn_observation(
+                snapshot,
+                sequence=sequence,
+                accepted=True,
+                terminal=False,
+                status=core.ObservationStatus.FAILED,
+            )
+            result = reload_step(state, core.RequestObserved(observation=answer))
+        elif phase == core.IntentPhase.COMPLETED:
+            break
+        else:
+            clock += 31.0
+            result = reload_step(state, core.ClockAdvanced(now_at=clock))
+        state = result.state
+        events.extend(result.events)
+        assert core.orphan_waits(state) == ()
+    assert asks == limit + 1
+    [failure] = [row for row in events if isinstance(row, core.InterruptFailed)]
+    assert failure.invocation == snapshot.invocation
+    assert state.sessions.interrupts[0].phase == "blocked"

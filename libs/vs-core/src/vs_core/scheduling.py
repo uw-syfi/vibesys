@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, assert_never
 
 from ._adoption import fences_root_mutation
+from ._intent_ledger import due_retries
 from ._intent_recovery import overdue_reconciliations
 from ._proofs import (
     Proven,
@@ -654,6 +655,7 @@ def schedule(
                     "signals": (
                         *filled.signals,
                         ObservationsDue(now_at=context.run.now_at),
+                        *due_retries(context.intents, context.run.now_at),
                         *overdue_reconciliations(context.intents, context.run.now_at),
                     )
                 }

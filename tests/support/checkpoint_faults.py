@@ -14,19 +14,16 @@ from typing import TYPE_CHECKING
 from hypothesis import strategies as st
 
 from vs_core.api import SnapshotAndRetain, SnapshotAndRetainRun
-from vs_core.testing.drive import Failed
+from vs_core.testing.drive import Failed, Retryable
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request
     from vs_core.testing.drive import Answer
     from vs_runtime.api.testing import Script
 
-CHECKPOINT_ANSWERS = ("succeeded", "failed")
-"""``succeeded`` is the wrapped script's own answer; ``failed`` is the executor's fault.
-
-``retryable`` is deliberately not generated: a retryable checkpoint answer makes the shell spin
-without ever calling an executor again, with or without this fix (filed separately).
-"""
+CHECKPOINT_ANSWERS = ("succeeded", "failed", "retryable")
+"""``succeeded`` is the wrapped script's own answer; ``failed`` is the executor's fault for good
+and ``retryable`` its transient fault, which core retries up to a bound."""
 
 CHECKPOINTS = st.lists(st.sampled_from(CHECKPOINT_ANSWERS), min_size=1, max_size=4).map(tuple)
 
@@ -47,6 +44,8 @@ class FaultyCheckpoints:
             self._seen += 1
             if answer == "failed":
                 return Failed()
+            if answer == "retryable":
+                return Retryable()
         return self._inner(request, core)
 
 

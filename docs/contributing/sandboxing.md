@@ -112,7 +112,7 @@ macOS when full read confinement matters.
   in Docker, but an agent GPU job (`[vibesys.agent_gpu]`) runs on a compute node,
   where Docker is normally unavailable, so the broker confines it with the host
   sandbox (`HostJobConfinement`; the broker refuses to start where that cannot
-  be enforced). The trusted gates run unconfined on the host, as they do in
+  be enforced). The job's `/tmp` is a private tmpfs, and `TMPDIR`, `TMP` and `TEMP` point at it, so scratch-space tools work and nothing outlives the job. The trusted gates run unconfined on the host, as they do in
   every other environment. The profiler server of `slurm` runs in the container
   with the image's `python3` and `pydantic`, importing the Slurm adapter from the
   read-only `libs` mount at its host path.

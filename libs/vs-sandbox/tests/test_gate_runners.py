@@ -7,6 +7,7 @@ are real while nothing needs a cluster.
 
 from __future__ import annotations
 
+import itertools
 import os
 import sys
 import threading
@@ -149,6 +150,9 @@ class TestSlurmCommandGateRunner:
         ]
 
 
+_TMP = "/tmp"  # noqa: S108  # lint-waiver: LW-010108 [S108]; the confined job's private tmpfs path inside its namespace, asserted as data, never opened on the host.
+
+
 class TestHostJobConfinement:
     def test_a_host_that_cannot_enforce_confinement_refuses_the_job(self, tmp_path: Path) -> None:
         """Enforcement is required: there is no unconfined job."""
@@ -184,3 +188,29 @@ class TestHostJobConfinement:
         assert argv[0] == "bwrap"
         assert str(tool_dir) not in " ".join(argv)
         assert argv[-1] == "true"
+
+    @pytest.mark.skipif(sys.platform != "linux", reason="bubblewrap is the Linux mechanism")
+    def test_the_job_gets_a_private_writable_tmp_and_every_temp_variable_points_at_it(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression: a host TMPDIR absent from the namespace broke ``ncu`` and other tools."""
+        tool_dir = tmp_path / "bin"
+        tool_dir.mkdir()
+        bwrap = tool_dir / "bwrap"
+        bwrap.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        bwrap.chmod(0o755)
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        confinement = HostJobConfinement(
+            env={"PATH": str(tool_dir), "HOME": str(tmp_path), "TMPDIR": "/scratch/host-only"},
+            resources=(),
+            project_path_policy=ProjectPathPolicy(),
+        )
+
+        argv = confinement.wrap(workspace, ["true"])
+
+        prefix = argv[: argv.index("--")]
+        pairs = list(itertools.pairwise(prefix))
+        assert ("--tmpfs", _TMP) in pairs
+        setenv = {prefix[i + 1]: prefix[i + 2] for i, arg in enumerate(prefix) if arg == "--setenv"}
+        assert setenv == dict.fromkeys(("TMPDIR", "TMP", "TEMP"), _TMP)

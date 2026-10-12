@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from ._intent_ledger import RETRYABLE_FAILURES
 from ._proofs import (
     Mismatch,
     Missing,
@@ -1380,9 +1379,7 @@ def _answered_open(intent: Intent) -> bool:
         return True
     observation = intent.observation
     return (
-        intent.phase == IntentPhase.DISPATCHED
-        and observation is not None
-        and observation.status in RETRYABLE_FAILURES
+        intent.phase == IntentPhase.DISPATCHED and observation is not None and observation.retryable
     )
 
 

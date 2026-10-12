@@ -40,6 +40,7 @@ from vs_runtime._run_environment import (
     _prepare_evaluation_plan,
     _PreparedRunEnvironment,
 )
+from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_TOOLS_ROOT,
     TrustedEvaluationCommandPaths,
@@ -131,6 +132,10 @@ class _Mode(Protocol):
         """Whether the profiler's tool must exist on this host."""
         ...
 
+    def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
+        """Where this mode runs *executable* at *site*, or why it cannot."""
+        ...
+
     def gpu_commands(
         self, request: RunEnvironmentRequest, confinement: JobConfinement | None
     ) -> GpuCommands | None:
@@ -165,6 +170,14 @@ class _ClusterGates:
     def supported_profiler_ids(self) -> frozenset[str]:
         return _REMOTE_PROFILER_IDS if self.remote_capture else _NO_PROFILER_IDS
 
+    def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
+        if site is ToolSite.AGENT_SHELL:
+            return ToolLocation.missing(
+                f"`{executable}` would run in the editor container, but this mode runs "
+                "profiling on the cluster, not in the container"
+            )
+        return assumed_tool(executable)
+
     def gpu_commands(
         self, request: RunEnvironmentRequest, confinement: JobConfinement | None
     ) -> None:
@@ -193,6 +206,14 @@ class _AgentGpuMode:
         return AgentGpuFacts(
             self.config.max_gpus, self.config.max_time_minutes, self.config.read_only_paths
         )
+
+    def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
+        if site is ToolSite.AGENT_SHELL:
+            return ToolLocation.missing(
+                f"`{executable}` would run in the editor container, which ships no "
+                "profiling tools, and the workload runs in Slurm jobs, not in the container"
+            )
+        return assumed_tool(executable)
 
     def gpu_commands(
         self, request: RunEnvironmentRequest, confinement: JobConfinement | None
@@ -310,6 +331,10 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
     def requires_local_profiler_preflight(self) -> bool:
         """Whether the profiler's tool must exist on this host: only the agent's own profiler."""
         return self._mode.requires_local_profiler_preflight
+
+    def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
+        """Where this run runs *executable* at *site*: the mode decides, from the operator file."""
+        return self._mode.locate_tool(executable, site)
 
     def validate_profile(self, profile_command: tuple[str, ...] | None) -> None:
         """Validate the remote capture's workload; the agent's own profiling has none."""

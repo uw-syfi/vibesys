@@ -157,7 +157,20 @@ class Intent(OutcomeValue):
     outcome_json: str | None = None
     outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
     retry_count: Count = 0
+    retry_at: Seconds | None = None
+    """Core time at which the request goes out again after a retryable failure, else None."""
     reconcile_deadline_at: Seconds
+
+    @property
+    def retry_wait_until(self) -> float | None:
+        """The core time at which a retryably failed request is sent again, else None."""
+        if (
+            self.phase == IntentPhase.DISPATCHED
+            and self.observation is not None
+            and self.observation.retryable
+        ):
+            return self.retry_at
+        return None
 
     @model_validator(mode="after")
     def registered_outcome(self, info: ValidationInfo) -> Intent:
@@ -514,6 +527,30 @@ class ReconciliationDeadline(Value):
     now_at: Seconds
 
 
+class RetryDue(Value):
+    """Internal signal: core time reached the backoff of a request the executor failed retryably.
+
+    Raised on every clock tick for each intent whose ``retry_at`` has come; the ledger sends the
+    request out again, unchanged. Never shell input.
+    """
+
+    kind: Literal["retry_due"] = "retry_due"
+    request_id: RequestId
+    now_at: Seconds
+
+
+class RequestUndispatchable(Value):
+    """Internal signal: a prepared request that nothing can ever authorize for dispatch.
+
+    Raised by the step when it reaches quiescence with a prepared request whose dependencies
+    have failed for good. The ledger closes it as cancelled-unsent, as it does for a dependent
+    whose dependency failed first, so its owner hears a conclusive failure. Never shell input.
+    """
+
+    kind: Literal["request_undispatchable"] = "request_undispatchable"
+    request_id: RequestId
+
+
 class DecisionDependencyResolved(Value):
     """Completion wakes intents to release or reject prepared dependents."""
 
@@ -559,6 +596,8 @@ type IntentsEvent = Annotated[
     | RecoveryStarted
     | RecoveryReady
     | ReconciliationDeadline
+    | RetryDue
+    | RequestUndispatchable
     | OperationRetireRequested
     | DecisionDependencyResolved,
     Field(discriminator="kind"),

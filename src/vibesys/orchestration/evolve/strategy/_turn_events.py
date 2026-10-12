@@ -49,14 +49,14 @@ from vs_core.api import (
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
-    Waitable,
+    WaitableReply,
     WaitingForEvaluation,
     YieldPublicationFailed,
     turn_reply,
 )
 
-_MUTATOR = TypeAdapter(Waitable[MutatorResponse])
-_JUDGE = TypeAdapter(Waitable[JudgeResponse])
+_MUTATOR = WaitableReply[MutatorResponse]
+_JUDGE = WaitableReply[JudgeResponse]
 _PROFILER = TypeAdapter(ProfilerSummary)
 # The shared protocol templates name the mutator's role by what it does for a candidate.
 _PROTOCOL_ROLE: dict[Role, Literal["implementer", "judge", "profiler"]] = {
@@ -69,10 +69,14 @@ _PROTOCOL_ROLE: dict[Role, Literal["implementer", "judge", "profiler"]] = {
 def _decode(
     role: Role, payload: str
 ) -> MutatorResponse | JudgeResponse | ProfilerSummary | WaitingForEvaluation | str:
-    adapters = {Role.MUTATOR: _MUTATOR, Role.JUDGE: _JUDGE, Role.PROFILER: _PROFILER}
-    adapter = adapters[role]
     try:
-        return adapter.validate_python(adapter.validate_json(payload))
+        match role:
+            case Role.MUTATOR:
+                return _MUTATOR.model_validate_json(payload).reply
+            case Role.JUDGE:
+                return _JUDGE.model_validate_json(payload).reply
+            case Role.PROFILER:
+                return _PROFILER.validate_json(payload)
     except ValidationError as error:
         return str(error)
 

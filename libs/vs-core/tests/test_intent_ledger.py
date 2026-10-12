@@ -260,12 +260,18 @@ def test_conflicting_or_premature_observations_are_typed_rejections() -> None:
     assert _try(first, RequestObserved(observation=clash)) is None
 
 
-def test_retries_exhaust_into_a_blocked_intent() -> None:
+def test_retries_exhaust_into_a_conclusive_failure() -> None:
+    """Failures the executor calls retryable end as a terminal failure once the bound is used."""
     state = _dispatched()
     for sequence in (1, 2, 3):
         failed = _obs(sequence, ObservationStatus.FAILED)
         state = step(state, RequestObserved(observation=failed)).state
-    assert state.intents.intents[0].phase == IntentPhase.BLOCKED
+    (intent,) = state.intents.intents
+    assert intent.phase == IntentPhase.COMPLETED
+    assert intent.observation is not None
+    assert intent.observation.terminal
+    assert intent.observation.status == ObservationStatus.FAILED
+    assert not intent.observation.accepted
 
 
 def test_a_prepared_request_replays_inertly_and_conflicts_loudly() -> None:

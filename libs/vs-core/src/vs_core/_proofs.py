@@ -19,6 +19,7 @@ from .types.common import (
     ChargeKind,
     CompletionStatus,
     DecisionId,
+    DependencyStatus,
     ExecuteRegisteredOperation,
     InvocationRef,
     LifecycleClass,
@@ -621,6 +622,53 @@ def dependencies_for(
         None,
     )
     return denial if denial is not None else Missing(ProofReason.UNRESOLVED)
+
+
+def request_dependency_status(
+    request: Request, receipts: tuple[DecisionReceipt, ...], intents: IntentsState
+) -> DependencyStatus:
+    """Whether a prepared request may be dispatched: now, later, or never.
+
+    ``FAILED`` is final: a decision that was not accepted, or a dependency that completed
+    without success, never changes. ``PENDING`` still has a producer, the dependency itself.
+    """
+    if request.decision_id is not None and not isinstance(
+        accepted_receipt_for(receipts, request.decision_id, None), Proven
+    ):
+        return DependencyStatus.FAILED
+    proof = dependencies_for(request, receipts, intents)
+    if isinstance(proof, Proven):
+        return DependencyStatus.SUCCEEDED
+    if isinstance(proof, Missing) and proof.reason in (
+        ProofReason.UNRESOLVED,
+        ProofReason.ABSENT_REQUEST,
+    ):
+        return DependencyStatus.PENDING
+    return DependencyStatus.FAILED
+
+
+_NOT_YET_KNOWN = (ProofReason.UNRESOLVED, ProofReason.ABSENT_REQUEST, ProofReason.ABSENT_RECEIPT)
+
+
+def dependency_failed(
+    request: Request, receipts: tuple[DecisionReceipt, ...], intents: IntentsState
+) -> bool:
+    """Whether a decision or request this one depends on has ended without succeeding.
+
+    Only a dependency that has concluded counts: one that is unfinished, or not yet recorded,
+    may still succeed. A concluded failure is final, so the request can never be dispatched.
+    """
+    proofs = tuple(
+        _decision_dependency(receipts, identity) for identity in request.decision_dependencies
+    ) + tuple(
+        _request_dependency(tuple(row for row in intents.intents if row.request_id == identity))
+        for identity in request.depends_on
+    )
+    return any(
+        (isinstance(proof, Mismatch) and proof.field == ProofField.STATUS)
+        or (isinstance(proof, Missing) and proof.reason not in _NOT_YET_KNOWN)
+        for proof in proofs
+    )
 
 
 def _decision_dependency(

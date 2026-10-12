@@ -128,7 +128,9 @@ def _observed_phase(
     selection: Selection, observation: Observation, intents: IntentsState
 ) -> _Phase:
     latest = max(_rounds(intents, selection) - 1, 0)
-    pending = observation.status == ObservationStatus.PENDING
+    # A retryable answer is not an outcome: the intent ledger asks again under the same
+    # identity, and a conclusive failure arrives once its retries are spent.
+    pending = observation.status == ObservationStatus.PENDING or observation.retryable
     if observation.request_id == _verify_id(selection, latest):
         return _Phase.VERIFYING if pending else _Phase.FAILED
     if observation.request_id == _adopt_id(selection, latest):
@@ -140,10 +142,8 @@ def _observed_phase(
 
 
 def _awaits_inspection(observation: Observation) -> bool:
-    """Applied, unknown and retryable outcomes are settled by looking at the root."""
-    return observation.status in (ObservationStatus.SUCCEEDED, ObservationStatus.UNKNOWN) or (
-        observation.status == ObservationStatus.FAILED and not observation.terminal
-    )
+    """Applied and unknown outcomes are settled by looking at the root."""
+    return observation.status in (ObservationStatus.SUCCEEDED, ObservationStatus.UNKNOWN)
 
 
 def fences_root_mutation(state: SettlementState, intents: IntentsState) -> bool:
@@ -381,7 +381,7 @@ def _adopt_observed(
     round_: int,
 ) -> AreaChange[SettlementState]:
     recorded = adoption.model_copy(update={"observation": observation})
-    if observation.status == ObservationStatus.PENDING:
+    if observation.status == ObservationStatus.PENDING or observation.retryable:
         return _with_adoption(state, recorded)
     if not _awaits_inspection(observation):
         return _fail(state, context, recorded, AdoptionFailureReason.ADOPT_FAILED)
@@ -400,7 +400,7 @@ def _verify_observed(
 ) -> AreaChange[SettlementState]:
     observation = event.observation
     selection = adoption.selection
-    if observation.status == ObservationStatus.PENDING:
+    if observation.status == ObservationStatus.PENDING or observation.retryable:
         return _with_adoption(state, adoption.model_copy(update={"observation": observation}))
     if observation.status == ObservationStatus.SUCCEEDED and event.revision == selection.revision:
         done = Adoption(selection=selection, observation=observation, verified=True)
