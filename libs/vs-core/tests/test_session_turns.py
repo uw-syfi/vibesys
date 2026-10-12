@@ -135,7 +135,7 @@ def test_unknown_and_stale_invocation_signals_never_create_execution(
     generations: list[int],
 ) -> None:
     spec = turn()
-    known = waiting_turn_state(spec)
+    known = waiting_for_reservation(spec)
     assert known.sessions.invocations[0].invocation == invocation(spec)
     for seed_state in (core.initial_state(), known):
         state = seed_state
@@ -170,6 +170,28 @@ def test_orphan_session_observation_cannot_acquire_or_release_a_lease(*, termina
     assert result.state.sessions == state.sessions
     assert result.requests == ()
     assert result.events == ()
+
+
+def carrying_request(spec: core.SessionSpec, scope: core.Scope) -> core.Intent:
+    """A live lease request for the session: the request that keeps an acquiring turn alive.
+
+    A turn acquiring with no request about its session is an orphan wait that the step ends
+    (`AcquisitionStalled`), so a state seeded between two signals carries one.
+    """
+    request = core.EnsureSession(
+        request_id=core.RequestId(root=f"carry:{spec.session_id.root}"),
+        scope=scope,
+        deadline_at=100.0,
+        spec=spec,
+    )
+    return core.Intent(
+        request_id=request.request_id,
+        request=request,
+        payload_digest=value_digest(request),
+        lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
+        phase=core.IntentPhase.DISPATCHED,
+        reconcile_deadline_at=100.0,
+    )
 
 
 def waiting_turn_state(spec: core.TurnSpec, *, charged: bool = True) -> core.CoreState:
@@ -209,6 +231,24 @@ def waiting_turn_state(spec: core.TurnSpec, *, charged: bool = True) -> core.Cor
     )
 
 
+def waiting_for_reservation(spec: core.TurnSpec) -> core.CoreState:
+    """A charged turn awaiting its input reservation, with a live request carrying it.
+
+    For a test that feeds other events first: the step ends a turn acquiring with no
+    request about its session (`AcquisitionStalled`).
+    """
+    state = waiting_turn_state(spec)
+    return state.model_copy(
+        update={
+            "intents": state.intents.model_copy(
+                update={
+                    "intents": (*state.intents.intents, carrying_request(spec.session, scope()))
+                }
+            )
+        }
+    )
+
+
 def test_empty_manifest_dispatch_requires_charge_and_positive_session_correspondence() -> None:
     spec = turn()
     event = core.TurnInputsReserved(invocation=invocation(spec), input_ids=())
@@ -233,7 +273,7 @@ def test_dispatch_reordered_duplicate_and_stale_manifests_have_one_durable_inten
     order: tuple[int, ...], duplicates: list[int]
 ) -> None:
     spec = turn()
-    state = waiting_turn_state(spec)
+    state = waiting_for_reservation(spec)
     events = (
         core.TurnInputsReserved(invocation=invocation(spec), input_ids=()),
         core.TurnInputsReserved(invocation=invocation(spec, 1), input_ids=()),
@@ -249,7 +289,8 @@ def test_dispatch_reordered_duplicate_and_stale_manifests_have_one_durable_inten
         state = result.state
     assert len(dispatches) == 1
     assert isinstance(dispatches[0], core.DispatchTurn)
-    assert len(state.intents.intents) == 1
+    assert [row for row in state.intents.intents if isinstance(row.request, core.DispatchTurn)]
+    assert len(dispatches) == 1
 
 
 @pytest.mark.parametrize("charge", ["correction", "resume"])
@@ -1071,6 +1112,9 @@ def interrupted_attempt_state(
             "sessions": core.SessionsState(
                 sessions=(session,), invocations=(predecessor,), interrupts=(claim,)
             ),
+            "intents": state.intents.model_copy(
+                update={"intents": (carrying_request(spec.session, owner_scope),)}
+            ),
         }
     )
     successor = spec.model_copy(
@@ -1146,7 +1190,7 @@ def test_missing_session_resource_cannot_dispatch_on_policy_alone() -> None:
     spec = turn().model_copy(
         update={"session": turn().session.model_copy(update={"policy": "reuse"})}
     )
-    state = waiting_turn_state(spec)
+    state = waiting_for_reservation(spec)
     session = state.sessions.sessions[0].model_copy(update={"resource_id": None})
     state = state.model_copy(
         update={"sessions": state.sessions.model_copy(update={"sessions": (session,)})}

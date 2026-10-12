@@ -430,6 +430,7 @@ from vs_core.types.session_inputs import (
 from vs_core.types.sessions import (
     TURN_FAILURE_DETAIL_LIMIT,
     Access,
+    AcquisitionStalled,
     CancelTurn,
     CheckpointFailure,
     CheckpointStalled,
@@ -546,6 +547,7 @@ __all__ = [
     "VERIFY_SUFFIX",
     "Accepted",
     "Access",
+    "AcquisitionStalled",
     "AdmissionControl",
     "AdmissionRequest",
     "AdmitAttempt",

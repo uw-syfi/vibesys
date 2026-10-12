@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, assert_never
 from ._proofs import dependency_failed
 from .types.attempts import AttemptPhase, SnapshotAndRetain
 from .types.common import (
+    InvocationRef,
     LifecycleClass,
     ObservationStatus,
     RunStatus,
@@ -54,10 +55,10 @@ from .types.sessions import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-    from .types.common import InvocationRef, RequestId
+    from .types.common import RequestId, SessionId
     from .types.intents import Intent, IntentsState, Request
     from .types.kernel import CoreEvent, CoreState, DecisionReceipt
-    from .types.sessions import SessionsState, SessionView
+    from .types.sessions import Invocation, SessionsState, SessionView
 
 
 class WaitKind(StrEnum):
@@ -72,6 +73,7 @@ class WaitKind(StrEnum):
     REFUND = "refund"
     DISPATCH = "dispatch"
     RETRY = "retry"
+    TURN_ACQUISITION = "turn-acquisition"
 
 
 class Producer(StrEnum):
@@ -131,6 +133,11 @@ RESOLUTIONS: Mapping[WaitKind, Resolution] = MappingProxyType(
         WaitKind.RETRY: Resolution(
             outcome=Outcome.RETRIES_THEN_FAILS,
             reason="after Limits.max_retries retries the request ends failed, not accepted",
+        ),
+        WaitKind.TURN_ACQUISITION: Resolution(
+            outcome=Outcome.FAILS_WITH_REASON,
+            reason="the turn ends cancelled with TurnResult.detail naming that nothing carried "
+            "its acquisition forward; its decision completes cancelled",
         ),
         WaitKind.SESSION: Resolution(
             outcome=Outcome.HALTS_THE_RUN,
@@ -246,8 +253,11 @@ def _outbox_requests(outbox: Iterable[CoreEvent]) -> frozenset[RequestId]:
 
 
 def _about_session(intent: Intent, session: SessionView) -> bool:
-    request = intent.request
-    identity = session.spec.session_id
+    return _concerns(intent.request, session.spec.session_id, intent.lifecycle)
+
+
+def _concerns(request: Request, identity: SessionId, lifecycle: LifecycleClass | None) -> bool:
+    """Whether *request* acquires, runs or closes a turn or lease of the session *identity*."""
     if isinstance(request, EnsureSession):
         return request.spec.session_id == identity
     if isinstance(request, CloseSession):
@@ -255,8 +265,10 @@ def _about_session(intent: Intent, session: SessionView) -> bool:
     if isinstance(request, DispatchTurn | ResumeSessionTurn):
         return request.turn.session.session_id == identity
     if isinstance(request, ExecuteRegisteredOperation):
-        return intent.lifecycle == LifecycleClass.SESSION_TURN
-    return False
+        return lifecycle is None or lifecycle == LifecycleClass.SESSION_TURN
+    # Cancelling, inspecting or checkpointing a turn names the invocation it is about.
+    invocation = getattr(request, "invocation", None)
+    return isinstance(invocation, InvocationRef) and invocation.session_id == identity
 
 
 def _producer(related: Sequence[Intent], outbox: frozenset[RequestId]) -> Producer | None:
@@ -299,6 +311,76 @@ def _session_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
                 waiter=WaitKind.SESSION,
                 subject=session.spec.session_id.root,
                 producer=_producer(related, outbox),
+            )
+        )
+    return found
+
+
+def _acquiring(sessions: SessionsState) -> tuple[Invocation, ...]:
+    """The turns still acquiring: requested and charged or not, but with no result yet."""
+    return tuple(
+        row
+        for row in sessions.invocations
+        if row.phase == SessionPhase.ACQUIRING and row.observation is None
+    )
+
+
+def _carried(
+    sessions: SessionsState,
+    intents: Sequence[Intent],
+    in_flight: Sequence[Request],
+    invocation: InvocationRef,
+) -> bool:
+    """Whether a live or in-flight request, or a turn interruption, can carry *invocation* on.
+
+    A turn acquires through its session's lease request, its input reservation and its
+    dispatch. A replacement turn also waits for the interruption of its predecessor, whose own
+    waits are ended first (see ``stalled_checkpoint_waits``).
+    """
+    return (
+        any(
+            intent_waits(row.phase) and _concerns(row.request, invocation.session_id, row.lifecycle)
+            for row in intents
+        )
+        or any(_concerns(request, invocation.session_id, None) for request in in_flight)
+        or any(
+            claim.invocation.session_id == invocation.session_id
+            and claim.phase in ("pending", "draining", "checkpointed")
+            for claim in sessions.interrupts
+        )
+    )
+
+
+def stalled_acquisitions(
+    sessions: SessionsState, intents: Sequence[Intent], in_flight: Sequence[Request] = ()
+) -> tuple[InvocationRef, ...]:
+    """The acquiring turns that nothing can carry forward.
+
+    A turn acquiring without a producer, for example because its charge was never granted,
+    would stall the run, so the step ends it (``AcquisitionStalled``).
+    """
+    return tuple(
+        row.invocation
+        for row in _acquiring(sessions)
+        if not _carried(sessions, intents, in_flight, row.invocation)
+    )
+
+
+def _acquisition_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
+    """A turn acquiring waits for the session request that carries it forward."""
+    found = []
+    for row in _acquiring(core.sessions):
+        related = [
+            intent
+            for intent in core.intents.intents
+            if _concerns(intent.request, row.invocation.session_id, intent.lifecycle)
+        ]
+        carried = _carried(core.sessions, core.intents.intents, (), row.invocation)
+        found.append(
+            Wait(
+                waiter=WaitKind.TURN_ACQUISITION,
+                subject=row.invocation.invocation_id.root,
+                producer=Producer.PENDING_REQUEST if carried else _producer(related, outbox),
             )
         )
     return found
@@ -567,6 +649,7 @@ def waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[Wait, ...]
     pending = _outbox_requests(outbox)
     return (
         *_session_waits(core, pending),
+        *_acquisition_waits(core, pending),
         *_recovery_waits(core),
         *_job_waits(core, pending),
         *_release_waits(core),
@@ -595,6 +678,7 @@ __all__ = [
     "draining_without_cancel",
     "orphan_waits",
     "phase_waits",
+    "stalled_acquisitions",
     "stalled_checkpoint_waits",
     "undispatchable_requests",
     "waits",

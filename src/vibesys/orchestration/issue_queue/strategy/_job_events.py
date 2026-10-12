@@ -58,6 +58,9 @@ from vs_core.api import (
     ResumeAuthorized,
     RevisionRef,
     RunView,
+    TurnCandidate,
+    TurnCandidateFailed,
+    TurnCandidatePending,
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
@@ -530,11 +533,21 @@ def _written_turn(
     return _evaluated(state, reply, payload)
 
 
-def _candidate_of(view: RunView, job: Job, invocation: InvocationRef) -> RevisionRef | None:
-    """The revision the reply's turn chain retained, by core's one rule (`TurnChain.candidate`)."""
+def _candidate_of(view: RunView, job: Job, invocation: InvocationRef) -> TurnCandidate | None:
+    """What core did with the reply's checkpoint, by its one rule (`TurnChain.candidate_outcome`)."""
     if job.turn is None:
         return None
-    return job.turn.candidate(view, job.attempt, invocation)
+    return job.turn.candidate_outcome(view, job.attempt, invocation)
+
+
+def _writer(job: Job) -> Role:
+    """The role of the job's write turn: an issue's implementer, or a performance evaluation's."""
+    return Role.IMPLEMENTER if job.kind is JobKind.ISSUE else Role.PERF
+
+
+def _checkpoint_failure(role: Role, candidate: TurnCandidateFailed) -> str:
+    """Why a write turn's workspace was not retained, so the job fails instead of reviewing it."""
+    return f"{_ROLE_NAME[role]} checkpoint declined ({candidate.reason.value})"
 
 
 def settle_retained(
@@ -549,18 +562,16 @@ def settle_retained(
     if job is None or not job.holds_reply or job.held_invocation is None or job.held_reply is None:
         return state
     invocation = job.held_invocation
-    live = next((item for item in view.attempts if item.attempt_id == job.attempt), None)
     candidate = _candidate_of(view, job, invocation)
-    declined = live is not None and any(
-        row.invocation == invocation for row in live.checkpoint_declines
-    )
-    if candidate is None and not declined:
+    if candidate is None or isinstance(candidate, TurnCandidatePending):
         return state
-    role = Role.IMPLEMENTER if job.kind is JobKind.ISSUE else Role.PERF
-    reply = _decode(role, job.held_reply, config)
+    role = _writer(job)
     held = _with(state, job.released())
+    if isinstance(candidate, TurnCandidateFailed):
+        return fail(held, _checkpoint_failure(role, candidate))
+    reply = _decode(role, job.held_reply, config)
     if isinstance(reply, IssueImplementerResult | IssuePerfEvalResult | GenericIssuePerfEvalResult):
-        return _written_turn(held, reply, job.held_reply, candidate)
+        return _written_turn(held, reply, job.held_reply, candidate.revision)
     return held
 
 
@@ -604,9 +615,11 @@ def _answered(
     payload = event.output_json or ""
     if isinstance(reply, IssueImplementerResult | IssuePerfEvalResult | GenericIssuePerfEvalResult):
         candidate = _candidate_of(view, job, event.invocation)
-        if candidate is None:
+        if candidate is None or isinstance(candidate, TurnCandidatePending):
             return _with(state, job.holding(payload, event.invocation))
-        return _written_turn(state, reply, payload, candidate)
+        if isinstance(candidate, TurnCandidateFailed):
+            return fail(state, _checkpoint_failure(_writer(job), candidate))
+        return _written_turn(state, reply, payload, candidate.revision)
     return _accept(state, reply, payload, event)
 
 

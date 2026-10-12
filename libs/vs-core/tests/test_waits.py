@@ -8,6 +8,7 @@ import pytest
 
 from vs_core.api import (
     RESOLUTIONS,
+    Access,
     AttemptBudget,
     AttemptId,
     AttemptPhase,
@@ -33,6 +34,8 @@ from vs_core.api import (
     SessionPhase,
     SessionsState,
     SessionView,
+    TurnFailureKind,
+    TurnResult,
     WaitingPhase,
     WaitKind,
     WorkspaceMode,
@@ -51,6 +54,7 @@ from .test_intent_recovery import (
     turn_intent,
 )
 from .test_measurements import submitted
+from .test_write_turn_retention import write_turn_world
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Intent
@@ -294,3 +298,38 @@ def test_every_kind_of_wait_declares_how_core_ends_it_when_nothing_else_does() -
     """A new ``WaitKind`` cannot be added without saying what resolves it."""
     assert set(RESOLUTIONS) == set(WaitKind)
     assert all(resolution.outcome in Outcome for resolution in RESOLUTIONS.values())
+
+
+def _acquiring_without_a_request() -> CoreState:
+    """A charged write turn still acquiring, with no request about its session (#2167)."""
+    state, _ = write_turn_world(access=Access.WRITE_CANDIDATE, charged=True)
+    [invocation] = state.sessions.invocations
+    acquiring = invocation.model_copy(
+        update={"phase": SessionPhase.ACQUIRING, "observation": None, "output_json": None}
+    )
+    idle = state.sessions.sessions[0].model_copy(update={"phase": SessionPhase.IDLE})
+    return state.model_copy(
+        update={
+            "sessions": state.sessions.model_copy(
+                update={"invocations": (acquiring,), "sessions": (idle,)}
+            ),
+            "intents": state.intents.model_copy(update={"intents": ()}),
+        }
+    )
+
+
+def test_a_turn_acquiring_with_no_request_is_a_wait_that_core_ends_with_a_named_reason() -> None:
+    """Nothing carries the turn forward, so the step cancels it and says why."""
+    state = _acquiring_without_a_request()
+    assert [(w.waiter, w.producer) for w in orphan_waits(state)] == [
+        (WaitKind.TURN_ACQUISITION, None)
+    ]
+
+    result = step(state, ClockAdvanced(now_at=2.0))
+
+    assert orphan_waits(result.state) == ()
+    [invocation] = result.state.sessions.invocations
+    assert invocation.phase == SessionPhase.TERMINAL
+    [ended] = [event for event in result.events if isinstance(event, TurnResult)]
+    assert ended.failure == TurnFailureKind.CANCELLED
+    assert "acquisition stalled" in ended.detail

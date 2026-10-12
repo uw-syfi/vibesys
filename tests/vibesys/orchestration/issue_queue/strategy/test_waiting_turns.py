@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import assume, given, settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.checkpoint_faults import CHECKPOINTS, with_checkpoints
 from tests.vibesys.orchestration.issue_queue.strategy._replies import evaluated, implemented, judged
@@ -26,7 +26,6 @@ from tests.vibesys.orchestration.issue_queue.strategy._waiting import (
 )
 
 from vs_core.api import AttemptPhase, RunStatus
-from vs_core.testing.liveness import LivenessViolationError
 from vs_runtime.api.testing import HostOptions
 
 if TYPE_CHECKING:
@@ -168,26 +167,50 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
         ]
 
 
-def _stalls_the_judge(checkpoints: tuple[str, ...], roles: tuple[str, ...]) -> bool:
-    """The known gap of #2167: a resumed implementer's write checkpoint fails before a judge turn."""
-    return roles != ("judge",) and checkpoints[:2] == ("succeeded", "failed")
-
-
-@settings(max_examples=10, deadline=None, derandomize=True, database=None)
-@given(checkpoints=CHECKPOINTS, roles=st.sampled_from((("implementer", "judge"), ("implementer",))))
-def test_a_run_ends_whatever_the_checkpoint_of_a_waiting_turn_does(
-    tmp_path_factory: pytest.TempPathFactory, checkpoints: tuple[str, ...], roles: tuple[str, ...]
+@settings(max_examples=15, deadline=None, derandomize=True, database=None)
+@given(
+    checkpoints=CHECKPOINTS,
+    roles=st.sampled_from((("implementer", "judge"), ("implementer",))),
+    waits=st.lists(st.booleans(), min_size=1, max_size=3).map(tuple),
+)
+def test_a_run_ends_whatever_the_checkpoint_of_a_turn_does(
+    tmp_path_factory: pytest.TempPathFactory,
+    checkpoints: tuple[str, ...],
+    roles: tuple[str, ...],
+    waits: tuple[bool, ...],
 ) -> None:
-    """A turn that asked to wait is suspended or failed with a reason, never left waiting."""
-    assume(not _stalls_the_judge(checkpoints, roles))
+    """A write turn whose checkpoint fails ends its job with a reason, and no judge reads it.
+
+    Whether the turn waits first or not, and whichever checkpoint answers fail, the run ends:
+    a turn that asked to wait is suspended or failed with a reason, and a turn whose
+    workspace was not retained is never reviewed (#2167).
+    """
     scenario = Scenario(
-        waits=(True,), delays=(0,), verdicts=(True,), roles=roles, checkpoints=checkpoints
+        waits=waits, delays=(0,), verdicts=(True,), roles=roles, checkpoints=checkpoints
     )
     finished = run_waiting(tmp_path_factory.mktemp("checkpoints"), scenario)
 
     assert finished.core.run.status == RunStatus.TERMINAL
     for attempt in finished.core.attempts.attempts:
         assert attempt.phase == AttemptPhase.TERMINAL
+
+
+@pytest.mark.parametrize("waits", [True, False])
+def test_a_failed_write_checkpoint_fails_the_issue_instead_of_stalling_the_judge(
+    tmp_path: Path, *, waits: bool
+) -> None:
+    """The implementer's write checkpoint fails (after a wait's checkpoint succeeded, if any)."""
+    scenario = Scenario(
+        waits=(waits,),
+        delays=(0,),
+        verdicts=(True,),
+        checkpoints=("succeeded", "failed") if waits else ("failed",),
+    )
+    finished = run_waiting(tmp_path, scenario)
+
+    assert finished.core.run.status == RunStatus.TERMINAL
+    assert finished.core.run.result is not None
+    assert finished.core.run.result.outcome != "success"
 
 
 def test_a_declined_checkpoint_fails_the_waiting_turn_instead_of_stalling_the_run(
@@ -199,20 +222,3 @@ def test_a_declined_checkpoint_fails_the_waiting_turn_instead_of_stalling_the_ru
 
     assert finished.core.run.status == RunStatus.TERMINAL
     assert finished.core.evaluation.continuations == ()
-
-
-@pytest.mark.xfail(
-    raises=LivenessViolationError,
-    strict=True,
-    reason="gap (owner: vs-core, #2167): a judge turn is never dispatched after the resumed "
-    "implementer's write checkpoint fails, and no wait names it",
-)
-def test_a_failed_write_checkpoint_of_a_resumed_turn_does_not_stall_the_judge(
-    tmp_path: Path,
-) -> None:
-    scenario = Scenario(
-        waits=(True,), delays=(0,), verdicts=(True,), checkpoints=("succeeded", "failed")
-    )
-    assert _stalls_the_judge(scenario.checkpoints, scenario.roles)
-    finished = run_waiting(tmp_path, scenario)
-    assert finished.core.run.status == RunStatus.TERMINAL

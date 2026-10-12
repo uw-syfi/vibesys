@@ -154,25 +154,44 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
         ]
 
 
-def _run_with_checkpoints(root: Path, checkpoints: tuple[str, ...], polls: int) -> Run:
-    """A one-round run whose waiting turn finds its checkpoint answered per ``checkpoints``."""
-    script, host = _world(root, waits=(True,), polls=(polls,), rounds=1, roles=("implementer",))
+def _run_with_checkpoints(
+    root: Path,
+    checkpoints: tuple[str, ...],
+    polls: int,
+    *,
+    waits: tuple[bool, ...] = (True,),
+    roles: tuple[str, ...] = ("implementer",),
+) -> Run:
+    """A one-round run whose turns find their checkpoints answered per ``checkpoints``."""
+    script, host = _world(root, waits=waits, polls=(polls,), rounds=1, roles=roles)
     return run_shell(with_checkpoints(script, checkpoints), host=host, max_rounds=1)
 
 
 @settings(max_examples=10, deadline=None, derandomize=True, database=None)
-@given(checkpoints=CHECKPOINTS, polls=st.integers(0, 3))
-def test_a_run_ends_whatever_the_checkpoint_of_a_waiting_turn_does(
-    tmp_path_factory: pytest.TempPathFactory, checkpoints: tuple[str, ...], polls: int
+@given(
+    checkpoints=CHECKPOINTS,
+    polls=st.integers(0, 3),
+    waits=st.lists(st.booleans(), min_size=1, max_size=3).map(tuple),
+    roles=st.sampled_from((("implementer",), ("implementer", "judge"))),
+)
+def test_a_run_ends_whatever_the_checkpoint_of_a_turn_does(
+    tmp_path_factory: pytest.TempPathFactory,
+    checkpoints: tuple[str, ...],
+    polls: int,
+    waits: tuple[bool, ...],
+    roles: tuple[str, ...],
 ) -> None:
     """A turn that asked to wait is suspended or failed with a reason, never left waiting.
 
     Core publishes the suspension only once the turn's workspace is checkpointed. Whether
-    the executor retains the workspace or fails the checkpoint, the run must reach
-    terminal with every attempt closed and no wait left without something to end it
-    (`run_shell` asserts the last).
+    the turn waits or not, and whether the executor retains the workspace or fails the
+    checkpoint, the run must reach terminal with every attempt closed and no wait left
+    without something to end it (`run_shell` asserts the last). A role that depends on the
+    write turn (the judge) is never started on a workspace core did not retain (#2167).
     """
-    finished = _run_with_checkpoints(tmp_path_factory.mktemp("checkpoints"), checkpoints, polls)
+    finished = _run_with_checkpoints(
+        tmp_path_factory.mktemp("checkpoints"), checkpoints, polls, waits=waits, roles=roles
+    )
 
     assert finished.core.run.status == RunStatus.TERMINAL
     for attempt in finished.core.attempts.attempts:

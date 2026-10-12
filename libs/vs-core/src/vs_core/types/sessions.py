@@ -520,6 +520,20 @@ class CheckpointStalled(Value):
     invocation: InvocationRef
 
 
+class AcquisitionStalled(Value):
+    """Internal signal: a turn is acquiring and nothing is left that could carry it forward.
+
+    Raised by the step when it reaches quiescence with an invocation still acquiring (its
+    charge or input reservation was never granted, or its session lease was lost) and no
+    request about its session live or in flight. The sessions reducer ends the turn with a
+    cancelled ``TurnResult`` whose detail names the stall, and completes its decision cancelled.
+    A stall naming an invocation that still has a producer changes nothing.
+    """
+
+    kind: Literal["acquisition_stalled"] = "acquisition_stalled"
+    invocation: InvocationRef
+
+
 class EnsureSession(RequestBase):
     """Acquire a lease or positively reattach required_resource.
 
@@ -823,7 +837,8 @@ type SessionsEvent = Annotated[
     | RunSessionsDrainRequested
     | RunInvocationCheckpointRequested
     | RunInvocationCheckpointObserved
-    | CheckpointStalled,
+    | CheckpointStalled
+    | AcquisitionStalled,
     Field(discriminator="kind"),
 ]
 type SessionRequest = Annotated[

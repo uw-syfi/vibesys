@@ -275,12 +275,23 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
 
 
 @settings(max_examples=10, deadline=None, derandomize=True, database=None)
-@given(checkpoints=CHECKPOINTS, polls=st.integers(0, 3))
-def test_a_run_ends_whatever_the_checkpoint_of_a_waiting_turn_does(
-    tmp_path_factory: pytest.TempPathFactory, checkpoints: tuple[str, ...], polls: int
+@given(
+    checkpoints=CHECKPOINTS,
+    polls=st.integers(0, 3),
+    waits=st.lists(st.booleans(), min_size=1, max_size=3).map(tuple),
+)
+def test_a_run_ends_whatever_the_checkpoint_of_a_turn_does(
+    tmp_path_factory: pytest.TempPathFactory,
+    checkpoints: tuple[str, ...],
+    polls: int,
+    waits: tuple[bool, ...],
 ) -> None:
-    """A turn that asked to wait is suspended or failed with a reason, never left waiting."""
-    scenario = replace(JUDGE_WAITS, roles=("implementer", "judge"), polls=(polls,))
+    """A turn that asked to wait is suspended or failed with a reason, never left waiting.
+
+    The implementer waits or not, and its write checkpoint may fail: the judge that depends
+    on it is never left without a turn (#2167).
+    """
+    scenario = replace(JUDGE_WAITS, roles=("implementer", "judge"), polls=(polls,), waits=waits)
     finished = run_waiting(
         tmp_path_factory.mktemp("checkpoints"), replace(scenario, checkpoints=checkpoints)
     )

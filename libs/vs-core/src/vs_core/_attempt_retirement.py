@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._acquisition_stall import is_stalled_acquisition
 from .types.attempts import (
     AttemptCheckpoint,
     AttemptClosure,
@@ -396,6 +397,16 @@ def _discover(owner: AttemptView, context: AttemptsContext) -> AttemptView:
 
 
 def _invocation_drained(
+    owner: AttemptView, context: AttemptsContext, invocation: Invocation
+) -> bool:
+    # A turn core ended because nothing could carry its acquisition never reached an executor,
+    # so there is no dispatch to prove it drained with.
+    if owner.closure is not None and is_stalled_acquisition(invocation):
+        return True
+    return _dispatched_invocation_drained(owner, context, invocation)
+
+
+def _dispatched_invocation_drained(
     owner: AttemptView, context: AttemptsContext, invocation: Invocation
 ) -> bool:
     observation = invocation.observation

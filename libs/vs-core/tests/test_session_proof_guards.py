@@ -15,7 +15,7 @@ from .test_session_turns import (
     reload_step,
     turn,
     turn_observation,
-    waiting_turn_state,
+    waiting_for_reservation,
 )
 
 
@@ -24,7 +24,7 @@ from .test_session_turns import (
 def test_input_delivery_optional_authority_guard_matrix(sequence: int) -> None:
     spec = turn()
     item = occurrence(0, 0)
-    state = reload_step(waiting_turn_state(spec), core.SessionInputReceived(input=item)).state
+    state = reload_step(waiting_for_reservation(spec), core.SessionInputReceived(input=item)).state
     dispatched = reload_step(state, core.InputReservationRequested(invocation=invocation(spec)))
     request = dispatched.requests[0]
     observation = turn_observation(

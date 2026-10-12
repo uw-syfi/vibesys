@@ -10,6 +10,7 @@ from . import _session_inputs, _session_stalls, _session_turns
 from ._proofs import Proven, committed_stop
 from .types.kernel import AreaChange
 from .types.sessions import (
+    AcquisitionStalled,
     CheckpointStalled,
     InputAcceptanceObserved,
     InputReservationReleased,
@@ -113,6 +114,7 @@ EVENT_TO_SUBAREA: Mapping[type[SessionsEvent], Reducer] = MappingProxyType(
         SessionDrainRequested: _shared_observation,
         InvocationCheckpointAvailable: _shared_observation,
         CheckpointStalled: _session_stalls.advance_stalled_checkpoint_waits,
+        AcquisitionStalled: _session_stalls.advance_stalled_acquisitions,
         SessionInputReceived: _session_inputs.advance,
         InputReservationRequested: _session_inputs.advance,
         InputAcceptanceObserved: _session_inputs.advance,

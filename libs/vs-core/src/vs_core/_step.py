@@ -30,7 +30,7 @@ from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
 from ._values import digest
-from ._waits import stalled_checkpoint_waits, undispatchable_requests
+from ._waits import stalled_acquisitions, stalled_checkpoint_waits, undispatchable_requests
 from .types.attempts import (
     AttemptAdmitted,
     AttemptPhase,
@@ -134,6 +134,7 @@ from .types.scheduling import (
 from .types.session_inputs import InputDropped, InputDropReason
 from .types.sessions import (
     Access,
+    AcquisitionStalled,
     CancelTurn,
     CheckpointStalled,
     CloseSession,
@@ -641,7 +642,8 @@ def _stall_entries(
 ) -> list[_Pending]:
     """One pending signal per wait that nothing can end, once per step.
 
-    The waits are a checkpoint wait without a producer (``CheckpointStalled``) and a prepared
+    The waits are a checkpoint wait without a producer (``CheckpointStalled``), a turn acquiring
+    with nothing to carry it (``AcquisitionStalled``) and a prepared
     request that can never be dispatched (``RequestUndispatchable``). A signal already raised
     in this step is not raised again: if its reducer could not end the wait (an ambiguous
     record it refuses to act on), the wait stays visible to the orphan check instead of the
@@ -655,6 +657,10 @@ def _stall_entries(
             for invocation in stalled_checkpoint_waits(
                 state.sessions, state.intents.intents, in_flight
             )
+        ),
+        *(
+            AcquisitionStalled(invocation=invocation)
+            for invocation in stalled_acquisitions(state.sessions, state.intents.intents, in_flight)
         ),
         *(
             RequestUndispatchable(request_id=request_id)

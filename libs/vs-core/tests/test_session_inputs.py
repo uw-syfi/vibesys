@@ -12,7 +12,7 @@ from .test_session_turns import (
     scope,
     turn,
     turn_observation,
-    waiting_turn_state,
+    waiting_for_reservation,
 )
 from .test_terminal_inputs import closing_state, drain
 
@@ -39,7 +39,7 @@ def test_occurrences_reserve_in_total_order_and_dispatch_once_across_reloads(
     sequences: list[int], data: st.DataObject
 ) -> None:
     spec = turn()
-    state = waiting_turn_state(spec)
+    state = waiting_for_reservation(spec)
     inputs = tuple(occurrence(index, sequence) for index, sequence in enumerate(sequences))
     ordered = data.draw(st.permutations(inputs))
     for item in (*ordered, *ordered):
@@ -86,7 +86,7 @@ def test_reservation_never_silently_retargets_an_occurrence(target: str, generat
         ),
     }
     item = occurrence(0, 0, targets[target])
-    state = reload_step(waiting_turn_state(spec), core.SessionInputReceived(input=item)).state
+    state = reload_step(waiting_for_reservation(spec), core.SessionInputReceived(input=item)).state
     result = reload_step(state, core.InputReservationRequested(invocation=ref))
     eligible = target in ("scope", "invocation")
     assert (result.state.sessions.inputs[0].reserved_to == ref) == eligible
@@ -108,7 +108,7 @@ def test_delivery_and_nonacceptance_are_separate_receipt_guards(
     item = occurrence(
         0, 0, core.InvocationInputTarget(invocation=ref) if target == "invocation" else None
     )
-    state = reload_step(waiting_turn_state(spec), core.SessionInputReceived(input=item)).state
+    state = reload_step(waiting_for_reservation(spec), core.SessionInputReceived(input=item)).state
     dispatched = reload_step(state, core.InputReservationRequested(invocation=ref))
     event = core.TurnObserved(
         invocation=ref,
@@ -151,7 +151,7 @@ def test_duplicate_reordered_stale_acceptance_never_redelivers(orders: list[int]
     spec = turn()
     ref = invocation(spec)
     state = reload_step(
-        waiting_turn_state(spec), core.SessionInputReceived(input=occurrence(0, 0))
+        waiting_for_reservation(spec), core.SessionInputReceived(input=occurrence(0, 0))
     ).state
     dispatched = reload_step(state, core.InputReservationRequested(invocation=ref))
     base = turn_observation(
