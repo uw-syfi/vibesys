@@ -74,6 +74,19 @@ def test_a_job_writes_to_a_private_tmp_that_the_node_never_sees(
     )
 
 
+def test_a_job_has_a_writable_tmpdir_even_when_the_requested_tmpdir_is_absent_from_its_namespace(
+    gpu_run: OpenRun,
+) -> None:
+    result = gpu_run.agent(
+        'TMPDIR=/nonexistent-host-scratch "$VIBESYS_GPU" -- sh -c '
+        '\'for d in "$TMPDIR" "$TMP" "$TEMP" /tmp; do '
+        'echo ok > "$d/probe" && cat "$d/probe"; done; echo "$TMPDIR"\''
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.output.endswith("ok\nok\nok\nok\n/tmp\n")
+
+
 def test_a_job_runs_as_the_unprivileged_host_user_in_its_own_pid_namespace(
     gpu_run: OpenRun,
 ) -> None:

@@ -173,6 +173,10 @@ _MACOS_SYSTEM_READ_ROOTS: tuple[str, ...] = (
 )
 
 
+_PRIVATE_TMP = "/tmp"  # noqa: S108  # lint-waiver: LW-010107 [S108]; bubblewrap creates this private namespace tmpfs for the sandbox.
+_TEMP_ENV_NAMES = ("TMPDIR", "TMP", "TEMP")
+
+
 def system_read_roots() -> tuple[str, ...]:
     """Return the system directories a confined job sees on this host, read-only."""
     return _MACOS_SYSTEM_READ_ROOTS if sys.platform == "darwin" else _SYSTEM_READ_ROOTS
@@ -280,8 +284,14 @@ class HostSandbox(WorkspaceSandbox):
             "--dev",
             "/dev",
             "--tmpfs",
-            "/tmp",  # noqa: S108  # lint-waiver: LW-010107 [S108]; bubblewrap creates this private namespace tmpfs for the sandbox.
+            _PRIVATE_TMP,
         ]
+        # The inherited TMPDIR names a host path (a node-local scratch disk, say)
+        # that does not exist in the namespace, so tools that need scratch space
+        # (Nsight Compute, compilers) fail. Point every convention at the
+        # private tmpfs; it vanishes with the namespace when the job ends.
+        for name in _TEMP_ENV_NAMES:
+            cmd += ["--setenv", name, _PRIVATE_TMP]
         # Leaf config mounts such as ~/.codex/auth.json need their destination
         # parents to exist in bubblewrap's otherwise-empty /home tree. These
         # directories are ephemeral inside the namespace; only the explicitly
