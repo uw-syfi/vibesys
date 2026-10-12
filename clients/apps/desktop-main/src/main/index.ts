@@ -28,6 +28,7 @@ import {
   registerAppScheme,
   serveBundledUi,
 } from './app-security.js';
+import {AppStartup} from './app-startup.js';
 import {Desktop} from './desktop.js';
 import {type LaunchPlan, parseLaunch} from './launch-args.js';
 import {WelcomeFeed} from './welcome-feed.js';
@@ -139,16 +140,22 @@ function main(): void {
     process.exit(2);
   }
   registerAppScheme();
-  let manager: ConnectionManager | null = null;
+  const launches = new AppLaunches<LaunchPlan>(error => log(error.message));
+  const startup = new AppStartup<LaunchPlan, ConnectionManager, Desktop>({
+    ready: () => app.whenReady(),
+    connectionManager,
+    openWindow,
+    openInitial: (desktop, initial) => launches.ready(desktop, initial),
+    log,
+  });
   const lifecycle = new AppLifecycle({
     // Runs are detached and keep going; quitting ends this app's channels and ssh masters only.
-    release: async () => manager?.[Symbol.asyncDispose](),
+    release: () => startup.release(),
     // The app's one exit call site.
     exit: code => app.exit(code),
     scheduleTimeout: realTimers,
     releaseBoundMs: RELEASE_BOUND_MS,
   });
-  const launches = new AppLaunches<LaunchPlan>(error => log(error.message));
   // One instance per user-data directory, the settings files' only writer: a second launch hands
   // its command line to this one (`second-instance`) and exits.
   if (!app.requestSingleInstanceLock()) {
@@ -170,16 +177,7 @@ function main(): void {
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => app.quit());
   app.on('web-contents-created', (_event, contents) => confineContents(contents, log));
   app.on('window-all-closed', () => app.quit());
-  void app.whenReady().then(async () => {
-    manager = await connectionManager();
-    const desktop = await openWindow(manager);
-    try {
-      await launches.ready(desktop, plan);
-    } catch (error) {
-      log((error as Error).message);
-      lifecycle.quit(1);
-    }
-  });
+  void startup.start(plan, lifecycle);
 }
 
 main();
