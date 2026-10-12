@@ -199,6 +199,49 @@ test('clipped tool arguments and output are named keyboard reading regions', asy
   await unmount(mounted);
 });
 
+test('distinguishes pending tool calls from completed empty results', async () => {
+  const run = runStep(initialCoreState(), {
+    type: 'events',
+    events: [
+      event(1, 'tool_call', {
+        invocation_id: 'turn-1',
+        data: {
+          kind: 'tool_call',
+          tool: 'read_file',
+          call_id: 'call-1',
+          args: {path: 'src/main.py'},
+        },
+      }),
+      event(2, 'tool_call', {
+        invocation_id: 'turn-2',
+        data: {
+          kind: 'tool_call',
+          tool: 'read_file',
+          call_id: 'call-2',
+          args: {path: 'src/empty.py'},
+        },
+      }),
+      event(3, 'tool_result', {
+        invocation_id: 'turn-2',
+        data: {
+          kind: 'tool_result',
+          tool: 'read_file',
+          call_id: 'call-2',
+          content: '',
+        },
+      }),
+    ],
+  }).state;
+  const mounted = await mountRun(run);
+  const rows = mounted.container.querySelectorAll<HTMLElement>('.transcript-row');
+
+  expect(rows).toHaveLength(2);
+  expect(rows[0]?.textContent).toContain('Waiting for tool output…');
+  expect(rows[1]?.textContent).toContain('No tool output was returned.');
+  expect(rows[1]?.textContent).not.toContain('Waiting for tool output…');
+  await unmount(mounted);
+});
+
 interface DeferredReply {
   readonly promise: Promise<RunCommandOutcome>;
   readonly resolve: (response: RunCommandOutcome) => void;

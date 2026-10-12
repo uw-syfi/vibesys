@@ -99,6 +99,7 @@ test('keeps every text token readable on the surface where the viewer uses it', 
       ['subtle', 'surface'],
       ['success', 'surface'],
       ['failure', 'surface'],
+      ['accent', 'pageBackground'],
       ['warning', 'warningSurface'],
       ['onAccent', 'accent'],
       ['onFailure', 'failure'],
@@ -106,9 +107,19 @@ test('keeps every text token readable on the surface where the viewer uses it', 
     for (const [foreground, background] of combinations) {
       expect(
         contrast(palette[foreground], palette[background]),
-        `${name} ${foreground}`,
+        `${name} ${foreground}/${background}`,
       ).toBeGreaterThanOrEqual(4.5);
     }
+  }
+});
+
+test('keeps form field boundaries distinguishable from their actual fill', () => {
+  for (const name of WEB_THEME_NAMES) {
+    const palette = WEB_THEME_TOKENS[name];
+    expect(
+      contrast(palette.border, palette.fieldBackground),
+      `${name} border/fieldBackground`,
+    ).toBeGreaterThanOrEqual(3);
   }
 });
 

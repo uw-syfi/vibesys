@@ -73,6 +73,7 @@ function TranscriptRow({
   const title = entry.toolName ?? entry.label ?? entry.kind;
   const toolArguments =
     entry.toolArguments === undefined ? null : JSON.stringify(entry.toolArguments, null, 2);
+  const content = transcriptContent(entry);
   return (
     <li
       className={`transcript-row transcript-${entry.kind}${entry.tone === undefined ? '' : ` transcript-${entry.tone}`}`}
@@ -100,11 +101,20 @@ function TranscriptRow({
         // biome-ignore lint/a11y/noNoninteractiveTabindex: This named region owns clipped overflow and must receive keyboard scrolling; a textarea would invent editing semantics, while details would hide run evidence.
         tabIndex={0}
       >
-        <pre>{entry.content || 'Waiting for tool output…'}</pre>
+        <pre>{content}</pre>
       </section>
       {entry.truncated === true && (
         <span className="event-truncated">Event payload truncated at the server's size bound.</span>
       )}
     </li>
   );
+}
+
+function transcriptContent(entry: TranscriptEntry): string {
+  if (entry.content.length > 0) return entry.content;
+  if (entry.toolResult !== undefined) return 'No tool output was returned.';
+  if (entry.kind === 'tool' && entry.toolArguments !== undefined) {
+    return 'Waiting for tool output…';
+  }
+  return '';
 }

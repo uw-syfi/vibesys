@@ -45,7 +45,7 @@ export const WEB_THEME_TOKENS: Readonly<Record<WebThemeName, WebThemeTokens>> = 
   dark: {
     pageBackground: '#0c1018',
     surface: '#131a26',
-    border: '#526177',
+    border: '#596b83',
     text: '#e9edf5',
     subtle: '#a9b8d0',
     accent: '#79a8ff',
@@ -123,7 +123,7 @@ export const WEB_THEME_TOKENS: Readonly<Record<WebThemeName, WebThemeTokens>> = 
     border: '#7c7f93',
     text: '#4c4f69',
     subtle: '#5c5f77',
-    accent: '#1e66f5',
+    accent: '#1d63ed',
     onAccent: '#ffffff',
     success: '#1f6b50',
     failure: '#c20d36',
