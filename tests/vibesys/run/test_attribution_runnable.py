@@ -1,14 +1,18 @@
-"""A profile-guided attribution command is offered only where the run can execute it (#2118).
+"""A profile-guided attribution command is refused at start when its site lacks the executable (#2118).
 
-The strategy runs the manifest's `[profile_guided]` command through the run's command runner,
-which is the agent's shell (the editor container under Slurm). That container binds no GPU and
-lacks the task's environment, so under Slurm the command exited 127 in every capture. Run start
-now asks the run environment, and refuses with an error naming the command and the reason
-before any agent work.
+The strategy runs the manifest's `[profile_guided]` command through the run's command runner.
+Run start asks the run environment whether the executable exists at that site. An environment
+that can inspect the site (the host) refuses an absent executable, naming the command. One that
+cannot (Docker, Slurm's editor container) assumes it: v14's passing run (pg5, `python3
+attribute.py`, stdlib only) must still start, and v14's pg1 (`bash py.sh`, whose script called an
+interpreter missing from the container) cannot be told apart at start, so it fails on its first
+capture, which names the command and where it ran (see the strategies' tests).
 """
 
 from __future__ import annotations
 
+import os
+import shutil
 from typing import TYPE_CHECKING
 
 import pytest
@@ -102,12 +106,13 @@ def _request(root: Path, environment: str, loop: str, command: list[str]) -> Run
     environment=st.sampled_from(_ENVIRONMENTS),
     loop=st.sampled_from(_LOOPS),
 )
-def test_an_attribution_command_is_runnable_where_offered_or_refused_by_name(
+def test_an_attribution_command_is_accepted_or_refused_by_name_at_start(
     tmp_path_factory: pytest.TempPathFactory, command: list[str], environment: str, loop: str
 ) -> None:
-    command = ["/bin/true", *command[1:]] if environment == "host" else command
     request = _request(tmp_path_factory.mktemp("attr"), environment, loop, command)
-    if environment not in _SLURM_ENVIRONMENTS:
+    inspectable = environment == "host" and os.sep not in command[0]
+    present = inspectable and shutil.which(command[0]) is not None
+    if not inspectable or present:
         validate_run_request(request)
         return
     with pytest.raises(ConfigurationError) as error:
@@ -116,4 +121,23 @@ def test_an_attribution_command_is_runnable_where_offered_or_refused_by_name(
     assert diagnostic.code == "attribution_command_unavailable"
     assert diagnostic.stage == "profiler_validation"
     assert command[0] in diagnostic.message
-    assert "editor container" in diagnostic.message
+
+
+@pytest.mark.parametrize("environment", sorted(_SLURM_ENVIRONMENTS))
+def test_a_stdlib_script_command_starts_under_every_slurm_mode(
+    tmp_path: Path, environment: str
+) -> None:
+    """v14 pg5: `python3 attribute.py` ran in the editor container and must stay accepted."""
+    request = _request(
+        tmp_path, environment, "profile-guided-single-agent", ["python3", "attribute.py"]
+    )
+    validate_run_request(request)
+
+
+def test_a_host_run_refuses_a_command_whose_interpreter_is_missing(tmp_path: Path) -> None:
+    """v14 pg1's shape on the host, where the site can be inspected: refused before any agent."""
+    request = _request(
+        tmp_path, "host", "profile-guided-single-agent", ["no-such-interpreter", "attribute.py"]
+    )
+    with pytest.raises(ConfigurationError, match="no-such-interpreter"):
+        validate_run_request(request)

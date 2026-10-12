@@ -19,6 +19,9 @@ class ToolSite(StrEnum):
 
     AGENT_SHELL = "agent_shell"
     """The agent's own shell: the editor container, or the host when the agent runs there."""
+    COMMAND_ENVIRONMENT = "command_environment"
+    """Where the run's own commands execute (build, evaluation, attribution): a container
+    image or host whose contents only the executing environment can inspect."""
     GPU_WORKLOAD = "gpu_workload"
     """Wherever the GPU workload runs: the accelerator container, a Slurm job, or the cluster."""
 

@@ -188,22 +188,23 @@ def resolve_run_profiler(
 
 
 def _require_attribution_runnable(command: tuple[str, ...], environment: RunEnvironment) -> None:
-    """Refuse a profile-guided attribution command the run's command environment cannot run.
+    """Refuse a profile-guided attribution command whose executable is not at its site.
 
-    The command runs through the run's command runner, in the agent's shell (the editor
-    container under Slurm), so the environment is asked about that site. Offering it where
-    it cannot run would fail the same way (exit 127) in every attribution capture.
+    The command runs through the run's command runner, at the command environment site.
+    An environment that can inspect that site (the host) refuses an executable that is not
+    there, naming the command and the missing piece, before any agent work; one that cannot
+    (a container image, a Slurm editor container) assumes it, and a command that then fails
+    is reported by the strategy with the command and where it ran.
     """
-    location = environment.locate_tool(command[0], ToolSite.AGENT_SHELL)
+    location = environment.locate_tool(command[0], ToolSite.COMMAND_ENVIRONMENT)
     if not location.available:
         raise ConfigurationError(
             ConfigurationDiagnostic(
                 code="attribution_command_unavailable",
                 stage="profiler_validation",
                 message=(
-                    f"[profile_guided] command {shlex.join(command)!r} cannot run here: "
-                    f"{location.reason}. Use a run environment whose command runner has the "
-                    "task's tools, or remove [profile_guided]."
+                    f"[profile_guided] command {shlex.join(command)!r} cannot run in the run's "
+                    f"command environment: {location.reason}."
                 ),
             )
         )

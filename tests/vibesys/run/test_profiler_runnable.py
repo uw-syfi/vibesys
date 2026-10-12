@@ -197,5 +197,5 @@ def test_the_host_locates_a_tool_on_its_path_and_names_the_one_it_lacks() -> Non
 
 
 def test_policy_sites_are_the_runtime_sites() -> None:
-    """Policy names sites it cannot import from the runtime, so the two must agree."""
-    assert {site.value for site in ProfilerSite} == {site.value for site in ToolSite}
+    """Policy names sites it cannot import from the runtime, so each must be a runtime site."""
+    assert {site.value for site in ProfilerSite} <= {site.value for site in ToolSite}

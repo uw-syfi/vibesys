@@ -174,8 +174,8 @@ class _ClusterGates:
     def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
         if site is ToolSite.AGENT_SHELL:
             return ToolLocation.missing(
-                f"`{executable}` would run in the editor container, which binds no GPU and "
-                "lacks the task's environment, because this mode runs GPU work on the cluster"
+                f"`{executable}` would run in the editor container, but this mode runs "
+                "profiling on the cluster, not in the container"
             )
         return assumed_tool(executable)
 
@@ -217,10 +217,12 @@ class _AgentGpuMode:
         )
 
     def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
+        if site is ToolSite.COMMAND_ENVIRONMENT:
+            return assumed_tool(executable)
         if site is ToolSite.AGENT_SHELL:
             return ToolLocation.missing(
-                f"`{executable}` would run in the editor container, which binds no GPU and "
-                "lacks the task's environment, because GPU work runs in Slurm jobs"
+                f"`{executable}` would run in the editor container, which ships no "
+                "profiling tools, and the workload runs in Slurm jobs, not in the container"
             )
         command = find_job_tool(
             executable, path_env=self.job_path, toolkit_patterns=self.toolkit_patterns
