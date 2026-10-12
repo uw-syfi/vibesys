@@ -1,7 +1,7 @@
 """Public surface of the issue-queue strategy package."""
 
 from vibesys.orchestration.issue_queue.strategy._config import IssueQueueConfig
-from vibesys.orchestration.issue_queue.strategy._flow import BOOTSTRAP_TEMPLATE, BOOTSTRAP_TITLE
+from vibesys.orchestration.issue_queue.strategy._flow import BOOTSTRAP_TEMPLATE, bootstrap_title
 from vibesys.orchestration.issue_queue.strategy._ids import IDS, role_id
 from vibesys.orchestration.issue_queue.strategy._measure import measurement_recipe
 from vibesys.orchestration.issue_queue.strategy._operations import (
@@ -44,7 +44,6 @@ from vibesys.orchestration.issue_queue.strategy._strategy import IssueQueueStrat
 
 __all__ = [
     "BOOTSTRAP_TEMPLATE",
-    "BOOTSTRAP_TITLE",
     "IDS",
     "IMPLEMENTER_REPLY",
     "JUDGE_REPLY",
@@ -74,6 +73,7 @@ __all__ = [
     "ReviewPrompt",
     "Role",
     "WaitUnrecordedPrompt",
+    "bootstrap_title",
     "measurement_recipe",
     "plain_operation_registrations",
     "plain_operation_registry",

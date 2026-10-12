@@ -67,10 +67,11 @@ def harness(
     *,
     deadline_at: float = Harness.deadline_at,
     lifecycle: frozenset[LifecycleCapability] = frozenset(),
+    facts: RunFacts = FACTS,
 ) -> Harness:
     return Harness(
         registry=plain_operation_registry(),
-        facts=FACTS,
+        facts=facts,
         limits=limits(settings),
         envelope_type=RunEnvelope[IssueQueueStrategyState],
         requirements=requirements_for(),
