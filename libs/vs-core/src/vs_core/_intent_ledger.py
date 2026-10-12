@@ -426,6 +426,23 @@ def _next_phase(intent: Intent, observation: Observation) -> tuple[IntentPhase, 
     return IntentPhase.DISPATCHED, intent.retry_count
 
 
+_EXHAUSTED = "retries-exhausted:"
+
+
+def is_late(state: IntentsState, event: RequestObserved) -> bool:
+    """Whether *event* answers a request core already ended because its retries ran out.
+
+    Core wrote that failure itself and told the owner. Whatever the executor says next is too
+    late to change it, and its sequence may equal the one core invented, so it is ignored.
+    """
+    root = _unique(state, event.observation.request_id)
+    return (
+        root is not None
+        and root.observation is not None
+        and root.observation.event_id.root.startswith(_EXHAUSTED)
+    )
+
+
 def _exhausted(context: IntentsContext, intent: Intent, facts: Facts) -> Facts:
     """The conclusive failure a request ends with once its retries are used up.
 
@@ -440,7 +457,7 @@ def _exhausted(context: IntentsContext, intent: Intent, facts: Facts) -> Facts:
     return TargetObservation(
         observation=observation.model_copy(
             update={
-                "event_id": EventId(root=f"retries-exhausted:{intent.request_id.root}"),
+                "event_id": EventId(root=f"{_EXHAUSTED}{intent.request_id.root}"),
                 "sequence": observation.sequence + 1,
                 "accepted": False,
                 "terminal": True,

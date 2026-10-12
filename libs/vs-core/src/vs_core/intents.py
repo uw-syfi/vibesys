@@ -19,10 +19,11 @@ from .types.intents import (
     RequestUndispatchable,
     RetryDue,
 )
+from .types.kernel import AreaChange
 
 if TYPE_CHECKING:
     from .types.intents import IntentsEvent, IntentsState
-    from .types.kernel import AreaChange, IntentsContext
+    from .types.kernel import IntentsContext
 
 
 type Reducer = Callable[[IntentsState, IntentsContext, IntentsEvent], AreaChange[IntentsState]]
@@ -37,6 +38,8 @@ def _observation(
     facts are not persisted in the request ledger. Recovery preserves ledger
     fields; the wrapper merges outputs before the kernel registers any request.
     """
+    if isinstance(event, RequestObserved) and _intent_ledger.is_late(state, event):
+        return AreaChange(state=state)
     ledger = _intent_ledger.advance(state, context, event)
     recovery = _intent_recovery.advance(ledger.state, context, event)
     return recovery.model_copy(

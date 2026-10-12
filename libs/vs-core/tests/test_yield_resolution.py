@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -286,6 +286,34 @@ SCENARIOS = st.builds(
 
 
 @settings(max_examples=300, deadline=None)
+@example(
+    scenario=Scenario(
+        access=core.Access.READ_ONLY,
+        charged=True,
+        phase=core.AttemptPhase.ACTIVE,
+        peer_writer=False,
+        answers=(
+            (core.ObservationStatus.FAILED, False, False),
+            (core.ObservationStatus.SUCCEEDED, True, True),
+        ),
+        retire=None,
+        replay=False,
+    )
+)
+@example(
+    scenario=Scenario(
+        access=core.Access.READ_ONLY,
+        charged=True,
+        phase=core.AttemptPhase.ACTIVE,
+        peer_writer=False,
+        answers=(
+            (core.ObservationStatus.FAILED, False, False),
+            (core.ObservationStatus.SUCCEEDED, True, True),
+        ),
+        retire="cancel",
+        replay=False,
+    )
+)
 @given(scenario=SCENARIOS)
 def test_a_turn_that_asked_to_wait_is_suspended_or_failed_whatever_the_checkpoint_does(
     scenario: Scenario,
