@@ -248,6 +248,7 @@ def planner_prompt(
         baseline=state.baseline.metrics,
         input_failure=state.baseline.failure,
         profiling=config.profiling,
+        profile_fields=config.profile_fields,
     )
 
 

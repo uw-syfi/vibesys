@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from vs_evaluation.api import EvidenceMetric, ProfileField
+from vs_evaluation.api import EvidenceMetric, ExecutorRejectedError, ProfileField
 from vs_slurm.api import PORT_PLACEHOLDER, shell_join_with_port
 
 if TYPE_CHECKING:
@@ -198,8 +198,10 @@ def require_profile_fields(
     descriptor = profile_capture_descriptor(command)
     missing = set(fields) - set(descriptor.supported_fields)
     if missing:
+        # A request the capture can never satisfy is a definite refusal, not an
+        # ambiguous submission failure: nothing was sent, and a retry cannot succeed.
         message = "configured capture cannot supply fields: " + ", ".join(sorted(missing))
-        raise ValueError(message)
+        raise ExecutorRejectedError(message)
     index = command.index("--request-json") + 1
     request = json.loads(command[index])
     request["options"]["hip_api"] = True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast, override
 
@@ -372,13 +373,81 @@ class ImplementPortfolioPlan(PortfolioPlan):
         return schema
 
 
-def planner_response_type(revisions: tuple[str, ...], *, profiling: bool) -> type[PortfolioPlan]:
+@dataclass(frozen=True)
+class ProfileOffer:
+    """What a run lets its planner ask of a profile workstream.
+
+    ``fields`` are the measurement fields the run's capture supplies, from
+    ``supported_profile_fields``: the one source for the planner's schema and prompt and for
+    plan validation. A run that cannot profile has no offer at all.
+    """
+
+    fields: tuple[ProfileField, ...]
+
+
+def _offer_profile_fields(schema: dict[str, Any], fields: tuple[ProfileField, ...]) -> None:
+    """Restrict ``required_fields`` in a portfolio schema to the fields the capture supplies.
+
+    With no supported field the property admits only the empty list, so the schema never
+    offers a field the run cannot measure.
+    """
+    definitions = schema["$defs"]
+    if fields:
+        definitions["ProfileField"]["enum"] = [str(field) for field in fields]
+        return
+    del definitions["ProfileField"]
+    offered = definitions["ProfileDecision"]["properties"]["required_fields"]
+    del offered["items"]
+    offered["maxItems"] = 0
+    offered["description"] = "This run's capture supplies no named measurement field: leave empty."
+
+
+def planner_reply_type(offer: ProfileOffer | None) -> type[PortfolioPlan]:
+    """The planner's reply type for a run: it offers exactly what the run can do.
+
+    Without an ``offer`` the schema has no profile workstream kind. With one, the schema
+    lists the capture's fields and no other, and none when the capture supplies none.
+    """
+    if offer is None:
+        return ImplementPortfolioPlan
+
+    @override
+    def schema(
+        _cls: type[PortfolioPlan],
+        by_alias: bool = True,
+        ref_template: str = "#/$defs/{model}",
+        schema_generator: type[GenerateJsonSchema] = _AnyOfTaggedUnions,
+        mode: JsonSchemaMode = "validation",
+        *,
+        union_format: Literal["any_of", "primitive_type_array"] = "any_of",
+    ) -> dict[str, Any]:
+        result = PortfolioPlan.model_json_schema(
+            by_alias=by_alias,
+            ref_template=ref_template,
+            schema_generator=schema_generator,
+            mode=mode,
+            union_format=union_format,
+        )
+        _offer_profile_fields(result, offer.fields)
+        return result
+
+    return cast(
+        "type[PortfolioPlan]",
+        type(
+            "ProfilingPortfolioPlan", (PortfolioPlan,), {"model_json_schema": classmethod(schema)}
+        ),
+    )
+
+
+def planner_response_type(
+    revisions: tuple[str, ...], offer: ProfileOffer | None
+) -> type[PortfolioPlan]:
     """Bind the reply schema to the same immutable revisions pure validation offers.
 
     Parsing keeps the ordinary portfolio contract so an invalid selector reaches
     the portfolio correction with its field path and usable alternatives.
     """
-    base = PortfolioPlan if profiling else ImplementPortfolioPlan
+    base = planner_reply_type(offer)
 
     @override
     def schema(
@@ -448,6 +517,7 @@ __all__ = [
     "PlannerWorkstream",
     "PortfolioPlan",
     "ProfileDecision",
+    "ProfileOffer",
     "ProfilePlan",
     "ReviewResult",
     "StrategyReason",
@@ -455,5 +525,6 @@ __all__ = [
     "WorkstreamKind",
     "WorkstreamPlan",
     "planned_id",
+    "planner_reply_type",
     "planner_response_type",
 ]

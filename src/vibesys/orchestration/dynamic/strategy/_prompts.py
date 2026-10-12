@@ -13,6 +13,7 @@ from pydantic import Field
 from vibesys.metrics import MetricRow, PartialRow
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
 from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionRef, Value
+from vs_runtime.api import ProfileField
 
 
 class PromptTemplate(StrEnum):
@@ -123,6 +124,8 @@ class PlannerPrompt(Value):
     baseline: tuple[MetricRow, ...] = ()
     input_failure: str | None = None
     profiling: bool = False
+    # The measurement fields a profile workstream may require: what the capture supplies.
+    profile_fields: tuple[ProfileField, ...] = ()
 
 
 class PlannerCorrectionPrompt(Value):

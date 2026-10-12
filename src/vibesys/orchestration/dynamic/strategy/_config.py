@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import Field
 
 from vibesys.candidates.api import CandidateConfig
+from vibesys.orchestration.dynamic.models import ProfileOffer
 from vs_core.api import ArtifactRef
+from vs_runtime.api import ProfileField
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.models import DynamicOptions
@@ -43,6 +45,8 @@ class DynamicConfig(CandidateConfig):
     profiling: bool = False
     # Whether a profile workstream also submits a profile measurement after its turn.
     profile_measurement: bool = False
+    # The measurement fields the run's capture supplies: the only ones the planner is offered.
+    profile_fields: tuple[ProfileField, ...] = ()
     max_continuation_rounds: Annotated[int, Field(ge=0)] = 2
     planner_turn_seconds: Duration = 1800.0
     implementer_turn_seconds: Duration = 7200.0
@@ -57,6 +61,11 @@ class DynamicConfig(CandidateConfig):
     def drop_backoff(self, drops: int) -> float:
         """Seconds to wait before re-asking a turn that was already lost ``drops`` times."""
         return min(self.turn_drop_backoff_cap_seconds, self.turn_drop_backoff_seconds * 2**drops)
+
+    @property
+    def profile_offer(self) -> ProfileOffer | None:
+        """What the planner may ask of a profile workstream, or None when none is offered."""
+        return ProfileOffer(self.profile_fields) if self.profiling else None
 
     @property
     def start_budget(self) -> int:

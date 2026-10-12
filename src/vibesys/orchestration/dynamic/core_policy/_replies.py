@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 from vibesys.orchestration.dynamic.models import (
     ImplementerResult,
     ImplementPortfolioPlan,
-    PortfolioPlan,
     ReviewResult,
+    planner_reply_type,
 )
 from vibesys.orchestration.dynamic.strategy.api import (
     IMPLEMENTER_REPLY,
@@ -42,7 +42,7 @@ def reply_schemas(config: DynamicConfig) -> Mapping[SchemaRef, type[BaseModel]]:
     rejects an unknown revision with a correction naming the alternatives.
     """
     return {
-        PLANNER_REPLY: PortfolioPlan if config.profiling else ImplementPortfolioPlan,
+        PLANNER_REPLY: planner_reply_type(config.profile_offer),
         IMPLEMENTER_REPLY: ImplementerReplyModel,
         PROFILER_REPLY: ImplementerReplyModel,
         JUDGE_REPLY: JudgeReplyModel,

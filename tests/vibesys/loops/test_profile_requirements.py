@@ -13,6 +13,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from resources.profilers.rocprof import remote_capture, semantic_capture
 
+from vs_evaluation.api import ExecutorRejectedError
 from vs_runtime.api import ProfileField
 from vs_sandbox.api.slurm import (
     profile_capture_descriptor,
@@ -95,7 +96,7 @@ def test_descriptor_never_silently_drops_requested_fields(fields: tuple[ProfileF
     descriptor = profile_capture_descriptor(command)
     missing = set(fields) - set(descriptor.supported_fields)
     if missing:
-        with pytest.raises(ValueError, match="cannot supply fields") as error:
+        with pytest.raises(ExecutorRejectedError, match="cannot supply fields") as error:
             require_profile_fields(command, fields)
         assert all(field.value in str(error.value) for field in missing)
     else:

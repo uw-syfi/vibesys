@@ -146,7 +146,7 @@ def _parse(
         item.snapshot.revision.revision_id.root for item in context.offered(state, view)
     )
     try:
-        return planner_response_type(revisions, profiling=config.profiling).model_validate_json(
+        return planner_response_type(revisions, config.profile_offer).model_validate_json(
             event.output_json
         ), ""
     except ValidationError as error:
@@ -165,7 +165,7 @@ def _check_json(
         state,
         context.offered(state, view),
         capacity=context.capacity(state, config),
-        profiling=config.profiling,
+        offer=config.profile_offer,
     )
 
 
@@ -204,7 +204,7 @@ def on_turn(
             state,
             context.offered(state, view),
             capacity=context.capacity(state, config),
-            profiling=config.profiling,
+            offer=config.profile_offer,
         )
     )
     # The planner was asked to fill the slots free when the call began. A workstream that

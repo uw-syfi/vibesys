@@ -286,6 +286,7 @@ def representative_context() -> dict[str, object]:
         "inspirations",
         "notes",
         "prior_attempt_artifact_locations",
+        "profile_fields",
         "ranked_bottlenecks",
         "read_only_paths",
         "recommended_skills",

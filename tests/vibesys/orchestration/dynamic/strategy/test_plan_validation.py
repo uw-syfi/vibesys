@@ -14,7 +14,7 @@ from vibesys.orchestration.dynamic.strategy.api import DynamicStrategyState, Pla
 
 def _check(*entries: dict[str, object], capacity: int = 8) -> PlanCheck:
     plan = PortfolioPlan.model_validate_json(plan_reply(*entries))
-    return validate(plan, DynamicStrategyState(), (), capacity=capacity, profiling=False)
+    return validate(plan, DynamicStrategyState(), (), capacity=capacity, offer=None)
 
 
 def test_repeated_id_is_a_violation() -> None:

@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from vs_core.api import MeasurementRecipe, StrategyOperations
-    from vs_runtime.api import ArtifactStore, RunFacts
+    from vs_runtime.api import ArtifactStore, ProfileField, RunFacts
     from vs_runtime.api.core import OperationPorts
     from vs_runtime.api.infrastructure import RunEnvironmentView, TrustedEvaluationPlan
 
@@ -91,6 +91,7 @@ class EvaluationInputs:
     profile_capture_withheld: bool
     """A strategy that offers profile work was denied it: the plan names a profile command and a
     profiler is chosen, but the run environment has no framework-side capture."""
+    profile_fields: tuple[ProfileField, ...]
     accuracy_seconds: float | None
     benchmark_seconds: float | None
     profile_seconds: float | None
@@ -115,6 +116,7 @@ def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
         profiling=profiling,
         profile_measurement=wants_profile_work and run.environment.captures_profile,
         profile_capture_withheld=wants_profile_work and not run.environment.captures_profile,
+        profile_fields=run.environment.supported_profile_fields,
         accuracy_seconds=plan.accuracy_timeout_seconds,
         benchmark_seconds=plan.benchmark_timeout_seconds,
         profile_seconds=plan.profile_timeout_seconds,

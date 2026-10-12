@@ -72,6 +72,12 @@ For measurement-only work, choose a profile workstream: `kind` "profile", a new
 revision), `question` (what uncertainty to measure on that existing revision), and
 `decision_impact` (which next decision depends on the answer). A profile cannot change
 code or produce a candidate.
+{% if profile_fields %}
+A profile may list `required_fields`, the measurements its answer must contain. This run's
+capture supplies only {{ profile_fields | join(', ') }}: list nothing else.
+{% else %}
+This run's capture supplies no named measurement field: leave `required_fields` empty.
+{% endif %}
 {% endif %}
 Choose workstreams that investigate distinct mechanisms or competing hypotheses. Do not
 split one implementation into parallel fragments and do not assign duplicate

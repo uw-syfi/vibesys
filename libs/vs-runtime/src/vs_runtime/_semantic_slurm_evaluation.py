@@ -153,13 +153,22 @@ class SemanticSlurmEvaluationExecutor:
 
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
         """Persist the semantic request before idempotent provider submission."""
-        # Translate first: a stage this executor cannot run is rejected before
-        # any record or candidate worktree exists.
-        provider_request = self._provider_request(request)
-        record = self._record(request)
+        # Validate first: a request this executor cannot run, or that conflicts with
+        # the work already recorded under its handle, is refused before any record
+        # or candidate worktree exists. Each refusal is a typed rejection so the
+        # requester resolves at once; any other exception reads as an ambiguous
+        # submission and leaves the requester waiting.
+        try:
+            provider_request = self._provider_request(request)
+            record = self._record(request)
+        except ExecutorRejectedError:
+            raise
+        except ValueError as error:
+            raise ExecutorRejectedError(str(error)) from error
         existing = self._load(handle_id)
         if existing is not None and existing != record:
-            raise ValueError(f"semantic Slurm handle {handle_id!r} has different work")  # noqa: TRY003  # lint-waiver: LW-930069 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
+            message = f"semantic Slurm handle {handle_id!r} has different work"
+            raise ExecutorRejectedError(message)
         if existing is None:
             self._namespace.save(self._path(handle_id), record)
         execution = await self._execution(handle_id, record)
@@ -249,7 +258,8 @@ class SemanticSlurmEvaluationExecutor:
         )
         snapshots = {stage.snapshot for stage in stages}
         if len(snapshots) != 1:
-            raise ValueError("fused semantic stages must use one candidate snapshot")  # noqa: TRY003  # lint-waiver: LW-930070 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
+            message = "fused semantic stages must use one candidate snapshot"
+            raise ValueError(message)
         return _DurableSemanticSubmission(request=request, snapshot=next(iter(snapshots)))
 
     async def _execution(self, handle_id: str, record: _DurableSemanticSubmission) -> _Execution:

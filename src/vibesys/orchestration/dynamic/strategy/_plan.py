@@ -12,6 +12,7 @@ from typing import Literal
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.orchestration.dynamic.models import (
     PortfolioPlan,
+    ProfileOffer,
     ProfilePlan,
     WorkstreamPlan,
     planned_id,
@@ -202,16 +203,25 @@ def _profile_violation(
     plan: ProfilePlan,
     state: DynamicStrategyState,
     offered: tuple[ParentOption, ...],
-    *,
-    profiling: bool,
+    offer: ProfileOffer | None,
 ) -> PlanViolation | None:
     path = f"workstreams[{position}]"
-    if not profiling:
+    if offer is None:
         return PlanViolation(
             path=f"{path}.kind",
             detail=(
                 "this run cannot produce trusted profile evidence; schedule only implement "
                 "workstreams"
+            ),
+        )
+    unsupported = sorted(set(plan.required_fields) - set(offer.fields))
+    if unsupported:
+        supplied = ", ".join(offer.fields) or "none"
+        return PlanViolation(
+            path=f"{path}.required_fields",
+            detail=(
+                f"this run's capture cannot supply {', '.join(unsupported)}; "
+                f"require only fields it supplies (supplied: {supplied})"
             ),
         )
     used = {item.hypothesis_id for item in state.hypotheses} | _profile_ids(state)
@@ -299,7 +309,7 @@ def validate(
     offered: tuple[ParentOption, ...],
     *,
     capacity: int,
-    profiling: bool,
+    offer: ProfileOffer | None,
 ) -> PlanCheck:
     """Split ``plan`` into schedulable entries and typed violations, never raising."""
     running = in_flight(state)
@@ -330,7 +340,7 @@ def validate(
                 ),
             )
         elif isinstance(entry, ProfilePlan):
-            violation = _profile_violation(position, entry, state, offered, profiling=profiling)
+            violation = _profile_violation(position, entry, state, offered, offer)
         else:
             violation = _implement_identity(
                 position, entry, state, abandoned=abandoned, running=running

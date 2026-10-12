@@ -117,6 +117,7 @@ from vs_sandbox.api.skypilot import (
     resolve_profile,
     stable_cluster_name,
 )
+from vs_sandbox.api.slurm import profile_capture_descriptor
 from vs_sandbox.api.symlink_mounts import (
     SymlinkMountScope,
     collect_symlink_mounts,
@@ -137,6 +138,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_agent.api.images import BuildProgressSink, DockerBuildRunner, ImageBuildProgress
+    from vs_evaluation.api import ProfileField
     from vs_project.api import StateNamespace
     from vs_sandbox.api import (
         CommandRunner,
@@ -210,6 +212,13 @@ class RunEnvironmentView:
         return self.cluster_evaluation is not None and self.cluster_evaluation.captures_profile
 
     @property
+    def supported_profile_fields(self) -> tuple[ProfileField, ...]:
+        """The measurement fields this run's capture can supply; empty when it captures none."""
+        if self.cluster_evaluation is None:
+            return ()
+        return self.cluster_evaluation.supported_profile_fields
+
+    @property
     def parallel_candidate_obstacle(self) -> str | None:
         """Why this session cannot open an isolated session per candidate, or ``None``.
 
@@ -271,6 +280,15 @@ class ClusterEvaluationFacts:
     def captures_profile(self) -> bool:
         """Whether the cluster runs a profile capture for this run."""
         return self.plan.profile_command is not None
+
+    @property
+    def supported_profile_fields(self) -> tuple[ProfileField, ...]:
+        """The measurement fields the configured capture can supply, none without a capture.
+
+        The single source for what a run offers to its agents and accepts from them: the
+        executor checks a request against this same descriptor.
+        """
+        return profile_capture_descriptor(self.plan.profile_command).supported_fields
 
 
 @dataclass(frozen=True)
