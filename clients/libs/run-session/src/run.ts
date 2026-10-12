@@ -8,8 +8,8 @@
 import type {EventBatchMessage, RunEvent, RunSnapshot} from '@vibesys/contracts';
 import {
   type CoreState,
-  initialCoreState,
   type IterationNavigationState,
+  initialCoreState,
   initialIterationNavigation,
   reduceEventBatch,
   reduceEventRebootstrap,

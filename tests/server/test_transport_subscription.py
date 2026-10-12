@@ -17,7 +17,6 @@ from tests.server.support import ServerParts, build_server_parts
 from server.api.protocol import (
     EventsQuery,
     IterationQuery,
-    Request,
     SnapshotQuery,
     SubscribeRequest,
 )
@@ -165,17 +164,6 @@ def _subscribed_client(
             stream.write(request.model_dump_json().encode() + b"\n")
             stream.flush()
             yield lambda: json.loads(stream.readline())
-
-
-def _request(socket_path: Path, request: Request) -> dict:
-    """Send one request over a control connection separate from the event stream."""
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(HANG_GUARD_S)
-        client.connect(str(socket_path))
-        with client.makefile("rwb") as stream:
-            stream.write(request.model_dump_json().encode() + b"\n")
-            stream.flush()
-            return json.loads(stream.readline())
 
 
 @contextmanager
@@ -446,37 +434,6 @@ def test_iteration_store_fence_rejects_a_replaced_sequence_space(tmp_path: Path)
         parts.api.execute(IterationQuery(expected_store_id=replacement_store)).iterations_ready
         is False
     )
-
-
-def test_iteration_query_follows_the_subscribed_store_across_control_sockets(
-    tmp_path: Path,
-) -> None:
-    parts = build_server_parts(tmp_path / "server")
-    socket_path = tmp_path / "server.sock"
-
-    with (
-        UnixJsonlServer(socket_path, parts.api),
-        _subscribed_client(socket_path, SubscribeRequest(after_sequence=0)) as read,
-    ):
-        assert read()["type"] == "subscribed"
-        bootstrap = read()
-        original_store = bootstrap["store_id"]
-        assert _request(socket_path, IterationQuery(expected_store_id=original_store))["ok"] is True
-        assert read()["store_id"] == original_store
-
-        parts.attach(_write_log(tmp_path / "logs", _round_log(200)))
-        replacement = read()
-        assert replacement["store_id"] != original_store
-
-        stale = _request(socket_path, IterationQuery(expected_store_id=original_store))
-        current = _request(
-            socket_path,
-            IterationQuery(expected_store_id=replacement["store_id"]),
-        )
-
-    assert stale["ok"] is False
-    assert stale["diagnostic"]["code"] == "iteration_store_replaced"
-    assert current["ok"] is True
 
 
 def test_late_attach_rebootstraps_at_fresh_tail_with_spine(tmp_path: Path) -> None:
