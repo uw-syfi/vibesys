@@ -2164,7 +2164,13 @@ const hostHelperSchema: Record<string, unknown> = {
     "channel_end"
   ],
   "title": "HostHelperDocument",
-  "type": "object"
+  "type": "object",
+  "x-vibesys-feature-by-request": {
+    "instances.inspect": "instances_inspect",
+    "instances.watch": "instances_watch",
+    "instances.unwatch": "instances_watch",
+    "paths.complete": "paths_complete"
+  }
 };
 
 export default hostHelperSchema;

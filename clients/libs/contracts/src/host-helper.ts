@@ -9,7 +9,12 @@
  * naming its path, never a value passed on.
  */
 import {BackendClientError} from './errors.js';
-import type {ChannelEnd, Message, Request} from './generated/host-helper.generated.js';
+import type {
+  ChannelEnd,
+  HelperFeature,
+  Message,
+  Request,
+} from './generated/host-helper.generated.js';
 import hostHelperSchema from './generated/host-helper.schema.js';
 import {type Schema, type SchemaWalk, validateSchema} from './schema-walker.js';
 
@@ -55,6 +60,19 @@ const definitions = hostHelperSchema['$defs'] as Record<string, Schema>;
 const logTail = definitions['AvailableLogTail'] as Schema;
 const logProperties = logTail['properties'] as Record<string, Schema>;
 const logText = logProperties['text'] as Schema;
+const featureByRequest = hostHelperSchema['x-vibesys-feature-by-request'] as Readonly<
+  Partial<Record<Request['type'], HelperFeature>>
+>;
+
+/** The generated feature gate for each gated helper request. */
+export const HELPER_FEATURE_BY_REQUEST = featureByRequest;
+
+/** The feature `type` needs, or null when it is part of the base protocol. */
+export function helperFeatureForRequest(type: string): HelperFeature | null {
+  return Object.hasOwn(featureByRequest, type)
+    ? (featureByRequest[type as Request['type']] ?? null)
+    : null;
+}
 
 /** Maximum UTF-8 bytes in an available instance log tail, generated from Python's contract. */
 export const INSTANCE_LOG_TAIL_BYTES = logText['x-vibesys-max-utf8-bytes'] as number;

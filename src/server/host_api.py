@@ -22,7 +22,7 @@ Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
 ``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
 ``TaskList``, the inspection documents, and the host helper's messages:
-``HELPER_PROTOCOL_VERSIONS``,
+``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``,
 ``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
 members, ``HelperMessage`` and its members, ``HelperErrorCode``, and a relayed
 channel's end: ``ChannelEndOutcome``, ``ChannelEnd``.
@@ -38,7 +38,10 @@ import json
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Final, Literal
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 from pydantic import (
     BaseModel,
@@ -728,6 +731,15 @@ class PathsCompleteRequest(_HelperRequest):
     prefix: Annotated[str, StringConstraints(max_length=4096)]
     """A path as typed: ``~`` expands on the host, a relative path is under the home
     directory, and a trailing ``/`` lists the directory itself."""
+
+
+HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
+    InstancesInspectRequest: HelperFeature.INSTANCES_INSPECT,
+    InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
+    InstancesUnwatchRequest: HelperFeature.INSTANCES_WATCH,
+    PathsCompleteRequest: HelperFeature.PATHS_COMPLETE,
+}
+"""The feature each gated request needs, exported with the generated wire contract."""
 
 
 HelperRequest = Annotated[

@@ -109,6 +109,38 @@ function subject(filesystem: SshConfigFilesystem): Hosts {
   });
 }
 
+/** The public completion controller over one in-memory helper and settings store. */
+function completionSubject(link: FakeLink): {
+  readonly hosts: Hosts;
+  readonly manager: ConnectionManager;
+} {
+  const settings = new SettingsStore({
+    settingsPath: '/settings/hosts.json',
+    recentPath: '/settings/recent.json',
+    filesystem: new FakeSettingsFilesystem(),
+    log: () => {},
+  });
+  const manager = new ConnectionManager({
+    linkFor: () => link,
+    appVersion: 'test',
+    scheduleTimeout: new FakeClock().scheduleTimeout,
+    config: CONFIG,
+    log: () => {},
+  });
+  return {
+    manager,
+    hosts: new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    }),
+  };
+}
+
 describe('Hosts.aliases', () => {
   test('reads and parses the configured SSH file', async () => {
     const filesystem = new FakeSshConfigFilesystem({text: 'Host gpu-box gpu-* jump\n'});
@@ -139,6 +171,45 @@ describe('Hosts.aliases', () => {
     }
   });
 });
+
+describe('Hosts.complete', () => {
+  test('returns a typed unsupported outcome without sending paths.complete', async () => {
+    const link = new FakeLink();
+    link.helper.features.delete('paths_complete');
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await expect(subject.hosts.complete(LOCAL, '/manual/')).resolves.toEqual({
+      kind: 'unsupported',
+    });
+    expect(link.helper.requests.filter(request => request.type === 'paths.complete')).toEqual([]);
+  });
+
+  test('returns a typed listing when paths_complete was negotiated', async () => {
+    const link = new FakeLink();
+    link.helper.host.directories.set('/manual', ['project']);
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await expect(subject.hosts.complete(LOCAL, '/manual/')).resolves.toEqual({
+      kind: 'listed',
+      directory: '/manual',
+      entries: [
+        {
+          name: 'project',
+          path: '/manual/project',
+          checkout: false,
+          project: false,
+        },
+      ],
+      truncated: false,
+    });
+    expect(link.helper.requests.filter(request => request.type === 'paths.complete')).toHaveLength(
+      1,
+    );
+  });
+});
+
 describe('Hosts checkout changes', () => {
   test('cancelling checkout validation cannot persist or replace a newer operation', async () => {
     const directory = '/settings';

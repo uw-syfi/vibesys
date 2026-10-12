@@ -2,7 +2,7 @@
   "id": "helper-feature-gated",
   "protocol": "host-helper",
   "title": "A gated method needs its feature",
-  "description": "After a hello that negotiated no features, instances.watch and paths.complete are answered feature_not_negotiated.",
+  "description": "After a hello that negotiated no features, every feature-gated method is answered feature_not_negotiated.",
   "role": "control",
   "transports": [
     "stdio"
@@ -44,6 +44,41 @@
       "expect": {
         "type": "error",
         "request_id": "w",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "instances.unwatch",
+        "request_id": "u",
+        "deadline_ms": 10000,
+        "watch_id": "w"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "u",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "instances.inspect",
+        "request_id": "i",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab",
+        "include_log": false
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "i",
         "code": "feature_not_negotiated"
       }
     },

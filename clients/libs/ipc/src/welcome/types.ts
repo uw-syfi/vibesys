@@ -65,18 +65,21 @@ export interface WelcomeOverview {
   readonly host: HostKey;
 }
 
-/** Directories that complete a typed path on a host (`paths.complete`). */
-export interface PathCompletion {
-  /** The directory that was listed. */
-  readonly directory: string;
-  readonly entries: readonly {
-    readonly name: string;
-    readonly path: string;
-    readonly checkout: boolean;
-    readonly project: boolean;
-  }[];
-  readonly truncated: boolean;
-}
+/** What directory completion established: one listing, or that this helper does not support it. */
+export type PathCompletion =
+  | {
+      readonly kind: 'listed';
+      /** The directory that was listed. */
+      readonly directory: string;
+      readonly entries: readonly {
+        readonly name: string;
+        readonly path: string;
+        readonly checkout: boolean;
+        readonly project: boolean;
+      }[];
+      readonly truncated: boolean;
+    }
+  | {readonly kind: 'unsupported'};
 
 /** How a start the welcome view asked for ended: attached, or cancelled (and its run stopped). */
 export type StartOutcome = 'started' | 'cancelled';

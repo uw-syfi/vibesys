@@ -208,6 +208,76 @@ describe('HostConnection over the FakeHelper', () => {
     expect(connection.phase.kind).toBe('ready');
   });
 
+  test('never writes any feature-gated request when hello omitted its feature', async () => {
+    const link = new FakeLink();
+    link.helper.features.clear();
+    await using connection = fakeConnection(link);
+    await connection.ready();
+
+    const errors = await Promise.all([
+      rejection(connection.request({type: 'instances.watch'})),
+      rejection(connection.request({type: 'instances.unwatch', watch_id: 'missing'})),
+      rejection(
+        connection.request({
+          type: 'instances.inspect',
+          instance_id: '0123456789ab',
+          include_log: false,
+        }),
+      ),
+      rejection(connection.request({type: 'paths.complete', prefix: '/'})),
+    ]);
+
+    expect(errors).toHaveLength(4);
+    for (const error of errors) {
+      expect(error).toBeInstanceOf(HelperRequestError);
+      expect((error as HelperRequestError).code).toBe('feature_not_negotiated');
+    }
+    const gated = new Set([
+      'instances.watch',
+      'instances.unwatch',
+      'instances.inspect',
+      'paths.complete',
+    ]);
+    expect(link.helper.requests.filter(request => gated.has(request.type))).toEqual([]);
+    await expect(connection.request({type: 'ping'})).resolves.toMatchObject({type: 'ping'});
+    expect(connection.phase.kind).toBe('ready');
+  });
+
+  test('without instances_watch, each control channel installs one snapshot and never polls', async () => {
+    const link = new FakeLink();
+    link.helper.features.delete('instances_watch');
+    link.helper.publish(record('000000000001', 'run-1'));
+    await using connection = fakeConnection(link);
+    const listings: string[][] = [];
+    connection.watchInstances(listing =>
+      listings.push(listing.instances.map(instance => instance.id)),
+    );
+
+    await connection.ready();
+    expect(listings).toEqual([['000000000001']]);
+    expect(link.helper.requests.filter(request => request.type === 'instances.list')).toHaveLength(
+      1,
+    );
+    expect(link.helper.watching).toBe(0);
+
+    link.helper.publish(record('000000000002', 'run-2'));
+    expect(listings).toEqual([['000000000001']]);
+    expect(link.helper.requests.filter(request => request.type === 'instances.list')).toHaveLength(
+      1,
+    );
+
+    const reconnecting = phaseReached(connection, 'reconnecting');
+    link.helper.drop();
+    await reconnecting;
+    await phaseReached(connection, 'ready');
+
+    expect(listings).toEqual([['000000000001'], ['000000000001', '000000000002']]);
+    expect(link.helper.requests.filter(request => request.type === 'instances.list')).toHaveLength(
+      2,
+    );
+    expect(link.helper.watching).toBe(0);
+  });
+
   test('inspection requests retained diagnostics only with explicit log consent', async () => {
     const link = new FakeLink();
     const instanceId = '0123456789ab';

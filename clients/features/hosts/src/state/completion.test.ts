@@ -14,6 +14,7 @@ function failed<T>(error: string): WelcomeResult<T> {
 }
 
 const COMPLETION: PathCompletion = {
+  kind: 'listed',
   directory: '/home/me',
   entries: [
     {name: 'src', path: '/home/me/src', checkout: false, project: false},
@@ -71,6 +72,31 @@ describe('path completion', () => {
     expect(splitPath('/home/me/sr')).toEqual({directory: '/home/me/', typed: 'sr'});
     expect(splitPath('~/')).toEqual({directory: '~/', typed: ''});
     expect(splitPath('rel/x')).toEqual({directory: null, typed: 'x'});
+  });
+
+  test('unsupported completion leaves manual path entry usable without suggestions', () => {
+    const asked = completionStep(COMPLETION_EMPTY, {
+      type: 'input',
+      field: 'project',
+      host: 'ssh:old',
+      value: '/manual/project',
+    });
+    const token = asked.requests[0]?.token ?? -1;
+    const unsupported = completionStep(asked.state, {
+      type: 'reply',
+      field: 'project',
+      token,
+      result: {ok: true, value: {kind: 'unsupported'}},
+    });
+
+    expect(suggestions(unsupported.state, 'project')).toEqual([]);
+    const next = completionStep(unsupported.state, {
+      type: 'input',
+      field: 'project',
+      host: 'ssh:old',
+      value: '/another/manual/path',
+    });
+    expect(next.requests).toHaveLength(1);
   });
 
   test('model: one awaited listing per field, stale replies dropped, one request per new directory', () => {

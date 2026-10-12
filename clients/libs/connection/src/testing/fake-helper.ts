@@ -14,7 +14,9 @@
  */
 import {
   type ChannelEndOutcome,
+  type HelperFeature,
   type HelperRequest,
+  helperFeatureForRequest,
   type InstanceList,
   type LiveInstanceRecord,
   type PathEntry,
@@ -150,8 +152,14 @@ export class FakeHelper {
   spawned = 0;
   /** Stop requests received, in order. */
   readonly stops: {readonly instanceId: string; readonly force: boolean}[] = [];
+  /** Every valid helper request received, including each channel's hello. */
+  readonly requests: HelperRequest[] = [];
   /** Features this helper version recognizes. */
-  readonly features = new Set(['instances_watch', 'paths_complete', 'instances_inspect']);
+  readonly features = new Set<HelperFeature>([
+    'instances_watch',
+    'paths_complete',
+    'instances_inspect',
+  ]);
   readonly #pendingAnswers = new Map<HelperRequest['type'], PendingAnswer[]>();
   /** How many of them have exited. */
   exited = 0;
@@ -382,6 +390,7 @@ class HelperSession {
       this.#send(this.#error(id, 'invalid_request', (error as Error).message));
       return;
     }
+    this.#helper.requests.push(request);
     const helper = this.#helper;
     if (helper.silent) {
       helper.hold(() => this.#respond(request));
@@ -396,6 +405,15 @@ class HelperSession {
     if (pending !== null) this.#deferredReplies.set(request.request_id, pending);
     if (this.#features === null && request.type !== 'hello') {
       this.#send(this.#error(request.request_id, 'handshake_required', 'hello first'));
+      return;
+    }
+    const required = helperFeatureForRequest(request.type);
+    if (
+      request.type !== 'hello' &&
+      required !== null &&
+      this.#features?.includes(required) !== true
+    ) {
+      this.#send(this.#error(request.request_id, 'feature_not_negotiated', required));
       return;
     }
     if (helper.expired.has(request.type)) {
@@ -446,7 +464,7 @@ class HelperSession {
         this.#connect(id, request.instance_id);
         return;
       case 'paths.complete':
-        if (this.#negotiated('paths_complete', id)) this.#complete(id, request.prefix);
+        this.#complete(id, request.prefix);
         return;
     }
   }
@@ -461,7 +479,8 @@ class HelperSession {
       });
       return;
     }
-    this.#features = (request.features ?? []).filter(feature => this.#helper.features.has(feature));
+    const supported: ReadonlySet<string> = this.#helper.features;
+    this.#features = (request.features ?? []).filter(feature => supported.has(feature));
     this.#send({
       type: 'hello',
       request_id: request.request_id,
@@ -473,7 +492,6 @@ class HelperSession {
   }
 
   #inspect(request: Extract<HelperRequest, {type: 'instances.inspect'}>): void {
-    if (!this.#negotiated('instances_inspect', request.request_id)) return;
     const helper = this.#helper;
     const record = [...helper.host.instances, ...helper.host.ended].find(
       entry => entry.id === request.instance_id,
@@ -507,7 +525,6 @@ class HelperSession {
 
   #watch(request: Extract<HelperRequest, {type: 'instances.watch'}>): void {
     const id = request.request_id;
-    if (!this.#negotiated('instances_watch', id)) return;
     this.#send({type: 'instances.watch', request_id: id, watch_id: id});
     const push = (): void =>
       this.#send({type: 'instances.changed', watch_id: id, listing: this.#helper.listing()});
@@ -542,12 +559,6 @@ class HelperSession {
         route: null,
       },
     });
-  }
-
-  #negotiated(feature: string, id: string): boolean {
-    if (this.#features?.includes(feature) === true) return true;
-    this.#send(this.#error(id, 'feature_not_negotiated', feature));
-    return false;
   }
 
   #project(

@@ -436,8 +436,11 @@ export class HostConnection implements AsyncDisposable {
     });
     try {
       stillWanted(signal);
-      if (channel.hello?.features.includes('instances_watch') === true) {
+      if (channel.supportsRequest('instances.watch')) {
         await channel.request({type: 'instances.watch'});
+      } else {
+        const {listing} = await channel.request({type: 'instances.list'});
+        this.#latest.set(channel, listing);
       }
       stillWanted(signal);
       if (!channel.active)

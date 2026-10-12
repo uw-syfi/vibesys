@@ -16,10 +16,12 @@ import {Duplex} from 'node:stream';
 import {
   type ChannelEndOutcome,
   HELPER_CLIENT_VERSIONS,
+  HELPER_FEATURE_BY_REQUEST,
   type HelloReply,
   type HelperError,
   type HelperFeature,
   type HelperMessage,
+  helperFeatureForRequest,
   type InstancesChanged,
   parseChannelEnd,
   parseHelperMessage,
@@ -76,14 +78,7 @@ export type Body = {readonly type: string} & Record<string, unknown>;
 /** The reply type of each request type. */
 export type ReplyOf<T extends string> = Extract<HelperMessage, {type: T}>;
 
-const FEATURES: readonly HelperFeature[] = [
-  'instances_watch',
-  'paths_complete',
-  'instances_inspect',
-];
-const FEATURE_BY_REQUEST: Readonly<Partial<Record<string, HelperFeature>>> = {
-  'instances.inspect': 'instances_inspect',
-};
+const FEATURES: readonly HelperFeature[] = [...new Set(Object.values(HELPER_FEATURE_BY_REQUEST))];
 /** How long past its own deadline a request may take before this side gives up on it. */
 const DEADLINE_SLACK_MS = 2_000;
 const STDERR_TAIL = 8192;
@@ -180,8 +175,8 @@ export class HelperChannel implements AsyncDisposable {
   /** Send `body` and resolve with its reply; rejects with `HelperRequestError` or `ConnectionError`. */
   request<T extends string>(body: Body & {readonly type: T}): Promise<ReplyOf<T>> {
     if (this.#failure !== null) return Promise.reject(this.#failure);
-    const required = FEATURE_BY_REQUEST[body.type];
-    if (this.hello !== null && required !== undefined && !this.hello.features.includes(required)) {
+    const required = helperFeatureForRequest(body.type);
+    if (this.hello !== null && required !== null && !this.hello.features.includes(required)) {
       return Promise.reject(
         new HelperRequestError({
           type: 'error',
@@ -207,6 +202,12 @@ export class HelperChannel implements AsyncDisposable {
       });
       this.#write({...body, request_id: requestId, deadline_ms: deadlineMs});
     });
+  }
+
+  /** Whether `hello` negotiated the feature needed by this gated request. */
+  supportsRequest(type: string): boolean {
+    const feature = helperFeatureForRequest(type);
+    return feature !== null && this.hello?.features.includes(feature) === true;
   }
 
   /** Hear every `instances.changed` push; returns the unsubscribe. */

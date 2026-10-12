@@ -19,7 +19,12 @@ from pydantic import BaseModel
 from server.api.iterations import IterationSlice
 from server.api.protocol import ProtocolRequest, Response, RunSnapshot, ServerMessage
 from server.events import RunEvent
-from server.host_api import ChannelEnd, HelperMessage, HelperRequest
+from server.host_api import (
+    HELPER_REQUEST_FEATURES,
+    ChannelEnd,
+    HelperMessage,
+    HelperRequest,
+)
 from vibesys.api import IterationKind, IterationMetric, IterationStatus, IterationSummary
 
 if TYPE_CHECKING:
@@ -112,7 +117,26 @@ def host_helper_json_schema() -> dict[str, Any]:
     The committed ``host-helper.schema.json`` and its generated TypeScript types come
     from here; another helper or client implementation generates its types from it.
     """
-    return require_tagged_union_discriminants(HostHelperDocument.model_json_schema())
+    document = require_tagged_union_discriminants(HostHelperDocument.model_json_schema())
+    document["x-vibesys-feature-by-request"] = _host_helper_feature_by_request(document)
+    return document
+
+
+def _host_helper_feature_by_request(document: dict[str, Any]) -> dict[str, str]:
+    """Export the server's request gates, refusing a class outside the request union."""
+    request = document["properties"]["request"]
+    request_tags = request["discriminator"]["mapping"]
+    result: dict[str, str] = {}
+    for request_type, feature in HELPER_REQUEST_FEATURES.items():
+        tag = request_type.model_fields["type"].default
+        if not isinstance(tag, str) or tag not in request_tags:
+            message = f"gated helper request {request_type.__name__} has no request-union tag"
+            raise ValueError(message)
+        if tag in result:
+            message = f"helper request tag {tag!r} has more than one feature gate"
+            raise ValueError(message)
+        result[tag] = feature.value
+    return result
 
 
 _HOST_HELPER_DESCRIPTOR_KEYWORDS = frozenset(
@@ -144,6 +168,8 @@ _HOST_HELPER_DESCRIPTOR_KEYWORDS = frozenset(
         "type",
         # Consumed by @vibesys/contracts/host-helper as the semantic log-tail byte limit.
         "x-vibesys-max-utf8-bytes",
+        # Generated from HELPER_REQUEST_FEATURES; both helper implementations consume it.
+        "x-vibesys-feature-by-request",
     }
 )
 """What the TypeScript walker's strict mode enforces (``contracts/src/schema-walker.ts``)."""

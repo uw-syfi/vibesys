@@ -25,6 +25,7 @@ from server.api.schema import (
     run_event_typescript,
 )
 from server.events import EventData
+from server.host_api import HelperFeature
 from vibesys.api import RunFailedData, RunFailure, ToolResultPayload
 
 SCHEMA_PATH = Path("clients/libs/contracts/src/generated/protocol.schema.json")
@@ -110,6 +111,21 @@ def test_host_helper_schema_exports_the_instance_log_utf8_byte_limit() -> None:
     text = document["$defs"]["AvailableLogTail"]["properties"]["text"]
 
     assert text["x-vibesys-max-utf8-bytes"] == 64 * 1024
+
+
+def test_host_helper_schema_exports_the_authoritative_request_feature_gates() -> None:
+    document = host_helper_json_schema()
+    gates = document["x-vibesys-feature-by-request"]
+
+    assert gates == {
+        "instances.inspect": "instances_inspect",
+        "instances.watch": "instances_watch",
+        "instances.unwatch": "instances_watch",
+        "paths.complete": "paths_complete",
+    }
+    request_tags = document["properties"]["request"]["discriminator"]["mapping"]
+    assert gates.keys() <= request_tags.keys()
+    assert set(gates.values()) == {feature.value for feature in HelperFeature}
 
 
 @pytest.mark.parametrize(

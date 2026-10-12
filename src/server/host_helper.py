@@ -39,22 +39,20 @@ from typing import TYPE_CHECKING, Final, assert_never
 from pydantic import ValidationError
 
 from server.host_api import (
+    HELPER_REQUEST_FEATURES,
     HelloRequest,
     HelperError,
     HelperErrorCode,
-    HelperFeature,
     HelperMessage,
     HelperReply,
     HelperRequest,
     InstanceList,
     InstancesChanged,
-    InstancesInspectRequest,
     InstancesUnwatchReply,
     InstancesUnwatchRequest,
     InstancesWatchReply,
     InstancesWatchRequest,
     LiveInstanceRecord,
-    PathsCompleteRequest,
     RunConnectReply,
     RunConnectRequest,
     RunStartReply,
@@ -248,13 +246,6 @@ class Close:
 
 type ChannelOutput = Send | Execute | Watch | Unwatch | Relay | Release | StopStartedRun | Close
 
-_GATED: Final[Mapping[type[object], HelperFeature]] = {
-    InstancesInspectRequest: HelperFeature.INSTANCES_INSPECT,
-    InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
-    InstancesUnwatchRequest: HelperFeature.INSTANCES_WATCH,
-    PathsCompleteRequest: HelperFeature.PATHS_COMPLETE,
-}
-
 
 def accepts_input(state: ChannelState) -> bool:
     """Whether the shell should read lines: not while a run channel is being handed over."""
@@ -424,7 +415,7 @@ def _admission(
         message = f"request id {request_id!r} is already open on this channel"
         refusal = _error(request_id, HelperErrorCode.DUPLICATE_REQUEST_ID, message)
     else:
-        feature = _GATED.get(type(request))
+        feature = HELPER_REQUEST_FEATURES.get(type(request))
         if feature is not None and feature not in state.negotiated.features:
             message = (
                 f"{request.type} needs the {feature.value} feature, which hello did not return"

@@ -1,5 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import type {PassThrough} from 'node:stream';
+import {helperFeatureForRequest} from '@vibesys/contracts/host-helper';
 import {FakeClock} from '@vibesys/transport/testing';
 import {fakeProcess} from '../testing/fake-process.js';
 import {type ChannelOptions, ConnectionError, HelperChannel} from './helper-channel.js';
@@ -59,6 +60,24 @@ function connectionFailure(error: Error): ConnectionError {
 function reply(process: ReturnType<typeof fakeProcess>, message: JsonLine): void {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
+
+test('the request-feature map covers every gated helper method', () => {
+  expect(
+    [
+      'instances.watch',
+      'instances.unwatch',
+      'paths.complete',
+      'instances.inspect',
+      'instances.list',
+    ].map(type => [type, helperFeatureForRequest(type)]),
+  ).toEqual([
+    ['instances.watch', 'instances_watch'],
+    ['instances.unwatch', 'instances_watch'],
+    ['paths.complete', 'paths_complete'],
+    ['instances.inspect', 'instances_inspect'],
+    ['instances.list', null],
+  ]);
+});
 
 async function openChannel(
   process: ReturnType<typeof fakeProcess>,

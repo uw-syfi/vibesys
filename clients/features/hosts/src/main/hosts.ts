@@ -239,9 +239,13 @@ export class Hosts {
     try {
       reply = await lease.connection.request({type: 'paths.complete', prefix: directory});
     } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        return {kind: 'unsupported'};
+      }
       throw plain(error, `Could not list ${directory}`);
     }
     return {
+      kind: 'listed',
       directory: reply.directory,
       entries: reply.entries.map(entry => ({
         name: entry.name,

@@ -11,6 +11,8 @@ import type {HostKey} from '@vibesys/hosts';
 import type {PathCompletion, WelcomeResult} from '@vibesys/ipc';
 import {only, type Step} from '@vibesys/store';
 
+type ListedCompletion = Extract<PathCompletion, {readonly kind: 'listed'}>;
+
 /** How long typing must pause before a directory is listed. */
 const COMPLETION_PAUSE_MS = 80;
 /** The most suggestions a field shows. */
@@ -25,7 +27,7 @@ interface FieldCompletion {
   /** The listing awaited for `directory`, or null. */
   readonly awaiting: number | null;
   /** The last listing of `directory`, or null. */
-  readonly listed: PathCompletion | null;
+  readonly listed: ListedCompletion | null;
   /** The name typed after the directory. */
   readonly typed: string;
 }
@@ -113,7 +115,8 @@ export function completionStep(
       const current = state.fields[action.field];
       if (current === undefined || current.awaiting !== action.token) return only(state);
       // A directory that cannot be listed offers nothing; the field itself still takes the path.
-      const listed = action.result.ok ? action.result.value : null;
+      const listed =
+        action.result.ok && action.result.value.kind === 'listed' ? action.result.value : null;
       return only({
         ...state,
         fields: {...state.fields, [action.field]: {...current, awaiting: null, listed}},
