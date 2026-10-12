@@ -682,7 +682,8 @@ const runEventSchema: Record<string, unknown> = {
         "gate_finished",
         "workspace_snapshot",
         "run_configured",
-        "framework_warning"
+        "framework_warning",
+        "winner_selected"
       ],
       "title": "EventType",
       "type": "string"
@@ -2122,6 +2123,48 @@ const runEventSchema: Record<string, unknown> = {
       "title": "UsageUpdateData",
       "type": "object"
     },
+    "WinnerSelectedData": {
+      "description": "The run's result was chosen: a retained candidate, or the unchanged trusted input.",
+      "properties": {
+        "kind": {
+          "const": "winner_selected",
+          "default": "winner_selected",
+          "title": "Kind",
+          "type": "string"
+        },
+        "selection": {
+          "enum": [
+            "candidate",
+            "baseline"
+          ],
+          "title": "Selection",
+          "type": "string"
+        },
+        "revision": {
+          "title": "Revision",
+          "type": "string"
+        },
+        "settlement_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Settlement Id"
+        }
+      },
+      "required": [
+        "kind",
+        "selection",
+        "revision"
+      ],
+      "title": "WinnerSelectedData",
+      "type": "object"
+    },
     "WorkspaceSnapshotData": {
       "description": "A Git tracker outcome: a snapshot, baseline, or exclusion change.\n\nExactly one aspect is populated per event: a snapshot attempt carries\n``label`` (``commit`` is None when there was nothing to commit), a\ntrusted-input baseline carries ``baseline``, and a snapshot-exclusion\nchange carries ``excluded_paths``.",
       "properties": {
@@ -2334,6 +2377,7 @@ const runEventSchema: Record<string, unknown> = {
               "tool_call": "#/$defs/ToolCallData",
               "tool_result": "#/$defs/ToolResultData",
               "usage_update": "#/$defs/UsageUpdateData",
+              "winner_selected": "#/$defs/WinnerSelectedData",
               "workspace_snapshot": "#/$defs/WorkspaceSnapshotData"
             },
             "propertyName": "kind"
@@ -2446,6 +2490,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/FrameworkWarningData"
+            },
+            {
+              "$ref": "#/$defs/WinnerSelectedData"
             }
           ]
         },

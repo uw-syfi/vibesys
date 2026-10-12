@@ -10,6 +10,7 @@ a slot is held stay in core.
 """
 
 from vibesys.candidates.api import STOPPED, stages
+from vibesys.metrics import judged_evidence
 from vibesys.orchestration.multi.strategy import _context as context
 from vibesys.orchestration.multi.strategy import _ids as ids
 from vibesys.orchestration.multi.strategy._draft import (
@@ -163,7 +164,10 @@ def _body(draft: Draft, record: RoundState, role: Role) -> PromptContext:
     if reply is None:
         message = "a review needs the implementer's reply"
         raise RuntimeError(message)
-    return context.judge_prompt(record, draft.config, hypothesis, reply)
+    scope = attempt_scope(draft.view, record.attempt, record.generation)
+    return context.judge_prompt(
+        record, draft.config, hypothesis, reply, judged_evidence(draft.view, scope)
+    )
 
 
 def _turn(draft: Draft, record: RoundState) -> RoundState:

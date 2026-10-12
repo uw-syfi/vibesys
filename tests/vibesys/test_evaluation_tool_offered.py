@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.support.skeleton_strategy import ATTEMPT, DIGEST
+from tests.support.synthesized_evidence import SynthesizedEvidence
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import write_project
 
 from vibesys.dynamic_roles import CORE_ROLES, IMPLEMENTER, JUDGE
@@ -20,6 +21,7 @@ from vs_project.api import Project
 from vs_runtime.api.core import (
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
+    AgentEvaluationRecords,
     OwedSubmissions,
     ReceiptStore,
     ScopeWorkspaces,
@@ -53,7 +55,7 @@ def _bridge(tmp_path: Path) -> AgentEvaluationBridge:
             cast("RuntimeWorkspaces", FakeWorkspaces(FakeWorkspace())),
             StoreWorkspaceReceipts(ReceiptStore(namespace)),
         ),
-        OwedSubmissions(ReceiptStore(namespace)),
+        AgentEvaluationRecords(OwedSubmissions(ReceiptStore(namespace)), SynthesizedEvidence()),
     )
 
 

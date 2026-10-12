@@ -1,3 +1,4 @@
+{% from '_evaluations.j2' import trusted_evaluations %}
 {% from '_revision.j2' import rev %}
 {% if modality %}{% include "_modality/" ~ modality ~ "/judge.j2" %}
 {% endif %}
@@ -10,6 +11,12 @@ discards its tree while retaining your feedback for later mutations.
 {% include 'run_context.j2' %}
 {% include 'agent_evaluation.j2' %}
 
+{% if cited_evidence %}
+Trusted evaluation results the framework recorded for this candidate (measured by the
+framework, not claimed by the implementer):
+
+{{ trusted_evaluations(cited_evidence) }}
+{% endif %}
 Your workspace is the offspring as it stands, at `{{ rev(candidate) }}`.
 
 ## Pass criteria

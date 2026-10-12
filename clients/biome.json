@@ -107,6 +107,8 @@
       "includes": [
         "features/run-control/src/**/*.ts",
         "features/run-control/src/**/*.tsx",
+        "libs/run-session/src/**/*.ts",
+        "!libs/run-session/src/run.ts",
         "libs/connection/src/**/*.ts",
         "!**/*.test.ts",
         "!**/*.test.tsx"

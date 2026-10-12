@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.checkpoint_faults import CHECKPOINTS, with_checkpoints
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
     implemented,
@@ -65,6 +66,8 @@ class Scenario:
     """How each waiting turn ends: ``wait``, ``result`` or ``invalid`` (see `WaitingTurns.ends`)."""
     unchanged_after_first_retain: bool = False
     """Whether a resumed turn leaves the worktree as it was (retains nothing of its own)."""
+    checkpoints: tuple[str, ...] = ()
+    """How the workspace executor answers each checkpoint request (see `with_checkpoints`)."""
 
 
 def run_waiting(root: Path, scenario: Scenario) -> Run:
@@ -112,7 +115,10 @@ def run_scripted(root: Path, scenario: Scenario) -> tuple[Run, WaitingTurns]:
         lifecycle=frozenset({"suspend"}),
     )
     finished = run_shell(
-        script, host=host, max_rounds=scenario.rounds, max_in_flight=scenario.in_flight
+        with_checkpoints(script, scenario.checkpoints),
+        host=host,
+        max_rounds=scenario.rounds,
+        max_in_flight=scenario.in_flight,
     )
     return finished, script
 
@@ -266,3 +272,29 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
         assert [type(item).__name__ for item in finished.decisions] == [
             type(item).__name__ for item in run(("wait",)).decisions
         ]
+
+
+@settings(max_examples=10, deadline=None, derandomize=True, database=None)
+@given(checkpoints=CHECKPOINTS, polls=st.integers(0, 3))
+def test_a_run_ends_whatever_the_checkpoint_of_a_waiting_turn_does(
+    tmp_path_factory: pytest.TempPathFactory, checkpoints: tuple[str, ...], polls: int
+) -> None:
+    """A turn that asked to wait is suspended or failed with a reason, never left waiting."""
+    scenario = replace(JUDGE_WAITS, roles=("implementer", "judge"), polls=(polls,))
+    finished = run_waiting(
+        tmp_path_factory.mktemp("checkpoints"), replace(scenario, checkpoints=checkpoints)
+    )
+
+    assert finished.core.run.status == RunStatus.TERMINAL
+    for attempt in finished.core.attempts.attempts:
+        assert attempt.phase == AttemptPhase.TERMINAL
+
+
+def test_a_declined_checkpoint_fails_the_waiting_turn_instead_of_stalling_the_run(
+    tmp_path: Path,
+) -> None:
+    """Every checkpoint fails: the turn cannot be suspended, and the run still ends."""
+    finished = run_waiting(tmp_path, replace(JUDGE_WAITS, checkpoints=("failed",)))
+
+    assert finished.core.run.status == RunStatus.TERMINAL
+    assert finished.core.evaluation.continuations == ()

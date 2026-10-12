@@ -533,6 +533,9 @@ importers:
       '@vibesys/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../machine
       '@vibesys/run-state':
         specifier: workspace:*
         version: link:../run-state
@@ -542,6 +545,9 @@ importers:
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../transport
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
     devDependencies:
       '@types/bun':
         specifier: 1.4.2

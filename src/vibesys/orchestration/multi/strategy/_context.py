@@ -33,7 +33,7 @@ from vibesys.orchestration.multi.strategy._state import MultiStrategyState, Roun
 from vibesys.profile_focus import FocusView
 from vibesys.serial_search import api as serial
 from vibesys.serial_search.api import PlanEvidence
-from vs_core.api import RevisionRef, RunView
+from vs_core.api import EvidenceRef, RevisionRef, RunView
 
 PROFILE_DIRECTORY = "profile"
 
@@ -276,6 +276,7 @@ def judge_prompt(
     config: MultiConfig,
     hypothesis: Hypothesis | None,
     reply: ImplementerResponse,
+    cited_evidence: tuple[EvidenceRef, ...],
 ) -> JudgePrompt:
     """The independent review request for the implementer's latest reply."""
     return JudgePrompt(
@@ -290,4 +291,5 @@ def judge_prompt(
         benchmark_enabled=config.benchmark_configured,
         modality=config.modality,
         interface=config.interface,
+        cited_evidence=cited_evidence,
     )

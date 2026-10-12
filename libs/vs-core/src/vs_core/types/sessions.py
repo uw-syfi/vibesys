@@ -12,6 +12,7 @@ from .common import (
     AttemptRef,
     ChargeId,
     ChargeReceipt,
+    CheckpointDecline,
     ContinuationId,
     ContractValidationError,
     Count,
@@ -147,7 +148,8 @@ class Invocation(Value):
     pending_suspension retains the first canonical terminal yield while its
     checkpoint is pending. Sessions A persists it with the observation, then
     clears it atomically with checkpoint-backed TurnSuspended and completion.
-    Failed retention preserves it; duplicates cannot replace or restore it.
+    Failed retention does not publish it: core ends the turn with
+    ``YieldPublicationFailed`` and clears it. Duplicates cannot replace or restore it.
     None means absent or consumed, never proof of checkpoint or publication.
     Acceptance, terminality and retained checkpoint proof remain leaf-owned.
     """
@@ -409,6 +411,8 @@ class TurnResult(Value):
     suspending: bool = False
     """Core recorded the turn's wait, so a ``TurnSuspended`` follows when it checkpoints.
 
+    If the checkpoint is declined or fails, ``YieldPublicationFailed`` follows instead.
+
     False for a turn that ends without one, whatever its reply says: the agent never
     asked to wait, core refused the wait it asked for, or the host lost the wait. A
     strategy must not wait for a resume of a turn that is not suspending.
@@ -422,6 +426,94 @@ class TurnResult(Value):
         ):
             raise ContractValidationError("failure", "a succeeded turn carries no failure")
         return self
+
+
+class CheckpointFailure(StrEnum):
+    """Why a wait that hangs on a checkpoint ended without it, as a closed set."""
+
+    CHECKPOINT_DECLINED = "checkpoint_declined"
+    """The checkpoint was declined or failed; ``decline`` says why."""
+
+    NO_CHECKPOINT = "no_checkpoint"
+    """No checkpoint was requested or is still coming, so the wait could never end."""
+
+    UNPUBLISHABLE = "unpublishable"
+    """A checkpoint came back but core could not act on it: the scope stopped accepting
+    work, or the checkpoint no longer matched the turn."""
+
+
+def _failure_detail(reason: CheckpointFailure, decline: CheckpointDecline | None) -> str:
+    return reason.value if decline is None else f"{reason.value} ({decline.value})"
+
+
+def _decline_names_the_declined_checkpoint(reason: CheckpointFailure, decline: object) -> None:
+    if (reason == CheckpointFailure.CHECKPOINT_DECLINED) != (decline is not None):
+        raise ContractValidationError("decline", "required exactly for checkpoint_declined")
+
+
+class YieldPublicationFailed(Value):
+    """A turn core recorded as suspending was ended: its suspension will not be published.
+
+    ``TurnResult.suspending`` promised a ``TurnSuspended``. This event is the other way that
+    promise ends. The turn is terminal and failed, its session accepts a new turn, and its
+    scope no longer holds a suspension claim. A strategy handles it like a failed turn:
+    ask again, settle the attempt as failed, or abandon the workstream. Core emits exactly
+    one of the two for every suspending turn.
+    """
+
+    kind: Literal["yield_publication_failed"] = "yield_publication_failed"
+    invocation: InvocationRef
+    reason: CheckpointFailure
+    decline: CheckpointDecline | None = None
+
+    @model_validator(mode="after")
+    def decline_matches_reason(self) -> YieldPublicationFailed:
+        """A decline reason accompanies exactly the declined-checkpoint failure."""
+        _decline_names_the_declined_checkpoint(self.reason, self.decline)
+        return self
+
+    @property
+    def detail(self) -> str:
+        """The reason in one line, for a strategy's failure record."""
+        return _failure_detail(self.reason, self.decline)
+
+
+class InterruptFailed(Value):
+    """An interruption core accepted cannot complete: its checkpoint will not come.
+
+    The other way an accepted interruption ends besides ``InterruptCompleted``. The turn is
+    cancelled but nothing was retained, no refund was paid, and the claim is closed, so a
+    strategy may propose a replacement turn knowing the workspace was not checkpointed.
+    """
+
+    kind: Literal["interrupt_failed"] = "interrupt_failed"
+    invocation: InvocationRef
+    reason: CheckpointFailure
+    decline: CheckpointDecline | None = None
+
+    @model_validator(mode="after")
+    def decline_matches_reason(self) -> InterruptFailed:
+        """A decline reason accompanies exactly the declined-checkpoint failure."""
+        _decline_names_the_declined_checkpoint(self.reason, self.decline)
+        return self
+
+    @property
+    def detail(self) -> str:
+        """The reason in one line, for a strategy's failure record."""
+        return _failure_detail(self.reason, self.decline)
+
+
+class CheckpointStalled(Value):
+    """Internal signal: a wait on this invocation's checkpoint has nothing left to end it.
+
+    Raised by the step when it reaches quiescence with a pending suspension or a draining
+    interruption claim and no checkpoint request live or in flight; the sessions reducer
+    ends each wait with ``YieldPublicationFailed`` or ``InterruptFailed``. A stall naming
+    an invocation whose waits still have a producer, or that has none, changes nothing.
+    """
+
+    kind: Literal["checkpoint_stalled"] = "checkpoint_stalled"
+    invocation: InvocationRef
 
 
 class EnsureSession(RequestBase):
@@ -726,7 +818,8 @@ type SessionsEvent = Annotated[
     | SessionDrainRequested
     | RunSessionsDrainRequested
     | RunInvocationCheckpointRequested
-    | RunInvocationCheckpointObserved,
+    | RunInvocationCheckpointObserved
+    | CheckpointStalled,
     Field(discriminator="kind"),
 ]
 type SessionRequest = Annotated[

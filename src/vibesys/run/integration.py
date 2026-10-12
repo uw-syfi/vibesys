@@ -19,10 +19,12 @@ from vibesys.events import (
     InvocationStartedData,
     PhaseData,
     RoundFinishedData,
+    WinnerSelectedData,
     json_value,
 )
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.event_journal import EventJournal
+from vs_runtime.api.core import RuntimeRecord, winner_selection
 from vs_runtime.api.infrastructure import (
     AgentExecutionLifecycleEvent,
     AgentExecutionStarted,
@@ -44,6 +46,7 @@ if TYPE_CHECKING:
     from vibesys.constants import ComputeBackend
     from vs_agent.api import AgentEventSink
     from vs_project.api import GitRepositoryFactory, Project, StateStoreFactory
+    from vs_runtime.api.core import WinnerSelection
     from vs_runtime.api.infrastructure import (
         ProjectRunResources,
         RunEnvironmentResources,
@@ -270,6 +273,21 @@ def _emit_round_finished(events: EventJournal, round_summary: _RoundProjection) 
     )
 
 
+def _emit_winner_selected(
+    events: EventJournal, before: WinnerSelection | None, after: WinnerSelection | None
+) -> None:
+    """Emit ``WINNER_SELECTED`` once per selection core newly records."""
+    if after is None or after == before:
+        return
+    events.emit(
+        CoreEventType.WINNER_SELECTED,
+        status=EventStatus.COMPLETED,
+        data=WinnerSelectedData(
+            selection=after.selection, revision=after.revision, settlement_id=after.settlement_id
+        ),
+    )
+
+
 class _CoreCommitObserver(_StateCommitObserver):
     """Publish a confirmed core commit: the committed-view hint, then its semantic events."""
 
@@ -278,6 +296,11 @@ class _CoreCommitObserver(_StateCommitObserver):
         self._integration.publish_committed_state(self._namespace, current)
         _emit_core_commit_events(
             self._integration.events, self._project(previous), self._project(current)
+        )
+        _emit_winner_selected(
+            self._integration.events,
+            winner_selection(previous) if isinstance(previous, RuntimeRecord) else None,
+            winner_selection(current) if isinstance(current, RuntimeRecord) else None,
         )
 
 

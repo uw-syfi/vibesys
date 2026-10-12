@@ -54,6 +54,7 @@ from vs_core.api import (
     StrategyEvent,
     TurnResult,
     TurnSuspended,
+    YieldPublicationFailed,
 )
 
 
@@ -133,7 +134,14 @@ class SingleStrategy:
 
     def _lifecycle(self, state: SingleStrategyState, event: StrategyEvent) -> SingleStrategyState:
         """Fold lifecycle feedback; other feedback needs no state change here."""
-        if isinstance(event, AttemptReady | AttemptSettled | TurnSuspended | ResumeAuthorized):
+        if isinstance(
+            event,
+            AttemptReady
+            | AttemptSettled
+            | TurnSuspended
+            | YieldPublicationFailed
+            | ResumeAuthorized,
+        ):
             return self._attempt_feedback(state, event)
         if isinstance(event, AttemptExhausted):
             return events.on_exhausted(state, event)
@@ -144,7 +152,11 @@ class SingleStrategy:
     def _attempt_feedback(
         self,
         state: SingleStrategyState,
-        event: AttemptReady | AttemptSettled | TurnSuspended | ResumeAuthorized,
+        event: AttemptReady
+        | AttemptSettled
+        | TurnSuspended
+        | YieldPublicationFailed
+        | ResumeAuthorized,
     ) -> SingleStrategyState:
         if isinstance(event, AttemptReady):
             return events.on_ready(state, event)
@@ -152,6 +164,8 @@ class SingleStrategy:
             return events.on_settled(state, self.config, event)
         if isinstance(event, TurnSuspended):
             return events.on_suspended(state, event)
+        if isinstance(event, YieldPublicationFailed):
+            return events.on_yield_failed(state, event)
         return events.on_resume(state, event)
 
     def _run_feedback(

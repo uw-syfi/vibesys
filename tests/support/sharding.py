@@ -4,8 +4,12 @@
 serve every shard) keeps only the test files assigned to shard ``I`` (1-based) of
 ``N``. Files are assigned longest-first to the currently lightest shard, using
 the per-file seconds in ``shard_durations.json``. A file missing from that
-record is weighted at the mean of the recorded files, so a new test file lands
-somewhere sensible until the record is refreshed.
+record is unknowable, so it is spread like a heavy file (below): a new file that
+turns out to be expensive can then never overload one shard, whatever the record says.
+Each of its tests is weighted at an even share of the mean recorded file.
+The record in use is the checked-in ``shard_durations.json`` as a floor, overridden
+file by file by the CI cache, so a file the cache has not seen yet still has its
+checked-in seconds.
 
 A file whose recorded seconds exceed ``HEAVY_SHARE`` times the mean shard load
 (the record's total over the shard count) is too big to place as one unit: it
@@ -106,6 +110,21 @@ def read_durations(path: Path) -> dict[str, float]:
     return parse_durations(path.read_text(encoding="utf-8"), str(path))
 
 
+def load_durations(path: Path) -> dict[str, float]:
+    """The record to balance on: the checked-in record, overridden per file by ``path``.
+
+    The checked-in record is a floor. A cache entry written before a file existed
+    must not hide the seconds the checked-in record has for it.
+    """
+    base = read_durations(DEFAULT_DURATIONS) if DEFAULT_DURATIONS.exists() else {}
+    return {**base, **read_durations(path)} if path != DEFAULT_DURATIONS else base
+
+
+def fallback_seconds(durations: Mapping[str, float]) -> float:
+    """Weight of a file missing from the record: the mean recorded file."""
+    return sum(durations.values()) / len(durations) if durations else 1.0
+
+
 def parse_shard(spec: str) -> tuple[int, int]:
     """Parse ``I/N`` into a 1-based shard index and the shard count."""
     index_text, separator, count_text = spec.partition("/")
@@ -125,8 +144,15 @@ def heavy_threshold(durations: Mapping[str, float], count: int) -> float:
 
 
 def is_heavy(name: str, durations: Mapping[str, float], count: int) -> bool:
-    """Whether the file's tests are spread over shards instead of placed as one unit."""
-    return durations.get(name, 0.0) > heavy_threshold(durations, count)
+    """Whether the file's tests are spread over shards instead of placed as one unit.
+
+    A file the record does not know could be any size, so it is spread too. An
+    empty record knows nothing about any file, and spreading everything would only
+    make every shard import the whole suite, so it places whole files instead.
+    """
+    if not durations:
+        return False
+    return name not in durations or durations[name] > heavy_threshold(durations, count)
 
 
 def shard_loads(
@@ -138,8 +164,7 @@ def shard_loads(
     the assignment and the seconds on each shard so far.
     """
     unique = sorted({name for name in files if not is_heavy(name, durations, count)})
-    known = [durations[name] for name in unique if name in durations]
-    fallback = sum(known) / len(known) if known else 1.0
+    fallback = fallback_seconds(durations)
     weights = {name: durations.get(name, fallback) for name in unique}
     loads = [0.0] * count
     assignment: dict[str, int] = {}
@@ -169,16 +194,31 @@ def assign_heavy_items(
     assignment and the final loads.
     """
     final = list(loads)
-    units = [
+    fallback = fallback_seconds(durations)
+    heavy = [
         (durations[name] / total, name, index)
         for name, total in items_per_file.items()
-        if is_heavy(name, durations, len(final))
+        if is_heavy(name, durations, len(final)) and name in durations
         for index in range(total)
     ]
     assignment: dict[tuple[str, int], int] = {}
-    for weight, name, index in sorted(units, key=lambda unit: (-unit[0], unit[1], unit[2])):
+    for weight, name, index in sorted(heavy, key=lambda unit: (-unit[0], unit[1], unit[2])):
         shard = min(range(len(final)), key=lambda candidate: (final[candidate], candidate))
         final[shard] += weight
+        assignment[name, index] = shard + 1
+    # A file the record lacks has no trustworthy weight, and a small guess would
+    # send all of its tests to the few lightest shards. Deal them out in turn
+    # instead, so no shard gets more than its even share whatever they cost.
+    unknown = [
+        (name, index)
+        for name, total in sorted(items_per_file.items())
+        if is_heavy(name, durations, len(final)) and name not in durations
+        for index in range(total)
+    ]
+    turns = sorted(range(len(final)), key=lambda candidate: (final[candidate], candidate))
+    for position, (name, index) in enumerate(unknown):
+        shard = turns[position % len(final)]
+        final[shard] += fallback / items_per_file[name]
         assignment[name, index] = shard + 1
     return assignment, final
 
@@ -301,7 +341,7 @@ class _Plan:
     """
 
     def __init__(self, config: pytest.Config) -> None:
-        self.durations = read_durations(Path(config.getoption("--shard-durations")))
+        self.durations = load_durations(Path(config.getoption("--shard-durations")))
         self.files = discover_test_files(
             config.rootpath, config.getini("testpaths"), config.getini("python_files")
         )
@@ -335,7 +375,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     order = getattr(config, "workerinput", {}).get("duration_order", False)
     if spec is None and not order:
         return
-    durations = read_durations(Path(config.getoption("--shard-durations")))
+    durations = load_durations(Path(config.getoption("--shard-durations")))
     if spec is not None:
         plan = _plan(config)
         index, count = plan.index, plan.count
@@ -387,12 +427,18 @@ def drift_report(
     return sum(measured.values()) / WORKERS_PER_SHARD, stale
 
 
+def slowest_files(measured: Mapping[str, float], limit: int = 3) -> str:
+    """One line naming the files that took the most seconds, for an over-budget warning."""
+    top = sorted(measured.items(), key=lambda pair: (-pair[1], pair[0]))[:limit]
+    return ", ".join(f"{name} {seconds:.0f}s" for name, seconds in top)
+
+
 def pytest_terminal_summary(terminalreporter: TerminalReporter, config: pytest.Config) -> None:
     """Warn when this shard overran its budget or ran files the record underestimates."""
     spec = config.getoption("--shard")
     if spec is None or hasattr(config, "workerinput"):
         return
-    durations = read_durations(Path(config.getoption("--shard-durations")))
+    durations = load_durations(Path(config.getoption("--shard-durations")))
     seconds, stale = drift_report(_measured, durations)
     index, count = parse_shard(spec)
     terminalreporter.write_line(
@@ -402,7 +448,8 @@ def pytest_terminal_summary(terminalreporter: TerminalReporter, config: pytest.C
     if seconds > SHARD_BUDGET_SECONDS:
         terminalreporter.write_line(
             f"::warning::shard {index}/{count} took {seconds:.0f}s of tests, over the "
-            f"{SHARD_BUDGET_SECONDS:.0f}s budget: add shards or refresh {DEFAULT_DURATIONS.name}"
+            f"{SHARD_BUDGET_SECONDS:.0f}s budget: add shards or refresh {DEFAULT_DURATIONS.name}. "
+            f"Slowest files: {slowest_files(_measured)}"
         )
     for line in stale:
         terminalreporter.write_line(

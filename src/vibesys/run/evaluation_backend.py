@@ -14,7 +14,6 @@ from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 from vs_evaluation.api import (
     EVALUATION_ACCESS_STATE_PATH,
     MAX_AGENT_AWAIT_S,
-    MAX_STAGE_SUMMARY_TAIL_CHARS,
     AccessErrorCode,
     AvailabilitySnapshot,
     ContentDigest,
@@ -1090,20 +1089,7 @@ def _project_operation_snapshot(record: StoredEvaluation) -> EvaluationOperation
             record.state is EvaluationState.SUCCEEDED
             and len(evidence) == len(record.request.stages)
         ),
-        stage_outcomes=tuple(
-            EvaluationStageOutcome(
-                kind=item.kind,
-                outcome=item.outcome,
-                metrics=item.metrics,
-                partial_measurement=item.partial_measurement,
-                summary_tail=(
-                    item.semantic_summary[-MAX_STAGE_SUMMARY_TAIL_CHARS:]
-                    if item.semantic_summary
-                    else None
-                ),
-            )
-            for item in evidence
-        ),
+        stage_outcomes=tuple(EvaluationStageOutcome.of(item) for item in evidence),
         evidence_ids=tuple(item.evidence_id for item in evidence),
         failure=agent_evaluation(record).failure,
     )

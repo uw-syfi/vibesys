@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from tests.support.owed_submissions import owed_in
+from tests.support.synthesized_evidence import SynthesizedEvidence
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._run import FACTS
 
@@ -33,6 +34,7 @@ from vs_runtime.api.core import (
     EVALUATION_TOOL_ID,
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
+    AgentEvaluationRecords,
     ExecutionResult,
     handle_for,
 )
@@ -85,7 +87,10 @@ class _Workspaces:
 def new_bridge(root: Path) -> AgentEvaluationBridge:
     """The production bridge over a fake workspace lookup; it is called in process."""
     return AgentEvaluationBridge(
-        root / "evaluation.sock", _POLICY, _Workspaces(), owed_in(root / "owed")
+        root / "evaluation.sock",
+        _POLICY,
+        _Workspaces(),
+        AgentEvaluationRecords(owed_in(root / "owed"), SynthesizedEvidence()),
     )
 
 

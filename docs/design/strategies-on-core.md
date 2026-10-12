@@ -51,12 +51,14 @@ Readers who know the product but not `vs-core` need these terms.
   it. Core runs it after `ProposeWinner` and reports `AdoptionResult`.
 - **Suspension**: a turn that ends by waiting for an evaluation job. Core publishes
   `TurnSuspended`, later `ResumeAuthorized` once, and the strategy asks the resumed turn.
+  If the turn's workspace checkpoint is declined or fails, core instead ends the turn with
+  `YieldPublicationFailed` (a named reason) and the strategy treats it as a failed turn.
 - **Shell**: the async host in `vs-runtime` that executes core's requests and feeds outcomes
   back as events. **Durable boundary**: one atomic commit of state plus the intents it implies.
 
 Core events the strategies fold, with the consequence of each: `AttemptReady` (slot and
-workspace held, begin turns), `TurnResult` (reply or typed failure), `TurnSuspended` and
-`ResumeAuthorized` (wait and resume), `MeasurementResult` (trusted evidence ids),
+workspace held, begin turns), `TurnResult` (reply or typed failure), `TurnSuspended`, `YieldPublicationFailed` and
+`ResumeAuthorized` (wait, failed wait, and resume), `MeasurementResult` (trusted evidence ids),
 `OperationResult`, `AttemptExhausted` (budget spent), `AttemptSettled`, `AdoptionResult`,
 `IntentBlocked` (effect unknown), `Rejected` (decision refused), `ControlChanged` (operator
 stop), `RunEnded`.

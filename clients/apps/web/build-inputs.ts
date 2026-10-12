@@ -12,6 +12,7 @@ export const WEB_BUNDLE_PACKAGES = [
   'features/run-view',
   'libs/hosts',
   'libs/ipc',
+  'libs/machine',
   'libs/run-session',
   'libs/run-state',
   'libs/runs',

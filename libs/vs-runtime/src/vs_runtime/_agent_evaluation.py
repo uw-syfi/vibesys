@@ -84,6 +84,8 @@ from vs_core.api import (
     ContinuationPhase,
     ContractError,
     DispatchTurn,
+    EvidenceId,
+    EvidenceKey,
     InvocationId,
     InvocationRef,
     MeasurementPlan,
@@ -101,6 +103,7 @@ from vs_core.api import (
 from vs_evaluation.api import (
     RECEIPT_LINE,
     AgentEvaluationCall,
+    EvaluationStageOutcome,
     RunStoppingReply,
     SocketFailure,
     SocketSuccess,
@@ -125,7 +128,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_core.api import CoreEvent, CoreState, RequestId
+    from vs_evaluation.api import TrustedEvidence
     from vs_mcp.api import ToolServerDescriptor
+    from vs_runtime._evidence_ledger import EvidenceLookup
     from vs_runtime._workspace_receipts import WorkspaceReceipts
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
     from vs_runtime.contracts import AgentRole
@@ -342,6 +347,19 @@ class _Scoped:
             self.waits = ()
 
 
+@dataclass(frozen=True, slots=True)
+class AgentEvaluationRecords:
+    """The durable records the bridge reads and writes.
+
+    ``owed`` keeps a charged submission until its reply reached the agent. ``evidence`` is the
+    ledger the evaluation executor records every accepted result in; a reply that reports a
+    finished evaluation reads what it measured from there.
+    """
+
+    owed: OwedSubmissions
+    evidence: EvidenceLookup
+
+
 class AgentEvaluationBridge:
     """The unix-socket service, token minting and yield producer of one run.
 
@@ -355,17 +373,18 @@ class AgentEvaluationBridge:
         socket_path: Path,
         policy: AgentEvaluationPolicy,
         workspaces: AgentWorkspaces,
-        owed: OwedSubmissions,
+        records: AgentEvaluationRecords,
         diagnostics: Callable[[str], None] = _ignore_diagnostic,
     ) -> None:
-        """Bind the socket path, the plan policy, the workspace lookup, the owed record and a log sink.
+        """Bind the socket path, the plan policy, the workspace lookup, the records and a log sink.
 
         ``diagnostics`` hears one line for each call refused as busy, for the run's journal.
         """
         self._socket_path = socket_path
         self._policy = policy
         self._workspaces = workspaces
-        self._owed = owed
+        self._owed = records.owed
+        self._evidence = records.evidence
         self._policy_digest = hashlib.sha256(
             f"{policy.purpose}\n{policy.measurement.model_dump_json()}".encode()
         ).hexdigest()
@@ -544,8 +563,7 @@ class AgentEvaluationBridge:
                 raise
             return self._answer(shell, scoped, call), self._acknowledger(owed)
 
-    @staticmethod
-    def _answer(shell: AdmissionShell, scoped: _Scoped, call: AgentCall) -> SubmittedReply:
+    def _answer(self, shell: AdmissionShell, scoped: _Scoped, call: AgentCall) -> SubmittedReply:
         """The reply for a call core answered with a submission, which the turn may now wait on."""
         if call.request_id is None or call.deadline_at is None:
             message = "an answered agent call names its submission and deadline"
@@ -554,14 +572,27 @@ class AgentEvaluationBridge:
         scoped.submitted[handle] = call.deadline_at
         outcome = _outcome(shell.admitted_core, call.request_id)
         records = shell.admitted_core.evaluation.evidence if outcome is not None else ()
+        own = tuple(item for item in records if item.source_request == call.request_id)
         return SubmittedReply(
             handle_id=handle,
             repeat=call.repeat,
             outcome=outcome,
-            evidence=tuple(
-                item.evidence_id.root for item in records if item.source_request == call.request_id
+            evidence=tuple(item.evidence_id.root for item in own),
+            stages=tuple(
+                EvaluationStageOutcome.of(self._recorded(call.request_id, item.evidence_id))
+                for item in own
             ),
         )
+
+    def _recorded(self, request_id: RequestId, evidence_id: EvidenceId) -> TrustedEvidence:
+        """The accepted record core's evidence names, from the ledger that holds what it measured."""
+        entry = self._evidence.lookup(
+            EvidenceKey(source_request=request_id, evidence_id=evidence_id)
+        )
+        if entry is None:
+            message = "core accepted evidence the evidence ledger never recorded"
+            raise ContractError(("evidence",), message)
+        return entry.evidence
 
     @staticmethod
     def _call_of(state: CoreState, call_id: str) -> AgentCall:
@@ -713,6 +744,7 @@ __all__ = [
     "EVALUATION_TOOL_ID",
     "AgentEvaluationBridge",
     "AgentEvaluationPolicy",
+    "AgentEvaluationRecords",
     "AgentWorkspaces",
     "ScopeWorkspaces",
     "SnapshotWorkspace",

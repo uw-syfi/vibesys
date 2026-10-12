@@ -153,7 +153,7 @@ def production_owners(
         match role:
             case OperationRole.RENDER_ARTIFACTS:
                 owners[role] = RenderArtifactsOwner(
-                    ports.renderer, ports.artifacts, ports.variables
+                    ports.renderer, ports.artifacts, ports.variables, ports.evidence
                 )
             case OperationRole.VERIFY_REVISION:
                 owners[role] = VerifyRevisionOwner(ports.workspaces, ports.ledger, ports.commit_of)

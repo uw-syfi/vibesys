@@ -50,6 +50,7 @@ from vs_core.api import (
     StrategyEvent,
     TurnResult,
     TurnSuspended,
+    YieldPublicationFailed,
 )
 
 
@@ -120,7 +121,14 @@ class EvolveStrategy:
 
     def _lifecycle(self, state: EvolveStrategyState, event: StrategyEvent) -> EvolveStrategyState:
         """Fold lifecycle feedback; other feedback needs no state change here."""
-        if isinstance(event, AttemptReady | AttemptSettled | TurnSuspended | ResumeAuthorized):
+        if isinstance(
+            event,
+            AttemptReady
+            | AttemptSettled
+            | TurnSuspended
+            | YieldPublicationFailed
+            | ResumeAuthorized,
+        ):
             return self._attempt_feedback(state, event)
         if isinstance(event, AttemptExhausted):
             return slot_events.on_exhausted(state, event)
@@ -131,7 +139,11 @@ class EvolveStrategy:
     def _attempt_feedback(
         self,
         state: EvolveStrategyState,
-        event: AttemptReady | AttemptSettled | TurnSuspended | ResumeAuthorized,
+        event: AttemptReady
+        | AttemptSettled
+        | TurnSuspended
+        | YieldPublicationFailed
+        | ResumeAuthorized,
     ) -> EvolveStrategyState:
         if isinstance(event, AttemptReady):
             return slot_events.on_ready(state, event)
@@ -140,6 +152,8 @@ class EvolveStrategy:
             return generation.admit_ready(settled, self.config)
         if isinstance(event, TurnSuspended):
             return turn_events.on_suspended(state, event)
+        if isinstance(event, YieldPublicationFailed):
+            return turn_events.on_yield_failed(state, event)
         return turn_events.on_resume(state, event)
 
     @staticmethod

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, override
 
 from tests.support.owed_submissions import owed_in
+from tests.support.synthesized_evidence import SynthesizedEvidence
 from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors, WorldTranslator
 from tests.vibesys.orchestration.issue_queue.strategy._run import FACTS, config
 
@@ -29,7 +30,12 @@ from vs_core.api import (
 )
 from vs_core.testing.drive import Running, Succeeded
 from vs_evaluation.api import SubmitCall, WaitCall
-from vs_runtime.api.core import EVALUATION_TOOL_ID, AgentEvaluationBridge, ExecutionResult
+from vs_runtime.api.core import (
+    EVALUATION_TOOL_ID,
+    AgentEvaluationBridge,
+    AgentEvaluationRecords,
+    ExecutionResult,
+)
 from vs_runtime.contracts import AgentRole, AgentTool
 
 if TYPE_CHECKING:
@@ -72,7 +78,10 @@ def new_bridge(root: Path) -> AgentEvaluationBridge:
         measurement_recipe(config(), FACTS), accuracy=True, benchmark=True
     )
     return AgentEvaluationBridge(
-        root / "evaluation.sock", policy, _Workspaces(), owed_in(root / "owed")
+        root / "evaluation.sock",
+        policy,
+        _Workspaces(),
+        AgentEvaluationRecords(owed_in(root / "owed"), SynthesizedEvidence()),
     )
 
 

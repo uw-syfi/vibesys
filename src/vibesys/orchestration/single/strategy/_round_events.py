@@ -58,6 +58,7 @@ from vs_core.api import (
     TurnSuspended,
     WaitableReply,
     WaitingForEvaluation,
+    YieldPublicationFailed,
     ledger_refs,
     may_resubmit,
     trusted_keys,
@@ -543,6 +544,20 @@ def on_suspended(state: SingleStrategyState, event: TurnSuspended) -> SingleStra
     )
 
 
+def on_yield_failed(
+    state: SingleStrategyState, event: YieldPublicationFailed
+) -> SingleStrategyState:
+    """Core could not publish the wait it recorded: the round fails with core's reason."""
+    record = state.round
+    if record is None or record.turn is None or record.step is not Step.AWAITING:
+        return state
+    if event.invocation.invocation_id.root != invocation_for(
+        Role.IMPLEMENTER, subject_of(record), record.turn
+    ):
+        return state
+    return fail(state, record, f"the turn's wait could not be published: {event.detail}")
+
+
 def on_resume(state: SingleStrategyState, event: ResumeAuthorized) -> SingleStrategyState:
     """Authorize the suspended turn's resume with the invocation core named."""
     record = state.round
@@ -560,7 +575,7 @@ def on_resume(state: SingleStrategyState, event: ResumeAuthorized) -> SingleStra
             role="implementer",
             retained_revision=record.candidate,
             timed_out=event.timeout is not None,
-            evidence=tuple(item.evidence_id for item in event.evidence),
+            cited_evidence=event.evidence,
             repeated_failure=None
             if event.repeated_failure is None
             else str(event.repeated_failure),

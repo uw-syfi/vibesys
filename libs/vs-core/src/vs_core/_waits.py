@@ -18,7 +18,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, assert_never
 
 from .types.attempts import AttemptPhase, SnapshotAndRetain
-from .types.common import LifecycleClass, RunStatus, Value
+from .types.common import LifecycleClass, ObservationStatus, RunStatus, Value
 from .types.evaluation import (
     ContinuationPhase,
     InspectOwnedJob,
@@ -33,6 +33,7 @@ from .types.sessions import (
     CloseSession,
     DispatchTurn,
     EnsureSession,
+    InspectTurn,
     ResumeSessionTurn,
     SessionPhase,
     SnapshotAndRetainRun,
@@ -41,10 +42,10 @@ from .types.sessions import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from .types.common import RequestId
-    from .types.intents import Intent
+    from .types.common import InvocationRef, RequestId
+    from .types.intents import Intent, Request
     from .types.kernel import CoreEvent, CoreState
-    from .types.sessions import SessionView
+    from .types.sessions import SessionsState, SessionView
 
 
 class WaitKind(StrEnum):
@@ -55,6 +56,7 @@ class WaitKind(StrEnum):
     OWNED_JOB = "owned-job"
     RELEASE_DEPENDENCY = "release-dependency"
     YIELD_PUBLICATION = "yield-publication"
+    INTERRUPT = "interrupt"
 
 
 class Producer(StrEnum):
@@ -313,29 +315,96 @@ def _release_waits(core: CoreState) -> list[Wait]:
     ]
 
 
-def _yield_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
-    """A turn that ended waiting, whose suspension is not yet published.
+def _checkpoint_intents(intents: Iterable[Intent], invocation: InvocationRef) -> list[Intent]:
+    """The intents that can still end a yield: its checkpoint, or the inspection of its turn.
 
-    Core publishes the suspension when the checkpoint of the turn's workspace comes back, so
-    the wait is produced by that checkpoint request. A yield with no checkpoint request
-    pending or answered would never be published, and the turn would never resume.
+    An inspection can end it because the turn's acceptance is what lets the checkpoint be
+    requested. Both are about exactly this invocation.
+    """
+    return [
+        row
+        for row in intents
+        if isinstance(row.request, SnapshotAndRetain | SnapshotAndRetainRun | InspectTurn)
+        and row.request.invocation == invocation
+    ]
+
+
+def draining_without_cancel(sessions: SessionsState, invocation: InvocationRef) -> bool:
+    """Whether an accepted interruption of *invocation* waits only on its checkpoint.
+
+    The claim is draining and the turn already ended, so cancellation is done and the
+    one thing left to wait for is the retained checkpoint (then the refund).
+    """
+    claim = next((row for row in sessions.interrupts if row.invocation == invocation), None)
+    turn = next((row for row in sessions.invocations if row.invocation == invocation), None)
+    observation = None if turn is None else turn.observation
+    return (
+        claim is not None
+        and claim.phase == "draining"
+        and observation is not None
+        and observation.terminal
+        and observation.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
+    )
+
+
+def _checkpoint_waiters(sessions: SessionsState) -> tuple[InvocationRef, ...]:
+    """Every invocation with a wait that only its checkpoint (or turn inspection) can end."""
+    return tuple(
+        dict.fromkeys(
+            turn.invocation
+            for turn in sessions.invocations
+            if turn.pending_suspension is not None
+            or draining_without_cancel(sessions, turn.invocation)
+        )
+    )
+
+
+def stalled_checkpoint_waits(
+    sessions: SessionsState, intents: Sequence[Intent], in_flight: Sequence[Request] = ()
+) -> tuple[InvocationRef, ...]:
+    """The invocations whose checkpoint wait nothing live or in flight can end.
+
+    Two waits hang on a checkpoint: a suspension core promised to publish, and an accepted
+    interruption that must retain the workspace before it refunds. *in_flight* holds the
+    requests a step has produced but not yet recorded as intents. An invocation named here
+    would stall the run, so the step ends the waits instead (see ``CheckpointStalled``):
+    this is the resolver every checkpoint wait is guaranteed.
+    """
+    return tuple(
+        invocation
+        for invocation in _checkpoint_waiters(sessions)
+        if not any(intent_waits(row.phase) for row in _checkpoint_intents(intents, invocation))
+        and not any(
+            isinstance(request, SnapshotAndRetain | SnapshotAndRetainRun | InspectTurn)
+            and request.invocation == invocation
+            for request in in_flight
+        )
+    )
+
+
+def _yield_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
+    """The waits that hang on a turn's checkpoint: its suspension and its interruption.
+
+    Core publishes a suspension, and completes an interruption, when the checkpoint of the
+    turn's workspace comes back, so each wait is produced by that checkpoint request. Core
+    ends a wait nothing can produce (``stalled_checkpoint_waits``), so an orphan here means
+    that resolver did not run.
     """
     found = []
     for invocation in core.sessions.invocations:
-        if invocation.pending_suspension is None:
-            continue
-        related = [
-            row
-            for row in core.intents.intents
-            if isinstance(row.request, SnapshotAndRetain | SnapshotAndRetainRun)
-            and row.request.invocation == invocation.invocation
-        ]
-        found.append(
+        kinds = []
+        if invocation.pending_suspension is not None:
+            kinds.append(WaitKind.YIELD_PUBLICATION)
+        if draining_without_cancel(core.sessions, invocation.invocation):
+            kinds.append(WaitKind.INTERRUPT)
+        related = _checkpoint_intents(core.intents.intents, invocation.invocation)
+        found.extend(
             Wait(
-                waiter=WaitKind.YIELD_PUBLICATION,
+                waiter=kind,
                 subject=invocation.invocation.invocation_id.root,
                 producer=_producer(related, outbox),
             )
+            for kind in kinds
         )
     return found
 
@@ -376,5 +445,6 @@ __all__ = [
     "WaitingPhase",
     "orphan_waits",
     "phase_waits",
+    "stalled_checkpoint_waits",
     "waits",
 ]

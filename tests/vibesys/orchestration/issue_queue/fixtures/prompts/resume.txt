@@ -4,8 +4,6 @@ relying on prior uncommitted or untracked files.
 Your original task remains in force; this continuation does not start another attempt.
 
 Every evaluation you awaited is terminal.
-Accepted evidence for the original submitted candidate, not a measurement of later
-workspace edits: e1
 
 Repeated failure: same error three times
 

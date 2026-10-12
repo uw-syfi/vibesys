@@ -37,8 +37,10 @@
   },
   "dependencies": {
     "@vibesys/contracts": "workspace:*",
+    "@vibesys/machine": "workspace:*",
     "@vibesys/run-state": "workspace:*",
     "@vibesys/store": "workspace:*",
-    "@vibesys/transport": "workspace:*"
+    "@vibesys/transport": "workspace:*",
+    "xstate": "5.33.2"
   }
 }

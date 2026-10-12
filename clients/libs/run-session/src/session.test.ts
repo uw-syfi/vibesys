@@ -1,18 +1,17 @@
 import {describe, expect, test} from 'bun:test';
 import {BackendClientError, type RunSnapshot} from '@vibesys/contracts';
-import {checkModel, type Seeded} from '@vibesys/store/testing';
+import {checkMachine, type Live, type MachineAction} from '@vibesys/machine/testing';
+import type {Seeded} from '@vibesys/store/testing';
 import type {ControlChannelState} from '@vibesys/transport';
+import {initialTransition, transition} from 'xstate';
 import {
   type Reachability,
-  SESSION_INITIAL,
-  type SessionAction,
-  type SessionRequest,
-  type SessionState,
+  type RefreshOutcome,
+  type SessionEvent,
+  type SessionSnapshot,
   type SnapshotResult,
-  sessionAcceptsSnapshot,
-  sessionAwaited,
   sessionInvariants,
-  sessionStep,
+  sessionMachine,
 } from './session.js';
 
 const ERRORS = [new Error('snapshot failed'), new Error('socket closed'), new Error('parse')];
@@ -22,76 +21,100 @@ const CONTROLS: readonly ControlChannelState[] = [
   {status: 'disconnected', error: OUTAGE, everConnected: false, retrying: false},
   {status: 'disconnected', error: OUTAGE, everConnected: true, retrying: true},
 ];
+const VISIBLE: Reachability = {visible: true, online: true};
+
+/** An event the machine takes: one the shell sends, or an operation's outcome. */
+type Event =
+  | SessionEvent
+  | {readonly type: string; readonly output?: unknown; readonly error?: unknown};
 
 function reach(random: Seeded): Reachability {
   return {visible: random.next() < 0.8, online: random.next() < 0.8};
 }
 
-function maybeError(random: Seeded): Error | null {
-  return random.bool() ? null : random.pick(ERRORS);
+/** The snapshot a load with `issue` returned: its sequence names the load, to trace what applied. */
+function snapshotOf(issue: number): RunSnapshot {
+  return {run_id: 'run-1', sequence: issue, status: 'running'};
 }
 
-/** The snapshot a load with `token` returned: its sequence names the load, to trace what applied. */
-function snapshotOf(token: number): RunSnapshot {
-  return {run_id: 'run-1', sequence: token, status: 'running'};
+function loaded(issue: number): SnapshotResult {
+  return {ok: true, snapshot: snapshotOf(issue)};
 }
 
-function loaded(token: number): SnapshotResult {
-  return {ok: true, snapshot: snapshotOf(token)};
+const REPLACED: SnapshotResult = {
+  ok: false,
+  error: new Error('store replaced'),
+  reason: 'store-replaced',
+};
+
+function snapshotResult(random: Seeded, issue: number): SnapshotResult {
+  switch (random.int(4)) {
+    case 0:
+      return {ok: false, error: random.pick(ERRORS)};
+    case 1:
+      return REPLACED;
+    default:
+      return loaded(issue);
+  }
 }
 
-function snapshotResult(random: Seeded, token: number): SnapshotResult {
-  const error = maybeError(random);
-  return error === null ? loaded(token) : {ok: false, error};
+function refreshOutcome(random: Seeded, issue: number): RefreshOutcome {
+  switch (random.int(4)) {
+    case 0:
+      return {kind: 'redial-failed', error: random.pick(ERRORS)};
+    case 1:
+      return {kind: 'ready'};
+    default:
+      return {kind: 'snapshot', result: snapshotResult(random, issue)};
+  }
 }
 
-function randomAction(random: Seeded, issued: readonly number[]): SessionAction {
-  const token = random.pick(issued);
-  switch (random.int(15)) {
+/** One outcome of each live operation, its output naming the load it answers. */
+function settleOne(random: Seeded, live: Live, snapshot: SessionSnapshot): Event[] {
+  const {recovery, replacement} = snapshot.context;
+  return live.operations.flatMap(operation => {
+    const failed = live.error(operation, random.pick(ERRORS));
+    switch (operation) {
+      case 'subscribe':
+        return [live.done(operation), failed];
+      case 'refresh':
+        return [live.done(operation, refreshOutcome(random, recovery.issue)), failed];
+      case 'loadReplacementSnapshot':
+        return [live.done(operation, snapshotResult(random, replacement.issue)), failed];
+      default:
+        return [failed];
+    }
+  });
+}
+
+function plainEvent(random: Seeded): SessionEvent {
+  switch (random.int(13)) {
     case 0:
       return {type: 'start'};
     case 1:
-      return {type: 'subscribe-reply', token, error: maybeError(random)};
     case 2:
-      return {
-        type: 'refresh-reply',
-        token,
-        outcome: random.pick([
-          {kind: 'snapshot', result: snapshotResult(random, token)} as const,
-          {kind: 'redial-failed', error: random.pick(ERRORS)} as const,
-          {kind: 'ready'} as const,
-        ]),
-      };
-    case 3:
       return {type: 'stream-established', storeId: `store-${random.int(4) + 1}`};
-    case 4:
-      return {
-        type: 'replacement-snapshot-reply',
-        token,
-        storeId: `store-${random.int(4) + 1}`,
-        result: snapshotResult(random, token),
-      };
-    case 5:
+    case 3:
       return {
         type: 'stream',
         state: random.bool()
           ? {status: 'connected'}
           : {status: 'disconnected', error: random.pick(ERRORS)},
       };
-    case 6:
+    case 4:
       return {type: 'fault', error: random.pick(ERRORS)};
-    case 7:
+    case 5:
       return {type: 'controls', state: random.pick(CONTROLS)};
-    case 8:
-    case 9:
+    case 6:
+    case 7:
       return {type: 'wake', reach: reach(random)};
-    case 10:
+    case 8:
       return {type: 'reattach', reach: reach(random), runEnded: random.bool()};
-    case 11:
+    case 9:
       return {type: 'offline', runEnded: random.bool()};
-    case 12:
+    case 10:
       return {type: 'reconnect-controls'};
-    case 13:
+    case 11:
       return {type: 'projection-rejected', error: random.pick(ERRORS)};
     default:
       // Rare, so most sequences stay open long enough to interleave.
@@ -99,288 +122,447 @@ function randomAction(random: Seeded, issued: readonly number[]): SessionAction 
   }
 }
 
-function issues(request: SessionRequest): number | null {
-  return 'token' in request ? request.token : null;
+/** A custom action's params, by its type. */
+function performed<P>(actions: readonly MachineAction[], type: string): P[] {
+  return actions.flatMap(action => (action.type === type ? [action.params as P] : []));
 }
 
-/** The reply slot an action answers, by the reply's type; null for any other action. */
-function replySlot(action: SessionAction): {slot: string; token: number} | null {
-  switch (action.type) {
-    case 'subscribe-reply':
-      return {slot: 'subscribe', token: action.token};
-    case 'refresh-reply':
-      return {slot: 'refresh', token: action.token};
-    case 'replacement-snapshot-reply':
-      return {slot: 'replacement', token: action.token};
-    default:
-      return null;
+function spawned(actions: readonly MachineAction[], id: string): boolean {
+  return actions.some(
+    action =>
+      action.type === 'xstate.spawnChild' &&
+      (action.params as {id?: string} | undefined)?.id === id,
+  );
+}
+
+function appliedSnapshots(actions: readonly MachineAction[]): RunSnapshot[] {
+  return performed<{snapshot: RunSnapshot | null}>(actions, 'applySnapshot').flatMap(
+    ({snapshot}) => (snapshot === null ? [] : [snapshot]),
+  );
+}
+
+/** The issue and the stale causes a settled load answered for, by the operation it came from. */
+function answered(
+  before: SessionSnapshot,
+  event: Event,
+): {readonly issue: number; readonly observed: number; readonly result: SnapshotResult} | null {
+  const {recovery, replacement} = before.context;
+  if (event.type === 'xstate.done.actor.loadReplacementSnapshot') {
+    const result = (event as {output: SnapshotResult}).output;
+    return {issue: replacement.issue, observed: replacement.problemEpoch, result};
   }
+  if (event.type === 'xstate.done.actor.refresh') {
+    const outcome = (event as {output: RefreshOutcome}).output;
+    if (outcome.kind !== 'snapshot') return null;
+    return {issue: recovery.issue, observed: recovery.problemEpoch, result: outcome.result};
+  }
+  return null;
 }
 
-/** Snapshot proof is published only from the awaited successful fold outcome. */
-function snapshotProperties(
-  before: SessionState,
-  action: SessionAction,
-  after: SessionState,
+/** Fencing: a snapshot is applied only by the load that carried it, issued after the newest applied. */
+function fencingProperties(
+  before: SessionSnapshot,
+  event: Event,
+  after: SessionSnapshot,
+  actions: readonly MachineAction[],
 ): void {
-  if (before.view.hasSnapshot || !after.view.hasSnapshot) return;
-  const reply = replySlot(action);
-  expect(reply).not.toBeNull();
-  expect(before.kind).toBe('open');
-  if (before.kind === 'open' && reply !== null) {
-    expect(sessionAwaited(before)[reply.slot as 'refresh' | 'replacement']).toBe(reply.token);
-    expect(reply.token).toBeGreaterThan(before.applied);
+  expect(after.context.applied).toBeGreaterThanOrEqual(before.context.applied);
+  expect(after.context.applied).toBeLessThanOrEqual(after.context.issued);
+  const applied = appliedSnapshots(actions);
+  if (applied.length > 0) {
+    const load = answered(before, event);
+    expect(load).not.toBeNull();
+    expect(applied.map(snapshot => snapshot.sequence)).toEqual([load?.issue ?? -1]);
+    expect(load?.issue ?? -1).toBeGreaterThan(before.context.applied);
+    expect(after.context.applied).toBe(load?.issue ?? -1);
   }
+  // A proven store fences every load issued before it.
+  if (spawned(actions, 'loadReplacementSnapshot')) {
+    expect(after.context.applied).toBeGreaterThanOrEqual(after.context.replacement.issue - 1);
+  }
+  // Only an applied snapshot reevaluates the stream.
+  const reevaluated = performed<{applied: boolean}>(actions, 'reevaluateStream').some(
+    ({applied: yes}) => yes,
+  );
+  if (reevaluated) expect(applied).toHaveLength(1);
 }
 
-function expectRefreshStartsOnce(
-  before: SessionState,
-  action: SessionAction,
-  requests: readonly SessionRequest[],
-): void {
-  if (requests.some(request => request.kind === 'refresh')) {
-    // A refresh starts only when none is in flight, and only when the page can reach anything.
-    expect(before.kind === 'open' && before.recovery.kind === 'none').toBe(true);
-    const reachable =
-      (action.type === 'wake' || action.type === 'reattach') &&
-      action.reach.visible &&
-      action.reach.online;
-    expect(reachable).toBe(true);
+/** Problem epochs: monotone, and a snapshot clears only the stale causes its load saw. */
+function problemProperties(before: SessionSnapshot, event: Event, after: SessionSnapshot): void {
+  expect(after.context.problemEpoch).toBeGreaterThanOrEqual(before.context.problemEpoch);
+  // A transient connection fault never erases stronger snapshot or projection evidence.
+  const stronger =
+    before.context.streamProblem === 'snapshot' || before.context.streamProblem === 'projection';
+  if (stronger && ['stream', 'fault', 'offline'].includes(event.type)) {
+    expect(after.context.streamProblem).toBe(before.context.streamProblem);
+    expect(after.context.view.error).toBe(before.context.view.error);
   }
-}
-
-function storeReplacementRecovery(action: SessionAction): 'rebootstrap' | null {
-  if (action.type === 'replacement-snapshot-reply') {
-    return !action.result.ok && action.result.reason === 'store-replaced' ? 'rebootstrap' : null;
+  const cleared = before.context.streamProblem !== 'none' && after.context.streamProblem === 'none';
+  if (!cleared) return;
+  const load = answered(before, event);
+  if (load !== null) {
+    expect(load.result.ok).toBe(true);
+    expect(before.context.problemEpoch).toBeLessThanOrEqual(load.observed);
+  } else {
+    // Otherwise only connection proof clears a connection problem, and only over a trusted snapshot.
+    expect(event).toMatchObject({type: 'stream', state: {status: 'connected'}});
+    expect(before.context.streamProblem).toBe('connection');
+    expect(before.context.streamSnapshot).toBe('trusted');
   }
-  if (action.type !== 'refresh-reply' || action.outcome.kind !== 'snapshot') return null;
-  return !action.outcome.result.ok && action.outcome.result.reason === 'store-replaced'
-    ? 'rebootstrap'
-    : null;
 }
 
 /** Recovery is single-flight and keeps the strongest intent until the stream gets it. */
 function recoveryProperties(
-  before: SessionState,
-  action: SessionAction,
-  requests: readonly SessionRequest[],
+  before: SessionSnapshot,
+  event: Event,
+  actions: readonly MachineAction[],
 ): void {
-  expectRefreshStartsOnce(before, action, requests);
-  const replacementMode = storeReplacementRecovery(action);
-  const heldIntent =
-    before.kind === 'open' && before.recovery.kind === 'refreshing' ? before.recovery.intent : null;
-  for (const request of requests) {
+  if (spawned(actions, 'refresh')) {
+    // A refresh starts only when none is in flight, and only when the page can reach anything.
+    expect(before.matches({open: {recovery: 'none'}})).toBe(true);
+    expect(event.type === 'wake' || event.type === 'reattach').toBe(true);
+    expect((event as {reach: Reachability}).reach).toEqual(VISIBLE);
+  }
+  const load = answered(before, event);
+  const storeReplaced = load !== null && !load.result.ok && load.result.reason === 'store-replaced';
+  const heldIntent = before.matches({open: {recovery: 'refreshing'}})
+    ? before.context.recovery.intent
+    : null;
+  for (const {mode} of performed<{mode: string}>(actions, 'recoverStream')) {
     // The stream recovers with the intent the flight held when it settled: a Reattach that
     // overlapped a lifecycle retry still gets its fresh bootstrap.
-    if (request.kind !== 'recover-stream') continue;
-    if (replacementMode !== null) expect(request.mode).toBe(replacementMode);
-    else if (heldIntent === 'rebootstrap') expect(request.mode).toBe('rebootstrap');
-    else expect(['retry', 'rebootstrap']).toContain(request.mode);
+    if (storeReplaced || heldIntent === 'rebootstrap') expect(mode).toBe('rebootstrap');
   }
 }
 
 function properties(
-  before: SessionState,
-  action: SessionAction,
-  after: SessionState,
-  requests: readonly SessionRequest[],
+  before: SessionSnapshot,
+  event: Event,
+  after: SessionSnapshot,
+  actions: readonly MachineAction[],
 ): void {
-  // The snapshot on screen is never forgotten.
-  if (before.view.hasSnapshot) expect(after.view.hasSnapshot).toBe(true);
-  // A closed session stays closed and asks for nothing.
-  if (before.kind === 'closed') expect({after, requests}).toEqual({after: before, requests: []});
-  recoveryProperties(before, action, requests);
-  snapshotProperties(before, action, after);
-  if (action.type === 'close' && before.kind === 'open') {
-    expect({kind: after.kind, requests}).toEqual({kind: 'closed', requests: [{kind: 'close'}]});
+  // The snapshot on screen is never forgotten, and only a successful load puts one there.
+  if (before.context.view.hasSnapshot) expect(after.context.view.hasSnapshot).toBe(true);
+  else if (after.context.view.hasSnapshot) expect(answered(before, event)?.result.ok).toBe(true);
+  // A closed session stays closed and does nothing.
+  if (before.status === 'done') expect({after, actions}).toEqual({after: before, actions: []});
+  if (event.type === 'close' && before.status === 'active') {
+    expect(after.status).toBe('done');
+    expect(performed(actions, 'closeShell')).toHaveLength(1);
   }
   // A healthy ended run's Reattach is inert.
-  if (action.type === 'reattach' && action.runEnded && before.view.status !== 'stale') {
+  if (
+    event.type === 'reattach' &&
+    (event as {runEnded: boolean}).runEnded &&
+    before.context.view.status !== 'stale'
+  ) {
     expect(after).toBe(before);
+  }
+  fencingProperties(before, event, after, actions);
+  problemProperties(before, event, after);
+  recoveryProperties(before, event, actions);
+}
+
+type Request =
+  | {readonly kind: 'subscribe'}
+  | {readonly kind: 'refresh'; readonly mode: string}
+  | {readonly kind: 'load-replacement-snapshot'; readonly storeId: string}
+  | {readonly kind: 'apply-snapshot'; readonly snapshot: RunSnapshot}
+  | {readonly kind: 'recover-stream'; readonly mode: string}
+  | {readonly kind: 'reevaluate-stream'}
+  | {readonly kind: 'close'};
+
+interface ActionParams {
+  readonly id?: string;
+  readonly snapshot?: RunSnapshot | null;
+  readonly mode?: string;
+  readonly applied?: boolean;
+}
+
+/** The operation an `xstate.spawnChild` started, as the request the shell performs. */
+function started(after: SessionSnapshot, id: string | undefined): Request[] {
+  switch (id) {
+    case 'subscribe':
+      return [{kind: 'subscribe'}];
+    case 'refresh':
+      return [{kind: 'refresh', mode: after.context.recovery.intent}];
+    case 'loadReplacementSnapshot':
+      return [{kind: 'load-replacement-snapshot', storeId: after.context.replacement.storeId}];
+    default:
+      return [];
   }
 }
 
-describe('sessionStep', () => {
-  test('holds its invariants and drops stale replies over random interleavings', () => {
-    checkModel({
-      initial: SESSION_INITIAL,
-      step: sessionStep,
-      action: randomAction,
-      issues,
-      awaited: sessionAwaited,
-      reply: replySlot,
-      invariants: sessionInvariants,
-      also: properties,
-    });
+/** What one step asked the shell for, in the order it asked. */
+function requestsOf(after: SessionSnapshot, actions: readonly MachineAction[]): Request[] {
+  return actions.flatMap((action): Request[] => {
+    const params = (action.params ?? {}) as ActionParams;
+    switch (action.type) {
+      case 'xstate.spawnChild':
+        return started(after, params.id);
+      case 'applySnapshot':
+        return params.snapshot ? [{kind: 'apply-snapshot', snapshot: params.snapshot}] : [];
+      case 'recoverStream':
+        return [{kind: 'recover-stream', mode: params.mode ?? ''}];
+      case 'reevaluateStream':
+        return params.applied === true ? [{kind: 'reevaluate-stream'}] : [];
+      case 'closeShell':
+        return [{kind: 'close'}];
+      default:
+        return [];
+    }
+  });
+}
+
+function step(
+  snapshot: SessionSnapshot,
+  event: Event,
+): {readonly state: SessionSnapshot; readonly requests: Request[]} {
+  const [state, actions] = transition(sessionMachine, snapshot, event as SessionEvent);
+  return {state, requests: requestsOf(state, actions as readonly MachineAction[])};
+}
+
+function steps(
+  events: readonly Event[],
+  from = initialTransition(sessionMachine)[0],
+): SessionSnapshot {
+  return events.reduce((snapshot, event) => step(snapshot, event).state, from);
+}
+
+const subscribed: Event = {type: 'xstate.done.actor.subscribe'};
+
+function replacementDone(result: SnapshotResult): Event {
+  return {type: 'xstate.done.actor.loadReplacementSnapshot', output: result};
+}
+
+function refreshDone(outcome: RefreshOutcome): Event {
+  return {type: 'xstate.done.actor.refresh', output: outcome};
+}
+
+describe('session machine', () => {
+  test('model: holds its invariants, fences snapshots, and orders stale causes', () => {
+    checkMachine(
+      {
+        machine: sessionMachine,
+        input: undefined,
+        // Settle a live operation about half the time, so the replies of overlapping flights
+        // race each other often.
+        event: (random, live, snapshot) => {
+          const settle = settleOne(random, live, snapshot);
+          return settle.length > 0 && random.bool() ? random.pick(settle) : plainEvent(random);
+        },
+        invariants: sessionInvariants,
+        also: (before, event, after, actions) => properties(before, event, after, actions),
+      },
+      60,
+    );
   });
 
-  test('starts the stream, then trusts only a folded snapshot fenced to its store', () => {
-    const asked = sessionStep(SESSION_INITIAL, {type: 'start'});
-    expect(asked.requests).toEqual([{kind: 'subscribe', token: 1}]);
-    const established = sessionStep(asked.state, {
-      type: 'stream-established',
-      storeId: 'store-a',
-    });
-    expect(established.requests).toEqual([
-      {kind: 'load-replacement-snapshot', token: 2, storeId: 'store-a'},
-    ]);
-    const subscribed = sessionStep(established.state, {
-      type: 'subscribe-reply',
-      token: 1,
-      error: null,
-    });
-    const live = sessionStep(subscribed.state, {
-      type: 'replacement-snapshot-reply',
-      token: 2,
-      storeId: 'store-a',
-      result: loaded(2),
-    });
-    expect(live.requests).toEqual([]);
-    expect(live.state.view.hasSnapshot).toBe(true);
-    expect(live.state.view.status).toBe('connected');
+  test('starts the stream, then applies only a snapshot fenced to its store', () => {
+    const asked = step(initialTransition(sessionMachine)[0], {type: 'start'});
+    expect(asked.requests).toEqual([{kind: 'subscribe'}]);
+    const established = step(asked.state, {type: 'stream-established', storeId: 'store-a'});
+    expect(established.requests).toEqual([{kind: 'load-replacement-snapshot', storeId: 'store-a'}]);
+    const handshake = step(established.state, subscribed);
+    const live = step(handshake.state, replacementDone(loaded(1)));
+    expect(live.requests).toEqual([{kind: 'apply-snapshot', snapshot: snapshotOf(1)}]);
+    expect(live.state.context.view.hasSnapshot).toBe(true);
+    expect(live.state.context.view.status).toBe('connected');
+    expect(live.state.matches({open: {startup: 'done'}})).toBe(true);
   });
 
   test('a failed start-up snapshot keeps the page stale after the stream subscribes', () => {
     const failure = new Error('no snapshot');
-    let state = sessionStep(SESSION_INITIAL, {type: 'start'}).state;
-    state = sessionStep(state, {type: 'stream-established', storeId: 'store-a'}).state;
-    state = sessionStep(state, {type: 'subscribe-reply', token: 1, error: null}).state;
-    state = sessionStep(state, {
-      type: 'replacement-snapshot-reply',
-      token: 2,
-      storeId: 'store-a',
-      result: {ok: false, error: failure},
-    }).state;
-    expect(state.view).toMatchObject({status: 'stale', error: failure, hasSnapshot: false});
+    const state = steps([
+      {type: 'start'},
+      {type: 'stream-established', storeId: 'store-a'},
+      subscribed,
+      replacementDone({ok: false, error: failure}),
+    ]);
+    expect(state.context.view).toMatchObject({status: 'stale', error: failure, hasSnapshot: false});
+    expect(state.matches({open: {startup: 'done'}})).toBe(true);
   });
 
   test('a Reattach during a lifecycle refresh promotes the stream recovery', () => {
-    const visible = {visible: true, online: true};
-    let state = sessionStep(SESSION_INITIAL, {type: 'wake', reach: visible}).state;
-    const reattach = sessionStep(state, {type: 'reattach', reach: visible, runEnded: false});
+    const state = steps([{type: 'wake', reach: VISIBLE}]);
+    const reattach = step(state, {type: 'reattach', reach: VISIBLE, runEnded: false});
     expect(reattach.requests).toEqual([]);
-    state = reattach.state;
-    expect(sessionAcceptsSnapshot(state, 'refresh', 1)).toBe(false);
-    const settled = sessionStep(state, {
-      type: 'refresh-reply',
-      token: 1,
-      outcome: {kind: 'snapshot', result: loaded(1)},
-    });
+    const settled = step(reattach.state, refreshDone({kind: 'snapshot', result: loaded(1)}));
     expect(settled.requests).toEqual([{kind: 'recover-stream', mode: 'rebootstrap'}]);
   });
 
   test('a failed fresh stream releases recovery for a later Reattach', () => {
-    const visible = {visible: true, online: true};
     const failure = ERRORS[1] ?? new Error();
-    const reports: readonly SessionAction[] = [
+    const reports: readonly Event[] = [
       {type: 'stream', state: {status: 'disconnected', error: failure}},
       {type: 'fault', error: failure},
     ];
     for (const report of reports) {
-      let state = sessionStep(SESSION_INITIAL, {type: 'start'}).state;
-      state = sessionStep(state, {type: 'stream-established', storeId: 'store-a'}).state;
-      state = sessionStep(state, {
-        type: 'replacement-snapshot-reply',
-        token: 2,
-        storeId: 'store-a',
-        result: loaded(2),
-      }).state;
-      state = sessionStep(state, {type: 'subscribe-reply', token: 1, error: null}).state;
-
-      const first = sessionStep(state, {type: 'reattach', reach: visible, runEnded: false});
-      expect(first.requests).toEqual([{kind: 'refresh', token: 3, mode: 'rebootstrap'}]);
-      const establishing = sessionStep(first.state, {
-        type: 'refresh-reply',
-        token: 3,
-        outcome: {kind: 'ready'},
-      });
+      const state = steps([
+        {type: 'start'},
+        {type: 'stream-established', storeId: 'store-a'},
+        replacementDone(loaded(1)),
+        subscribed,
+      ]);
+      const first = step(state, {type: 'reattach', reach: VISIBLE, runEnded: false});
+      expect(first.requests).toEqual([{kind: 'refresh', mode: 'rebootstrap'}]);
+      const establishing = step(first.state, refreshDone({kind: 'ready'}));
       expect(establishing.requests).toEqual([{kind: 'recover-stream', mode: 'rebootstrap'}]);
 
-      const failed = sessionStep(establishing.state, report);
-      const retry = sessionStep(failed.state, {
-        type: 'reattach',
-        reach: visible,
-        runEnded: false,
-      });
-      expect(retry.requests).toEqual([{kind: 'refresh', token: 4, mode: 'rebootstrap'}]);
+      const failed = step(establishing.state, report);
+      const retry = step(failed.state, {type: 'reattach', reach: VISIBLE, runEnded: false});
+      expect(retry.requests).toEqual([{kind: 'refresh', mode: 'rebootstrap'}]);
     }
   });
 
   test('fences pre-replacement replies and accepts only the proven generation snapshot', () => {
-    const visible = {visible: true, online: true};
-    const refreshing = sessionStep(SESSION_INITIAL, {type: 'wake', reach: visible}).state;
-    const replaced = sessionStep(refreshing, {type: 'stream-established', storeId: 'store-b'});
-    expect(replaced.requests).toEqual([
-      {kind: 'load-replacement-snapshot', token: 2, storeId: 'store-b'},
-    ]);
-
-    const staleRefresh = sessionStep(replaced.state, {
-      type: 'refresh-reply',
-      token: 1,
-      outcome: {kind: 'snapshot', result: loaded(1)},
-    });
+    const refreshing = steps([{type: 'wake', reach: VISIBLE}]);
+    const replaced = step(refreshing, {type: 'stream-established', storeId: 'store-b'});
+    // Proving the store retires the refresh in flight: its reply could only describe the old one.
+    expect(replaced.requests).toEqual([{kind: 'load-replacement-snapshot', storeId: 'store-b'}]);
+    expect(replaced.state.matches({open: {recovery: {refreshing: 'snapshot'}}})).toBe(true);
+    const staleRefresh = step(replaced.state, refreshDone({kind: 'snapshot', result: loaded(1)}));
     expect(staleRefresh).toEqual({state: replaced.state, requests: []});
 
-    const accepted = sessionStep(staleRefresh.state, {
-      type: 'replacement-snapshot-reply',
-      token: 2,
-      storeId: 'store-b',
-      result: loaded(2),
-    });
-    expect(accepted.requests).toEqual([{kind: 'reevaluate-stream'}]);
+    const accepted = step(staleRefresh.state, replacementDone(loaded(2)));
+    expect(accepted.requests).toEqual([
+      {kind: 'apply-snapshot', snapshot: snapshotOf(2)},
+      {kind: 'reevaluate-stream'},
+    ]);
+    expect(accepted.state.matches({open: {recovery: 'none'}})).toBe(true);
   });
 
   test('keeps a rejected stream projection stale until newer snapshot proof succeeds', () => {
-    const visible = {visible: true, online: true};
-    let state = sessionStep(SESSION_INITIAL, {type: 'start'}).state;
-    state = sessionStep(state, {type: 'stream-established', storeId: 'store-a'}).state;
-    state = sessionStep(state, {type: 'subscribe-reply', token: 1, error: null}).state;
-    state = sessionStep(state, {
-      type: 'replacement-snapshot-reply',
-      token: 2,
-      storeId: 'store-a',
-      result: loaded(2),
-    }).state;
-    expect(state.view.status).toBe('connected');
+    let state = steps([
+      {type: 'start'},
+      {type: 'stream-established', storeId: 'store-a'},
+      subscribed,
+      replacementDone(loaded(1)),
+    ]);
+    expect(state.context.view.status).toBe('connected');
 
     const rejection = new Error('event stream crossed run identities');
-    state = sessionStep(state, {type: 'projection-rejected', error: rejection}).state;
-    state = sessionStep(state, {type: 'stream', state: {status: 'connected'}}).state;
-    expect(state.view).toMatchObject({status: 'stale', error: rejection});
+    state = steps(
+      [
+        {type: 'projection-rejected', error: rejection},
+        {type: 'stream', state: {status: 'connected'}},
+      ],
+      state,
+    );
+    expect(state.context.view).toMatchObject({status: 'stale', error: rejection});
 
-    state = sessionStep(state, {
-      type: 'stream',
-      state: {status: 'disconnected', error: new Error('socket closed')},
-    }).state;
-    state = sessionStep(state, {type: 'stream', state: {status: 'connected'}}).state;
-    expect(state.view).toMatchObject({status: 'stale', error: rejection});
+    state = steps(
+      [
+        {type: 'stream', state: {status: 'disconnected', error: new Error('socket closed')}},
+        {type: 'stream', state: {status: 'connected'}},
+      ],
+      state,
+    );
+    expect(state.context.view).toMatchObject({status: 'stale', error: rejection});
 
-    state = sessionStep(state, {type: 'wake', reach: visible}).state;
-    const recovered = sessionStep(state, {
-      type: 'refresh-reply',
-      token: 3,
-      outcome: {kind: 'snapshot', result: loaded(3)},
-    });
-    expect(recovered.state.view).toMatchObject({status: 'connected', error: null});
+    state = steps(
+      [{type: 'wake', reach: VISIBLE}, refreshDone({kind: 'snapshot', result: loaded(2)})],
+      state,
+    );
+    expect(state.context.view).toMatchObject({status: 'connected', error: null});
+  });
+
+  test('a load rejected as another run keeps start-up stale without a snapshot', () => {
+    const foreign = new Error('Ignored data for run run-b; this projection owns run-a');
+    const state = steps([
+      {type: 'start'},
+      {type: 'stream-established', storeId: 'store-a'},
+      subscribed,
+      {type: 'stream', state: {status: 'connected'}},
+      replacementDone({ok: false, error: foreign}),
+      // A live socket does not retire the failed proof.
+      {type: 'stream', state: {status: 'connected'}},
+    ]);
+    expect(state.context.view).toMatchObject({status: 'stale', error: foreign, hasSnapshot: false});
+    expect(state.matches({open: {startup: 'done'}})).toBe(true);
   });
 
   test('a superseded fenced snapshot keeps recovery owned until a fresh store is established', () => {
-    const visible = {visible: true, online: true};
-    const refreshing = sessionStep(SESSION_INITIAL, {type: 'wake', reach: visible}).state;
-    const established = sessionStep(refreshing, {
-      type: 'stream-established',
-      storeId: 'store-b',
-    });
-    const superseded = sessionStep(established.state, {
-      type: 'replacement-snapshot-reply',
-      token: 2,
-      storeId: 'store-b',
-      result: {ok: false, error: ERRORS[0] ?? new Error(), reason: 'store-replaced'},
-    });
+    const established = steps([
+      {type: 'wake', reach: VISIBLE},
+      {type: 'stream-established', storeId: 'store-b'},
+    ]);
+    const superseded = step(established, replacementDone(REPLACED));
     expect(superseded.requests).toEqual([{kind: 'recover-stream', mode: 'rebootstrap'}]);
-    expect(superseded.state).toMatchObject({
-      recovery: {kind: 'refreshing', intent: 'rebootstrap', phase: 'establishing'},
-      replacement: {kind: 'none'},
+    expect(superseded.state.matches({open: {recovery: {refreshing: 'establishing'}}})).toBe(true);
+    expect(superseded.state.context.recovery.intent).toBe('rebootstrap');
+    expect(superseded.state.matches({open: {replacement: 'none'}})).toBe(true);
+  });
+
+  test('a snapshot that began before a stream fault does not clear it', () => {
+    const fault = new Error('replacement stream sent an invalid frame');
+    const state = steps([
+      {type: 'start'},
+      {type: 'stream-established', storeId: 'store-a'},
+      subscribed,
+      {type: 'stream', state: {status: 'connected'}},
+      {type: 'fault', error: fault},
+      replacementDone(loaded(1)),
+    ]);
+    expect(state.context.view).toMatchObject({hasSnapshot: true, status: 'stale', error: fault});
+  });
+
+  test('a later load fences an earlier one whatever order their replies arrive in', () => {
+    const twoLoads = steps([
+      {type: 'start'},
+      {type: 'stream-established', storeId: 'store-a'},
+      subscribed,
+      replacementDone(loaded(1)),
+      {type: 'wake', reach: VISIBLE},
+    ]);
+    // The refresh's load is issue 2; a replacement batch then proves store-b and issues 3.
+    const replaced = step(twoLoads, {type: 'stream-established', storeId: 'store-b'});
+    expect(replaced.state.context.applied).toBe(2);
+    const applied = step(replaced.state, replacementDone(loaded(3)));
+    expect(applied.requests[0]).toEqual({kind: 'apply-snapshot', snapshot: snapshotOf(3)});
+    expect(applied.state.context.applied).toBe(3);
+  });
+
+  test('regression: a late start-up snapshot never overwrites a newer refresh snapshot', () => {
+    const racing = steps([
+      {type: 'start'},
+      {type: 'stream-established', storeId: 'store-a'},
+      subscribed,
+      {type: 'wake', reach: VISIBLE},
+      refreshDone({kind: 'snapshot', result: loaded(2)}),
+    ]);
+    expect(racing.context.applied).toBe(2);
+    const late = step(racing, replacementDone(loaded(1)));
+    expect(late.requests).toEqual([]);
+    // The start-up flight still settles: its handshake and a usable snapshot both happened.
+    expect(late.state.matches({open: {startup: 'done', replacement: 'none'}})).toBe(true);
+  });
+
+  test('every operation that fails ends its flight instead of leaving its region waiting', () => {
+    const failure = new Error('operation rejected');
+    const subscribing = steps([{type: 'start'}]);
+    const subscribeFailed = step(subscribing, {
+      type: 'xstate.error.actor.subscribe',
+      error: failure,
     });
+    expect(subscribeFailed.state.matches({open: {startup: 'done'}})).toBe(true);
+    expect(subscribeFailed.state.context.view).toMatchObject({status: 'stale', error: failure});
+
+    const refreshing = steps([{type: 'wake', reach: VISIBLE}]);
+    const refreshFailed = step(refreshing, {type: 'xstate.error.actor.refresh', error: failure});
+    expect(refreshFailed.state.matches({open: {recovery: 'none'}})).toBe(true);
+    expect(refreshFailed.state.context.view).toMatchObject({status: 'stale', error: failure});
+
+    const loading = steps([
+      {type: 'start'},
+      {type: 'stream-established', storeId: 'store-a'},
+      subscribed,
+    ]);
+    const loadFailed = step(loading, {
+      type: 'xstate.error.actor.loadReplacementSnapshot',
+      error: failure,
+    });
+    expect(loadFailed.state.matches({open: {replacement: 'none', startup: 'done'}})).toBe(true);
+    expect(loadFailed.state.context.view).toMatchObject({status: 'stale', error: failure});
   });
 });

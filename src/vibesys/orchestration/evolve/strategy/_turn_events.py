@@ -51,6 +51,7 @@ from vs_core.api import (
     TurnSuspended,
     Waitable,
     WaitingForEvaluation,
+    YieldPublicationFailed,
     turn_reply,
 )
 
@@ -333,6 +334,21 @@ def on_suspended(state: EvolveStrategyState, event: TurnSuspended) -> EvolveStra
     return state
 
 
+def on_yield_failed(
+    state: EvolveStrategyState, event: YieldPublicationFailed
+) -> EvolveStrategyState:
+    """Core could not publish the wait it recorded: the slot fails with core's reason."""
+    for slot in state.slots:
+        role = role_of(slot.phase)
+        if role is None or slot.turn is None or slot.step is not Step.AWAITING:
+            continue
+        if event.invocation.invocation_id.root == invocation_for(
+            role, subject_of(slot, role), slot.turn
+        ):
+            return fail(state, slot, f"the turn's wait could not be published: {event.detail}")
+    return state
+
+
 def on_resume(state: EvolveStrategyState, event: ResumeAuthorized) -> EvolveStrategyState:
     """Authorize the suspended turn's resume with the invocation core named."""
     for slot in state.slots:
@@ -351,7 +367,7 @@ def on_resume(state: EvolveStrategyState, event: ResumeAuthorized) -> EvolveStra
                 role=_PROTOCOL_ROLE[role],
                 retained_revision=slot.candidate,
                 timed_out=event.timeout is not None,
-                evidence=tuple(item.evidence_id for item in event.evidence),
+                cited_evidence=event.evidence,
                 repeated_failure=None
                 if event.repeated_failure is None
                 else str(event.repeated_failure),

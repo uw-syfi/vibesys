@@ -121,6 +121,7 @@ EXPECTED_TARGET = {
                 "invocation_checkpoint_available",
             ),
         ),
+        ("vs_core._session_stalls.advance_stalled_checkpoint_waits", ("checkpoint_stalled",)),
         ("vs_core.intents._observation", ("request_observed",)),
         (
             "vs_core._settlement.advance",

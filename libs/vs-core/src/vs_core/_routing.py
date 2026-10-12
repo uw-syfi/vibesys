@@ -83,6 +83,7 @@ from .types.scheduling import (
     SlotReleased,
 )
 from .types.sessions import (
+    CheckpointStalled,
     InputAcceptanceObserved,
     InputReservationReleased,
     InputReservationRequested,
@@ -180,6 +181,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | TurnInputsReserved()
             | SessionDrainRequested()
             | InvocationCheckpointAvailable()
+            | CheckpointStalled()
             | SessionInputReceived()
             | InputReservationRequested()
             | InputAcceptanceObserved()

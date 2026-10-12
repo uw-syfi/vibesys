@@ -22,6 +22,7 @@ from tests.support.sharding import (
     drift_report,
     heavy_threshold,
     is_heavy,
+    load_durations,
     merge_durations,
     order_test_indices,
     parse_durations,
@@ -30,6 +31,7 @@ from tests.support.sharding import (
     read_durations,
     record_durations,
     shard_loads,
+    slowest_files,
 )
 
 pytest_plugins = ["pytester"]
@@ -333,3 +335,77 @@ def test_a_shard_that_owns_no_test_under_the_given_path_passes(
 
     assert [result.ret for result in results] == [0, 0]
     assert sorted(result.parseoutcomes().get("passed", 0) for result in results) == [0, 1]
+
+
+@given(
+    known=st.dictionaries(_NAMES, st.floats(min_value=0, max_value=500), min_size=1, max_size=30),
+    new=st.dictionaries(
+        _NAMES.map(lambda name: f"new/{name}"),
+        st.tuples(st.integers(min_value=1, max_value=60), st.floats(min_value=0, max_value=100)),
+        max_size=4,
+    ),
+    count=_COUNTS,
+)
+def test_files_new_to_the_record_never_overload_a_shard(
+    known: dict[str, float],
+    new: dict[str, tuple[int, float]],
+    count: int,
+) -> None:
+    """Whatever an unrecorded file really costs, the slowest shard stays near the ideal.
+
+    ``new`` maps a file the record lacks to (test count, true seconds per test).
+    Whole known files are placed longest-first, so they add at most one file to
+    the ideal; each unrecorded file puts at most ``ceil(tests / shards)`` tests on
+    a shard, so it adds at most one test beyond its even share.
+    """
+    tests = {name: total for name, (total, _) in new.items()}
+    whole, loads = shard_loads([*known, *new], known, count)
+    heavy_known = [name for name in known if is_heavy(name, known, count)]
+    spread, _ = assign_heavy_items({**tests, **dict.fromkeys(heavy_known, 1)}, known, loads)
+    true_load = [0.0] * count
+    for name, shard in whole.items():
+        true_load[shard - 1] += known[name]
+    for name in heavy_known:
+        true_load[spread[name, 0] - 1] += known[name]
+    for name, (total, seconds) in new.items():
+        for index in range(total):
+            true_load[spread[name, index] - 1] += seconds
+
+    assert not set(new) & set(whole)
+    ideal = (sum(known.values()) + sum(total * sec for total, sec in new.values())) / count
+    largest_unit = max([*known.values(), 0.0])
+    bound = ideal + largest_unit + sum(seconds for _, seconds in new.values())
+    assert max(true_load) <= bound + 1e-6
+
+
+def test_a_crash_replay_file_missing_from_the_cache_is_spread_over_every_shard() -> None:
+    """Regression: 24 tests of 60-77 s landed in one shard (shard 7 took 1005 s)."""
+    durations = {f"tests/f{index}.py": 20.0 for index in range(30)}
+    crash = "tests/composition/_loop/test_conformance_crash.py"
+    whole, loads = shard_loads([*durations, crash], durations, 8)
+    spread, _ = assign_heavy_items({crash: 24}, durations, loads)
+
+    assert crash not in whole
+    assert Counter(spread.values()) == dict.fromkeys(range(1, 9), 3)
+
+
+def test_the_checked_in_record_is_a_floor_under_a_cache_entry(tmp_path: Path) -> None:
+    floor = read_durations(DEFAULT_DURATIONS)
+    name = next(iter(floor))
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps({name: 123.0, "only/in/cache.py": 1.0}))
+
+    merged = load_durations(cache)
+
+    assert merged[name] == 123.0
+    assert merged["only/in/cache.py"] == 1.0
+    assert set(floor) <= set(merged)
+
+
+@given(measured=st.dictionaries(_NAMES, st.floats(min_value=0, max_value=500), min_size=1))
+def test_the_slowest_files_line_names_the_most_expensive_file(measured: dict[str, float]) -> None:
+    worst = max(measured.values())
+
+    assert any(
+        name in slowest_files(measured) for name, seconds in measured.items() if seconds == worst
+    )

@@ -36,7 +36,8 @@ from vibesys.orchestration.issue_queue.strategy.api import (
     ReviewPrompt,
     WaitUnrecordedPrompt,
 )
-from vs_core.api import ArtifactId, ArtifactRef, EvidenceId, RevisionId, RevisionRef
+from vibesys.prompts import CORE_PROTOCOL_DIR
+from vs_core.api import ArtifactId, ArtifactRef, RevisionId, RevisionRef
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import AgentRole, ProfileExecution, RunFacts
 
@@ -121,7 +122,6 @@ _CASES: dict[str, tuple[PromptContext | str, RunFacts]] = {
             role="implementer",
             retained_revision=_REVISION,
             timed_out=False,
-            evidence=(EvidenceId(root="e1"),),
             repeated_failure="same error three times",
         ),
         _CONFIGURED,
@@ -150,9 +150,9 @@ def _render(context: PromptContext | str, facts: RunFacts) -> str:
         return IssueQueueTexts(variables).issue_body(context)
     fields = {name: getattr(context, name) for name in type(context).model_fields}
     template = str(fields.pop("template"))
-    return TemplateRenderer(Path(prompts.__file__).parent).render_template(
-        f"{template}.j2", **variables, **fields
-    )
+    return TemplateRenderer(
+        Path(prompts.__file__).parent, fallback_roots=(CORE_PROTOCOL_DIR,)
+    ).render_template(f"{template}.j2", **variables, **fields)
 
 
 @pytest.mark.parametrize("name", sorted(_CASES))

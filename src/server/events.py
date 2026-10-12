@@ -113,6 +113,7 @@ class EventType(StrEnum):
     WORKSPACE_SNAPSHOT = "workspace_snapshot"
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
+    WINNER_SELECTED = "winner_selected"
 
 
 class EventStatus(StrEnum):
@@ -634,6 +635,15 @@ class FrameworkWarningData(EventPayload):
     source_label: str | None = None
 
 
+class WinnerSelectedData(EventPayload):
+    """The run's result was chosen: a retained candidate, or the unchanged trusted input."""
+
+    kind: Literal["winner_selected"] = "winner_selected"
+    selection: Literal["candidate", "baseline"]
+    revision: str
+    settlement_id: str | None = None
+
+
 EventData = Annotated[
     ChatData
     | ChatThreadCreatedData
@@ -670,7 +680,8 @@ EventData = Annotated[
     | GateFinishedData
     | WorkspaceSnapshotData
     | RunConfiguredData
-    | FrameworkWarningData,
+    | FrameworkWarningData
+    | WinnerSelectedData,
     Field(discriminator="kind"),
 ]
 

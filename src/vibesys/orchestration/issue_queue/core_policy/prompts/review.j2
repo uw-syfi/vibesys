@@ -1,3 +1,4 @@
+{% from '_evaluations.j2' import trusted_evaluations %}
 {% from '_macros.j2' import board_list %}
 Review issue #{{ issue.id }}: [{{ issue.type }}] {{ issue.title }}
 
@@ -9,6 +10,12 @@ Files touched: {% for path in files_touched %}`{{ path }}`{% if not loop.last %}
 {% endif %}
 Implementer self-check: {{ self_check or "<none>" }}
 
+{% if cited_evidence %}
+Trusted evaluation results the framework recorded for this candidate (measured by the
+framework, not claimed by the implementer):
+
+{{ trusted_evaluations(cited_evidence) }}
+{% endif %}
 {% include '_run_context.j2' %}
 
 Performance improvement is out of scope for this verdict. Inspect the candidate without
