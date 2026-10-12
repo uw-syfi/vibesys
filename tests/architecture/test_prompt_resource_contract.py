@@ -520,6 +520,9 @@ def core_policy_context() -> dict[str, object]:
         feedback_cut=True,
     )
     return {
+        "domain_sections": dict.fromkeys(
+            ("implementer", "judge", "single_agent", "orchestrator", "profiler"), ""
+        ),
         "evaluations": (evaluation,),
         "planner": planner,
         "base_revision": revision,
