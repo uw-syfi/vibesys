@@ -8,6 +8,7 @@ evaluation runs on the Fake cluster and checks that the job does not outlive the
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
@@ -28,6 +29,8 @@ if TYPE_CHECKING:
 
 
 SOCKET_REPLY = TypeAdapter(SocketSuccess | SocketFailure)
+GRACE_S = 60.0
+"""The host's grace period (``STOP_GRACE_S``): the time a stop may take before the host cancels the loop."""
 
 
 def _ignore(transition: object) -> None:
@@ -51,8 +54,28 @@ class _OnSleep(ProbedRunClock):
         self._act()
 
 
+async def _until_the_host_gives_up(
+    running: asyncio.Future[object], clock: ProbedRunClock, stopped_at: list[float]
+) -> None:
+    """Wait for the loop; ``GRACE_S`` after the stop, cancel it as the host does.
+
+    The skeleton strategy lets an attempt drain, and its agent's job never ends, so the loop
+    would wait for the continuation's deadline. The host's grace bound is what ends the run.
+    """
+    while not running.done():
+        if stopped_at and clock.now() >= stopped_at[0] + GRACE_S:
+            running.cancel()
+            await asyncio.gather(running, return_exceptions=True)
+            raise RunStopped
+        await clock.sleep(1.0)
+    await running
+
+
 async def _stopped_run(
-    played: Scenario, clock: ProbedRunClock, channel: RuntimeRunControlChannel
+    played: Scenario,
+    clock: ProbedRunClock,
+    channel: RuntimeRunControlChannel,
+    stopped_at: list[float],
 ) -> tuple[Process, bool]:
     process = played.world.runtime()
     (bridge,) = played.bridge
@@ -66,8 +89,8 @@ async def _stopped_run(
     bridge.attach(process.shell, clock)
     await bridge.serve()
     stopped = False
-    try:
-        await drive_core(
+    running = asyncio.ensure_future(
+        drive_core(
             host,
             RunLoopConfig(
                 host_id="loop",
@@ -77,6 +100,9 @@ async def _stopped_run(
                 max_dispatches=5000,
             ),
         )
+    )
+    try:
+        await _until_the_host_gives_up(running, clock, stopped_at)
     except RunStopped:
         stopped = True
     finally:
@@ -88,10 +114,12 @@ async def test_a_stop_while_an_agent_evaluation_runs_starts_no_further_work(tmp_
     channel = RuntimeRunControlChannel(_ignore)
     holder: list[Scenario] = []
     at_stop: list[int] = []
+    stopped_at: list[float] = []
 
     def stop() -> None:
         if not at_stop:
             at_stop.append(len(holder[0].world.cluster.submissions))
+            stopped_at.append(clock.now())
             channel.request_stop()
 
     def act() -> None:
@@ -105,7 +133,7 @@ async def test_a_stop_while_an_agent_evaluation_runs_starts_no_further_work(tmp_
     clock = _OnSleep(clock_from(1.0), act)
     async with scenario(tmp_path) as played:
         holder.append(played)
-        process, stopped = await _stopped_run(played, clock, channel)
+        process, stopped = await _stopped_run(played, clock, channel, stopped_at)
         submitted_at_stop = at_stop[0]
         core = process.shell.record.envelope.core
         cluster = played.world.cluster
