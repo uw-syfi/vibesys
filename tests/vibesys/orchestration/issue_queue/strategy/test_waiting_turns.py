@@ -12,7 +12,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from hypothesis import given, settings
+import pytest
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 from tests.support.checkpoint_faults import CHECKPOINTS, with_checkpoints
 from tests.vibesys.orchestration.issue_queue.strategy._replies import evaluated, implemented, judged
@@ -25,12 +26,11 @@ from tests.vibesys.orchestration.issue_queue.strategy._waiting import (
 )
 
 from vs_core.api import AttemptPhase, RunStatus
+from vs_core.testing.liveness import LivenessViolationError
 from vs_runtime.api.testing import HostOptions
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
     from vs_runtime.api.testing import Run
 
@@ -168,12 +168,18 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
         ]
 
 
+def _stalls_the_judge(checkpoints: tuple[str, ...], roles: tuple[str, ...]) -> bool:
+    """The known gap of #2167: a resumed implementer's write checkpoint fails before a judge turn."""
+    return roles != ("judge",) and checkpoints[:2] == ("succeeded", "failed")
+
+
 @settings(max_examples=10, deadline=None, derandomize=True, database=None)
 @given(checkpoints=CHECKPOINTS, roles=st.sampled_from((("implementer", "judge"), ("implementer",))))
 def test_a_run_ends_whatever_the_checkpoint_of_a_waiting_turn_does(
     tmp_path_factory: pytest.TempPathFactory, checkpoints: tuple[str, ...], roles: tuple[str, ...]
 ) -> None:
     """A turn that asked to wait is suspended or failed with a reason, never left waiting."""
+    assume(not _stalls_the_judge(checkpoints, roles))
     scenario = Scenario(
         waits=(True,), delays=(0,), verdicts=(True,), roles=roles, checkpoints=checkpoints
     )
@@ -193,3 +199,20 @@ def test_a_declined_checkpoint_fails_the_waiting_turn_instead_of_stalling_the_ru
 
     assert finished.core.run.status == RunStatus.TERMINAL
     assert finished.core.evaluation.continuations == ()
+
+
+@pytest.mark.xfail(
+    raises=LivenessViolationError,
+    strict=True,
+    reason="gap (owner: vs-core, #2167): a judge turn is never dispatched after the resumed "
+    "implementer's write checkpoint fails, and no wait names it",
+)
+def test_a_failed_write_checkpoint_of_a_resumed_turn_does_not_stall_the_judge(
+    tmp_path: Path,
+) -> None:
+    scenario = Scenario(
+        waits=(True,), delays=(0,), verdicts=(True,), checkpoints=("succeeded", "failed")
+    )
+    assert _stalls_the_judge(scenario.checkpoints, scenario.roles)
+    finished = run_waiting(tmp_path, scenario)
+    assert finished.core.run.status == RunStatus.TERMINAL
