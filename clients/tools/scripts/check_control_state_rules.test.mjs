@@ -94,7 +94,10 @@ for (const directory of [
 }
 
 test("a control-state package's fold module may run its fold on the reducer kernel", () => {
-  assert.deepEqual(pluginDiagnostics(join(WORKSPACE_ROOT, 'libs', 'run-session', 'src', 'run.ts')), []);
+  assert.deepEqual(
+    pluginDiagnostics(join(WORKSPACE_ROOT, 'libs', 'run-session', 'src', 'run.ts')),
+    [],
+  );
 });
 
 test('a feature still on the reducer kernel is not held to the control-state rule', async t => {
