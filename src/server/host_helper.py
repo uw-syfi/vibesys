@@ -14,8 +14,8 @@ The module is a pure core and a thin shell; answering one request is
   answered, a watch observed the registry, time passed, input ended) into
   :class:`ChannelState` and returns the outputs the shell performs: lines to send,
   requests to execute, watches to start or stop, a connection to relay or release.
-  It owns the handshake, request-id uniqueness, deadlines, feature gating, and the
-  one hand-over of a run channel.
+  It owns the handshake, request-id uniqueness, deadlines, admission limits,
+  resource settlement, feature gating, and the one hand-over of a run channel.
 - :func:`serve_channel` is the shell: one reader of the client's bytes, one worker
   per request (``answer`` or ``connect``), one watcher per watch, and the supervisor
   that runs :func:`step`.
@@ -26,7 +26,8 @@ holds its imports to the standard library, Pydantic, ``vs_sim.api``,
 
 Public surface: ``step``, ``ChannelState``, ``ChannelEvent`` and its members,
 ``ChannelOutput`` and its members, ``accepts_input``, ``next_deadline``;
-``serve_channel``; and the limits ``WATCH_INTERVAL_SECONDS`` and ``MAX_LINE_BYTES``.
+``serve_channel``; and the limits ``MAX_EXECUTING_REQUESTS``, ``MAX_ACTIVE_WATCHES``,
+``WATCH_INTERVAL_SECONDS`` and ``MAX_LINE_BYTES``.
 """
 
 from __future__ import annotations
@@ -80,6 +81,10 @@ if TYPE_CHECKING:
 
 WATCH_INTERVAL_SECONDS: Final = 1.0
 """How often a watch reads the registry; a change is pushed at most this late."""
+MAX_EXECUTING_REQUESTS: Final = 16
+"""The most request or compensation workers one channel owns at once."""
+MAX_ACTIVE_WATCHES: Final = 1
+"""The most active or physically stopping watch workers one channel owns at once."""
 MAX_LINE_BYTES: Final = 1 << 20
 """The longest request line; a longer one is read in pieces, each answered ``invalid_request``."""
 _READ_BYTES: Final = 64 * 1024
@@ -96,11 +101,17 @@ class ChannelState:
 
     negotiated: Negotiated | None = None
     pending: Mapping[str, float] = field(default_factory=dict)
-    """Requests in flight, by id, with the time their deadline passes."""
+    """Replies still owed to the client, by id, with their deadline."""
+    executing: frozenset[str] = frozenset()
+    """Request workers that have not physically returned, including expired ones."""
     starting: frozenset[str] = frozenset()
     """``run.start`` workers still owned after their client deadline passes."""
     watches: Mapping[str, InstanceList | None] = field(default_factory=dict)
     """Open watches, by id, with the listing last pushed on each."""
+    stopping_watches: frozenset[str] = frozenset()
+    """Watch ids owned until their workers confirm that they stopped."""
+    compensating: frozenset[str] = frozenset()
+    """Request ids whose undeliverable started run is still being stopped."""
     connecting: str | None = None
     """The ``run.connect`` in flight; input waits until it is answered."""
     relaying: bool = False
@@ -133,6 +144,28 @@ class Observed:
 
 
 @dataclass(frozen=True)
+class WatchStopped:
+    """The watch worker for ``watch_id`` physically returned."""
+
+    watch_id: str
+
+
+@dataclass(frozen=True)
+class StartUndeliverable:
+    """A successful start reply could not be delivered and now needs compensation."""
+
+    request_id: str
+    instance_id: str
+
+
+@dataclass(frozen=True)
+class CompensationFinished:
+    """The cleanup owned by ``request_id`` physically returned."""
+
+    request_id: str
+
+
+@dataclass(frozen=True)
 class Tick:
     """Time has reached ``at``."""
 
@@ -144,13 +177,23 @@ class InputEnded:
     """The client's input reached end of stream."""
 
 
-type ChannelEvent = Received | Answered | Observed | Tick | InputEnded
+type ChannelEvent = (
+    Received
+    | Answered
+    | Observed
+    | WatchStopped
+    | StartUndeliverable
+    | CompensationFinished
+    | Tick
+    | InputEnded
+)
 
 
 @dataclass(frozen=True)
 class StopStartedRun:
     """Stop a newly started instance whose identity cannot reach the client."""
 
+    request_id: str
     instance_id: str
 
 
@@ -225,7 +268,7 @@ def step(
     state: ChannelState, event: ChannelEvent, vibesys_version: str
 ) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
     """Fold one observation into the channel; return the new state and the outputs."""
-    if state.relaying:
+    if state.relaying and not isinstance(event, CompensationFinished):
         return state, ()
     match event:
         case Received(line=line, at=at):
@@ -234,11 +277,45 @@ def step(
             return _answered(state, request_id, reply)
         case Observed(watch_id=watch_id, listing=listing):
             return _observed(state, watch_id, listing)
+        case WatchStopped() | StartUndeliverable() | CompensationFinished() | InputEnded():
+            return _settle(state, event)
         case Tick(at=at):
             return _tick(state, at)
+        case _:
+            assert_never(event)
+
+
+def _settle(
+    state: ChannelState,
+    event: WatchStopped | StartUndeliverable | CompensationFinished | InputEnded,
+) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
+    """Release physical watch or compensation ownership after its worker returns."""
+    match event:
+        case WatchStopped(watch_id=watch_id):
+            watches = {wid: last for wid, last in state.watches.items() if wid != watch_id}
+            state = replace(
+                state,
+                watches=watches,
+                stopping_watches=state.stopping_watches - {watch_id},
+            )
+            return _maybe_close(state, [])
+        case StartUndeliverable(request_id=request_id, instance_id=instance_id):
+            if request_id in state.compensating:
+                return state, ()
+            state = replace(state, compensating=state.compensating | {request_id})
+            return state, (StopStartedRun(request_id, instance_id),)
+        case CompensationFinished(request_id=request_id):
+            state = replace(state, compensating=state.compensating - {request_id})
+            return _maybe_close(state, [])
         case InputEnded():
             outputs: list[ChannelOutput] = [Unwatch(watch_id) for watch_id in state.watches]
-            return _maybe_close(replace(state, input_ended=True, watches={}), outputs)
+            state = replace(
+                state,
+                input_ended=True,
+                stopping_watches=state.stopping_watches | frozenset(state.watches),
+                watches={},
+            )
+            return _maybe_close(state, outputs)
         case _:
             assert_never(event)
 
@@ -271,7 +348,13 @@ def _tick(state: ChannelState, at: float) -> tuple[ChannelState, tuple[ChannelOu
 def _maybe_close(
     state: ChannelState, outputs: list[ChannelOutput]
 ) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
-    if state.input_ended and not state.pending and not state.starting:
+    if (
+        state.input_ended
+        and not state.pending
+        and not state.starting
+        and not state.stopping_watches
+        and not state.compensating
+    ):
         outputs.append(Close())
     return state, tuple(outputs)
 
@@ -328,7 +411,14 @@ def _admission(
     elif isinstance(request, HelloRequest):
         message = "hello was already negotiated on this channel"
         refusal = _error(request_id, HelperErrorCode.INCOMPATIBLE, message)
-    elif request_id in state.pending or request_id in state.starting or request_id in state.watches:
+    elif (
+        request_id in state.pending
+        or request_id in state.executing
+        or request_id in state.starting
+        or request_id in state.watches
+        or request_id in state.stopping_watches
+        or request_id in state.compensating
+    ):
         message = f"request id {request_id!r} is already open on this channel"
         refusal = _error(request_id, HelperErrorCode.DUPLICATE_REQUEST_ID, message)
     else:
@@ -338,6 +428,16 @@ def _admission(
                 f"{request.type} needs the {feature.value} feature, which hello did not return"
             )
             refusal = _error(request_id, HelperErrorCode.FEATURE_NOT_NEGOTIATED, message)
+        elif isinstance(request, InstancesWatchRequest) and (
+            len(state.watches) + len(state.stopping_watches) >= MAX_ACTIVE_WATCHES
+        ):
+            message = f"this channel already owns {MAX_ACTIVE_WATCHES} watch worker"
+            refusal = _error(request_id, HelperErrorCode.CHANNEL_BUSY, message)
+        elif not isinstance(request, InstancesUnwatchRequest) and (
+            len(state.executing) + len(state.compensating) >= MAX_EXECUTING_REQUESTS
+        ):
+            message = f"this channel already owns {MAX_EXECUTING_REQUESTS} request workers"
+            refusal = _error(request_id, HelperErrorCode.CHANNEL_BUSY, message)
     return state, refusal
 
 
@@ -349,20 +449,25 @@ def _admit(
         case InstancesWatchRequest():
             watches = {**state.watches, request_id: None}
             return replace(state, watches=watches), (
-                Send(InstancesWatchReply(request_id=request_id, watch_id=request_id)),
                 Watch(request_id),
+                Send(InstancesWatchReply(request_id=request_id, watch_id=request_id)),
             )
         case InstancesUnwatchRequest(watch_id=watch_id):
             if watch_id not in state.watches:
                 message = f"no watch {watch_id!r} is open on this channel"
                 return state, (Send(_error(request_id, HelperErrorCode.UNKNOWN_WATCH, message)),)
             watches = {wid: last for wid, last in state.watches.items() if wid != watch_id}
-            return replace(state, watches=watches), (
+            state = replace(
+                state,
+                watches=watches,
+                stopping_watches=state.stopping_watches | {watch_id},
+            )
+            return state, (
                 Unwatch(watch_id),
                 Send(InstancesUnwatchReply(request_id=request_id, watch_id=watch_id)),
             )
         case RunConnectRequest():
-            if state.pending or state.starting or state.watches:
+            if state.executing or state.watches or state.stopping_watches:
                 message = "run.connect needs a channel with no other request or watch open"
                 return state, (Send(_error(request_id, HelperErrorCode.CHANNEL_BUSY, message)),)
             state = replace(state, connecting=request_id)
@@ -371,20 +476,29 @@ def _admit(
         case _:
             pass
     pending = {**state.pending, request_id: at + request.deadline_ms / 1000}
-    return replace(state, pending=pending), (Execute(request),)
+    executing = state.executing | {request_id}
+    return replace(state, pending=pending, executing=executing), (Execute(request),)
 
 
 def _answered(
     state: ChannelState, request_id: str, reply: HelperReply | HelperError
 ) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
-    state = replace(state, starting=state.starting - {request_id})
-    compensation = _start_compensation(reply)
+    if request_id not in state.executing:
+        return state, ()
+    was_starting = request_id in state.starting
+    state = replace(
+        state,
+        executing=state.executing - {request_id},
+        starting=state.starting - {request_id},
+    )
+    compensation = _start_compensation(request_id, reply) if was_starting else None
     if request_id not in state.pending:
         # Its deadline already answered for it; resources it created have no taker.
         outputs: list[ChannelOutput] = []
         if isinstance(reply, RunConnectReply):
             outputs.append(Release(request_id))
         elif compensation is not None:
+            state = replace(state, compensating=state.compensating | {request_id})
             outputs.append(compensation)
         return _maybe_close(state, outputs)
     pending = {rid: d for rid, d in state.pending.items() if rid != request_id}
@@ -397,10 +511,10 @@ def _answered(
     return _maybe_close(state, outputs)
 
 
-def _start_compensation(reply: HelperReply | HelperError) -> StopStartedRun | None:
+def _start_compensation(request_id: str, reply: HelperReply | HelperError) -> StopStartedRun | None:
     """Return the cleanup owned by a newly created, undeliverable start reply."""
     if isinstance(reply, RunStartReply) and isinstance(reply.launch, LiveInstanceRecord):
-        return StopStartedRun(reply.launch.id)
+        return StopStartedRun(request_id, reply.launch.id)
     return None
 
 
@@ -471,10 +585,9 @@ class _Channel:
         self._state = ChannelState()
         self._events: list[ChannelEvent] = []
         self._held: dict[str, Connection] = {}
-        self._watches: dict[str, Event] = {}
+        self._watches: dict[str, tuple[Event, Event]] = {}
         self._handed_over: str | None = None
         self._closed = False
-        self._compensating: set[str] = set()
 
     def post(self, event: ChannelEvent) -> None:
         with self._inbox.cond:
@@ -488,12 +601,17 @@ class _Channel:
             while True:
                 if not self._closed:
                     self._take_input()
-                while self._events and self._handed_over is None:
+                while self._events:
                     self._apply(self._events.pop(0))
-                if self._closed and not self._state.starting and not self._compensating:
+                if (
+                    self._closed
+                    and not self._state.starting
+                    and not self._state.stopping_watches
+                    and not self._state.compensating
+                ):
                     return None
                 if self._handed_over is not None:
-                    if not self._compensating:
+                    if not self._state.compensating:
                         return self._held.pop(self._handed_over)
                     # The relay owns the channel now. Only compensation can delay
                     # handoff, and its worker notifies this condition when it settles.
@@ -522,8 +640,16 @@ class _Channel:
 
     def _apply(self, event: ChannelEvent) -> None:
         self._state, outputs = step(self._state, event, self._host.vibesys_version)
-        for output in outputs:
-            self._perform(output)
+        try:
+            for output in outputs:
+                self._perform(output)
+        finally:
+            if isinstance(event, Observed):
+                watch = self._watches.get(event.watch_id)
+                if watch is not None:
+                    watch[1].set()
+            elif isinstance(event, WatchStopped):
+                self._watches.pop(event.watch_id, None)
 
     def _perform(self, output: ChannelOutput) -> None:
         match output:
@@ -533,16 +659,19 @@ class _Channel:
                 self._threads.spawn(lambda: self._execute(request), name=f"helper-{request.type}")
             case Watch(watch_id=watch_id):
                 stop = self._threads.event()
-                self._watches[watch_id] = stop
-                self._threads.spawn(lambda: self._watch(watch_id, stop), name="helper-watch")
+                observed = self._threads.event()
+                self._watches[watch_id] = (stop, observed)
+                self._threads.spawn(
+                    lambda: self._watch(watch_id, stop, observed), name="helper-watch"
+                )
             case Unwatch(watch_id=watch_id):
-                self._watches.pop(watch_id).set()
+                self._watches[watch_id][0].set()
             case Relay(request_id=request_id):
                 self._handed_over = request_id
             case Release(request_id=request_id):
                 self._held.pop(request_id).close()
-            case StopStartedRun(instance_id=instance_id):
-                self._begin_stop_started(instance_id)
+            case StopStartedRun(request_id=request_id, instance_id=instance_id):
+                self._begin_stop_started(request_id, instance_id)
             case Close():
                 self._closed = True
             case _:
@@ -554,14 +683,16 @@ class _Channel:
         except OSError:
             # The client stopped reading: nobody is left to answer.
             if output.if_undelivered is not None:
-                self._begin_stop_started(output.if_undelivered.instance_id)
+                cleanup = output.if_undelivered
+                self._apply(StartUndeliverable(cleanup.request_id, cleanup.instance_id))
+            if not self._state.input_ended:
+                self._apply(InputEnded())
             self._closed = True
 
-    def _begin_stop_started(self, instance_id: str) -> None:
-        if instance_id in self._compensating:
-            return
-        self._compensating.add(instance_id)
-        self._threads.spawn(lambda: self._stop_started(instance_id), name="helper-stop-started")
+    def _begin_stop_started(self, request_id: str, instance_id: str) -> None:
+        self._threads.spawn(
+            lambda: self._stop_started(request_id, instance_id), name="helper-stop-started"
+        )
 
     def _execute(self, request: HelperRequest) -> None:
         try:
@@ -585,18 +716,25 @@ class _Channel:
             )
         self.post(Answered(request.request_id, reply))
 
-    def _watch(self, watch_id: str, stop: Event) -> None:
-        while not stop.is_set():
-            self.post(Observed(watch_id, self._host.registry.read()))
-            stop.wait(WATCH_INTERVAL_SECONDS)
+    def _watch(self, watch_id: str, stop: Event, observed: Event) -> None:
+        try:
+            while not stop.is_set():
+                try:
+                    listing = self._host.registry.read()
+                except OSError:
+                    return
+                self.post(Observed(watch_id, listing))
+                observed.wait()
+                observed.clear()
+                stop.wait(WATCH_INTERVAL_SECONDS)
+        finally:
+            self.post(WatchStopped(watch_id))
 
-    def _stop_started(self, instance_id: str) -> None:
+    def _stop_started(self, request_id: str, instance_id: str) -> None:
         try:
             self._host.registry.stop(instance_id, self._host.stop_effects)
         finally:
-            with self._inbox.cond:
-                self._compensating.remove(instance_id)
-                self._inbox.cond.notify_all()
+            self.post(CompensationFinished(request_id))
 
 
 def serve_channel(

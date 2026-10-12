@@ -466,7 +466,7 @@ class HelperFeature(StrEnum):
 
 
 RequestId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
-"""Chosen by the client, unique among its requests in flight on one channel."""
+"""Chosen by the client, unique while the channel owns its request or watch worker."""
 
 MAX_DEADLINE_MS = 3_600_000
 
@@ -792,7 +792,7 @@ class HelperErrorCode(StrEnum):
     DEADLINE_EXCEEDED = "deadline_exceeded"
     """The reply was not ready within the request's ``deadline_ms``."""
     CHANNEL_BUSY = "channel_busy"
-    """``run.connect`` needs a channel with no other request or watch open."""
+    """The channel's worker limit is full, or ``run.connect`` needs an idle channel."""
     UNKNOWN_WATCH = "unknown_watch"
     """``instances.unwatch`` named no open watch."""
     PROJECT_MISSING = "project_missing"

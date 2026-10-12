@@ -58,11 +58,14 @@ from server.host_api import (
     parse_helper_request,
 )
 from server.host_helper import (
+    MAX_ACTIVE_WATCHES,
+    MAX_EXECUTING_REQUESTS,
     WATCH_INTERVAL_SECONDS,
     Answered,
     ChannelOutput,
     ChannelState,
     Close,
+    CompensationFinished,
     Execute,
     InputEnded,
     Observed,
@@ -74,6 +77,7 @@ from server.host_helper import (
     Tick,
     Unwatch,
     Watch,
+    WatchStopped,
     accepts_input,
     serve_channel,
     step,
@@ -89,7 +93,7 @@ from server.host_helper_requests import (
     select_completions,
     split_prefix,
 )
-from server.registry import FakeInstanceStore, StopEffects
+from server.registry import FakeInstanceStore, LiveRegistry, StopEffects
 from server.relay import EXIT_STATUS
 from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller, SimNetwork, SimThreads
 
@@ -191,6 +195,13 @@ class _Driver:
 
     def feed(self, event: Received | Answered | Observed | Tick | InputEnded) -> None:
         self.state, outputs = step(self.state, event, VIBESYS_VERSION)
+        assert self.state.pending.keys() <= self.state.executing
+        assert self.state.starting <= self.state.executing
+        assert len(self.state.executing) + len(self.state.compensating) <= MAX_EXECUTING_REQUESTS
+        assert len(self.state.watches) + len(self.state.stopping_watches) <= MAX_ACTIVE_WATCHES
+        assert not (self.state.watches.keys() & self.state.stopping_watches)
+        if self.state.connecting is not None:
+            assert self.state.connecting in self.state.executing
         self.outputs.extend(outputs)
         for output in outputs:
             if isinstance(output, Send):
@@ -336,6 +347,175 @@ def test_a_gated_method_needs_its_feature() -> None:
     assert isinstance(sent, Send)
     assert isinstance(sent.message, HelperError)
     assert sent.message.code is HelperErrorCode.FEATURE_NOT_NEGOTIATED
+
+
+def _settled_channel() -> ChannelState:
+    state, _ = step(ChannelState(), Received(_line(_hello()), 0.0), "v")
+    state, _ = step(state, Answered("h", PingReply(request_id="h")), "v")
+    return state
+
+
+def test_a_channel_admits_at_most_sixteen_executing_requests() -> None:
+    state = _settled_channel()
+    for index in range(MAX_EXECUTING_REQUESTS):
+        state, outputs = step(
+            state,
+            Received(_line(_request("ping", f"p{index}")), 0.0),
+            "v",
+        )
+        assert len(outputs) == 1
+        assert isinstance(outputs[0], Execute)
+
+    state, outputs = step(
+        state,
+        Received(_line(_request("ping", "overflow")), 0.0),
+        "v",
+    )
+
+    (sent,) = outputs
+    assert isinstance(sent, Send)
+    assert isinstance(sent.message, HelperError)
+    assert sent.message.code is HelperErrorCode.CHANNEL_BUSY
+
+
+def test_a_deadline_does_not_release_a_worker_slot_or_its_request_id() -> None:
+    state = _settled_channel()
+    state, _ = step(
+        state,
+        Received(_line(_request("ping", "slow", 1000)), 0.0),
+        "v",
+    )
+    for index in range(MAX_EXECUTING_REQUESTS - 1):
+        state, _ = step(
+            state,
+            Received(_line(_request("ping", f"other-{index}")), 0.0),
+            "v",
+        )
+
+    state, outputs = step(state, Tick(1.0), "v")
+    assert isinstance(outputs[0], Send)
+    assert isinstance(outputs[0].message, HelperError)
+    assert outputs[0].message.code is HelperErrorCode.DEADLINE_EXCEEDED
+
+    _, outputs = step(
+        state,
+        Received(_line(_request("ping", "overflow")), 1.0),
+        "v",
+    )
+    assert isinstance(outputs[0], Send)
+    assert isinstance(outputs[0].message, HelperError)
+    assert outputs[0].message.code is HelperErrorCode.CHANNEL_BUSY
+
+    _, outputs = step(
+        state,
+        Received(_line(_request("ping", "slow")), 1.0),
+        "v",
+    )
+    (sent,) = outputs
+    assert isinstance(sent, Send)
+    assert isinstance(sent.message, HelperError)
+    assert sent.message.code is HelperErrorCode.DUPLICATE_REQUEST_ID
+
+
+def test_a_late_reply_settles_before_its_request_id_can_be_reused() -> None:
+    state = _settled_channel()
+    state, _ = step(
+        state,
+        Received(_line(_request("ping", "reused", 1000)), 0.0),
+        "v",
+    )
+    state, _ = step(state, Tick(1.0), "v")
+    state, outputs = step(state, Answered("reused", PingReply(request_id="reused")), "v")
+    assert outputs == ()
+
+    state, outputs = step(
+        state,
+        Received(_line(_request("ping", "reused")), 1.0),
+        "v",
+    )
+    (execute,) = outputs
+    assert isinstance(execute, Execute)
+    state, outputs = step(state, Answered("reused", PingReply(request_id="reused")), "v")
+    assert outputs == (Send(PingReply(request_id="reused")),)
+
+
+def test_an_unwatch_keeps_the_watch_slot_until_the_worker_stops() -> None:
+    assert MAX_ACTIVE_WATCHES == 1
+    state = _settled_channel()
+    state, _ = step(
+        state,
+        Received(_line(_request("instances.watch", "watch-1")), 0.0),
+        "v",
+    )
+    state, outputs = step(
+        state,
+        Received(_line(_request("instances.unwatch", "unwatch", watch_id="watch-1")), 0.0),
+        "v",
+    )
+    assert isinstance(outputs[0], Unwatch)
+
+    _, outputs = step(
+        state,
+        Received(_line(_request("instances.watch", "watch-2")), 0.0),
+        "v",
+    )
+    (sent,) = outputs
+    assert isinstance(sent, Send)
+    assert isinstance(sent.message, HelperError)
+    assert sent.message.code is HelperErrorCode.CHANNEL_BUSY
+
+    state, outputs = step(state, WatchStopped("watch-1"), "v")
+    assert outputs == ()
+    _, outputs = step(
+        state,
+        Received(_line(_request("instances.watch", "watch-2")), 0.0),
+        "v",
+    )
+    assert isinstance(outputs[0], Watch)
+    assert isinstance(outputs[1], Send)
+
+
+def test_a_late_successful_start_owns_its_slot_until_compensation_finishes() -> None:
+    state = _settled_channel()
+    for index in range(MAX_EXECUTING_REQUESTS - 1):
+        state, _ = step(
+            state,
+            Received(_line(_request("ping", f"p{index}")), 0.0),
+            "v",
+        )
+    state, _ = step(
+        state,
+        Received(_line(_request("run.start", "start", 1000, project="/project")), 0.0),
+        "v",
+    )
+    state, _ = step(state, Tick(1.0), "v")
+    started = record("0123456789ab")
+
+    state, outputs = step(
+        state,
+        Answered("start", RunStartReply(request_id="start", launch=started)),
+        "v",
+    )
+
+    assert outputs == (StopStartedRun("start", started.id),)
+    assert state.compensating == frozenset({"start"})
+    state, outputs = step(
+        state,
+        Received(_line(_request("ping", "overflow")), 1.0),
+        "v",
+    )
+    assert isinstance(outputs[0], Send)
+    assert isinstance(outputs[0].message, HelperError)
+    assert outputs[0].message.code is HelperErrorCode.CHANNEL_BUSY
+
+    state, outputs = step(state, CompensationFinished("start"), "v")
+    assert outputs == ()
+    _, outputs = step(
+        state,
+        Received(_line(_request("ping", "after-cleanup")), 1.0),
+        "v",
+    )
+    assert isinstance(outputs[0], Execute)
 
 
 def test_a_reply_after_its_deadline_is_dropped_and_its_connection_released() -> None:
@@ -803,7 +983,10 @@ def test_a_late_successful_start_owns_compensation_until_input_can_close() -> No
     started = record("0123456789ab")
     state, outputs = step(state, Answered("s", RunStartReply(request_id="s", launch=started)), "v")
 
-    assert outputs == (StopStartedRun(started.id), Close())
+    assert outputs == (StopStartedRun("s", started.id),)
+    assert state.compensating == frozenset({"s"})
+    state, outputs = step(state, CompensationFinished("s"), "v")
+    assert outputs == (Close(),)
     assert not state.starting
 
 
@@ -1082,3 +1265,247 @@ def test_ids_in_a_burst_of_requests_each_come_back_once() -> None:
         return received
 
     assert sorted(threads.run(main)) == sorted(ids)
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_serve_channel_spawns_at_most_the_request_limit(seed: int, tmp_path: Path) -> None:
+    project = _project(tmp_path / f"p{seed}")
+    threads = SimThreads(schedule_seed=seed)
+    network = SimNetwork(threads)
+    permit = threads.event()
+    at_limit = threads.event()
+    launches = 0
+
+    def launch(_project: Path, _arguments: tuple[str, ...]) -> LiveInstanceRecord:
+        nonlocal launches
+        launches += 1
+        if launches == MAX_EXECUTING_REQUESTS:
+            at_limit.set()
+        assert permit.wait(HANG_GUARD_S)
+        return record(f"{launches:012d}")
+
+    def main() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        client = ChannelClient(threads)
+        host = fake_host(threads, network, launcher=FakeRunLauncher(launch))
+        worker = serve_on(threads, client, ByteBuffer(), host)
+        client.send(_hello())
+        client.receive()
+        client.send(
+            b"".join(
+                _line(_request("run.start", f"s{index}", project=str(project))) + b"\n"
+                for index in range(MAX_EXECUTING_REQUESTS + 1)
+            )
+        )
+        assert at_limit.wait(HANG_GUARD_S)
+        refused = client.receive()
+        permit.set()
+        replies = [client.receive() for _ in range(MAX_EXECUTING_REQUESTS)]
+        client.close()
+        worker.join(HANG_GUARD_S)
+        assert not worker.is_alive()
+        return refused, replies
+
+    refused, replies = threads.run(main)
+    assert (refused["request_id"], refused["code"]) == (
+        f"s{MAX_EXECUTING_REQUESTS}",
+        "channel_busy",
+    )
+    assert launches == MAX_EXECUTING_REQUESTS
+    assert {reply["request_id"] for reply in replies} == {
+        f"s{index}" for index in range(MAX_EXECUTING_REQUESTS)
+    }
+
+
+class _CountingRegistry(LiveRegistry):
+    """A real registry that exposes how often a watch read it."""
+
+    def __init__(self, store: FakeInstanceStore, threads: SimThreads) -> None:
+        super().__init__(store, threads)
+        self.reads = 0
+
+    def read(self) -> InstanceList:
+        self.reads += 1
+        return super().read()
+
+
+class _FailingRegistry(LiveRegistry):
+    """Raise one controlled read failure after the test lets it proceed."""
+
+    def __init__(
+        self,
+        store: FakeInstanceStore,
+        threads: SimThreads,
+        entered: Event,
+        permit: Event,
+    ) -> None:
+        super().__init__(store, threads)
+        self._entered = entered
+        self._permit = permit
+
+    def read(self) -> InstanceList:
+        self._entered.set()
+        assert self._permit.wait(HANG_GUARD_S)
+        raise OSError
+
+
+@dataclass
+class _GateFirstObservation:
+    """Hold the first watch push so its producer's backpressure is observable."""
+
+    client: ChannelClient
+    entered: Event
+    permit: Event
+    held: bool = False
+
+    def write(self, data: bytes) -> None:
+        if json.loads(data)["type"] == "instances.changed" and not self.held:
+            self.held = True
+            self.entered.set()
+            assert self.permit.wait(HANG_GUARD_S)
+        self.client.write(data)
+
+
+@dataclass
+class _RejectMessage:
+    """Simulate a client that cannot receive one kind of helper message."""
+
+    client: ChannelClient
+    kind: str
+
+    def write(self, data: bytes) -> None:
+        if json.loads(data)["type"] == self.kind:
+            raise BrokenPipeError
+        self.client.write(data)
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_a_watch_has_at_most_one_observation_waiting_for_the_supervisor(seed: int) -> None:
+    threads = SimThreads(schedule_seed=seed)
+    network = SimNetwork(threads)
+    registry = _CountingRegistry(FakeInstanceStore(), threads)
+    entered = threads.event()
+    permit = threads.event()
+
+    def main() -> int:
+        client = ChannelClient(threads)
+        output = _GateFirstObservation(client, entered, permit)
+        host = replace(fake_host(threads, network), registry=registry)
+        worker = threads.spawn(
+            lambda: serve_channel(
+                host=host,
+                source=client,
+                output=output,
+                errors=ByteBuffer(),
+                threads=threads,
+            ),
+            name="helper",
+        )
+        client.send(_hello())
+        client.receive()
+        client.send(_request("instances.watch", "watch"))
+        client.receive()
+        assert entered.wait(HANG_GUARD_S)
+        threads.sleep(WATCH_INTERVAL_SECONDS * 2)
+        reads_while_blocked = registry.reads
+        permit.set()
+        client.receive()
+        client.send(_request("instances.unwatch", "unwatch", watch_id="watch"))
+        client.receive()
+        client.close()
+        worker.join(HANG_GUARD_S)
+        assert not worker.is_alive()
+        return reads_while_blocked
+
+    assert threads.run(main) == 1
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_a_failed_watch_push_stops_the_watch_before_the_channel_returns(seed: int) -> None:
+    threads = SimThreads(schedule_seed=seed)
+    network = SimNetwork(threads)
+    registry = _CountingRegistry(FakeInstanceStore(), threads)
+
+    def main() -> tuple[int, int]:
+        client = ChannelClient(threads)
+        host = replace(fake_host(threads, network), registry=registry)
+        worker = threads.spawn(
+            lambda: serve_channel(
+                host=host,
+                source=client,
+                output=_RejectMessage(client, "instances.changed"),
+                errors=ByteBuffer(),
+                threads=threads,
+            ),
+            name="helper",
+        )
+        client.send(_hello())
+        client.receive()
+        client.send(_request("instances.watch", "watch"))
+        client.receive()
+        worker.join(HANG_GUARD_S)
+        assert not worker.is_alive()
+        reads_at_exit = registry.reads
+        threads.sleep(WATCH_INTERVAL_SECONDS * 2)
+        return reads_at_exit, registry.reads
+
+    assert threads.run(main) == (1, 1)
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_a_watch_read_failure_retires_active_ownership(seed: int) -> None:
+    threads = SimThreads(schedule_seed=seed)
+    network = SimNetwork(threads)
+    entered = threads.event()
+    permit = threads.event()
+    registry = _FailingRegistry(FakeInstanceStore(), threads, entered, permit)
+
+    def main() -> None:
+        client = ChannelClient(threads)
+        host = replace(fake_host(threads, network), registry=registry)
+        worker = serve_on(threads, client, ByteBuffer(), host)
+        client.send(_hello())
+        client.receive()
+        client.send(_request("instances.watch", "watch"))
+        watched = client.receive()
+        assert watched["type"] == "instances.watch"
+        assert entered.wait(HANG_GUARD_S)
+        permit.set()
+        threads.sleep(WATCH_INTERVAL_SECONDS)
+        client.close()
+        worker.join(HANG_GUARD_S)
+        assert not worker.is_alive()
+
+    threads.run(main)
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_a_failed_watch_acknowledgement_stops_the_installed_watch(seed: int) -> None:
+    threads = SimThreads(schedule_seed=seed)
+    network = SimNetwork(threads)
+    registry = _CountingRegistry(FakeInstanceStore(), threads)
+
+    def main() -> tuple[int, int]:
+        client = ChannelClient(threads)
+        host = replace(fake_host(threads, network), registry=registry)
+        worker = threads.spawn(
+            lambda: serve_channel(
+                host=host,
+                source=client,
+                output=_RejectMessage(client, "instances.watch"),
+                errors=ByteBuffer(),
+                threads=threads,
+            ),
+            name="helper",
+        )
+        client.send(_hello())
+        client.receive()
+        client.send(_request("instances.watch", "watch"))
+        worker.join(HANG_GUARD_S)
+        assert not worker.is_alive()
+        reads_at_exit = registry.reads
+        threads.sleep(WATCH_INTERVAL_SECONDS * 2)
+        return reads_at_exit, registry.reads
+
+    reads_at_exit, reads_after = threads.run(main)
+    assert reads_at_exit <= 1
+    assert reads_after == reads_at_exit
