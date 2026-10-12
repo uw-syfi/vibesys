@@ -705,6 +705,36 @@ function ok(
   };
 }
 
+/** A typed request failure, shaped like `Response.from_exception`. */
+function failed(
+  requestId: unknown,
+  timestamp: string,
+  code: string,
+  message: string,
+): Record<string, unknown> {
+  const summary = 'Request failed';
+  return {
+    protocol_version: 1,
+    request_id: requestId,
+    timestamp,
+    ok: false,
+    error: summary,
+    diagnostic: {
+      code,
+      summary,
+      detail: message,
+      hint: null,
+      scope: 'request',
+      severity: 'error',
+      retryability: 'unknown',
+      cause_id: null,
+      debug_ref: null,
+      source: null,
+      validation_paths: null,
+    },
+  };
+}
+
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 function main(): void {
   const options = parseOptions(process.argv.slice(2));
@@ -816,6 +846,19 @@ function main(): void {
           return;
         }
         case 'query.events': {
+          const expectedStore = request['expected_store_id'];
+          if (typeof expectedStore === 'string' && expectedStore !== replay.storeId) {
+            writeLine(
+              socket,
+              failed(
+                id,
+                replay.clockNow(),
+                'events_store_replaced',
+                'The run event store changed before history was captured',
+              ),
+            );
+            return;
+          }
           const after = Number(request['after_sequence'] ?? 0);
           const beforeRaw = request['before_sequence'];
           const before = typeof beforeRaw === 'number' ? beforeRaw : null;

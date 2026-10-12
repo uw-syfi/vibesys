@@ -4,6 +4,7 @@ import {BackendClientError} from '@vibesys/contracts';
 import {event, eventBatch} from '@vibesys/contracts/testing';
 import {
   type BackfillFetch,
+  type BackfillFetchResult,
   type BackfillOutcome,
   type BackfillRequest,
   type BatchContext,
@@ -72,19 +73,25 @@ async function rejected(promise: Promise<unknown>): Promise<Error> {
 
 /** A promise a test settles on command, so a request stays in flight without a timer. */
 interface Gate {
-  readonly promise: Promise<readonly RunEvent[]>;
+  readonly promise: Promise<BackfillFetchResult>;
   readonly answer: (events: readonly RunEvent[]) => void;
+  readonly replaceStore: () => void;
   readonly fail: (error: Error) => void;
 }
 
 function gate(): Gate {
-  let answer!: (events: readonly RunEvent[]) => void;
+  let settle!: (result: BackfillFetchResult) => void;
   let fail!: (error: Error) => void;
-  const promise = new Promise<readonly RunEvent[]>((resolve, reject) => {
-    answer = resolve;
+  const promise = new Promise<BackfillFetchResult>((resolve, reject) => {
+    settle = resolve;
     fail = reject;
   });
-  return {promise, answer, fail};
+  return {
+    promise,
+    answer: events => settle({kind: 'events', events}),
+    replaceStore: () => settle({kind: 'store-replaced'}),
+    fail,
+  };
 }
 
 /**
@@ -118,6 +125,10 @@ class FakeQuery {
     this.#latest().fail(error);
   }
 
+  replaceStore(): void {
+    this.#latest().replaceStore();
+  }
+
   #latest(): Gate {
     const pending = this.#gates.at(-1);
     if (pending === undefined) throw new Error('no request is in flight');
@@ -130,7 +141,7 @@ async function backfilled(
   reconciler: StreamReconciler,
   events: readonly RunEvent[] = [],
 ): Promise<BackfillOutcome> {
-  const outcome = await reconciler.backfill(() => Promise.resolve(events));
+  const outcome = await reconciler.backfill(() => Promise.resolve({kind: 'events', events}));
   if (outcome.kind === 'prepend') outcome.accept();
   return outcome;
 }
@@ -552,6 +563,7 @@ describe('StreamReconciler backfill', () => {
     // Both bounds are exclusive, so the range holds exactly `backfillChunk`
     // sequences and the last of them is the floor itself.
     const first = reconciler.backfill(query.fetch);
+    expect(query.requests[0]?.expectedStoreId).toBe('log');
     expect(query.range(0)).toEqual([60, 101]);
     query.answer([]);
     prepended(await first).accept();
@@ -559,6 +571,18 @@ describe('StreamReconciler backfill', () => {
     expect(query.range(1)).toEqual([20, 61]);
     query.answer([]);
     await second;
+  });
+
+  it('omits the store fence for a legacy batch without a store identity', async () => {
+    const reconciler = new StreamReconciler({backfillChunk: 40});
+    reconciler.reconcileBatch(batch({storeId: '', declaredFloor: 100}), FRESH);
+    const query = new FakeQuery();
+
+    const pending = reconciler.backfill(query.fetch);
+
+    expect(query.requests).toEqual([{afterSequence: 60, beforeSequence: 101}]);
+    query.answer([]);
+    await pending;
   });
 
   it('never asks below the start of the log', async () => {
@@ -690,6 +714,27 @@ describe('StreamReconciler backfill', () => {
     reconciler.reconcileBatch(batch({storeId: 'run-log', declaredFloor: 900}), FRESH);
     query.answer([tailEvent(150), tailEvent(199)]);
     expect(await stale).toEqual({kind: 'superseded'});
+  });
+
+  it('treats a fenced store replacement as superseded before its batch arrives', async () => {
+    const reconciler = new StreamReconciler({backfillChunk: 100});
+    reconciler.reconcileBatch(batch({storeId: 'store-a', declaredFloor: 200}), FRESH);
+    const query = new FakeQuery();
+
+    const stale = reconciler.backfill(query.fetch);
+    expect(query.requests).toEqual([
+      {expectedStoreId: 'store-a', afterSequence: 100, beforeSequence: 201},
+    ]);
+    // The server has attached store B, but B's replacement batch has not yet
+    // reached the reconciler, so its local generation is deliberately still A.
+    query.replaceStore();
+
+    expect(await stale).toEqual({kind: 'superseded'});
+    expect(reconciler.storeId()).toBe('store-a');
+    const retry = reconciler.backfill(query.fetch);
+    expect(query.requests[1]).toEqual(query.requests[0]);
+    query.answer([]);
+    expect(prepended(await retry).historyFloor).toBe(100);
   });
 
   it('leaves the floor where the re-bootstrap put it when it rejects a superseded answer', async () => {
@@ -1621,8 +1666,15 @@ class ControllerOracle implements Reconciling {
     const floor = this.#stateFloor;
     const nextFloor = Math.max(0, floor - this.#backfillChunk);
     const generation = this.#rebootstrapGeneration;
-    const events = await fetch({afterSequence: nextFloor, beforeSequence: floor + 1});
+    const storeId = this.#storeId;
+    const result = await fetch({
+      ...(storeId === null || storeId === '' ? {} : {expectedStoreId: storeId}),
+      afterSequence: nextFloor,
+      beforeSequence: floor + 1,
+    });
     if (this.#rebootstrapGeneration !== generation) return {kind: 'superseded'};
+    if (result.kind === 'store-replaced') return {kind: 'superseded'};
+    const {events} = result;
     const filtered = events.filter(
       item => item.sequence === undefined || !this.#foldedBelowFloor.has(item.sequence),
     );

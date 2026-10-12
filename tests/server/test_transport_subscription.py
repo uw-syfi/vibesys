@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Never, TypedDict, Unpack
 
 import pytest
-from tests.server.support import ServerParts, build_server_parts
+from tests.server.support import ServerParts, Task, build_server_parts
 
 from server.api.protocol import (
     EventsQuery,
@@ -35,7 +35,7 @@ from server.events import (
 from server.journal import _BOOTSTRAP_SPINE_TYPES
 from server.transport.unix_jsonl import UnixJsonlServer
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import HANG_GUARD_S, join_or_fail, wait_or_fail
+from vs_sim.api.testing import HANG_GUARD_S, SimThreads, join_or_fail, wait_or_fail
 
 _TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 _ROUND_EVERY = 25
@@ -372,6 +372,98 @@ def test_events_query_is_half_open_and_backfills_without_gaps(tmp_path: Path) ->
         collected = [event.sequence for event in response.events] + collected
         floor = after
     assert collected == list(range(1, 151))
+
+
+@pytest.mark.parametrize("timeout_ms", [0, 30_000])
+def test_events_query_store_fence_rejects_a_replaced_sequence_space(
+    tmp_path: Path, timeout_ms: int
+) -> None:
+    parts = _attach(tmp_path / "first", _round_log(80))
+    first_store = parts.journal.store_id_locked()
+    parts.attach(_write_log(tmp_path / "second", _round_log(40)))
+    second_store = parts.journal.store_id_locked()
+    assert second_store != first_store
+
+    with pytest.raises(RuntimeError) as failure:
+        parts.api.execute(
+            EventsQuery(
+                expected_store_id=first_store,
+                after_sequence=0,
+                before_sequence=10,
+                timeout_ms=timeout_ms,
+            )
+        )
+    assert getattr(failure.value, "diagnostic_code", None) == "events_store_replaced"
+
+    # The optional fence preserves standalone history consumers, while a
+    # request naming the replacement reads only that replacement.
+    unfenced = parts.api.execute(EventsQuery()).events
+    matching = parts.api.execute(EventsQuery(expected_store_id=second_store)).events
+    assert unfenced == matching
+    assert [
+        event.sequence
+        for event in parts.api.execute(
+            EventsQuery(expected_store_id=second_store, before_sequence=10)
+        ).events
+    ] == list(range(1, 10))
+
+
+def test_waiting_events_query_rejects_when_its_store_is_replaced(tmp_path: Path) -> None:
+    first = _write_log(tmp_path / "first", _round_log(40))
+    second = _write_log(tmp_path / "second", _round_log(80))
+    threads = SimThreads(schedule_seed=0)
+
+    def scenario() -> None:
+        parts = build_server_parts(threads=threads)
+        parts.attach(first)
+        cursor = parts.api.latest_sequence
+        first_store = parts.journal.store_id_locked()
+        pending = Task(
+            threads,
+            lambda: parts.api.execute(
+                EventsQuery(
+                    expected_store_id=first_store,
+                    after_sequence=cursor,
+                    timeout_ms=30_000,
+                )
+            ),
+            name="fenced-events-query",
+        )
+
+        parts.attach(second)
+
+        with pytest.raises(RuntimeError) as failure:
+            pending.result()
+        assert getattr(failure.value, "diagnostic_code", None) == "events_store_replaced"
+        parts.close()
+
+    threads.run(scenario)
+
+
+def test_unfenced_waiting_events_query_finishes_on_the_retired_store(tmp_path: Path) -> None:
+    first = _write_log(tmp_path / "first", _round_log(40))
+    second = _write_log(tmp_path / "second", _round_log(80))
+    threads = SimThreads(schedule_seed=0)
+
+    def scenario() -> None:
+        parts = build_server_parts(threads=threads)
+        parts.attach(first)
+        cursor = parts.api.latest_sequence
+        pending = Task(
+            threads,
+            lambda: parts.api.execute(EventsQuery(after_sequence=cursor, timeout_ms=30_000)),
+            name="unfenced-events-query",
+        )
+
+        parts.attach(second)
+        assert parts.api.latest_sequence > cursor
+        # Compatibility for standalone long-poll callers: replacement wakes
+        # the retired store and returns its final (empty) range. It must not
+        # silently switch to the replacement's identically numbered history.
+        assert pending.result().events == []
+        parts.close()
+
+    threads.run(scenario)
 
 
 @pytest.mark.parametrize("before_sequence", [0, -1])

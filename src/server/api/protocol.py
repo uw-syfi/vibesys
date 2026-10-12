@@ -183,9 +183,16 @@ class DesignPatchQuery(Request):
 
 
 class EventsQuery(Request):
-    """Request run events in a sequence interval."""
+    """Request run events in a sequence interval.
+
+    ``expected_store_id`` fences the interval to the event store whose stream
+    established the caller's history floor. None preserves the unfenced query
+    for callers that do not combine history with a live subscription. An empty
+    string is a real fence for the pre-attachment store.
+    """
 
     type: Literal["query.events"] = "query.events"
+    expected_store_id: str | None = None
     after_sequence: int = Field(default=0, ge=0)
     # Exclusive upper bound: the result is ``after_sequence < sequence <
     # before_sequence``. None keeps the open-ended read. This is the backfill

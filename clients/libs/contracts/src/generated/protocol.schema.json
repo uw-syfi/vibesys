@@ -1419,7 +1419,7 @@
     },
     "EventsQuery": {
       "additionalProperties": false,
-      "description": "Request run events in a sequence interval.",
+      "description": "Request run events in a sequence interval.\n\n``expected_store_id`` fences the interval to the event store whose stream\nestablished the caller's history floor. None preserves the unfenced query\nfor callers that do not combine history with a live subscription. An empty\nstring is a real fence for the pre-attachment store.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -1446,6 +1446,18 @@
           "default": "query.events",
           "title": "Type",
           "type": "string"
+        },
+        "expected_store_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Store Id"
         },
         "after_sequence": {
           "default": 0,

@@ -2856,7 +2856,7 @@ describe('session controller', () => {
     expect(controller.state.errorBanner).toMatchObject({scope: 'transport'});
   });
 
-  it('loads older history on demand while the fold is only a suffix', async () => {
+  it('backfills a legacy batch without sending the unsupported store-fence key', async () => {
     const history = longHistory(2_000);
     const transport = new HistoryTransport(history);
     const controller = new SocketSessionController(transport);
@@ -2870,7 +2870,11 @@ describe('session controller', () => {
     await expect(controller.loadOlderHistory()).resolves.toBe(true);
 
     expect(eventsQueries(transport)).toEqual([
-      {type: 'query.events', after_sequence: 500, before_sequence: 1_501},
+      {
+        type: 'query.events',
+        after_sequence: 500,
+        before_sequence: 1_501,
+      },
     ]);
     expect(controller.state.core.historyAfterSequence).toBe(500);
     expect(controller.state.core.transcript).toHaveLength(1_500);
@@ -2895,8 +2899,16 @@ describe('session controller', () => {
 
     await expect(controller.loadOlderHistory()).resolves.toBe(false);
     expect(eventsQueries(transport)).toEqual([
-      {type: 'query.events', after_sequence: 500, before_sequence: 1_501},
-      {type: 'query.events', after_sequence: 500, before_sequence: 1_501},
+      {
+        type: 'query.events',
+        after_sequence: 500,
+        before_sequence: 1_501,
+      },
+      {
+        type: 'query.events',
+        after_sequence: 500,
+        before_sequence: 1_501,
+      },
     ]);
     expect(controller.state.core.historyAfterSequence).toBe(1_500);
   });
@@ -2927,6 +2939,39 @@ describe('session controller', () => {
     expect(controller.state.core.historyAfterSequence).toBe(0);
     await expect(controller.loadOlderHistory()).resolves.toBe(false);
     expect(eventsQueries(transport)).toHaveLength(issued);
+  });
+
+  it('drops a store-fenced backfill rejected before the replacement batch arrives', async () => {
+    const history = longHistory(2_000);
+    const transport = new HistoryTransport(history);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emitBatch(history.slice(1_500), 1_500, 'store-a');
+    transport.eventsError = new ServerError(
+      'The run event store changed before history was captured',
+      {
+        code: 'events_store_replaced',
+        summary: 'Request failed',
+        scope: 'request',
+      },
+    );
+
+    // Store B is already attached at the server, but its replacement batch has
+    // not reached this controller. The A fence prevents B's identically
+    // numbered events from being prepended into the A fold.
+    await expect(controller.loadOlderHistory()).resolves.toBe(false);
+
+    expect(eventsQueries(transport)).toEqual([
+      {
+        type: 'query.events',
+        expected_store_id: 'store-a',
+        after_sequence: 500,
+        before_sequence: 1_501,
+      },
+    ]);
+    expect(controller.state.core.historyAfterSequence).toBe(1_500);
+    expect(controller.state.core.transcript).toHaveLength(500);
+    expect(controller.state.errorBanner).toBeNull();
   });
 
   it('leaves the history floor where it was when a backfill fails', async () => {

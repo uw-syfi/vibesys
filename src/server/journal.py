@@ -226,6 +226,7 @@ class WireJournal:
             self._read_only = read_only
             if previous is not None:
                 previous.notify_change()
+            self._condition.notify_all()
         if started_fresh:
             self.record(EventType.SERVER_STARTED, status=EventStatus.ACTIVE)
 
@@ -474,6 +475,14 @@ class WireJournal:
             self._error_diagnostics[key] = (error, diagnostic)
         return diagnostic
 
+    def read_fenced_locked(
+        self, expected_store_id: str, after_sequence: int, before_sequence: int | None
+    ) -> list[RunEvent] | None:
+        """Read only if the shared-lock store still has the expected identity."""
+        if self.store_id_locked() != expected_store_id:
+            return None
+        return self._read_locked(after_sequence, before_sequence)
+
     def _read_locked(self, after_sequence: int, before_sequence: int | None) -> list[RunEvent]:
         if self._store is None:
             return []
@@ -490,6 +499,7 @@ class WireJournal:
         self._index_execution_identity(event.type, event.execution_id)
         for listener, _replay_filter in self._listeners:
             listener(event)
+        self._condition.notify_all()
         return event
 
     def _index_stored_history(self, store: EventStore) -> None:

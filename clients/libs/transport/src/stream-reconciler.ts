@@ -29,6 +29,12 @@ export type BatchReconciliation =
 
 /** The `query.events` range one backfill covers. Both bounds are exclusive. */
 export interface BackfillRequest {
+  /**
+   * The event-store generation whose sequence interval is being requested.
+   * Absent only for legacy batches that do not identify their store; callers
+   * must omit the wire field in that case so older strict servers can answer.
+   */
+  readonly expectedStoreId?: string;
   /** `after_sequence`. The server answers `after_sequence < sequence`. */
   readonly afterSequence: number;
   /**
@@ -38,17 +44,23 @@ export interface BackfillRequest {
   readonly beforeSequence: number;
 }
 
+/** The transport-neutral result of one fenced history request. */
+export type BackfillFetchResult =
+  | {readonly kind: 'events'; readonly events: readonly RunEvent[]}
+  | {readonly kind: 'store-replaced'};
+
 /**
- * Issues one `query.events` and answers with what the range held, which is
- * empty when it held nothing.
+ * Issues one fenced `query.events` and answers with what the range held, which
+ * is empty when it held nothing, or reports that the named store was replaced.
  *
  * The reconciler computes the range and drives the call; the caller owns the
- * transport, the timeout, and whether a failure is worth reporting. A rejection
- * means the request did not complete, which is not the same as an empty range:
- * it leaves the floor where it was and propagates to whoever asked for the
+ * transport, typed server-error classification, the timeout, and whether an
+ * ordinary failure is worth reporting. A store replacement is an expected
+ * supersession, while a rejection means the request did not complete: it
+ * leaves the floor where it was and propagates to whoever asked for the
  * backfill.
  */
-export type BackfillFetch = (request: BackfillRequest) => Promise<readonly RunEvent[]>;
+export type BackfillFetch = (request: BackfillRequest) => Promise<BackfillFetchResult>;
 
 /**
  * How one backfill turned out.
@@ -58,9 +70,9 @@ export type BackfillFetch = (request: BackfillRequest) => Promise<readonly RunEv
  * The consumer calls `accept` only after its state model accepts that prefix;
  * until then, the same range remains available. `complete` means the folded
  * log already reaches back to the start of the log, so nothing was asked for.
- * `superseded` means a re-bootstrap landed while the request was in flight, so
- * the answer describes a log the fold no longer belongs to: drop it and leave
- * the floor where it is.
+ * `superseded` means either the server rejected the request's store fence or a
+ * re-bootstrap landed while it was in flight. The range no longer safely
+ * describes the fold: drop it and leave the floor where it is.
  */
 export type BackfillOutcome =
   | {
@@ -364,8 +376,18 @@ export class StreamReconciler {
   async #fetchBelow(floor: number, fetch: BackfillFetch): Promise<BackfillOutcome> {
     const afterSequence = Math.max(0, floor - this.#backfillChunk);
     const generation = this.#rebootstrapGeneration;
-    const events = await fetch({afterSequence, beforeSequence: floor + 1});
+    const expectedStoreId = this.#storeId;
+    if (expectedStoreId === null) {
+      throw new Error('A history floor has no event-store identity');
+    }
+    const result = await fetch({
+      ...(expectedStoreId === '' ? {} : {expectedStoreId}),
+      afterSequence,
+      beforeSequence: floor + 1,
+    });
     if (generation !== this.#rebootstrapGeneration) return SUPERSEDED;
+    if (result.kind === 'store-replaced') return SUPERSEDED;
+    const {events} = result;
     const fresh = events.filter(candidate => {
       const {sequence} = candidate;
       // An unsequenced event cannot be recognized in a later chunk, so it is
@@ -416,12 +438,11 @@ export class StreamReconciler {
    * `#highestDeclaredFloor` descends with it for the same reason: it is the
    * watermark of the log being folded, and this starts a new one.
    *
-   * An outstanding range is left outstanding. Nothing can cancel it: the
-   * protocol carries no store or generation on `query.events`, the server keeps
-   * no registry of outstanding requests, and a subscribed connection serves no
-   * further requests at all, so the round trip really is still in flight and
-   * discarding its answer is the only available answer. The generation captured
-   * with it now differs, so that answer comes back `superseded`.
+   * An outstanding range is left outstanding. The request is fenced to this
+   * generation, so the server either completes it before replacement or answers
+   * with a typed replacement failure. The generation captured here also differs
+   * once the replacement batch arrives; either signal makes the answer
+   * `superseded` without letting events cross sequence spaces.
    */
   #rebootstrap(store: string, declared: number, events: readonly RunEvent[]): BatchReconciliation {
     this.#storeId = store;

@@ -30,6 +30,7 @@ export {
 } from './request-policy.js';
 export {
   type BackfillFetch,
+  type BackfillFetchResult,
   type BackfillOutcome,
   type BackfillRequest,
   type BatchContext,

@@ -118,6 +118,7 @@ export type RequestId15 = string;
 export type ClientId15 = string;
 export type Timestamp15 = string;
 export type Type15 = "query.events";
+export type ExpectedStoreId2 = string | null;
 export type AfterSequence = number;
 export type BeforeSequence = number | null;
 export type TimeoutMs = number;
@@ -921,6 +922,11 @@ export interface DesignPatchQuery {
 }
 /**
  * Request run events in a sequence interval.
+ *
+ * ``expected_store_id`` fences the interval to the event store whose stream
+ * established the caller's history floor. None preserves the unfenced query
+ * for callers that do not combine history with a live subscription. An empty
+ * string is a real fence for the pre-attachment store.
  */
 export interface EventsQuery {
   protocol_version?: ProtocolVersion15;
@@ -928,6 +934,7 @@ export interface EventsQuery {
   client_id?: ClientId15;
   timestamp?: Timestamp15;
   type: Type15;
+  expected_store_id?: ExpectedStoreId2;
   after_sequence?: AfterSequence;
   before_sequence?: BeforeSequence;
   timeout_ms?: TimeoutMs;

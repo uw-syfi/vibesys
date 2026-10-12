@@ -107,6 +107,16 @@ class IterationStoreReplacedError(RuntimeError):
         super().__init__("The run event store changed before iterations were captured")
 
 
+class EventsStoreReplacedError(RuntimeError):
+    """A fenced event-range request whose event store is no longer current."""
+
+    diagnostic_code = "events_store_replaced"
+
+    def __init__(self) -> None:
+        """Keep the public failure independent of opaque store identifiers."""
+        super().__init__("The run event store changed before history was captured")
+
+
 class _RunControlState(StrEnum):
     """Lifecycle of the one control session owned by a server runtime."""
 
@@ -358,9 +368,18 @@ class RunApi:
         if isinstance(request, EventsQuery):
             timeout = request.timeout_ms / 1000 if request.timeout_ms else None
             events = (
-                self.wait_for_events(request.after_sequence, timeout, request.before_sequence)
+                self.wait_for_events(
+                    request.after_sequence,
+                    timeout,
+                    request.before_sequence,
+                    expected_store_id=request.expected_store_id,
+                )
                 if timeout is not None
-                else self.events(request.after_sequence, request.before_sequence)
+                else self.events(
+                    request.after_sequence,
+                    request.before_sequence,
+                    expected_store_id=request.expected_store_id,
+                )
             )
             return Response(request_id=request.request_id, events=events)
         message = f"Unsupported protocol request: {type(request).__name__}"
@@ -527,9 +546,18 @@ class RunApi:
                 active_executions=self._executions.active_locked(),
             )
 
-    def events(self, after_sequence: int = 0, before_sequence: int | None = None) -> list[RunEvent]:
-        """Read journal events within the requested sequence bounds."""
-        return self._journal.read(after_sequence, before_sequence)
+    def events(
+        self,
+        after_sequence: int = 0,
+        before_sequence: int | None = None,
+        *,
+        expected_store_id: str | None = None,
+    ) -> list[RunEvent]:
+        """Read one event range from the expected sequence space."""
+        if expected_store_id is None:
+            return self._journal.read(after_sequence, before_sequence)
+        with self._condition:
+            return self._fenced_events_locked(expected_store_id, after_sequence, before_sequence)
 
     def history_events(self) -> list[RunEvent]:
         """Read the canonical event history used by frontend clients."""
@@ -673,9 +701,52 @@ class RunApi:
         after_sequence: int,
         timeout: float | None = None,
         before_sequence: int | None = None,
+        *,
+        expected_store_id: str | None = None,
     ) -> list[RunEvent]:
-        """Wait for and read events newer than the supplied sequence."""
-        return self._journal.wait_for_events(after_sequence, timeout, before_sequence)
+        """Wait for and atomically read events from the expected sequence space."""
+        if expected_store_id is None:
+            # Preserve the original-store behavior for standalone long-poll
+            # callers. A replacement wakes the retired store and this returns
+            # that store's final range rather than switching sequence spaces.
+            return self._journal.wait_for_events(after_sequence, timeout, before_sequence)
+        with self._condition:
+            self._require_event_store_locked(expected_store_id)
+            initial_store_id = self._journal.store_id_locked()
+            # Before attachment there is no durable store to wait on. Preserve
+            # the historical immediate empty answer, including for the empty
+            # pre-attachment fence.
+            if initial_store_id == "":
+                return self._fenced_events_locked(
+                    expected_store_id, after_sequence, before_sequence
+                )
+            self._condition.wait_for(
+                lambda: (
+                    self._journal.store_id_locked() != initial_store_id
+                    or self._journal.latest_sequence_locked() > after_sequence
+                ),
+                timeout,
+            )
+            return self._fenced_events_locked(expected_store_id, after_sequence, before_sequence)
+
+    def _fenced_events_locked(
+        self,
+        expected_store_id: str,
+        after_sequence: int,
+        before_sequence: int | None,
+    ) -> list[RunEvent]:
+        """Read under the journal condition after enforcing one store fence."""
+        events = self._journal.read_fenced_locked(
+            expected_store_id, after_sequence, before_sequence
+        )
+        if events is None:
+            raise EventsStoreReplacedError
+        return events
+
+    def _require_event_store_locked(self, expected_store_id: str | None) -> None:
+        """Reject a cursor whose named event-store generation is gone."""
+        if expected_store_id is not None and self._journal.store_id_locked() != expected_store_id:
+            raise EventsStoreReplacedError
 
     def wait_for_change(self, after_sequence: int, timeout: float | None = None) -> bool:
         """Wait until the journal advances beyond the supplied sequence."""

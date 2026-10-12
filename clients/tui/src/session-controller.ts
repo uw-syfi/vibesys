@@ -587,14 +587,22 @@ export class SocketSessionController implements SessionController {
 
   async #requestOlderHistory(): Promise<boolean> {
     try {
-      const outcome = await this.#reconciler.backfill(async ({afterSequence, beforeSequence}) => {
-        const response = await this.client.request({
-          type: 'query.events',
-          after_sequence: afterSequence,
-          before_sequence: beforeSequence,
-        });
-        return response.events ?? [];
-      });
+      const outcome = await this.#reconciler.backfill(
+        async ({expectedStoreId, afterSequence, beforeSequence}) => {
+          try {
+            const response = await this.client.request({
+              type: 'query.events',
+              ...(expectedStoreId === undefined ? {} : {expected_store_id: expectedStoreId}),
+              after_sequence: afterSequence,
+              before_sequence: beforeSequence,
+            });
+            return {kind: 'events', events: response.events ?? []};
+          } catch (error) {
+            if (isEventsStoreReplaced(error)) return {kind: 'store-replaced'};
+            throw error;
+          }
+        },
+      );
       if (outcome.kind !== 'prepend') return false;
       const next = applyEventPrefix(this.#state, outcome.events, outcome.historyFloor);
       this.#setState(next);
@@ -1713,6 +1721,10 @@ function reportCaughtError(
 
 function isIterationStoreReplaced(error: unknown): error is ServerError {
   return error instanceof ServerError && error.diagnostic?.code === 'iteration_store_replaced';
+}
+
+function isEventsStoreReplaced(error: unknown): error is ServerError {
+  return error instanceof ServerError && error.diagnostic?.code === 'events_store_replaced';
 }
 
 function errorMessage(error: unknown): string {
