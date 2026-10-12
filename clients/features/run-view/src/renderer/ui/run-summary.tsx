@@ -9,6 +9,9 @@ export function RunSummary({
   readonly run: CoreState;
   readonly iterations: IterationNavigationState;
 }): JSX.Element {
+  const roots = iterationRoots(iterations, run);
+  const roundBudget =
+    roots.length > 0 && roots.every(root => root.kind === 'round') ? run.maxRounds : null;
   return (
     <section className="summary" aria-label="Run summary">
       <div>
@@ -18,8 +21,8 @@ export function RunSummary({
       <div>
         <span>Iterations</span>
         <strong>
-          {iterationRoots(iterations, run).length}
-          {run.maxRounds === null ? '' : ` / ${run.maxRounds}`}
+          {roots.length}
+          {roundBudget === null ? '' : ` / ${roundBudget}`}
         </strong>
       </div>
       <div>

@@ -17,9 +17,9 @@ The built-in mappings are:
   completion order changes neither identity nor ordinal.
 - `evolve`: root `generation` nodes containing `candidate` children. Candidate
   identity comes from the population member ID, not its position in a page.
-- `plain`: typed `external_state_unavailable`. Its issue board is owned by the
-  configured issue provider and is not part of `IssueQueueState`; the projector
-  must not parse or duplicate `issues.json`.
+- `plain`: one root `board` node containing `item` children from the durable
+  issue snapshot already held by `IssueQueueStrategyState`. The tracker remains
+  authoritative; the projector neither opens nor parses provider storage.
 
 IDs, sibling ordinals, parent references, child counts, status vocabulary, and
 headline metric bounds are validated before a `RunView` is published. The

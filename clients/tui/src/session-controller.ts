@@ -1536,20 +1536,24 @@ export class SocketSessionController implements SessionController {
   }
 
   #onMessage(message: ServerMessage, resumed: boolean): void {
-    const events = this.#dispatchMessage(message, resumed);
-    if (events === null) return;
+    const dispatched = this.#dispatchMessage(message, resumed);
+    if (dispatched === null) return;
+    const {events, iterationStoreReplaced} = dispatched;
     this.#refreshExperimentsFor(events);
-    if (events.some(event => event.type === 'iterations_changed')) {
+    if (iterationStoreReplaced || events.some(event => event.type === 'iterations_changed')) {
       void this.#loadIterations();
     }
     this.#refreshPaneFor(events);
   }
 
-  #dispatchMessage(message: ServerMessage, resumed: boolean): readonly RunEvent[] | null {
+  #dispatchMessage(
+    message: ServerMessage,
+    resumed: boolean,
+  ): {readonly events: readonly RunEvent[]; readonly iterationStoreReplaced: boolean} | null {
     switch (message.type) {
       case 'event':
         this.#setState(applyEvent(this.#state, message.event));
-        return [message.event];
+        return {events: [message.event], iterationStoreReplaced: false};
       case 'event_batch': {
         const reconciliation = this.#reconciler.reconcileBatch(message, {resumed});
         if (reconciliation.kind === 'rebootstrap') {
@@ -1565,7 +1569,10 @@ export class SocketSessionController implements SessionController {
             reconciliation.historyFloor,
           ),
         );
-        return message.events;
+        return {
+          events: message.events,
+          iterationStoreReplaced: reconciliation.kind === 'rebootstrap',
+        };
       }
       case 'protocol_error':
         this.#streamProtocolError = true;

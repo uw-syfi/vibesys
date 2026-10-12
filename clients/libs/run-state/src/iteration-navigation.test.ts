@@ -1,14 +1,14 @@
 import {describe, expect, test} from 'bun:test';
 import type {IterationPage} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
-import {reduceEvent} from './reduce.js';
-import {initialCoreState} from './state.js';
 import {
   initialIterationNavigation,
   iterationChildren,
   iterationRoots,
   reduceIterationResult,
 } from './iteration-navigation.js';
+import {reduceEvent} from './reduce.js';
+import {initialCoreState} from './state.js';
 
 function page(overrides: Partial<IterationPage> = {}): IterationPage {
   return {

@@ -974,7 +974,9 @@ const responsePayloadSchema: Record<string, unknown> = {
         "workstream",
         "attempt",
         "generation",
-        "candidate"
+        "candidate",
+        "board",
+        "item"
       ],
       "title": "IterationKind",
       "type": "string"

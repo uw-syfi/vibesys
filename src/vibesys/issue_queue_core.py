@@ -231,5 +231,5 @@ def issue_queue_core_registration() -> OrchestrationRegistration:
         plugin=plugin,
         projector=issue_queue_projector(),
         project_max_rounds=_project_max_rounds,
-        iteration_support=IterationSupport.EXTERNAL_STATE_UNAVAILABLE,
+        iteration_support=IterationSupport.PROJECTED,
     )

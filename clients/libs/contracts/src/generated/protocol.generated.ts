@@ -648,7 +648,7 @@ export type ParentId2 = string | null;
 /**
  * Policy-neutral kinds a client may use to label navigation rows.
  */
-export type IterationKind = "round" | "workstream" | "attempt" | "generation" | "candidate";
+export type IterationKind = "round" | "workstream" | "attempt" | "generation" | "candidate" | "board" | "item";
 export type Label2 = string;
 export type Ordinal = number;
 /**

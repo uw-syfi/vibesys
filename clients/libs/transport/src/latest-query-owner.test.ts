@@ -1,5 +1,6 @@
-import {describe, expect, test} from 'bun:test';
+import {describe, it} from 'node:test';
 import {LatestQueryOwner} from './index.js';
+import {expect} from './test-support/expect.js';
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -23,7 +24,7 @@ async function settle(): Promise<void> {
 }
 
 describe('LatestQueryOwner', () => {
-  test('suppresses a superseded success and settles every waiter on the follow-up', async () => {
+  it('suppresses a superseded success and settles every waiter on the follow-up', async () => {
     const predecessor = deferred<string>();
     const followUp = deferred<string>();
     const requests = [predecessor.promise, followUp.promise];
@@ -59,7 +60,7 @@ describe('LatestQueryOwner', () => {
     expect(published).toEqual(['current']);
   });
 
-  test('suppresses a superseded failure when the follow-up succeeds', async () => {
+  it('suppresses a superseded failure when the follow-up succeeds', async () => {
     const predecessor = deferred<string>();
     const followUp = deferred<string>();
     const requests = [predecessor.promise, followUp.promise];
@@ -87,23 +88,25 @@ describe('LatestQueryOwner', () => {
     expect(reported).toEqual([]);
   });
 
-  test.each(['success', 'failure'] as const)('retires a late %s after stop', async outcome => {
-    const pending = deferred<string>();
-    const published: string[] = [];
-    const reported: unknown[] = [];
-    const owner = new LatestQueryOwner({
-      request: () => pending.promise,
-      publish: value => published.push(value),
-      report: error => reported.push(error),
+  for (const outcome of ['success', 'failure'] as const) {
+    it(`retires a late ${outcome} after stop`, async () => {
+      const pending = deferred<string>();
+      const published: string[] = [];
+      const reported: unknown[] = [];
+      const owner = new LatestQueryOwner({
+        request: () => pending.promise,
+        publish: value => published.push(value),
+        report: error => reported.push(error),
+      });
+      const refresh = owner.refresh();
+
+      owner.stop();
+      if (outcome === 'success') pending.resolve('late');
+      else pending.reject(new Error('late failure'));
+      await refresh;
+
+      expect(published).toEqual([]);
+      expect(reported).toEqual([]);
     });
-    const refresh = owner.refresh();
-
-    owner.stop();
-    if (outcome === 'success') pending.resolve('late');
-    else pending.reject(new Error('late failure'));
-    await refresh;
-
-    expect(published).toEqual([]);
-    expect(reported).toEqual([]);
-  });
+  }
 });

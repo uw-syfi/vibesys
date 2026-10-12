@@ -26,6 +26,7 @@ BUILT_INS = (
 )
 
 __all__ = [
+    "BUILT_INS",
     "DYNAMIC",
     "EVOLVE",
     "ISSUE_QUEUE",

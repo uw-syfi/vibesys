@@ -56,6 +56,48 @@ def test_pages_are_bounded_and_cursor_continuations_are_exact() -> None:
     assert pages == [f"generation:{number}" for number in range(5)]
 
 
+def test_pages_direct_children_without_recursing_into_their_parent() -> None:
+    root_id = "generation:1"
+    view = RunView(
+        run_id="run-1",
+        loop="evolve",
+        status=RunStatus.ACTIVE,
+        iterations=IterationTree.from_nodes(
+            (
+                IterationSummary(
+                    id=root_id,
+                    kind=IterationKind.GENERATION,
+                    label="Generation 1",
+                    ordinal=1,
+                    status=IterationStatus.ACTIVE,
+                    child_count=3,
+                ),
+                *(
+                    IterationSummary(
+                        id=f"candidate:{number}",
+                        parent_id=root_id,
+                        kind=IterationKind.CANDIDATE,
+                        label=f"Candidate {number}",
+                        ordinal=number,
+                        status=IterationStatus.COMPLETED,
+                    )
+                    for number in range(3)
+                ),
+            )
+        ),
+    )
+
+    first = page_iterations(view, parent_id=root_id, cursor=None, limit=2)
+    assert first.kind == "page"
+    assert [item.id for item in first.items] == ["candidate:0", "candidate:1"]
+    assert first.next_cursor is not None
+
+    second = page_iterations(view, parent_id=root_id, cursor=first.next_cursor, limit=2)
+    assert second.kind == "page"
+    assert [item.id for item in second.items] == ["candidate:2"]
+    assert second.next_cursor is None
+
+
 def test_cursor_free_page_is_an_authoritative_reset_at_the_current_revision() -> None:
     stale = page_iterations(_view(), parent_id=None, cursor=None, limit=2)
     reset = page_iterations(_view(6), parent_id=None, cursor=None, limit=2)

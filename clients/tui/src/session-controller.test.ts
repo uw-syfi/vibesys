@@ -397,6 +397,47 @@ describe('session controller', () => {
     await controller.stop();
   });
 
+  it('loads iteration navigation again when the stream store replaces an in-flight query', async () => {
+    const transport = new FakeTransport();
+    const stale = deferred<ProtocolResponse>();
+    const current = deferred<ProtocolResponse>();
+    transport.iterationResponses.push(stale.promise, current.promise);
+    const controller = new SocketSessionController(transport);
+
+    const started = controller.start();
+    await settleMicrotasks();
+    transport.emit({
+      type: 'event_batch',
+      events: [event(1, 'server_ready')],
+      store_id: 'bootstrap-store',
+      history_after_sequence: 0,
+    });
+    transport.emit({
+      type: 'event_batch',
+      events: [
+        {
+          ...event(1, 'run_started'),
+          data: {kind: 'run_started', outer_loop: 'evolve', input: '.', max_rounds: 3},
+        },
+      ],
+      store_id: 'run-store',
+      history_after_sequence: 0,
+      rebootstrap: true,
+    });
+
+    stale.resolve(iterationPageResponse('bootstrap', null, 0, 1, null));
+    await settleMicrotasks();
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      2,
+    );
+
+    current.resolve(iterationPageResponse('run', null, 1, 1, null));
+    await started;
+    expect(controller.state.iterations.revision).toBe('run');
+    await controller.stop();
+  });
+
   it.each([
     'success',
     'failure',

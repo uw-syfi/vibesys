@@ -14,8 +14,6 @@ from vibesys.api import (
     IterationSummary,
     IterationSupport,
     IterationTree,
-    IterationUnavailable,
-    IterationUnavailableReason,
     catalog,
 )
 from vibesys.orchestration.dynamic.core_policy.api import project_strategy_state
@@ -29,8 +27,9 @@ from vibesys.orchestration.dynamic.strategy.api import (
 from vibesys.orchestration.issue_queue.core_policy.api import (
     project_strategy_state as project_issue_queue_state,
 )
-from vibesys.orchestration.issue_queue.strategy.api import IssueQueueStrategyState
+from vibesys.orchestration.issue_queue.strategy.api import BoardState, IssueQueueStrategyState
 from vs_core.api import AttemptId, RevisionRef
+from vs_issue_tracker.api import IssueRow, IssueStatus, IssueType
 
 
 def _node(identifier: str, ordinal: int) -> IterationSummary:
@@ -91,16 +90,72 @@ def test_catalog_has_an_explicit_iteration_disposition_for_every_builtin() -> No
         registration.iteration_support is not IterationSupport.UNMAPPED
         for registration in registrations
     )
-    assert catalog.ISSUE_QUEUE.iteration_support is IterationSupport.EXTERNAL_STATE_UNAVAILABLE
     assert all(
         registration.iteration_support is IterationSupport.PROJECTED
         for registration in registrations
-        if registration is not catalog.ISSUE_QUEUE
     )
 
     projection = project_issue_queue_state(IssueQueueStrategyState(), experiment_revision=0)
-    assert isinstance(projection.iterations, IterationUnavailable)
-    assert projection.iterations.reason is IterationUnavailableReason.EXTERNAL_STATE_UNAVAILABLE
+    assert isinstance(projection.iterations, IterationTree)
+    assert projection.iterations.nodes == (
+        IterationSummary(
+            id="board:issues",
+            kind=IterationKind.BOARD,
+            label="Issue board",
+            ordinal=0,
+            status=IterationStatus.PENDING,
+        ),
+    )
+
+
+def test_issue_queue_projects_board_items_in_stable_identity_order() -> None:
+    def issue(identifier: int, status: IssueStatus, *, attempts: int = 0) -> IssueRow:
+        return IssueRow(
+            id=identifier,
+            type=IssueType.BUG,
+            status=status,
+            title=f"Issue {identifier}",
+            attempts=attempts,
+            created_by="operator",
+            created_iter=1,
+        )
+
+    state = IssueQueueStrategyState(
+        board=BoardState(
+            bootstrap_done=True,
+            issues=(
+                issue(4, IssueStatus.BLOCKED, attempts=2),
+                issue(1, IssueStatus.IN_PROGRESS, attempts=1),
+                issue(3, IssueStatus.CLOSED),
+                issue(2, IssueStatus.OPEN),
+            ),
+        )
+    )
+
+    projected = project_issue_queue_state(state, experiment_revision=7).iterations
+    reopened = project_issue_queue_state(
+        IssueQueueStrategyState.model_validate_json(state.model_dump_json()),
+        experiment_revision=7,
+    ).iterations
+
+    assert isinstance(projected, IterationTree)
+    assert reopened == projected
+    assert [
+        (node.id, node.parent_id, node.kind, node.ordinal, node.status) for node in projected.nodes
+    ] == [
+        ("board:issues", None, IterationKind.BOARD, 0, IterationStatus.ACTIVE),
+        ("item:1", "board:issues", IterationKind.ITEM, 1, IterationStatus.ACTIVE),
+        ("item:2", "board:issues", IterationKind.ITEM, 2, IterationStatus.PENDING),
+        ("item:3", "board:issues", IterationKind.ITEM, 3, IterationStatus.COMPLETED),
+        ("item:4", "board:issues", IterationKind.ITEM, 4, IterationStatus.FAILED),
+    ]
+    assert projected.nodes[0].child_count == 4
+    assert projected.nodes[-1].headline_metrics[0].model_dump() == {
+        "id": "attempts",
+        "value": 2.0,
+        "unit": None,
+        "direction": None,
+    }
 
 
 def test_dynamic_iterations_group_attempts_under_stable_workstreams() -> None:

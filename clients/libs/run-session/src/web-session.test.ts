@@ -499,6 +499,48 @@ describe('WebSession', () => {
     await session.close();
   });
 
+  test('reloads iteration navigation from the stream store that replaces an in-flight query', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.iterations.push(iterationResponse('store-a', 'Generation 1'));
+    await session.start();
+    const stale = deferred<ProtocolResponse>();
+    const current = deferred<ProtocolResponse>();
+    transport.iterations.push(stale.promise, current.promise);
+    const stream = transport.subscriptions[0];
+    if (stream === undefined) throw new Error('Initial subscription did not open');
+
+    stream.onMessage(
+      eventBatch(
+        [
+          event(2, 'iterations_changed', {
+            data: {kind: 'iterations_changed', revision: 'store-a-late'},
+          }),
+        ],
+        {through_sequence: 2, store_id: 'store-1', history_after_sequence: 0},
+      ),
+    );
+    stream.onMessage(
+      eventBatch([event(1, 'server_ready')], {
+        through_sequence: 1,
+        store_id: 'store-2',
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+
+    stale.resolve(iterationResponse('store-a-late', 'Generation 2'));
+    await settle();
+    expect(session.store.getIterations().revision).toBe('store-a');
+
+    current.resolve(iterationResponse('store-b', 'Generation 3'));
+    await waitForSession(session, () => session.store.getIterations().revision === 'store-b');
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      3,
+    );
+    await session.close();
+  });
+
   test('publishes more than one hundred iteration roots only after the last page', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
@@ -840,7 +882,9 @@ describe('WebSession', () => {
       }),
     );
     await connected;
-    expect(transport.requests.at(-1)).toMatchObject({
+    expect(
+      transport.requests.filter(request => request.type === 'query.snapshot').at(-1),
+    ).toMatchObject({
       type: 'query.snapshot',
       expected_store_id: 'replacement-store',
     });
@@ -887,7 +931,9 @@ describe('WebSession', () => {
       }),
     );
     await connected;
-    expect(transport.requests.at(-1)).toMatchObject({
+    expect(
+      transport.requests.filter(request => request.type === 'query.snapshot').at(-1),
+    ).toMatchObject({
       type: 'query.snapshot',
       expected_store_id: 'replacement-store',
     });
@@ -980,7 +1026,9 @@ describe('WebSession', () => {
     session.reattach();
     const b = await bDial;
     b.onMessage(streamBatch('store-b', 1));
-    expect(transport.requests.at(-1)).toMatchObject({
+    expect(
+      transport.requests.filter(request => request.type === 'query.snapshot').at(-1),
+    ).toMatchObject({
       type: 'query.snapshot',
       expected_store_id: 'store-b',
     });
@@ -992,7 +1040,9 @@ describe('WebSession', () => {
     storeB.resolve(storeReplacedResponse());
     const c = await cDial;
     c.onMessage(streamBatch('store-c', 1));
-    expect(transport.requests.at(-1)).toMatchObject({
+    expect(
+      transport.requests.filter(request => request.type === 'query.snapshot').at(-1),
+    ).toMatchObject({
       type: 'query.snapshot',
       expected_store_id: 'store-c',
     });
@@ -1029,7 +1079,9 @@ describe('WebSession', () => {
     const storeC = deferred<ProtocolResponse>();
     transport.snapshots.push(storeC.promise);
     stream.onMessage(streamBatch('store-c', 1));
-    expect(transport.requests.slice(-2)).toMatchObject([
+    expect(
+      transport.requests.filter(request => request.type === 'query.snapshot').slice(-2),
+    ).toMatchObject([
       {type: 'query.snapshot', expected_store_id: 'store-b'},
       {type: 'query.snapshot', expected_store_id: 'store-c'},
     ]);
@@ -1077,7 +1129,9 @@ describe('WebSession', () => {
       }),
     );
     expect(session.store.getState()).toMatchObject({sequence: 1, status: 'completed'});
-    expect(transport.requests.at(-1)).toMatchObject({
+    expect(
+      transport.requests.filter(request => request.type === 'query.snapshot').at(-1),
+    ).toMatchObject({
       type: 'query.snapshot',
       expected_store_id: 'replacement-store',
     });
@@ -1108,7 +1162,9 @@ describe('WebSession', () => {
         rebootstrap: true,
       }),
     );
-    expect(transport.requests.at(-1)).toMatchObject({
+    expect(
+      transport.requests.filter(request => request.type === 'query.snapshot').at(-1),
+    ).toMatchObject({
       type: 'query.snapshot',
       expected_store_id: 'later-store',
     });
@@ -1684,7 +1740,9 @@ describe('WebSession', () => {
     session.reattach();
     await settle();
     expect(transport.requests.filter(request => request.type === 'query.snapshot')).toHaveLength(2);
-    expect(transport.requests.at(-1)).toMatchObject({
+    expect(
+      transport.requests.filter(request => request.type === 'query.snapshot').at(-1),
+    ).toMatchObject({
       type: 'query.snapshot',
       expected_store_id: 'replacement-store',
     });
@@ -1768,7 +1826,7 @@ describe('WebSession', () => {
     transport.subscriptions[0]?.onMessage(streamBatch('', 2));
 
     expect(session.store.getState().sequence).toBe(2);
-    expect(transport.requests.at(-1)).toEqual({
+    expect(transport.requests.filter(request => request.type === 'query.snapshot').at(-1)).toEqual({
       type: 'query.snapshot',
       expected_store_id: '',
     });

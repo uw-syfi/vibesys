@@ -207,6 +207,8 @@ class IterationKind(StrEnum):
     ATTEMPT = "attempt"
     GENERATION = "generation"
     CANDIDATE = "candidate"
+    BOARD = "board"
+    ITEM = "item"
 
 
 class IterationStatus(StrEnum):
