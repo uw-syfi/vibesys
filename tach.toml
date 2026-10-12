@@ -1054,7 +1054,7 @@ expose = ["ProfilerPreflight", "SessionAgents", "SessionImplementations"]
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._session_checkpoints", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
+depends_on = ["vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -1072,11 +1072,20 @@ from = ["vibesys.orchestration.dynamic.models"]
 [[modules]]
 path = "vs_core._waits"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common"]
+depends_on = ["vs_core._dispatch_episode", "vs_core._proofs", "vs_core.types", "vs_core.types.common"]
 
 [[interfaces]]
 from = ["vs_core._waits"]
 expose = ["Outcome", "Producer", "RESOLUTIONS", "Resolution", "Wait", "WaitKind", "WaitingPhase", "awaiting_refund", "draining_without_cancel", "orphan_waits", "phase_waits", "stalled_acquisitions", "stalled_checkpoint_waits", "undispatchable_requests", "waits"]
+
+[[modules]]
+path = "vs_core._dispatch_episode"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common"]
+
+[[interfaces]]
+from = ["vs_core._dispatch_episode"]
+expose = ["EpisodeFacts", "dispatch_episode_current", "episode_ended", "registered_retirement", "retirement_dispatch", "scope_admission"]
 
 [[modules]]
 path = "vs_core._proofs"

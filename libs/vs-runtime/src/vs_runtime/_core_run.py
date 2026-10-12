@@ -49,7 +49,6 @@ from vs_core.api import (
     project,
 )
 from vs_runtime._core_loop import LeaseUnavailableError
-from vs_runtime._run_control import RunStopped
 from vs_runtime._steer_delivery import SteerConsumption, steer_input, unrecorded_steers
 from vs_sim.api import SleepingClock, SystemClock
 
@@ -332,9 +331,12 @@ async def drive_core(
     any request finishes, not only when all have. An iteration that changed nothing waits
     (see the module docstring); one that cannot be woken by time raises ``RunStalledError``.
 
-    A stop is a control like the others: core commits it and cancels the running turns
-    itself, and the run ends terminal. If a request core cannot cancel is running, the
-    loop cancels it and raises ``RunStopped`` instead.
+    A stop is a control like the others: core commits it, cancels the running turns, and
+    cancels the run's owned jobs and closes its attempts once the requests it cannot cancel
+    (a submission, a job poll) have returned their observations; the run then ends
+    terminal. The loop waits for those requests. Only the host's grace bound ends the wait
+    early, with ``RunStopped`` and the record open; the abandoned requests stay dispatched,
+    and a resume inspects them and finishes the drain.
 
     ``stall_notes`` adds what only the host knows to the ``RunStalledError`` message, such
     as a charged submission whose handle never reached its agent.
@@ -422,29 +424,12 @@ class _Loop:
                 return self._outcome(refusal)
             if self._core().run.status == RunStatus.TERMINAL:
                 break
-            self._stop_what_core_cannot()
             if self._signature() == before:
                 await self._wait(now)
         return self._outcome()
 
     def _slots(self) -> int:
         return self._config.max_concurrent or self._core().run.limits.max_parallel
-
-    def _stop_what_core_cannot(self) -> None:
-        """Give up on running requests when an operator stop cannot finish through core.
-
-        A stop makes core cancel each running turn; the turns end, their observations
-        commit and the run ends terminal. A request core has no cancellation for (a
-        submission, a poll) is not waited for: the loop cancels it and raises
-        ``RunStopped`` with the run's record still open, as the host's grace bound would
-        a minute later. Work that does not end on cancel is still bounded by that grace.
-        """
-        stopped = any(
-            c.action == "stop" and c.control_id.root != "deadline"
-            for c in self._core().run.controls
-        )
-        if stopped and self._shell.in_flight and not self._shell.stop_ends_in_core:
-            raise RunStopped
 
     async def _settle(self, now: float) -> ExecutorRefusal | None:
         total = self._shell.dispatched - self._first_dispatch

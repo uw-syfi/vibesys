@@ -93,7 +93,7 @@ def test_c4_delivery_faults_never_change_the_decisions_or_the_liveness(
 def test_c5_an_operator_stop_at_any_request_ends_the_run_and_leaves_nothing(
     name: str, data: st.DataObject, stop_at: int
 ) -> None:
-    """A stop injected while the ``stop_at``-th request runs ends the run, resumably or not."""
+    """A stop injected while the ``stop_at``-th request runs ends the run terminal."""
     # A run that stays open (a request nothing answers) ends at its deadline; keep that short.
     subject = replace(SUBJECTS[name], harness=replace(SUBJECTS[name].harness, deadline_at=15_000.0))
     world = c.Faulted(data.draw(subject.worlds)(), data.draw(outcomes), stop_at=stop_at)
@@ -102,10 +102,8 @@ def test_c5_an_operator_stop_at_any_request_ends_the_run_and_leaves_nothing(
     if not world.stopped:
         return
     budget = Budget(retries=subject.harness.limits.max_retries)
-    if recorded.run.stopped:
-        # The host gave up on a request core cannot cancel; the run stays open for a resume.
-        assert_live(recorded.run.journal, core, budget, End.STOPPED)
-        return
+    # The loop waits for requests core cannot cancel, so the run never ends open for a resume.
+    assert not recorded.run.stopped
     # The run may have decided its own result in the same step the stop arrived; whatever it
     # is, the run is terminal with every attempt settled and nothing open.
     assert core.run.result is not None

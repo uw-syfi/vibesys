@@ -58,7 +58,7 @@ from vs_runtime.api.core import (
     start_core,
     start_core_awaiting_lease,
 )
-from vs_runtime.api.infrastructure import RunStopped, RuntimeRunControlChannel
+from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.testing import ProbedRunClock
 from vs_sim.api.testing import clock_from
 
@@ -283,45 +283,40 @@ async def test_a_dispatch_longer_than_the_lease_does_not_lose_the_lease(
 
 
 @pytest.mark.parametrize("lease_durations_first", [0, 1, 5])
-async def test_a_stop_during_a_turn_that_never_ends_cancels_it_once_without_waiting(
+async def test_a_stop_during_a_submission_waits_for_it_and_closes_the_run(
     tmp_path: Path, lease_durations_first: int
 ) -> None:
-    """A stop that arrives while one dispatch (an agent turn) is in flight is acted on then.
+    """A stop that arrives while a submission is in flight waits for it, then closes the run.
 
-    The submission stands for a turn that never ends on its own. The loop reads controls
-    between drains, so before the fix it never saw the stop: the run ended only when the
-    host's grace bound cancelled it. Now the loop cancels the dispatch once and ends the
-    run as stopped, with no run-clock time spent waiting for a bound.
+    A submission is a request core cannot cancel, so the loop does not abandon it at the
+    stop (that left the run record closing and every owned job uncancelled until the host
+    exited). It drains the submission, cancels what the run owns through core, and ends
+    terminal. The wait is bounded by the host's grace period, which is not reached here.
     """
     clock = ProbedRunClock(clock_from(1.0))
     channel = _channel()
-    cancellations: list[str] = []
+    stop_seen_in_flight: list[bool] = []
 
-    async def turn_that_never_ends() -> None:
+    async def slow_submission() -> None:
         for _ in range(lease_durations_first * 4):
             # Real virtual time, not a jump of ``clock.at``: the heartbeat renews as the
             # timeline passes each third of the lease, as it would beside a real turn.
             await clock.pass_time(LEASE / 4)
         channel.request_stop()
-        try:
-            # Never ends on its own as far as the run is concerned. The bound counts event
-            # loop turns, not time: a loop that ignores the stop lets it elapse and fails.
-            for _ in range(_TURN_BOUND):
-                await asyncio.sleep(0)
-        except asyncio.CancelledError:
-            cancellations.append("cancelled")
-            raise
+        for _ in range(_TURN_BOUND):
+            await asyncio.sleep(0)
+        stop_seen_in_flight.append(True)
 
     with open_skeleton_world(tmp_path, BaselineOnly(), timed=(clock, 0.0)) as world:
-        world.during_submit = turn_that_never_ends
+        world.during_submit = slow_submission
         _, host = _host(world, clock, channel)
         start_core(host, _config())
-        with pytest.raises(RunStopped):
-            await drive_core(host, _config())
-    assert cancellations == ["cancelled"]
-    # The only run-clock time that passed is what the turn itself spent before the stop
-    # (the loop's control polls inside it); acting on the stop waited for nothing.
-    assert clock.at == pytest.approx(1.0 + lease_durations_first * LEASE)
+        outcome = await drive_core(host, _config())
+    assert outcome.status == RunStatus.TERMINAL
+    assert stop_seen_in_flight == [True]
+    # Draining and closing take a few control polls, far inside the host's 60 s grace.
+    spent_before_stop = 1.0 + lease_durations_first * LEASE
+    assert spent_before_stop <= clock.at <= spent_before_stop + 60.0
 
 
 async def test_a_run_with_a_long_measurement_closes_after_the_job_ends(tmp_path: Path) -> None:

@@ -40,6 +40,9 @@ from vs_slurm.api import SecondsRange, SlurmTimingProfile
 #: A stop during a turn is acted on within this many virtual seconds (the old bound was
 #: the host's 60 s grace period).
 STOP_BOUND_S = 5.0
+#: Waiting for a request core cannot cancel (a job poll) is bounded by the host's grace
+#: period (``STOP_GRACE_S``); after that the host abandons it and a resume inspects it.
+DRAIN_BOUND_S = 60.0
 #: Core polls a running job every ``observe_interval`` and the loop adds at most its
 #: minimum sleep, so noticing that a job ended costs up to one interval.
 _POLL_SLACK_S = OBSERVE_INTERVAL_S + 1.0
@@ -145,11 +148,12 @@ def test_a_stop_during_a_turn_is_acted_on_within_the_bound(
     stop_after = start + position * (end - start) - _finished(profile).started_at
     run = run_timed(profile, stop_after=stop_after)
     assert run.stopped_at is not None
-    # Core cancels the running turns and ends the run terminal; only a request core cannot
-    # cancel (a submission, a poll) in flight makes the loop give up with RunStopped.
+    # Core cancels the running turns promptly and ends the run terminal; a request core
+    # cannot cancel (a submission, a poll) in flight is waited for, within the grace bound.
     assert run.error is None or isinstance(run.error, RunStopped), run.error
-    assert run.ended_at - run.stopped_at <= STOP_BOUND_S
+    assert run.ended_at - run.stopped_at <= DRAIN_BOUND_S
     assert run.turns[-1].cancelled
+    assert run.turns[-1].end - run.stopped_at <= STOP_BOUND_S
     # Nothing new started after the stop.
     assert all(span.start <= run.stopped_at for span in run.turns)
 

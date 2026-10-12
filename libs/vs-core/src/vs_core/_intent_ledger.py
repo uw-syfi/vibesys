@@ -15,8 +15,10 @@ its request fields.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ._dispatch_episode import episode_ended
 from ._intent_forward import declaration, intents_own, owner_signals, success_without_reply
 from ._outcomes import prove_outcome
 from ._proofs import (
@@ -78,9 +80,11 @@ from .types.sessions import (
 from .types.strategy import Cancel, Withdraw
 
 if TYPE_CHECKING:
+    from .types.attempts import AttemptsState
     from .types.common import DecisionId
-    from .types.intents import IntentsEvent, Request
-    from .types.kernel import IntentsContext, Signal, StrategyEvent
+    from .types.intents import IntentsEvent, IntentsState, Request
+    from .types.kernel import IntentsContext, RunState, Signal, StrategyEvent
+    from .types.sessions import SessionsState
 
     type Facts = RequestObserved | TargetObservation
 
@@ -504,15 +508,32 @@ def _retry(
     return _reissue(state, intent)
 
 
+@dataclass(frozen=True)
+class _EpisodeFacts:
+    """The state slices an episode check reads, joined from the context and the intents."""
+
+    run: RunState
+    attempts: AttemptsState
+    sessions: SessionsState
+    intents: IntentsState
+
+
 def _undispatchable(
     state: IntentsState, context: IntentsContext, event: RequestUndispatchable
 ) -> AreaChange[IntentsState]:
-    """Close a prepared request whose dependencies failed for good, as an unsent cancellation."""
+    """Close a prepared request that can never be dispatched, as an unsent cancellation.
+
+    Its dependencies failed for good, or the episode that prepared it ended.
+    """
     intent = _unique(state, event.request_id)
-    if (
-        intent is None
-        or intent.phase != IntentPhase.PREPARED
-        or not dependency_failed(intent.request, context.run.receipts, state)
+    if intent is None or intent.phase != IntentPhase.PREPARED:
+        return AreaChange(state=state)
+    facts = _EpisodeFacts(
+        run=context.run, attempts=context.attempts, sessions=context.sessions, intents=state
+    )
+    if not (
+        dependency_failed(intent.request, context.run.receipts, state)
+        or episode_ended(facts, intent.request)
     ):
         return AreaChange(state=state)
     return _cancel_prepared(state, context, (intent,))
