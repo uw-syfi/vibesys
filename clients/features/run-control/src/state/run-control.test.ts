@@ -4,7 +4,13 @@ import {randomChrome} from '@vibesys/ipc/testing';
 import {checkMachine} from '@vibesys/machine/testing';
 import {exactResumeRunId} from '@vibesys/runs';
 import {createActor, fromPromise} from 'xstate';
-import {type RunCommand, runControlMachine, welcomeView} from './run-control.js';
+import {
+  type RunCommand,
+  runControlMachine,
+  type WelcomeAction,
+  type WelcomeState,
+  welcomeView,
+} from './run-control.js';
 
 function failed<T>(error: string): WelcomeResult<T> {
   return {ok: false, error, authNeeded: false};
@@ -26,6 +32,34 @@ const COMMANDS: readonly RunCommand[] = [
   {kind: 'show-run'},
   {kind: 'show-welcome'},
 ];
+
+type Banner = WelcomeState['banner'];
+
+/** A textless command retires superseded progress but keeps an asynchronous problem. */
+function assertTextlessCommandBanner(prior: Banner, command: RunCommand, banner: Banner): void {
+  if (!TEXTLESS_KINDS.has(command.kind)) return;
+  if (prior?.source === 'progress') expect(banner).toBeNull();
+  if (prior?.source === 'problem') expect(banner).toEqual(prior);
+}
+
+/** A failure replaces the banner; a success clears command-owned text but keeps a problem. */
+function assertSettledBanner(prior: Banner, output: WelcomeResult<null>, banner: Banner): void {
+  const kept = prior?.source === 'problem' ? prior : null;
+  expect(banner).toEqual(output.ok ? kept : {text: output.error, error: true, source: 'reply'});
+}
+
+function assertBanner(prior: Banner, event: {readonly type: string}, banner: Banner): void {
+  if (event.type === 'problem')
+    expect(banner).toEqual({text: 'settings unreadable', error: true, source: 'problem'});
+  if (event.type === 'command')
+    assertTextlessCommandBanner(
+      prior,
+      (event as Extract<WelcomeAction, {type: 'command'}>).command,
+      banner,
+    );
+  if (event.type === 'xstate.done.actor.command')
+    assertSettledBanner(prior, (event as unknown as {output: WelcomeResult<null>}).output, banner);
+}
 
 /** Let settled operations report: promise callbacks only, no timers. */
 async function flush(): Promise<void> {
@@ -54,28 +88,8 @@ describe('run-control machine', () => {
         welcomeView(snapshot).busy === snapshot.matches('commanding')
           ? []
           : [`busy ${welcomeView(snapshot).busy} in ${String(snapshot.value)}`],
-      also: (before, event, after) => {
-        const prior = welcomeView(before).banner;
-        const view = welcomeView(after);
-        if (event.type === 'problem')
-          expect(view.banner).toEqual({
-            text: 'settings unreadable',
-            error: true,
-            source: 'problem',
-          });
-        if (event.type === 'command' && TEXTLESS_KINDS.has(event.command.kind)) {
-          // A textless command retires superseded progress but keeps an asynchronous problem.
-          if (prior?.source === 'progress') expect(view.banner).toBeNull();
-          if (prior?.source === 'problem') expect(view.banner).toEqual(prior);
-        }
-        if (event.type === 'xstate.done.actor.command') {
-          const {output} = event as unknown as {output: WelcomeResult<null>};
-          const kept = prior?.source === 'problem' ? prior : null;
-          expect(view.banner).toEqual(
-            output.ok ? kept : {text: output.error, error: true, source: 'reply'},
-          );
-        }
-      },
+      also: (before, event, after) =>
+        assertBanner(welcomeView(before).banner, event, welcomeView(after).banner),
     });
   });
 
@@ -148,7 +162,7 @@ describe('run-control machine', () => {
       type: 'command',
       command: {kind: 'stop', host: 'local', instance: 'run-a', force: false},
     });
-    const problem = {text: 'Connection lost.', error: true, source: 'problem'};
+    const problem = {text: 'Connection lost.', error: true, source: 'problem'} as const;
     expect(welcomeView(actor.getSnapshot()).banner).toEqual(problem);
 
     expect(replies).toHaveLength(1);
