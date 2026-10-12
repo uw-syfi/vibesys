@@ -1,0 +1,115 @@
+"""An operator stop ends the evaluations agents submitted, through the production loop.
+
+On the legacy path the host cancelled the evaluation service's outstanding jobs when a stop
+arrived. Core runs have no such service: an agent's submission is a core measurement, so the
+stop is settled by core and the shell. This test stops a run while an agent-submitted
+evaluation runs on the Fake cluster and checks that the job does not outlive the run.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from pydantic import TypeAdapter
+from tests.composition.test_agent_evaluation_bridge import Scenario, scenario
+from tests.support.skeleton_world import LEASE, Process
+
+from vs_core.api import RunResultProposal, RunStatus
+from vs_evaluation.api import SocketFailure, SocketSuccess, SubmitCall
+from vs_runtime.api.core import CoreRunHost, RunControlBridge, RunLoopConfig, drive_core
+from vs_runtime.api.infrastructure import RunStopped, RuntimeRunControlChannel
+from vs_runtime.api.testing import ProbedRunClock
+from vs_sim.api.testing import VirtualClock, clock_from
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+
+SOCKET_REPLY = TypeAdapter(SocketSuccess | SocketFailure)
+
+
+def _ignore(transition: object) -> None:
+    del transition
+
+
+class _NoSteers:
+    def put(self, ref: object, text: str) -> None:
+        del ref, text
+
+
+class _StopsWhen(ProbedRunClock):
+    """A run clock that asks for a stop at the first sleep after ``condition`` holds."""
+
+    def __init__(
+        self, inner: VirtualClock, condition: Callable[[], bool], stop: Callable[[], None]
+    ) -> None:
+        super().__init__(inner)
+        self._condition = condition
+        self._stop = stop
+
+    async def sleep(self, seconds: float) -> None:
+        await super().sleep(seconds)
+        if self._condition():
+            self._stop()
+
+
+async def _stopped_run(
+    played: Scenario, clock: ProbedRunClock, channel: RuntimeRunControlChannel
+) -> tuple[Process, bool]:
+    process = played.world.runtime()
+    (bridge,) = played.bridge
+    controls = RunControlBridge(
+        channel,
+        _NoSteers(),  # type: ignore[arg-type]  # only stores steer text; none is sent
+        stop_result=RunResultProposal(outcome="cancelled", reason="operator"),
+    )
+    host = CoreRunHost(process.shell, process.delivery, clock, controls)
+    process.shell.start("skeleton", now_at=1.0, lease_duration=LEASE)
+    bridge.attach(process.shell, clock)
+    await bridge.serve()
+    stopped = False
+    try:
+        await drive_core(
+            host,
+            RunLoopConfig(
+                host_id="loop",
+                lease_duration=LEASE,
+                control_poll_interval=1.0,
+                min_sleep=0.05,
+                max_dispatches=5000,
+            ),
+        )
+    except RunStopped:
+        stopped = True
+    finally:
+        await bridge.close()
+    return process, stopped
+
+
+async def test_a_stop_while_an_agent_evaluation_runs_starts_no_further_work(tmp_path: Path) -> None:
+    channel = RuntimeRunControlChannel(_ignore)
+    holder: list[Scenario] = []
+    at_stop: list[int] = []
+
+    def stop() -> None:
+        if not at_stop:
+            at_stop.append(len(holder[0].world.cluster.submissions))
+            channel.request_stop()
+
+    clock = _StopsWhen(clock_from(1.0), lambda: len(holder[0].world.cluster.submissions) >= 2, stop)
+    async with scenario(tmp_path, timed=(clock, 30.0)) as played:
+        holder.append(played)
+        process, stopped = await _stopped_run(played, clock, channel)
+        submitted_at_stop = at_stop[0]
+        core = process.shell.record.envelope.core
+        cluster = played.world.cluster
+        assert stopped
+        assert core.run.status == RunStatus.CLOSING
+        assert [c.action for c in core.run.controls] == ["stop"]
+        assert len(cluster.submissions) == submitted_at_stop, "a stop starts no further work"
+        token = played.writer.descriptor_env["VS_EVALUATION_TOKEN"]
+        frame = SubmitCall(token=token).model_dump_json().encode()
+        reply = SOCKET_REPLY.validate_json((await played.bridge[0].answer(frame))[0])
+        assert isinstance(reply, SocketFailure), "a stopped run admits no new agent submission"
+        assert len(cluster.submissions) == submitted_at_stop
