@@ -26,6 +26,7 @@ from vs_core.api import (
     StageBudget,
 )
 from vs_runtime.api import AgentCapability, WorkspaceAccess
+from vs_runtime.api.infrastructure import ParallelCandidateObstacle
 
 CANDIDATE = RevisionRef(revision_id=RevisionId(root="c"), digest="d")
 
@@ -62,21 +63,34 @@ def test_an_agent_measures_exactly_the_configured_gates(*, accuracy: bool, bench
 @dataclass
 class FakeEnvironment:
     env_kind: str
-    parallel_candidate_obstacle: str | None
+    parallel_candidate_obstacle: ParallelCandidateObstacle | None
 
 
 def test_an_environment_that_opens_candidate_sandboxes_is_accepted() -> None:
     require_candidate_sandboxes(FakeEnvironment("docker", None), loop="dynamic")
 
 
-def test_an_environment_that_cannot_is_refused_naming_the_loop_and_the_obstacle() -> None:
-    environment = FakeEnvironment("local", "it has one working tree")
+def _refusal_text(obstacle: ParallelCandidateObstacle, *, loop: str = "serial") -> str:
     with pytest.raises(ConfigurationError) as raised:
-        require_candidate_sandboxes(environment, loop="serial")
-    text = str(raised.value)
+        require_candidate_sandboxes(FakeEnvironment("local", obstacle), loop=loop)
+    return str(raised.value)
+
+
+def test_an_environment_that_cannot_is_refused_naming_the_loop_and_the_obstacle() -> None:
+    text = _refusal_text(ParallelCandidateObstacle.NO_OWN_CONTAINER)
     assert "serial loop" in text
     assert "'local'" in text
-    assert "it has one working tree" in text
+    assert "its agent does not run in a container of its own" in text
+
+
+@given(st.sampled_from(ParallelCandidateObstacle), st.sampled_from(ParallelCandidateObstacle))
+def test_every_declared_obstacle_has_its_own_stated_reason(
+    left: ParallelCandidateObstacle, right: ParallelCandidateObstacle
+) -> None:
+    left_text, right_text = _refusal_text(left), _refusal_text(right)
+
+    assert " because " in left_text
+    assert (left_text == right_text) == (left is right)
 
 
 def test_role_kinds_grow_from_reading_to_measuring_and_writing() -> None:

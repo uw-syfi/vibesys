@@ -71,7 +71,6 @@ def _plan_variables(root: Path, notes: str) -> dict[str, object]:
                 env_kind="docker",
                 cli_sandboxed=True,
                 share_agent_session=False,
-                parallel_candidate_blocker=None,
             ),
             artifacts=run.artifacts,
             evaluation_capacity=1,

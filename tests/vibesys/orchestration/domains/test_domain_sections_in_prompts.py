@@ -280,7 +280,6 @@ def _plan(strategy: _Strategy, domain: DomainName, root: Path) -> CorePlan:
                 env_kind="docker",
                 cli_sandboxed=True,
                 share_agent_session=False,
-                parallel_candidate_blocker=None,
             ),
             artifacts=run.artifacts,
             evaluation_capacity=1,

@@ -35,6 +35,7 @@ import sys
 from collections.abc import Mapping  # noqa: TC003
 from contextlib import ExitStack
 from dataclasses import dataclass, field
+from enum import StrEnum
 from functools import partial
 from importlib import import_module
 from pathlib import Path
@@ -172,6 +173,13 @@ class AgentPaths:
     profiler_support: str | None = None
 
 
+class ParallelCandidateObstacle(StrEnum):
+    """The closed set of reasons a session cannot open one session per candidate."""
+
+    NO_OWN_CONTAINER = "no_own_container"
+    BORROWED_SESSION = "borrowed_session"
+
+
 @dataclass(frozen=True)
 class RunEnvironmentView:
     """Run-environment-neutral facts consumed by loops and agent construction."""
@@ -193,11 +201,6 @@ class RunEnvironmentView:
     # run environment whose GPU work happens elsewhere (Slurm jobs) sets it False, so
     # tools that need the driver in the editor are withheld rather than offered to fail.
     editor_has_gpu: bool = True
-    # Why a session whose editor sits in its own container still cannot open one
-    # session per candidate, or ``None`` when nothing stops it. A reason is
-    # worth stating: ``supports_parallel_candidate_evaluation`` follows from
-    # the structure above and this, and the refusal quotes it.
-    parallel_candidate_blocker: str | None = None
     # Optional environment variable understood by the environment-owned
     # evaluator wrapper when the final trusted command should release its
     # deployment lease.
@@ -223,21 +226,20 @@ class RunEnvironmentView:
         return self.cluster_evaluation.supported_profile_fields
 
     @property
-    def parallel_candidate_obstacle(self) -> str | None:
+    def parallel_candidate_obstacle(self) -> ParallelCandidateObstacle | None:
         """Why this session cannot open an isolated session per candidate, or ``None``.
 
         A candidate session is a second session of the same environment, so it
         has its own sandbox exactly when the agent's CLI runs in a container
         this session starts (``cli_sandboxed``) and agent clients do not borrow
         the run-owned sandbox and bridge (``share_agent_session``). Nothing
-        declares the answer: it follows from those facts and from
-        ``parallel_candidate_blocker``.
+        declares the answer: it follows from those two facts.
         """
         if not self.cli_sandboxed:
-            return "its agent does not run in a container of its own"
+            return ParallelCandidateObstacle.NO_OWN_CONTAINER
         if self.share_agent_session:
-            return "its agent clients borrow the run-owned sandbox and bridge"
-        return self.parallel_candidate_blocker
+            return ParallelCandidateObstacle.BORROWED_SESSION
+        return None
 
     @property
     def supports_parallel_candidate_evaluation(self) -> bool:

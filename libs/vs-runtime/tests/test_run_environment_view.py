@@ -14,7 +14,11 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_runtime.api.infrastructure import AgentPaths, RunEnvironmentView
+from vs_runtime.api.infrastructure import (
+    AgentPaths,
+    ParallelCandidateObstacle,
+    RunEnvironmentView,
+)
 
 _views = st.builds(
     RunEnvironmentView,
@@ -22,7 +26,6 @@ _views = st.builds(
     isolated=st.booleans(),
     cli_sandboxed=st.booleans(),
     share_agent_session=st.booleans(),
-    parallel_candidate_blocker=st.none() | st.text(min_size=1, max_size=12),
 )
 
 
@@ -33,20 +36,25 @@ def test_support_is_exactly_the_absence_of_an_obstacle(view: RunEnvironmentView)
 
 @given(_views)
 def test_support_follows_from_the_container_the_agent_runs_in(view: RunEnvironmentView) -> None:
-    expected = (
-        view.cli_sandboxed
-        and not view.share_agent_session
-        and view.parallel_candidate_blocker is None
-    )
+    expected = view.cli_sandboxed and not view.share_agent_session
 
     assert view.supports_parallel_candidate_evaluation is expected
 
 
 @given(_views)
-def test_a_refusal_always_carries_its_reason(view: RunEnvironmentView) -> None:
+def test_a_refusal_always_names_a_declared_reason(view: RunEnvironmentView) -> None:
     obstacle = view.parallel_candidate_obstacle
 
-    assert obstacle is None or obstacle.strip()
+    assert obstacle is None or obstacle in set(ParallelCandidateObstacle)
+
+
+def test_a_reason_cannot_be_free_text() -> None:
+    """Regression: a free-text blocker accepted a blank string as the reason for a refusal."""
+    declared = {field.name for field in fields(RunEnvironmentView)}
+
+    assert "parallel_candidate_blocker" not in declared
+    with pytest.raises(ValueError, match="not a valid ParallelCandidateObstacle"):
+        ParallelCandidateObstacle(" ")
 
 
 def test_support_is_not_a_field_an_environment_can_set() -> None:

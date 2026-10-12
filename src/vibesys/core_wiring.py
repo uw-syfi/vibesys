@@ -25,6 +25,7 @@ from vs_runtime.api.core import (
     operation_roles,
     production_owners,
 )
+from vs_runtime.api.infrastructure import ParallelCandidateObstacle
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -55,7 +56,7 @@ class ParallelCandidateFacts(Protocol):
         ...
 
     @property
-    def parallel_candidate_obstacle(self) -> str | None:
+    def parallel_candidate_obstacle(self) -> ParallelCandidateObstacle | None:
         """Why the environment cannot open isolated candidate sandboxes, or None."""
         ...
 
@@ -143,6 +144,14 @@ def operation_catalog(operations: StrategyOperations, ports: OperationPorts) -> 
     return build_operation_catalog(registrations, production_owners(registrations, ports))
 
 
+_OBSTACLE_WORDING: Mapping[ParallelCandidateObstacle, str] = {
+    ParallelCandidateObstacle.NO_OWN_CONTAINER: "its agent does not run in a container of its own",
+    ParallelCandidateObstacle.BORROWED_SESSION: (
+        "its agent clients borrow the run-owned sandbox and bridge"
+    ),
+}
+
+
 def require_candidate_sandboxes(environment: ParallelCandidateFacts, *, loop: str) -> None:
     """Refuse a run environment that cannot open isolated candidate sandboxes.
 
@@ -158,7 +167,7 @@ def require_candidate_sandboxes(environment: ParallelCandidateFacts, *, loop: st
                 message=(
                     f"the {loop} loop cannot run on the {environment.env_kind!r} run "
                     "environment: it cannot open isolated candidate sandboxes (parallel "
-                    f"candidate evaluation) because {obstacle}; choose a run environment "
+                    f"candidate evaluation) because {_OBSTACLE_WORDING[obstacle]}; choose a run environment "
                     "that can, such as docker, slurm or modal"
                 ),
             )

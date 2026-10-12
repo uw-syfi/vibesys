@@ -65,7 +65,6 @@ def test_an_environment_without_candidate_sandboxes_is_refused_naming_it_and_why
             env_kind=kind,
             cli_sandboxed=cli_sandboxed,
             share_agent_session=share_agent_session,
-            parallel_candidate_blocker=None if cli_sandboxed and not share_agent_session else "x",
         )
         if environment.supports_parallel_candidate_evaluation:
             _plan(Path(directory), environment)
@@ -74,7 +73,7 @@ def test_an_environment_without_candidate_sandboxes_is_refused_naming_it_and_why
             _plan(Path(directory), environment)
 
     assert f"'{kind}' run environment" in str(raised.value)
-    assert str(environment.parallel_candidate_obstacle) in str(raised.value)
+    assert " because " in str(raised.value)
 
 
 def test_an_environment_with_candidate_sandboxes_is_planned(tmp_path: Path) -> None:
@@ -83,7 +82,6 @@ def test_an_environment_with_candidate_sandboxes_is_planned(tmp_path: Path) -> N
         env_kind="docker",
         cli_sandboxed=True,
         share_agent_session=False,
-        parallel_candidate_blocker=None,
     )
 
     _plan(tmp_path, environment)
