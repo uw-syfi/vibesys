@@ -9,16 +9,6 @@ from __future__ import annotations
 _OUTER_LOOPS = ("agent", "profile-guided", "dynamic", "plain", "evolve")
 
 
-_MODALITIES = (
-    "text_generation",
-    "image_generation",
-    "video_generation",
-    "text_to_speech",
-    "speech_to_text",
-    "realtime_audio",
-)
-
-
 _DEFAULT_CONFIG_TEXT = '[model]\nname = "gpt-5.4"\n'
 
 
