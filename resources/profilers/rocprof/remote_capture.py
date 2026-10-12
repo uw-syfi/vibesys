@@ -28,7 +28,12 @@ import capture_runtime  # noqa: E402  # LW-930101; the preceding path setup must
 
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
+import analyze_rocprof  # noqa: E402  # LW-930190; the preceding path setup must run before this import
 import capture  # noqa: E402  # LW-930102; the preceding path setup must run before this import
+
+# The host's `vs_sandbox.slurm_profile.PROFILE_STATS_PREFIX` names the same line; a test
+# keeps the two equal, because this script cannot import the host's libraries.
+PROFILE_STATS_PREFIX = "VIBESYS_PROFILE_STATS "
 
 _CAPTURE_TOOLS = {
     "timeline": (
@@ -167,7 +172,20 @@ def run_request(
         # keeps as the profile's summary, states why it is not profile evidence.
         sys.stdout.write(f"{failure}\n")
         return 1
+    stats = _timeline_stats(kind, profiles_path / new_ids[0])
+    if stats is not None:
+        sys.stdout.write(f"{PROFILE_STATS_PREFIX}{json.dumps(stats, sort_keys=True)}\n")
     return 0
+
+
+def _timeline_stats(kind: str, capture_dir: Path) -> dict[str, Any] | None:
+    """The first timeline capture's typed statistics, or None when it has none to report."""
+    if kind != "timeline":
+        return None
+    try:
+        return analyze_rocprof.profile_stats(str(capture_dir))
+    except (OSError, ValueError, KeyError):
+        return None
 
 
 def failed_profile_fields(

@@ -77,3 +77,30 @@ def test_script_runs_every_repo_policy_guard_directory() -> None:
 def test_guard_group_runs_in_ci_next_to_quality_checks() -> None:
     quality_job = WORKFLOW.split("python_quality", 1)[1].split("typecheck:", 1)[0]
     assert "repoctl run-checks --group python_guards" in quality_job
+
+
+def test_policy_commands_never_use_a_bare_python_from_path() -> None:
+    # A bare `python3` resolves to whatever is first on PATH (the system 3.11 on some hosts), which
+    # cannot parse sources the project's pinned Python can. Python commands go through `uv run`.
+    bare = [
+        command
+        for group in POLICY["check_groups"]
+        for command in group.get("commands", [])
+        if Path(command[0]).name in {"python", "python3"}
+        or re.fullmatch(r"python[\d.]*", command[0])
+    ]
+
+    assert bare == [], f"run these through `uv run python`: {bare}"
+
+
+def test_check_shell_scripts_never_invoke_a_bare_python() -> None:
+    offenders = [
+        f"{script.name}:{number}: {line.strip()}"
+        for script in sorted((REPO_ROOT / "scripts").glob("*.sh"))
+        for number, line in enumerate(script.read_text(encoding="utf-8").splitlines(), 1)
+        if re.search(r"(^|[\s;&|(])python[\d.]*\s", line)
+        and not line.lstrip().startswith("#")
+        and "uv run" not in line
+    ]
+
+    assert offenders == [], offenders

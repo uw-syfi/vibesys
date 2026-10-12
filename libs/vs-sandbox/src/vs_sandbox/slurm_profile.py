@@ -13,9 +13,9 @@ import json
 import shlex
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from vs_evaluation.api import ProfileField
+from vs_evaluation.api import EvidenceMetric, ProfileField
 from vs_slurm.api import PORT_PLACEHOLDER, shell_join_with_port
 
 if TYPE_CHECKING:
@@ -25,6 +25,12 @@ if TYPE_CHECKING:
 # Remote path, relative to the job's workspace, that holds a trusted profile's
 # result document and captures; the executor stages it back as one tree.
 PROFILE_OUTPUT_ROOT = ".vibesys-profile"
+# The capture's last stdout line when it has typed statistics: this prefix, then one
+# `ProfileStats` JSON object. The remote script cannot import this library, so it spells
+# the prefix itself and a test keeps the two equal.
+PROFILE_STATS_PREFIX = "VIBESYS_PROFILE_STATS "
+GPU_ACTIVE_FRACTION_METRIC = "gpu_active_fraction"
+HIP_API_TIME_METRIC_PREFIX = "hip_api_time_ms."
 _PORT_FILE = ".vibesys-profile-port"
 _MIN_GRACE_SECONDS = 30.0
 _MAX_GRACE_SECONDS = 120.0
@@ -205,11 +211,82 @@ def require_profile_fields(
     )
 
 
+class HipApiTime(BaseModel):
+    """Total time one HIP API call name took in the captured window."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    name: str = Field(min_length=1)
+    total_ms: float = Field(ge=0, allow_inf_nan=False)
+    calls: int = Field(ge=0)
+
+
+class ProfileStats(BaseModel):
+    """Headline statistics of a timeline capture, as the capture itself computed them."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    gpu_active_fraction: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    top_hip_api: tuple[HipApiTime, ...] = ()
+
+    def metrics(self) -> tuple[EvidenceMetric, ...]:
+        """The statistics as evidence metrics: the one typed channel readings decode."""
+        active = (
+            ()
+            if self.gpu_active_fraction is None
+            else (
+                EvidenceMetric(
+                    name=GPU_ACTIVE_FRACTION_METRIC,
+                    value=self.gpu_active_fraction,
+                    direction="max",
+                    unit="fraction",
+                ),
+            )
+        )
+        return (
+            *active,
+            *(
+                EvidenceMetric(
+                    name=f"{HIP_API_TIME_METRIC_PREFIX}{item.name}",
+                    value=item.total_ms,
+                    direction="min",
+                    unit="ms",
+                )
+                for item in self.top_hip_api
+            ),
+        )
+
+
+def split_profile_stats(stdout: str) -> tuple[str, ProfileStats | None]:
+    """Separate a capture's printed summary from its typed statistics line.
+
+    Returns the text without the statistics line, and the parsed statistics, or None
+    when the capture printed none. A statistics line that does not parse raises
+    ``ValueError`` naming the problem: the capture's own record is never guessed at.
+    """
+    kept: list[str] = []
+    stats: ProfileStats | None = None
+    for line in stdout.splitlines(keepends=True):
+        if not line.startswith(PROFILE_STATS_PREFIX):
+            kept.append(line)
+            continue
+        try:
+            stats = ProfileStats.model_validate_json(line[len(PROFILE_STATS_PREFIX) :])
+        except ValidationError as exc:
+            message = f"malformed profile statistics line: {exc.error_count()} invalid field(s)"
+            raise ValueError(message) from exc
+    return "".join(kept), stats
+
+
 __all__ = [
+    "GPU_ACTIVE_FRACTION_METRIC",
+    "HIP_API_TIME_METRIC_PREFIX",
     "PROFILE_OUTPUT_ROOT",
+    "PROFILE_STATS_PREFIX",
+    "HipApiTime",
     "ProfileCaptureDescriptor",
+    "ProfileStats",
     "configured_capture_lifecycle",
     "profile_capture_descriptor",
     "require_profile_fields",
+    "split_profile_stats",
     "trusted_profile_command",
 ]

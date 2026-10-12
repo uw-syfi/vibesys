@@ -1976,6 +1976,40 @@ def _kernel_union_ns(bundle: KernelBundle) -> float:
     return sum(e - s for s, e in _merge_intervals(all_intervals))
 
 
+def _activity_ns(kernel_bundle: KernelBundle, bundles: tuple[Any, ...]) -> tuple[float, float]:
+    """The capture window and the GPU kernel busy time inside it, in nanoseconds."""
+    starts = [b.window_start for b in bundles if b.count]
+    ends = [b.window_end for b in bundles if b.count]
+    window_ns = max(ends) - min(starts) if starts else 0.0
+    return window_ns, _kernel_union_ns(kernel_bundle)
+
+
+_STATS_TOP_HIP_API = 5
+
+
+def profile_stats(report: str) -> dict[str, Any]:
+    """Typed headline statistics of one capture: GPU-active fraction and top HIP API calls.
+
+    ``gpu_active_fraction`` is the same quantity ``host_idle`` reports as a percentage
+    (None when the trace has no timestamped events), and ``top_hip_api`` ranks HIP API
+    calls by total time. The host reads this record instead of parsing the printed text.
+    """
+    disc = discover(report)
+    resolved = _resolve_window_for_report(disc, report, None)
+    kernel_bundle = _get_kernel_bundle(disc, resolved.bounds)
+    api_bundle = _get_api_bundle(disc, resolved.bounds)
+    mem_bundle = _get_memcpy_bundle(disc, resolved.bounds)
+    window_ns, busy_ns = _activity_ns(kernel_bundle, (kernel_bundle, api_bundle, mem_bundle))
+    ranked = sorted(api_bundle.by_name.items(), key=lambda item: -item[1]["total_ns"])
+    return {
+        "gpu_active_fraction": busy_ns / window_ns if window_ns > 0 else None,
+        "top_hip_api": [
+            {"name": name, "total_ms": entry["total_ns"] / 1e6, "calls": int(entry["calls"])}
+            for name, entry in ranked[:_STATS_TOP_HIP_API]
+        ],
+    }
+
+
 def cmd_host_idle(ns: argparse.Namespace) -> None:
     """Detect a mostly host-idle capture (missed load, or an idle server)."""
     disc = discover(ns.report)
@@ -1996,10 +2030,7 @@ def cmd_host_idle(ns: argparse.Namespace) -> None:
             print("(no timestamped data found at all — nothing to check.)")  # noqa: T201  # LW-920104; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         return
 
-    starts = [b.window_start for b in bundles if b.count]
-    ends = [b.window_end for b in bundles if b.count]
-    window_ns = max(ends) - min(starts) if starts else 0.0
-    busy_ns = _kernel_union_ns(kernel_bundle)
+    window_ns, busy_ns = _activity_ns(kernel_bundle, bundles)
     busy_pct = busy_ns / window_ns * 100 if window_ns > 0 else 0.0
 
     print(_window_header(resolved, kernel_bundle.count, kernel_bundle.count_total))  # noqa: T201  # LW-920105; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism

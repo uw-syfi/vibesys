@@ -33,8 +33,8 @@ commands = [
   ["uv", "run", "python", "scripts/check_tach.py"],
   ["uv", "run", "python", "scripts/check_member_dependencies.py"],
   ["uv", "run", "python", "scripts/check_tach_graph.py", "--check"],
-  ["python3", "scripts/check_doc_links.py"],
-  ["python3", "-m", "scripts.check_doc_citations"],
+  ["uv", "run", "python", "scripts/check_doc_links.py"],
+  ["uv", "run", "python", "-m", "scripts.check_doc_citations"],
   ["uv", "run", "vibesys", "--headless", "--help"],
   ["uv", "run", "python", "scripts/check_lint_waivers.py"],
 ]

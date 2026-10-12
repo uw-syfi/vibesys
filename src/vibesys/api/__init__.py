@@ -37,6 +37,7 @@ from vibesys.api.contracts import (
     RunStatus,
     RunView,
 )
+from vibesys.api.domains import domain_modalities
 from vibesys.api.entry import load_config
 from vibesys.api.runs import RunHandle, Runs
 from vibesys.api.session import RunControl, RunSession, create_session
@@ -159,6 +160,7 @@ __all__ = [
     "agent_spec_from_config",
     "boot_trace",
     "create_session",
+    "domain_modalities",
     "load_config",
     "open_run_store",
 ]

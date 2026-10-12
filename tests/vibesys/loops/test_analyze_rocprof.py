@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from resources.profilers.rocprof import analyze_rocprof
+from resources.profilers.rocprof import analyze_rocprof, remote_capture
 from resources.profilers.rocprof.analyze_rocprof import (
     _CORR_COLS,
     _END_COLS,
@@ -67,6 +67,8 @@ from tests.vibesys.loops.rocprof_strategies import (
     triton_jit_style_kernel_name,
     wrap_with_namespace_and_template_noise,
 )
+
+from vs_sandbox.api.slurm import PROFILE_STATS_PREFIX
 
 _REAL_FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "rocprof" / "rocprofv3_real"
 
@@ -1497,3 +1499,61 @@ def test_property_window_totals_are_monotone_in_window_size(
     big = _build_kernel_bundle_from_csv(files, (win_start, win_start + small_len + grow))
 
     assert big.count >= small.count
+
+
+# ---------------------------------------------------------------------------
+# profile_stats: the typed record the host reads instead of the printed text
+# ---------------------------------------------------------------------------
+
+
+@given(
+    kernels=st.lists(
+        st.tuples(st.integers(0, 10_000), st.integers(1, 5_000)), min_size=1, max_size=8
+    ),
+    calls=st.lists(
+        st.tuples(
+            st.sampled_from(["hipA", "hipB", "hipC", "hipD", "hipE", "hipF", "hipG"]),
+            st.integers(1, 9_000),
+        ),
+        min_size=1,
+        max_size=12,
+    ),
+)
+def test_profile_stats_agree_with_the_host_idle_percentage_and_rank_hip_api_by_time(
+    tmp_path_factory: pytest.TempPathFactory,
+    kernels: list[tuple[int, int]],
+    calls: list[tuple[str, int]],
+) -> None:
+    root = tmp_path_factory.mktemp("stats")
+    d = _process_dir(root)
+    _kernel_trace(
+        d,
+        *(
+            f"k{n},0,0,{n},{start},{start + length},4242"
+            for n, (start, length) in enumerate(kernels)
+        ),
+    )
+    _hip_api_trace(d, *(f"{name},{n},0,{length},4242" for n, (name, length) in enumerate(calls)))
+
+    stats = analyze_rocprof.profile_stats(str(root))
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        cmd_host_idle(_ns(str(root)))
+    printed = float(buffer.getvalue().split("GPU kernel activity:")[1].split("(")[1].split("%")[0])
+
+    assert stats["gpu_active_fraction"] is not None
+    assert abs(stats["gpu_active_fraction"] * 100 - printed) < 0.01
+    top = stats["top_hip_api"]
+    assert [item["total_ms"] for item in top] == sorted(
+        (item["total_ms"] for item in top), reverse=True
+    )
+    totals: dict[str, int] = {}
+    for name, length in calls:
+        totals[name] = totals.get(name, 0) + length
+    assert {item["name"] for item in top} <= set(totals)
+    assert len(top) == min(5, len(totals))
+
+
+def test_the_capture_and_the_host_name_the_statistics_line_the_same() -> None:
+
+    assert remote_capture.PROFILE_STATS_PREFIX == PROFILE_STATS_PREFIX

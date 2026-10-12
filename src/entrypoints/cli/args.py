@@ -6,7 +6,7 @@ import argparse
 import shlex
 from pathlib import Path
 
-from entrypoints.cli.constants import _MODALITIES, _OUTER_LOOPS
+from entrypoints.cli.constants import _OUTER_LOOPS
 from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
 from vibesys.api import (
     KNOWN_COMPUTE_BACKENDS,
@@ -16,6 +16,7 @@ from vibesys.api import (
     DomainName,
     ProfilerKind,
     RepositoryVisibility,
+    domain_modalities,
 )
 from vibesys.api.metrics import Objective
 from vibesys.api.profilers import CLI_PROFILER_CHOICES, coerce_profiler_kind
@@ -626,7 +627,7 @@ def _build_agent_parser() -> argparse.ArgumentParser:
             "round run them immediately (default: 3)."
         ),
     )
-    parser.add_argument("--modality", default=None, choices=_MODALITIES)
+    _add_modality_argument(parser)
     parser.add_argument(
         "--interface",
         choices=["inprocess", "service"],
@@ -779,7 +780,7 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
             "turn; doubles with each further drop of the same turn (default: 5)."
         ),
     )
-    parser.add_argument("--modality", default=None, choices=_MODALITIES)
+    _add_modality_argument(parser)
     return parser
 
 
@@ -825,3 +826,14 @@ def _build_plain_parser() -> argparse.ArgumentParser:
         help="GitHub OWNER/REPOSITORY used when --tracker-backend=github.",
     )
     return parser
+
+
+def _add_modality_argument(parser: argparse.ArgumentParser) -> None:
+    """Offer ``--modality`` with the choices the registered domains declare."""
+    modalities = domain_modalities()
+    parser.add_argument(
+        "--modality",
+        default=None,
+        choices=modalities,
+        help=f"Modality of the target (one of: {', '.join(modalities)}).",
+    )

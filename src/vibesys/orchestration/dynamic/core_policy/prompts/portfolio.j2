@@ -94,8 +94,17 @@ be adopted or offered as a parent.
 {% if row.evidence_ids %}
   Trusted evidence: {% for evidence_id in row.evidence_ids %}`{{ evidence_id.root }}`{% if not loop.last %}, {% endif %}{% endfor %}
 {% endif %}
+{% if row.status.value == "observed" %}
+  Verdict: the trusted profile succeeded and measured {% if row.captured_fields %}{{ row.captured_fields | join(', ') }}{% else %}the capture's default fields{% endif %}; treat it as evidence, do not repeat it to confirm it.
+{% for m in row.metrics %}
+  Statistic: {{ metric(m) }}
+{% endfor %}
+{% if row.artifacts %}
+  Artifacts: {{ row.artifacts | join(', ') }}
+{% endif %}
+{% endif %}
 {% if row.diagnosis %}
-  Profile diagnosis:
+  Profile output (last lines):
   {{ row.detail_fence }}
 {{ row.diagnosis | indent(2, true) }}
   {{ row.detail_fence }}

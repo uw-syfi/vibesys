@@ -42,7 +42,7 @@ from entrypoints.cli.config import (
     _prepare_experiment_repository,
     load_config_and_skills,
 )
-from entrypoints.cli.constants import _MODALITIES, _OUTER_LOOPS
+from entrypoints.cli.constants import _OUTER_LOOPS
 from entrypoints.cli.environment import run_environment_spec_from_args
 from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
 from entrypoints.cli.inputs import (
@@ -80,7 +80,6 @@ _load_objective = load_objective
 _with_operator_constraints = with_operator_constraints
 
 __all__ = [
-    "_MODALITIES",
     "_OUTER_LOOPS",
     "CliInvocation",
     "RunArgumentParser",

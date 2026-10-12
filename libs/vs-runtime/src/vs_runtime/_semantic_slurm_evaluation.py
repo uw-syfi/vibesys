@@ -58,6 +58,7 @@ from vs_sandbox.api.slurm import (
     SlurmTargetLifecycle,
     profile_capture_descriptor,
     require_profile_fields,
+    split_profile_stats,
 )
 
 if TYPE_CHECKING:
@@ -468,8 +469,16 @@ class SemanticSlurmEvaluationExecutor:
             )
         if stage.kind is EvidenceKind.PROFILE and passed:
             # The capture's printed summary is the profile's evidence; its end
-            # holds the attribution tables.
-            summary = (raw.stdout or raw.output)[-MAX_EVIDENCE_SUMMARY_CHARS:] or None
+            # holds the attribution tables. Its typed statistics line is evidence
+            # metrics, not summary text.
+            try:
+                text, stats = split_profile_stats(raw.stdout or raw.output)
+            except ValueError as exc:
+                passed = False
+                failure = str(exc)
+            else:
+                summary = text[-MAX_EVIDENCE_SUMMARY_CHARS:] or None
+                metrics = () if stats is None else stats.metrics()
         if not passed and summary is None:
             # The provider's stage failure already holds the stage output plus the
             # server log tail; keep its end, where the cause usually is.
