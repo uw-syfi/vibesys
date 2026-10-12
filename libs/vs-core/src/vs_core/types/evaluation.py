@@ -50,6 +50,13 @@ class MeasurementStage(Value):
     stage_id: str = Field(min_length=1)
     depends_on: tuple[str, ...] = ()
     execution_budget: Seconds
+    required_outputs: tuple[str, ...] = ()
+    """Named outputs the stage's evidence must contain, which the executor must be able to supply.
+
+    Names are the executor's own vocabulary; core only carries them and keys the measurement's
+    identity on them, because evidence that lacks a required output cannot stand for a
+    measurement that asked for it. An executor rejects a name it cannot supply.
+    """
 
 
 class MeasurementPlan(Value):
@@ -335,6 +342,7 @@ class MeasurementStageIdentity(Value):
 
     stage_id: str = Field(min_length=1)
     depends_on: tuple[str, ...] = ()
+    required_outputs: tuple[str, ...] = ()
 
 
 class MeasurementIdentity(Value):
@@ -366,7 +374,11 @@ class MeasurementIdentity(Value):
             environment_digest=plan.environment_digest,
             recipe_digest=plan.recipe.digest,
             stages=tuple(
-                MeasurementStageIdentity(stage_id=stage.stage_id, depends_on=stage.depends_on)
+                MeasurementStageIdentity(
+                    stage_id=stage.stage_id,
+                    depends_on=stage.depends_on,
+                    required_outputs=tuple(sorted(set(stage.required_outputs))),
+                )
                 for stage in plan.stages
             ),
             accuracy_stage=plan.accuracy_stage,

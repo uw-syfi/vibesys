@@ -25,6 +25,8 @@ class StageBudget(Value):
 
     stage_id: str = Field(min_length=1)
     execution_seconds: float = Field(ge=0)
+    required_outputs: tuple[str, ...] = ()
+    """What the stage's evidence must contain (see ``MeasurementStage.required_outputs``)."""
 
 
 class MeasurementRecipe(Value):
@@ -39,6 +41,22 @@ class MeasurementRecipe(Value):
     queue_allowance: float = Field(ge=0)
     accuracy_stage: str | None = Field(default=None, min_length=1)
     """The stage whose pass is the correctness gate, used by plans that include it."""
+
+    def requiring(self, stage_id: str, outputs: tuple[str, ...]) -> MeasurementRecipe:
+        """The same recipe whose ``stage_id`` evidence must contain ``outputs``."""
+        if all(item.stage_id != stage_id for item in self.stages):
+            message = f"cannot require outputs of unknown stage {stage_id!r}"
+            raise ValueError(message)
+        return self.model_copy(
+            update={
+                "stages": tuple(
+                    item.model_copy(update={"required_outputs": outputs})
+                    if item.stage_id == stage_id
+                    else item
+                    for item in self.stages
+                )
+            }
+        )
 
     def only(self, names: tuple[str, ...]) -> MeasurementRecipe:
         """The same recipe over the named stages, keeping the recipe's own order.
@@ -68,12 +86,14 @@ class MeasurementRecipe(Value):
         resubmits after an infrastructure failure.
         """
         budgets = {item.stage_id: item.execution_seconds for item in self.stages}
+        outputs = {item.stage_id: item.required_outputs for item in self.stages}
         names = tuple(budgets) if stages is None else stages
         ordered = tuple(
             MeasurementStage(
                 stage_id=name,
                 depends_on=names[index - 1 : index] if index else (),
                 execution_budget=budgets[name],
+                required_outputs=tuple(sorted(set(outputs.get(name, ())))),
             )
             for index, name in enumerate(names)
         )

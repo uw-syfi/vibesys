@@ -74,6 +74,8 @@ class ScenarioCluster(FakeCluster):
         self.benchmark_output = BENCHMARK_OUTPUT
         self.profile_output = "profile captured\n"
         self.submissions: list[str] = []
+        self.batches: list[SlurmBatchRequest] = []
+        """Every batch request the scheduler accepted, in submission order."""
         self.accepted = threading.Event()
 
     @property
@@ -87,6 +89,7 @@ class ScenarioCluster(FakeCluster):
         """Script the job's ending on first sight of its identity, then behave as Fake."""
         if isinstance(request, SlurmBatchRequest) and operation_id not in self.submissions:
             self.submissions.append(operation_id)
+            self.batches.append(request)
             self.script(
                 operation_id,
                 states=self.states,
