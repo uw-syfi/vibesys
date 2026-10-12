@@ -147,7 +147,7 @@ if TYPE_CHECKING:
     from vs_agent.client import AgentClient
     from vs_agent.factory import agent_supports_tool_servers
     from vs_agent.orphans import OrphanReapError, reap_orphaned_agents
-    from vs_agent.shim_turns import native_schema_problems
+    from vs_agent.shim_turns import native_schema, native_schema_problems
     from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
 
 __all__ = [
@@ -254,6 +254,7 @@ __all__ = [
     "describe_validation_error",
     "inspect_invocation_journal",
     "materialize_skills",
+    "native_schema",
     "native_schema_problems",
     "parse_typed_response",
     "reap_orphaned_agents",
@@ -297,6 +298,12 @@ def __getattr__(name: str) -> object:
         )
 
         return native_schema_problems
+    if name == "native_schema":
+        from vs_agent.shim_turns import (  # noqa: PLC0415  # lint-waiver: LW-010310 [PLC0415]; keep agentshim unloaded for consumers of vs_agent.api that never check a schema, like the other lazy names here.
+            native_schema,
+        )
+
+        return native_schema
     if name in {"OrphanReapError", "reap_orphaned_agents"}:
         # The reaper builds agentshim confinements, and importing agentshim at
         # module import would load it into every consumer of this package.

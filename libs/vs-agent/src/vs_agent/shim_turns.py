@@ -436,3 +436,12 @@ def native_schema_problems(response_cls: type[BaseModel], provider: str) -> list
     non-empty one means a turn falls back to the prompt-level contract.
     """
     return _native_schema(response_cls, agentshim.get_provider(provider).profile)[1]
+
+
+def native_schema(response_cls: type[BaseModel], provider: str) -> dict[str, object]:
+    """The JSON Schema *provider* receives for *response_cls* when it takes a native schema.
+
+    This is the schema after the provider's dialect rewrite, whether or not that dialect
+    accepts the model (see ``native_schema_problems``).
+    """
+    return _native_schema(response_cls, agentshim.get_provider(provider).profile)[0]

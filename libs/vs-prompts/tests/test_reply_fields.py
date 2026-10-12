@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import pickle
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -141,3 +143,29 @@ def test_the_error_names_the_field_and_what_is_offered() -> None:
 
     with pytest.raises(UnknownReplyFieldError, match=r"'gamma'.*alpha, beta"):
         _ = fields.gamma
+
+
+@given(root=_objects(2))
+def test_python_protocol_lookups_behave_normally(root: _Object) -> None:
+    fields = reply_fields(_schema(root))
+
+    assert not hasattr(fields, "__html__")
+    assert getattr(fields, "__anything__", "default") == "default"
+    assert pickle.dumps(fields)  # pickling shares the protocol copy relies on
+    for clone in (
+        copy.copy(fields),
+        copy.deepcopy(fields),
+    ):
+        assert set(clone) == set(fields)
+        assert [str(getattr(clone, name)) for name in sorted(clone)] == [
+            f"`{name}`" for name in sorted(fields)
+        ]
+
+
+@given(root=_objects(2))
+def test_an_ordinary_unknown_name_is_not_an_attribute_error(root: _Object) -> None:
+    fields = reply_fields(_schema(root))
+
+    with pytest.raises(UnknownReplyFieldError) as raised:
+        _ = fields.not_offered_anywhere
+    assert not isinstance(raised.value, AttributeError)

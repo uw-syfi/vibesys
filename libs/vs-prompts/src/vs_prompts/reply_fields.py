@@ -70,8 +70,16 @@ class ReplyFields:
         return iter(self._names)
 
     def __getattr__(self, name: str) -> ReplyField:
-        """The offered field ``name``, or :class:`UnknownReplyFieldError`."""
-        if name.startswith("__") or name not in self._names:
+        """The offered field ``name``, or :class:`UnknownReplyFieldError`.
+
+        Python protocol lookups (``__html__``, ``__deepcopy__``, ...) and the internal slot
+        are not fields: they raise a plain ``AttributeError`` so ``hasattr``, ``getattr``
+        with a default, ``copy`` and ``pickle`` behave normally. Ordinary unknown names do
+        not raise ``AttributeError``, or Jinja would turn them into an ``Undefined``.
+        """
+        if name.startswith("_"):
+            raise AttributeError(name)
+        if name not in self._names:
             raise UnknownReplyFieldError(name, self._names)
         return ReplyField(name)
 
