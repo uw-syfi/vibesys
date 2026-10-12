@@ -301,19 +301,20 @@ class WebSocketLimits:
     send_frame_bytes: int = _FRAME_BYTES
 
 
-async def _run_owned_request(
+async def _run_owned_blocking[**P, T](
     runner: BlockingRunner,
-    execute: Callable[[ProtocolRequest], Response],
-    request: ProtocolRequest,
-) -> Response:
-    """Run one synchronous API request without abandoning it on cancellation.
+    function: Callable[P, T],
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> T:
+    """Run synchronous API work without abandoning it on cancellation.
 
     A browser disconnect or gateway shutdown can cancel the connection handler,
-    but ``RunApi.execute`` may already have changed durable state. Shield the
-    worker and drain it before propagating cancellation so the gateway never
-    closes its loop around an unowned side effect.
+    but the worker may hold journal resources or already have changed durable
+    state. Shield it and drain it before propagating cancellation so the gateway
+    never closes its loop around unowned blocking work.
     """
-    return await finish(asyncio.create_task(runner.run(execute, request)))
+    return await finish(asyncio.create_task(runner.run(function, *args, **kwargs)))
 
 
 class WebSocketGateway:
@@ -346,8 +347,8 @@ class WebSocketGateway:
     ) -> None:
         """Create a loopback gateway around a shared run API.
 
-        ``request_runner`` owns synchronous request execution outside the
-        gateway event loop. Raises `ValueError`, naming the offending value,
+        ``request_runner`` owns synchronous API work outside the gateway event
+        loop. Raises `ValueError`, naming the offending value,
         when `allowed_origins` holds anything a browser cannot send as an
         `Origin` header.
         """
@@ -1166,7 +1167,9 @@ class WebSocketGateway:
                         await self._write_stream_error(websocket, request, error)
                 return True
             try:
-                response = await _run_owned_request(self._request_runner, self.api.execute, request)
+                response = await _run_owned_blocking(
+                    self._request_runner, self.api.execute, request
+                )
             # lint-waiver: LW-101111 [BLE001]; the request boundary converts arbitrary API failures into the protocol's typed response.
             # > Listing current service exceptions would leak future request failures out of the transport; a helper would retain the same broad boundary catch with more indirection.
             except Exception as error:  # noqa: BLE001
@@ -1180,8 +1183,12 @@ class WebSocketGateway:
 
     async def _stream(self, websocket: ServerConnection, request: SubscribeRequest) -> None:
         try:
-            bootstrap = self.api.subscription_bootstrap(
-                request.after_sequence, request.tail, store_id=request.store_id
+            bootstrap = await _run_owned_blocking(
+                self._request_runner,
+                self.api.subscription_bootstrap,
+                request.after_sequence,
+                request.tail,
+                store_id=request.store_id,
             )
         except Exception:
             # A bootstrap failure must not reject the accepted subscription.
@@ -1212,15 +1219,19 @@ class WebSocketGateway:
             websocket, request, bootstrap
         )
         while True:
-            changed = await asyncio.to_thread(
-                self.api.wait_for_change, cursor, _DISCONNECT_POLL_SECONDS
+            changed = await _run_owned_blocking(
+                self._request_runner,
+                self.api.wait_for_change,
+                cursor,
+                _DISCONNECT_POLL_SECONDS,
             )
             if not changed:
                 if _connection_closed(websocket):
                     return
                 continue
             if request.tail is not None and self.api.latest_sequence - cursor > request.tail:
-                bootstrap = await asyncio.to_thread(
+                bootstrap = await _run_owned_blocking(
+                    self._request_runner,
                     self.api.subscription_bootstrap,
                     request.after_sequence,
                     request.tail,
@@ -1230,11 +1241,15 @@ class WebSocketGateway:
                     websocket, request, bootstrap, rebootstrap=True
                 )
                 continue
-            checkpoint = await asyncio.to_thread(
-                self.api.subscription_checkpoint, cursor, store_id=store_id
+            checkpoint = await _run_owned_blocking(
+                self._request_runner,
+                self.api.subscription_checkpoint,
+                cursor,
+                store_id=store_id,
             )
             if checkpoint.store_id != store_id:
-                bootstrap = await asyncio.to_thread(
+                bootstrap = await _run_owned_blocking(
+                    self._request_runner,
                     self.api.subscription_bootstrap,
                     request.after_sequence,
                     request.tail,

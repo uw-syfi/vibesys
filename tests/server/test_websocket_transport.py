@@ -954,6 +954,108 @@ class _RecordingRequestApi:
         return Response(request_id=request.request_id)
 
 
+class _HeldBootstrapRunner:
+    """Hold one initial replay while letting independent API work finish."""
+
+    def __init__(self, bootstrap: Callable[..., object]) -> None:
+        self._bootstrap = bootstrap
+        self.bootstrap_entered = Gate()
+        self.bootstrap_completed = Gate()
+        self.release_bootstrap = Gate()
+        self._completed: dict[str, Gate] = {}
+
+    def completed(self, request: ProtocolRequest) -> Gate:
+        """Return the signal for this exact request finishing its API call."""
+        return self._completed.setdefault(request.request_id, Gate())
+
+    async def run[**P, T](self, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+        if function == self._bootstrap:
+            self.bootstrap_entered.open()
+            await self.release_bootstrap.wait()
+        result = function(*args, **kwargs)
+        if function == self._bootstrap:
+            self.bootstrap_completed.open()
+        elif args and isinstance(args[0], SnapshotQuery):
+            self.completed(args[0]).open()
+        return result
+
+
+async def _assert_initial_bootstrap_isolated(
+    gateway: WebSocketGateway, runner: _HeldBootstrapRunner
+) -> None:
+    snapshot = SnapshotQuery()
+    async with (
+        asyncio.timeout(DEADLOCK_GUARD_S),
+        _gateway_connection(gateway) as stream,
+        _gateway_connection(gateway) as control,
+    ):
+        try:
+            await stream.send(SubscribeRequest(client_id="held-bootstrap").model_dump_json())
+            first_stream_frame = asyncio.create_task(stream.recv())
+            await runner.bootstrap_entered.wait(first_stream_frame)
+
+            await control.send(snapshot.model_dump_json())
+            control_response = asyncio.create_task(control.recv())
+            await runner.completed(snapshot).wait(control_response)
+
+            assert runner.bootstrap_completed.is_open is False
+            assert json.loads(await control_response)["request_id"] == snapshot.request_id
+
+            runner.release_bootstrap.open()
+            assert json.loads(await first_stream_frame)["type"] == "subscribed"
+            assert json.loads(await stream.recv())["type"] == "event_batch"
+        finally:
+            runner.release_bootstrap.open()
+
+
+def test_initial_bootstrap_does_not_block_another_established_websocket(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+    runner = _HeldBootstrapRunner(parts.api.subscription_bootstrap)
+    with WebSocketGateway(parts.api, request_runner=cast("BlockingRunner", runner)) as gateway:
+        asyncio.run(_assert_initial_bootstrap_isolated(gateway, runner))
+    parts.close()
+
+
+async def _assert_shutdown_drains_initial_bootstrap(
+    gateway: WebSocketGateway, runner: _HeldBootstrapRunner
+) -> None:
+    closing = None
+    async with _gateway_connection(gateway) as stream:
+        try:
+            await stream.send(SubscribeRequest(client_id="shutdown-bootstrap").model_dump_json())
+            first_stream_frame = asyncio.create_task(stream.recv())
+            await runner.bootstrap_entered.wait(first_stream_frame)
+
+            closing = start_thread(gateway.close)
+            async with asyncio.timeout(DEADLOCK_GUARD_S):
+                with pytest.raises(ConnectionClosedOK):
+                    await first_stream_frame
+            assert not closing.done(), "gateway abandoned its started bootstrap worker"
+            assert runner.bootstrap_completed.is_open is False
+
+            runner.release_bootstrap.open()
+            async with asyncio.timeout(DEADLOCK_GUARD_S):
+                await asyncio.wrap_future(closing)
+            assert runner.bootstrap_completed.is_open is True
+        finally:
+            runner.release_bootstrap.open()
+            if closing is not None and not closing.done():
+                await asyncio.wrap_future(closing)
+
+
+def test_gateway_shutdown_drains_a_started_initial_bootstrap(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+    runner = _HeldBootstrapRunner(parts.api.subscription_bootstrap)
+    gateway = WebSocketGateway(parts.api, request_runner=cast("BlockingRunner", runner))
+    gateway.start()
+    try:
+        asyncio.run(_assert_shutdown_drains_initial_bootstrap(gateway, runner))
+    finally:
+        runner.release_bootstrap.open()
+        gateway.close()
+        parts.close()
+
+
 async def _assert_chat_connection_is_isolated(
     gateway: WebSocketGateway,
     runner: _HeldChatRequestRunner,
