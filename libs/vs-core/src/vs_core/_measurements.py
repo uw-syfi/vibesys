@@ -87,7 +87,7 @@ from .types.kernel import AreaChange
 from .types.strategy import Measure
 
 if TYPE_CHECKING:
-    from .types.common import DecisionId, Observation, ResourceId, Scope
+    from .types.common import DecisionId, Observation, ResourceId, Scope, Seconds
     from .types.evaluation import EvaluationEvent, EvaluationState, EvidenceRef, MeasurementPlan
     from .types.intents import Intent, Request
     from .types.kernel import EvaluationContext, Signal
@@ -421,7 +421,18 @@ def _admit(
 def _agent_requested(
     state: EvaluationState, context: EvaluationContext, event: AgentMeasurementRequested
 ) -> AreaChange[EvaluationState]:
-    """Admit an agent tool call: same authority, identity and budget as a Measure."""
+    """Admit an agent tool call: same authority, identity and budget as a Measure.
+
+    A call for a candidate this scope already measures or measured (same identity) is a
+    repeat. It is answered with that submission and charges nothing: the scope's budget
+    receipts are the one record of "this candidate's evaluation", so every role that holds
+    the scope (an implementer and the judge reviewing its candidate) gets the same handle.
+    A repeat exists only while the earlier submission cannot be redone; after a released
+    retryable infrastructure failure the call is a real retry and is charged like any other.
+
+    An agent's call is answered to the agent and tells the strategy nothing: a refusal of
+    it is not the rejection of a Measure decision, and neither is the end of its job.
+    """
     if any(call.call_id == event.call_id for call in state.agent_calls):
         return AreaChange(state=state)
     identity = _identity(event.plan)
@@ -433,23 +444,74 @@ def _agent_requested(
     elif not isinstance(identity, Proven):
         rejection = AgentRejection.INVALID_PLAN
     if rejection is not None or not isinstance(identity, Proven):
-        change = _rejected(state, event.scope)
-    else:
-        change = _admit(state, context, _Origin(event.scope, None), event.plan, identity.value)
+        return _recorded(AreaChange(state=state), AgentCall.refused(event, rejection))
+    repeated = _repeated(state, context, event.scope, identity.value)
+    if repeated is not None:
+        request_id, deadline_at = repeated
+        call = AgentCall.answered(event, request_id, deadline_at, repeat=True)
+        return _recorded(AreaChange(state=state), call)
+    change = _admit(state, context, _Origin(event.scope, None), event.plan, identity.value)
     request = next((r for r in change.requests if isinstance(r, SubmitMeasurement)), None)
-    if request is None and rejection is None:
-        rejection = AgentRejection.NOT_ALLOWED
-    call = AgentCall(
-        call_id=event.call_id,
-        scope=event.scope,
-        request_id=request.request_id if request is not None else None,
-        rejection=rejection,
-    )
+    if request is None or request.request_id is None:
+        refused = AgentCall.refused(event, AgentRejection.NOT_ALLOWED)
+        return _recorded(AreaChange(state=state), refused)
+    call = AgentCall.answered(event, request.request_id, request.deadline_at, repeat=False)
+    return _recorded(change, call)
+
+
+def _recorded(change: AreaChange[EvaluationState], call: AgentCall) -> AreaChange[EvaluationState]:
+    """``change`` without the events meant for a strategy, and with ``call`` on record."""
+    state = change.state
     return change.model_copy(
         update={
-            "state": change.state.model_copy(update={"agent_calls": (*state.agent_calls, call)})
+            "state": state.model_copy(update={"agent_calls": (*state.agent_calls, call)}),
+            "events": (),
         }
     )
+
+
+def _repeated(
+    state: EvaluationState, context: EvaluationContext, scope: Scope, identity: MeasurementIdentity
+) -> tuple[RequestId, Seconds] | None:
+    """The submission a repeat call is answered with, and its deadline; None for a new one.
+
+    The scope's budget for the identity holds the evaluation: its latest receipt is the
+    submission that is running, or ended and cannot be redone. It is not a repeat when
+    the budget would admit another submission (none yet, or a released retryable
+    failure), nor when the receipt names no request (a migrated one).
+    """
+    matches = tuple(
+        b for b in state.submission_budgets if b.scope == scope and b.identity == identity
+    )
+    if len(matches) != 1 or not matches[0].receipts:
+        return None
+    if isinstance(_budget_ready(state, context, matches[0]), Proven):
+        return None
+    latest = matches[0].receipts[-1]
+    if not isinstance(latest, PreparedSubmissionReceipt):
+        return None
+    deadline_at = _deadline_of(state, context, latest.request_id)
+    return None if deadline_at is None else (latest.request_id, deadline_at)
+
+
+def _deadline_of(
+    state: EvaluationState, context: EvaluationContext, request_id: RequestId
+) -> Seconds | None:
+    """The deadline core gave a submission, from the call that allocated it or its intent."""
+    call = next(
+        (
+            c
+            for c in state.agent_calls
+            if c.request_id == request_id and not c.repeat and c.deadline_at is not None
+        ),
+        None,
+    )
+    if call is not None:
+        return call.deadline_at
+    row = next((r for r in context.intents.intents if r.request_id == request_id), None)
+    if row is not None and isinstance(row.request, SubmitMeasurement):
+        return row.request.deadline_at
+    return None
 
 
 def _allocate(
@@ -514,6 +576,24 @@ def _rejected(
                 scope=scope, evidence=(), status=ObservationStatus.REJECTED, failure=failure
             ),
         ),
+    )
+
+
+def _reported_to_strategy(context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob) -> bool:
+    """Whether the end of ``job`` is a result the strategy asked for.
+
+    A strategy awaits the result of its own Measure decision and takes any result of its
+    scope for that one. A job an agent submitted from its turn (a request without a
+    decision) answers the agent, which waits for it through its continuation; reporting
+    it too would hand the awaiting Measure another submission's evidence.
+    """
+    if isinstance(job, RegisteredOwnedJob):
+        return True
+    row = next((r for r in context.intents.intents if r.request_id == job.submission_id), None)
+    return not (
+        row is not None
+        and isinstance(row.request, SubmitMeasurement)
+        and row.request.decision_id is None
     )
 
 
@@ -754,7 +834,7 @@ def _submission_job(
         )
         state = state.model_copy(update={"jobs": (*state.jobs, job)})
         return AreaChange(state=state)
-    if observation.terminal and not observation.accepted:
+    if observation.terminal and not observation.accepted and request.decision_id is not None:
         return AreaChange(
             state=state,
             events=(
@@ -1161,11 +1241,12 @@ def _job_observed(
     requests: tuple[Request, ...] = ()
     events: tuple[MeasurementResult, ...] = ()
     source_id = updated.submission_id if isinstance(updated, OwnedJob) else updated.request_id
+    reported = _reported_to_strategy(context, job)
     if _conclusive(observation):
         newly = tuple(e for e in accepted if e not in job.evidence)
         # A refused evidence id is reported as an unclassified failure, never hidden.
         failure = MeasurementFailure.UNKNOWN if refused else claim
-        if not _conclusive(job.observation):
+        if reported and not _conclusive(job.observation):
             events = (
                 MeasurementResult(
                     scope=job.scope,
@@ -1176,7 +1257,7 @@ def _job_observed(
                     diagnostic=observation.diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
                 ),
             )
-        elif newly or refused:
+        elif reported and (newly or refused):
             # Late evidence is published once, as the delta, never replayed or dropped.
             events = (
                 MeasurementResult(

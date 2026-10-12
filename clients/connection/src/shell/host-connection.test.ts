@@ -6,7 +6,7 @@ import type {ChannelEndOutcome} from '@vibesys/contracts/host-helper';
 import {FakeClock} from '@vibesys/transport/testing';
 import type {Cause, ConnectionConfig} from '../state/host-connection.js';
 import {ECHO_SERVER, FakeHelper, FakeLink, record} from '../testing/fake-helper.js';
-import {fakeProcess} from '../testing/fake-process.js';
+import {deferredKillProcess, fakeProcess} from '../testing/fake-process.js';
 import {hostConnectionContract, phaseReached} from '../testing/host-connection-contract.js';
 import {ConnectionManager} from './connection-manager.js';
 import {ConnectionError, type HelperRequestError} from './helper-channel.js';
@@ -284,6 +284,24 @@ describe('HostConnection over the FakeHelper', () => {
     await phaseReached(connection, 'ready');
   });
 
+  test('regression: wake abandons a stalled link and starts a fresh operation', async () => {
+    const link = new FakeLink();
+    const stale = link.deferEstablish();
+    await using connection = fakeConnection(link);
+    const ready = connection.ready();
+    await stale.received;
+    const fresh = link.deferEstablish();
+
+    connection.dispatch({type: 'wake'});
+
+    expect(stale.abandoned).toBe(true);
+    expect(link.establishments).toBe(2);
+    await fresh.received;
+    fresh.release();
+    await ready;
+    expect(connection.phase.kind).toBe('ready');
+  });
+
   test('regression: closing resolves only once every helper process has exited', async () => {
     const link = new FakeLink();
     link.helper.publish(record('00000000000c', 'run-c'));
@@ -341,6 +359,64 @@ describe('HostConnection over the FakeHelper', () => {
     expect((error as ConnectionError).reason).toBe('denied');
     expect(connection.phase.kind).toBe('ready');
   });
+
+  // regression: openRun's own catch used to dispatch `run-ended` only when the dial failed with
+  // cause 'link', so 'incompatible' (and 'auth', the same code path) never reached the machine: the
+  // host stayed ready forever and every later attach failed the same generic way. It now forwards
+  // whatever cause the dial actually failed with, same as `#connectRun`'s stream-error listener; the
+  // machine's own routing for each cause (`run-ended` -> `lost` -> `failed`) is covered by its model
+  // tests in `../state/host-connection.test.ts`, so this only proves the shell forwards what it saw.
+  const dialFailures: readonly {
+    readonly cause: Cause;
+    readonly nextPhase: string;
+    readonly arrange: (link: FakeLink) => void;
+  }[] = [
+    {
+      cause: 'link',
+      nextPhase: 'reconnecting',
+      arrange: link => {
+        link.linkFault = {cause: 'link', detail: 'down'};
+      },
+    },
+    {
+      cause: 'incompatible',
+      nextPhase: 'incompatible',
+      arrange: link => {
+        // The checkout turns incompatible on disk after the control channel is already up: the
+        // next helper this link starts (for the run channel) fails its bootstrap before any
+        // `hello` reply.
+        link.helper.bootstrapExit = {code: 65, stdout: 'notvibesys'};
+      },
+    },
+    {
+      cause: 'auth',
+      nextPhase: 'auth-needed',
+      arrange: link => {
+        link.linkFault = {cause: 'auth', detail: 'Permission denied'};
+      },
+    },
+    {cause: 'run-gone', nextPhase: 'ready', arrange: () => {}},
+    {
+      cause: 'denied',
+      nextPhase: 'ready',
+      arrange: link => {
+        link.helper.publish(record('0000000000f0', 'run-f0'));
+        link.helper.host.runs.set('0000000000f0', ECHO_SERVER);
+        link.helper.host.denied.add('0000000000f0');
+      },
+    },
+  ];
+  for (const {cause, nextPhase, arrange} of dialFailures) {
+    test(`openRun's own dial failure reaches the machine as ${cause}`, async () => {
+      const link = new FakeLink();
+      await using connection = fakeConnection(link);
+      await connection.ready();
+      arrange(link);
+      const error = await rejection(connection.openRun('0000000000f0'));
+      expect((error as ConnectionError).reason).toBe(cause);
+      await phaseReached(connection, nextPhase);
+    });
+  }
 
   test('a request the helper answers past its deadline fails with that code; a late ping is a lost link', async () => {
     const clock = new FakeClock();
@@ -436,10 +512,119 @@ describe('HostConnection over the FakeHelper', () => {
 });
 
 describe('ConnectionManager', () => {
-  test('regression: releasing a link waits for an in-flight ssh master before its exit', async () => {
+  test('release cancels every ssh attempt and waits for every retired process to exit', async () => {
     const actions: string[] = [];
+    const stale = deferredKillProcess(() => actions.push('term-stale'));
+    const fresh = deferredKillProcess(() => actions.push('term-fresh'));
+    let checks = 0;
+    const spawn: Spawn = (_command, args) => {
+      const operation = args.at(args.indexOf('-O') + 1);
+      if (operation === 'check') {
+        actions.push(`check-${checks}`);
+        checks += 1;
+        return checks === 1 ? stale.process : fresh.process;
+      }
+      if (operation === 'exit') {
+        actions.push('exit');
+        const exit = fakeProcess();
+        exit.end(0);
+        return exit.process;
+      }
+      throw new Error(`unexpected ssh operation: ${args.join(' ')}`);
+    };
+    const link = sshLink(spawn);
+    const abandoned = new AbortController();
+    const first = link.establish(false, abandoned.signal);
+    abandoned.abort();
+    expect((await rejection(first)).message).toContain('abandoned');
+    const second = link.establish(false);
+
+    const releasing = link.release();
+    expect(actions).toEqual(['check-0', 'term-stale', 'check-1', 'term-fresh']);
+    expect(actions).not.toContain('exit');
+    fresh.end(null);
+    expect((await rejection(second)).message).toContain('abandoned');
+    expect(stale.process.running).toBe(true);
+    expect(actions).not.toContain('exit');
+
+    stale.end(null);
+    await releasing;
+    expect(actions).toEqual(['check-0', 'term-stale', 'check-1', 'term-fresh', 'exit']);
+  });
+
+  test('abandoning one shared ssh waiter leaves the other waiter and process intact', async () => {
     const check = fakeProcess();
-    const master = fakeProcess();
+    const spawn: Spawn = (_command, args) => {
+      const operation = args.at(args.indexOf('-O') + 1);
+      if (operation === 'check') return check.process;
+      if (operation === 'exit') {
+        const exit = fakeProcess();
+        exit.end(0);
+        return exit.process;
+      }
+      throw new Error(`unexpected ssh operation: ${args.join(' ')}`);
+    };
+    const link = sshLink(spawn);
+    const abandoned = new AbortController();
+    const retained = new AbortController();
+    const first = link.establish(false, abandoned.signal);
+    const second = link.establish(false, retained.signal);
+
+    abandoned.abort();
+
+    expect((await rejection(first)).message).toContain('abandoned');
+    expect(check.process.running).toBe(true);
+    check.end(0);
+    await second;
+    await link.release();
+  });
+
+  test('network wake retires one shared ssh attempt before connections start a fresh one', async () => {
+    const helper = new FakeHelper();
+    const checks: ReturnType<typeof fakeProcess>[] = [];
+    const killed: number[] = [];
+    const spawn: Spawn = (_command, args) => {
+      const control = args.indexOf('-O');
+      const operation = control < 0 ? null : args[control + 1];
+      if (operation === 'check') {
+        const index = checks.length;
+        const check = fakeProcess(() => killed.push(index));
+        checks.push(check);
+        return check.process;
+      }
+      if (operation === 'exit') {
+        const exit = fakeProcess();
+        exit.end(0);
+        return exit.process;
+      }
+      if (args.at(-1) === 'true') throw new Error('the controlled check reports a live master');
+      return helper.spawn();
+    };
+    const manager = fakeManager(() => sshLink(spawn));
+    const replaced = manager.connection(GPU, '/a');
+    const release = replaced.hold();
+    const firstReady = replaced.ready();
+    const shown = manager.connection(GPU, '/b');
+    const secondReady = shown.ready();
+    expect(checks).toHaveLength(1);
+
+    manager.wake();
+
+    expect(killed).toEqual([0]);
+    expect(checks).toHaveLength(2);
+    checks[1]?.end(0);
+    await Promise.all([firstReady, secondReady]);
+    expect(replaced.phase.kind).toBe('ready');
+    expect(shown.phase.kind).toBe('ready');
+    release();
+    await manager[Symbol.asyncDispose]();
+  });
+
+  test('regression: releasing a link kills an in-flight ssh master attempt before its exit', async () => {
+    const actions: string[] = [];
+    const killed: string[] = [];
+    const check = fakeProcess();
+    const master = fakeProcess(signal => killed.push(signal));
     let announceMaster = (): void => {};
     const masterStarted = new Promise<void>(resolve => {
       announceMaster = resolve;
@@ -470,12 +655,53 @@ describe('ConnectionManager', () => {
     check.end(255);
     await masterStarted;
 
+    // The master-creation command can legitimately run for its 20s ConnectTimeout; nothing here
+    // ever finishes it on its own, modeling a handshake still under way when the app quits.
+    // Release must not wait that out: it kills the attempt itself, rather than leaving an ssh
+    // process free to fork off a persistent master nobody ever asks to exit.
     const closing = link.release();
+    expect(killed).toEqual(['SIGTERM']);
     expect(actions).toEqual(['check', 'master-start']);
-    master.end(0);
-    await Promise.all([establishing, closing]);
+
+    const error = await rejection(establishing);
+    expect((error as ConnectionError).reason).toBe('link');
+    await closing;
 
     expect(actions).toEqual(['check', 'master-start', 'exit']);
+  });
+
+  test('releasing after the master check resolves never starts a late master attempt', async () => {
+    const actions: string[] = [];
+    const check = fakeProcess();
+    const spawn: Spawn = (_command, args) => {
+      const control = args.indexOf('-O');
+      const operation = control < 0 ? null : args[control + 1];
+      if (operation === 'check') {
+        actions.push('check');
+        return check.process;
+      }
+      if (operation === 'exit') {
+        actions.push('exit');
+        const exiting = fakeProcess();
+        exiting.end(0);
+        return exiting.process;
+      }
+      actions.push('master-start');
+      const master = fakeProcess();
+      master.end(0);
+      return master.process;
+    };
+    const link = sshLink(spawn);
+    const establishing = link.establish(false);
+    check.end(255);
+
+    // End the link before the completed check's continuation can start a master process.
+    const closing = link.release();
+
+    expect(await rejection(establishing)).toBeInstanceOf(ConnectionError);
+    await closing;
+    expect(await rejection(link.establish(false))).toBeInstanceOf(ConnectionError);
+    expect(actions).toEqual(['check', 'exit']);
   });
 
   test('a checkout check shares the host link, and the manager releases it once, at the end', async () => {

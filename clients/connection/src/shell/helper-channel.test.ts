@@ -148,3 +148,41 @@ describe('HelperChannel reply correlation', () => {
     expect(await channel.ended).toBe(error);
   });
 });
+
+describe('HelperChannel line buffer bound', () => {
+  test('a line that never gets a newline ends the channel instead of growing without end', async () => {
+    const killed: Array<NodeJS.Signals | number> = [];
+    const process = fakeProcess(signal => killed.push(signal));
+    const nextLine = jsonLines(process.input);
+    const channel = await openChannel(process, nextLine);
+    const pending = channel.request({type: 'ping'});
+
+    process.stdout.write('x'.repeat(5 * 1024 * 1024));
+
+    const error = connectionFailure(await rejection(pending));
+    expect(error.reason).toBe('incompatible');
+    expect(await channel.ended).toBe(error);
+    expect(killed).toEqual(['SIGTERM']);
+  });
+
+  test('the bound is exact: a buffered line at the cap is tolerated, one byte past it is not', async () => {
+    const CAP = 4 * 1024 * 1024; // mirrors NewlineFramer's MAX_REMAINDER_CHARS
+    const killed: Array<NodeJS.Signals | number> = [];
+    const process = fakeProcess(signal => killed.push(signal));
+    const nextLine = jsonLines(process.input);
+    const channel = await openChannel(process, nextLine);
+
+    process.stdout.write('x'.repeat(CAP));
+    const ping = channel.request({type: 'ping'});
+    // The request reaching the helper's stdin proves the channel is still alive at exactly the
+    // cap: a failed channel rejects `request()` before writing anything (see `request()`).
+    await nextLine();
+
+    process.stdout.write('x');
+    const error = connectionFailure(await rejection(ping));
+    expect(error.reason).toBe('incompatible');
+    expect(error.message).toContain('without a newline');
+    expect(await channel.ended).toBe(error);
+    expect(killed).toEqual(['SIGTERM']);
+  });
+});

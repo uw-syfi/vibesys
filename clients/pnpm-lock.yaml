@@ -294,9 +294,15 @@ importers:
       '@types/react':
         specifier: 19.1.13
         version: 19.1.13
+      '@types/react-dom':
+        specifier: 19.1.9
+        version: 19.1.9(@types/react@19.1.13)
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../transport
+      react-dom:
+        specifier: 19.1.1
+        version: 19.1.1(react@19.1.1)
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

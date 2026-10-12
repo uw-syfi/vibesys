@@ -15,6 +15,11 @@
  * one applied or fenced (`issued`, `applied`), so a slow start-up snapshot cannot overwrite a newer
  * refresh's, and a stream replacement fences every load issued before it. And each stale cause is
  * numbered (`problemEpoch`): a snapshot clears only the causes that existed when its load began.
+ *
+ * A load reports success only for a snapshot the run fold would accept (the shell dry-runs the
+ * fold), so a successful load is proof of the current run. Rejected projection evidence (a foreign
+ * batch, or a snapshot rejected after its check) keeps the page stale through stream reconnects
+ * until a later fenced snapshot succeeds; a transient connection fault never erases it.
  */
 
 import type {RunSnapshot} from '@vibesys/contracts';
@@ -51,7 +56,7 @@ export type RefreshOutcome =
 /** Which flights wait on a fenced snapshot load: they settle together when it does. */
 type LoadOwner = 'startup' | 'startup-recovery' | 'recovery' | 'replacement';
 
-type StreamProblem = 'none' | 'snapshot' | 'connection';
+type StreamProblem = 'none' | 'snapshot' | 'connection' | 'projection';
 
 export type SessionEvent =
   | {readonly type: 'start'}
@@ -61,6 +66,11 @@ export type SessionEvent =
   | {readonly type: 'stream'; readonly state: StreamConnectionState}
   /** The stream reported a fault in band (a protocol error), or could not be recovered. */
   | {readonly type: 'fault'; readonly error: Error}
+  /**
+   * The run fold rejected data as belonging to another run: a stream batch, or a snapshot whose
+   * identity changed between its load's check and its fold.
+   */
+  | {readonly type: 'projection-rejected'; readonly error: Error}
   /** The control channel changed state (the shell drops repeats of the same state). */
   | {readonly type: 'controls'; readonly state: ControlChannelState}
   /** The tab became visible or the network came back (or the machine woke). */
@@ -196,9 +206,16 @@ function withProblem(
   );
 }
 
-/** The stream lost its connection: stale with `error`. */
+/** Add a transient connection fault without erasing stronger snapshot or projection evidence. */
+function connectionFailed(context: SessionContext, error: Error): SessionContext {
+  return context.streamProblem === 'snapshot' || context.streamProblem === 'projection'
+    ? context
+    : withProblem(context, 'connection', error);
+}
+
+/** The stream lost its connection: stale with `error`, unless a stronger cause already owns it. */
 function streamLost(context: SessionContext, error: Error): SessionContext {
-  return withProblem({...context, streamConnected: false}, 'connection', error);
+  return connectionFailed({...context, streamConnected: false}, error);
 }
 
 /** The snapshot a settled load applies: a loaded one issued after the newest applied, else null. */
@@ -243,7 +260,10 @@ function streamReported(context: SessionContext, state: StreamConnectionState): 
   // suppressing it here left an ended run's empty transcript unexplained (#1044).
   if (state.status !== 'connected') return streamLost(context, state.error);
   const connected = context.streamConnected ? context : {...context, streamConnected: true};
-  return context.streamSnapshot === 'trusted' && context.streamProblem !== 'snapshot'
+  // Only connection evidence retires a connection problem: a live socket does not make a failed
+  // snapshot or rejected foreign-run data trustworthy.
+  return context.streamSnapshot === 'trusted' &&
+    (context.streamProblem === 'none' || context.streamProblem === 'connection')
     ? withStatus({...connected, streamProblem: 'none'}, 'connected', null)
     : connected;
 }
@@ -351,7 +371,11 @@ export const sessionMachine = setup({
     ),
   },
   actions: {
-    /** Fold `snapshot` into the run; null (an older or a failed load) does nothing. */
+    /**
+     * Fold `snapshot` into the run; null (an older or a failed load) does nothing. The load already
+     * reported a snapshot of another run as failed; one the fold still rejects comes back as
+     * `projection-rejected`.
+     */
     applySnapshot: (_, _params: {readonly snapshot: RunSnapshot | null}) => undefined,
     /** Restart the stream; a failure comes back as a `fault`. */
     recoverStream: (_, _params: {readonly mode: StreamRecovery}) => undefined,
@@ -416,6 +440,10 @@ export const sessionMachine = setup({
             raise({type: 'session.stream-failed'}),
           ],
         },
+        // Only a later fenced snapshot, issued after this cause, can retire it.
+        'projection-rejected': {
+          actions: assign(({context, event}) => withProblem(context, 'projection', event.error)),
+        },
         controls: {
           actions: assign(({context, event}) => ({view: {...context.view, controls: event.state}})),
         },
@@ -455,7 +483,11 @@ export const sessionMachine = setup({
                     onError: {
                       target: `${OPEN}.startup.done`,
                       actions: assign(({context, event}) =>
-                        streamLost(context, toError(event.error)),
+                        withProblem(
+                          {...context, streamConnected: false},
+                          'connection',
+                          toError(event.error),
+                        ),
                       ),
                     },
                   },

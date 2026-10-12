@@ -10,7 +10,11 @@ Time Profiler when selected; otherwise use sample. Report the selected tool, act
 process, raw artifact and metadata paths, symbols present or missing, hot functions and
 threads, scheduling evidence, and the limits of conclusions without hardware counters.
 
+{% if benchmark_command is defined and benchmark_command %}
 Benchmark command: {{ benchmark_command }}
+{% else %}
+The benchmark command is documented in `OBJECTIVE.md`.
+{% endif %}
 
 {% if runtime_notes %}
 Runtime environment: {{ runtime_notes }}

@@ -37,7 +37,12 @@ def test_call_allocates_one_submission_without_a_decision() -> None:
     assert isinstance(request, core.SubmitMeasurement)
     assert request.decision_id is None
     assert result.state.evaluation.agent_calls == (
-        core.AgentCall(call_id="c1", scope=request.scope, request_id=request.request_id),
+        core.AgentCall(
+            call_id="c1",
+            scope=request.scope,
+            request_id=request.request_id,
+            deadline_at=request.deadline_at,
+        ),
     )
     budget = result.state.evaluation.submission_budgets[0]
     assert [getattr(r, "request_id", None) for r in budget.receipts] == [request.request_id]
@@ -54,18 +59,21 @@ def test_replayed_call_changes_nothing() -> None:
 def test_stale_generation_is_rejected_and_recorded() -> None:
     result = call(core.initial_state(), "c1", generation_offset=1)
     assert result.requests == ()
-    assert [e.status for e in result.events if isinstance(e, core.MeasurementResult)] == [
-        core.ObservationStatus.REJECTED
-    ]
+    assert result.events == (), "a refused tool call is the agent's to hear, not the strategy's"
     assert result.state.evaluation.agent_calls[0].request_id is None
     assert result.state.evaluation.submission_budgets == ()
 
 
 def test_agent_call_and_measure_decision_share_one_budget() -> None:
+    """The agent's call for an identity a Measure already charged is that submission, not a second."""
     measured = requested(measurement=plan(evaluator_digest="evaluator-0", submission_limit=1))
+    (measure,) = submissions(measured.state)
     result = call(measured.state, "c1")
     assert result.requests == ()
     assert len(submissions(result.state)) == 1
+    (row,) = result.state.evaluation.agent_calls
+    assert (row.request_id, row.repeat, row.rejection) == (measure.request_id, True, None)
+    assert row.deadline_at == measure.deadline_at
 
 
 @given(
@@ -131,10 +139,16 @@ def test_each_refusal_names_its_reason_and_charges_nothing() -> None:
     stale = call(core.initial_state(), "c1", generation_offset=1)
     assert rejection(stale.state, "c1") is core.AgentRejection.NOT_ADMITTED
 
-    spent = requested(measurement=plan(evaluator_digest="evaluator-0", submission_limit=1))
-    refused = call(spent.state, "c1")
+    state = core.initial_state()
+    event = core.AgentMeasurementRequested(
+        scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
+        plan=plan(deadline_at=0.0),
+        call_id="c1",
+    )
+    refused = transition(state, event)
     assert rejection(refused.state, "c1") is core.AgentRejection.NOT_ALLOWED
-    assert len(submissions(refused.state)) == 1
+    assert submissions(refused.state) == []
+    assert refused.events == ()
 
 
 @given(
@@ -154,3 +168,94 @@ def test_a_run_that_is_not_running_starts_no_agent_measurement(
         state = result.state
     assert submissions(state) == []
     assert state.evaluation.submission_budgets == ()
+
+
+def charged(state: core.CoreState) -> list[str]:
+    return [
+        row.request_id.root
+        for row in state.intents.intents
+        if isinstance(row.request, core.SubmitMeasurement) and row.request_id is not None
+    ]
+
+
+@given(
+    calls=st.lists(
+        st.tuples(st.integers(min_value=0, max_value=2), st.integers(min_value=0, max_value=1)),
+        min_size=1,
+        max_size=14,
+    )
+)
+def test_a_repeated_candidate_is_one_charge_and_one_handle(calls: list[tuple[int, int]]) -> None:
+    """Whatever the order of calls for candidates (variants) in two scopes, one charge each.
+
+    A call for a candidate its scope already evaluates names that submission and charges
+    nothing; another variant is another charge; another scope's call is another charge.
+    """
+    state = core.initial_state()
+    first: dict[tuple[int, int], str] = {}
+    for number, (variant, generation_offset) in enumerate(calls):
+        result = call(state, f"c{number}", variant=variant, generation_offset=generation_offset)
+        (row,) = [c for c in result.state.evaluation.agent_calls if c.call_id == f"c{number}"]
+        key = (variant, generation_offset)
+        if generation_offset:
+            assert row.rejection is core.AgentRejection.NOT_ADMITTED
+        elif key in first:
+            assert result.requests == ()
+            assert (row.rejection, row.repeat, row.request_id.root if row.request_id else None) == (
+                None,
+                True,
+                first[key],
+            )
+        else:
+            assert len(result.requests) == 1
+            assert row.request_id is not None
+            assert not row.repeat
+            first[key] = row.request_id.root
+        assert not result.events
+        state = result.state
+    assert sorted(charged(state)) == sorted(first.values())
+
+
+def ended(
+    state: core.CoreState, request: core.SubmitMeasurement
+) -> tuple[core.Transition, core.Transition]:
+    """The submission accepted, then its job ending successfully: (accepted, ended)."""
+    started = observation(request)
+    state = committed(state, started)
+    accepted = transition(state, core.MeasurementSubmissionObserved(observation=started))
+    running = transition(
+        accepted.state,
+        core.JobObserved(resource_id=core.ResourceId(root="job"), observation=started),
+    )
+    finished = observation(
+        request, 2, status=core.ObservationStatus.SUCCEEDED, terminal=True, released=True
+    )
+    done = transition(
+        committed(running.state, finished),
+        core.JobObserved(resource_id=core.ResourceId(root="job"), observation=finished),
+    )
+    return accepted, done
+
+
+def results(change: core.Transition) -> list[core.MeasurementResult]:
+    return [e for e in change.events if isinstance(e, core.MeasurementResult)]
+
+
+def test_the_end_of_an_agents_job_is_not_reported_to_the_strategy_but_a_measures_is() -> None:
+    """The v13 round with no metric: a Measure awaiting its result took the agent job's.
+
+    The strategy takes a result of its scope for the Measure it awaits. An agent's own
+    submission shares that scope, so reporting its end would hand the Measure another
+    submission's (local-validation) evidence; the agent hears of its job through its
+    continuation instead.
+    """
+    agent_state = call(core.initial_state(), "c1").state
+    (agent_request,) = submissions(agent_state)
+    _, agent_done = ended(agent_state, agent_request)
+    assert results(agent_done) == []
+    assert agent_done.state.evaluation.jobs[0].terminal
+
+    measured = requested(measurement=plan(evaluator_digest="evaluator-0"))
+    (measure_request,) = submissions(measured.state)
+    _, measure_done = ended(measured.state, measure_request)
+    assert [r.status for r in results(measure_done)] == [core.ObservationStatus.SUCCEEDED]

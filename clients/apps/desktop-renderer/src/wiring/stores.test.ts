@@ -217,7 +217,14 @@ describe('loadWelcomeStores', () => {
     const stores = await loaded(bridge);
     const run = recent('run-1');
     bridge.pushRecent([run]);
-    bridge.pushListing({kind: 'listed', host: 'ssh:gpu', live: [], ended: [], unreadable: []});
+    bridge.pushListing({
+      kind: 'listed',
+      host: 'ssh:gpu',
+      live: [],
+      ended: [],
+      unreadable: [],
+      unverified: [],
+    });
     bridge.pushShowHost('ssh:gpu');
     await settle();
     expect(stores.lists.getState().runs).toEqual([run]);
@@ -409,5 +416,6 @@ function listing(runId: string): HostListing {
     ],
     ended: [],
     unreadable: [],
+    unverified: [],
   };
 }

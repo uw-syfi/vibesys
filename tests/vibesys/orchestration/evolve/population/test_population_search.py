@@ -355,17 +355,17 @@ def test_frontier_never_dominated(perf_metrics: list[float]) -> None:
             parent_id=None,
             commit="c",
             perf_metric=value,
-            metrics={"throughput": value},
+            metrics=(("throughput", value),),
             summary="s",
         )
         _, state = search.admit(state, outcome)
 
     front = search.frontier(state)
-    front_values = {individual.metrics["throughput"] for individual in front}
+    front_values = {individual.metric_map()["throughput"] for individual in front}
     best_value = max(perf_metrics)
     # Nothing on the frontier is beaten by another admitted individual.
     for individual in front:
-        value = individual.metrics["throughput"]
+        value = individual.metric_map()["throughput"]
         assert not any(other > value for other in perf_metrics)
     # The maximum is always on the frontier.
     assert best_value in front_values

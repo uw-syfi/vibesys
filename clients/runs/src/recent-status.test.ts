@@ -39,6 +39,7 @@ describe('recentStatus', () => {
         live: [],
         ended: shuffled,
         unreadable: [],
+        unverified: [],
       };
       expect(recentStatus(RECENT, listing)).toEqual({
         kind: 'ended',
@@ -55,6 +56,7 @@ describe('recentStatus', () => {
       live: [server(9, 9, 'running')],
       ended: [server(1, 1, 'stopped')],
       unreadable: [],
+      unverified: [],
     };
     expect(recentStatus(RECENT, listing)).toEqual({
       kind: 'live',

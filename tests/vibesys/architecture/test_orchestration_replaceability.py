@@ -34,6 +34,8 @@ _ALLOWED_EXTERNAL_POLICY_IMPORTS = {
     "issue_queue_board.py",
     "issue_queue_core.py",
     "multi_core.py",
+    "evolve_core.py",
+    "evolve_roles.py",
     "multi_roles.py",
     "single_core.py",
     "single_roles.py",

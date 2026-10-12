@@ -21,6 +21,12 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
     reviewed,
 )
 from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, LIMITS, config
+from tests.vibesys.orchestration.evolve.strategy._executors import Executors as EvolveExecutors
+from tests.vibesys.orchestration.evolve.strategy._replies import mutated as evolve_mutated
+from tests.vibesys.orchestration.evolve.strategy._replies import profiled as evolve_profiled
+from tests.vibesys.orchestration.evolve.strategy._replies import reviewed as evolve_reviewed
+from tests.vibesys.orchestration.evolve.strategy._run import config as evolve_config
+from tests.vibesys.orchestration.evolve.strategy._run import harness as evolve_harness
 from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors as PlainExecutors
 from tests.vibesys.orchestration.issue_queue.strategy._replies import (
     evaluated as plain_evaluated,
@@ -60,6 +66,8 @@ from vibesys.orchestration.dynamic.strategy.api import (
     DynamicStrategyState,
     dynamic_operation_registry,
 )
+from vibesys.orchestration.evolve.core_policy.api import reply_schemas as evolve_reply_schemas
+from vibesys.orchestration.evolve.strategy.api import EvolveConfig, EvolveStrategy
 from vibesys.orchestration.issue_queue.core_policy.api import reply_schemas as plain_reply_schemas
 from vibesys.orchestration.issue_queue.strategy.api import IssueQueueConfig, IssueQueueStrategy
 from vibesys.orchestration.multi.core_policy.api import reply_schemas as multi_reply_schemas
@@ -353,6 +361,75 @@ def plain_subject(name: str, settings: IssueQueueConfig, *, sweeps_crashes: bool
     )
 
 
+class EvolveWorld:
+    """The evolve search's scripted executors: each child's verdict and throughput are drawn."""
+
+    def __init__(self, throughputs: tuple[float | None, ...], passes: tuple[bool, ...]) -> None:
+        self._throughputs = throughputs
+
+        def replies(role: str, key: str, serial: int) -> str:
+            del serial
+            # A child's verdict is a pure function of its name, so it does not depend on the
+            # order its siblings are asked in.
+            passing = passes[sum(map(ord, key)) % len(passes)]
+            if role == "mutator":
+                return evolve_mutated(f"change of {key}")
+            if role == "judge":
+                return evolve_reviewed(passed=passing)
+            return evolve_profiled()
+
+        self.executors = EvolveExecutors(replies=replies, benchmark=self.headline)
+
+    def headline(self, commit: str) -> float | None:
+        """The throughput the drawn table gives the candidate (a pure function of its commit)."""
+        return self._throughputs[int(commit, 16) % len(self._throughputs)]
+
+    def __call__(self, request: Request, core: CoreState) -> Answer:
+        """Answer as the scripted evolve executors do."""
+        return self.executors(request, core)
+
+
+@st.composite
+def _evolve_world(draw: st.DrawFn) -> Callable[[], World]:
+    throughputs = tuple(draw(st.lists(st.sampled_from(_THROUGHPUTS), min_size=1, max_size=4)))
+    passes = tuple(draw(st.lists(st.booleans(), min_size=1, max_size=3)))
+    return lambda: EvolveWorld(throughputs, passes)
+
+
+def evolve_subject(
+    name: str, settings: EvolveConfig, *, sweeps_crashes: bool, ci_stride: int = 1
+) -> Subject:
+    """The evolve search under ``settings``."""
+    return Subject(
+        name=name,
+        new_strategy=lambda: EvolveStrategy(config=settings),
+        harness=evolve_harness(settings),
+        schemas=evolve_reply_schemas(),
+        worlds=_evolve_world(),
+        sweeps_crashes=sweeps_crashes,
+        ci_stride=ci_stride,
+        default_world=lambda: EvolveWorld((120.0, 80.0), (True,)),
+        smallest_world=lambda: EvolveWorld((120.0,), (True,)),
+        issued=frozenset(
+            {
+                "adopt_revision",
+                "close_attempt_scope",
+                "close_session",
+                "discard_workspace",
+                "dispatch_turn",
+                "ensure_session",
+                "ensure_workspace",
+                "execute_registered_operation",
+                "observe_owned_job",
+                "retain_revision",
+                "snapshot_and_retain",
+                "submit_measurement",
+                "verify_adoption",
+            }
+        ),
+    )
+
+
 _GUIDED = {
     "profiler_id": "linux_cpu",
     "profiler_support_name": "linux_cpu_profiler",
@@ -379,6 +456,33 @@ SUBJECTS = {
         multi_subject(
             "multi-cadence",
             multi_config(max_rounds=3, official_eval_every=2, judge_every=2),
+            sweeps_crashes=False,
+        ),
+        evolve_subject(
+            "evolve",
+            evolve_config(max_generations=1, children_per_generation=1, bootstrap_max_attempts=2),
+            sweeps_crashes=False,
+            ci_stride=8,
+        ),
+        # Concurrent children: the crash sweep covers a run whose slots overlap.
+        evolve_subject(
+            "evolve-parallel",
+            evolve_config(
+                max_generations=1,
+                children_per_generation=2,
+                bootstrap_max_attempts=2,
+                max_parallelism=2,
+                profiler_id="linux_cpu",
+                profiler_support_name="linux_cpu_profiler",
+                profiler_mcp_name="vibesys-linux-cpu-profiler",
+            ),
+            sweeps_crashes=False,
+            # 400 commits of overlapping slots: CI samples every 16th, the slow sweep takes all.
+            ci_stride=16,
+        ),
+        evolve_subject(
+            "evolve-generations",
+            evolve_config(max_generations=3, children_per_generation=2, bootstrap_max_attempts=2),
             sweeps_crashes=False,
         ),
         multi_subject(

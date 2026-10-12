@@ -17,19 +17,19 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors
 from tests.vibesys.orchestration.issue_queue.strategy._replies import evaluated, implemented, judged
-from tests.vibesys.orchestration.issue_queue.strategy._run import config, harness, run_shell
+from tests.vibesys.orchestration.issue_queue.strategy._run import FACTS, config, harness, run_shell
 
 from vibesys.orchestration.issue_queue.models import (
     JudgeReplyModel,
     perf_result_model,
 )
 from vibesys.orchestration.issue_queue.strategy.api import (
-    BOOTSTRAP_TITLE,
     BoardState,
     Cursor,
     IssueQueueStrategy,
     IssueQueueStrategyState,
     JobKind,
+    bootstrap_title,
 )
 from vibesys.orchestration.issue_queue.strategy.api import PerformanceRecord as Record
 from vs_core.api import Operation, Proposal, StartAttempt, project
@@ -209,4 +209,4 @@ def test_no_round_works_more_issues_than_the_cap(cap: int, humans: int) -> None:
     for kind, group in groupby(kinds):
         if kind is JobKind.ISSUE:
             assert len(list(group)) <= cap
-    assert BOOTSTRAP_TITLE in [issue.title for issue in executors.tracker.list()]
+    assert bootstrap_title(FACTS.objective) in [issue.title for issue in executors.tracker.list()]

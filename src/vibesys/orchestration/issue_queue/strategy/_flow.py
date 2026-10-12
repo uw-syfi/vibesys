@@ -7,6 +7,7 @@ of a run (a blocked queue, a quiet board, an exhausted round budget) is a functi
 snapshot, so it is the same on every replay.
 """
 
+import re
 from typing import Literal
 
 from vibesys.orchestration.issue_queue.strategy import _board as board
@@ -34,8 +35,24 @@ from vs_issue_tracker.api import (
     TemplateBody,
 )
 
-BOOTSTRAP_TITLE = "Build inference server for the reference model"
 BOOTSTRAP_TEMPLATE = "bootstrap_description"
+
+
+_TITLE_LIMIT = 80
+
+
+def bootstrap_title(objective: str) -> str:
+    """The first issue's title: the task objective's first sentence, clipped to one line.
+
+    The run's first issue is the task itself, so its title comes from the objective and never
+    from a fixed phrase that would name one kind of task. A blank objective has no title.
+    """
+    lines = [" ".join(line.split()) for line in objective.splitlines()]
+    first = next((line for line in lines if line), "")
+    sentence = re.split(r"(?<=[.!?])\s", first, maxsplit=1)[0]
+    if len(sentence) <= _TITLE_LIMIT:
+        return sentence
+    return sentence[: _TITLE_LIMIT - 3].rstrip() + "..."
 
 
 def tip_revision(state: IssueQueueStrategyState, view: RunView) -> RevisionRef:
@@ -77,6 +94,15 @@ def _fresh(draft: Draft) -> bool:
 
 
 def _start(draft: Draft) -> None:
+    title = bootstrap_title(draft.view.facts.objective)
+    if not title:
+        _finish(
+            draft,
+            "failure",
+            "the run's objective is blank, so there is no first issue to file: "
+            "give the task an objective",
+        )
+        return
     if not _fresh(draft):
         return
     current = draft.state.board
@@ -90,7 +116,7 @@ def _start(draft: Draft) -> None:
     create = CreateIssue(
         key=change_key(draft.view, None, "bootstrap"),
         type=IssueType.FEATURE,
-        title=BOOTSTRAP_TITLE,
+        title=title,
         body=TemplateBody(template=BOOTSTRAP_TEMPLATE),
         created_by="loop:bootstrap",
         iteration=draft.state.round_idx + 1,

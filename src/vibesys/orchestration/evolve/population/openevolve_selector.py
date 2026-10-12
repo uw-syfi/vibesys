@@ -283,7 +283,7 @@ def _resolve_individual(
 def _combined_score(individual: Individual, space: MetricSpace) -> float:
     primary = space.primary
     if primary is not None:
-        value = individual.metrics.get(primary.name)
+        value = individual.metric_map().get(primary.name)
         if value is not None:
             return primary.signed(value)
     if individual.perf_metric is None:
@@ -301,7 +301,7 @@ def select(
 ) -> tuple[Proposal | None, OpenEvolveSelectorState]:
     """Sample a parent/inspirations from the upstream island database."""
     database = _build_database(state.config, seed=None)
-    _load_files(database, state.files)
+    _load_files(database, dict(state.files))
     database.set_current_island(state.current_island)
     rng = random.Random()  # noqa: S311  # LW-040052 [S311]; the generator only seeds deterministic search sampling and is not used for security.
     rng.setstate(state.rng_state)
@@ -324,7 +324,7 @@ def select(
     parent = _resolve_individual(database, parent_program, individuals_by_id)
     new_state = state.model_copy(
         update={
-            "files": _dump_files(database, iteration=database.last_iteration),
+            "files": tuple(_dump_files(database, iteration=database.last_iteration).items()),
             "rng_state": cast("RandomState", rng.getstate()),
             "current_island": database.current_island,
         }
@@ -368,7 +368,7 @@ def admit(  # noqa: PLR0913  # LW-040053 [PLR0913]; the parameters are independe
         return state
 
     database = _build_database(state.config, seed=None)
-    _load_files(database, state.files)
+    _load_files(database, dict(state.files))
     database.set_current_island(state.current_island)
     rng = random.Random()  # noqa: S311  # LW-040054 [S311]; the generator only seeds deterministic search sampling and is not used for security.
     rng.setstate(state.rng_state)
@@ -379,7 +379,7 @@ def admit(  # noqa: PLR0913  # LW-040053 [PLR0913]; the parameters are independe
             update={"admitted_individual_ids": (*state.admitted_individual_ids, individual.id)}
         )
 
-    metrics = dict(individual.metrics)
+    metrics = individual.metric_map()
     metrics["combined_score"] = _combined_score(individual, space)
     program = Program(
         id=program_id,
@@ -413,7 +413,7 @@ def admit(  # noqa: PLR0913  # LW-040053 [PLR0913]; the parameters are independe
 
     return state.model_copy(
         update={
-            "files": _dump_files(database, iteration=database.last_iteration),
+            "files": tuple(_dump_files(database, iteration=database.last_iteration).items()),
             "rng_state": cast("RandomState", rng.getstate()),
             "current_island": database.current_island,
             "admitted_individual_ids": (*state.admitted_individual_ids, individual.id),

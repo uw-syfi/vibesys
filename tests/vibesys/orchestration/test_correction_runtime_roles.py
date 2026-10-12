@@ -15,14 +15,6 @@ from vibesys.orchestration.dynamic.models import (
     PortfolioPlan,
     WaitingForEvaluation,
 )
-from vibesys.orchestration.evolve import agents as evolve
-from vibesys.orchestration.evolve.models import (
-    JudgeResponse as EvolveJudgeResponse,
-)
-from vibesys.orchestration.evolve.models import (
-    MutatorResponse,
-)
-from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_agent.api import AgentClient, AgentOutputSchemaError, DurableSessionStore
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider, FakeTurnScript
@@ -109,21 +101,6 @@ CASES = (
             ),
         ),
         id="dynamic-planner",
-    ),
-    pytest.param(
-        evolve.MUTATOR,
-        MutatorResponse(summary="Mutated", hypothesis="Faster", expected_behavior="Improves"),
-        id="evolve-mutator",
-    ),
-    pytest.param(
-        evolve.JUDGE,
-        EvolveJudgeResponse(analysis="Reviewed", feedback="", verdict="pass"),
-        id="evolve-judge",
-    ),
-    pytest.param(
-        evolve.PROFILER,
-        ProfilerSummary(analysis="Measured", bottlenecks="CPU", suggestions="Batch"),
-        id="evolve-profiler",
     ),
 )
 

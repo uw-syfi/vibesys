@@ -4,15 +4,22 @@
  * composition injects, and turns the browser's lifecycle (visibility, network) into events.
  * Decisions live in the machine; this module only does what the machine asks and reports what
  * happened. A connection method that throws is reported to the machine as a stream `fault`; an
- * action that throws anyway (the run fold rejecting a snapshot) stops the machine, and the shell
- * then releases the connection as a close would.
+ * action that throws anyway (a run-store subscriber failing while a snapshot folds) stops the
+ * machine, and the shell then releases the connection as a close would.
+ *
+ * A snapshot load reports success only for a snapshot the run fold would accept: the operation
+ * dry-runs the fold and reports a foreign run as a failed load, so it never proves the page
+ * healthy. The machine still folds it later, in its `applySnapshot` action, which keeps the fold
+ * ordered by the machine's issue order. A rejection the dry-run could not foresee (the run's
+ * identity latched between the operation settling and the machine taking its output) and a
+ * rejected stream batch are reported as `projection-rejected`.
  */
 import type {RunSnapshot} from '@vibesys/contracts';
-import {hasRunEnded} from '@vibesys/run-state';
+import {type CoreState, hasRunEnded} from '@vibesys/run-state';
 import {type Actor, createActor, fromPromise} from 'xstate';
 import {isSnapshotStoreReplaced, type WebSessionState} from './connection.js';
 import type {BrowserLifecycle, RunConnection, RunStreamHandlers, TransportHooks} from './ports.js';
-import {createRunStore, type RunStore} from './run.js';
+import {createRunStore, type RunStore, runStep} from './run.js';
 import {
   type Reachability,
   type RefreshOutcome,
@@ -34,6 +41,18 @@ export interface WebSessionOptions {
    */
   readonly connect: (hooks: TransportHooks) => RunConnection;
   readonly lifecycle: BrowserLifecycle;
+}
+
+/** An operation's stop signal: aborted once the machine left the state that owned the operation. */
+interface Stoppable {
+  readonly aborted: boolean;
+}
+
+/** The new foreign-run rejection produced by one run-fold transition, if any. */
+function runIdentityRejection(previous: CoreState, current: CoreState): Error | null {
+  const before = previous.diagnostics.find(item => item.id === 'core-state:run-identity-mismatch');
+  const rejected = current.diagnostics.find(item => item.id === 'core-state:run-identity-mismatch');
+  return rejected === undefined || rejected === before ? null : new Error(rejected.summary);
 }
 
 export class WebSession {
@@ -174,11 +193,11 @@ export class WebSession {
         subscribe: fromPromise<void, void>(() =>
           this.#connection.subscribe(this.#streamHandlers()),
         ),
-        refresh: fromPromise<RefreshOutcome, {readonly mode: StreamRecovery}>(({input}) =>
-          this.#refresh(input.mode),
+        refresh: fromPromise<RefreshOutcome, {readonly mode: StreamRecovery}>(({input, signal}) =>
+          this.#refresh(input.mode, signal),
         ),
         loadReplacementSnapshot: fromPromise<SnapshotResult, {readonly storeId: string}>(
-          ({input}) => this.#loadSnapshot(input.storeId),
+          ({input, signal}) => this.#loadSnapshot(signal, input.storeId),
         ),
       },
       actions: {
@@ -199,12 +218,20 @@ export class WebSession {
   }
 
   #applySnapshot(snapshot: RunSnapshot): void {
+    const previous = this.store.getState();
     this.store.dispatch({type: 'snapshot', snapshot});
+    const rejection = runIdentityRejection(previous, this.store.getState());
+    if (rejection !== null) {
+      // The load's dry run accepted this snapshot, but the run latched another identity before the
+      // machine took the load's output. The machine already trusted it, so report the rejection:
+      // the page stays stale until a later fenced snapshot succeeds.
+      this.#send({type: 'projection-rejected', error: rejection});
+      return;
+    }
     // A snapshot carries a journal position but no events, so it must not advance the event
     // cursor. Retain that position only when core-state accepted its run identity. Within one
     // stream-store generation the evidence is monotone: core-state can reject a stale same-run
     // snapshot's liveness, and that response must not erase a newer known journal position.
-    if (this.store.getState().runId !== snapshot.run_id) return;
     const current = this.#snapshotWatermark;
     this.#snapshotWatermark = {
       runId: snapshot.run_id,
@@ -246,7 +273,9 @@ export class WebSession {
           (boundary === null || context.connectionGeneration > boundary);
         const firstGeneration = previousStoreId === null;
         const storeReplaced = previousStoreId !== null && storeId !== previousStoreId;
+        const previousRun = this.store.getState();
         this.store.dispatch({type: 'batch', message, reconciliation});
+        const rejection = runIdentityRejection(previousRun, this.store.getState());
         this.#streamStoreId = storeId;
         if (storeReplaced) {
           // Store identity, not connection or chunk identity, proves a replacement. Retire old
@@ -258,6 +287,8 @@ export class WebSession {
         }
         if (requestedFreshGeneration) this.#freshBoundaryAfterConnection = undefined;
         this.#lastBatchConnection = context.connectionGeneration;
+        // A live socket does not make discarded foreign-run data trustworthy.
+        if (rejection !== null) this.#send({type: 'projection-rejected', error: rejection});
       },
       onFault: error => this.#send({type: 'fault', error}),
       onConnectionState: state => this.#send({type: 'stream', state}),
@@ -270,25 +301,39 @@ export class WebSession {
    * dials before the snapshot request is queued. A fresh bootstrap loads no snapshot here: its
    * snapshot is fenced to the store its first batch establishes.
    */
-  async #refresh(mode: StreamRecovery): Promise<RefreshOutcome> {
+  async #refresh(mode: StreamRecovery, signal: Stoppable): Promise<RefreshOutcome> {
     try {
       this.#connection.redialControls();
     } catch (error) {
       return {kind: 'redial-failed', error: toError(error)};
     }
     if (mode === 'rebootstrap') return {kind: 'ready'};
-    return {kind: 'snapshot', result: await this.#loadSnapshot(this.#streamStoreId ?? undefined)};
+    return {
+      kind: 'snapshot',
+      result: await this.#loadSnapshot(signal, this.#streamStoreId ?? undefined),
+    };
   }
 
-  /** Load the snapshot; the machine decides whether the run fold applies it. */
-  async #loadSnapshot(storeId?: string): Promise<SnapshotResult> {
+  /**
+   * Load the snapshot; the machine decides whether the run fold applies it. A snapshot the run fold
+   * would reject as another run's is a failed load: it must not prove the streamed run healthy.
+   * While the load is still owned (its operation not stopped), the rejection is recorded in the
+   * fold, which changes only the fold's diagnostics.
+   */
+  async #loadSnapshot(signal: Stoppable, storeId?: string): Promise<SnapshotResult> {
+    let snapshot: RunSnapshot;
     try {
-      return {ok: true, snapshot: await this.#connection.loadSnapshot(storeId)};
+      snapshot = await this.#connection.loadSnapshot(storeId);
     } catch (error) {
       if (isSnapshotStoreReplaced(error)) {
         return {ok: false, error, reason: 'store-replaced'};
       }
       return {ok: false, error: toError(error)};
     }
+    const run = this.store.getState();
+    const rejection = runIdentityRejection(run, runStep(run, {type: 'snapshot', snapshot}).state);
+    if (rejection === null) return {ok: true, snapshot};
+    if (!signal.aborted) this.store.dispatch({type: 'snapshot', snapshot});
+    return {ok: false, error: rejection};
   }
 }

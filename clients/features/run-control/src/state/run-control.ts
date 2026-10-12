@@ -7,7 +7,8 @@
  * invokes the latest command, and a new command re-enters it, which stops the earlier one. A stopped
  * command never reports, so the banner answers the latest command only and a slow attach cannot
  * overwrite what a later resume says. The command itself is the `command` operation the shell
- * provides (`renderer/effects`).
+ * provides (`renderer/effects`). An asynchronous problem is not owned by a command and stays
+ * visible through textless commands and their successful replies.
  */
 
 import type {HostKey} from '@vibesys/hosts';
@@ -16,9 +17,13 @@ import {unprovided} from '@vibesys/machine';
 import type {ResumeRunId} from '@vibesys/runs';
 import {assign, type SnapshotFrom, setup} from 'xstate';
 
+type BannerSource = 'progress' | 'problem' | 'reply';
+
 interface Banner {
   readonly text: string;
   readonly error: boolean;
+  /** Whether a command reply may replace this banner. */
+  readonly source: BannerSource;
 }
 
 /** What the title strip and the banner render. */
@@ -78,8 +83,23 @@ function progress(command: RunCommand): string | null {
   }
 }
 
-function settledBanner(result: WelcomeResult<null>): Banner | null {
-  return result.ok ? null : {text: result.error, error: true};
+/**
+ * The banner once the latest command settles: a failure replaces it, and a success clears
+ * command-owned text but keeps an asynchronous problem, which no command owns.
+ */
+function settledBanner(current: Banner | null, result: WelcomeResult<null>): Banner | null {
+  if (!result.ok) return {text: result.error, error: true, source: 'reply'};
+  return current?.source === 'problem' ? current : null;
+}
+
+/**
+ * The banner while `command` runs. Textless commands supersede only command-owned progress; an
+ * asynchronous problem has no command and must remain visible until an action replaces it.
+ */
+function commandBanner(current: Banner | null, command: RunCommand): Banner | null {
+  const text = progress(command);
+  if (text !== null) return {text, error: false, source: 'progress'};
+  return current?.source === 'progress' ? null : current;
 }
 
 export const runControlMachine = setup({
@@ -96,22 +116,16 @@ export const runControlMachine = setup({
     problem: {
       target: '.idle',
       actions: assign(({context, event}) => ({
-        view: {...context.view, banner: {text: event.text, error: true}},
+        view: {...context.view, banner: {text: event.text, error: true, source: 'problem'}},
       })),
     },
     command: {
       target: '.commanding',
       reenter: true,
-      actions: assign(({context, event}) => {
-        const text = progress(event.command);
-        return {
-          command: event.command,
-          view: {
-            ...context.view,
-            banner: text === null ? context.view.banner : {text, error: false},
-          },
-        };
-      }),
+      actions: assign(({context, event}) => ({
+        command: event.command,
+        view: {...context.view, banner: commandBanner(context.view.banner, event.command)},
+      })),
     },
   },
   states: {
@@ -131,13 +145,16 @@ export const runControlMachine = setup({
         onDone: {
           target: 'idle',
           actions: assign(({context, event}) => ({
-            view: {...context.view, banner: settledBanner(event.output)},
+            view: {...context.view, banner: settledBanner(context.view.banner, event.output)},
           })),
         },
         onError: {
           target: 'idle',
           actions: assign(({context, event}) => ({
-            view: {...context.view, banner: {text: String(event.error), error: true}},
+            view: {
+              ...context.view,
+              banner: {text: String(event.error), error: true, source: 'reply'},
+            },
           })),
         },
       },

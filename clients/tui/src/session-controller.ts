@@ -35,6 +35,7 @@ import {
   type ParsedCommand,
   parseCommand,
 } from './commands.js';
+import {DesignQueryOwner} from './design-query-owner.js';
 import {
   applyDiffPatch,
   closeDiffViewer,
@@ -286,12 +287,22 @@ export class SocketSessionController implements SessionController {
   #paneFetch: Promise<void> | null = null;
   /** The view to fetch once the in-flight pane query settles; see `#loadPane`. */
   #paneRefreshWanted: PaneView | null = null;
-  /** Single-flight guard for the supplemental design-log refresh. */
-  #designFetch: Promise<void> | null = null;
-  /** One refresh requested after the current design query started. */
-  #designRefreshPending = false;
-  /** Stop is terminal for this controller, so no supplemental query starts afterward. */
-  #designRefreshAllowed = true;
+  /** Owns both design consumers, retaining one follow-up without delaying boot. */
+  readonly #designQuery = new DesignQueryOwner({
+    request: async () => {
+      const response = await this.client.request({type: 'query.design'});
+      return {rounds: response.design ?? [], available: response.design_ready !== false};
+    },
+    publish: ({rounds, available}) => {
+      const withLog = available ? setDesignLog(this.#state, rounds) : this.#state;
+      this.#setState(setDesignPane(withLog, rounds, available));
+    },
+    report: error => {
+      if (this.#state.layout.right?.view !== 'design') return;
+      const message = errorMessage(error);
+      this.#setState(reportCaughtError(failPane(this.#state, 'design', message), error, 'request'));
+    },
+  });
   readonly #reconciler = new StreamReconciler({backfillChunk: BACKFILL_CHUNK});
   /** Serializes the consumer effect of applying one shared backfill outcome. */
   #historyFetch: Promise<boolean> | null = null;
@@ -498,8 +509,7 @@ export class SocketSessionController implements SessionController {
   }
 
   async stop(): Promise<void> {
-    this.#designRefreshAllowed = false;
-    this.#designRefreshPending = false;
+    this.#designQuery.stop();
     this.#chatThreadCreateGeneration += 1;
     await this.#stream.close();
     await this.client.close();
@@ -1004,10 +1014,7 @@ export class SocketSessionController implements SessionController {
           return;
         }
         case 'design': {
-          const response = await this.client.request({type: 'query.design'});
-          this.#setState(
-            setDesignPane(this.#state, response.design ?? [], response.design_ready !== false),
-          );
+          await this.#designQuery.refresh(true);
           return;
         }
         default: {
@@ -1209,43 +1216,7 @@ export class SocketSessionController implements SessionController {
       const message = errorMessage(error);
       this.#setState(reportCaughtError(failExperiments(this.#state, message), error, 'request'));
     }
-    void this.#refreshDesignLog();
-  }
-
-  /**
-   * The design log annotates the hypothesis drill-down, so it rides the same
-   * triggers as the experiment fetch but never its promise: the query runs git
-   * over the run's history, and the landing view must not wait on that to
-   * report boot. Single-flighted on its own so overlapping refreshes collapse,
-   * with one follow-up retained when an invalidation arrives mid-flight. Best
-   * effort: on failure the drill-down keeps whatever it last showed and stays
-   * quiet, because `/design` reports errors through the pane.
-   */
-  #refreshDesignLog(): Promise<void> {
-    if (!this.#designRefreshAllowed) return Promise.resolve();
-    if (this.#designFetch !== null) {
-      this.#designRefreshPending = true;
-      return this.#designFetch;
-    }
-    const fetch = this.#requestDesignLog().finally(() => {
-      this.#designFetch = null;
-      if (this.#designRefreshAllowed && this.#designRefreshPending) {
-        this.#designRefreshPending = false;
-        void this.#refreshDesignLog();
-      }
-    });
-    this.#designFetch = fetch;
-    return fetch;
-  }
-
-  async #requestDesignLog(): Promise<void> {
-    try {
-      const response = await this.client.request({type: 'query.design'});
-      if (response.design_ready === false) return;
-      this.#setState(setDesignLog(this.#state, response.design ?? []));
-    } catch {
-      // Supplemental data: no banner, no experiment-log error state.
-    }
+    void this.#designQuery.refresh();
   }
 
   /** Reports the first delivery only: later refreshes are not a boot cost. */

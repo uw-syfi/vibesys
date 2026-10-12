@@ -273,9 +273,9 @@ def _decode(role: Role, payload: str, config: IssueQueueConfig) -> object:
     """The reply as its typed result or wait, or the schema violation as text."""
     try:
         if role is Role.IMPLEMENTER:
-            return ImplementerReplyModel.model_validate_json(payload).root
+            return ImplementerReplyModel.model_validate_json(payload).reply
         if role is Role.JUDGE:
-            return JudgeReplyModel.model_validate_json(payload).root
+            return JudgeReplyModel.model_validate_json(payload).reply
         return perf_result_model(config.max_issues_per_perf_eval).model_validate_json(payload)
     except ValidationError as error:
         return str(error)[:_ERROR_LIMIT]

@@ -17,7 +17,7 @@ from vibesys.plugin_catalog import project_run
 from vibesys.run.core_run import RunEnd, drive_core_run, ensure_not_legacy_resume
 from vibesys.run.host import open_product_core_host, open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
-from vibesys.run.profilers import validate_run_request
+from vibesys.run.profilers import ProfilerPreflight, validate_run_request
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import RunStopped
 from vs_sim.api import OsThreads
@@ -85,6 +85,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     ) = None,
     agent_client_factory: Callable[..., AgentClientProtocol],
     backend_factory: Callable[..., ComputeBackendImpl],
+    profiler_preflight: ProfilerPreflight | None = None,
     agent_tool_bindings: Mapping[
         str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]
     ]
@@ -111,6 +112,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
             resume_policy=resume_policy,
             agent_client_factory=agent_client_factory,
             backend_factory=backend_factory,
+            profiler_preflight=profiler_preflight,
             agent_tool_bindings=agent_tool_bindings,
             stateless_tool_servers=stateless_tool_servers,
             plugin=plugin,
@@ -128,6 +130,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         resume_policy=resume_policy,
         agent_client_factory=agent_client_factory,
         backend_factory=backend_factory,
+        profiler_preflight=profiler_preflight,
         agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
         stop_timer=stop_timer,
@@ -318,6 +321,7 @@ class _LocalRunSession:
                 resume_policy=self._registration.resume_policy,
                 agent_client_factory=self._implementations.agent_client_factory,
                 backend_factory=self._implementations.backend_factory,
+                profiler_preflight=self._implementations.profiler_preflight,
                 agent_tool_bindings=self._implementations.agent_tool_bindings,
                 stateless_tool_servers=self._implementations.stateless_tool_servers,
                 stop_timer=self._implementations.stop_timer,

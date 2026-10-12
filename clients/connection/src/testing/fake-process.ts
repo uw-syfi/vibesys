@@ -18,6 +18,18 @@ export interface FakeProcess {
 }
 
 export function fakeProcess(onKill: (signal: KillSignal) => void = () => {}): FakeProcess {
+  return buildFakeProcess(onKill, true);
+}
+
+/** A process whose kill request is not confirmed until the test explicitly calls `end`. */
+export function deferredKillProcess(onKill: (signal: KillSignal) => void = () => {}): FakeProcess {
+  return buildFakeProcess(onKill, false);
+}
+
+function buildFakeProcess(
+  onKill: (signal: KillSignal) => void,
+  settleOnKill: boolean,
+): FakeProcess {
   const input = new PassThrough();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -52,7 +64,7 @@ export function fakeProcess(onKill: (signal: KillSignal) => void = () => {}): Fa
       kill: signal => {
         if (ended) return;
         onKill(signal);
-        end(null);
+        if (settleOnKill) end(null);
       },
     },
     input,

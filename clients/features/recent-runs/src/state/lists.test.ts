@@ -19,7 +19,14 @@ function listing(host: string, live: string[], ended: string[]): HostListing {
     startedAt: 1,
     reason: null,
   });
-  return {kind: 'listed', host, live: live.map(entry), ended: ended.map(entry), unreadable: []};
+  return {
+    kind: 'listed',
+    host,
+    live: live.map(entry),
+    ended: ended.map(entry),
+    unreadable: [],
+    unverified: [],
+  };
 }
 
 function randomListsAction(random: Seeded): ListsAction {

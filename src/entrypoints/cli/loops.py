@@ -308,6 +308,7 @@ def _evolve_policy_descriptor(
         "bootstrap_max_attempts": args.bootstrap_max_attempts,
         "keep_deployments": args.keep_deployments,
         "max_parallelism": args.max_parallelism,
+        "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
         "metric_space": space.model_dump(mode="json"),
     }
     return OrchestrationDescriptor(id="evolve", config_version=1, options=options)

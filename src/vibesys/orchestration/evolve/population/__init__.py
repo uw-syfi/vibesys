@@ -12,6 +12,7 @@ from __future__ import annotations
 from vibesys.orchestration.evolve.population.models import (
     CandidateOutcome,
     Individual,
+    Metrics,
     OpenEvolveSelectorConfig,
     OpenEvolveSelectorState,
     PopulationConfig,
@@ -19,11 +20,12 @@ from vibesys.orchestration.evolve.population.models import (
     Proposal,
     RandomState,
 )
-from vibesys.orchestration.evolve.population.search import PopulationSearch, candidate_fitness
+from vibesys.orchestration.evolve.population.search import PopulationSearch
 
 __all__ = [
     "CandidateOutcome",
     "Individual",
+    "Metrics",
     "OpenEvolveSelectorConfig",
     "OpenEvolveSelectorState",
     "PopulationConfig",
@@ -31,5 +33,4 @@ __all__ = [
     "PopulationState",
     "Proposal",
     "RandomState",
-    "candidate_fitness",
 ]

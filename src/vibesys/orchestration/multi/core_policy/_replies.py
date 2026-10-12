@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, RootModel
-
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse, PreRoundDecision
 from vibesys.orchestration.multi.strategy.api import (
@@ -16,19 +14,21 @@ from vibesys.orchestration.multi.strategy.api import (
     PROFILER_REPLY,
 )
 from vibesys.orchestration.profilers import ProfilerSummary
-from vs_core.api import Waitable
+from vs_core.api import WaitableReply
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from pydantic import BaseModel
+
     from vs_core.api import SchemaRef
 
 
-class ImplementerReplyModel(RootModel[Waitable[ImplementerResponse]]):
+class ImplementerReplyModel(WaitableReply[ImplementerResponse]):
     """The implementer's turn ends with a result or a wait for evaluations."""
 
 
-class JudgeReplyModel(RootModel[Waitable[JudgeResponse]]):
+class JudgeReplyModel(WaitableReply[JudgeResponse]):
     """The judge's turn ends with a verdict or a wait for evaluations."""
 
 

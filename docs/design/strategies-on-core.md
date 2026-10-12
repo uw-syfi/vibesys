@@ -81,7 +81,7 @@ stop), `RunEnded`.
 | `issue_queue` strategy | built (section 7.8) | 3 |
 | `ValidateLocal` operation (`vs_core.api.ValidateLocalBase`, owner `ValidateLocalOwner`) | built | 4 |
 | `multi` and `profile-guided multi` strategy (section 9.5.1 records the outcome) | built | 4 |
-| Immutable population state, `ExportPatch` operation, `evolve` strategy | unbuilt | 5 |
+| Immutable population state, `ExportPatch` operation, `evolve` strategy (section 9.6.1 records the outcome) | built | 5 |
 | Removal of the legacy loop runtime and evaluation service | unbuilt | 6 |
 | Limits extension for a resumed run with a larger round budget | issue #2013 (Q3) | n/a |
 
@@ -1021,6 +1021,50 @@ mapping above, each deliberate:
 - **Live run.** Two generations of the standard example with `--max-parallelism 2`, once with
   each selector; criteria as 9.3, plus: the admitted order equals slot order in the event log
   whatever the completion order was.
+
+#### 9.6.1 Outcome of the `evolve` port
+
+`evolve` runs as `vibesys.orchestration.evolve` (`strategy/` pure, `core_policy/` limits, replies,
+projection and templates) wired by `vibesys.evolve_core` and `vibesys.evolve_roles` (roles
+`evolve-mutator`, `evolve-judge`, `evolve-profiler`; the profiler's tool is declared `stateless`).
+The population policy (`evolve/population/`) is unchanged in algorithm; its models are now `Value`s
+(metric rows and the OpenEvolve database files are tuples of pairs), so the whole population is part
+of the committed strategy state. Deviations from the mapping above, each deliberate:
+
+- Alternative E1 holds, with the generator state inside the immutable population. The legacy loop
+  threads the generator through a generation's proposals and discards the result, so every
+  generation starts from the generator state the run began with; the port keeps exactly that, which is
+  why a given `--seed` reproduces the legacy populations (recorded in
+  `tests/vibesys/orchestration/evolve/fixtures/legacy_trajectories.json`). The state therefore does
+  not advance the generator once per admitted outcome, as property E4 as first written assumed; the
+  properties assert dense unique ids and the recorded trajectories instead.
+- Slots start in slot order, and a slot starts only while fewer than `--max-parallelism` children are in
+  flight, so no start waits in core's admission queue and an operator stop meets only attempts that
+  are in flight or not yet started. Outcomes are admitted in slot order; a settled child waits in its
+  slot until every lower slot is recorded. A skipped slot (an unretained parent, a child never
+  admitted, a candidate the machinery could not measure, an operator stop) earns no individual.
+- The `openevolve` selector needs each passing child's code for its diversity and duplicate checks, and
+  the policy is a pure function of the strategy state, so the patch text cannot be a reference that
+  only an effect can read. The patch is obtained by the new `ExportPatch` operation (contract
+  `vs_core.api.ExportPatchBase`, owner `vs_runtime.api.core.ExportPatchOwner`) and stays in the
+  OpenEvolve database inside the state. State size for that selector therefore grows with the
+  patches the database keeps (bounded by `--openevolve-population-size`); with the default selector
+  it grows linearly in individuals and never in patch size (`test_properties.py`). Moving the database
+  to content-addressed artifacts needs the selection step itself to become an operation, which is a
+  follow-up.
+- A mutation whose checkpoint core declines is a failed child (`TurnCandidateFailed`); a mutation that changed nothing checkpoints the unchanged tree and is reviewed and measured, as the legacy loop did. A failed cold start that left a
+  checkpoint settles `wip`, and the next cold start builds on it (`repair_seed`).
+- The mutator's failure lessons come from the population at the time the slot is asked (only a cold
+  start reads them); the proposals come from `generation_start`.
+- A run whose task configures neither an accuracy nor a benchmark gate has no trusted reading to
+  adopt, so none of its children is winner-eligible and the run ends with no selection.
+- Prompts are domain-agnostic as `single`'s and `multi`'s are (the domain sections are not rendered);
+  the judge and the mutator learn about the evaluation tool from the shared protocol text.
+- `--turn-drop-backoff-seconds` is accepted by `--outer-loop evolve`. Q3 holds: a resumed run uses
+  its recorded options.
+- Properties: E1 and E3 are the trajectory tests (`strategy/test_trajectory.py`, serial and with
+  drawn completion orders, both selectors); E2 is the conformance crash sweep over the serial and the
+  concurrent subjects (`tests/composition/_loop`); E4 to E6 are `strategy/test_properties.py`.
 
 ### 9.7 Phase 2 acceptance
 

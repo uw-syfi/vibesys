@@ -43,7 +43,7 @@ class OwedSubmission(BaseModel):
     key: OwedKey
     call_id: str = Field(min_length=1)
     submitted_at: float
-    """The time the plan was built at, so the retry's plan has the same deadline."""
+    """When the call was made (the answer's deadline is core's, in its record of the call)."""
 
 
 class _Entries(BaseModel):

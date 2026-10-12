@@ -1,0 +1,1655 @@
+{
+ "attempts": 3,
+ "children": 3,
+ "generations": 3,
+ "runs": {
+  "world=1,seed=0,objectives=one": {
+   "generation": 3,
+   "individuals": [
+    {
+     "feedback": "",
+     "generation": 0,
+     "has_commit": true,
+     "id": 1,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.796,
+      "throughput": 141.168,
+      "ttft_ms": 85.117
+     },
+     "parent_id": null,
+     "passed": true,
+     "perf_metric": 141.168,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate bootstrap.1 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 2,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.205,
+      "throughput": 53.554,
+      "ttft_ms": 68.595
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 53.554,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c1 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 3,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.034,
+      "throughput": 116.756,
+      "ttft_ms": 22.803
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 116.756,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c2 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 4,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.97,
+      "throughput": 131.311,
+      "ttft_ms": 68.665
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 131.311,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c3 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 5,
+     "inspiration_ids": [
+      1,
+      3
+     ],
+     "metrics": {
+      "cache_hit": 0.82,
+      "throughput": 59.77,
+      "ttft_ms": 88.853
+     },
+     "parent_id": 4,
+     "passed": true,
+     "perf_metric": 59.77,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c1 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 6,
+     "inspiration_ids": [
+      4,
+      3
+     ],
+     "metrics": {
+      "cache_hit": 0.247,
+      "throughput": 104.7,
+      "ttft_ms": 96.532
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 104.7,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c2 of world 1"
+    },
+    {
+     "feedback": "fails g2.c3",
+     "generation": 2,
+     "has_commit": false,
+     "id": 7,
+     "inspiration_ids": [
+      1,
+      3
+     ],
+     "metrics": {},
+     "parent_id": 4,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c3 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 8,
+     "inspiration_ids": [
+      1,
+      6
+     ],
+     "metrics": {
+      "cache_hit": 0.437,
+      "throughput": 154.915,
+      "ttft_ms": 78.629
+     },
+     "parent_id": 5,
+     "passed": true,
+     "perf_metric": 154.915,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c1 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 9,
+     "inspiration_ids": [
+      4,
+      6
+     ],
+     "metrics": {
+      "cache_hit": 0.173,
+      "throughput": 111.293,
+      "ttft_ms": 86.548
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 111.293,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c2 of world 1"
+    },
+    {
+     "feedback": "fails g3.c3",
+     "generation": 3,
+     "has_commit": false,
+     "id": 10,
+     "inspiration_ids": [
+      1,
+      6
+     ],
+     "metrics": {},
+     "parent_id": 5,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c3 of world 1"
+    }
+   ],
+   "status": "succeeded"
+  },
+  "world=1,seed=0,objectives=two": {
+   "generation": 3,
+   "individuals": [
+    {
+     "feedback": "",
+     "generation": 0,
+     "has_commit": true,
+     "id": 1,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.796,
+      "throughput": 141.168,
+      "ttft_ms": 85.117
+     },
+     "parent_id": null,
+     "passed": true,
+     "perf_metric": 141.168,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate bootstrap.1 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 2,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.205,
+      "throughput": 53.554,
+      "ttft_ms": 68.595
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 53.554,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c1 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 3,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.034,
+      "throughput": 116.756,
+      "ttft_ms": 22.803
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 116.756,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c2 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 4,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.97,
+      "throughput": 131.311,
+      "ttft_ms": 68.665
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 131.311,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c3 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 5,
+     "inspiration_ids": [
+      1,
+      3
+     ],
+     "metrics": {
+      "cache_hit": 0.82,
+      "throughput": 59.77,
+      "ttft_ms": 88.853
+     },
+     "parent_id": 4,
+     "passed": true,
+     "perf_metric": 59.77,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c1 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 6,
+     "inspiration_ids": [
+      1,
+      3
+     ],
+     "metrics": {
+      "cache_hit": 0.247,
+      "throughput": 104.7,
+      "ttft_ms": 96.532
+     },
+     "parent_id": 4,
+     "passed": true,
+     "perf_metric": 104.7,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c2 of world 1"
+    },
+    {
+     "feedback": "fails g2.c3",
+     "generation": 2,
+     "has_commit": false,
+     "id": 7,
+     "inspiration_ids": [
+      1,
+      4
+     ],
+     "metrics": {},
+     "parent_id": 3,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c3 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 8,
+     "inspiration_ids": [
+      1,
+      6
+     ],
+     "metrics": {
+      "cache_hit": 0.437,
+      "throughput": 154.915,
+      "ttft_ms": 78.629
+     },
+     "parent_id": 5,
+     "passed": true,
+     "perf_metric": 154.915,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c1 of world 1"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 9,
+     "inspiration_ids": [
+      1,
+      6
+     ],
+     "metrics": {
+      "cache_hit": 0.173,
+      "throughput": 111.293,
+      "ttft_ms": 86.548
+     },
+     "parent_id": 4,
+     "passed": true,
+     "perf_metric": 111.293,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c2 of world 1"
+    },
+    {
+     "feedback": "fails g3.c3",
+     "generation": 3,
+     "has_commit": false,
+     "id": 10,
+     "inspiration_ids": [
+      1,
+      6
+     ],
+     "metrics": {},
+     "parent_id": 3,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c3 of world 1"
+    }
+   ],
+   "status": "succeeded"
+  },
+  "world=2,seed=7,objectives=one": {
+   "generation": 3,
+   "individuals": [
+    {
+     "feedback": "fails bootstrap.1",
+     "generation": 0,
+     "has_commit": true,
+     "id": 1,
+     "inspiration_ids": [],
+     "metrics": {},
+     "parent_id": null,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate bootstrap.1 of world 2"
+    },
+    {
+     "feedback": "",
+     "generation": 0,
+     "has_commit": true,
+     "id": 2,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.36,
+      "throughput": 71.618,
+      "ttft_ms": 14.084
+     },
+     "parent_id": null,
+     "passed": true,
+     "perf_metric": 71.618,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate bootstrap.2 of world 2"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 3,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.317,
+      "throughput": 50.862,
+      "ttft_ms": 11.975
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 50.862,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c1 of world 2"
+    },
+    {
+     "feedback": "fails g1.c2",
+     "generation": 1,
+     "has_commit": false,
+     "id": 4,
+     "inspiration_ids": [],
+     "metrics": {},
+     "parent_id": 2,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c2 of world 2"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 5,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.237,
+      "throughput": 151.476,
+      "ttft_ms": 44.062
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 151.476,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c3 of world 2"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 6,
+     "inspiration_ids": [
+      2,
+      3
+     ],
+     "metrics": {
+      "cache_hit": 0.811,
+      "throughput": 137.44,
+      "ttft_ms": 57.466
+     },
+     "parent_id": 5,
+     "passed": true,
+     "perf_metric": 137.44,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c1 of world 2"
+    },
+    {
+     "feedback": "fails g2.c2",
+     "generation": 2,
+     "has_commit": false,
+     "id": 7,
+     "inspiration_ids": [
+      2,
+      3
+     ],
+     "metrics": {},
+     "parent_id": 5,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c2 of world 2"
+    },
+    {
+     "feedback": "fails g2.c3",
+     "generation": 2,
+     "has_commit": false,
+     "id": 8,
+     "inspiration_ids": [
+      2,
+      3
+     ],
+     "metrics": {},
+     "parent_id": 5,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c3 of world 2"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 9,
+     "inspiration_ids": [
+      6,
+      3
+     ],
+     "metrics": {
+      "cache_hit": 0.031,
+      "throughput": 71.128,
+      "ttft_ms": 93.968
+     },
+     "parent_id": 5,
+     "passed": true,
+     "perf_metric": 71.128,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c1 of world 2"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 10,
+     "inspiration_ids": [
+      6,
+      2
+     ],
+     "metrics": {
+      "cache_hit": 0.513,
+      "throughput": 103.266,
+      "ttft_ms": 82.149
+     },
+     "parent_id": 5,
+     "passed": true,
+     "perf_metric": 103.266,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c2 of world 2"
+    },
+    {
+     "feedback": "fails g3.c3",
+     "generation": 3,
+     "has_commit": false,
+     "id": 11,
+     "inspiration_ids": [
+      6,
+      2
+     ],
+     "metrics": {},
+     "parent_id": 5,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c3 of world 2"
+    }
+   ],
+   "status": "succeeded"
+  },
+  "world=2,seed=7,objectives=two": {
+   "generation": 3,
+   "individuals": [
+    {
+     "feedback": "fails bootstrap.1",
+     "generation": 0,
+     "has_commit": true,
+     "id": 1,
+     "inspiration_ids": [],
+     "metrics": {},
+     "parent_id": null,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate bootstrap.1 of world 2"
+    },
+    {
+     "feedback": "",
+     "generation": 0,
+     "has_commit": true,
+     "id": 2,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.36,
+      "throughput": 71.618,
+      "ttft_ms": 14.084
+     },
+     "parent_id": null,
+     "passed": true,
+     "perf_metric": 71.618,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate bootstrap.2 of world 2"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 3,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.317,
+      "throughput": 50.862,
+      "ttft_ms": 11.975
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 50.862,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c1 of world 2"
+    },
+    {
+     "feedback": "fails g1.c2",
+     "generation": 1,
+     "has_commit": false,
+     "id": 4,
+     "inspiration_ids": [],
+     "metrics": {},
+     "parent_id": 2,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c2 of world 2"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 5,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.237,
+      "throughput": 151.476,
+      "ttft_ms": 44.062
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 151.476,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c3 of world 2"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 6,
+     "inspiration_ids": [
+      5,
+      3
+     ],
+     "metrics": {
+      "cache_hit": 0.811,
+      "throughput": 137.44,
+      "ttft_ms": 57.466
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 137.44,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c1 of world 2"
+    },
+    {
+     "feedback": "fails g2.c2",
+     "generation": 2,
+     "has_commit": false,
+     "id": 7,
+     "inspiration_ids": [
+      5,
+      3
+     ],
+     "metrics": {},
+     "parent_id": 2,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c2 of world 2"
+    },
+    {
+     "feedback": "fails g2.c3",
+     "generation": 2,
+     "has_commit": false,
+     "id": 8,
+     "inspiration_ids": [
+      5,
+      3
+     ],
+     "metrics": {},
+     "parent_id": 2,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c3 of world 2"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 9,
+     "inspiration_ids": [
+      5,
+      6
+     ],
+     "metrics": {
+      "cache_hit": 0.031,
+      "throughput": 71.128,
+      "ttft_ms": 93.968
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 71.128,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c1 of world 2"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 10,
+     "inspiration_ids": [
+      5,
+      3
+     ],
+     "metrics": {
+      "cache_hit": 0.513,
+      "throughput": 103.266,
+      "ttft_ms": 82.149
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 103.266,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c2 of world 2"
+    },
+    {
+     "feedback": "fails g3.c3",
+     "generation": 3,
+     "has_commit": false,
+     "id": 11,
+     "inspiration_ids": [
+      5,
+      3
+     ],
+     "metrics": {},
+     "parent_id": 2,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c3 of world 2"
+    }
+   ],
+   "status": "succeeded"
+  },
+  "world=3,seed=42,objectives=one": {
+   "generation": 3,
+   "individuals": [
+    {
+     "feedback": "",
+     "generation": 0,
+     "has_commit": true,
+     "id": 1,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.696,
+      "throughput": 40.572,
+      "ttft_ms": 92.05
+     },
+     "parent_id": null,
+     "passed": true,
+     "perf_metric": 40.572,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate bootstrap.1 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 2,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.999,
+      "throughput": 132.613,
+      "ttft_ms": 81.281
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 132.613,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c1 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 3,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.376,
+      "throughput": 60.471,
+      "ttft_ms": 30.163
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 60.471,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c2 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 4,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.574,
+      "throughput": 108.941,
+      "ttft_ms": 29.357
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 108.941,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c3 of world 3"
+    },
+    {
+     "feedback": "fails g2.c1",
+     "generation": 2,
+     "has_commit": false,
+     "id": 5,
+     "inspiration_ids": [
+      4,
+      3
+     ],
+     "metrics": {},
+     "parent_id": 2,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c1 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 6,
+     "inspiration_ids": [
+      4,
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.491,
+      "throughput": 155.988,
+      "ttft_ms": 47.406
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 155.988,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c2 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 7,
+     "inspiration_ids": [
+      4,
+      3
+     ],
+     "metrics": {
+      "cache_hit": 0.883,
+      "throughput": 102.37,
+      "ttft_ms": 23.209
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 102.37,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c3 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 8,
+     "inspiration_ids": [
+      2,
+      4
+     ],
+     "metrics": {
+      "cache_hit": 0.853,
+      "throughput": 150.013,
+      "ttft_ms": 89.752
+     },
+     "parent_id": 6,
+     "passed": true,
+     "perf_metric": 150.013,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c1 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 9,
+     "inspiration_ids": [
+      2,
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.859,
+      "throughput": 62.455,
+      "ttft_ms": 91.633
+     },
+     "parent_id": 6,
+     "passed": true,
+     "perf_metric": 62.455,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c2 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 10,
+     "inspiration_ids": [
+      2,
+      7
+     ],
+     "metrics": {
+      "cache_hit": 0.591,
+      "throughput": 51.429,
+      "ttft_ms": 48.52
+     },
+     "parent_id": 6,
+     "passed": true,
+     "perf_metric": 51.429,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c3 of world 3"
+    }
+   ],
+   "status": "succeeded"
+  },
+  "world=3,seed=42,objectives=two": {
+   "generation": 3,
+   "individuals": [
+    {
+     "feedback": "",
+     "generation": 0,
+     "has_commit": true,
+     "id": 1,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.696,
+      "throughput": 40.572,
+      "ttft_ms": 92.05
+     },
+     "parent_id": null,
+     "passed": true,
+     "perf_metric": 40.572,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate bootstrap.1 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 2,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.999,
+      "throughput": 132.613,
+      "ttft_ms": 81.281
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 132.613,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c1 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 3,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.376,
+      "throughput": 60.471,
+      "ttft_ms": 30.163
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 60.471,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c2 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 4,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.574,
+      "throughput": 108.941,
+      "ttft_ms": 29.357
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 108.941,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c3 of world 3"
+    },
+    {
+     "feedback": "fails g2.c1",
+     "generation": 2,
+     "has_commit": false,
+     "id": 5,
+     "inspiration_ids": [
+      4,
+      3
+     ],
+     "metrics": {},
+     "parent_id": 2,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c1 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 6,
+     "inspiration_ids": [
+      4,
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.491,
+      "throughput": 155.988,
+      "ttft_ms": 47.406
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 155.988,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c2 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 7,
+     "inspiration_ids": [
+      4,
+      3
+     ],
+     "metrics": {
+      "cache_hit": 0.883,
+      "throughput": 102.37,
+      "ttft_ms": 23.209
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 102.37,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c3 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 8,
+     "inspiration_ids": [
+      6,
+      3
+     ],
+     "metrics": {
+      "cache_hit": 0.853,
+      "throughput": 150.013,
+      "ttft_ms": 89.752
+     },
+     "parent_id": 4,
+     "passed": true,
+     "perf_metric": 150.013,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c1 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 9,
+     "inspiration_ids": [
+      6,
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.859,
+      "throughput": 62.455,
+      "ttft_ms": 91.633
+     },
+     "parent_id": 4,
+     "passed": true,
+     "perf_metric": 62.455,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c2 of world 3"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 10,
+     "inspiration_ids": [
+      6,
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.591,
+      "throughput": 51.429,
+      "ttft_ms": 48.52
+     },
+     "parent_id": 7,
+     "passed": true,
+     "perf_metric": 51.429,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c3 of world 3"
+    }
+   ],
+   "status": "succeeded"
+  },
+  "world=4,seed=5,objectives=one": {
+   "generation": 3,
+   "individuals": [
+    {
+     "feedback": "",
+     "generation": 0,
+     "has_commit": true,
+     "id": 1,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.738,
+      "throughput": 84.081,
+      "ttft_ms": 26.927
+     },
+     "parent_id": null,
+     "passed": true,
+     "perf_metric": 84.081,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate bootstrap.1 of world 4"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 2,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.119,
+      "throughput": 121.723,
+      "ttft_ms": 62.176
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 121.723,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c1 of world 4"
+    },
+    {
+     "feedback": "fails g1.c2",
+     "generation": 1,
+     "has_commit": false,
+     "id": 3,
+     "inspiration_ids": [],
+     "metrics": {},
+     "parent_id": 1,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c2 of world 4"
+    },
+    {
+     "feedback": "fails g1.c3",
+     "generation": 1,
+     "has_commit": false,
+     "id": 4,
+     "inspiration_ids": [],
+     "metrics": {},
+     "parent_id": 1,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c3 of world 4"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 5,
+     "inspiration_ids": [
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.062,
+      "throughput": 105.329,
+      "ttft_ms": 25.628
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 105.329,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c1 of world 4"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 6,
+     "inspiration_ids": [
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.007,
+      "throughput": 84.046,
+      "ttft_ms": 11.194
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 84.046,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c2 of world 4"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 7,
+     "inspiration_ids": [
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.594,
+      "throughput": 148.996,
+      "ttft_ms": 51.823
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 148.996,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c3 of world 4"
+    },
+    {
+     "feedback": "fails g3.c1",
+     "generation": 3,
+     "has_commit": false,
+     "id": 8,
+     "inspiration_ids": [
+      2,
+      6
+     ],
+     "metrics": {},
+     "parent_id": 7,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c1 of world 4"
+    },
+    {
+     "feedback": "fails g3.c2",
+     "generation": 3,
+     "has_commit": false,
+     "id": 9,
+     "inspiration_ids": [
+      2,
+      6
+     ],
+     "metrics": {},
+     "parent_id": 7,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c2 of world 4"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 10,
+     "inspiration_ids": [
+      2,
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.72,
+      "throughput": 106.506,
+      "ttft_ms": 83.654
+     },
+     "parent_id": 7,
+     "passed": true,
+     "perf_metric": 106.506,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c3 of world 4"
+    }
+   ],
+   "status": "succeeded"
+  },
+  "world=4,seed=5,objectives=two": {
+   "generation": 3,
+   "individuals": [
+    {
+     "feedback": "",
+     "generation": 0,
+     "has_commit": true,
+     "id": 1,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.738,
+      "throughput": 84.081,
+      "ttft_ms": 26.927
+     },
+     "parent_id": null,
+     "passed": true,
+     "perf_metric": 84.081,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate bootstrap.1 of world 4"
+    },
+    {
+     "feedback": "",
+     "generation": 1,
+     "has_commit": true,
+     "id": 2,
+     "inspiration_ids": [],
+     "metrics": {
+      "cache_hit": 0.119,
+      "throughput": 121.723,
+      "ttft_ms": 62.176
+     },
+     "parent_id": 1,
+     "passed": true,
+     "perf_metric": 121.723,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c1 of world 4"
+    },
+    {
+     "feedback": "fails g1.c2",
+     "generation": 1,
+     "has_commit": false,
+     "id": 3,
+     "inspiration_ids": [],
+     "metrics": {},
+     "parent_id": 1,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c2 of world 4"
+    },
+    {
+     "feedback": "fails g1.c3",
+     "generation": 1,
+     "has_commit": false,
+     "id": 4,
+     "inspiration_ids": [],
+     "metrics": {},
+     "parent_id": 1,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g1.c3 of world 4"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 5,
+     "inspiration_ids": [
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.062,
+      "throughput": 105.329,
+      "ttft_ms": 25.628
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 105.329,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c1 of world 4"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 6,
+     "inspiration_ids": [
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.007,
+      "throughput": 84.046,
+      "ttft_ms": 11.194
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 84.046,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c2 of world 4"
+    },
+    {
+     "feedback": "",
+     "generation": 2,
+     "has_commit": true,
+     "id": 7,
+     "inspiration_ids": [
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.594,
+      "throughput": 148.996,
+      "ttft_ms": 51.823
+     },
+     "parent_id": 2,
+     "passed": true,
+     "perf_metric": 148.996,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g2.c3 of world 4"
+    },
+    {
+     "feedback": "fails g3.c1",
+     "generation": 3,
+     "has_commit": false,
+     "id": 8,
+     "inspiration_ids": [
+      5,
+      2
+     ],
+     "metrics": {},
+     "parent_id": 7,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c1 of world 4"
+    },
+    {
+     "feedback": "fails g3.c2",
+     "generation": 3,
+     "has_commit": false,
+     "id": 9,
+     "inspiration_ids": [
+      5,
+      6
+     ],
+     "metrics": {},
+     "parent_id": 7,
+     "passed": false,
+     "perf_metric": null,
+     "perf_unit": null,
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c2 of world 4"
+    },
+    {
+     "feedback": "",
+     "generation": 3,
+     "has_commit": true,
+     "id": 10,
+     "inspiration_ids": [
+      5,
+      1
+     ],
+     "metrics": {
+      "cache_hit": 0.72,
+      "throughput": 106.506,
+      "ttft_ms": 83.654
+     },
+     "parent_id": 7,
+     "passed": true,
+     "perf_metric": 106.506,
+     "perf_unit": "tokens/s",
+     "policy_parent_id": null,
+     "policy_target_island": null,
+     "summary": "candidate g3.c3 of world 4"
+    }
+   ],
+   "status": "succeeded"
+  }
+ }
+}

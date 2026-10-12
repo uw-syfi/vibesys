@@ -592,13 +592,17 @@ def record_candidate_retained(record: RoundRecord) -> bool | None:
     return record.candidate_retained
 
 
-def provisional_candidate_retained(disposition: CandidateDisposition) -> bool | None:
-    """Translate an implementer disposition into provisional branch retention."""
-    if disposition is CandidateDisposition.DISCARD:
-        return False
-    if disposition in {CandidateDisposition.PREREQUISITE, CandidateDisposition.PARETO_FRONTIER}:
-        return True
-    return None
+def unmeasured_candidate_retained(disposition: CandidateDisposition) -> bool | None:
+    """Fail closed when no trusted comparison decided candidate retention.
+
+    The implementer's disposition and justification remain recorded evidence,
+    but they are not authority to advance a checkpoint. ``UNASSESSED`` stays
+    unknown; every explicit recommendation without a framework measurement is
+    recorded as not retained.
+    """
+    if disposition is CandidateDisposition.UNASSESSED:
+        return None
+    return False
 
 
 def trusted_candidate_records(

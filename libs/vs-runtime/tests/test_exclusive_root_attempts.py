@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from tests.support.session_world import SettledRunInvocations
 from tests.support.workspace_world import WorkspaceEnv, open_workspace_env
@@ -397,8 +397,20 @@ class _Model:
     holder: AttemptRef | None = None
     bound: set[AttemptRef] = field(default_factory=set)
     ended: set[AttemptRef] = field(default_factory=set)
+    seen: dict[str, int] = field(default_factory=dict)
+    """The highest generation of each attempt any request has named, granted or not."""
+
+    def _admit(self, attempt: AttemptRef) -> bool:
+        """Record the generation; ``False`` once a request named a higher one."""
+        key = attempt.attempt_id.root
+        if attempt.generation < self.seen.get(key, 0):
+            return False
+        self.seen[key] = attempt.generation
+        return True
 
     def ensure(self, attempt: AttemptRef) -> ObservationStatus:
+        if not self._admit(attempt):
+            return ObservationStatus.REJECTED
         holder = self.holder
         if attempt in self.ended:
             return ObservationStatus.REJECTED
@@ -411,6 +423,8 @@ class _Model:
         return ObservationStatus.SUCCEEDED
 
     def discard(self, attempt: AttemptRef) -> ObservationStatus:
+        if not self._admit(attempt):
+            return ObservationStatus.REJECTED
         if attempt in self.ended:
             return ObservationStatus.SUCCEEDED
         if attempt != self.holder:
@@ -429,7 +443,7 @@ async def _replay(env: WorkspaceEnv, ops: list[Op], crash: RestoreCrash) -> None
     base = revision_ref(cast("str", root.revision))
     plan = WorkspacePlan(mode=_ROOT, base=base)
     model = _Model()
-    sent: list[Request] = []
+    sent: list[tuple[Request, AttemptRef, ObservationStatus]] = []
     for index, op in enumerate(ops):
         attempt = _POOL[op.pick % len(_POOL)]
         dirty_names = (*_LEFTOVERS, "candidate.py")
@@ -437,15 +451,24 @@ async def _replay(env: WorkspaceEnv, ops: list[Op], crash: RestoreCrash) -> None
         if StoreWorkspaceReceipts(MortalStore(env)).root_baseline() is not None:
             _write_files(root.path, dirty_names)
         before = _visible_files(root.path)
-        was_new_hold = model.holder != attempt
+        replayed: Request | None = None
+        slot = op.pick % len(sent) if sent else 0
         if op.kind == "repeat" and sent:
-            # A sealed request answers again without effect: nothing changes.
-            await host.run(sent[op.pick % len(sent)])
-            assert host.holder() == model.holder
-            assert _visible_files(root.path) == before
-            continue
-        if op.kind == "discard" and attempt in model.bound:
-            request: Request = DiscardWorkspace(**_common(attempt, f"op-{index}"), attempt=attempt)
+            replayed, attempt, answered = sent[slot]
+            if answered is not ObservationStatus.UNKNOWN:
+                # A sealed request answers again without effect: nothing changes.
+                await host.run(replayed)
+                assert host.holder() == model.holder
+                assert _visible_files(root.path) == before
+                continue
+            # An Unknown answer is never stored, so repeating it is a new evaluation.
+        was_new_hold = model.holder != attempt
+        if replayed is not None:
+            request: Request = replayed
+            expected = model.ensure(attempt)
+            released = False
+        elif op.kind == "discard" and attempt in model.bound:
+            request = DiscardWorkspace(**_common(attempt, f"op-{index}"), attempt=attempt)
             expected = model.discard(attempt)
             released = True
         elif op.kind == "ensure":
@@ -454,7 +477,10 @@ async def _replay(env: WorkspaceEnv, ops: list[Op], crash: RestoreCrash) -> None
             released = False
         else:
             continue
-        sent.append(request)
+        if replayed is None:
+            sent.append((request, attempt, expected))
+        else:
+            sent[slot] = (request, attempt, expected)  # the new answer is what a repeat sees
         result = await host.run(request)
         assert _status(result) is expected, (op, attempt, expected)
         assert host.holder() == model.holder
@@ -467,6 +493,22 @@ async def _replay(env: WorkspaceEnv, ops: list[Op], crash: RestoreCrash) -> None
     max_examples=40, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
 )
 @given(ops=st.lists(_OPS, min_size=1, max_size=14))
+@example(  # a refused ensure of generation 1 still retires generation 0 of that attempt
+    ops=[Op("ensure", 0), Op("ensure", 3), Op("ensure", 2)]
+)
+@example(  # a refused ensure is retried, not sealed, so repeating it after the release grants
+    ops=[Op("ensure", 0), Op("ensure", 2), Op("discard", 0), Op("repeat", 1)]
+)
+@example(  # once that retry is granted it is sealed, and a later repeat has no effect
+    ops=[
+        Op("ensure", 2),
+        Op("ensure", 0),
+        Op("discard", 2),
+        Op("repeat", 1),
+        Op("ensure", 1),
+        Op("repeat", 1),
+    ]
+)
 def test_an_ended_generation_is_never_granted_again_and_a_stale_release_never_reports_success(
     tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, ops: list[Op]
 ) -> None:

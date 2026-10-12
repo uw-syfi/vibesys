@@ -28,7 +28,11 @@ trusted benchmark metric.
 Your working directory contains the candidate and a `{{ profiler_support_name }}/`
 directory with the OpenTelemetry profiler MCP server (`{{ profiler_mcp_name }}`).
 
+{% if benchmark_command is defined and benchmark_command %}
 Benchmark command: {{ benchmark_command }}
+{% else %}
+The benchmark command is documented in `OBJECTIVE.md`.
+{% endif %}
 
 {% if domain_profiler %}
 {{ domain_profiler }}

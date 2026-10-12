@@ -288,7 +288,7 @@ depends_on = ["vibesys.dynamic_core", "vibesys.orchestration.dynamic.parents", "
 [[modules]]
 path = "vibesys.orchestration.evolve"
 layer = "loops"
-depends_on = ["vibesys.orchestration.attempts", "vibesys.orchestration.structured_turn", "vibesys.domains", "vibesys.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.evolve_core", "vibesys.orchestration.evolve.models"]
 
 [[modules]]
 path = "vibesys.orchestration.issue_queue"
@@ -337,7 +337,7 @@ depends_on = ["vibesys.prompts", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.profiler_agent"
 layer = "orchestration_host"
-depends_on = ["vibesys.prompts", "vibesys.orchestration.structured_turn", "vibesys.run.validated_turn", "vs_evaluation.api", "vs_runtime"]
+depends_on = ["vibesys.prompts", "vibesys.orchestration.structured_turn", "vibesys.run.validated_turn", "vs_core", "vs_evaluation.api", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.skill_selection"
@@ -377,7 +377,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp"]
+depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp"]
 
 [[modules]]
 path = "vibesys.run.evaluation_socket"
@@ -439,7 +439,7 @@ depends_on = ["vibesys", "vs_project", "vs_runtime", "vs_prompts"]
 [[modules]]
 path = "vibesys.orchestration.evolve.population"
 layer = "roles_search"
-depends_on = ["vibesys.metrics", "vibesys.orchestration.profilers"]
+depends_on = ["vs_core", "vibesys.metrics"]
 
 [[modules]]
 path = "vibesys.prompts"
@@ -930,7 +930,7 @@ expose = ["MetricComparison", "MetricSpace", "Objective"]
 from = ["vibesys.api.metrics"]
 
 [[interfaces]]
-expose = ["CLI_PROFILER_CHOICES", "ProfilerKind", "coerce_profiler_kind"]
+expose = ["CLI_PROFILER_CHOICES", "ProfilerKind", "ProfilerPreflightResult", "coerce_profiler_kind"]
 from = ["vibesys.api.profilers"]
 
 [[interfaces]]
@@ -982,7 +982,7 @@ expose = ["create_evaluation", "trusted_evaluation_plan"]
 from = ["vibesys.run.evaluation"]
 
 [[interfaces]]
-expose = ["native_profiler_preflight", "resolve_run_profiler", "validate_run_request"]
+expose = ["ProfilerPreflight", "native_profiler_preflight", "resolve_run_profiler", "validate_run_request"]
 from = ["vibesys.run.profilers"]
 
 [[interfaces]]
@@ -1102,7 +1102,7 @@ expose = ["RunHandle", "Runs"]
 
 [[interfaces]]
 from = ["vibesys.api.wiring"]
-expose = ["AgentToolContext", "RunResources", "SessionAgents", "SessionImplementations", "create_session", "platform_skill_selection"]
+expose = ["AgentToolContext", "ProfilerPreflight", "RunResources", "SessionAgents", "SessionImplementations", "create_session", "platform_skill_selection"]
 
 [[interfaces]]
 from = ["vibesys.api.catalog"]
@@ -1118,11 +1118,11 @@ expose = ["InProcessRuns", "TaskRunHandle"]
 
 [[modules]]
 path = "vibesys.api.assembly"
-depends_on = ["vibesys.api.auxiliary", "vibesys.run", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
+depends_on = ["vibesys.api.auxiliary", "vibesys.run", "vibesys.run.profilers", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
 
 [[interfaces]]
 from = ["vibesys.api.assembly"]
-expose = ["SessionAgents", "SessionImplementations"]
+expose = ["ProfilerPreflight", "SessionAgents", "SessionImplementations"]
 
 [[modules]]
 path = "vs_evaluation.settlements"
@@ -1454,6 +1454,55 @@ expose = ["CORE_ROLES", "DESIGNER", "IMPLEMENTER", "JUDGE", "PROFILER"]
 path = "vibesys.multi_roles"
 layer = "loops"
 depends_on = ["vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.multi.core_policy", "vibesys.orchestration.multi.strategy"]
+
+[[modules]]
+path = "vibesys.orchestration.evolve.models"
+layer = "roles_search"
+depends_on = ["vibesys.metrics", "vibesys.orchestration.evolve.population", "vibesys.orchestration.review"]
+
+[[interfaces]]
+expose = ["[A-Za-z][A-Za-z0-9_]*"]
+from = ["vibesys.orchestration.evolve.models"]
+
+[[modules]]
+path = "vibesys.orchestration.evolve.strategy"
+layer = "loops"
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.population", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.prompts"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.evolve.strategy"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vibesys.orchestration.evolve.core_policy"
+layer = "loops"
+depends_on = ["vs_core", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.strategy", "vibesys.orchestration.profilers", "vibesys.run.contracts"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.evolve.core_policy"]
+expose = ["api", "api\\..*"]
+
+[[interfaces]]
+from = ["vibesys.evolve_core"]
+expose = ["evolve_core_registration"]
+
+[[modules]]
+# Assembles the evolve core policy from the run's resolved resources: the one place that
+# stores the recipe, builds the operation catalog and reads the run record.
+path = "vibesys.evolve_core"
+layer = "loops"
+depends_on = ["vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.evolve_roles", "vibesys.orchestration.evolve.core_policy", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.strategy", "vibesys.plugin_registration", "vibesys.prompts"]
+
+[[interfaces]]
+from = ["vibesys.evolve_roles"]
+expose = ["CORE_ROLES", "JUDGE", "MUTATOR", "PROFILER"]
+
+[[modules]]
+# The agent roles of a core evolve run: host wiring (vs_runtime values, template file paths)
+# that the pure core_policy may not hold.
+path = "vibesys.evolve_roles"
+layer = "loops"
+depends_on = ["vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.evolve.core_policy", "vibesys.orchestration.evolve.strategy"]
 
 [[modules]]
 path = "vs_core._session_scope"

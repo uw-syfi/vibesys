@@ -5,7 +5,7 @@ Handlers never propose decisions; they move the record to the phase and step who
 leave the state unchanged.
 """
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 
 from vibesys.candidates.api import STOPPED
 from vibesys.hypothesis import AgentAttribution, rounds
@@ -55,14 +55,14 @@ from vs_core.api import (
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
-    Waitable,
+    WaitableReply,
     WaitingForEvaluation,
     ledger_refs,
     may_resubmit,
     trusted_keys,
 )
 
-_REPLY = TypeAdapter(Waitable[SingleAgentRoundResponse])
+_REPLY = WaitableReply[SingleAgentRoundResponse]
 
 
 def _put(state: SingleStrategyState, record: RoundState) -> SingleStrategyState:
@@ -291,7 +291,7 @@ def settle_retained(
 
 def _decode(payload: str) -> SingleAgentRoundResponse | WaitingForEvaluation | str:
     try:
-        return _REPLY.validate_python(_REPLY.validate_json(payload))
+        return _REPLY.model_validate_json(payload).reply
     except ValidationError as error:
         return str(error)
 

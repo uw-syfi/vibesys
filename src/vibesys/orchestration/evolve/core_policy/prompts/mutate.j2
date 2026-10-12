@@ -1,0 +1,106 @@
+{% from '_revision.j2' import rev %}
+{% if modality %}{% include "_modality/" ~ modality ~ "/implementer.j2" %}
+{% endif %}
+You are the mutation operator in an LLM-driven evolutionary search. Produce one
+offspring by editing the workspace in place. A passing offspring is profiled and
+added to the population; a failing offspring is discarded after its feedback is
+recorded.
+
+## Authoritative inputs
+
+{% include 'run_context.j2' %}
+{% include 'agent_evaluation.j2' %}
+
+Your workspace is an isolated candidate at `{{ rev(base_revision) }}`; edit it freely.
+
+## Correctness gates
+
+The offspring must preserve the input bundle's candidate contract. Evaluator-owned
+files and commands are trusted infrastructure: inspect them to understand the
+contract, but do not edit or bypass them. Only the framework's trusted evaluation
+decides whether the offspring passes.
+
+{% if is_cold_start %}
+## Bootstrap the first passing seed
+
+{% if repair_seed %}
+A previous bootstrap attempt's files are already in the workspace. Repair that
+implementation in place with the smallest change that addresses the judge's
+feedback; do not rebuild working pieces from scratch.
+{% else %}
+There is no passing parent yet. Build the smallest correct initial candidate from
+the reference at `{{ reference_path }}` and the contracts in the input bundle.
+Prioritize an end-to-end passing implementation over optimization; later
+generations will mutate it.
+{% endif %}
+
+{% if failed_lessons %}
+### Lessons from {{ num_failed_attempts }} failed bootstrap attempt(s)
+
+Do not repeat these failures:
+
+{% for lesson in failed_lessons %}
+{{ loop.index }}. {{ lesson }}
+{% endfor %}
+{% endif %}
+
+{% else %}
+## Parent
+
+- id: #{{ parent.id }}
+- generation: {{ parent.generation }}
+- perf_metric: {{ parent.perf_metric }}{% if parent.perf_unit %} {{ parent.perf_unit }}{% endif %}
+{% if parent.metrics %}
+- metrics:
+{% for key, value in parent.metrics %}
+  - `{{ key }}`: {{ value }}
+{% endfor %}
+{% endif %}
+- summary: {{ parent.summary }}
+
+The workspace is already checked out to this parent's tree. Read it before
+editing and preserve the behavior that made it pass.
+
+{% if parent.feedback %}
+### Judge feedback that accepted the parent
+
+{{ parent.feedback }}
+{% endif %}
+{% endif %}
+
+{% if inspirations %}
+## Inspirations
+
+These are passing peers, not the checked-out parent. Their summaries can suggest
+one idea to transfer into this lineage:
+
+{% for individual in inspirations %}
+### Individual #{{ individual.id }} (generation {{ individual.generation }})
+
+Performance: {{ individual.perf_metric }}{% if individual.perf_unit %} {{ individual.perf_unit }}{% endif %}
+{% if individual.metrics %}
+{% for key, value in individual.metrics %}
+- `{{ key }}`: {{ value }}
+{% endfor %}
+{% endif %}
+{{ individual.summary }}
+
+{% endfor %}
+{% endif %}
+
+## Mutation discipline
+
+For an existing passing parent, make one focused, attributable change. Keep the
+candidate contract intact and choose a change expected to move the objective's
+headline metric. Do not stack unrelated experiments in one offspring.
+
+## Output
+
+After editing the workspace, return exactly one JSON object without markdown
+fences:
+
+{
+  "summary": "<what changed and any domain references consulted>",
+  "hypothesis": "<why the change should improve the headline metric>",
+  "expected_behavior": "<observable result expected from evaluation>"
+}

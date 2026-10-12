@@ -211,6 +211,55 @@ describe('SettingsStore', () => {
     ]);
   });
 
+  test('regression: a failed host-settings replace removes its staged file', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'hosts.json');
+    const staging = `${path}.${process.pid}.tmp`;
+    const existing = {version: 2, hosts: {'ssh:existing': {checkout: '/existing'}}};
+    const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
+    const {settings} = store(filesystem, directory);
+    filesystem.failNextReplace(path, fileError('ENOSPC', path));
+
+    const changing = settings.updateHosts(current =>
+      withHostSettings(current, {kind: 'ssh', alias: 'new'}, {checkout: '/new'}),
+    );
+    await expect(changing).rejects.toThrow('ENOSPC');
+
+    expect(JSON.parse(filesystem.text(path))).toEqual(existing);
+    expect(() => filesystem.text(staging)).toThrow();
+    expect(filesystem.operations.map(operation => operation.kind)).toEqual([
+      'read',
+      'write',
+      'replace',
+      'remove',
+    ]);
+  });
+
+  test('regression: a failed recent-runs replace removes its staged file', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'recent.json');
+    const staging = `${path}.${process.pid}.tmp`;
+    const existing = {version: 2, runs: [run(1)]};
+    const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
+    const {settings} = store(filesystem, directory);
+    const heard: RecentFile[] = [];
+    settings.onRecentChanged(recent => heard.push(recent));
+    filesystem.failNextReplace(path, fileError('EACCES', path));
+
+    const changing = settings.updateRecent(current => remember(current, run(2)));
+    await expect(changing).rejects.toThrow('EACCES');
+
+    expect(heard).toEqual([]);
+    expect(JSON.parse(filesystem.text(path))).toEqual(existing);
+    expect(() => filesystem.text(staging)).toThrow();
+    expect(filesystem.operations.map(operation => operation.kind)).toEqual([
+      'read',
+      'write',
+      'replace',
+      'remove',
+    ]);
+  });
+
   test('regression: every recent update is pushed, so Recent never needs a manual refresh', async () => {
     const {settings} = store();
     const heard: RecentFile[] = [];

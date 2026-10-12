@@ -88,7 +88,7 @@ function settleOne(random: Seeded, live: Live, snapshot: SessionSnapshot): Event
 }
 
 function plainEvent(random: Seeded): SessionEvent {
-  switch (random.int(12)) {
+  switch (random.int(13)) {
     case 0:
       return {type: 'start'};
     case 1:
@@ -114,6 +114,8 @@ function plainEvent(random: Seeded): SessionEvent {
       return {type: 'offline', runEnded: random.bool()};
     case 10:
       return {type: 'reconnect-controls'};
+    case 11:
+      return {type: 'projection-rejected', error: random.pick(ERRORS)};
     default:
       // Rare, so most sequences stay open long enough to interleave.
       return random.int(4) === 0 ? {type: 'close'} : {type: 'start'};
@@ -188,6 +190,13 @@ function fencingProperties(
 /** Problem epochs: monotone, and a snapshot clears only the stale causes its load saw. */
 function problemProperties(before: SessionSnapshot, event: Event, after: SessionSnapshot): void {
   expect(after.context.problemEpoch).toBeGreaterThanOrEqual(before.context.problemEpoch);
+  // A transient connection fault never erases stronger snapshot or projection evidence.
+  const stronger =
+    before.context.streamProblem === 'snapshot' || before.context.streamProblem === 'projection';
+  if (stronger && ['stream', 'fault', 'offline'].includes(event.type)) {
+    expect(after.context.streamProblem).toBe(before.context.streamProblem);
+    expect(after.context.view.error).toBe(before.context.view.error);
+  }
   const cleared = before.context.streamProblem !== 'none' && after.context.streamProblem === 'none';
   if (!cleared) return;
   const load = answered(before, event);
@@ -232,8 +241,9 @@ function properties(
   after: SessionSnapshot,
   actions: readonly MachineAction[],
 ): void {
-  // The snapshot on screen is never forgotten.
+  // The snapshot on screen is never forgotten, and only a successful load puts one there.
   if (before.context.view.hasSnapshot) expect(after.context.view.hasSnapshot).toBe(true);
+  else if (after.context.view.hasSnapshot) expect(answered(before, event)?.result.ok).toBe(true);
   // A closed session stays closed and does nothing.
   if (before.status === 'done') expect({after, actions}).toEqual({after: before, actions: []});
   if (event.type === 'close' && before.status === 'active') {
@@ -420,6 +430,56 @@ describe('session machine', () => {
       {kind: 'reevaluate-stream'},
     ]);
     expect(accepted.state.matches({open: {recovery: 'none'}})).toBe(true);
+  });
+
+  test('keeps a rejected stream projection stale until newer snapshot proof succeeds', () => {
+    let state = steps([
+      {type: 'start'},
+      {type: 'stream-established', storeId: 'store-a'},
+      subscribed,
+      replacementDone(loaded(1)),
+    ]);
+    expect(state.context.view.status).toBe('connected');
+
+    const rejection = new Error('event stream crossed run identities');
+    state = steps(
+      [
+        {type: 'projection-rejected', error: rejection},
+        {type: 'stream', state: {status: 'connected'}},
+      ],
+      state,
+    );
+    expect(state.context.view).toMatchObject({status: 'stale', error: rejection});
+
+    state = steps(
+      [
+        {type: 'stream', state: {status: 'disconnected', error: new Error('socket closed')}},
+        {type: 'stream', state: {status: 'connected'}},
+      ],
+      state,
+    );
+    expect(state.context.view).toMatchObject({status: 'stale', error: rejection});
+
+    state = steps(
+      [{type: 'wake', reach: VISIBLE}, refreshDone({kind: 'snapshot', result: loaded(2)})],
+      state,
+    );
+    expect(state.context.view).toMatchObject({status: 'connected', error: null});
+  });
+
+  test('a load rejected as another run keeps start-up stale without a snapshot', () => {
+    const foreign = new Error('Ignored data for run run-b; this projection owns run-a');
+    const state = steps([
+      {type: 'start'},
+      {type: 'stream-established', storeId: 'store-a'},
+      subscribed,
+      {type: 'stream', state: {status: 'connected'}},
+      replacementDone({ok: false, error: foreign}),
+      // A live socket does not retire the failed proof.
+      {type: 'stream', state: {status: 'connected'}},
+    ]);
+    expect(state.context.view).toMatchObject({status: 'stale', error: foreign, hasSnapshot: false});
+    expect(state.matches({open: {startup: 'done'}})).toBe(true);
   });
 
   test('a superseded fenced snapshot keeps recovery owned until a fresh store is established', () => {

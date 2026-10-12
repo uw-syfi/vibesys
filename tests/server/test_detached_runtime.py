@@ -17,7 +17,7 @@ from launch import default_runs
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
 from server.events import EventType
 from server.runtime import ServerRuntime
-from server.transport.discovery import WebInstanceHold, WebInstanceRecord
+from server.transport.discovery import WebHealthProbe, WebInstanceHold, WebInstanceRecord
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vs_sim.api.testing import stop_process
 
@@ -229,6 +229,37 @@ def test_stale_instance_record_is_removed(tmp_path: Path) -> None:
 
     assert WebInstanceRecord.discover(path) is None
     assert not path.exists()
+
+
+class FakeWebHealthProbe(WebHealthProbe):
+    """A deterministic health observation with every inspected record retained."""
+
+    def __init__(self, *, healthy: bool) -> None:
+        self.result = healthy
+        self.records: list[WebInstanceRecord] = []
+
+    def healthy(self, record: WebInstanceRecord) -> bool:
+        self.records.append(record)
+        return self.result
+
+
+def test_an_unavailable_gateway_with_a_live_owner_keeps_its_record(tmp_path: Path) -> None:
+    path = tmp_path / "web-gateway.json"
+    record = WebInstanceRecord(
+        pid=os.getpid(),
+        port=43_211,
+        token="temporarily-unavailable",  # noqa: S106  # lint-waiver: LW-208401 [S106]; recognizable test-only gateway capability
+        url="http://127.0.0.1:43211/?token=temporarily-unavailable",
+        project_root=str(tmp_path),
+        started_at=0.0,
+    )
+    record.write(path)
+    probe = FakeWebHealthProbe(healthy=False)
+
+    assert WebInstanceRecord.discover(path, probe=probe) is None
+
+    assert probe.records == [record]
+    assert WebInstanceRecord.read(path) == record
 
 
 def test_an_idle_instance_directory_reads_free(tmp_path: Path) -> None:

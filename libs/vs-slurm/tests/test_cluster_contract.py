@@ -1345,6 +1345,28 @@ def test_resubmitting_a_cancelled_accepted_job_answers_the_same_on_a_cold_cache(
         machine.teardown()
 
 
+def test_cancel_after_collect_does_not_reuse_an_older_active_scheduler_reading() -> None:
+    """A completed collect cannot lend stale scheduler evidence to a later cancellation."""
+    machine = ClusterContractMachine()
+    try:
+        machine.begin(
+            scenario=_ClusterScenario(
+                active=SlurmJobStatus.PENDING,
+                terminal=SlurmJobStatus.UNKNOWN,
+                lost_reply=False,
+                fault="none",
+                batch=False,
+                reason=None,
+                early_cancel=False,
+                active_observations=1,
+            )
+        )
+        machine.collect()
+        machine.cancel()
+    finally:
+        machine.teardown()
+
+
 @pytest.mark.parametrize("status", list(SlurmJobStatus))
 def test_complete_stage_evidence_does_not_override_aggregate_scheduler_state(
     case: _Case, status: SlurmJobStatus

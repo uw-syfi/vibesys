@@ -78,6 +78,7 @@ if TYPE_CHECKING:
     from vibesys.events import CoreEventWriter
     from vibesys.run.contracts import RunRequest
     from vibesys.run.integration import CommittedStateProjector, LocalRunIntegration
+    from vibesys.run.profilers import ProfilerPreflight
     from vibesys.run.resources import _PreparedRun
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
     from vs_core.api import LifecycleCapability
@@ -181,6 +182,7 @@ class _ProductHostFactory:
         ]
         | None
     )
+    profiler_preflight: ProfilerPreflight | None = None
     options: BaseModel | None = None
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None
     core_services: CoreServices | None = field(default=None, init=False)
@@ -218,6 +220,7 @@ class _ProductHostFactory:
                 else None
             ),
             backend_factory=self.backend_factory,
+            profiler_preflight=self.profiler_preflight,
             evaluation_tool=offers_evaluation_tool(plugin),
         )
         return self._components(resources, state_namespace, plugin.state, ownership)
@@ -846,6 +849,7 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
     projector: CommittedStateProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    profiler_preflight: ProfilerPreflight | None = None,
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,
     stop_timer: StopTimer = asyncio.sleep,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
@@ -871,6 +875,7 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
         projector=projector,
         agent_client_factory=agent_client_factory,
         backend_factory=backend_factory,
+        profiler_preflight=profiler_preflight,
         agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
         invocation_store_factory=invocation_store_factory,
@@ -899,6 +904,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     projector: CommittedStateProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    profiler_preflight: ProfilerPreflight | None = None,
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,
     stop_timer: StopTimer = asyncio.sleep,
     timing: RunTiming,
@@ -924,6 +930,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
         projector=projector,
         agent_client_factory=agent_client_factory,
         backend_factory=backend_factory,
+        profiler_preflight=profiler_preflight,
         agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
         invocation_store_factory=invocation_store_factory,
