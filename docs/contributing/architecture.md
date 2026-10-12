@@ -21,7 +21,7 @@ The graph is acyclic and `tach.toml` forbids cycles.
 
 Every direct subfolder of `src/vibesys/orchestration/` is one orchestration
 strategy: `dynamic`, `evolve`, `issue_queue`, `multi`, or `single`. Shared
-policy and resources (`domains`, `hypothesis`, `profile_focus`, `steering`,
+policy and resources (`domains`, `hypothesis`, `profile_focus`,
 `prompts`, and `metrics`) live beside `orchestration` under `src/vibesys/` and
 never import it. Domain templates live in their domain package; strategy
 templates live in their strategy package. The shared `prompts` package owns

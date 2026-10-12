@@ -16,7 +16,7 @@ from vibesys.plugin_registration import OrchestrationRegistration
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _SOURCE_ROOT = _REPOSITORY_ROOT / "src"
 _ORCHESTRATION = _SOURCE_ROOT / "vibesys" / "orchestration"
-_SHARED_PACKAGES = ("domains", "hypothesis", "profile_focus", "steering", "prompts", "metrics")
+_SHARED_PACKAGES = ("domains", "hypothesis", "profile_focus", "prompts", "metrics")
 
 
 def test_every_direct_orchestration_folder_registers_a_strategy() -> None:
