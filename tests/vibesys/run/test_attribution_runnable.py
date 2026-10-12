@@ -18,9 +18,10 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.docker_environment import host_container_backend
 from tests.support.task_project import write_task
 
-from launch import validate_run_request
+from launch import LaunchSettings, create_session, validate_run_request
 from vibesys.api import Config, ConfigurationError, OrchestrationDescriptor, RunRequest
 from vibesys.api.request import RunEnvironmentSpec, load_task
 
@@ -141,3 +142,19 @@ def test_a_host_run_refuses_a_command_whose_interpreter_is_missing(tmp_path: Pat
     )
     with pytest.raises(ConfigurationError, match="no-such-interpreter"):
         validate_run_request(request)
+
+
+def test_session_construction_refuses_a_host_command_whose_interpreter_is_missing(
+    tmp_path: Path,
+) -> None:
+    """The session path, which parses options before this check, refuses it just as start does."""
+    request = _request(
+        tmp_path, "host", "profile-guided-single-agent", ["no-such-interpreter", "attribute.py"]
+    )
+    with pytest.raises(ConfigurationError) as error:
+        create_session(
+            request,
+            sink=lambda _event: None,
+            settings=LaunchSettings(backend_factory=host_container_backend),
+        )
+    assert error.value.diagnostic.code == "attribution_command_unavailable"

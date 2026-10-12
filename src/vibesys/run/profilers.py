@@ -235,4 +235,21 @@ def validate_run_request(
         _require_attribution_runnable(attribution_command, environment)
 
 
-__all__ = ["native_profiler_preflight", "resolve_run_profiler", "validate_run_request"]
+def validate_attribution_command(request: RunRequest, command: tuple[str, ...] | None) -> None:
+    """Refuse a profile-guided attribution *command* the run's command environment cannot run.
+
+    For callers that validate the request before the orchestration options are parsed and so
+    cannot pass the command to :func:`validate_run_request`.
+    """
+    if command is None:
+        return
+    environment = build_run_environment(request.run_environment or make_run_environment_spec())
+    _require_attribution_runnable(command, environment)
+
+
+__all__ = [
+    "native_profiler_preflight",
+    "resolve_run_profiler",
+    "validate_attribution_command",
+    "validate_run_request",
+]

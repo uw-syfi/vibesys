@@ -18,7 +18,11 @@ from vibesys.plugin_catalog import project_run
 from vibesys.run.core_run import RunEnd, drive_core_run, ensure_not_legacy_resume
 from vibesys.run.host import open_product_core_host, open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
-from vibesys.run.profilers import ProfilerPreflight, validate_run_request
+from vibesys.run.profilers import (
+    ProfilerPreflight,
+    validate_attribution_command,
+    validate_run_request,
+)
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import RunStopped
 from vs_sim.api import OsThreads
@@ -156,6 +160,7 @@ class _LocalRunSession:
         registry: OrchestrationRegistry,
         implementations: SessionImplementations,
     ) -> None:
+        validate_run_request(request)
         self._request = request
         self._implementations = implementations
         self._sink = sink
@@ -163,9 +168,7 @@ class _LocalRunSession:
         self._registration = self._registry.resolve(request.orchestration.id)
         # Descriptor validation precedes integration and run resource setup.
         self._plugin_options = self._registration.parse_options(request.orchestration)
-        validate_run_request(
-            request, attribution_command=attribution_command_of(self._plugin_options)
-        )
+        validate_attribution_command(request, attribution_command_of(self._plugin_options))
         resolve_agent_specs(
             request.config,
             self._registration.plugin.agents,
