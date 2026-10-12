@@ -298,7 +298,9 @@ def _render(strategy: _Strategy, plan: CorePlan, context: BaseModel) -> str:
     assert core is not None
     renderer = TemplateRenderer(core.prompt_templates, fallback_roots=core.prompt_fallback_roots)
     fields = context_variables(context, plan.reply_schemas)
-    return renderer.render_template(f"{context.template}.j2", **plan.prompt_variables, **fields)
+    return renderer.render_template(
+        f"{context.model_dump()['template']}.j2", **plan.prompt_variables, **fields
+    )
 
 
 def _own_text(text: str) -> str:

@@ -8,7 +8,7 @@ from typing import ClassVar
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel
 
 from vs_core.api import RolePromptContext, SchemaRef, Value
 from vs_prompts.api import TemplateRenderer, UnknownReplyFieldError
@@ -35,7 +35,7 @@ class _ReplylessPrompt(Value):
 
 
 def _reply_type(names: list[str]) -> type[BaseModel]:
-    return create_model("Reply", **dict.fromkeys(names, (str, ...)))
+    return type("Reply", (BaseModel,), {"__annotations__": dict.fromkeys(names, str)})
 
 
 @given(offered=_NAMES, withheld=_NAMES)

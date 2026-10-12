@@ -43,7 +43,7 @@ class _Schema:
         self.defs: dict[str, object] = {}
         self._count = 0
 
-    def object(self, node: _Object) -> dict[str, object]:
+    def node(self, node: _Object) -> dict[str, object]:
         return {
             "type": "object",
             "properties": {name: self._value(child) for name, child in node.fields.items()},
@@ -55,7 +55,7 @@ class _Schema:
         self._count += 1
         match self._count % 4:
             case 0:
-                return self.object(child)
+                return self.node(child)
             case 1:
                 return {"$ref": self._define(child)}
             case 2:
@@ -66,13 +66,13 @@ class _Schema:
     def _define(self, child: _Object) -> str:
         key = f"Def{len(self.defs)}"
         self.defs[key] = {}
-        self.defs[key] = self.object(child)
+        self.defs[key] = self.node(child)
         return f"#/$defs/{key}"
 
 
 def _schema(root: _Object, *, dead: _Object | None = None) -> dict[str, object]:
     builder = _Schema()
-    schema = builder.object(root)
+    schema = builder.node(root)
     if dead is not None:
         builder.defs["Dead"] = {
             "type": "object",
