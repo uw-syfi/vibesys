@@ -18,9 +18,9 @@ job_name = "Verify release artifact set"
 [capabilities.tui]
 members = ["AyanBinRafaih", "Nano-AI"]
 prefixes = [
-  "clients/run-state/src/",
-  "clients/transport-node/src/",
-  "clients/transport/src/",
+  "clients/libs/run-state/src/",
+  "clients/libs/transport-node/src/",
+  "clients/libs/transport/src/",
   "clients/tui/dev/",
   "clients/tui/src/",
 ]

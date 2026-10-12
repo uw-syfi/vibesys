@@ -35,7 +35,8 @@ dist/
 # `run_node_tests.mjs` cleans these package-local compiler outputs in a
 # `finally`, but a killed runner cannot execute cleanup.
 clients/*/.vibesys-node-tests-*/
-# `scripts/new_package.test.mjs` scaffolds into these and removes them when it finishes.
+clients/*/*/.vibesys-node-tests-*/
+# `tools/scripts/new_package.test.mjs` scaffolds into these and removes them when it finishes.
 clients/.vibesys-scaffold-test-*/
 clients/apps/web/artifacts/
 clients/apps/web/test-results/
@@ -80,7 +81,7 @@ htmlcov/
 .cache
 nosetests.xml
 # `bun test --coverage` writes here by default (bun 1.4.2 `coverageDir`), and
-# `clients/scripts/workspace_layout.mjs` asks git which directories hold no source, so an
+# `clients/tools/scripts/workspace_layout.mjs` asks git which directories hold no source, so an
 # unignored report directory becomes a dependency-cruiser scan root.
 coverage/
 coverage.xml

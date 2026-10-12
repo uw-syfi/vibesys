@@ -23,7 +23,18 @@ ownership_group = "workspace_packages"
 workspace_prefix = "workspace:"
 dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
 
-# Feature and app packages sit one level down (`pnpm-workspace.yaml`: `features/*`, `apps/*`).
+# Library, feature, and app packages sit one level down (`pnpm-workspace.yaml`: `libs/*`,
+# `features/*`, `apps/*`); the deprecated `tui` is the one package at the workspace root.
+[[discoveries]]
+adapter = "package_json"
+manifest_glob = "clients/libs/*/package.json"
+class = "workspace_package"
+id_prefix = "pnpm:"
+job = "tui"
+ownership_group = "workspace_packages"
+workspace_prefix = "workspace:"
+dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
+
 [[discoveries]]
 adapter = "package_json"
 manifest_glob = "clients/features/*/package.json"

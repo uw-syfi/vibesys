@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../tools/tsconfig.base.json",
   "compilerOptions": {
     "types": [
       "bun"
@@ -25,16 +25,16 @@
       "path": "./tsconfig.renderer.json"
     },
     {
-      "path": "../../contracts/tsconfig.lib.json"
+      "path": "../../libs/contracts/tsconfig.lib.json"
     },
     {
-      "path": "../../contracts/tsconfig.testing.json"
+      "path": "../../libs/contracts/tsconfig.testing.json"
     },
     {
-      "path": "../../run-session/tsconfig.lib.json"
+      "path": "../../libs/run-session/tsconfig.lib.json"
     },
     {
-      "path": "../../run-state/tsconfig.lib.json"
+      "path": "../../libs/run-state/tsconfig.lib.json"
     }
   ]
 }

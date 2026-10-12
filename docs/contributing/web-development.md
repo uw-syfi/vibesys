@@ -158,7 +158,7 @@ The run page is one app package over three feature packages
   injects platform services into them, and wires cross-feature flows (replayed
   events fold into the run view). `src/platform/` holds the browser's services:
   `backend.ts` is the only module that imports `@vibesys/transport` runtime
-  values or uses `fetch` (`lint-rules/web-fetch-only-in-backend.grit`), plus the
+  values or uses `fetch` (`tools/lint-rules/web-fetch-only-in-backend.grit`), plus the
   browser lifecycle, tab storage, and the desktop shell's bridge transport.
   `platform/` never imports `app/`.
 - `clients/features/<name>` (`@vibesys/feature-run-view`,

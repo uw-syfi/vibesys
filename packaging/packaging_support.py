@@ -49,6 +49,9 @@ _CLIENT_LOCAL_DIRECTORIES = frozenset(
     }
 )
 _CLIENT_LOCAL_FILENAMES = frozenset({".env", ".envrc"})
+# Where the shipped workspace packages live: the deprecated `tui` at the workspace root, and the
+# library packages under `libs/`. Feature and app packages are not part of the source distribution.
+_CLIENT_PACKAGE_MANIFESTS = ("*/package.json", "libs/*/package.json")
 
 
 class InvalidPackageNamesError(ValueError):
@@ -123,12 +126,13 @@ def discover_client_workspace_sources(repo_root: Path) -> list[str]:
     clients_root = repo_root / "clients"
     package_roots = sorted(
         manifest.parent
-        for manifest in clients_root.glob("*/package.json")
+        for pattern in _CLIENT_PACKAGE_MANIFESTS
+        for manifest in clients_root.glob(pattern)
         if manifest.parent.name not in {"bower_components", "node_modules"}
     )
-    allowed_directories = {package_root.name for package_root in package_roots}
-    if (clients_root / "scripts").is_dir():
-        allowed_directories.add("scripts")
+    allowed_directories = {package_root.relative_to(clients_root).parts for package_root in package_roots}
+    if (clients_root / "tools").is_dir():
+        allowed_directories.add(("tools",))
 
     tracked = _tracked_client_sources(repo_root)
     candidates = _walk_client_sources(clients_root, package_roots) if tracked is None else tracked
@@ -168,7 +172,7 @@ def _tracked_client_sources(repo_root: Path) -> tuple[Path, ...] | None:
 
 def _walk_client_sources(clients_root: Path, package_roots: list[Path]) -> tuple[Path, ...]:
     """Recover canonical sources when an unpacked sdist has no Git metadata."""
-    roots = [clients_root, clients_root / "scripts", *package_roots]
+    roots = [clients_root, clients_root / "tools", *package_roots]
     sources: list[Path] = []
     for source_root in roots:
         if not source_root.exists():
@@ -186,7 +190,7 @@ def _walk_client_sources(clients_root: Path, package_roots: list[Path]) -> tuple
 
 
 def _is_canonical_client_source(
-    path: Path, clients_root: Path, allowed_directories: set[str]
+    path: Path, clients_root: Path, allowed_directories: set[tuple[str, ...]]
 ) -> bool:
     try:
         relative = path.relative_to(clients_root)
@@ -194,7 +198,9 @@ def _is_canonical_client_source(
         return False
     if not relative.parts:
         return False
-    if len(relative.parts) > 1 and relative.parts[0] not in allowed_directories:
+    if len(relative.parts) > 1 and not any(
+        relative.parts[: len(allowed)] == allowed for allowed in allowed_directories
+    ):
         return False
     if any(part in _CLIENT_LOCAL_DIRECTORIES for part in relative.parts):
         return False

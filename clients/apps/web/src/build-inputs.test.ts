@@ -16,9 +16,9 @@ function manifest(directory: string): Manifest {
   return JSON.parse(readFileSync(join(clientsRoot, directory, 'package.json'), 'utf8')) as Manifest;
 }
 
-/** Every workspace package directory (`pnpm-workspace.yaml`: `*`, `features/*`, `apps/*`). */
+/** Every workspace package directory (`pnpm-workspace.yaml`: `tui`, `libs/*`, `features/*`, `apps/*`). */
 function workspaceDirectories(): string[] {
-  return ['', 'features/', 'apps/'].flatMap(prefix =>
+  return ['', 'libs/', 'features/', 'apps/'].flatMap(prefix =>
     readdirSync(join(clientsRoot, prefix), {withFileTypes: true})
       .filter(entry => entry.isDirectory())
       .map(entry => `${prefix}${entry.name}`)
@@ -69,7 +69,7 @@ describe('webBuildInputs', () => {
         'clients/package.json',
         'clients/pnpm-lock.yaml',
         'clients/pnpm-workspace.yaml',
-        'clients/tsconfig.base.json',
+        'clients/tools/tsconfig.base.json',
       ].sort(),
     );
   });

@@ -6,11 +6,11 @@
       ".dependency-cruiser.mjs",
       "**/*.ts",
       "**/*.tsx",
-      "scripts/**/*.mjs",
+      "tools/scripts/**/*.mjs",
       "!**/*.test.ts",
       "!**/*.test.tsx",
       "!**/dist",
-      "!contracts/src/generated"
+      "!libs/contracts/src/generated"
     ]
   },
   "linter": {

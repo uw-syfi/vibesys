@@ -3,9 +3,9 @@
   "ui": "stream",
   "envMode": "loose",
   "globalDependencies": [
-    "tsconfig.base.json",
-    "scripts/run_bun_tests.mjs",
-    "scripts/run_node_tests.mjs"
+    "tools/tsconfig.base.json",
+    "tools/scripts/run_bun_tests.mjs",
+    "tools/scripts/run_node_tests.mjs"
   ],
   "tasks": {
     "transit": {

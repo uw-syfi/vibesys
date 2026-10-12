@@ -237,10 +237,10 @@ def test_client_source_discovery_is_tracked_and_excludes_local_state(
     clients = tmp_path / "clients"
     (clients / "package.json").parent.mkdir(parents=True)
     (clients / "package.json").write_text("{}\n")
-    script = clients / "scripts" / "check.mjs"
-    script.parent.mkdir()
+    script = clients / "tools" / "scripts" / "check.mjs"
+    script.parent.mkdir(parents=True)
     script.write_text("export {};\n")
-    package = tmp_path / "clients" / "example"
+    package = tmp_path / "clients" / "libs" / "example"
     source = package / "src" / "index.ts"
     source.parent.mkdir(parents=True)
     source.write_text("export const value = 1;\n")
@@ -289,32 +289,32 @@ def test_client_source_discovery_is_tracked_and_excludes_local_state(
 
     sources = module.discover_client_workspace_sources(tmp_path)
     assert sources == [
-        "clients/example/package.json",
-        "clients/example/src/index.ts",
+        "clients/libs/example/package.json",
+        "clients/libs/example/src/index.ts",
         "clients/package.json",
-        "clients/scripts/check.mjs",
+        "clients/tools/scripts/check.mjs",
     ]
-    assert module.is_client_workspace_path("clients/example/src/index.ts")
+    assert module.is_client_workspace_path("clients/libs/example/src/index.ts")
     assert not module.is_client_workspace_path("src/vibesys/__init__.py")
     for local_path in (
         "clients/.env",
         "clients/.vibesys-demo/local.txt",
         "clients/artifacts/local.txt",
         "clients/.browser-dist/local.txt",
-        "clients/example/.env",
-        "clients/example/.vibesys-demo/local.txt",
-        "clients/example/artifacts/local.txt",
-        "clients/example/.browser-dist/local.txt",
-        "clients/example/dist/index.js",
-        "clients/example/node_modules/dependency/index.js",
+        "clients/libs/example/.env",
+        "clients/libs/example/.vibesys-demo/local.txt",
+        "clients/libs/example/artifacts/local.txt",
+        "clients/libs/example/.browser-dist/local.txt",
+        "clients/libs/example/dist/index.js",
+        "clients/libs/example/node_modules/dependency/index.js",
     ):
         assert local_path not in sources
-    assert "clients/example/untracked-secret.txt" not in sources
+    assert "clients/libs/example/untracked-secret.txt" not in sources
 
 
 def test_client_source_discovery_without_git_uses_only_canonical_roots(tmp_path: Path) -> None:
     module = _load_packaging_support()
-    package = tmp_path / "clients" / "example"
+    package = tmp_path / "clients" / "libs" / "example"
     source = package / "src" / "index.ts"
     source.parent.mkdir(parents=True)
     source.write_text("export const value = 1;\n")
@@ -328,8 +328,8 @@ def test_client_source_discovery_without_git_uses_only_canonical_roots(tmp_path:
     undeclared.write_text("export {};\n")
 
     assert module.discover_client_workspace_sources(tmp_path) == [
-        "clients/example/package.json",
-        "clients/example/src/index.ts",
+        "clients/libs/example/package.json",
+        "clients/libs/example/src/index.ts",
     ]
 
 
@@ -337,7 +337,7 @@ def test_client_source_discovery_fails_closed_when_checkout_tracking_is_unreadab
     tmp_path: Path,
 ) -> None:
     module = _load_packaging_support()
-    package = tmp_path / "clients" / "example"
+    package = tmp_path / "clients" / "libs" / "example"
     package.mkdir(parents=True)
     (package / "package.json").write_text("{}\n")
     (tmp_path / ".git").mkdir()
@@ -457,7 +457,8 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(
     client_root = source_root / "clients"
     workspace_packages = sorted(
         manifest_path.parent
-        for manifest_path in client_root.glob("*/package.json")
+        for pattern in ("*/package.json", "libs/*/package.json")
+        for manifest_path in client_root.glob(pattern)
         if manifest_path.parent.name not in {"bower_components", "node_modules"}
     )
     assert workspace_packages
@@ -470,12 +471,12 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(
 
     assert "clients/pnpm-lock.yaml" in members
     assert "clients/biome.warnings.json" in members
-    assert "clients/tsconfig.architecture.json" in members
+    assert "clients/tools/tsconfig.architecture.json" in members
     assert "clients/.dependency-cruiser.mjs" in members
-    assert "clients/scripts/check_ts_architecture.mjs" in members
-    assert "clients/scripts/check_ts_architecture.test.mjs" in members
-    assert "clients/scripts/check_package_graph.mjs" in members
-    assert "clients/scripts/workspace_layout.mjs" in members
+    assert "clients/tools/scripts/check_ts_architecture.mjs" in members
+    assert "clients/tools/scripts/check_ts_architecture.test.mjs" in members
+    assert "clients/tools/scripts/check_package_graph.mjs" in members
+    assert "clients/tools/scripts/workspace_layout.mjs" in members
     module = _load_packaging_support()
     expected_client_sources = set(module.discover_client_workspace_sources(source_root))
     assert {

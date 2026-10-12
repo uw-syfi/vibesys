@@ -20,26 +20,31 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 def test_bun_type_packages_match_the_packaged_runtime() -> None:
     pins = {
         manifest.relative_to(PROJECT_ROOT).as_posix(): package["devDependencies"]["@types/bun"]
-        for pattern in ("*/package.json", "features/*/package.json", "apps/*/package.json")
+        for pattern in (
+            "*/package.json",
+            "libs/*/package.json",
+            "features/*/package.json",
+            "apps/*/package.json",
+        )
         for manifest in (PROJECT_ROOT / "clients").glob(pattern)
         if "@types/bun" in (package := json.loads(manifest.read_text())).get("devDependencies", {})
     }
 
     assert set(pins) == {
-        "clients/connection/package.json",
-        "clients/contracts/package.json",
-        "clients/hosts/package.json",
-        "clients/ipc/package.json",
-        "clients/machine/package.json",
-        "clients/run-session/package.json",
-        "clients/run-state/package.json",
-        "clients/runs/package.json",
-        "clients/settings/package.json",
-        "clients/store/package.json",
-        "clients/transport/package.json",
-        "clients/transport-node/package.json",
+        "clients/libs/connection/package.json",
+        "clients/libs/contracts/package.json",
+        "clients/libs/hosts/package.json",
+        "clients/libs/ipc/package.json",
+        "clients/libs/machine/package.json",
+        "clients/libs/run-session/package.json",
+        "clients/libs/run-state/package.json",
+        "clients/libs/runs/package.json",
+        "clients/libs/settings/package.json",
+        "clients/libs/store/package.json",
+        "clients/libs/transport/package.json",
+        "clients/libs/transport-node/package.json",
         "clients/tui/package.json",
-        "clients/ui/package.json",
+        "clients/libs/ui/package.json",
         "clients/features/gateway-connect/package.json",
         "clients/features/hosts/package.json",
         "clients/features/recent-runs/package.json",
@@ -146,7 +151,7 @@ def test_tui_payload_rejects_checkout_specific_dependencies(tmp_path: Path) -> N
     package_path = source / "app" / "package.json"
     package = json.loads(package_path.read_text())
     package["dependencies"] = {
-        "@vibesys/run-state": "@vibesys/run-state@file:///build/clients/run-state"
+        "@vibesys/run-state": "@vibesys/run-state@file:///build/clients/libs/run-state"
     }
     package_path.write_text(json.dumps(package))
 

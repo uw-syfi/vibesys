@@ -1,7 +1,7 @@
 {
   // The shipping pages (the browser entry and the desktop shell's run page): DOM and Vite's client
   // types only, so a Node import is a type error.
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../tools/tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
@@ -14,12 +14,12 @@
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
   "references": [
-    {"path": "../../contracts/tsconfig.lib.json"},
-    {"path": "../../transport/tsconfig.lib.json"},
-    {"path": "../../transport/tsconfig.websocket.json"},
-    {"path": "../../run-session/tsconfig.lib.json"},
-    {"path": "../../store/tsconfig.lib.json"},
-    {"path": "../../ipc/tsconfig.lib.json"},
+    {"path": "../../libs/contracts/tsconfig.lib.json"},
+    {"path": "../../libs/transport/tsconfig.lib.json"},
+    {"path": "../../libs/transport/tsconfig.websocket.json"},
+    {"path": "../../libs/run-session/tsconfig.lib.json"},
+    {"path": "../../libs/store/tsconfig.lib.json"},
+    {"path": "../../libs/ipc/tsconfig.lib.json"},
     {"path": "../../features/run-view/tsconfig.state.json"},
     {"path": "../../features/run-view/tsconfig.renderer.json"},
     {"path": "../../features/gateway-connect/tsconfig.renderer.json"},

@@ -442,7 +442,7 @@ def test_rejects_checkout_specific_tui_dependencies(
     package_path = f"{PLATLIB}entrypoints/_tui/app/package.json"
     package = json.loads(files[package_path])
     package["dependencies"] = {
-        "@vibesys/run-state": "@vibesys/run-state@file:///build/clients/run-state"
+        "@vibesys/run-state": "@vibesys/run-state@file:///build/clients/libs/run-state"
     }
     files[package_path] = json.dumps(package).encode()
     _write_wheel(wheel, source_root, extra={package_path: files[package_path]})

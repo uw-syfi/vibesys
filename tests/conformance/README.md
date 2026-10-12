@@ -22,7 +22,7 @@ tests/conformance/
 ```
 
 - `events/` proves event-kind coverage. There is one file per member of the `EventType` enum in the
-  generated schema (`clients/contracts/src/generated/protocol.schema.json`). The corpus gate
+  generated schema (`clients/libs/contracts/src/generated/protocol.schema.json`). The corpus gate
   enumerates the enum and fails if a kind has no fixture, so a new event kind cannot land without
   one. Each file is a single valid `RunEvent` instance; the filename stem is its `type`.
 
@@ -45,8 +45,8 @@ tests/conformance/
 
 | Reader | Language | Lands in | Uses |
 | --- | --- | --- | --- |
-| corpus gate | Node (`clients/scripts/check_conformance_corpus.mjs`) | 888a (this) | validates coverage, structure, decision anchoring, and the execution partition |
-| event fold runner | TypeScript (`clients/run-state/src/conformance.test.ts`) | follow-up to 888a | folds every shared event fixture through `run-state`, both batched and incrementally |
+| corpus gate | Node (`clients/tools/scripts/check_conformance_corpus.mjs`) | 888a (this) | validates coverage, structure, decision anchoring, and the execution partition |
+| event fold runner | TypeScript (`clients/libs/run-state/src/conformance.test.ts`) | follow-up to 888a | folds every shared event fixture through `run-state`, both batched and incrementally |
 | client scenario runner | TypeScript | 888b | replays connection scenarios through the client transport and `run-state` |
 | server scenario suite | Python (`tests/conformance/test_server_transports.py`) | follow-up to #811 | replays the bootstrap, control-path, and simultaneous two-client scenarios on every transport each declares |
 | relay runner | Python (`tests/e2e/test_relay.py`) | #1785 | replays the Unix bootstrap, control-path, and tail-overflow scenarios through a real host helper's run channel |
@@ -62,7 +62,7 @@ The checked-in inventories are `runners/server.json`, consumed directly by the P
 suite, `runners/relay.json`, consumed by the relay runner, and `runners/host-helper.json`,
 consumed by the host helper runner. All three replay steps through
 `replay.py`. The remaining scenarios carry `required_setup` in their own files. This section deliberately
-does not repeat either list: `node clients/scripts/check_conformance_corpus.mjs` derives the complete
+does not repeat either list: `node clients/tools/scripts/check_conformance_corpus.mjs` derives the complete
 partition and fails when a scenario is in neither half or both.
 
 A control-path reply is a `Response`, which is deliberately outside the `type`-discriminated
@@ -77,7 +77,7 @@ process; `test_frame_matching.py` fails if the two disagree.
 From the repository root:
 
 ```bash
-node clients/scripts/check_conformance_corpus.mjs       # one-shot check, prints violations and exits non-zero
+node clients/tools/scripts/check_conformance_corpus.mjs       # one-shot check, prints violations and exits non-zero
 pnpm --dir clients test:conformance                     # the same check under node --test, with failure-mode tests
 pnpm --dir clients --filter @vibesys/run-state test    # folds the shared event fixtures through core state
 uv run pytest -q tests/conformance/test_server_transports.py  # exercises both server transports

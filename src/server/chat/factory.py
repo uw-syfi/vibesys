@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 #: Session-key identifier for the run's default chat, which has no thread ID of
 #: its own. Threads are ``uuid4().hex``, so this cannot collide with one; it is
 #: the same name the client already shows the default thread under
-#: (``DEFAULT_CHAT_THREAD_ID`` in ``clients/run-state``).
+#: (``DEFAULT_CHAT_THREAD_ID`` in ``clients/libs/run-state``).
 DEFAULT_CHAT_THREAD = "default"
 
 

@@ -7,7 +7,7 @@ runtime, so a renamed or removed field leaves the harness rendering through its
 raw-content fallback while nothing fails.
 
 Everything here validates against the Python models. Those are the same
-contract as ``clients/contracts/src/generated/protocol.schema.json``, which
+contract as ``clients/libs/contracts/src/generated/protocol.schema.json``, which
 is generated from them and pinned to them by ``test_protocol_schema.py``.
 
 One test writes rather than validates. The harness reimplements the legacy

@@ -13,7 +13,7 @@
   "scripts": {
     "build": "vite build",
     "check": "tsc -b",
-    "test": "node ../../scripts/run_bun_tests.mjs ./src"
+    "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
   },
   "dependencies": {
     "@vibesys/feature-hosts": "workspace:*",

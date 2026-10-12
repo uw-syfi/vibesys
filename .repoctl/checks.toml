@@ -88,8 +88,8 @@ commands = [
   ["pnpm", "check:ts"],
   ["pnpm", "check:ts-architecture"],
   ["pnpm", "check:knip"],
-  ["pnpm", "--dir", "contracts", "generate:protocol"],
-  ["git", "diff", "--exit-code", "--", "contracts/src/generated/"],
+  ["pnpm", "--dir", "libs/contracts", "generate:protocol"],
+  ["git", "diff", "--exit-code", "--", "libs/contracts/src/generated/"],
   ["pnpm", "check:clients"],
 ]
 
@@ -112,7 +112,7 @@ name = "tui_package_smoke"
 language = "typescript"
 directory = "clients"
 timeout_seconds = 600
-commands = [["bash", "scripts/check_package_smoke.sh"]]
+commands = [["bash", "tools/scripts/check_package_smoke.sh"]]
 
 [[check_groups]]
 name = "examples_tests"

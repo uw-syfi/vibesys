@@ -11,9 +11,9 @@
       ".dependency-cruiser.mjs",
       "**/*.ts",
       "**/*.tsx",
-      "scripts/**/*.mjs",
+      "tools/scripts/**/*.mjs",
       "!**/dist",
-      "!contracts/src/generated"
+      "!libs/contracts/src/generated"
     ]
   },
   "formatter": {
@@ -58,9 +58,9 @@
     {
       "includes": ["**/ui/**/*.ts", "**/ui/**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
       "plugins": [
-        "./lint-rules/ui-no-io-calls.grit",
-        "./lint-rules/ui-no-effect-hooks.grit",
-        "./lint-rules/ui-no-io-imports.grit"
+        "./tools/lint-rules/ui-no-io-calls.grit",
+        "./tools/lint-rules/ui-no-effect-hooks.grit",
+        "./tools/lint-rules/ui-no-io-imports.grit"
       ]
     },
     {
@@ -73,7 +73,7 @@
         "!**/*.test.ts",
         "!**/*.test.tsx"
       ],
-      "plugins": ["./lint-rules/web-fetch-only-in-backend.grit"]
+      "plugins": ["./tools/lint-rules/web-fetch-only-in-backend.grit"]
     },
     {
       "includes": [
@@ -87,7 +87,7 @@
         "!tui/src/ui/experiment-log.ts",
         "!tui/src/ui/round-rail.ts"
       ],
-      "plugins": ["./lint-rules/ui-no-timers.grit"]
+      "plugins": ["./tools/lint-rules/ui-no-timers.grit"]
     },
     {
       "includes": [
@@ -95,23 +95,23 @@
         "features/*/src/**/state/**/*.tsx",
         "features/*/src/**/effects/**/*.ts",
         "features/*/src/**/effects/**/*.tsx",
-        "connection/src/state/**/*.ts",
+        "libs/connection/src/state/**/*.ts",
         "!**/*.test.ts",
         "!**/*.test.tsx",
         "!features/gateway-connect/src/renderer/effects/gateway-connect.ts",
         "!features/hosts/src/renderer/effects/stores.ts"
       ],
-      "plugins": ["./lint-rules/features-no-hand-rolled-control.grit"]
+      "plugins": ["./tools/lint-rules/features-no-hand-rolled-control.grit"]
     },
     {
       "includes": [
         "features/run-control/src/**/*.ts",
         "features/run-control/src/**/*.tsx",
-        "connection/src/**/*.ts",
+        "libs/connection/src/**/*.ts",
         "!**/*.test.ts",
         "!**/*.test.tsx"
       ],
-      "plugins": ["./lint-rules/control-state-no-store-kernel.grit"]
+      "plugins": ["./tools/lint-rules/control-state-no-store-kernel.grit"]
     },
     {
       "includes": ["**/*.test.ts", "**/*.test.tsx"],

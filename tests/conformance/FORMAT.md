@@ -3,7 +3,7 @@
 Three file kinds live in this corpus: event fixtures under `events/`, connection scenarios under
 `scenarios/`, and runner inventories under `runners/`. All are plain JSON so any language can read
 them. The corpus gate
-(`clients/scripts/check_conformance_corpus.mjs`) validates every file against the rules below with no
+(`clients/tools/scripts/check_conformance_corpus.mjs`) validates every file against the rules below with no
 external schema library, so the rules are intentionally simple and structural. Deep payload
 validation happens when the runners fold a fixture through `run-state` (888b) or replay a scenario
 against a live transport (#811); the gate's job is coverage and well-formedness.

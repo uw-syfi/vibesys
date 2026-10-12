@@ -42,7 +42,7 @@ breakpoint/error/issue-form tables. This file is the workflow.
   `cargo` when running real rounds on the queue example. `claude` CLI installed
   and authenticated (`claude -p "ok"` returns `ok`) for real-provider runs.
 - TUI built: `clients/tui/dist/launcher.js` and `dist/index.js` exist. If not:
-  `pnpm install --frozen-lockfile && pnpm --dir clients/contracts generate:protocol && pnpm build:clients`.
+  `pnpm install --frozen-lockfile && pnpm --dir clients/libs/contracts generate:protocol && pnpm build:clients`.
 - Python env: `<repo>/.venv` with `vibesys` installed (`uv sync`). Export
   `VIBESYS_PYTHON=<repo>/.venv/bin/python`.
 - A standalone candidate repo (its own git root). The bundled `queue-rs` example
@@ -353,8 +353,8 @@ Ownership (put the fix where the state lives, per `tui-architecture.md`):
 
 | Symptom | Owner | Where |
 | --- | --- | --- |
-| Protocol types, socket framing, connection lifecycle, requests, event subscription | `transport`, `transport-node` | `clients/transport/**`, `clients/transport-node/**` |
-| Status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics (a pure fold over snapshot + ordered events) | `run-state` | `clients/run-state/**` |
+| Protocol types, socket framing, connection lifecycle, requests, event subscription | `transport`, `transport-node` | `clients/libs/transport/**`, `clients/libs/transport-node/**` |
+| Status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics (a pure fold over snapshot + ordered events) | `run-state` | `clients/libs/run-state/**` |
 | Focus, selection, layout, zoom, theme, modals, drafts, query progress; widgets, rendering, key/mouse | `tui` | `clients/tui/src/**`, `ui/**` |
 | Event/query payloads, run state, projection into experiments/design/rounds, the optimization loop | Python backend | `src/vibesys/server/**`, `src/vibesys/loops/**` |
 
@@ -375,7 +375,7 @@ Rules that follow from this and from AGENTS.md and the `software-design` skill:
 **Contract changes are authoritative-first.** If the fix needs a new or changed
 event/query field, edit the one authoritative definition
 (`src/vibesys/server/protocol.py`), then regenerate the TS bindings
-(`pnpm --dir clients/contracts generate:protocol`) rather than hand-editing
+(`pnpm --dir clients/libs/contracts generate:protocol`) rather than hand-editing
 generated files. Keep changes additive/backward-compatible; bump the protocol
 version only for an incompatible change. Round-trip a representative payload at
 the boundary in a test. The committed-schema drift test must stay green (a

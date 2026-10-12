@@ -80,8 +80,8 @@ desktop main process (apps/desktop-main)              host (local or ssh)
 | Helper entrypoint | `entrypoints.host_helper` (console script `vibesys-host-helper`) | Wires real I/O, reads stdin, writes stdout. Replaced `entrypoints.stdio_bridge` (phase 5). |
 | Relay core | `server.relay` (kept) | Byte relay between stdio and a run's Unix socket, with its deadlines and typed outcomes. Used by `run.connect`. |
 | Detached run server | `entrypoints.server` (changed) | Takes the lock and publishes its record (with `run_id` and phase `starting/resolving`) before importing the engine; owns its phases. |
-| Generated helper types | `clients/contracts/src/generated/`, read through `@vibesys/contracts/host-helper` | `host-helper.schema.json` (committed, language neutral), the TypeScript types and descriptor generated from it, and the strict parse every helper line goes through. |
-| Connection manager | `@vibesys/connection` (`clients/connection`: a pure `state/` machine and a `shell/`) | The only code that creates links and channels. One `HostConnection` per host; its machine is the one retry loop. |
+| Generated helper types | `clients/libs/contracts/src/generated/`, read through `@vibesys/contracts/host-helper` | `host-helper.schema.json` (committed, language neutral), the TypeScript types and descriptor generated from it, and the strict parse every helper line goes through. |
+| Connection manager | `@vibesys/connection` (`clients/libs/connection`: a pure `state/` machine and a `shell/`) | The only code that creates links and channels. One `HostConnection` per host; its machine is the one retry loop. |
 | Screen stores | the desktop features (`clients/features/*`) and `clients/apps/web` | One store per screen; pure reducer; React renders state. |
 | App lifecycle | `clients/apps/desktop-main` (`src/main/app-lifecycle.ts`) and `@vibesys/settings` | Single-instance lock, the quit sequence, the settings store. |
 
@@ -437,7 +437,7 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
 ## Contract pipeline and IDL
 
 Helper messages join the existing pipeline: Pydantic models in `server.host_api` produce
-`clients/contracts/src/generated/host-helper.schema.json` (committed) through
+`clients/libs/contracts/src/generated/host-helper.schema.json` (committed) through
 `server.api.schema`'s generator, and TypeScript types are generated from that schema, as for the
 run protocol (see the generated directory's README). CI fails when the committed schema is stale.
 The committed JSON Schema is the language-neutral contract; the conformance corpus is the

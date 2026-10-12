@@ -6,18 +6,18 @@ import {fileURLToPath} from 'node:url';
  */
 export const WEB_BUNDLE_PACKAGES = [
   'apps/web',
-  'contracts',
+  'libs/contracts',
   'features/gateway-connect',
   'features/replay',
   'features/run-view',
-  'hosts',
-  'ipc',
-  'run-session',
-  'run-state',
-  'runs',
-  'store',
-  'transport',
-  'ui',
+  'libs/hosts',
+  'libs/ipc',
+  'libs/run-session',
+  'libs/run-state',
+  'libs/runs',
+  'libs/store',
+  'libs/transport',
+  'libs/ui',
 ] as const;
 
 /** Repository inputs that can change the gateway's production browser bundle. */
@@ -35,7 +35,7 @@ export function webBuildInputs(): string[] {
     'apps/web/build-manifest.ts',
     'apps/web/tsconfig.lib.json',
     'package.json',
-    'tsconfig.base.json',
+    'tools/tsconfig.base.json',
     'pnpm-lock.yaml',
     'pnpm-workspace.yaml',
   ].map(path => fileURLToPath(new URL(`../../${path}`, import.meta.url)));

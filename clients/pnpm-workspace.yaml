@@ -1,5 +1,6 @@
 packages:
-  - "*"
+  - "tui"
+  - "libs/*"
   - "features/*"
   - "apps/*"
 

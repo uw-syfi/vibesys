@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 # The Node corpus gate runs in its own process, so it cannot import the
 # derivation. It declares the same name as a literal and this test is what
 # fails when the two drift apart.
-_GATE = Path("clients/scripts/check_conformance_corpus.mjs")
+_GATE = Path("clients/tools/scripts/check_conformance_corpus.mjs")
 _GATE_CONSTANT = re.compile(r"^const RESPONSE_PSEUDO_TYPE = '([^']*)';$", re.MULTILINE)
 
 _IDENTIFIERS = st.text(alphabet="abc", max_size=3)

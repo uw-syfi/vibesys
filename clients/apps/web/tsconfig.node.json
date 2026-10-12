@@ -1,6 +1,6 @@
 {
   // The build and test tool configuration, which runs under Node.
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../tools/tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"],
     "module": "ESNext",

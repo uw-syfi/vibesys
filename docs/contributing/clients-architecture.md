@@ -37,27 +37,27 @@ read whole, and the build model below keeps a graph of thirty packages as fast a
 
 ```text
 clients/
-  contracts/        @vibesys/contracts        generated message types + the one runtime validator
-  ui/               @vibesys/ui               domain-free React primitives + design tokens
-  store/            @vibesys/store            domain-free reducer kernel + fold model-test kit
-  machine/          @vibesys/machine          domain-free machine glue + machine model-test kit
+  libs/contracts/   @vibesys/contracts        generated message types + the one runtime validator
+  libs/ui/          @vibesys/ui               domain-free React primitives + design tokens
+  libs/store/       @vibesys/store            domain-free reducer kernel + fold model-test kit
+  libs/machine/     @vibesys/machine          domain-free machine glue + machine model-test kit
                                                                                  -> store
-  run-state/        @vibesys/run-state        pure fold of run events; ./rounds, ./performance,
+  libs/run-state/   @vibesys/run-state        pure fold of run events; ./rounds, ./performance,
                                               ./transcript projections -> contracts
-  transport/        @vibesys/transport        framing, redial, persistent stream -> contracts
-  hosts/            @vibesys/hosts            host identity, listing, connection status,
+  libs/transport/   @vibesys/transport        framing, redial, persistent stream -> contracts
+  libs/hosts/       @vibesys/hosts            host identity, listing, connection status,
                                               checkout path rules              -> contracts
-  runs/             @vibesys/runs             run identity, recent status, resume and stop
+  libs/runs/        @vibesys/runs             run identity, recent status, resume and stop
                                                                                  -> contracts, hosts
-  run-session/      @vibesys/run-session      one live run: runStep, the session lifecycle, its
+  libs/run-session/ @vibesys/run-session      one live run: runStep, the session lifecycle, its
                                               ports, connectRun, WebSession    -> contracts, run-state,
                                                                        transport, store
-  transport-node/   @vibesys/transport-node   stdio / unix socket / ssh channel  -> transport
-  ipc/              @vibesys/ipc              typed main <-> renderer messages, the welcome
+  libs/transport-node/ @vibesys/transport-node   stdio / unix socket / ssh channel  -> transport
+  libs/ipc/         @vibesys/ipc              typed main <-> renderer messages, the welcome
                                               requests' parsers per feature      -> hosts, runs
-  connection/       @vibesys/connection       host connection manager            -> contracts, transport, hosts,
+  libs/connection/  @vibesys/connection       host connection manager            -> contracts, transport, hosts,
                                                                                     machine
-  settings/         @vibesys/settings         settings store, atomic files       -> hosts, runs
+  libs/settings/    @vibesys/settings         settings store, atomic files       -> hosts, runs
   features/<x>/     @vibesys/feature-<x>      run-view, gateway-connect, replay, hosts,
                                               start-run, run-control, recent-runs
   apps/desktop-main      @vibesys/app-desktop-main      composition only (Electron main), and the
@@ -65,7 +65,20 @@ clients/
   apps/desktop-renderer  @vibesys/app-desktop-renderer  composition only (Electron renderer)
   apps/web               @vibesys/app-web               composition only (browser, and the
                                                         desktop shell's run page)
+  tui/              @vibesys/tui              deprecated terminal UI; stays at the root until it is deleted
+  tools/            scripts/ (checkers, scaffold), lint-rules/ (Biome plugins), and the shared
+                    tsconfig.base.json, tsconfig.architecture.json, knip.config.ts
 ```
+
+The folder a package sits in mirrors its layer: `libs/` holds the `foundation`, `core`, `domain`,
+and `service` packages, `features/` the `feature` packages, and `apps/` the `app` packages. The
+manifest's `vibesys.layer` stays the one source of truth; the `layer-matches-folder` rule fails a
+package filed under the wrong folder. Imports are by package name, so moving a package between
+folders changes no source. `tui` is the one package outside the three folders (see
+[Layers](#layers)). Files a tool requires at the workspace root stay there: `package.json`,
+`pnpm-workspace.yaml`, `pnpm-lock.yaml`, `turbo.json`, `biome.json` and `biome.warnings.json`
+(Biome resolves a config's plugin paths against the config that extends it, so the warnings
+config sits beside `biome.json`), and `.dependency-cruiser.mjs`.
 
 ```mermaid
 flowchart BT
@@ -177,14 +190,15 @@ through no path: only `node` entries may import them, and only `desktop-main` an
 | 2 | No feature depends on another feature; cross-feature flows are composed in apps | `layer-direction` (peers share a layer) |
 | 3 | A package is used only through its `exports` map; every import of a workspace package is a declared dependency | `imports-use-exports`, `imports-are-declared`, `imports-are-workspace-packages`, `workspace-protocol`; `.dependency-cruiser.mjs` for relative paths into another package |
 | 4 | Each entry is compiled with the `lib` and `types` of its runtime, so importing a Node module from a renderer entry is a type error | `entry-projects`, `entry-capability`; `tsc -b` then enforces it |
-| 5 | Inside a package: `state/` pure, `ui/` free of I/O, `effects/` never import `ui/`, effects depend on injected interfaces | `lint-rules/*.grit` (Biome) and `.dependency-cruiser.mjs` |
+| 5 | Inside a package: `state/` pure, `ui/` free of I/O, `effects/` never import `ui/`, effects depend on injected interfaces | `tools/lint-rules/*.grit` (Biome) and `.dependency-cruiser.mjs` |
 | 6 | `@vibesys/ui` and `@vibesys/store` have no domain dependencies and name no domain concept; helpers live in the lowest package that needs them, with no shared junk drawer | `layer-direction` (both are rank 0), `domain-free` (no word of `DOMAIN_WORDS`, or an inflection of one, in their production source or stylesheet); review |
 | 7 | A foundation, core, or domain package is named for the concept it owns, not for a bucket | `bucket-names` (no segment of its name in `BUCKET_NAMES`) |
 | 8 | A sandboxed preload loads only Electron at run time; every workspace import in it is erased | `preload-sandbox` (what the entry's emitted CommonJS still requires); `.dependency-cruiser.mjs` keeps a preload's imports to `@vibesys/ipc` and Electron |
-| 9 | Control state is an XState machine; data folds are plain reducers (see [State](#state)) | `external-dependencies` (`xstate` only in features' `./state` and `./renderer` and `MACHINE_PACKAGES`); `lint-rules/features-no-hand-rolled-control.grit`, `lint-rules/control-state-no-store-kernel.grit` |
+| 9 | Control state is an XState machine; data folds are plain reducers (see [State](#state)) | `external-dependencies` (`xstate` only in features' `./state` and `./renderer` and `MACHINE_PACKAGES`); `tools/lint-rules/features-no-hand-rolled-control.grit`, `tools/lint-rules/control-state-no-store-kernel.grit` |
+| 10 | A package's folder matches the layer its manifest declares: `libs/*` is foundation, core, domain, or service; `features/*` is feature; `apps/*` is app; nothing else, except the deprecated `tui` (`DEPRECATED_OUTSIDE_FOLDERS`) | `layer-matches-folder` |
 
 All package-graph rules, and the tables they read, live in one module,
-[`clients/scripts/check_package_graph.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/scripts/check_package_graph.mjs),
+[`clients/tools/scripts/check_package_graph.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/tools/scripts/check_package_graph.mjs),
 run by `pnpm check:ts-architecture`. Its tests build a valid fixture workspace and break it once
 per rule, and a meta-test fails when a rule has no failing fixture. `.dependency-cruiser.mjs` keeps
 the rules about modules inside a package and about how imports resolve.
@@ -346,7 +360,7 @@ need, and nothing repeats work whose inputs did not change.
 ```
 
 Vite (`resolve.conditions`), the Bun test runner (`--conditions`), and `tsc`
-(`customConditions` in `clients/tsconfig.base.json`) all resolve that condition, so the dev
+(`customConditions` in `clients/tools/tsconfig.base.json`) all resolve that condition, so the dev
 server, tests, and type checks read dependencies from source and never need a prebuilt `dist/`.
 Node and Electron at runtime do not set the condition and load `dist/`. There are no `paths`
 aliases and no `pre*` "build dependencies first" scripts.
@@ -385,16 +399,16 @@ pnpm new:package feature <name>                                  # pnpm new:pack
 pnpm install
 ```
 
-`scripts/new_package.mjs` writes the `vibesys` block first and derives everything else from it:
+`tools/scripts/new_package.mjs` writes the `vibesys` block first and derives everything else from it:
 the `exports` map with the source condition, one composite `tsconfig.<entry>.json` per entry with
 its runtime's `lib` and `types`, the test project and solution `tsconfig.json`, the `build`,
 `check`, and `test` scripts, a passing smoke test per entry, and the entries in
-`tsconfig.architecture.json` that dependency-cruiser resolves. Knip derives its policy from the
+`tools/tsconfig.architecture.json` that dependency-cruiser resolves. Knip derives its policy from the
 exports, and Biome and Turborepo cover the package by glob. A feature lands in
 `features/<name>` as `@vibesys/feature-<name>` with `./state`, `./renderer`, and `./main`; an app
 in `apps/<name>` as `@vibesys/app-<name>`; a feature's `./state` also starts from a
 control-state machine skeleton, its pure-transition test, and its `checkMachine` model (see
-[State](#state)); any other layer in `<name>` with one `.` entry
+[State](#state)); any other layer (a library) in `libs/<name>` as `@vibesys/<name>` with one `.` entry
 (`neutral` unless `--runtime` says otherwise). Its test scaffolds one package of each shape and
 requires the graph checker, the workspace declarations, `tsc -b`, and the package's own tests to
 pass, and a Node import in a scaffolded renderer entry to fail compilation.

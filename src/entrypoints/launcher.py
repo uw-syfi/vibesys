@@ -82,32 +82,32 @@ _MIN_NODE_MAJOR = 20
 #: modules feed the Pydantic models serialized into the schema, so changes to
 #: them cannot change the generated output and are deliberately excluded here.
 _REBUILD_WATCH_FILES: tuple[str, ...] = (
-    "clients/contracts/package.json",
-    "clients/contracts/tsconfig.json",
-    "clients/contracts/tsconfig.lib.json",
-    "clients/run-state/package.json",
-    "clients/run-state/tsconfig.json",
-    "clients/run-state/tsconfig.lib.json",
-    "clients/run-state/tsconfig.performance.json",
-    "clients/run-state/tsconfig.rounds.json",
-    "clients/run-state/tsconfig.transcript.json",
-    "clients/transport/package.json",
-    "clients/transport/tsconfig.json",
-    "clients/transport/tsconfig.lib.json",
-    "clients/transport-node/package.json",
-    "clients/transport-node/tsconfig.json",
-    "clients/transport-node/tsconfig.lib.json",
+    "clients/libs/contracts/package.json",
+    "clients/libs/contracts/tsconfig.json",
+    "clients/libs/contracts/tsconfig.lib.json",
+    "clients/libs/run-state/package.json",
+    "clients/libs/run-state/tsconfig.json",
+    "clients/libs/run-state/tsconfig.lib.json",
+    "clients/libs/run-state/tsconfig.performance.json",
+    "clients/libs/run-state/tsconfig.rounds.json",
+    "clients/libs/run-state/tsconfig.transcript.json",
+    "clients/libs/transport/package.json",
+    "clients/libs/transport/tsconfig.json",
+    "clients/libs/transport/tsconfig.lib.json",
+    "clients/libs/transport-node/package.json",
+    "clients/libs/transport-node/tsconfig.json",
+    "clients/libs/transport-node/tsconfig.lib.json",
     "clients/tui/package.json",
     "clients/tui/tsconfig.json",
     "clients/tui/tsconfig.check.json",
-    "clients/tsconfig.base.json",
+    "clients/tools/tsconfig.base.json",
     "clients/turbo.json",
     "clients/package.json",
     "clients/pnpm-lock.yaml",
     "clients/pnpm-workspace.yaml",
     "clients/biome.json",
     # Inputs to `generate:protocol` (python -m server.api.schema), which
-    # feeds clients/contracts' generated types and, downstream, the TUI
+    # feeds clients/libs/contracts' generated types and, downstream, the TUI
     # bundle. See the principle above for why this is the full set, no more.
     "src/server/api/schema.py",
     "src/server/events.py",
@@ -117,10 +117,10 @@ _REBUILD_WATCH_FILES: tuple[str, ...] = (
     "src/server/settings.py",
 )
 _REBUILD_WATCH_DIRS: tuple[str, ...] = (
-    "clients/contracts/src",
-    "clients/run-state/src",
-    "clients/transport/src",
-    "clients/transport-node/src",
+    "clients/libs/contracts/src",
+    "clients/libs/run-state/src",
+    "clients/libs/transport/src",
+    "clients/libs/transport-node/src",
     "clients/tui/src",
 )
 

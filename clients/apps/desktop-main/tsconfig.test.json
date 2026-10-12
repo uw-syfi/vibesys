@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../tools/tsconfig.base.json",
   "compilerOptions": {
     "lib": [
       "ES2022",
@@ -27,22 +27,22 @@
       "path": "./tsconfig.preload-welcome.json"
     },
     {
-      "path": "../../ipc/tsconfig.lib.json"
+      "path": "../../libs/ipc/tsconfig.lib.json"
     },
     {
-      "path": "../../hosts/tsconfig.lib.json"
+      "path": "../../libs/hosts/tsconfig.lib.json"
     },
     {
-      "path": "../../runs/tsconfig.lib.json"
+      "path": "../../libs/runs/tsconfig.lib.json"
     },
     {
-      "path": "../../store/tsconfig.testing.json"
+      "path": "../../libs/store/tsconfig.testing.json"
     },
     {
-      "path": "../../transport/tsconfig.testing.json"
+      "path": "../../libs/transport/tsconfig.testing.json"
     },
     {
-      "path": "../../connection/tsconfig.lib.json"
+      "path": "../../libs/connection/tsconfig.lib.json"
     },
     {
       "path": "../../features/start-run/tsconfig.state.json"

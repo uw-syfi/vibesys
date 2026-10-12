@@ -20,7 +20,7 @@ pnpm_packages = []
 
 [[cases]]
 name = "run fold changes reach downstream TypeScript packages"
-paths = ["clients/run-state/src/reduce.test.ts"]
+paths = ["clients/libs/run-state/src/reduce.test.ts"]
 jobs = ["tui"]
 [cases.collections]
 native_languages = []

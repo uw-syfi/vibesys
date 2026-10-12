@@ -31,14 +31,14 @@ and reverse imports and cross-package relative imports are forbidden and checked
 
 Dependency-cruiser parses and resolves the TypeScript graph for dependency direction, cycles,
 unresolvable or undeclared imports, public package entry points, and the runtime-independence rules
-for `run-state`. `tsconfig.architecture.json` maps workspace package names to their public source
+for `run-state`. `clients/tools/tsconfig.architecture.json` maps workspace package names to their public source
 entry points, so the check does not depend on prior builds. A small manifest check covers forbidden
 workspace dependencies that are declared but unused, because they do not appear in a source
 dependency graph. Rule regressions run as part of `pnpm test:clients`.
 
 The check scans each package's `src/` plus the non-shipping code next to it (`tui/dev`, benchmarks,
-the web end-to-end tests, and `clients/scripts`). That set is derived from the workspace rather
-than listed: `clients/scripts/workspace_layout.mjs` enumerates the packages pnpm admits and the
+the web end-to-end tests, and `clients/tools/scripts`). That set is derived from the workspace rather
+than listed: `clients/tools/scripts/workspace_layout.mjs` enumerates the packages pnpm admits and the
 source directories inside them, and the scan roots, the rule path patterns, the audited knip
 workspaces, and the dependency policy all read it from there. A new package or directory is
 therefore gated on its first commit. Beyond the package direction, it enforces:
@@ -288,12 +288,12 @@ pnpm test:clients
 pnpm build:clients
 ```
 
-`pnpm check:knip` (knip, configured in `clients/knip.config.ts`) fails on unused files, exports,
+`pnpm check:knip` (knip, configured in `clients/tools/knip.config.ts`) fails on unused files, exports,
 dependencies, and unlisted or unresolved imports. Entry points are the package `bin` and `exports`
 plus the declared test, harness, and benchmark files; an export used nowhere in the workspace should
-lose its `export` or be deleted. `contracts/src/generated/` is ignored because the generator
+lose its `export` or be deleted. `libs/contracts/src/generated/` is ignored because the generator
 exports every schema type, and the `index.ts` of each library package is its public API. Add an
-entry point to `knip.config.ts` (with a comment saying who runs it) rather than suppressing a
+entry point to `tools/knip.config.ts` (with a comment saying who runs it) rather than suppressing a
 finding. The config keys its per-package policy off the derived workspace layout, so a package
 without one fails the gate by name instead of falling back to knip's default heuristics.
 
@@ -312,8 +312,8 @@ Biome also enforces the presentational layer. Production files under any `ui/` d
 client package may not call `fetch`, open a `WebSocket`/`EventSource`/`XMLHttpRequest`, use
 `useEffect`/`useLayoutEffect`/`useInsertionEffect`, schedule timers, or import
 `@vibesys/transport`, `@vibesys/transport-node`, `electron`, or `node:*`. The GritQL plugins are in
-`clients/lint-rules/` and are attached to `ui/` globs in `clients/biome.json`;
-`clients/scripts/check_ui_no_effects.test.mjs` is their test. The timer rule excludes five OpenTUI
+`clients/tools/lint-rules/` and are attached to `ui/` globs in `clients/biome.json`;
+`clients/tools/scripts/check_ui_no_effects.test.mjs` is their test. The timer rule excludes five OpenTUI
 widgets that own spinner or elapsed-time refresh (`activity-bar`, `agent-map`, `chat-composer`,
 `experiment-log`, `round-rail`), listed by path in `biome.json`; moving those timers behind an
 injected scheduler removes the exclusions.

@@ -1,0 +1,38 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022",
+      "esnext.disposable"
+    ],
+    "types": [
+      "bun",
+      "node"
+    ],
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
+  },
+  "include": [
+    "src/**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.testing.json"
+    },
+    {
+      "path": "../contracts/tsconfig.host-helper.json"
+    },
+    {
+      "path": "../transport/tsconfig.testing.json"
+    },
+    {
+      "path": "../store/tsconfig.testing.json"
+    },
+    {
+      "path": "../machine/tsconfig.testing.json"
+    }
+  ]
+}

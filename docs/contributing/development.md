@@ -21,11 +21,11 @@ bundles, and the TUI.
 src/vibesys/             Orchestration policy and thin product API/composition
 src/server/              Frontend-serving runtime and protocol
 src/entrypoints/         Process composition and command entrypoints
-clients/contracts/       TypeScript server protocol types and validator
-clients/transport/       Runtime-neutral transport and the WebSocket adapter
-clients/transport-node/  Node transport: the Unix-socket client
-clients/run-state/       Pure backend-event projection (the run fold)
-clients/tui/             TypeScript terminal UI and launcher
+clients/libs/contracts/      TypeScript server protocol types and validator
+clients/libs/transport/      Runtime-neutral transport and the WebSocket adapter
+clients/libs/transport-node/ Node transport: the Unix-socket client
+clients/libs/run-state/      Pure backend-event projection (the run fold)
+clients/tui/                 TypeScript terminal UI and launcher
 libs/                    Reusable standalone libraries
 examples/                Candidate repositories, tasks, and input bundles
 resources/evaluators/    Reusable versioned evaluator packages
@@ -273,7 +273,7 @@ model. `tsc -b` keeps each package's `dist` incrementally; `pnpm exec tsc -b --c
 removes it.
 
 When Python protocol models change, regenerate the files under
-`clients/contracts/src/generated/` and review the diff.
+`clients/libs/contracts/src/generated/` and review the diff.
 See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
 TUI-specific contributor docs are indexed in [`tui/README.md`](tui/README.md).
 

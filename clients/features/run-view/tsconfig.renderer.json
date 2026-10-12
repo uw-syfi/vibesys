@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../tools/tsconfig.base.json",
   "compilerOptions": {
     "lib": [
       "ES2022",
@@ -25,13 +25,13 @@
       "path": "./tsconfig.state.json"
     },
     {
-      "path": "../../run-session/tsconfig.lib.json"
+      "path": "../../libs/run-session/tsconfig.lib.json"
     },
     {
-      "path": "../../run-state/tsconfig.lib.json"
+      "path": "../../libs/run-state/tsconfig.lib.json"
     },
     {
-      "path": "../../ui/tsconfig.lib.json"
+      "path": "../../libs/ui/tsconfig.lib.json"
     }
   ]
 }

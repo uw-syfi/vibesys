@@ -27,15 +27,19 @@ from server.api.schema import (
 from server.events import EventData
 from vibesys.api import RunFailedData, RunFailure, ToolResultPayload
 
-SCHEMA_PATH = Path("clients/contracts/src/generated/protocol.schema.json")
-HOST_HELPER_SCHEMA_PATH = Path("clients/contracts/src/generated/host-helper.schema.json")
-RESPONSE_PAYLOAD_SCHEMA_PATH = Path("clients/contracts/src/generated/response-payload.schema.json")
-RESPONSE_PAYLOAD_MODULE_PATH = Path("clients/contracts/src/generated/response-payload.schema.ts")
-RESPONSE_PAYLOAD_FIXTURE_PATH = Path(
-    "clients/contracts/src/generated/response-payload.fixture.json"
+SCHEMA_PATH = Path("clients/libs/contracts/src/generated/protocol.schema.json")
+HOST_HELPER_SCHEMA_PATH = Path("clients/libs/contracts/src/generated/host-helper.schema.json")
+RESPONSE_PAYLOAD_SCHEMA_PATH = Path(
+    "clients/libs/contracts/src/generated/response-payload.schema.json"
 )
-RUN_EVENT_MODULE_PATH = Path("clients/contracts/src/generated/run-event.schema.ts")
-HOST_HELPER_MODULE_PATH = Path("clients/contracts/src/generated/host-helper.schema.ts")
+RESPONSE_PAYLOAD_MODULE_PATH = Path(
+    "clients/libs/contracts/src/generated/response-payload.schema.ts"
+)
+RESPONSE_PAYLOAD_FIXTURE_PATH = Path(
+    "clients/libs/contracts/src/generated/response-payload.fixture.json"
+)
+RUN_EVENT_MODULE_PATH = Path("clients/libs/contracts/src/generated/run-event.schema.ts")
+HOST_HELPER_MODULE_PATH = Path("clients/libs/contracts/src/generated/host-helper.schema.ts")
 
 # The public alias of every tagged union the protocol publishes. A member model
 # is only reachable through one of these, which is why the exported schema may

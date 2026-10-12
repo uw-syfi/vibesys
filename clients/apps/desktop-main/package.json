@@ -31,7 +31,7 @@
   "scripts": {
     "build": "tsc -b tsconfig.lib.json tsconfig.preload-run.json tsconfig.preload-welcome.json && node scripts/copy-ui.mjs",
     "check": "tsc -b",
-    "test": "node ../../scripts/run_bun_tests.mjs ./src",
+    "test": "node ../../tools/scripts/run_bun_tests.mjs ./src",
     "start": "pnpm build && electron ."
   },
   "dependencies": {

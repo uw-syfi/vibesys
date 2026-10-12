@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../tools/tsconfig.base.json",
   "compilerOptions": {
     "lib": [
       "ES2022",
@@ -30,31 +30,31 @@
       "path": "./tsconfig.main.json"
     },
     {
-      "path": "../../hosts/tsconfig.lib.json"
+      "path": "../../libs/hosts/tsconfig.lib.json"
     },
     {
-      "path": "../../ipc/tsconfig.lib.json"
+      "path": "../../libs/ipc/tsconfig.lib.json"
     },
     {
-      "path": "../../ipc/tsconfig.testing.json"
+      "path": "../../libs/ipc/tsconfig.testing.json"
     },
     {
-      "path": "../../store/tsconfig.testing.json"
+      "path": "../../libs/store/tsconfig.testing.json"
     },
     {
-      "path": "../../connection/tsconfig.lib.json"
+      "path": "../../libs/connection/tsconfig.lib.json"
     },
     {
-      "path": "../../connection/tsconfig.testing.json"
+      "path": "../../libs/connection/tsconfig.testing.json"
     },
     {
-      "path": "../../settings/tsconfig.lib.json"
+      "path": "../../libs/settings/tsconfig.lib.json"
     },
     {
-      "path": "../../settings/tsconfig.testing.json"
+      "path": "../../libs/settings/tsconfig.testing.json"
     },
     {
-      "path": "../../transport/tsconfig.testing.json"
+      "path": "../../libs/transport/tsconfig.testing.json"
     }
   ]
 }

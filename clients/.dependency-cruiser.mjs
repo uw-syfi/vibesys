@@ -1,11 +1,11 @@
 import {fileURLToPath} from 'node:url';
-import {pathAlternation, workspaceLayout} from './scripts/workspace_layout.mjs';
+import {pathAlternation, workspaceLayout} from './tools/scripts/workspace_layout.mjs';
 
 // Scanned sources: each package's `src/`, plus the non-shipping code that lives next to it (the
 // replay harness `tui/dev`, the benchmarks, the web end-to-end specs) and the workspace's own
-// tooling (`scripts`). Both sets come from the workspace layout rather than a name list, so a new
+// tooling (`tools`). Both sets come from the workspace layout rather than a name list, so a new
 // package, or a new directory inside one, is covered by these rules on its first commit.
-// `scripts/check_ts_architecture.mjs` derives the scan roots from the same place.
+// `tools/scripts/check_ts_architecture.mjs` derives the scan roots from the same place.
 const layout = workspaceLayout(fileURLToPath(new URL('.', import.meta.url)));
 const PACKAGE_DIRECTORIES = pathAlternation(layout.packages.map(({directory}) => directory));
 const PACKAGES = `^(?:${PACKAGE_DIRECTORIES})/`;
@@ -16,10 +16,10 @@ const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
 const TRANSPORT_TEST_ONLY =
-  '^(?:transport|transport-node|contracts)/src/(?:test-support/|testing/)';
-const STORE_TEST_ONLY = '^store/src/testing/';
+  '^libs/(?:transport|transport-node|contracts)/src/(?:test-support/|testing/)';
+const STORE_TEST_ONLY = '^libs/store/src/testing/';
 // A package's own test-support directory (`connection/src/testing/`): Fakes that only tests import.
-const PACKAGE_TEST_SUPPORT = '^[^/]+/src/testing/';
+const PACKAGE_TEST_SUPPORT = '^libs/[^/]+/src/testing/';
 // Any package's test support, at any depth of its sources: the `testing/` entries that ship Fakes
 // to other packages' tests, and the `test-support/` helpers.
 // Two patterns, because the one-pattern `src/(?:.+/)?` nests quantifiers that dependency-cruiser's
@@ -56,9 +56,9 @@ const RENDERER_PART = part => `^features/[^/]+/src/renderer/${part}/`;
 // `platform/` (the browser's services: the one backend adapter, lifecycle, storage, the desktop
 // shell's bridge). `docs/contributing/web-development.md` describes the layout.
 const WEB = '^apps/web/src/';
-const TRANSPORT = ['^transport(?:-node)?/', '/node_modules/@vibesys/transport(?:-node)?/'];
+const TRANSPORT = ['^libs/transport(?:-node)?/', '/node_modules/@vibesys/transport(?:-node)?/'];
 // The protocol vocabulary, which presentational code never names.
-const CONTRACTS = ['^contracts/', '/node_modules/@vibesys/contracts/'];
+const CONTRACTS = ['^libs/contracts/', '/node_modules/@vibesys/contracts/'];
 const WEB_BACKEND_ADAPTER = `${WEB}platform/backend\\.ts$`;
 
 function featureRules() {
@@ -140,13 +140,13 @@ function webAppRules() {
 // modules inside those packages.
 const DESKTOP_MAIN = '^apps/desktop-main/src/main/';
 const DESKTOP_PRELOAD = '^apps/desktop-main/src/preload/';
-const CONNECTION_STATE = '^connection/src/state/';
-const CONNECTION_SHELL = '^connection/src/shell/';
+const CONNECTION_STATE = '^libs/connection/src/state/';
+const CONNECTION_SHELL = '^libs/connection/src/shell/';
 // Every module of the main process: the app, the packages only it runs, the features' `./main`.
 const MAIN_PROCESS = [
   '^apps/desktop-main/src/',
-  '^connection/src/',
-  '^settings/src/',
+  '^libs/connection/src/',
+  '^libs/settings/src/',
   '^features/[^/]+/src/main/',
 ];
 // The desktop renderer app (`apps/desktop-renderer/src`) is composition only: `main.tsx` (the
@@ -165,7 +165,7 @@ function desktopRules() {
       name: 'desktop-preloads-import-only-ipc-and-electron',
       severity: 'error',
       from: {path: DESKTOP_PRELOAD, pathNot: TEST_FILE},
-      to: {pathNot: ['^ipc/src/', '(?:^|/)node_modules/electron/']},
+      to: {pathNot: ['^libs/ipc/src/', '(?:^|/)node_modules/electron/']},
     },
     {
       // The main process loads a preload by path into a page; it never runs one itself.
@@ -238,7 +238,7 @@ function rendererRules() {
 }
 
 // Rules between packages (layers, runtimes, declared and exported imports, third-party
-// confinement) have one home, `scripts/check_package_graph.mjs`, which reads them from the
+// confinement) have one home, `tools/scripts/check_package_graph.mjs`, which reads them from the
 // manifests. These rules cover what it cannot see: modules inside a package, relative paths into
 // another package, and how imports resolve.
 /** @type {import('dependency-cruiser').IConfiguration} */
@@ -255,11 +255,12 @@ export default {
       severity: 'error',
       from: {path: SCANNED},
       // `bun:test` is a runtime builtin. dependency-cruiser cannot resolve the `exports`
-      // subpath `dependency-cruiser/config-utl/*` (only the tooling under `scripts` uses it),
-      // although Node does.
+      // subpath `dependency-cruiser/config-utl/*` (only the tooling under `tools` uses it),
+      // although Node does. Nor does it resolve the type-only `knip` import of
+      // `tools/knip.config.ts`; knip's own run loads that file.
       to: {
         couldNotResolve: true,
-        pathNot: ['^bun:test$', '^dependency-cruiser/config-utl/'],
+        pathNot: ['^bun:test$', '^dependency-cruiser/config-utl/', '^knip$'],
       },
     },
     {
@@ -280,19 +281,19 @@ export default {
       // packages, never the other way round, so a package build or test cannot depend on them.
       // Each tool may reach its own directory and no other's, which is what the `$1`
       // back-reference on `LEAF_TOOL_IMPORTER` says. Excluding every tool from `from` instead
-      // would permit `web/e2e -> scripts` and `web/e2e -> tui/benchmarks`.
+      // would permit `web/e2e -> tools` and `web/e2e -> tui/benchmarks`.
       name: 'tools-are-leaves',
       severity: 'error',
       from: {path: LEAF_TOOL_IMPORTER},
       to: {path: LEAF_TOOLS, pathNot: '^$1/'},
     },
     {
-      // `scripts/` is repository tooling (architecture checks). It reads package manifests
+      // `tools/scripts/` is repository tooling (architecture checks). It reads package manifests
       // from disk, and does not import package code, so a package refactor cannot break the
       // gate that enforces the layering.
       name: 'scripts-do-not-import-package-code',
       severity: 'error',
-      from: {path: '^scripts/'},
+      from: {path: '^tools/scripts/'},
       to: {path: PACKAGES},
     },
     {
@@ -354,7 +355,7 @@ export default {
       from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
       to: {
         path: [
-          '^(?:transport|transport-node|contracts)/',
+          '^libs/(?:transport|transport-node|contracts)/',
           '/node_modules/@vibesys/(?:transport|transport-node|contracts)/',
         ],
       },
@@ -440,14 +441,14 @@ export default {
       to: {
         path: [
           '^tui/src/(?!launcher\\.ts$|theme\\.ts$)',
-          '^(?:transport|transport-node|contracts|run-state|store)/',
+          '^libs/(?:transport|transport-node|contracts|run-state|store)/',
           '@opentui[+/]',
         ],
       },
     },
   ],
   options: {
-    tsConfig: {fileName: 'tsconfig.architecture.json'},
+    tsConfig: {fileName: 'tools/tsconfig.architecture.json'},
     doNotFollow: {path: 'node_modules'},
     preserveSymlinks: true,
     tsPreCompilationDeps: true,
