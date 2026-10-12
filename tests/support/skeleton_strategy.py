@@ -118,6 +118,15 @@ class SkeletonStrategy(Value):
     keeps_candidate: bool = True
     cancels_after_start: bool = False
 
+    def _origin(self, view: RunView) -> float:
+        """The clock time the plans' deadlines count from.
+
+        Zero, so a plan is a pure function of the run's state: a plan that changed with the
+        clock would be a new decision at every tick of a virtual-clock run.
+        """
+        del view
+        return 0.0
+
     @classmethod
     def unmeasured(cls, *, keeps_candidate: bool = True) -> SkeletonStrategy:
         """The scenario without the baseline and candidate measurements.
@@ -170,7 +179,7 @@ class SkeletonStrategy(Value):
                 decision = Measure(
                     decision_id=DecisionId(root="measure-baseline"),
                     scope=run,
-                    plan=measurement(view.facts.baseline, "baseline", now_at=view.run.now_at),
+                    plan=measurement(view.facts.baseline, "baseline", now_at=self._origin(view)),
                 )
             case "start":
                 decision = StartAttempt(
@@ -246,7 +255,7 @@ class SkeletonStrategy(Value):
                         ),
                         prompts=(),
                         output_schema=SchemaRef(name="implementation", version=1),
-                        deadline_at=view.run.now_at + 400.0,
+                        deadline_at=self._origin(view) + 400.0,
                         charge_class="paid",
                     ),
                 )
@@ -255,7 +264,7 @@ class SkeletonStrategy(Value):
                 return Measure(
                     decision_id=DecisionId(root="measure-candidate"),
                     scope=attempt,
-                    plan=measurement(state.candidate, "official", now_at=view.run.now_at),
+                    plan=measurement(state.candidate, "official", now_at=self._origin(view)),
                 )
             case "settle":
                 return Withdraw(
@@ -305,6 +314,10 @@ class BaselineProbeStrategy(SkeletonStrategy):
     It is a run that is always waiting on a job: for tests of what ends such a run (a signal,
     an operator stop) and what the host then cancels.
     """
+
+    def _origin(self, view: RunView) -> float:
+        """Count deadlines from now: this run is driven on a real clock, far from zero."""
+        return view.run.now_at
 
     def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
         state = super().on_event(view, event)
