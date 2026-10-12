@@ -18,7 +18,8 @@ import agentshim
 
 from vs_agent import shim_translation
 from vs_agent.cli_common import build_schema_hint
-from vs_agent.contracts import AgentTurnResult, SteerOutcome
+from vs_agent.contracts import AgentOutputSchemaError, AgentTurnResult, SteerOutcome
+from vs_agent.reply_limits import ReplyGuard, reply_breach
 from vs_agent.session_errors import SessionResumeError
 from vs_sim.api import OsThreads
 
@@ -106,7 +107,19 @@ class TurnEvents:
         self.structured = False
         #: Windows the provider reported exhausted during the turn in flight.
         self.exhausted: list[agentshim.RateLimitStatus] = []
+        #: Why the turn in flight was stopped for its reply, or ``None``.
+        self.breach: str | None = None
+        self._guard = ReplyGuard()
+        self._stop: Callable[[], None] | None = None
         self._steers = steers
+
+    def begin_turn(self, *, structured: bool, stop: Callable[[], None]) -> None:
+        """Start watching a turn; *stop* ends it when its reply crosses a limit."""
+        self.structured = structured
+        self.exhausted = []
+        self.breach = None
+        self._guard = ReplyGuard()
+        self._stop = stop
 
     def on_event(self, event: agentshim.AgentEvent) -> None:
         """Translate and forward one library event, if anyone is listening."""
@@ -116,12 +129,23 @@ class TurnEvents:
             self._steers.rejected(event.text)
         elif isinstance(event, agentshim.RateLimitStatus) and event.exhausted:
             self.exhausted.append(event)
+        elif isinstance(event, agentshim.AssistantText) and self._refuse_reply(event.text):
+            # The refused text is not forwarded: it is the flood being refused.
+            return
         observer = self.observer
         if observer is None:
             return
         translated = shim_translation.event_from(event, structured=self.structured)
         if translated is not None:
             observer.on_event(translated)
+
+    def _refuse_reply(self, text: str) -> bool:
+        """Stop the turn the first time its reply crosses a limit; whether *text* is refused."""
+        if self.breach is None:
+            self.breach = self._guard.feed(text)
+            if self.breach is not None and self._stop is not None:
+                self._stop()
+        return self.breach is not None
 
 
 class LaunchedSession:
@@ -217,8 +241,7 @@ def _run_turn(
     expected = request.expected_provider_session_id
     events = live.events
     events.observer = observer
-    events.structured = request.output_schema is not None
-    events.exhausted = []
+    events.begin_turn(structured=request.output_schema is not None, stop=live.session.interrupt)
     try:
         if expected is None:
             turn = _run(live, request, expect_conversation=None)
@@ -231,12 +254,20 @@ def _run_turn(
                 ) from error
             except agentshim.AgentShimError as error:
                 raise SessionResumeError(expected, str(error)) from error
+    except Exception as error:
+        # A turn stopped for its reply fails however the library reports the stop.
+        if events.breach is not None:
+            raise AgentOutputSchemaError(events.breach) from error
+        raise
     finally:
         events.observer = None
         events.structured = False
         live.steers.clear()
 
     result = turn.result
+    refusal = events.breach or reply_breach(shim_translation.result_text(result))
+    if refusal is not None:
+        raise AgentOutputSchemaError(refusal)
     if result.interrupted:
         # The conversation survives an interrupt, but the caller asked for
         # an answer and there is none: a stopped turn raises.
