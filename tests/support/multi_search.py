@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.vibesys.orchestration.multi.strategy._run import config, harness
+from tests.vibesys.orchestration.multi.strategy.world import MultiWorld
 
 from vibesys.hypothesis import rounds
-from vibesys.orchestration.multi.strategy.api import MultiStrategy, MultiStrategyState
+from vibesys.orchestration.multi.strategy.api import MultiStrategyState
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     EventCursor,
@@ -42,9 +42,9 @@ class SearchRecord:
         """Commit a record whose strategy state holds ``search``."""
         encoded = rounds.encode(rounds.Ledger(search))
         state = MultiStrategyState(search_json=encoded.search_json, carry_json=encoded.carry_json)
-        strategy = MultiStrategy(config=config())
-        chosen = harness(config())
-        core = new_run(strategy, chosen)
+        setup = MultiWorld().setup
+        strategy = setup.new_strategy()
+        core = new_run(strategy, setup.harness)
         record = RuntimeRecord[MultiStrategyState].fresh(
             RunEnvelope[MultiStrategyState](
                 schema_version=ENVELOPE_SCHEMA_VERSION,

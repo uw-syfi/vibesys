@@ -7,13 +7,9 @@ from typing import TYPE_CHECKING
 
 from tests.vibesys.orchestration.dynamic.strategy._replies import implemented
 from tests.vibesys.orchestration.dynamic.strategy._run import config as dynamic_config
-from tests.vibesys.orchestration.multi.strategy._replies import (
-    implemented as multi_implemented,
-)
-from tests.vibesys.orchestration.multi.strategy._replies import (
-    plan_reply as multi_plan_reply,
-)
-from tests.vibesys.orchestration.multi.strategy._run import config as multi_config
+from tests.vibesys.orchestration.multi.strategy.world import implemented as multi_implemented
+from tests.vibesys.orchestration.multi.strategy.world import multi_config
+from tests.vibesys.orchestration.multi.strategy.world import plan_reply as multi_plan_reply
 from tests.vibesys.orchestration.single.strategy.world import implemented as combined
 from tests.vibesys.orchestration.single.strategy.world import plan_reply, single_config
 
