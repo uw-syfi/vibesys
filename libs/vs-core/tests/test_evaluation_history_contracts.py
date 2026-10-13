@@ -336,12 +336,6 @@ def test_repeated_failure_guidance_requires_positive_typed_evidence(count: int) 
         )
 
 
-@given(st.integers(max_value=0))
-def test_repeated_failure_bound_is_explicit_and_positive(limit: int) -> None:
-    with pytest.raises(ValidationError, match="repeated_failure_limit"):
-        AttemptBudget(repeated_failure_limit=limit)
-
-
 @given(st.integers(min_value=1, max_value=20))
 def test_preupdate_sequence_is_correlated_per_source_without_cross_source_ordering(
     sequence: int,

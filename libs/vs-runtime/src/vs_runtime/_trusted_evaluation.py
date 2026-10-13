@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator, model_validator
 
 from vs_evaluator_protocol.api import (
     ErrorRecord,
@@ -31,6 +31,7 @@ from vs_evaluator_protocol.api import (
 from vs_runtime._failure_classification import (
     RecordState,
     TerminalSignal,
+    check_startup_cause_patterns,
     classify,
     signal_of,
 )
@@ -181,6 +182,15 @@ class TrustedEvaluationPlan(BaseModel):
     benchmark_contract: TrustedBenchmarkContract | None = Field(
         default=None,
         discriminator="kind",
+    )
+    # Regular expressions (case-insensitive) that a server's log tail matches when its
+    # candidate caused a startup failure. The task's domain supplies them: the runtime
+    # holds only the facts true of any process. They describe why a candidate failed;
+    # they do not decide whether an infrastructure failure is measured again.
+    candidate_startup_causes: tuple[str, ...] = ()
+
+    _check_startup_causes = field_validator("candidate_startup_causes")(
+        check_startup_cause_patterns
     )
 
     def execution_budget_seconds(

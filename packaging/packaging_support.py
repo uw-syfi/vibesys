@@ -130,7 +130,9 @@ def discover_client_workspace_sources(repo_root: Path) -> list[str]:
         for manifest in clients_root.glob(pattern)
         if manifest.parent.name not in {"bower_components", "node_modules"}
     )
-    allowed_directories = {package_root.relative_to(clients_root).parts for package_root in package_roots}
+    allowed_directories = {
+        package_root.relative_to(clients_root).parts for package_root in package_roots
+    }
     if (clients_root / "tools").is_dir():
         allowed_directories.add(("tools",))
 

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from ._registry import ContractError, EnvelopeMigration, OperationRegistry
 from ._values import canonical_json
-from .types.attempts import AttemptBudget
 from .types.common import AttemptId, ExecuteRegisteredOperation, LifecycleClass
 from .types.evaluation import SubmitMeasurement
 from .types.intents import IntentPhase, RecoveryBarrier, RecoveryPhase
@@ -81,16 +80,11 @@ def _new_attempt_contracts(core: dict[str, object]) -> None:
     for index, attempt in enumerate(
         _rows(attempts.get("attempts"), ("core", "attempts", "attempts"))
     ):
-        budget = _object(attempt.get("budget"), ("core", "attempts", "attempts", index, "budget"))
-        _absent_fields(
-            budget, ("repeated_failure_limit",), ("core", "attempts", "attempts", index, "budget")
-        )
         _absent_fields(
             attempt,
             ("evaluation_history", "terminal_reason"),
             ("core", "attempts", "attempts", index),
         )
-        budget["repeated_failure_limit"] = AttemptBudget().repeated_failure_limit
         attempt["evaluation_history"] = {
             "availability": "unavailable",
             "covered_submissions": [],
@@ -202,15 +196,6 @@ def _validate_old_decisions(core: dict[str, object]) -> None:
         if receipt.get("decision") is None:
             continue
         decision = _object(receipt["decision"], ("core", "run", "receipts", index, "decision"))
-        if decision.get("kind") == "start_attempt":
-            budget = _object(
-                decision.get("budget"), ("core", "run", "receipts", index, "decision", "budget")
-            )
-            _absent_fields(
-                budget,
-                ("repeated_failure_limit",),
-                ("core", "run", "receipts", index, "decision", "budget"),
-            )
         if decision.get("kind") == "operation":
             _absent_fields(
                 decision,

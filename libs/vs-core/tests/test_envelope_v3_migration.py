@@ -115,7 +115,6 @@ def test_migration_does_not_infer_other_source_watermarks_from_latest_observatio
 @pytest.mark.parametrize(
     "path",
     [
-        ("core", "attempts", "attempts", 0, "budget", "repeated_failure_limit"),
         ("core", "attempts", "attempts", 0, "evaluation_history"),
         ("core", "attempts", "attempts", 0, "terminal_reason"),
         ("core", "intents", "children", 0, "observation_watermarks"),
@@ -170,31 +169,6 @@ def test_version2_rejects_new_authority_fields_in_legacy_intent(field: str) -> N
     old["core"]["intents"]["intents"] = [intent]
     intent[field] = None
     with pytest.raises(ContractError, match=field):
-        _load(json.dumps(old))
-
-
-def test_version2_rejects_new_bound_in_accepted_start_receipt() -> None:
-    old = json.loads(_FIXTURE.read_text())
-    state = core.initial_state()
-    identity = core.DecisionId(root="queued-start")
-    decision = core.StartAttempt(
-        decision_id=identity,
-        scope=core.Scope(owner=state.run.run_id, generation=0),
-        attempt_id=core.AttemptId(root="queued"),
-        item_id=core.ItemId(root="item"),
-        workspace=core.WorkspacePlan(
-            mode=core.WorkspaceMode.ISOLATED_CHILD, base=state.run.facts.baseline
-        ),
-        budget=core.AttemptBudget(),
-    )
-    receipt = core.DecisionReceipt(
-        decision_id=identity,
-        decision=decision,
-        payload_digest="payload",
-        feedback=core.Accepted(decision_id=identity),
-    ).model_dump(mode="json")
-    old["core"]["run"]["receipts"] = [receipt]
-    with pytest.raises(ContractError, match="repeated_failure_limit"):
         _load(json.dumps(old))
 
 

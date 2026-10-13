@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import ValidationError
 
 from vs_core.api import MeasurementFailure, may_resubmit
 from vs_runtime.api import BenchmarkFailureKind
 from vs_runtime.api.infrastructure import (
     RecordState,
     TerminalSignal,
+    TrustedEvaluationPlan,
     classify,
     job_failure,
     signal_of,
@@ -52,37 +55,88 @@ def test_a_process_that_died_with_no_record_is_retried_at_most_once(exit_code: i
     assert kind is BenchmarkFailureKind.AMBIGUOUS
 
 
-_CANDIDATE_LOGS = (
+# Facts true of any process: the library knows them with no task's help.
+_GENERIC_CANDIDATE_LOGS = (
     "torch.OutOfMemoryError: CUDA out of memory",
     "HIP error: out of memory",
+    "OSError: [Errno 12] Cannot allocate memory",
+)
+# What one task's server prints: only that task's domain can say so.
+_TASK_LOGS = (
     "ValueError: No available memory for the cache blocks",
     "error: unrecognized arguments: --max-batch 99",
 )
+_TASK_CAUSES = (r"no available memory for the cache blocks", r"unrecognized arguments")
 _NODE_LOGS = (
     "HSA_STATUS_ERROR_OUT_OF_RESOURCES: hip device lost",
     "OSError: [Errno 5] Input/output error: '/shared/model/model.safetensors'",
     "hipErrorNoDevice: no ROCm-capable device is detected",
 )
 _OTHER_LOGS = ("", "Traceback (most recent call last):\nKeyError: 'x'", "waiting for the server")
+_CAUSES = st.lists(st.sampled_from(_TASK_CAUSES), unique=True).map(tuple)
 
 
-@given(log=st.sampled_from(_CANDIDATE_LOGS), noise=st.text(max_size=40))
-def test_a_server_that_died_of_the_candidates_own_cause_is_the_candidates(
-    log: str, noise: str
+def _startup_kind(log: str, causes: tuple[str, ...]) -> set[BenchmarkFailureKind]:
+    """The class of a never-ready server's failure under every record state."""
+    signal = signal_of(
+        None, service_not_ready=True, service_log=log, candidate_startup_causes=causes
+    )
+    return {classify(signal, record) for record in RecordState}
+
+
+@given(log=st.sampled_from(_GENERIC_CANDIDATE_LOGS), noise=st.text(max_size=40), causes=_CAUSES)
+def test_a_server_that_ran_out_of_memory_is_the_candidates_whatever_the_task(
+    log: str, noise: str, causes: tuple[str, ...]
 ) -> None:
-    signal = signal_of(None, service_not_ready=True, service_log=f"{noise}\n{log}")
-    for record in RecordState:
-        assert classify(signal, record) is BenchmarkFailureKind.WORKLOAD
+    assert _startup_kind(f"{noise}\n{log}", causes) == {BenchmarkFailureKind.WORKLOAD}
 
 
-@given(log=st.sampled_from(_NODE_LOGS + _OTHER_LOGS), cause=st.sampled_from(_CANDIDATE_LOGS))
+@given(log=st.sampled_from(_TASK_LOGS), noise=st.text(max_size=40))
+def test_a_task_cause_is_the_candidates_only_when_the_task_names_it(log: str, noise: str) -> None:
+    text = f"{noise}\n{log}"
+    assert _startup_kind(text, ()) == {BenchmarkFailureKind.AMBIGUOUS}
+    assert _startup_kind(text, _TASK_CAUSES) == {BenchmarkFailureKind.WORKLOAD}
+
+
+@given(
+    log=st.text(max_size=120),
+    causes=_CAUSES,
+    exit_code=st.none() | st.integers(min_value=-300, max_value=300),
+    ready=st.booleans(),
+)
+def test_a_task_cause_only_adds_to_what_the_generic_facts_say(
+    log: str, causes: tuple[str, ...], exit_code: int | None, *, ready: bool
+) -> None:
+    bare = signal_of(exit_code, service_not_ready=not ready, service_log=log)
+    with_task = signal_of(
+        exit_code, service_not_ready=not ready, service_log=log, candidate_startup_causes=causes
+    )
+    if bare is TerminalSignal.SERVICE_CANDIDATE_FAULT:
+        assert with_task is bare
+    elif with_task is not bare:
+        assert (bare, with_task) == (
+            TerminalSignal.SERVICE_NOT_READY,
+            TerminalSignal.SERVICE_CANDIDATE_FAULT,
+        )
+
+
+@given(
+    log=st.sampled_from(_NODE_LOGS + _OTHER_LOGS),
+    cause=st.sampled_from(_GENERIC_CANDIDATE_LOGS + _TASK_LOGS),
+    causes=_CAUSES,
+)
 def test_a_server_that_never_became_ready_without_a_candidate_cause_is_ambiguous(
-    log: str, cause: str
+    log: str, cause: str, causes: tuple[str, ...]
 ) -> None:
     for text in (log, f"{cause}\n{log}" if log in _NODE_LOGS else log):
-        signal = signal_of(None, service_not_ready=True, service_log=text)
-        for record in RecordState:
-            assert classify(signal, record) is BenchmarkFailureKind.AMBIGUOUS
+        assert _startup_kind(text, causes) == {BenchmarkFailureKind.AMBIGUOUS}
+
+
+@given(causes=st.lists(st.text(max_size=8)))
+def test_a_plan_rejects_a_cause_that_is_not_a_regular_expression(causes: list[str]) -> None:
+    bad = [*causes, "("]
+    with pytest.raises(ValidationError, match="not a regular expression"):
+        TrustedEvaluationPlan(candidate_startup_causes=tuple(bad))
 
 
 @given(kinds=st.lists(st.sampled_from((*_KINDS, None)), max_size=5))

@@ -60,8 +60,14 @@ GATE_FEEDBACK_TAIL_CHARS = 4000
 def trusted_evaluation_plan(
     bundle: InputBundle,
     session: RunEnvironmentSession,
+    *,
+    candidate_startup_causes: tuple[str, ...],
 ) -> TrustedEvaluationPlan:
-    """Lower task and environment configuration into runtime execution facts."""
+    """Lower task and environment configuration into runtime execution facts.
+
+    ``candidate_startup_causes`` are the run's domain's log patterns for a candidate that
+    broke its own server; the wiring passes them in, so this module names no domain.
+    """
     scalar = bundle.benchmark_result
     contract = (
         ScalarBenchmarkContract(
@@ -84,6 +90,7 @@ def trusted_evaluation_plan(
             bundle.manifest.profile.timeout_seconds if bundle.manifest.profile else None
         ),
         benchmark_contract=contract,
+        candidate_startup_causes=candidate_startup_causes,
     )
 
 

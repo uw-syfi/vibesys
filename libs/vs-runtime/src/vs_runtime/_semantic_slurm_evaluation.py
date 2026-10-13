@@ -447,6 +447,7 @@ class SemanticSlurmEvaluationExecutor:
             raw.exit_code if ran else None,
             service_not_ready=service_not_ready,
             service_log=raw.output,
+            candidate_startup_causes=self._trusted_plan.candidate_startup_causes,
         )
         record = RecordState.OUTCOME
         contract = self._trusted_plan.benchmark_contract

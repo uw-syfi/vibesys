@@ -40,3 +40,8 @@ class DomainDefinition:
     modalities: tuple[str, ...] = ()
     # The modality a run of this domain gets when it names none.
     default_modality: str | None = None
+    # Regular expressions (case-insensitive) that a task server's log tail matches when
+    # its candidate caused the startup failure, such as a cache too small for the model. They
+    # describe candidate failures; they do not decide whether infrastructure failures are
+    # measured again. Out-of-memory is a generic fact the runtime already knows.
+    candidate_startup_causes: tuple[str, ...] = ()

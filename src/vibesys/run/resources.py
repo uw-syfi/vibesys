@@ -18,6 +18,7 @@ from vibesys.constants import (
     PROJECT_ROOT,
     ComputeBackend,
 )
+from vibesys.domains.registry import resolve_domain
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import (
     CoreEventType,
@@ -646,7 +647,11 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 skill_source_paths=skill_source_paths,
             ),
             skill_source_paths=tuple(skill_source_paths),
-            evaluation_plan=trusted_evaluation_plan(bundle, session),
+            evaluation_plan=trusted_evaluation_plan(
+                bundle,
+                session,
+                candidate_startup_causes=resolve_domain(bundle.domain).candidate_startup_causes,
+            ),
             environment_resources=environment_resources,
             project_resources=project_resources,
             agent_host_resources=agent_host_resources,

@@ -380,7 +380,7 @@ depends_on = ["vibesys.prompts", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.resources"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.errors", "vibesys.run.evaluation", "vibesys.run.evaluation_socket", "vibesys.run.profilers", "vibesys.orchestration.profilers", "vibesys.orchestration.skill_selection", "vibesys.run", "vibesys.run.contracts", "vibesys.run.environment", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox", "vs_sim.api"]
+depends_on = ["vibesys", "vibesys.errors", "vibesys.run.evaluation", "vibesys.run.evaluation_socket", "vibesys.run.profilers", "vibesys.orchestration.profilers", "vibesys.orchestration.skill_selection", "vibesys.run", "vibesys.run.contracts", "vibesys.run.environment", "vibesys.domains", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.run.evaluation"

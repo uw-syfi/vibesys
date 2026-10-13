@@ -59,7 +59,6 @@ class AttemptBudget(Value):
     paid_invocation_limit: Count = 1
     retry_limit: Count = 0
     refund_limit: Count = 0
-    repeated_failure_limit: int = Field(default=3, ge=1)
 
 
 class AttemptPhase(StrEnum):

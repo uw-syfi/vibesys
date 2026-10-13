@@ -18,7 +18,7 @@ preemption, boot failure, job
 time limit, collection failure)
 service never ready, log shows     candidate   candidate   candidate
 a candidate cause (out of memory,
-KV cache too small, bad flags)
+the task's own startup causes)
 service never ready, any other     ambiguous   ambiguous   ambiguous
 log (node or ROCm fault, I/O
 error on shared storage, a hang)
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 __all__ = [
     "RecordState",
     "TerminalSignal",
+    "check_startup_cause_patterns",
     "classify",
     "is_unsettled",
     "job_failure",
@@ -103,16 +104,16 @@ _COLUMNS = tuple(RecordState)
 # A signature of the candidate's own configuration makes the failure the candidate's, unless
 # a signature of a fault in the node or its storage shows too: that one proves nothing, so
 # the failure stays ambiguous.
-_CANDIDATE_STARTUP_CAUSES = tuple(
-    re.compile(pattern, re.IGNORECASE)
-    for pattern in (
-        r"out[ _-]?of[ _-]?memory",
-        r"\bOOM\b",
-        r"cannot allocate memory",
-        r"no available memory for the cache blocks",
-        r"larger than the maximum number of tokens that can be stored in kv cache",
-        r"unrecognized arguments",
-    )
+#
+# Only facts true of any process live here: the operating system running out of memory. What
+# else a task's server prints when its candidate is at fault (a full KV cache, a rejected flag)
+# is the task's knowledge: the domain supplies it as `candidate_startup_causes`, and a domain
+# with none gets only these. These patterns describe why a candidate failed; whether an
+# infrastructure failure is measured again is the backend's decision, not made here.
+_GENERIC_STARTUP_CAUSES = (
+    r"out[ _-]?of[ _-]?memory",
+    r"\bOOM\b",
+    r"cannot allocate memory",
 )
 _NODE_FAULT_SIGNATURES = tuple(
     re.compile(pattern, re.IGNORECASE)
@@ -133,27 +134,49 @@ def classify(signal: TerminalSignal, record: RecordState) -> BenchmarkFailureKin
     return _TABLE[signal][_COLUMNS.index(record)]
 
 
-def _startup_signal(service_log: str) -> TerminalSignal:
+def check_startup_cause_patterns(patterns: Iterable[str]) -> tuple[str, ...]:
+    """The patterns, each checked to be a regular expression; raises ``ValueError`` naming one."""
+    checked = tuple(patterns)
+    for pattern in checked:
+        try:
+            re.compile(pattern)
+        except re.error as error:
+            message = f"candidate startup cause {pattern!r} is not a regular expression: {error}"
+            raise ValueError(message) from error
+    return checked
+
+
+def _startup_signal(service_log: str, domain_causes: tuple[str, ...]) -> TerminalSignal:
     """Whether a server that never became ready says the candidate made it die."""
     if any(p.search(service_log) for p in _NODE_FAULT_SIGNATURES):
         return TerminalSignal.SERVICE_NOT_READY
-    if any(p.search(service_log) for p in _CANDIDATE_STARTUP_CAUSES):
+    causes = (*_GENERIC_STARTUP_CAUSES, *domain_causes)
+    if any(re.search(pattern, service_log, re.IGNORECASE) for pattern in causes):
         return TerminalSignal.SERVICE_CANDIDATE_FAULT
     return TerminalSignal.SERVICE_NOT_READY
 
 
 def signal_of(
-    exit_code: int | None, *, service_not_ready: bool = False, service_log: str = ""
+    exit_code: int | None,
+    *,
+    service_not_ready: bool = False,
+    service_log: str = "",
+    candidate_startup_causes: tuple[str, ...] = (),
 ) -> TerminalSignal:
     """How a stage ended, from its exit status (None when it never reported one).
 
     A negative status is the sandbox's own cancellation or timeout, which proves nothing
     about the candidate, like a missing one. ``service_not_ready`` says the allocation's
     server never answered its readiness probe, so the stage never ran; ``service_log`` is
-    the tail of that server's log, which says whether the candidate caused it.
+    the tail of that server's log, which says whether the candidate caused it:
+    out-of-memory always does, and so does any of the task's ``candidate_startup_causes``.
     """
     if exit_code is None or exit_code < 0:
-        return _startup_signal(service_log) if service_not_ready else TerminalSignal.NO_EXIT_STATUS
+        return (
+            _startup_signal(service_log, candidate_startup_causes)
+            if service_not_ready
+            else TerminalSignal.NO_EXIT_STATUS
+        )
     if exit_code == 0:
         return TerminalSignal.CLEAN_EXIT
     if exit_code == _STAGE_TIMEOUT_EXIT:

@@ -51,7 +51,7 @@ def test_the_task_profile_command_reaches_the_trusted_evaluation_plan(tmp_path: 
         "timeout_seconds = 37\n",
     )
 
-    plan = trusted_evaluation_plan(load_task(tmp_path), _Session())
+    plan = trusted_evaluation_plan(load_task(tmp_path), _Session(), candidate_startup_causes=())
 
     assert plan.profile_command == "python profile.py --label 'queue run'"
     assert plan.profile_timeout_seconds == 37
