@@ -359,6 +359,55 @@ describe('Hosts desired set', () => {
     });
   });
 
+  test('a connection settled before its host is desired is installed with its real status', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await configuredSettings(settings, [ALPHA]);
+    const link = new FakeLink();
+    link.linkFault = {cause: 'link', detail: 'host unreachable'};
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      // No backoff slot: the one attempt this test drives goes straight to offline.
+      config: {delaysMs: [], deadlineMs: 60_000, heartbeatMs: 15_000},
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      log: () => {},
+    });
+    const pushed: HostListing[] = [];
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: listing => pushed.push(listing),
+      retire: () => {},
+    });
+
+    // `tasks`, `complete`, and `inspect` each lease a host's connection through `Hosts.connection`,
+    // independently of whether the welcome view desires that host yet. A connection their lease
+    // settles this way, before the host is desired, must not be relabelled once it is installed:
+    // offline has no further phase change coming to ever correct a wrong guess.
+    const probe = await hosts.connection(ALPHA);
+    await expect(probe.connection.ready()).rejects.toThrow('host unreachable');
+    expect(probe.connection.phase.kind).toBe('offline');
+
+    await hosts.host(ALPHA, '10:100');
+
+    expect(pushed.filter(listing => listing.host === 'ssh:alpha')).toEqual([
+      {
+        kind: 'unavailable',
+        host: 'ssh:alpha',
+        connection: {kind: 'offline', detail: 'host unreachable'},
+      },
+    ]);
+  });
+
   test('recent and visible intent form one set, independently of update order', async () => {
     const filesystem = new FakeSettingsFilesystem();
     const settings = new SettingsStore({

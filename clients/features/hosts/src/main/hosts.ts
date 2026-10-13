@@ -340,8 +340,17 @@ export class Hosts {
   #install(key: HostKey, lease: ConnectionLease): void {
     const connection = lease.connection;
     // A host returning to the set must overwrite any renderer cache before its old listing could
-    // be drawn. A fresh listing, if already known, follows synchronously.
-    this.#deps.push({kind: 'unavailable', host: key, connection: {kind: 'connecting'}});
+    // be drawn. A fresh listing, if already known, follows synchronously. `acquire` may hand back a
+    // connection another caller (`tasks`, `complete`, `inspect`) already settled, so the synthetic
+    // status mirrors its real current phase, exactly as the `onPhase` callback below does for every
+    // later change; a reused connection already ready skips it and waits for its real listing.
+    if (connection.phase.kind !== 'ready') {
+      this.#deps.push({
+        kind: 'unavailable',
+        host: key,
+        connection: connectionStatus(connection.phase),
+      });
+    }
     const push = this.#deps.push;
     const stopListing = connection.watchInstances(listing => push(hostListing(key, listing)));
     const stopPhase = connection.onPhase(phase => {
