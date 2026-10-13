@@ -278,6 +278,83 @@ describe('ServerClient', () => {
     );
   });
 
+  it('close joins a dedicated socket still retiring after its response', async () => {
+    socketPath = join('/tmp', `vs-${randomUUID().slice(0, 8)}.sock`);
+    const clock = new FakeClock();
+    const sockets = new Set<Socket>();
+    const server = createServer({allowHalfOpen: true}, socket => {
+      sockets.add(socket);
+      socket.on('error', () => undefined);
+      socket.once('close', () => sockets.delete(socket));
+      respondToLines(socket, request => {
+        if (request['type'] !== 'query.chat') return;
+        socket.write(
+          `${JSON.stringify({
+            ...successResponse(request['request_id'] as string),
+            chat: {question: 'done?', answer: 'done', effect: 'none'},
+          })}\n`,
+        );
+      });
+    });
+    await listen(server, socketPath);
+    const client = await ServerClient.connect(socketPath, {clock, closeGraceMs: 40});
+    try {
+      await client.request({type: 'query.chat', text: 'done?'});
+      expect(sockets.size).toBe(2);
+      // Completing the response starts graceful retirement, but the client
+      // must retain ownership until the peer closes or the grace bound wins.
+      expect(clock.pendingDelays()).toEqual([40]);
+
+      const closing = client.close();
+      await clock.waitUntilScheduled(40);
+      clock.runPending();
+      await closing;
+
+      expect(clock.pendingDelays()).toEqual([]);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      clock.runPending();
+      await client.close();
+      await close(server);
+    }
+  });
+
+  it('shares one retirement when a subscription and client close race', async () => {
+    socketPath = join('/tmp', `vs-${randomUUID().slice(0, 8)}.sock`);
+    const clock = new FakeClock();
+    const sockets = new Set<Socket>();
+    const server = createServer({allowHalfOpen: true}, socket => {
+      sockets.add(socket);
+      socket.on('error', () => undefined);
+      socket.once('close', () => sockets.delete(socket));
+      respondToLines(socket, request => {
+        if (request['type'] === 'subscribe') socket.write(subscribedMessage(request));
+      });
+    });
+    await listen(server, socketPath);
+    const client = await ServerClient.connect(socketPath, {clock, closeGraceMs: 40});
+    try {
+      const subscription = await client.subscribe(0, () => undefined, noopDisconnect);
+
+      const firstHandleClose = subscription.close();
+      const repeatedHandleClose = subscription.close();
+      const clientClose = client.close();
+      // One grace bound for the subscription and one for the control socket:
+      // repeated owners join rather than scheduling another physical teardown.
+      await Promise.resolve();
+      expect(clock.pendingDelays()).toEqual([40, 40]);
+      clock.runPending();
+      await Promise.all([firstHandleClose, repeatedHandleClose, clientClose]);
+
+      expect(clock.pendingDelays()).toEqual([]);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      clock.runPending();
+      await client.close();
+      await close(server);
+    }
+  });
+
   it('rejects malformed responses on a long-running connection', async () => {
     await withServer(
       socket =>

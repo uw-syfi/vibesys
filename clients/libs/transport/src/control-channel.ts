@@ -254,6 +254,13 @@ export class ControlChannel {
   readonly #held: ControlRequest[] = [];
   /** Connection teardowns that a terminal close must join. */
   readonly #retiringConnections = new Set<Promise<void>>();
+  /**
+   * Dial attempts owned from before their first callback until a connection has
+   * either been installed or handed to `#retireConnection`. This is deliberately
+   * wider than `#dialing`: that flag describes whether `open()` is outstanding
+   * for state reporting, while this set closes the post-open ownership handoff.
+   */
+  readonly #dialCompletions = new Set<Promise<void>>();
 
   #phase: ControlPhase = {kind: 'down'};
   /**
@@ -263,6 +270,8 @@ export class ControlChannel {
    */
   #generation = 0;
   #cancelRedial: (() => void) | null = null;
+  /** The one terminal teardown every close caller joins, including its error. */
+  #closing: Promise<void> | null = null;
   #dialing = false;
   /**
    * A failure the connection a dial is still resolving has already reported.
@@ -386,14 +395,31 @@ export class ControlChannel {
    * an answer (on the wire or held for a resend), and release the live
    * connection. Terminal; a later request rejects rather than dialing.
    */
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.#closing !== null) return this.#closing;
     const phase = this.#phase;
     this.#phase = {kind: 'closed'};
     this.#cancelRedial?.();
     this.#cancelRedial = null;
     this.#failOwed(disconnectedError('Client closed'));
     if (phase.kind === 'connected') this.#retireConnection(phase.connection);
-    await Promise.all([...this.#retiringConnections]);
+    this.#closing = this.#settleTerminalOwners();
+    return this.#closing;
+  }
+
+  /** Settle every terminal owner, then preserve the first owner-ordered error. */
+  async #settleTerminalOwners(): Promise<void> {
+    // A dial may have returned its connection but not resumed far enough to
+    // install or retire it. Settle every handoff before snapshotting teardown.
+    const dialResults = await Promise.allSettled([...this.#dialCompletions]);
+    // Retirements stay registered once the phase is closed, including fast
+    // failures created while the dial completions above are settling.
+    const retirementResults = await Promise.allSettled([...this.#retiringConnections]);
+    this.#retiringConnections.clear();
+    const failure = [...dialResults, ...retirementResults].find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failure !== undefined) throw failure.reason;
   }
 
   /**
@@ -407,8 +433,12 @@ export class ControlChannel {
     const retiring = Promise.resolve().then(() => connection.close());
     this.#retiringConnections.add(retiring);
     void retiring.then(
-      () => this.#retiringConnections.delete(retiring),
-      () => this.#retiringConnections.delete(retiring),
+      () => {
+        if (this.#phase.kind !== 'closed') this.#retiringConnections.delete(retiring);
+      },
+      () => {
+        if (this.#phase.kind !== 'closed') this.#retiringConnections.delete(retiring);
+      },
     );
   }
 
@@ -622,7 +652,27 @@ export class ControlChannel {
    */
   #dialNow(): void {
     this.#backoff.reset();
-    void this.#dial();
+    this.#startDial();
+  }
+
+  /**
+   * Own a dial before invoking it, because its synchronous state report may
+   * re-enter `close()`. The completion remains owned through the async
+   * dial-to-connection handoff, after `#dialing` has truthfully become false.
+   */
+  #startDial(): void {
+    let resolveCompletion = (): void => undefined;
+    let rejectCompletion = (_error: unknown): void => undefined;
+    const completion = new Promise<void>((resolve, reject) => {
+      resolveCompletion = resolve;
+      rejectCompletion = reject;
+    });
+    this.#dialCompletions.add(completion);
+    void completion.then(
+      () => this.#dialCompletions.delete(completion),
+      () => this.#dialCompletions.delete(completion),
+    );
+    void this.#dial().then(resolveCompletion, rejectCompletion);
   }
 
   /**
@@ -751,7 +801,7 @@ export class ControlChannel {
     }
     this.#cancelRedial = this.#scheduleTimeout(() => {
       this.#cancelRedial = null;
-      void this.#dial();
+      this.#startDial();
     }, delayMs);
   }
 

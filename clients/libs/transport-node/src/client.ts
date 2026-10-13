@@ -109,6 +109,13 @@ export class ServerClient {
    * whatever order the caller closes the stream and the client in.
    */
   readonly #secondarySockets = new Map<Socket, () => void>();
+  /**
+   * Graceful teardowns that have released their operation ownership but have
+   * not reached the socket's terminal close event. Keeping them here lets a
+   * client-wide close join the same teardown instead of losing the socket or
+   * starting a second FIN/grace sequence.
+   */
+  readonly #retiringSockets = new Map<Socket, Promise<void>>();
   /** Control dials created by a reconnect but not yet handed to the channel. */
   readonly #openingControlDials = new Map<Socket, SocketDial>();
   readonly #channel: ControlChannel;
@@ -252,7 +259,7 @@ export class ServerClient {
               closing = true;
               cancelHandshakeTimeout();
               this.#secondarySockets.delete(socket);
-              return closeSocketWithin(socket, this.#closeGraceMs, this.#clock.scheduleTimeout);
+              return this.#retireSocket(socket);
             },
           });
         }
@@ -366,13 +373,33 @@ export class ServerClient {
     const secondaries = [...this.#secondarySockets];
     this.#secondarySockets.clear();
     for (const [, settle] of secondaries) settle();
+    const secondaryRetirements = secondaries.map(([socket]) => this.#retireSocket(socket));
+    // Operations that completed before close() may still be waiting for their
+    // peer's FIN. Snapshot them only after every active owner has settled, so
+    // this terminal close joins all teardown that can start synchronously.
+    const retiring = new Set([...secondaryRetirements, ...this.#retiringSockets.values()]);
     return Promise.all([
       channelClosed,
       ...openingControls.map(dial => dial.close()),
-      ...secondaries.map(([socket]) =>
-        closeSocketWithin(socket, this.#closeGraceMs, this.#clock.scheduleTimeout),
-      ),
+      ...retiring,
     ]).then(() => undefined);
+  }
+
+  /** Begin or join the one bounded graceful retirement for a socket. */
+  #retireSocket(socket: Socket): Promise<void> {
+    const existing = this.#retiringSockets.get(socket);
+    if (existing !== undefined) return existing;
+    const retiring = closeSocketWithin(
+      socket,
+      this.#closeGraceMs,
+      this.#clock.scheduleTimeout,
+    ).finally(() => {
+      if (this.#retiringSockets.get(socket) === retiring) {
+        this.#retiringSockets.delete(socket);
+      }
+    });
+    this.#retiringSockets.set(socket, retiring);
+    return retiring;
   }
 
   /** Dial one control socket for the channel. */
@@ -429,7 +456,7 @@ export class ServerClient {
           // the request is disposed by its policy and the redial loop takes over.
           if (error) handlers.onDrop(transportFailure(error));
         }),
-      close: () => closeSocketWithin(socket, this.#closeGraceMs, this.#clock.scheduleTimeout),
+      close: () => this.#retireSocket(socket),
     };
   }
 
@@ -500,7 +527,7 @@ export class ServerClient {
         // EventEmitter error after the response promise has settled.
         socket.once('error', fail);
         socket.once('close', () => socket.off('error', fail));
-        socket.end();
+        void this.#retireSocket(socket);
         if (response.ok) resolve(response);
         else reject(responseError(response));
       };

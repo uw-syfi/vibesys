@@ -7,7 +7,7 @@ import {
   type ControlConnection,
   type ControlConnectionHandlers,
   type IssuedRequest,
-} from './control-channel.js';
+} from './index.js';
 import {expect} from './test-support/expect.js';
 import {FakeClock} from './testing/index.js';
 
@@ -112,6 +112,135 @@ function channelWith(
 }
 
 describe('ControlChannel', () => {
+  it('close joins a dial that resolves at the connection-ownership handoff', async () => {
+    const openStarted = deferred();
+    const releaseOpen = deferred();
+    const closeStarted = deferred();
+    const connectionCloseCalled = deferred();
+    const connectionClosed = deferred();
+    let connectionCloseCalls = 0;
+    const connector = {
+      open: async (_handlers: ControlConnectionHandlers): Promise<ControlConnection> => {
+        openStarted.resolve();
+        await releaseOpen.promise;
+        return {
+          send: () => undefined,
+          close: () => {
+            connectionCloseCalls += 1;
+            connectionCloseCalled.resolve();
+            return connectionClosed.promise;
+          },
+        };
+      },
+      runDedicated: async (): Promise<ProtocolResponse> => {
+        throw new Error('This scenario opens only a control connection');
+      },
+    };
+    const channel = new ControlChannel(connector, {
+      clientId: 'test-client',
+      reconnectDelaysMs: [],
+    });
+
+    channel.reconnect();
+    await openStarted.promise;
+    let closing: Promise<void> | undefined;
+    // `open()` resumes first and returns the connection. This callback is next,
+    // before the channel continuation that installs or retires the connection.
+    void releaseOpen.promise.then(() => {
+      closing = channel.close();
+      closeStarted.resolve();
+    });
+    releaseOpen.resolve();
+    await closeStarted.promise;
+    if (closing === undefined) throw new Error('The release did not close the channel');
+    await connectionCloseCalled.promise;
+
+    let closeSettled = false;
+    void closing.then(() => {
+      closeSettled = true;
+    });
+    await Promise.resolve();
+
+    expect(connectionCloseCalls).toBe(1);
+    expect(closeSettled).toBe(false);
+
+    connectionClosed.resolve();
+    await closing;
+    expect(closeSettled).toBe(true);
+    expect(channel.connected).toBe(false);
+  });
+
+  it('close settles every owner when a connection observer rejects the dial', async () => {
+    const closeStarted = deferred();
+    const connectionCloseCalled = deferred();
+    const releaseConnectionClose = deferred();
+    const observerError = new Error('connection observer failed');
+    const retirementError = new Error('connection retirement failed');
+    let connectionCloseCalls = 0;
+    const connector = {
+      open: async (handlers: ControlConnectionHandlers): Promise<ControlConnection> => ({
+        send: () => {
+          handlers.onDrop(new BackendClientError('disconnected', 'socket dropped during send'));
+        },
+        close: async () => {
+          connectionCloseCalls += 1;
+          connectionCloseCalled.resolve();
+          await releaseConnectionClose.promise;
+          throw retirementError;
+        },
+      }),
+      runDedicated: async (): Promise<ProtocolResponse> => {
+        throw new Error('This scenario opens only a control connection');
+      },
+    };
+    let closing: Promise<void> | undefined;
+    let channel: ControlChannel;
+    channel = new ControlChannel(connector, {
+      clientId: 'test-client',
+      reconnectDelaysMs: [],
+      onConnectionState: state => {
+        if (state.status === 'connected') return;
+        closing = channel.close();
+        closeStarted.resolve();
+        throw observerError;
+      },
+    });
+
+    const request = channel.request({type: 'command.pause'});
+    // Observe the request immediately; the terminal assertions below still
+    // inspect its typed result after the intentionally failing close paths.
+    void request.catch(() => undefined);
+    await closeStarted.promise;
+    const firstClose = closing;
+    if (firstClose === undefined) throw new Error('The observer did not close the channel');
+    const repeatedClose = channel.close();
+    await connectionCloseCalled.promise;
+
+    let closeSettled = false;
+    void firstClose.then(
+      () => {
+        closeSettled = true;
+      },
+      () => {
+        closeSettled = true;
+      },
+    );
+    // Drain the fixed promise chain through the rejected dial completion. The
+    // gated retirement is still an owned resource, so neither outcome is legal.
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    expect(connectionCloseCalls).toBe(1);
+    expect(closeSettled).toBe(false);
+
+    releaseConnectionClose.resolve();
+    // Dial ownership precedes retirement ownership, so the observer failure is
+    // stable even though the later connection retirement also rejects.
+    await expect(firstClose).rejects.toBe(observerError);
+    await expect(repeatedClose).rejects.toBe(observerError);
+    await expect(channel.close()).rejects.toBe(observerError);
+    await expect(request).rejects.toMatchObject({kind: 'disconnected'});
+    expect(channel.connected).toBe(false);
+  });
+
   it('does not open a connection after a state callback closes the channel', async () => {
     const connector = new FakeConnector(['answers']);
     const adopted: {handlers?: ControlConnectionHandlers} = {};
