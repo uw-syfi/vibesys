@@ -73,6 +73,40 @@ class ControlledReadStream extends Duplex {
   }
 }
 
+/** A host stream whose destroy callback can be held across the relay handoff. */
+class HandoffStream extends Duplex {
+  readonly #holdDestroy: boolean;
+  #completeDestroy: (() => void) | null = null;
+
+  constructor({autoDestroy = true, holdDestroy = false} = {}) {
+    super({allowHalfOpen: false, autoDestroy});
+    this.#holdDestroy = holdDestroy;
+  }
+
+  override _read(): void {}
+
+  override _write(_chunk: Buffer, _encoding: BufferEncoding, callback: () => void): void {
+    callback();
+  }
+
+  endReadable(): void {
+    this.push(null);
+  }
+
+  releaseDestroy(): void {
+    const complete = this.#completeDestroy;
+    if (complete === null) return;
+    this.#completeDestroy = null;
+    complete();
+  }
+
+  override _destroy(error: Error | null, callback: (error: Error | null) => void): void {
+    const complete = (): void => callback(error);
+    if (this.#holdDestroy) this.#completeDestroy = complete;
+    else complete();
+  }
+}
+
 function duplexPair(): [Duplex, Duplex] {
   const left = new LinkedEnd();
   const right = new LinkedEnd();
@@ -151,7 +185,87 @@ function frameBytes(data: string): number {
   return Buffer.byteLength(data, 'utf8') + 1;
 }
 
+function streamEvent(stream: Duplex, event: 'close' | 'end'): Promise<void> {
+  return new Promise(resolve => stream.once(event, resolve));
+}
+
+interface TerminalHandoff {
+  readonly stream: HandoffStream;
+  release(): void;
+}
+
+const TERMINAL_HANDOFFS: ReadonlyArray<{
+  readonly name: string;
+  prepare(): Promise<TerminalHandoff>;
+}> = [
+  {
+    name: 'ended',
+    async prepare() {
+      const stream = new HandoffStream({autoDestroy: false});
+      const ended = streamEvent(stream, 'end');
+      stream.endReadable();
+      stream.resume();
+      await ended;
+      return {stream, release: () => undefined};
+    },
+  },
+  {
+    name: 'closed',
+    async prepare() {
+      const stream = new HandoffStream();
+      const closed = streamEvent(stream, 'close');
+      stream.destroy();
+      await closed;
+      return {stream, release: () => undefined};
+    },
+  },
+  {
+    name: 'destroyed by an error',
+    async prepare() {
+      const stream = new HandoffStream({holdDestroy: true});
+      // The relay will own the terminal error once the pending dial hands this stream over.
+      stream.destroy(new Error('host stream failed before relay adoption'));
+      return {stream, release: () => stream.releaseDestroy()};
+    },
+  },
+];
+
 describe('relay', () => {
+  for (const handoff of TERMINAL_HANDOFFS) {
+    test(`a stream already ${handoff.name} closes without opening during dial handoff`, async () => {
+      const {stream, release} = await handoff.prepare();
+      const port = new FakePort();
+      const firstPost = port.until(posted => posted.length > 0);
+      const done = relay(port, async () => stream);
+
+      await firstPost;
+      if (!port.closedByMain) port.disconnect();
+      const closed = stream.closed ? Promise.resolve() : streamEvent(stream, 'close');
+      release();
+      if (!stream.destroyed) stream.destroy();
+      await Promise.all([done, closed]);
+
+      expect(port.posted).toEqual([{type: 'close'}]);
+      expect(port.closedByMain).toBe(true);
+    });
+  }
+
+  test('an error immediately after adoption closes the relay exactly once', async () => {
+    const port = new FakePort();
+    const stream = new HandoffStream();
+    const done = relay(port, async () => stream);
+    await port.until(posted => posted.some(message => message.type === 'open'));
+
+    stream.destroy(new Error('host stream failed after relay adoption'));
+    await done;
+
+    expect(port.posted).toEqual([
+      {type: 'open', creditBytes: BRIDGE_CREDIT_WINDOW_BYTES},
+      {type: 'close'},
+    ]);
+    expect(port.closedByMain).toBe(true);
+  });
+
   test('server lines reach the page as whole messages, however the bytes are chunked', async () => {
     for (let seed = 1; seed <= 50; seed += 1) {
       const next = random(seed);

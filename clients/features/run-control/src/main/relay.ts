@@ -128,11 +128,17 @@ class StreamRelay {
     }
     this.#stream = stream;
     stream.pause();
-    stream.setEncoding('utf8');
-    stream.on('data', (chunk: string) => this.#receiveStreamChunk(chunk));
+    // Take ownership of terminal events before inspecting state. A stream may have ended while the
+    // dial promise was handing it to us; publishing `open` for that stream would strand the page.
     stream.once('end', () => this.#endStream());
     stream.once('close', () => this.#streamClosed());
     stream.once('error', () => this.#finish());
+    if (stream.destroyed || stream.closed || stream.readableEnded || stream.errored !== null) {
+      this.#finish();
+      return;
+    }
+    stream.setEncoding('utf8');
+    stream.on('data', (chunk: string) => this.#receiveStreamChunk(chunk));
     if (this.#post({type: 'open', creditBytes: BRIDGE_CREDIT_WINDOW_BYTES})) {
       // Read ahead only until bounded output is waiting. In particular, do not require the first
       // credit grant to observe a host that wrote its final frame and clean EOF immediately.
