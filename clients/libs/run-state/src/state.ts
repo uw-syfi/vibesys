@@ -87,6 +87,25 @@ export interface QuotaState {
   readonly pause: QuotaPause | null;
 }
 
+type RunStartupProgressData = Extract<
+  NonNullable<RunEvent['data']>,
+  {kind: 'run_startup_progress'}
+>;
+
+/**
+ * The latest startup stage and progress fact, while the run's environment opens.
+ *
+ * `null` before the first `run_startup_progress` event. The backend stops
+ * reporting once the run is ready and emits no explicit "done" event, so this
+ * is never cleared once set; a consumer shows it only while `status` is
+ * `starting`, the same discipline `QuotaState` documents for `pause`.
+ */
+export interface RunStartupState {
+  readonly stage: RunStartupProgressData['stage'];
+  /** `null` while the stage reports no progress of its own (resolving, say). */
+  readonly progress: Readonly<{done: number; total: number | null; label: string}> | null;
+}
+
 /** Thread id used for chat events recorded without one. */
 export const DEFAULT_CHAT_THREAD_ID = 'default';
 
@@ -178,6 +197,7 @@ export interface CoreState {
    */
   readonly foldedOutOfBand: readonly number[];
   readonly status: CoreRunStatus;
+  readonly startup: RunStartupState | null;
   /** @deprecated Last event cursor; use `activeRunFocus` for current work. */
   readonly agentKind: string | null;
   /** @deprecated Last event cursor; use `activeRunFocus` for current work. */
@@ -242,6 +262,7 @@ export function initialCoreState(): CoreState {
     sequence: 0,
     foldedOutOfBand: [],
     status: 'connecting',
+    startup: null,
     agentKind: null,
     roundLabel: null,
     outerLoop: null,

@@ -10,6 +10,7 @@ import {
   LIVE_SESSION_HEADER_COPY,
   PAGE_CONNECTION_BANNER_COPY,
   pageHeader,
+  STARTUP_STAGE_LABELS,
   STREAM_BANNER_COPY,
 } from './banners.js';
 
@@ -85,6 +86,24 @@ const RUN_FINISHED: RunEvent = {
   type: 'run_finished',
   text: '',
   status: 'completed',
+};
+/**
+ * A mid-build progress tick, as the backend's `_StartupReporter` emits it: before
+ * `run_started`, which the environment it reports on precedes (#resources.py).
+ */
+const STARTUP_PROGRESS: RunEvent = {
+  protocol_version: 1,
+  sequence: 1,
+  run_id: 'run-1',
+  timestamp: '2026-09-12T10:14:58Z',
+  type: 'run_startup_progress',
+  text: '',
+  status: 'active',
+  data: {
+    kind: 'run_startup_progress',
+    stage: 'building_image',
+    progress: {done: 12, total: 30, label: 'RUN pip install'},
+  },
 };
 
 describe('connectionBanners', () => {
@@ -296,6 +315,43 @@ describe('connectionBanners', () => {
         }
       }
     }
+  });
+});
+
+describe('the status chip while a run is starting', () => {
+  const connected = sessionState('connected', 'up');
+
+  test('narrates the stage and progress of the environment opening, worded like the Host Panel', () => {
+    const run = runStep(runWith('starting'), {type: 'events', events: [STARTUP_PROGRESS]}).state;
+    expect(pageHeader(run, connected).status).toEqual({
+      className: 'status-starting',
+      label: `${STARTUP_STAGE_LABELS.building_image} 12/30: RUN pip install`,
+    });
+  });
+
+  test('keeps the bare status word while starting has reported no progress yet', () => {
+    expect(pageHeader(runWith('starting'), connected).status).toEqual({
+      className: 'status-starting',
+      label: 'starting',
+    });
+  });
+
+  test('stops narrating startup progress once the run is ready, though the fact is retained', () => {
+    let run = runStep(runWith('starting'), {type: 'events', events: [STARTUP_PROGRESS]}).state;
+    run = runStep(run, {type: 'events', events: [{...RUN_STARTED, sequence: 2}]}).state;
+
+    expect(run.status).toBe('running');
+    // The last startup fact survives the transition undisturbed (`QuotaState.pause`'s
+    // discipline): nothing clears it, because nothing has to. Showing it is `pageHeader`'s
+    // call, made from `status` alone, which is why the chip reverts to the bare word.
+    expect(run.startup).toEqual({
+      stage: 'building_image',
+      progress: {done: 12, total: 30, label: 'RUN pip install'},
+    });
+    expect(pageHeader(run, connected).status).toEqual({
+      className: 'status-running',
+      label: 'running',
+    });
   });
 });
 

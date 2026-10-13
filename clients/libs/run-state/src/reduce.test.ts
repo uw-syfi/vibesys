@@ -2694,3 +2694,70 @@ describe('quota state', () => {
     }
   });
 });
+
+describe('run startup progress state', () => {
+  const progressEvent = (
+    sequence: number,
+    data: {
+      stage: 'resolving' | 'building_image' | 'starting_container';
+      progress?: {done: number; total?: number | null; label?: string};
+    },
+  ): RunEvent =>
+    fixtureEvent(sequence, 'run_startup_progress', {data: {kind: 'run_startup_progress', ...data}});
+
+  it('starts with no startup fact', () => {
+    expect(initialCoreState().startup).toBeNull();
+  });
+
+  it('folds a stage with no progress of its own', () => {
+    const state = reduceEvent(initialCoreState(), progressEvent(1, {stage: 'resolving'}));
+    expect(state.startup).toEqual({stage: 'resolving', progress: null});
+  });
+
+  it('folds a stage with done, total and a running step label', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      progressEvent(1, {
+        stage: 'building_image',
+        progress: {done: 12, total: 30, label: 'RUN pip install'},
+      }),
+    );
+    expect(state.startup).toEqual({
+      stage: 'building_image',
+      progress: {done: 12, total: 30, label: 'RUN pip install'},
+    });
+  });
+
+  it('defaults an absent total and label without inventing evidence', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      progressEvent(1, {stage: 'starting_container', progress: {done: 0}}),
+    );
+    expect(state.startup).toEqual({
+      stage: 'starting_container',
+      progress: {done: 0, total: null, label: ''},
+    });
+  });
+
+  it('advances to the latest stage as later progress events replace earlier ones', () => {
+    let state = reduceEvent(initialCoreState(), progressEvent(1, {stage: 'resolving'}));
+    state = reduceEvent(
+      state,
+      progressEvent(2, {
+        stage: 'building_image',
+        progress: {done: 1, total: 10, label: 'FROM base'},
+      }),
+    );
+    state = reduceEvent(
+      state,
+      progressEvent(3, {
+        stage: 'building_image',
+        progress: {done: 2, total: 10, label: 'RUN build'},
+      }),
+    );
+    expect(state.startup).toEqual({
+      stage: 'building_image',
+      progress: {done: 2, total: 10, label: 'RUN build'},
+    });
+  });
+});

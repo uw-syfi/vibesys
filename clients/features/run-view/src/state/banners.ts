@@ -1,5 +1,5 @@
 import type {WebSessionState} from '@vibesys/run-session';
-import {type CoreState, hasRunEnded} from '@vibesys/run-state';
+import {type CoreState, hasRunEnded, type RunStartupState} from '@vibesys/run-state';
 import {activeRunFocus, phaseText} from '@vibesys/run-state/rounds';
 import type {ControlChannelState} from '@vibesys/transport';
 
@@ -160,6 +160,37 @@ export const PAGE_CONNECTION_BANNER_COPY = {
   lost: 'The VibeSys server is unreachable, so this page may no longer be current.',
 } as const;
 
+/**
+ * Stage labels for a starting run's environment, in the Host Panel's wording
+ * (`clients/libs/hosts/src/listing.ts`'s `STAGES`) so the two surfaces never
+ * disagree on what a stage is called.
+ *
+ * Duplicated rather than imported: the Host Panel's `instancePhaseText`
+ * formats a registry record's polled `RunPhase`, a different package's wire
+ * type for a different (polling) data source, and this page's fact streams
+ * from the run's own events. Routing it through that helper would mean
+ * faking a `RunPhase` for the sole purpose of borrowing three strings, which
+ * reads as a relationship between the two facts that does not exist. If the
+ * wording changes, update both; there are only three stages.
+ */
+export const STARTUP_STAGE_LABELS: Readonly<Record<RunStartupState['stage'], string>> = {
+  resolving: 'Resolving',
+  building_image: 'Building image',
+  starting_container: 'Starting container',
+};
+
+/**
+ * A starting run's stage and progress in words, e.g. `Building image 12/30: RUN pip install`.
+ * Mirrors `instancePhaseText`'s format in `clients/libs/hosts/src/listing.ts` exactly.
+ */
+function startupStatusLabel(startup: RunStartupState): string {
+  const stage = STARTUP_STAGE_LABELS[startup.stage];
+  const progress = startup.progress;
+  if (progress === null) return stage;
+  const count = `${progress.done}/${progress.total ?? '?'}`;
+  return progress.label === '' ? `${stage} ${count}` : `${stage} ${count}: ${progress.label}`;
+}
+
 /** Header copy used before a live session has loaded its first snapshot. */
 export const LIVE_SESSION_HEADER_COPY = {
   connecting: {heading: 'Connecting to the server', status: 'connecting'},
@@ -236,7 +267,13 @@ export function pageHeader(run: CoreState, session: WebSessionState | null): Pag
         (run.status === 'connecting' && session === null ? 'Replay is loading' : 'Run overview'));
   return {
     heading,
-    status: {className: `status-${run.status}`, label: run.status},
+    status: {
+      className: `status-${run.status}`,
+      label:
+        run.status === 'starting' && run.startup !== null
+          ? startupStatusLabel(run.startup)
+          : run.status,
+    },
   };
 }
 

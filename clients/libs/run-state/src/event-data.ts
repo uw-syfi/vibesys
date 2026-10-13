@@ -105,7 +105,7 @@ const EVENT_DATA_HANDLERS = {
   output: ignoredEventData,
   server_ready: ignoredEventData,
   run_started: ignoredEventData,
-  run_startup_progress: ignoredEventData,
+  run_startup_progress: runEventData(applyRunStartupProgressData),
   run_failed: runEventData(applyTerminalExecutionStatus),
   run_interrupted: runEventData(applyTerminalExecutionStatus),
   run_status_changed: runEventData(
@@ -184,6 +184,21 @@ function applyExperimentsChangedData(
   sequence: number,
 ): CoreState {
   return cloneCoreStateWith(state, {experimentsRevision: sequence});
+}
+
+function applyRunStartupProgressData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'run_startup_progress') return state;
+  const progress = data.progress;
+  return cloneCoreStateWith(state, {
+    startup: {
+      stage: data.stage,
+      progress:
+        progress == null
+          ? null
+          : {done: progress.done, total: progress.total ?? null, label: progress.label ?? ''},
+    },
+  });
 }
 
 function applyRunStatusData(state: CoreState, event: RunEvent): CoreState {

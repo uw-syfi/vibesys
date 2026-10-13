@@ -213,3 +213,37 @@ test('renders typed tool data as a card instead of reparsing its display text', 
   expect(html).toContain('class="tool-arguments"');
   expect(html).toContain('src/main.py');
 });
+
+test('narrates a starting run environment progress in the status chip', () => {
+  const run = runStep(
+    {...initialCoreState(), status: 'starting'},
+    {
+      type: 'events',
+      events: [
+        event(1, 'run_startup_progress', {
+          data: {
+            kind: 'run_startup_progress',
+            stage: 'building_image',
+            progress: {done: 12, total: 30, label: 'RUN pip install'},
+          },
+        }),
+      ],
+    },
+  ).state;
+
+  const html = renderToStaticMarkup(
+    <RunPage
+      run={run}
+      iterations={initialIterationNavigation()}
+      session={null}
+      replayFailure={null}
+      onReattach={() => undefined}
+      onReconnectControls={() => undefined}
+      onRetryReplay={() => undefined}
+      onCommand={null}
+    />,
+  );
+
+  expect(html).toContain('class="status status-starting"');
+  expect(html).toContain('Building image 12/30: RUN pip install');
+});
