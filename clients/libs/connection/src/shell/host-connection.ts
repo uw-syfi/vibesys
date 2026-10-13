@@ -44,6 +44,7 @@ import {
   type RunStream,
 } from './helper-channel.js';
 import type {Link} from './link.js';
+import {retireProcess, type SpawnedProcess} from './process.js';
 
 export interface HostConnectionOptions {
   readonly link: Link;
@@ -53,8 +54,10 @@ export interface HostConnectionOptions {
   readonly config: ConnectionConfig;
   readonly scheduleTimeout: ScheduleTimeout;
   readonly log: (message: string) => void;
-  /** Tell the owning manager after every channel and helper process has ended. */
-  readonly released?: () => void;
+  /** Publish the release barrier before cleanup starts, so the owner admits no replacement. */
+  readonly releaseStarted?: (release: Promise<void>) => void;
+  /** Tell the owning manager whether every channel and helper process was confirmed ended. */
+  readonly released?: (failure: Error | null) => void;
 }
 
 /** What the app may tell a connection: a wake or a network change, or the user's retry. */
@@ -115,8 +118,10 @@ export class HostConnection implements AsyncDisposable {
   readonly #runs = new Set<HelperChannel>();
   /** Control channels opened by an operation and not yet installed or closed. */
   readonly #opened = new Set<HelperChannel>();
-  /** The exits of every helper process this connection started that has not exited yet. */
-  readonly #exits = new Set<Promise<number | null>>();
+  /** Every helper process this connection started whose exact exit has not been observed yet. */
+  readonly #processes = new Set<SpawnedProcess>();
+  /** One joinable disposal per channel, including channels an abandoned operation handed back. */
+  readonly #channelRetirements = new Map<HelperChannel, Promise<void>>();
   readonly #phaseListeners = new Set<(phase: Phase) => void>();
   readonly #unreachable = new Set<(instanceId: string, detail: string) => void>();
   readonly #watchers = new Set<(listing: InstanceList) => void>();
@@ -127,6 +132,7 @@ export class HostConnection implements AsyncDisposable {
   #phase: Phase = {kind: 'idle'};
   #control: HelperChannel | null = null;
   #listing: InstanceList | null = null;
+  #retirementFailure: ConnectionError | null = null;
   #closing: Promise<void> | null = null;
   #holds = 0;
 
@@ -147,9 +153,9 @@ export class HostConnection implements AsyncDisposable {
         check: fromPromise(({input, signal}) => typed(() => this.#check(input.target, signal))),
       },
       actions: {
-        release: () => void this.#release(),
+        release: () => this.#releaseInBackground(),
         installControl: (_, {opened}) => this.#install(opened),
-        discard: (_, {opened}) => void this.#discard(opened),
+        discard: (_, {opened}) => this.#discardInBackground(opened),
       },
       guards: {
         current: (_, {opened}) => this.#current(opened),
@@ -169,7 +175,8 @@ export class HostConnection implements AsyncDisposable {
       this.#phase = phase;
       this.#phaseChanged(phase);
     });
-    // Released in reverse: the channels, and every process, after the machine stopped.
+    // Released in reverse: the channels, and every process, after the machine stopped. Retiring
+    // the process set also covers a helper whose opening operation had not returned its channel.
     this.#stack.defer(async () => {
       const channels = [
         ...this.#runs,
@@ -179,8 +186,28 @@ export class HostConnection implements AsyncDisposable {
       this.#runs.clear();
       this.#opened.clear();
       this.#control = null;
-      await Promise.all(channels.map(channel => channel[Symbol.asyncDispose]()));
-      await Promise.all(this.#exits);
+      const channelDisposals = new Set([
+        ...this.#channelRetirements.values(),
+        ...channels.map(channel => this.#retireChannel(channel)),
+      ]);
+      const retirements = [...this.#processes].map(process =>
+        retireProcess(process, this.#options.scheduleTimeout),
+      );
+      const [disposed, outcomes] = await Promise.all([
+        Promise.allSettled(channelDisposals),
+        Promise.all(retirements.map(retirement => retirement.outcome)),
+      ]);
+      if (outcomes.some(outcome => outcome.kind === 'unconfirmed')) {
+        throw (
+          this.#retirementFailure ??
+          new ConnectionError(
+            'link',
+            `could not confirm termination of every helper for ${this.where}`,
+          )
+        );
+      }
+      const failed = disposed.find(result => result.status === 'rejected');
+      if (failed?.status === 'rejected') throw failed.reason;
     });
     // Stopping the machine stops every operation (aborting its signal) and cancels every timer.
     this.#stack.defer(() => {
@@ -358,8 +385,43 @@ export class HostConnection implements AsyncDisposable {
 
   /** Release everything, once; every caller waits for the same release. */
   #release(): Promise<void> {
-    this.#closing ??= this.#stack.disposeAsync().finally(() => this.#options.released?.());
+    if (this.#closing !== null) return this.#closing;
+    let resolve = (): void => {};
+    let reject = (_error: Error): void => {};
+    this.#closing = new Promise<void>((settled, failed) => {
+      resolve = settled;
+      reject = failed;
+    });
+    try {
+      this.#options.releaseStarted?.(this.#closing);
+    } catch {
+      // An owner's observer cannot prevent cleanup after the connection published its barrier.
+    }
+    void this.#stack.disposeAsync().then(
+      () => {
+        this.#reportReleased(null);
+        resolve();
+      },
+      error => {
+        const failure = asConnectionError(error);
+        this.#reportReleased(failure);
+        reject(failure);
+      },
+    );
     return this.#closing;
+  }
+
+  /** The machine owns release even when no public disposal caller is waiting for it. */
+  #releaseInBackground(): void {
+    void this.#release().catch(() => {});
+  }
+
+  #reportReleased(failure: Error | null): void {
+    try {
+      this.#options.released?.(failure);
+    } catch {
+      // Resource ownership and the public release result cannot depend on an observer succeeding.
+    }
   }
 
   /** Write one request to the already-ready control channel. */
@@ -380,7 +442,7 @@ export class HostConnection implements AsyncDisposable {
     try {
       connected = await channel.connectRun(instanceId);
     } catch (error) {
-      await channel[Symbol.asyncDispose]();
+      await this.#retireChannel(channel);
       throw error;
     }
     connected.stream.once('error', error => {
@@ -395,14 +457,18 @@ export class HostConnection implements AsyncDisposable {
    * Start a helper and its channel, living until `signal` aborts; aborting `opening` before it
    * answered ends it too. Nothing starts once the connection is closing.
    */
-  #openChannel(signal: AbortSignal, opening?: AbortSignal): Promise<HelperChannel> {
+  async #openChannel(signal: AbortSignal, opening?: AbortSignal): Promise<HelperChannel> {
     const {link, checkout, appVersion, config, scheduleTimeout} = this.#options;
+    await Promise.all(this.#channelRetirements.values());
     if (this.#abort.signal.aborted) {
-      return Promise.reject(new ConnectionError('link', 'the connection was closed'));
+      throw new ConnectionError('link', 'the connection was closed');
     }
     const process = link.spawnHelper(checkout);
-    this.#exits.add(process.exit);
-    void process.exit.then(() => this.#exits.delete(process.exit));
+    this.#processes.add(process);
+    void process.exit.then(
+      () => this.#processes.delete(process),
+      () => {},
+    );
     return HelperChannel.open(
       process,
       {
@@ -413,6 +479,7 @@ export class HostConnection implements AsyncDisposable {
         signal,
         explain: (code, stderr) => link.explain(code, stderr, this.where),
         heard: line => link.heard(line),
+        retirementFailed: error => this.#retirementFailed(error),
       },
       opening,
     );
@@ -426,7 +493,7 @@ export class HostConnection implements AsyncDisposable {
   async #openControl(signal: AbortSignal): Promise<HelperChannel> {
     const channel = await this.#openChannel(this.#abort.signal, signal);
     this.#opened.add(channel);
-    signal.addEventListener('abort', () => void this.#discard(channel), {once: true});
+    signal.addEventListener('abort', () => this.#discardInBackground(channel), {once: true});
     // Pushes reach watchers only once the machine installed this channel (`#install`).
     channel.onPush(push => {
       this.#latest.set(channel, push.listing);
@@ -466,7 +533,7 @@ export class HostConnection implements AsyncDisposable {
     this.#opened.delete(channel);
     const previous = this.#control;
     this.#control = channel;
-    if (previous !== null && previous !== channel) void previous[Symbol.asyncDispose]();
+    if (previous !== null && previous !== channel) this.#retireInBackground(previous);
     const latest = this.#latest.get(channel);
     if (latest !== undefined) {
       this.#listing = latest;
@@ -484,8 +551,53 @@ export class HostConnection implements AsyncDisposable {
   async #discard(opened: Opened): Promise<void> {
     if (opened === null) return;
     const channel = opened as HelperChannel;
-    if (!this.#opened.delete(channel)) return;
-    await channel[Symbol.asyncDispose]();
+    if (this.#opened.delete(channel)) {
+      await this.#retireChannel(channel);
+      return;
+    }
+    const retiring = this.#channelRetirements.get(channel);
+    if (retiring !== undefined) await retiring;
+  }
+
+  /** Dispose a channel once; every owner joins the same exact retirement task. */
+  #retireChannel(channel: HelperChannel): Promise<void> {
+    let retirement = this.#channelRetirements.get(channel);
+    if (retirement === undefined) {
+      retirement = channel[Symbol.asyncDispose]();
+      this.#channelRetirements.set(channel, retirement);
+      void retirement.then(
+        () => {
+          if (this.#channelRetirements.get(channel) === retirement) {
+            this.#channelRetirements.delete(channel);
+          }
+        },
+        () => {
+          // Retain a rejected task: it is the terminal barrier for an unconfirmed helper process.
+        },
+      );
+    }
+    return retirement;
+  }
+
+  /** Own a channel retirement whose originating machine action cannot await it. */
+  #retireInBackground(channel: HelperChannel): void {
+    void this.#retireChannel(channel).catch(error => this.#retirementFailed(error));
+  }
+
+  #discardInBackground(opened: Opened): void {
+    void this.#discard(opened).catch(error => this.#retirementFailed(error));
+  }
+
+  /** An unconfirmed helper is terminal: close the machine and expose one typed release failure. */
+  #retirementFailed(error: unknown): void {
+    if (this.#retirementFailure !== null) return;
+    this.#retirementFailure = asConnectionError(error);
+    try {
+      this.#options.log(`${this.where}: ${this.#retirementFailure.message}`);
+    } catch {
+      // Diagnostics cannot regain ownership of an unconfirmed process or prevent terminal cleanup.
+    }
+    this.#send({type: 'close'});
   }
 
   async #check(target: CheckTarget, signal: AbortSignal): Promise<Opened> {

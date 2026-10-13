@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {PassThrough} from 'node:stream';
 import {helperFeatureForRequest} from '@vibesys/contracts/host-helper';
 import {FakeClock} from '@vibesys/transport/testing';
-import {fakeProcess} from '../testing/fake-process.js';
+import {deferredKillProcess, fakeProcess} from '../testing/fake-process.js';
 import {type ChannelOptions, ConnectionError, HelperChannel} from './helper-channel.js';
 
 type JsonLine = Record<string, unknown>;
@@ -203,5 +203,79 @@ describe('HelperChannel line buffer bound', () => {
     expect(error.message).toContain('without a newline');
     expect(await channel.ended).toBe(error);
     expect(killed).toEqual(['SIGTERM']);
+  });
+});
+
+describe('HelperChannel process retirement', () => {
+  test('disposal is bounded when a helper ignores both termination signals', async () => {
+    const clock = new FakeClock();
+    const signals: string[] = [];
+    const process = deferredKillProcess(signal => signals.push(signal));
+    const nextLine = jsonLines(process.input);
+    const channel = await openChannel(process, nextLine, channelOptions(clock));
+
+    const disposing = rejection(channel[Symbol.asyncDispose]());
+
+    expect(signals).toEqual(['SIGTERM']);
+    expect(clock.pendingDelays()).toEqual([1_000]);
+    clock.advanceBy(2_000);
+    const error = connectionFailure(await disposing);
+    expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(error.message).toContain('could not confirm termination');
+    expect(process.process.running).toBe(true);
+
+    process.end(null);
+  });
+
+  test('disposal confirms a helper that exits only after forced termination', async () => {
+    const clock = new FakeClock();
+    const signals: string[] = [];
+    let process: ReturnType<typeof deferredKillProcess>;
+    process = deferredKillProcess(signal => {
+      signals.push(signal);
+      if (signal === 'SIGKILL') process.end(null);
+    });
+    const nextLine = jsonLines(process.input);
+    const channel = await openChannel(process, nextLine, channelOptions(clock));
+
+    const disposing = channel[Symbol.asyncDispose]();
+    clock.advanceBy(1_000);
+
+    await disposing;
+    expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(process.process.running).toBe(false);
+    expect(clock.pending).toBe(0);
+  });
+
+  test('destroying a run stream uses the helper process retirement bound', async () => {
+    const clock = new FakeClock();
+    const signals: string[] = [];
+    const process = deferredKillProcess(signal => signals.push(signal));
+    const nextLine = jsonLines(process.input);
+    const channel = await openChannel(process, nextLine, channelOptions(clock));
+    const connecting = channel.connectRun('0123456789ab');
+    const request = await nextLine();
+    reply(process, {
+      type: 'run.connect',
+      request_id: request['request_id'],
+      run_id: 'run-a',
+      protocol_version: 1,
+    });
+    const {stream} = await connecting;
+    const failed = new Promise<Error>(resolve => stream.once('error', resolve));
+    const closed = new Promise<void>(resolve => stream.once('close', resolve));
+
+    stream.destroy();
+
+    expect(signals).toEqual(['SIGTERM']);
+    expect(clock.pendingDelays()).toEqual([1_000]);
+    clock.advanceBy(2_000);
+    expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(process.process.running).toBe(true);
+    const error = connectionFailure(await failed);
+    expect(error.message).toContain('could not confirm termination');
+    await closed;
+
+    process.end(null);
   });
 });

@@ -67,8 +67,8 @@ export class ConnectionManager implements AsyncDisposable {
   readonly #leases = new Map<HostConnection, number>();
   /** Connections a changed checkout replaced, open while a run is attached through them. */
   readonly #replaced = new Set<HostConnection>();
-  /** Closes under way, which the manager's own release waits for. */
-  readonly #closing = new Set<Promise<void>>();
+  /** The one close task per connection, which the manager's own release waits for. */
+  readonly #closing = new Map<HostConnection, Promise<void>>();
   /** Link releases under way after their final connection or operation ended. */
   readonly #releasing = new Set<Promise<void>>();
   /** A host cannot be reopened until its prior ssh control master has finished exiting. */
@@ -189,10 +189,14 @@ export class ConnectionManager implements AsyncDisposable {
   }
 
   #close(connection: HostConnection): Promise<void> {
-    // A connection's release settles every channel it started; it has nothing to report.
-    const closing = connection[Symbol.asyncDispose]().catch(() => {});
-    this.#closing.add(closing);
-    void closing.then(() => this.#closing.delete(closing));
+    const existing = this.#closing.get(connection);
+    if (existing !== undefined) return existing;
+    const closing = connection[Symbol.asyncDispose]();
+    this.#closing.set(connection, closing);
+    void closing.then(
+      () => this.#closing.delete(connection),
+      () => this.#closing.delete(connection),
+    );
     return closing;
   }
 
@@ -232,9 +236,14 @@ export class ConnectionManager implements AsyncDisposable {
       config: config ?? DEFAULT_CONNECTION_CONFIG,
       scheduleTimeout,
       log,
-      released: () => {
-        managed.connections.delete(connection);
-        void this.#releaseUnused(key, managed);
+      releaseStarted: release => this.#admissionBarrier(key, release),
+      released: failure => {
+        if (failure === null) {
+          managed.connections.delete(connection);
+          void this.#releaseUnused(key, managed);
+          return;
+        }
+        this.#releaseFailed(key, connection, failure);
       },
     });
     managed.connections.add(connection);
@@ -252,11 +261,10 @@ export class ConnectionManager implements AsyncDisposable {
     }
     this.#links.delete(key);
     const releasing = managed.link.release();
-    this.#retiring.set(key, releasing);
+    this.#admissionBarrier(key, releasing);
     this.#releasing.add(releasing);
     void releasing.then(
       () => {
-        if (this.#retiring.get(key) === releasing) this.#retiring.delete(key);
         this.#releasing.delete(releasing);
       },
       error => {
@@ -264,12 +272,47 @@ export class ConnectionManager implements AsyncDisposable {
         // Keep the rejected promise as a terminal admission barrier: replacing the link could run
         // two masters against the same path. A later host operation and manager disposal surface
         // the original failure, while this observer prevents an unhandled background rejection.
-        this.#options.log(
-          `could not retire ${key}: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        try {
+          this.#options.log(
+            `could not retire ${key}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        } catch {
+          // Diagnostics cannot replace the retained admission barrier as the failure owner.
+        }
       },
     );
     return releasing;
+  }
+
+  /** Join `next` to every earlier close/release that must settle before this host is admitted. */
+  #admissionBarrier(key: HostKey, next: Promise<void>): void {
+    const previous = this.#retiring.get(key);
+    const barrier =
+      previous === undefined ? next : Promise.all([previous, next]).then(() => undefined);
+    this.#retiring.set(key, barrier);
+    void barrier.then(
+      () => {
+        if (this.#retiring.get(key) === barrier) this.#retiring.delete(key);
+      },
+      () => {
+        // A rejected barrier is retained: a new link must not overlap an unretired resource.
+      },
+    );
+  }
+
+  #releaseFailed(key: HostKey, connection: HostConnection, failure: Error): void {
+    try {
+      this.#options.log(`could not retire ${connection.where}: ${failure.message}`);
+    } catch {
+      // The admission barrier, not diagnostics, owns the unconfirmed connection resource.
+    }
+    // `releaseStarted` already published the rejecting release as this host's barrier. Keeping the
+    // connection in its managed link also prevents that link from being retired underneath it.
+    if (!this.#retiring.has(key)) {
+      const rejected = Promise.reject(failure);
+      void rejected.catch(() => {});
+      this.#admissionBarrier(key, rejected);
+    }
   }
 
   async #dispose(): Promise<void> {
@@ -279,14 +322,18 @@ export class ConnectionManager implements AsyncDisposable {
     this.#leases.clear();
     const managed = [...this.#links.values()];
     const connections = new Set(managed.flatMap(entry => [...entry.connections]));
-    for (const connection of connections) this.#close(connection);
-    await Promise.all(this.#closing);
+    const closing = [...connections].map(connection => this.#close(connection));
+    const closed = await Promise.allSettled(closing);
+    const releases = [
+      ...managed.filter(entry => entry.connections.size === 0).map(entry => entry.link.release()),
+      ...this.#releasing,
+    ];
+    const retired = await Promise.allSettled(releases);
     this.#links.clear();
-    const releases = [...managed.map(entry => entry.link.release()), ...this.#releasing];
-    const outcomes = await Promise.allSettled(releases);
     this.#retiring.clear();
     this.#releasing.clear();
-    const failed = outcomes.find(
+    this.#closing.clear();
+    const failed = [...closed, ...retired].find(
       (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
     );
     if (failed !== undefined) throw failed.reason;

@@ -7,6 +7,7 @@
  */
 import type {ChildProcess} from 'node:child_process';
 import type {Readable, Writable} from 'node:stream';
+import type {ScheduleTimeout} from '@vibesys/transport';
 
 export interface SpawnedProcess {
   readonly stdin: Writable;
@@ -20,6 +21,100 @@ export interface SpawnedProcess {
    */
   readonly exit: Promise<number | null>;
   kill(signal: 'SIGTERM' | 'SIGKILL'): void;
+}
+
+/** What bounded retirement proved about the exact child process. */
+export type ProcessRetirementOutcome =
+  | {readonly kind: 'confirmed'; readonly code: number | null}
+  | {readonly kind: 'unconfirmed'};
+
+/**
+ * One idempotent retirement of a child. `outcome` settles within two grace periods; `exit` remains
+ * the exact termination proof when that bound expires first.
+ */
+export interface ProcessRetirement {
+  readonly outcome: Promise<ProcessRetirementOutcome>;
+  readonly exit: Promise<number | null>;
+}
+
+/** A retirement whose ownership is published but whose first signal has not necessarily fired. */
+export interface PreparedProcessRetirement extends ProcessRetirement {
+  readonly start: () => void;
+}
+
+interface OwnedProcessRetirement extends PreparedProcessRetirement {
+  readonly process: SpawnedProcess;
+}
+
+const DEFAULT_TERMINATION_GRACE_MS = 1_000;
+const retirements = new WeakMap<SpawnedProcess, OwnedProcessRetirement>();
+/** Retain exact process ownership after a bounded outcome reports that termination is unconfirmed. */
+const ownedRetirements = new Set<OwnedProcessRetirement>();
+
+/**
+ * Terminate `process` once: TERM now, KILL after one grace, and an unconfirmed outcome after a
+ * second. Repeated callers join the first operation and its bounds. The shell retains an
+ * unconfirmed process until its exact `exit` eventually settles.
+ */
+export function prepareProcessRetirement(
+  process: SpawnedProcess,
+  scheduleTimeout: ScheduleTimeout,
+  graceMs = DEFAULT_TERMINATION_GRACE_MS,
+): PreparedProcessRetirement {
+  const existing = retirements.get(process);
+  if (existing !== undefined) return existing;
+  if (!Number.isSafeInteger(graceMs) || graceMs < 1) {
+    throw new RangeError('process termination grace must be a positive integer');
+  }
+
+  let cancelKill = (): void => {};
+  let cancelConfirmation = (): void => {};
+  let settle = (_outcome: ProcessRetirementOutcome): void => {};
+  let settled = false;
+  const outcome = new Promise<ProcessRetirementOutcome>(resolve => {
+    settle = result => {
+      if (settled) return;
+      settled = true;
+      cancelKill();
+      cancelConfirmation();
+      resolve(result);
+    };
+  });
+  let started = false;
+  const start = (): void => {
+    if (started || settled) return;
+    started = true;
+    process.kill('SIGTERM');
+    cancelKill = scheduleTimeout(() => {
+      process.kill('SIGKILL');
+      cancelConfirmation = scheduleTimeout(() => settle({kind: 'unconfirmed'}), graceMs);
+    }, graceMs);
+  };
+  const retirement: OwnedProcessRetirement = {process, outcome, exit: process.exit, start};
+  retirements.set(process, retirement);
+  ownedRetirements.add(retirement);
+  void process.exit.then(
+    code => {
+      ownedRetirements.delete(retirement);
+      settle({kind: 'confirmed', code});
+    },
+    () => {
+      process.kill('SIGKILL');
+      settle({kind: 'unconfirmed'});
+    },
+  );
+  return retirement;
+}
+
+/** Prepare and immediately start one bounded child retirement. */
+export function retireProcess(
+  process: SpawnedProcess,
+  scheduleTimeout: ScheduleTimeout,
+  graceMs = DEFAULT_TERMINATION_GRACE_MS,
+): ProcessRetirement {
+  const retirement = prepareProcessRetirement(process, scheduleTimeout, graceMs);
+  retirement.start();
+  return retirement;
 }
 
 /** A real child process spawned with three pipes. */

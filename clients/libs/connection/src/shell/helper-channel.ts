@@ -29,7 +29,7 @@ import {
 import type {ScheduleTimeout} from '@vibesys/transport';
 import type {Cause} from '../state/host-connection.js';
 import {bootstrapProblem} from './bootstrap.js';
-import type {SpawnedProcess} from './process.js';
+import {type ProcessRetirement, retireProcess, type SpawnedProcess} from './process.js';
 
 /** A failure of a channel or of an operation on one, with the cause the machine decides on. */
 export class ConnectionError extends Error {
@@ -70,6 +70,8 @@ export interface ChannelOptions {
   readonly explain: ExitExplanation;
   /** Hear each line the bootstrap printed before the helper answered `hello`. */
   readonly heard: (line: string) => void;
+  /** A bounded retirement could not prove that this channel's exact process ended. */
+  readonly retirementFailed?: (error: ConnectionError) => void;
 }
 
 /** The request bodies the app sends; the channel adds `request_id` and `deadline_ms`. */
@@ -114,6 +116,7 @@ export class HelperChannel implements AsyncDisposable {
   #nextId = 1;
   #relay: RunStream | null = null;
   #failure: ConnectionError | null = null;
+  #retirement: ProcessRetirement | null = null;
   /** What `hello` settled: the versions, the negotiated features, and the checkout. */
   hello: HelloReply | null = null;
   /** Settles once the process has ended, with why (null: the app ended it). */
@@ -165,7 +168,8 @@ export class HelperChannel implements AsyncDisposable {
       });
       return channel;
     } catch (error) {
-      channel.#process.kill('SIGTERM');
+      const outcome = await channel.#retire().outcome;
+      if (outcome.kind === 'unconfirmed') throw channel.#unconfirmedTerminationError();
       throw await channel.#explained(error);
     } finally {
       opening?.removeEventListener('abort', abandon);
@@ -245,7 +249,14 @@ export class HelperChannel implements AsyncDisposable {
         reply => {
           // This callback runs synchronously while #line owns the reply. Transfer the complete
           // remainder before #data can interpret another newline as a helper control message.
-          const stream = new RunStream(this.#process, this.#buffer, this.ended, () => this.#stderr);
+          const stream = new RunStream(
+            this.#process,
+            this.#buffer,
+            this.ended,
+            () => this.#stderr,
+            () => this.#retire(),
+            () => this.#unconfirmedTerminationError(),
+          );
           this.#buffer = Buffer.alloc(0);
           this.#relay = stream;
           return {runId: reply.run_id, stream};
@@ -258,6 +269,8 @@ export class HelperChannel implements AsyncDisposable {
 
   async [Symbol.asyncDispose](): Promise<void> {
     this.#close();
+    const outcome = await this.#retire().outcome;
+    if (outcome.kind === 'unconfirmed') throw this.#unconfirmedTerminationError();
     await this.ended;
   }
 
@@ -342,8 +355,30 @@ export class HelperChannel implements AsyncDisposable {
     this.#failure = error;
     this.#buffer = Buffer.alloc(0);
     this.#rejectAll(error);
+    this.#retire();
+  }
+
+  #retire(): ProcessRetirement {
     this.#process.stdin.destroy();
-    this.#process.kill('SIGTERM');
+    if (this.#retirement === null) {
+      this.#retirement = retireProcess(this.#process, this.#options.scheduleTimeout);
+      void this.#retirement.outcome.then(outcome => {
+        if (outcome.kind !== 'unconfirmed') return;
+        try {
+          this.#options.retirementFailed?.(this.#unconfirmedTerminationError());
+        } catch {
+          // Retirement ownership must not depend on a diagnostic/lifecycle observer succeeding.
+        }
+      });
+    }
+    return this.#retirement;
+  }
+
+  #unconfirmedTerminationError(): ConnectionError {
+    return new ConnectionError(
+      'link',
+      `could not confirm termination of the helper for ${this.#options.where}`,
+    );
   }
 
   #rejectAll(error: Error): void {
@@ -426,15 +461,21 @@ function relayEnd(
  */
 export class RunStream extends Duplex {
   readonly #process: SpawnedProcess;
+  readonly #retire: () => ProcessRetirement;
+  readonly #unconfirmedTerminationError: () => ConnectionError;
 
   constructor(
     process: SpawnedProcess,
     first: Buffer,
     ended: Promise<ConnectionError | null>,
     stderr: () => string,
+    retire: () => ProcessRetirement,
+    unconfirmedTerminationError: () => ConnectionError,
   ) {
     super({allowHalfOpen: false});
     this.#process = process;
+    this.#retire = retire;
+    this.#unconfirmedTerminationError = unconfirmedTerminationError;
     if (first.length > 0) this.push(first);
     void Promise.all([process.exit, ended]).then(([code, failure]) => {
       const error = relayEnd(code, stderr(), failure);
@@ -463,8 +504,10 @@ export class RunStream extends Duplex {
   }
 
   override _destroy(error: Error | null, callback: (error: Error | null) => void): void {
-    this.#process.stdin.destroy();
-    this.#process.kill('SIGTERM');
-    callback(error);
+    void this.#retire().outcome.then(outcome => {
+      callback(
+        error ?? (outcome.kind === 'unconfirmed' ? this.#unconfirmedTerminationError() : null),
+      );
+    });
   }
 }

@@ -22,7 +22,12 @@ import {homedir} from 'node:os';
 import type {ScheduleTimeout} from '@vibesys/transport';
 import {bootstrapUv, localBootstrap, remoteBootstrap} from './bootstrap.js';
 import {ConnectionError} from './helper-channel.js';
-import {fromChild, type SpawnedProcess} from './process.js';
+import {
+  fromChild,
+  type ProcessRetirement,
+  prepareProcessRetirement,
+  type SpawnedProcess,
+} from './process.js';
 
 export interface Link {
   /** The host, for messages: `This Mac`, or its ssh alias. */
@@ -139,6 +144,9 @@ const AUTH_FAILURE =
 interface EstablishAttempt {
   process: SpawnedProcess | null;
   cancelled: boolean;
+  readonly cancellation: Promise<void>;
+  readonly cancel: () => void;
+  retirement: ProcessRetirement | null;
   readonly waiters: Set<object>;
   promise: Promise<void>;
 }
@@ -156,6 +164,8 @@ export class SshLink implements Link {
   readonly #retirementCommandTimeoutMs: number;
   /** Every establishment subprocess that has not exited, including retired generations. */
   readonly #attempts = new Set<EstablishAttempt>();
+  /** Cancelled establishment children whose exact exit has not been observed yet. */
+  readonly #retiringAttempts = new Set<ProcessRetirement>();
   #establishing: EstablishAttempt | null = null;
   #released = false;
   #releasing: Promise<void> | null = null;
@@ -244,7 +254,17 @@ export class SshLink implements Link {
     this.#released = true;
     for (const attempt of this.#attempts) this.#cancel(attempt);
     await Promise.all([...this.#attempts].map(attempt => attempt.promise.catch(() => {})));
+    await this.#confirmRetiredAttempts();
     await this.#retireMaster();
+  }
+
+  async #confirmRetiredAttempts(): Promise<void> {
+    const outcomes = await Promise.all(
+      [...this.#retiringAttempts].map(retirement => retirement.outcome),
+    );
+    if (outcomes.some(outcome => outcome.kind === 'unconfirmed')) {
+      throw this.#unconfirmedAttemptError();
+    }
   }
 
   async #retireMaster(): Promise<void> {
@@ -307,10 +327,24 @@ export class SshLink implements Link {
     return new ConnectionError('link', 'could not confirm teardown of the SSH master');
   }
 
+  #unconfirmedAttemptError(): ConnectionError {
+    return new ConnectionError(
+      'link',
+      'could not confirm termination of an SSH connection attempt',
+    );
+  }
+
   #begin(interactive: boolean): EstablishAttempt {
+    let cancel = (): void => {};
+    const cancellation = new Promise<void>(resolve => {
+      cancel = resolve;
+    });
     const attempt: EstablishAttempt = {
       process: null,
       cancelled: false,
+      cancellation,
+      cancel,
+      retirement: null,
       waiters: new Set(),
       promise: Promise.resolve(),
     };
@@ -327,13 +361,29 @@ export class SshLink implements Link {
     if (attempt.cancelled) return;
     attempt.cancelled = true;
     if (this.#establishing === attempt) this.#establishing = null;
-    attempt.process?.kill('SIGTERM');
+    if (attempt.process !== null) {
+      const retirement = prepareProcessRetirement(
+        attempt.process,
+        this.#options.scheduleTimeout,
+        this.#retirementCommandTimeoutMs,
+      );
+      attempt.retirement = retirement;
+      this.#retiringAttempts.add(retirement);
+      void retirement.exit.then(
+        () => this.#retiringAttempts.delete(retirement),
+        () => {},
+      );
+      retirement.start();
+    }
+    attempt.cancel();
   }
 
   async #establish(interactive: boolean, attempt: EstablishAttempt): Promise<void> {
+    if (this.#retiringAttempts.size > 0) await this.#confirmRetiredAttempts();
+    this.#stillCurrent(attempt);
     const checkProcess = this.#ssh(['-O', 'check', '--', this.#options.alias]);
     attempt.process = checkProcess;
-    const check = await this.#finish(checkProcess);
+    const check = await this.#finishAttempt(checkProcess, attempt);
     attempt.process = null;
     this.#stillCurrent(attempt);
     if (check.code === 0) return;
@@ -358,7 +408,7 @@ export class SshLink implements Link {
       env,
     );
     attempt.process = masterProcess;
-    const master = await this.#finish(masterProcess);
+    const master = await this.#finishAttempt(masterProcess, attempt);
     attempt.process = null;
     this.#stillCurrent(attempt);
     if (master.code !== 0) throw this.#sshError(master.stderr);
@@ -367,6 +417,21 @@ export class SshLink implements Link {
   #stillCurrent(attempt: EstablishAttempt): void {
     if (attempt.cancelled)
       throw new ConnectionError('link', 'the connection attempt was abandoned');
+  }
+
+  #finishAttempt(
+    process: SpawnedProcess,
+    attempt: EstablishAttempt,
+  ): Promise<{code: number | null; stderr: string}> {
+    const cancelled = attempt.cancellation.then(async () => {
+      const retirement = attempt.retirement;
+      if (retirement !== null) {
+        const outcome = await retirement.outcome;
+        if (outcome.kind === 'unconfirmed') throw this.#unconfirmedAttemptError();
+      }
+      throw new ConnectionError('link', 'the connection attempt was abandoned');
+    });
+    return Promise.race([this.#finish(process), cancelled]);
   }
 
   #ssh(

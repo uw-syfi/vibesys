@@ -11,7 +11,8 @@ import {hostConnectionContract, phaseReached} from '../testing/host-connection-c
 import {ConnectionManager} from './connection-manager.js';
 import {ConnectionError, HelperRequestError} from './helper-channel.js';
 import {HostConnection} from './host-connection.js';
-import {LocalLink, nodeSpawn, type Spawn, SshLink} from './link.js';
+import {type Link, LocalLink, nodeSpawn, type Spawn, SshLink} from './link.js';
+import type {SpawnedProcess} from './process.js';
 
 const CONFIG: ConnectionConfig = {delaysMs: [500, 1_000], deadlineMs: 60_000, heartbeatMs: 15_000};
 const REPOSITORY = join(import.meta.dir, '../../../../..');
@@ -19,7 +20,7 @@ const realContracts = process.env['VIBESYS_REAL_CONTRACTS'] === '1';
 const GPU = {kind: 'ssh', alias: 'gpu'} as const;
 
 function fakeConnection(
-  link = new FakeLink(),
+  link: Link = new FakeLink(),
   clock = new FakeClock(),
   checkout = '/src/vibesys',
 ): HostConnection {
@@ -80,6 +81,45 @@ class FailedReleaseLink extends FakeLink {
   override async release(): Promise<void> {
     this.released += 1;
     throw this.failure;
+  }
+}
+
+/** A real FakeHelper protocol whose process never exits merely because the owner signals it. */
+class UnretiringHelperLink implements Link {
+  readonly host = 'fake';
+  readonly helper = new FakeHelper();
+  readonly signals: string[] = [];
+  released = 0;
+
+  async establish(): Promise<void> {}
+
+  networkChanged(): void {}
+
+  spawnHelper(checkout: string): SpawnedProcess {
+    const process = this.helper.spawn(checkout);
+    const signals = this.signals;
+    return {
+      stdin: process.stdin,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      get running() {
+        return process.running;
+      },
+      exit: process.exit,
+      kill(signal) {
+        signals.push(signal);
+      },
+    };
+  }
+
+  heard(): void {}
+
+  explain(): ConnectionError {
+    return new ConnectionError('link', 'the helper ended');
+  }
+
+  async release(): Promise<void> {
+    this.released += 1;
   }
 }
 
@@ -346,8 +386,12 @@ describe('HostConnection over the FakeHelper', () => {
     const ready = connection.ready();
     for (const [index, delay] of CONFIG.delaysMs.entries()) {
       await clock.waitUntilScheduled(delay);
+      // Process retirement has its own injected timer, which may share a retry delay. Exact helper
+      // exit is the synchronization point that proves the failed channel is gone.
+      await link.helper.channels.at(-1)?.process.exit;
       expect(link.helper.running).toBe(0);
       expect(link.helper.watching).toBe(0);
+      await clock.waitUntilScheduled(delay);
       if (index === CONFIG.delaysMs.length - 1) {
         link.helper.expired.delete('instances.watch');
       }
@@ -593,6 +637,85 @@ describe('HostConnection over the FakeHelper', () => {
     // A closed connection starts nothing.
     expect(await rejection(connection.openRun('00000000000c'))).toBeInstanceOf(ConnectionError);
     expect(link.helper.spawned).toBe(1);
+  });
+
+  test('closing is bounded when an opening helper never confirms termination', async () => {
+    const clock = new FakeClock();
+    const signals: string[] = [];
+    const helper = deferredKillProcess(signal => signals.push(signal));
+    let announceSpawn = (): void => {};
+    const spawned = new Promise<void>(resolve => {
+      announceSpawn = resolve;
+    });
+    const link: Link = {
+      host: 'fake',
+      async establish() {},
+      networkChanged() {},
+      spawnHelper: () => {
+        announceSpawn();
+        return helper.process;
+      },
+      heard() {},
+      explain: () => new ConnectionError('link', 'the helper ended'),
+      async release() {},
+    };
+    const connection = fakeConnection(link, clock);
+    const ready = rejection(connection.ready());
+    await spawned;
+
+    const closing = rejection(connection[Symbol.asyncDispose]());
+
+    expect(signals).toEqual(['SIGTERM']);
+    expect(clock.pendingDelays()).toContain(1_000);
+    clock.advanceBy(2_000);
+    const error = await closing;
+    expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(error).toBeInstanceOf(ConnectionError);
+    expect(error.message).toContain('could not confirm termination');
+    expect(await ready).toBeInstanceOf(ConnectionError);
+
+    helper.end(null);
+  });
+
+  test('an aborted opened control joins one retirement and closes on unconfirmed termination', async () => {
+    const clock = new FakeClock();
+    const link = new UnretiringHelperLink();
+    const watch = link.helper.deferNext('instances.watch');
+    const logged: string[] = [];
+    let reportRelease = (_failure: Error | null): void => {};
+    const released = new Promise<Error | null>(resolve => {
+      reportRelease = resolve;
+    });
+    const connection = new HostConnection({
+      link,
+      checkout: '/src/vibesys',
+      appVersion: 'test',
+      config: CONFIG,
+      scheduleTimeout: clock.scheduleTimeout,
+      log: message => logged.push(message),
+      released: reportRelease,
+    });
+    const ready = rejection(connection.ready());
+    await watch.received;
+
+    // Re-entering handshaking aborts the first actor. Its abort listener and catch path both hand
+    // back the same opened channel; the replacement must join that one retirement operation.
+    connection.dispatch({type: 'wake'});
+
+    expect(link.helper.spawned).toBe(1);
+    expect(link.signals).toEqual(['SIGTERM']);
+    clock.advanceBy(2_000);
+    const failure = await released;
+    expect(failure).toBeInstanceOf(ConnectionError);
+    expect(failure?.message).toContain('could not confirm termination');
+    expect(connection.phase.kind).toBe('closed');
+    expect(link.helper.spawned).toBe(1);
+    expect(link.signals).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(logged.some(line => line.includes('could not confirm termination'))).toBe(true);
+    expect(await ready).toBeInstanceOf(ConnectionError);
+
+    link.helper.channels[0]?.end(null);
+    watch.release();
   });
 
   test('regression: a handshake past its deadline is aborted and never installs its channel', async () => {
@@ -991,17 +1114,46 @@ describe('ConnectionManager', () => {
     expect(held.released).toBe(1);
   });
 
-  test('release cancels every ssh attempt and waits for every retired process to exit', async () => {
+  test('an unconfirmed helper fails its lease and prevents link release or host readmission', async () => {
+    const clock = new FakeClock();
+    const link = new UnretiringHelperLink();
+    const logged: string[] = [];
+    const manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: clock.scheduleTimeout,
+      log: message => logged.push(message),
+      config: CONFIG,
+    });
+    const lease = await manager.acquire(GPU, '/src/vibesys');
+    await lease.connection.ready();
+
+    const retiring = rejection(Promise.resolve(lease[Symbol.asyncDispose]()));
+    expect(link.signals).toEqual(['SIGTERM']);
+    clock.advanceBy(2_000);
+    const failure = await retiring;
+
+    expect(failure).toBeInstanceOf(ConnectionError);
+    expect(failure.message).toContain('could not confirm termination');
+    expect(lease.connection.phase.kind).toBe('closed');
+    expect(link.helper.running).toBe(1);
+    expect(link.released).toBe(0);
+    expect(await rejection(manager.acquire(GPU, '/replacement'))).toBe(failure);
+    expect(await rejection(manager[Symbol.asyncDispose]())).toBe(failure);
+    expect(link.released).toBe(0);
+    expect(logged.some(line => line.includes('could not retire'))).toBe(true);
+
+    link.helper.channels[0]?.end(null);
+  });
+
+  test('release waits for a cancelled ssh process before retiring its master', async () => {
     const actions: string[] = [];
     const stale = deferredKillProcess(() => actions.push('term-stale'));
-    const fresh = deferredKillProcess(() => actions.push('term-fresh'));
-    let checks = 0;
     const spawn: Spawn = (_command, args) => {
       const operation = args.at(args.indexOf('-O') + 1);
       if (operation === 'check') {
-        actions.push(`check-${checks}`);
-        checks += 1;
-        return checks === 1 ? stale.process : fresh.process;
+        actions.push('check');
+        return stale.process;
       }
       if (operation === 'exit') {
         actions.push('exit');
@@ -1019,16 +1171,176 @@ describe('ConnectionManager', () => {
     const second = link.establish(false);
 
     const releasing = link.release();
-    expect(actions).toEqual(['check-0', 'term-stale', 'check-1', 'term-fresh']);
+    expect(actions).toEqual(['check', 'term-stale']);
     expect(actions).not.toContain('exit');
-    fresh.end(null);
-    expect((await rejection(second)).message).toContain('abandoned');
     expect(stale.process.running).toBe(true);
-    expect(actions).not.toContain('exit');
 
     stale.end(null);
+    expect((await rejection(second)).message).toContain('abandoned');
     await releasing;
-    expect(actions).toEqual(['check-0', 'term-stale', 'check-1', 'term-fresh', 'exit']);
+    expect(actions).toEqual(['check', 'term-stale', 'exit']);
+  });
+
+  test('release bounds an ssh attempt whose process never confirms termination', async () => {
+    const clock = new FakeClock();
+    const signals: string[] = [];
+    const stuck = deferredKillProcess(signal => signals.push(signal));
+    const operations: string[] = [];
+    const spawn: Spawn = (_command, args) => {
+      const operation = args.at(args.indexOf('-O') + 1) ?? 'master';
+      operations.push(operation);
+      if (operation === 'check') return stuck.process;
+      const process = fakeProcess();
+      process.end(0);
+      return process.process;
+    };
+    const link = sshLink(spawn, clock);
+    const establishing = rejection(link.establish(false));
+
+    const releasing = rejection(link.release());
+
+    expect(signals).toEqual(['SIGTERM']);
+    expect(clock.pendingDelays()).toEqual([100]);
+    clock.advanceBy(200);
+    const [establishError, releaseError] = await Promise.all([establishing, releasing]);
+    expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(establishError).toBeInstanceOf(ConnectionError);
+    expect(establishError.message).toContain('could not confirm termination');
+    expect(releaseError).toBeInstanceOf(ConnectionError);
+    expect(releaseError.message).toContain('could not confirm termination');
+    expect(operations).toEqual(['check']);
+    expect(stuck.process.running).toBe(true);
+
+    stuck.end(null);
+  });
+
+  test('network changes confirm the old ssh process exit before starting its replacement', async () => {
+    const clock = new FakeClock();
+    const first = deferredKillProcess();
+    const second = fakeProcess();
+    let checks = 0;
+    let announceSecond = (): void => {};
+    const secondStarted = new Promise<void>(resolve => {
+      announceSecond = resolve;
+    });
+    const spawn: Spawn = (_command, args) => {
+      const operation = args.at(args.indexOf('-O') + 1);
+      if (operation === 'check') {
+        checks += 1;
+        if (checks === 1) return first.process;
+        announceSecond();
+        return second.process;
+      }
+      if (operation === 'exit') {
+        const exiting = fakeProcess();
+        exiting.end(0);
+        return exiting.process;
+      }
+      throw new Error(`unexpected ssh operation: ${args.join(' ')}`);
+    };
+    const link = sshLink(spawn, clock);
+    const stale = rejection(link.establish(false));
+
+    link.networkChanged();
+    const fresh = link.establish(false);
+
+    expect(checks).toBe(1);
+    expect(first.process.running).toBe(true);
+    expect(clock.pendingDelays()).toEqual([100]);
+    first.end(null);
+    expect((await stale).message).toContain('abandoned');
+    await secondStarted;
+    expect(checks).toBe(2);
+    second.end(0);
+    await fresh;
+    await link.release();
+  });
+
+  test('publishes the ssh retirement barrier before SIGTERM can re-enter establishment', async () => {
+    const clock = new FakeClock();
+    let link: SshLink;
+    let reentrant: Promise<void> | null = null;
+    const first = deferredKillProcess(signal => {
+      if (signal === 'SIGTERM') reentrant = link.establish(false);
+    });
+    const second = fakeProcess();
+    let checks = 0;
+    const spawn: Spawn = (_command, args) => {
+      const operation = args.at(args.indexOf('-O') + 1);
+      if (operation === 'check') {
+        checks += 1;
+        return checks === 1 ? first.process : second.process;
+      }
+      if (operation === 'exit') {
+        const exiting = fakeProcess();
+        exiting.end(0);
+        return exiting.process;
+      }
+      throw new Error(`unexpected ssh operation: ${args.join(' ')}`);
+    };
+    link = sshLink(spawn, clock);
+    const stale = rejection(link.establish(false));
+
+    // `kill(SIGTERM)` invokes the callback synchronously. Even that callback cannot get a second
+    // check past the already-published retirement ownership.
+    link.networkChanged();
+
+    const fresh = reentrant;
+    if (fresh === null) throw new Error('SIGTERM did not synchronously re-enter establish');
+    expect(checks).toBe(1);
+    expect(first.process.running).toBe(true);
+    first.end(null);
+    expect((await stale).message).toContain('abandoned');
+    await Promise.resolve();
+    expect(checks).toBe(2);
+    second.end(0);
+    await fresh;
+    await link.release();
+  });
+
+  test('an unconfirmed old ssh process blocks replacements until its exact exit', async () => {
+    const clock = new FakeClock();
+    const first = deferredKillProcess();
+    const second = fakeProcess();
+    let checks = 0;
+    let announceSecond = (): void => {};
+    const secondStarted = new Promise<void>(resolve => {
+      announceSecond = resolve;
+    });
+    const spawn: Spawn = (_command, args) => {
+      const operation = args.at(args.indexOf('-O') + 1);
+      if (operation === 'check') {
+        checks += 1;
+        if (checks === 1) return first.process;
+        announceSecond();
+        return second.process;
+      }
+      if (operation === 'exit') {
+        const exiting = fakeProcess();
+        exiting.end(0);
+        return exiting.process;
+      }
+      throw new Error(`unexpected ssh operation: ${args.join(' ')}`);
+    };
+    const link = sshLink(spawn, clock);
+    const stale = rejection(link.establish(false));
+
+    link.networkChanged();
+    const blocked = rejection(link.establish(false));
+    clock.advanceBy(200);
+
+    expect((await stale).message).toContain('could not confirm termination');
+    expect((await blocked).message).toContain('could not confirm termination');
+    expect(checks).toBe(1);
+    first.end(null);
+    await first.process.exit;
+
+    const recovered = link.establish(false);
+    await secondStarted;
+    expect(checks).toBe(2);
+    second.end(0);
+    await recovered;
+    await link.release();
   });
 
   for (const outcome of [
@@ -1116,6 +1428,13 @@ describe('ConnectionManager', () => {
     const helper = new FakeHelper();
     const checks: ReturnType<typeof fakeProcess>[] = [];
     const killed: number[] = [];
+    let announceReplacement = (): void => {};
+    const replacementStarted = new Promise<void>(resolve => {
+      announceReplacement = resolve;
+    });
+    const announceCheck = (index: number): void => {
+      if (index === 1) announceReplacement();
+    };
     const spawn: Spawn = (_command, args) => {
       const control = args.indexOf('-O');
       const operation = control < 0 ? null : args[control + 1];
@@ -1123,6 +1442,7 @@ describe('ConnectionManager', () => {
         const index = checks.length;
         const check = fakeProcess(() => killed.push(index));
         checks.push(check);
+        announceCheck(index);
         return check.process;
       }
       if (operation === 'exit') {
@@ -1144,6 +1464,8 @@ describe('ConnectionManager', () => {
     manager.wake();
 
     expect(killed).toEqual([0]);
+    expect(checks).toHaveLength(1);
+    await replacementStarted;
     expect(checks).toHaveLength(2);
     checks[1]?.end(0);
     await Promise.all([firstReady, secondReady]);
