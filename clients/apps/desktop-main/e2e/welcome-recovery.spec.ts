@@ -43,6 +43,18 @@ interface MainControl {
   closeUnauthorizedWelcome(): void;
 }
 
+async function bounded<T>(label: string, operation: Promise<T>): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => reject(new Error(`timed out while ${label}`)), 8_000);
+  });
+  try {
+    return await Promise.race([operation, expired]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
 function state(app: ElectronApplication): Promise<RecoveryState> {
   return app.evaluate(() => {
     const control = (globalThis as typeof globalThis & {vibesysWelcomeRecoveryE2E?: MainControl})
@@ -126,32 +138,59 @@ function closeUnauthorizedWelcome(app: ElectronApplication): Promise<void> {
   });
 }
 
+async function verifyUnauthorizedWelcome(
+  electronApp: ElectronApplication,
+  currentWelcomeId: number | null,
+): Promise<void> {
+  const unauthorized = await bounded(
+    'opening an unauthorized welcome document',
+    openUnauthorizedWelcome(electronApp),
+  );
+  await expect
+    .poll(
+      async () =>
+        (
+          await bounded(
+            'inspecting the unauthorized welcome document',
+            inspectUnauthorizedWelcome(electronApp),
+          )
+        ).bodyText,
+    )
+    .toContain('not the welcome view');
+  expect(unauthorized.currentId).toBe(currentWelcomeId);
+  expect(unauthorized.unauthorizedId).not.toBe(unauthorized.currentId);
+  await bounded('closing the unauthorized welcome document', closeUnauthorizedWelcome(electronApp));
+}
+
 test('a crashed welcome renderer is replaced once without losing its open run', async () => {
   const args = [
     APP,
     ...(process.platform === 'linux' ? ['--headless'] : []),
     ...electronRuntimeArgs(),
   ];
-  const electronApp = await electron.launch({args});
+  const electronApp = await bounded('launching Electron', electron.launch({args}));
   try {
     await expect
-      .poll(() => state(electronApp))
+      .poll(() => bounded('reading the initial shell state', state(electronApp)))
       .toMatchObject({currentWelcomeUrl: WELCOME_URL, runUrl: RUN_URL, fatals: []});
-    await expect.poll(() => inspectWelcome(electronApp)).toMatchObject({titleStripVisible: true});
+    await expect
+      .poll(() => bounded('inspecting the initial welcome document', inspectWelcome(electronApp)))
+      .toMatchObject({titleStripVisible: true});
 
-    const before = await state(electronApp);
+    const before = await bounded('reading the ready shell state', state(electronApp));
     expect(before.currentWelcomeId).not.toBeNull();
     expect(before.runId).not.toBeNull();
 
-    const retiredId = await crashWelcome(electronApp);
+    const retiredId = await bounded('crashing the welcome renderer', crashWelcome(electronApp));
     await expect
       .poll(async () => {
-        const currentId = (await state(electronApp)).currentWelcomeId;
+        const currentId = (await bounded('reading the recovering shell state', state(electronApp)))
+          .currentWelcomeId;
         return currentId !== null && currentId !== retiredId;
       })
       .toBe(true);
     await expect
-      .poll(() => state(electronApp))
+      .poll(() => bounded('reading the recovered shell state', state(electronApp)))
       .toMatchObject({
         currentWelcomeUrl: WELCOME_URL,
         runId: before.runId,
@@ -159,38 +198,47 @@ test('a crashed welcome renderer is replaced once without losing its open run', 
         mode: 'run',
         fatals: [],
       });
-    const recovered = await state(electronApp);
+    const recovered = await bounded('reading the stable recovered state', state(electronApp));
     expect(recovered.logs.filter(line => line.startsWith('recovering the welcome view'))).toEqual([
       'recovering the welcome view after render-process-gone',
     ]);
-    await expect.poll(() => hasContents(electronApp, retiredId)).toBe(false);
+    await expect
+      .poll(() => bounded('checking the retired renderer', hasContents(electronApp, retiredId)))
+      .toBe(false);
 
-    const welcome = await inspectWelcome(electronApp);
+    const welcome = await bounded(
+      'inspecting the recovered welcome document',
+      inspectWelcome(electronApp),
+    );
     expect(welcome.confinement).toEqual({
       bridge: 'object',
       nodeRequire: 'undefined',
       nodeProcess: 'undefined',
     });
-    await expect(welcomeHosts(electronApp)).resolves.toEqual({ok: true, value: []});
+    await expect(
+      bounded('requesting hosts from the recovered document', welcomeHosts(electronApp)),
+    ).resolves.toEqual({ok: true, value: []});
 
-    await clickWelcomeButton(electronApp, 'This Mac');
-    await expect.poll(async () => (await inspectWelcome(electronApp)).headings).toContain('Recent');
+    await bounded('opening the local host', clickWelcomeButton(electronApp, 'This Mac'));
     await expect
-      .poll(async () => (await inspectWelcome(electronApp)).buttons)
+      .poll(
+        async () =>
+          (await bounded('inspecting the local host page', inspectWelcome(electronApp))).headings,
+      )
+      .toContain('Recent');
+    await expect
+      .poll(
+        async () =>
+          (await bounded('inspecting local host actions', inspectWelcome(electronApp))).buttons,
+      )
       .toContain('Back to run');
-    await clickWelcomeButton(electronApp, 'Back to run');
+    await bounded('returning to the run', clickWelcomeButton(electronApp, 'Back to run'));
     await expect
-      .poll(() => state(electronApp))
+      .poll(() => bounded('reading the resumed run state', state(electronApp)))
       .toMatchObject({mode: 'run', runId: before.runId, fatals: []});
 
-    const unauthorized = await openUnauthorizedWelcome(electronApp);
-    await expect
-      .poll(async () => (await inspectUnauthorizedWelcome(electronApp)).bodyText)
-      .toContain('not the welcome view');
-    expect(unauthorized.currentId).toBe(recovered.currentWelcomeId);
-    expect(unauthorized.unauthorizedId).not.toBe(unauthorized.currentId);
-    await closeUnauthorizedWelcome(electronApp);
+    await verifyUnauthorizedWelcome(electronApp, recovered.currentWelcomeId);
   } finally {
-    await electronApp.close();
+    await bounded('closing Electron', electronApp.close());
   }
 });
