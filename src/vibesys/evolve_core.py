@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from vibesys.core_wiring import (
     ResolvedRun,
     agent_evaluation_policy,
+    benchmark_objectives,
     domain_prompt_sections,
     evaluation_inputs,
     operation_catalog,
@@ -152,6 +153,9 @@ def _plan(context: CoreRunContext) -> CorePlan:
 def evolve_core_policy() -> CorePolicy:
     """The evolutionary search as a core run: its plan, operations and the roles that perform them."""
     return CorePolicy(
+        benchmark_objectives=lambda options: benchmark_objectives(
+            EvolveOptions.model_validate(options).metric_space
+        ),
         plan=_plan,
         operations=tuple(
             CoreOperation(role, registration)

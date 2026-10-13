@@ -753,6 +753,8 @@ class CorePolicy:
     """Directories searched, in order, for a template or include the strategy's own lacks."""
     artifact_directories: tuple[str, ...] = ()
     """Workspace-relative directories a write-artifacts turn may write."""
+    benchmark_objectives: Callable[[BaseModel], tuple[BenchmarkObjective, ...]] | None = None
+    """Resolve benchmark axes from validated policy options; None selects no axes."""
     owned_operations: Callable[[OwnedOperationResources], tuple[OperationEntry, ...]] | None = None
     """Operations outside the runtime's roles, each with the owner the policy builds for the run.
 

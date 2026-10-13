@@ -386,7 +386,16 @@ class _ProductHostFactory:
                 evaluation=(
                     executor
                     if executor is not None
-                    else PollingEvaluationExecutor(evaluation, workspaces)
+                    else PollingEvaluationExecutor(
+                        evaluation,
+                        workspaces,
+                        objectives=(
+                            policy.benchmark_objectives(self.options)
+                            if policy.benchmark_objectives is not None
+                            else ()
+                        ),
+                        clock=self.timing.clock,
+                    )
                 ),
                 environment=self._core_environment(resources),
                 roles=self._offered_roles(resources),

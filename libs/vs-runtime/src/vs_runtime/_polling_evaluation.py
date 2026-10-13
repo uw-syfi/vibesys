@@ -39,6 +39,7 @@ from vs_evaluation.api import (
 )
 from vs_runtime._evaluation_failure_text import render_evaluation_failure, render_stage_failure
 from vs_runtime._failure_classification import is_unsettled
+from vs_runtime.contracts import BenchmarkObjective, validate_objectives
 from vs_sim.api import MonotonicClock
 
 if TYPE_CHECKING:
@@ -61,12 +62,19 @@ class PollingEvaluationExecutor:
     """
 
     def __init__(
-        self, evaluation: Evaluation, workspaces: Workspaces, *, clock: Clock | None = None
+        self,
+        evaluation: Evaluation,
+        workspaces: Workspaces,
+        *,
+        objectives: tuple[BenchmarkObjective, ...] = (),
+        clock: Clock | None = None,
     ) -> None:
         """Evaluate through ``evaluation`` in candidate workspaces from ``workspaces``.
 
         ``clock`` stamps availability observations; the default is the monotonic clock.
         """
+        validate_objectives(objectives)
+        self._objectives = objectives
         self._clock = clock or MonotonicClock()
         self._evaluation = evaluation
         self._workspaces = workspaces
@@ -239,7 +247,7 @@ class PollingEvaluationExecutor:
             partial = None
             kind = result.failure_kind
         elif stage.kind is EvidenceKind.BENCHMARK:
-            result = await self._evaluation.benchmark(workspace)
+            result = await self._evaluation.benchmark(workspace, objectives=self._objectives)
             completed = not is_unsettled(result.failure_kind)
             kind = result.failure_kind
             outcome = (

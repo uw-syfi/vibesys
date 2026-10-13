@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from vibesys.core_wiring import (
     ResolvedRun,
     agent_evaluation_policy,
+    benchmark_objectives,
     domain_prompt_sections,
     evaluation_inputs,
     operation_catalog,
@@ -175,6 +176,9 @@ def _plan_for(options_type: type[MultiRunOptions]) -> Callable[[CoreRunContext],
 def multi_core_policy(options_type: type[MultiRunOptions]) -> CorePolicy:
     """The multi search as a core run: its plan, operations and the roles that perform them."""
     return CorePolicy(
+        benchmark_objectives=lambda options: benchmark_objectives(
+            options_type.model_validate(options).metric_space
+        ),
         plan=_plan_for(options_type),
         operations=tuple(
             CoreOperation(role, registration)

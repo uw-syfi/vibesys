@@ -51,6 +51,8 @@ from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import (
     AgentRole,
+    BenchmarkObjective,
+    MetricDirection,
     OrchestrationResumeDecision,
 )
 
@@ -329,6 +331,13 @@ def test_builtin_plugin_parsing_preserves_strict_tuples_from_persisted_json(
     assert observed == expected_tuple
     if plugin_id == "plain":
         return
+    assert isinstance(parsed, (MultiOptions, EvolveOptions))
+    project_axes = registration.plugin.core.benchmark_objectives
+    assert project_axes is not None
+    assert project_axes(parsed) == tuple(
+        BenchmarkObjective(name=axis.name, direction=MetricDirection(axis.direction))
+        for axis in parsed.metric_space.objectives
+    )
     compare = registration.resume_policy
     if plugin_id in {"multi-agent", "evolve"}:
         assert compare is None  # a core strategy resumes with exact options

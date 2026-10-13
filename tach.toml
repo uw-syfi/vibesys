@@ -1253,11 +1253,11 @@ expose = ["CORE_ROLES", "IMPLEMENTER", "JUDGE", "ORCHESTRATOR", "PROFILER"]
 # the production owner of each operation role, and the sandbox check.
 path = "vibesys.core_wiring"
 layer = "loops"
-depends_on = ["vs_core", "vs_runtime", "vibesys", "vibesys.domains", "vibesys.errors", "vibesys.run.evaluation_identity"]
+depends_on = ["vs_core", "vs_runtime", "vibesys", "vibesys.metrics", "vibesys.domains", "vibesys.errors", "vibesys.run.evaluation_identity"]
 
 [[interfaces]]
 from = ["vibesys.core_wiring"]
-expose = ["ParallelCandidateFacts", "EvaluationInputs", "ResolvedRun", "agent_evaluation_policy", "domain_prompt_sections", "evaluation_inputs", "operation_catalog", "require_candidate_sandboxes"]
+expose = ["ParallelCandidateFacts", "EvaluationInputs", "ResolvedRun", "agent_evaluation_policy", "benchmark_objectives", "domain_prompt_sections", "evaluation_inputs", "operation_catalog", "require_candidate_sandboxes"]
 
 [[modules]]
 # The capability sets and the factory of the agent roles of a strategy on the core lifecycle.

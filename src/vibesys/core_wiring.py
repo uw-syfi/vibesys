@@ -18,6 +18,7 @@ from vibesys.domains.rendering import render_domain_sections
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.run.evaluation_identity import semantic_evaluation_identity
 from vs_core.api import ArtifactId, ArtifactRef
+from vs_runtime.api import BenchmarkObjective, MetricDirection
 from vs_runtime.api.core import (
     AgentEvaluationPolicy,
     OperationCatalog,
@@ -30,6 +31,7 @@ from vs_runtime.api.infrastructure import ParallelCandidateObstacle
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from vibesys.metrics import MetricSpace
     from vs_core.api import MeasurementRecipe, StrategyOperations
     from vs_runtime.api import ArtifactStore, ProfileField, RunFacts
     from vs_runtime.api.core import OperationPorts
@@ -40,6 +42,7 @@ __all__ = [
     "ParallelCandidateFacts",
     "ResolvedRun",
     "agent_evaluation_policy",
+    "benchmark_objectives",
     "domain_prompt_sections",
     "evaluation_inputs",
     "operation_catalog",
@@ -209,3 +212,11 @@ def domain_prompt_sections(
         workspace_sources=facts.workspace_sources,
     )
     return {role.value: text for role, text in sections.items()}
+
+
+def benchmark_objectives(space: MetricSpace) -> tuple[BenchmarkObjective, ...]:
+    """Project the policy-selected axes into the trusted benchmark contract."""
+    return tuple(
+        BenchmarkObjective(name=axis.name, direction=MetricDirection(axis.direction))
+        for axis in space.objectives
+    )
