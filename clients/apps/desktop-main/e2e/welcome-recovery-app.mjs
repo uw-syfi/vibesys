@@ -204,7 +204,7 @@ function requiredContents(contents, label) {
 
 function inspectWelcomeContents(contents) {
   return requiredContents(contents, 'welcome').executeJavaScript(
-    `(async () => {
+    `(() => {
       const visible = element => {
         if (element === null) return false;
         const style = getComputedStyle(element);
@@ -222,9 +222,15 @@ function inspectWelcomeContents(contents) {
           nodeRequire: typeof globalThis.require,
           nodeProcess: typeof globalThis.process,
         },
-        hosts: await window.vibesysWelcome.hosts(),
       };
     })()`,
+    true,
+  );
+}
+
+function welcomeHosts(contents) {
+  return requiredContents(contents, 'welcome').executeJavaScript(
+    'window.vibesysWelcome.hosts()',
     true,
   );
 }
@@ -297,6 +303,9 @@ globalThis.vibesysWelcomeRecoveryE2E = {
   },
   inspectWelcome() {
     return inspectWelcomeContents(ownedWelcomeContents());
+  },
+  welcomeHosts() {
+    return welcomeHosts(ownedWelcomeContents());
   },
   clickWelcomeButton(label) {
     return clickWelcomeButton(label);

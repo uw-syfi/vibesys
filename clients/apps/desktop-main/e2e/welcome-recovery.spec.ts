@@ -26,7 +26,6 @@ interface WelcomeInspection {
     readonly nodeRequire: string;
     readonly nodeProcess: string;
   };
-  readonly hosts: unknown;
 }
 
 interface MainControl {
@@ -34,6 +33,7 @@ interface MainControl {
   crashWelcome(): number;
   hasContents(id: number): boolean;
   inspectWelcome(): Promise<WelcomeInspection>;
+  welcomeHosts(): Promise<unknown>;
   clickWelcomeButton(label: string): Promise<void>;
   openUnauthorizedWelcome(): Promise<{
     readonly unauthorizedId: number;
@@ -76,6 +76,15 @@ function inspectWelcome(app: ElectronApplication): Promise<WelcomeInspection> {
       .vibesysWelcomeRecoveryE2E;
     if (control === undefined) throw new Error('the welcome-recovery E2E control is unavailable');
     return control.inspectWelcome();
+  });
+}
+
+function welcomeHosts(app: ElectronApplication): Promise<unknown> {
+  return app.evaluate(() => {
+    const control = (globalThis as typeof globalThis & {vibesysWelcomeRecoveryE2E?: MainControl})
+      .vibesysWelcomeRecoveryE2E;
+    if (control === undefined) throw new Error('the welcome-recovery E2E control is unavailable');
+    return control.welcomeHosts();
   });
 }
 
@@ -162,7 +171,7 @@ test('a crashed welcome renderer is replaced once without losing its open run', 
       nodeRequire: 'undefined',
       nodeProcess: 'undefined',
     });
-    expect(welcome.hosts).toEqual({ok: true, value: []});
+    await expect(welcomeHosts(electronApp)).resolves.toEqual({ok: true, value: []});
 
     await clickWelcomeButton(electronApp, 'This Mac');
     await expect.poll(async () => (await inspectWelcome(electronApp)).headings).toContain('Recent');
