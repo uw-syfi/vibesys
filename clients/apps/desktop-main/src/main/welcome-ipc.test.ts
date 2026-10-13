@@ -40,12 +40,21 @@ class FakeWelcomeIpc implements WelcomeIpc {
     channel: string,
     ...args: unknown[]
   ): Promise<WelcomeResult<unknown>> {
+    return this.invokeFromUrl('app://vibesys/welcome.html', rendererGeneration, channel, ...args);
+  }
+
+  invokeFromUrl(
+    senderUrl: string,
+    rendererGeneration: string,
+    channel: string,
+    ...args: unknown[]
+  ): Promise<WelcomeResult<unknown>> {
     const handler = this.#handlers.get(channel);
     if (handler === undefined) throw new Error(`no handler for ${channel}`);
     return handler(
       {
         senderId: 7,
-        senderUrl: 'app://vibesys/welcome.html',
+        senderUrl,
         rendererGeneration,
       },
       ...args,
@@ -80,6 +89,51 @@ async function spin(): Promise<void> {
 }
 
 describe('bindWelcomeIpc', () => {
+  test('admits only the welcome resource, independent of query or fragment', async () => {
+    const ipc = new FakeWelcomeIpc();
+    const document = new FakeWelcomeDocument();
+    const answered: string[] = [];
+    bindWelcomeIpc(
+      ipc,
+      document,
+      'app://vibesys/welcome.html',
+      async (_request, generation) => {
+        answered.push(generation);
+        return null;
+      },
+      async () => undefined,
+    );
+
+    for (const url of [
+      'app://vibesys/welcome.html',
+      'app://vibesys/welcome.html?source=launch',
+      'app://vibesys/welcome.html#recent',
+    ]) {
+      await expect(ipc.invokeFromUrl(url, '10:100', WELCOME_CHANNELS.hosts)).resolves.toMatchObject(
+        {
+          ok: true,
+        },
+      );
+    }
+    for (const url of [
+      'app://vibesys/welcome.html-preview.html',
+      'app://vibesys/welcome.html/child',
+      'app://other/welcome.html',
+      'app://user@vibesys/welcome.html',
+      'app://vibesys:443/welcome.html',
+      'https://vibesys/welcome.html',
+      'not a url',
+    ]) {
+      await expect(ipc.invokeFromUrl(url, '10:100', WELCOME_CHANNELS.hosts)).resolves.toMatchObject(
+        {
+          ok: false,
+          error: 'not the welcome view',
+        },
+      );
+    }
+    expect(answered).toEqual(['10:100', '10:100', '10:100']);
+  });
+
   test('a replacement document waits for the retired generation before reusing a token', async () => {
     const ipc = new FakeWelcomeIpc();
     const document = new FakeWelcomeDocument();
