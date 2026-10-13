@@ -6,6 +6,7 @@ import {
   type Page,
   test,
 } from '@playwright/test';
+import {electronRuntimeArgs} from './electron-launch-policy.mjs';
 
 const APP = fileURLToPath(new URL('./welcome-recovery-app.mjs', import.meta.url));
 const WELCOME_URL = 'app://vibesys/welcome.html';
@@ -93,7 +94,11 @@ function closeUnauthorizedWelcome(app: ElectronApplication): Promise<void> {
 }
 
 test('a crashed welcome renderer is replaced once without losing its open run', async () => {
-  const args = [APP, ...(process.platform === 'linux' ? ['--headless'] : [])];
+  const args = [
+    APP,
+    ...(process.platform === 'linux' ? ['--headless'] : []),
+    ...electronRuntimeArgs(),
+  ];
   const electronApp = await electron.launch({args});
   try {
     const welcome = await pageAt(electronApp, WELCOME_URL);
