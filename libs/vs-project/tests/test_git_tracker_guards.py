@@ -29,6 +29,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
+# Each example runs real Git processes. A pull request draws a sample; the nightly workflow
+# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "test",
     "GIT_AUTHOR_EMAIL": "test@example.com",
@@ -412,7 +416,9 @@ def _turn(draw: st.DrawFn) -> list[tuple[str, str, bytes | None]]:
     return draw(st.lists(st.one_of(framework, agent), max_size=8))
 
 
-@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=40 if _FULL else 6, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
 @given(turn=_turn())
 def test_isolation_reports_exactly_what_the_agent_wrote_including_below_vibesys(
     tmp_path_factory: pytest.TempPathFactory, turn: list[tuple[str, str, bytes | None]]

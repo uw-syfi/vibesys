@@ -43,6 +43,11 @@ _OPERATIONS = st.sampled_from(
 )
 
 
+# Each example runs real Git processes. A pull request draws a sample; the nightly workflow
+# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+
+
 @pytest.fixture(autouse=True, params=["cli", "pygit2"])
 def _backend(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(GIT_BACKEND_ENV, request.param)
@@ -71,7 +76,7 @@ def _fresh_tracker(root: Path, *, existing: bool) -> GitTracker:
 
 
 @settings(
-    max_examples=25,
+    max_examples=25 if _FULL else 4,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -125,7 +130,9 @@ def test_current_sha_follows_a_commit_made_by_another_process(tmp_path: Path) ->
 
 
 @settings(
-    max_examples=15, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=15 if _FULL else 3,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(
     commits=st.lists(st.sampled_from(["commit", "pack_refs", "detach"]), min_size=1, max_size=6),

@@ -27,6 +27,10 @@ if TYPE_CHECKING:
     from vs_project.api import GitRepository
     from vs_project.api.testing import ContractProject, RepositoryFactory
 
+# Each example runs real Git processes. A pull request draws a sample; the nightly workflow
+# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+
 REQUIRES_ON_DISK_REPOSITORY = True
 """This module shares one repository with plain ``git``; see ``conftest.ON_DISK``."""
 
@@ -139,7 +143,7 @@ def _prepare(root: Path, make: RepositoryFactory) -> dict[Actor, GitRepository]:
     return {"subject": repo}
 
 
-@settings(max_examples=10)
+@settings(max_examples=10 if _FULL else 2)
 @given(steps=st.lists(_STEPS, min_size=1, max_size=8))
 def test_alternating_implementations_and_git_agree_with_an_all_cli_run(
     factory: RepositoryFactory, oracle_factory: RepositoryFactory, steps: list[_Step]

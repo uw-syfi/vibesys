@@ -13,6 +13,10 @@ from tests.support import run_test_command
 
 from vs_project.api import GitTracker, NullGitTrackerEvents
 
+# Each example runs real Git processes. A pull request draws a sample; the nightly workflow
+# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "test",
     "GIT_AUTHOR_EMAIL": "test@example.com",
@@ -65,7 +69,9 @@ def _files(root: Path) -> dict[str, str]:
 
 
 @settings(
-    max_examples=40, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=40 if _FULL else 6,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(head=_trees, source=_trees, clean=st.booleans())
 def test_checkout_tree_reproduces_source_tree_over_any_head(
@@ -109,7 +115,7 @@ def test_checkout_tree_removes_ignored_files_only_when_asked(tmp_path: Path) -> 
     assert not (tmp_path / "stale.out").exists()
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=25 if _FULL else 4, deadline=None)
 @given(head=_trees, source=_trees)
 def test_matches_tree_agrees_with_an_exact_checkout(
     head: dict[str, str], source: dict[str, str]

@@ -8,6 +8,7 @@ about the same directory.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,6 +40,10 @@ _FILES = (
     "sp ace.txt",
     "é.txt",
 )
+# Each example runs real Git processes. A pull request draws a sample; the nightly workflow
+# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+
 _NEW_FILES = ("other/new.txt", "dir/sub/new.py")
 
 _PATHSPECS = st.sampled_from(
@@ -133,7 +138,9 @@ def _outcome(call: Callable[[], object]) -> object:
         return type(error)
 
 
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=40)
+@settings(
+    suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=40 if _FULL else 6
+)
 @given(specs=_SPEC_LISTS)
 def test_pathspec_reads_agree_with_the_oracle(
     populated: ContractProject, populated_oracle: ContractProject, specs: list[str]
@@ -161,7 +168,7 @@ def _staged_state(repo: GitRepository) -> object:
     return tuple(repo.read_blob("HEAD", path) for path in (*_FILES, *_NEW_FILES))
 
 
-@settings(max_examples=12)
+@settings(max_examples=12 if _FULL else 3)
 @given(specs=_SPEC_LISTS)
 def test_unstage_agrees_with_the_oracle(
     factory: RepositoryFactory, oracle_factory: RepositoryFactory, specs: list[str]
@@ -213,7 +220,9 @@ def _fragments() -> st.SearchStrategy[str]:
     return st.lists(st.sampled_from(pieces), max_size=6).map("".join)
 
 
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=200)
+@settings(
+    suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=200 if _FULL else 25
+)
 @given(name=_fragments())
 def test_name_rules_agree_with_the_oracle_on_assembled_names(
     sandbox: ContractProject, oracle_factory: RepositoryFactory, name: str
@@ -263,7 +272,9 @@ def test_non_ascii_paths_are_reported_as_they_are_named(sandbox: ContractProject
     assert sandbox.repo.tracked_changes_since_head(["."]) == ("é.txt",)
 
 
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=40)
+@settings(
+    suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=40 if _FULL else 6
+)
 @given(length=st.integers(min_value=1, max_value=40), unknown=st.booleans())
 def test_revisions_resolve_like_the_oracle(
     started: ContractProject, started_oracle: ContractProject, length: int, *, unknown: bool
@@ -292,7 +303,9 @@ def _subjects(repo: GitRepository, limit: int) -> object:
 _LINES = st.sampled_from(["fix", "part two", "  indented", "trail  ", "\t", "", " ", "é"])
 
 
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=30)
+@settings(
+    suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=30 if _FULL else 5
+)
 @given(
     lines=st.lists(_LINES, min_size=1, max_size=5),
     limit=st.integers(min_value=0, max_value=4),

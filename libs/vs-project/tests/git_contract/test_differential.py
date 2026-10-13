@@ -304,9 +304,16 @@ def _start(root: Path, make: RepositoryFactory) -> GitRepository:
     return repo
 
 
-# Each step starts Git processes in the CLI implementation, so the count is fixed small.
-# ``VIBESYS_GIT_CONTRACT_EXAMPLES`` raises it for a long local run.
-@settings(max_examples=int(os.environ.get("VIBESYS_GIT_CONTRACT_EXAMPLES", "12")), deadline=None)
+# Each step starts Git processes in the CLI implementation and the oracle. A pull request draws a
+# sample; the nightly workflow sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper, and
+# ``VIBESYS_GIT_CONTRACT_EXAMPLES`` sets the count for a long local run.
+_EXAMPLES = 12 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 2
+
+
+@settings(
+    max_examples=int(os.environ.get("VIBESYS_GIT_CONTRACT_EXAMPLES", str(_EXAMPLES))),
+    deadline=None,
+)
 @example(
     # Regression: a staged deletion plus the same path recreated untracked is two
     # status lines but one path in ``uncommitted_paths``.
