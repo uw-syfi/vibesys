@@ -112,6 +112,13 @@ export interface PersistentEventStreamOptions {
   scheduleTimeout?: ScheduleTimeout;
 }
 
+interface SubscriptionRetirement {
+  /** The handle's own close promise, preserving its established scheduling. */
+  readonly closing: Promise<void>;
+  /** The same teardown with an already-fenced handle's failure contained. */
+  readonly settled: Promise<void>;
+}
+
 function toError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
@@ -245,23 +252,37 @@ export class PersistentEventStream {
     await subscription?.close();
   }
 
-  /** Close a fenced handle without letting transport teardown mask stream recovery. */
-  async #closeBestEffort(subscription: EventSubscription | null): Promise<void> {
-    try {
-      await subscription?.close();
-    } catch {
-      // Handles are fenced before teardown begins; closing them is best effort.
-    }
-  }
-
   /** Serialize owned handle retirement and contain close errors from already-failed sockets. */
-  #retire(subscription: EventSubscription | null): Promise<void> | null {
+  #retire(subscription: EventSubscription | null): SubscriptionRetirement | null {
     if (subscription === null) return null;
     const previous = this.#retiring;
-    const retiring = (async () => {
-      if (previous !== null) await previous;
-      await this.#closeBestEffort(subscription);
-    })();
+    let settleRetirement: () => void = () => undefined;
+    const retirement = new Promise<void>(resolve => {
+      settleRetirement = resolve;
+    });
+    // Publish the owner before invoking the handle. A close implementation may
+    // synchronously ask this stream to shut down, which must join this work.
+    this.#trackRetirement(retirement);
+    let closing: Promise<void>;
+    try {
+      closing =
+        previous === null ? subscription.close() : previous.then(() => subscription.close());
+    } catch (error) {
+      closing = Promise.reject(error);
+    }
+    // The handle is fenced before teardown begins, so a close failure is not
+    // allowed to mask stream recovery or strand terminal shutdown.
+    const settled = closing.catch(() => undefined);
+    // Once invocation returned, routine observers can join the actual close
+    // promise directly. A synchronously re-entrant observer already captured
+    // the placeholder, which is settled from the same close below.
+    if (this.#retiring === retirement) this.#trackRetirement(settled);
+    void settled.then(settleRetirement);
+    return {closing, settled};
+  }
+
+  /** Publish already-started teardown before any caller can race terminal close. */
+  #trackRetirement(retiring: Promise<void>): Promise<void> {
     this.#retiring = retiring;
     void retiring.then(() => {
       if (this.#retiring === retiring) this.#retiring = null;
@@ -386,7 +407,7 @@ export class PersistentEventStream {
       // become authoritative merely because its promise resolves afterward.
       if (this.#closed || token !== this.#connectionSeq || this.#recoveryFailed) {
         const retired = this.#retire(subscription);
-        if (retired !== null) await retired;
+        if (retired !== null) await retired.settled;
         return false;
       }
       this.#subscription = subscription;
@@ -481,14 +502,17 @@ export class PersistentEventStream {
     try {
       const stale = this.#subscription;
       this.#subscription = null;
-      // A protocol fault may already have detached and begun closing this
-      // handle. Do not dial its replacement until every owned close retires.
+      // A protocol fault may already have detached and begun closing a handle.
+      // Do not dial its replacement until every owned close retires.
       const retiring = this.#retiring;
       if (retiring !== null) await retiring;
-      try {
-        await stale?.close();
-      } catch {
-        // The subscription is already fenced; closing it owes nothing.
+      const staleRetirement = this.#retire(stale);
+      if (staleRetirement !== null) {
+        try {
+          await staleRetirement.closing;
+        } catch {
+          // The subscription is already fenced; closing it owes nothing.
+        }
       }
       // An explicit fresh intent can arrive while the cursor retry is still
       // retiring its old handle. Skip a dial it has already superseded.

@@ -132,6 +132,7 @@ class StubTransport implements StreamTransport {
   #release: (() => void) | null = null;
   #deferNextClose = false;
   #releaseClose: (() => void) | null = null;
+  #nextCloseStarted: (() => void) | null = null;
 
   /** Arm the next subscribe to deliver this batch before its promise resolves. */
   deliverOnNextSubscribe(events: readonly RunEvent[], historyAfterSequence: number): void {
@@ -157,6 +158,11 @@ class StubTransport implements StreamTransport {
   /** Hold the next accepted subscription's close until `releasePendingClose`. */
   deferNextSubscriptionClose(): void {
     this.#deferNextClose = true;
+  }
+
+  /** Invoke `listener` synchronously when the next accepted handle starts closing. */
+  onNextSubscriptionClose(listener: () => void): void {
+    this.#nextCloseStarted = listener;
   }
 
   releasePendingClose(): void {
@@ -200,9 +206,16 @@ class StubTransport implements StreamTransport {
         })
       : null;
     const closeFailure = this.scriptedCloseFailures.shift();
+    const closeStarted = this.#nextCloseStarted;
+    this.#nextCloseStarted = null;
     this.#deferNextClose = false;
+    let closing = false;
     const subscription: EventSubscription = {
       close: async () => {
+        if (!closing) {
+          closing = true;
+          closeStarted?.();
+        }
         record.closed = true;
         if (closeSettled !== null) await closeSettled;
         if (closeFailure !== undefined) throw closeFailure;
@@ -1371,6 +1384,88 @@ describe('PersistentEventStream', () => {
     await expect(recovered).resolves.toMatchObject({status: 'connected'});
     expect(transport.subscribeCalls).toHaveLength(2);
     await stream.close();
+  });
+
+  it('close joins a live subscription retirement already started by retry', async () => {
+    const transport = new StubTransport();
+    const {callbacks} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: []});
+    transport.deferNextSubscriptionClose();
+    await stream.subscribe(callbacks);
+
+    stream.retry();
+    let closeSettled = false;
+    const closing = stream.close().then(() => {
+      closeSettled = true;
+    });
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    try {
+      expect(closeSettled).toBe(false);
+      expect(transport.subscribeCalls).toHaveLength(1);
+    } finally {
+      transport.releasePendingClose();
+      await closing;
+      for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+      await stream.close();
+    }
+    expect(transport.subscribeCalls).toHaveLength(1);
+  });
+
+  it('close joins and contains failed retirement started by rebootstrap', async () => {
+    const transport = new StubTransport();
+    const {callbacks} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: []});
+    transport.deferNextSubscriptionClose();
+    transport.scriptedCloseFailures.push(new Error('retired handle close failed'));
+    await stream.subscribe(callbacks);
+
+    expect(stream.rebootstrap()).toBe('transitioning');
+    let closeSettled = false;
+    const closing = stream.close().then(() => {
+      closeSettled = true;
+    });
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    try {
+      expect(closeSettled).toBe(false);
+      expect(transport.subscribeCalls).toHaveLength(1);
+    } finally {
+      transport.releasePendingClose();
+      await closing;
+      for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+      await stream.close();
+    }
+    expect(transport.subscribeCalls).toHaveLength(1);
+  });
+
+  it('publishes protocol-fault retirement before handle close can reenter shutdown', async () => {
+    const transport = new StubTransport();
+    const {callbacks} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: []});
+    transport.deferNextSubscriptionClose();
+    let terminalClose: Promise<void> | null = null;
+    transport.onNextSubscriptionClose(() => {
+      terminalClose = stream.close();
+    });
+    await stream.subscribe(callbacks);
+
+    transport.emitProtocolError();
+    const closing = terminalClose as Promise<void> | null;
+    if (closing === null) throw new Error('The handle did not re-enter terminal shutdown');
+    let closeSettled = false;
+    void closing.then(() => {
+      closeSettled = true;
+    });
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    try {
+      expect(closeSettled).toBe(false);
+      expect(transport.subscribeCalls).toHaveLength(1);
+    } finally {
+      transport.releasePendingClose();
+      await closing;
+      await stream.close();
+    }
+    expect(closeSettled).toBe(true);
+    expect(transport.subscriptions).toEqual([{closed: true}]);
   });
 
   it('reports a failed replacement dial when retry retires a healthy stream', async () => {
