@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -109,41 +110,42 @@ def test_a_string_that_spells_a_splice_token_is_written_as_the_string() -> None:
         assert encode_json(envelope) == envelope.model_dump_json().encode()
 
 
-class Counted(Value):
-    """A value that counts how often it is serialized."""
+def _counting_values() -> tuple[Any, Any, list[Any]]:
+    """A value class that records each serialization of its instances, a holder of them, the record."""
+    writes: list[Any] = []
 
-    n: int = 0
+    class Counted(Value):
+        n: int = 0
 
-    @field_serializer("n")
-    def _count(self, value: int) -> int:
-        WRITES.append(self)
-        return value
+        @field_serializer("n")
+        def _count(self, value: int) -> int:
+            writes.append(self)
+            return value
 
+    class Holder(Value):
+        items: tuple[Counted, ...]
 
-WRITES: list[Counted] = []
-
-
-class Holder(Value):
-    items: tuple[Counted, ...]
+    return Counted, Holder, writes
 
 
 @given(size=st.integers(min_value=1, max_value=8))
 def test_only_values_new_since_the_last_encoding_are_serialized(size: int) -> None:
-    items = tuple(Counted(n=index) for index in range(size))
-    WRITES.clear()
-    encode_json(Holder(items=items))
-    assert len(WRITES) == size
-    WRITES.clear()
-    extra = Counted(n=size)
-    holder = Holder(items=(*items, extra))
+    counted, holder_of, writes = _counting_values()
+    items = tuple(counted(n=index) for index in range(size))
+    encode_json(holder_of(items=items))
+    assert len(writes) == size
+    writes.clear()
+    extra = counted(n=size)
+    holder = holder_of(items=(*items, extra))
     encoded = encode_json(holder)
-    assert [extra] == WRITES
+    assert writes == [extra]
     assert encoded == holder.model_dump_json().encode()
 
 
 def test_a_value_that_holds_a_mutable_container_is_never_served_from_memory() -> None:
-    items = [Counted(n=1)]
-    holder = Holder.model_construct(items=items)  # skips validation, so the list gets in
+    counted, holder_of, _ = _counting_values()
+    items = [counted(n=1)]
+    holder = holder_of.model_construct(items=items)  # skips validation, so the list gets in
     assert encode_json(holder) == holder.model_dump_json().encode()
-    items.append(Counted(n=2))  # the "frozen" value changes under the memory's feet
+    items.append(counted(n=2))  # the "frozen" value changes under the memory's feet
     assert encode_json(holder) == holder.model_dump_json().encode()
