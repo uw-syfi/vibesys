@@ -382,9 +382,33 @@ export class Hosts {
       this.#watched.delete(key);
       watched.stop();
       this.#deps.retire(key);
-      void watched.lease[Symbol.asyncDispose]();
+      this.#retireLease(key, watched.lease);
     }
     return generation;
+  }
+
+  /** Observe cleanup without making a desired-set transition wait for connection resource I/O. */
+  #retireLease(key: HostKey, lease: ConnectionLease): void {
+    let retirement: PromiseLike<void>;
+    try {
+      retirement = lease[Symbol.asyncDispose]();
+    } catch (error) {
+      this.#logRetirementFailure(key, error);
+      return;
+    }
+    void Promise.resolve(retirement).catch(error => this.#logRetirementFailure(key, error));
+  }
+
+  #logRetirementFailure(key: HostKey, error: unknown): void {
+    try {
+      this.#deps.log(
+        `could not retire ${hostLabel(hostFromKey(key))} connection: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    } catch {
+      // Diagnostics cannot become a second unhandled failure after the manager retained its barrier.
+    }
   }
 
   async #reconcile(

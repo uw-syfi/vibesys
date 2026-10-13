@@ -42,16 +42,24 @@ function gate(): Gate {
   };
 }
 
-function lease(connection: HostConnection, onRelease: () => void = () => {}): ConnectionLease {
+type LeaseFailure = {readonly error: Error; readonly mode: 'reject' | 'throw'};
+
+function lease(
+  connection: HostConnection,
+  onRelease: () => void = () => {},
+  failure: LeaseFailure | null = null,
+): ConnectionLease {
   const release = connection.hold();
   let done = false;
   return {
     connection,
-    async [Symbol.asyncDispose]() {
-      if (done) return;
+    [Symbol.asyncDispose]() {
+      if (done) return Promise.resolve();
       done = true;
       release();
       onRelease();
+      if (failure?.mode === 'throw') throw failure.error;
+      return failure === null ? Promise.resolve() : Promise.reject(failure.error);
     },
   };
 }
@@ -182,6 +190,8 @@ function world(
     readonly deferConnectionCall?: number;
     readonly deferConnectionCalls?: readonly number[];
     readonly failBindingStage?: BindingStage;
+    readonly failLeaseReleaseCall?: number;
+    readonly leaseFailureMode?: LeaseFailure['mode'];
   } = {},
 ) {
   const link = new FakeLink();
@@ -227,9 +237,18 @@ function world(
         await deferred.wait;
       }
       if (call === options.failConnectionCall) throw new Error('the cleanup connection failed');
-      return lease(connection, () => {
-        calls.releases += 1;
-      });
+      return lease(
+        connection,
+        () => {
+          calls.releases += 1;
+        },
+        call === options.failLeaseReleaseCall
+          ? {
+              error: new Error('retirement remained unconfirmed'),
+              mode: options.leaseFailureMode ?? 'reject',
+            }
+          : null,
+      );
     },
     openPage: () => {
       fail('openPage');
@@ -671,6 +690,45 @@ describe('RunControl over the FakeHelper', () => {
     expect(w.connection.held).toBe(true);
     w.runs.detach();
     expect(w.connection.held).toBe(false);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test.each([
+    'reject',
+    'throw',
+  ] as const)('detach observes a lease retirement that %ss without delaying the UI transition', async mode => {
+    const w = world({failLeaseReleaseCall: 1, leaseFailureMode: mode});
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+    await w.runs.attach(HOST, RUN_A);
+    const message =
+      'could not retire run 00000000000a on This Mac: retirement remained unconfirmed';
+
+    expect(() => w.runs.detach()).not.toThrow();
+    expect(w.runs.attached()).toBeNull();
+    expect(w.pages).toMatchObject({opened: 1, closed: 1});
+    expect(w.calls.releases).toBe(1);
+    await w.waitForLog(message);
+    expect(w.logs).toEqual([message]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a failed old-binding retirement is observed once and leaves its replacement selected', async () => {
+    const w = world({failLeaseReleaseCall: 1});
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+    w.link.helper.publish(record(RUN_B, 'run-b', '/p'));
+    await w.runs.attach(HOST, RUN_A);
+    const message =
+      'could not retire run 00000000000a on This Mac: retirement remained unconfirmed';
+
+    await w.runs.attach(HOST, RUN_B);
+    expect(w.runs.attached()?.instanceId).toBe(RUN_B);
+    expect(w.pages).toMatchObject({opened: 2, closed: 1});
+    expect(w.calls.releases).toBe(1);
+    await w.waitForLog(message);
+    expect(w.logs).toEqual([message]);
+
+    w.runs.detach();
+    expect(w.calls.releases).toBe(2);
     await w.connection[Symbol.asyncDispose]();
   });
 

@@ -71,7 +71,8 @@ interface Binding {
    * record says nothing about the run, so only a server seen live, then gone, has ended.
    */
   seenLive: boolean;
-  readonly release: () => void;
+  /** Retire this binding's connection lease once and report when cleanup settles. */
+  readonly release: () => PromiseLike<void>;
 }
 
 interface StartIntent {
@@ -283,8 +284,29 @@ export class RunControl {
     const run = this.#run;
     if (run === null) return;
     this.#run = null;
-    run.release();
+    let retirement: PromiseLike<void>;
+    try {
+      retirement = run.release();
+    } catch (error) {
+      this.#logRetirementFailure(run, error);
+      run.page.close();
+      return;
+    }
+    void Promise.resolve(retirement).catch(error => this.#logRetirementFailure(run, error));
     run.page.close();
+  }
+
+  /** Observe cleanup without extending a synchronous navigation transition into resource I/O. */
+  #logRetirementFailure(binding: Binding, error: unknown): void {
+    try {
+      this.#deps.log(
+        `could not retire run ${binding.instanceId} on ${hostLabel(binding.id)}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    } catch {
+      // Diagnostics cannot become a second unhandled failure after the manager retained its barrier.
+    }
   }
 
   async #launch(
@@ -439,7 +461,6 @@ export class RunControl {
     let observationPhase: 'buffering' | 'live' | 'closed' = 'buffering';
     let page: RunPage | null = null;
     let pageClosed = false;
-    let released = false;
     let leaseRelease: PromiseLike<void> | null = null;
     let binding: Binding | null = null;
     let installed = false;
@@ -452,13 +473,17 @@ export class RunControl {
       pageClosed = true;
       page.close();
     };
-    const release = (): void => {
-      if (released) return;
-      released = true;
+    const release = (): PromiseLike<void> => {
+      if (leaseRelease !== null) return leaseRelease;
       observationPhase = 'closed';
       pendingObservations.splice(0);
       for (const unsubscribe of subscriptions.splice(0).reverse()) unsubscribe();
-      leaseRelease = lease[Symbol.asyncDispose]();
+      try {
+        leaseRelease = lease[Symbol.asyncDispose]();
+      } catch (error) {
+        leaseRelease = Promise.reject(error);
+      }
+      return leaseRelease;
     };
     try {
       if (!this.#owns(generation)) return false;
@@ -513,7 +538,7 @@ export class RunControl {
         observationPhase = 'closed';
         if (binding !== null && this.#run === binding) this.#run = null;
         try {
-          release();
+          leaseRelease = release();
         } finally {
           closePage();
           this.#forgetIntended(generation);

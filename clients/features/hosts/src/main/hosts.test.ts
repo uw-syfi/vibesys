@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
-import {ConnectionManager} from '@vibesys/connection';
+import {type ConnectionLease, ConnectionManager} from '@vibesys/connection';
 import {FakeLink, record} from '@vibesys/connection/testing';
 import type {HostId, HostListing} from '@vibesys/hosts';
 import {remember, SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
@@ -13,6 +13,44 @@ const LOCAL = {kind: 'local'} as const;
 const ALPHA = {kind: 'ssh', alias: 'alpha'} as const;
 const BETA = {kind: 'ssh', alias: 'beta'} as const;
 const CONFIG = {delaysMs: [1], deadlineMs: 60_000, heartbeatMs: 15_000};
+
+type LeaseFailureMode = 'reject' | 'throw';
+
+/** A real manager whose first public lease reports a failed retirement after releasing its hold. */
+class FirstReleaseFailureManager extends ConnectionManager {
+  readonly failure = new Error('retirement remained unconfirmed');
+  readonly #mode: LeaseFailureMode;
+  releases = 0;
+
+  constructor(mode: LeaseFailureMode, options: ConstructorParameters<typeof ConnectionManager>[0]) {
+    super(options);
+    this.#mode = mode;
+  }
+
+  override async acquire(host: HostId, checkout: string): Promise<ConnectionLease> {
+    const lease = await super.acquire(host, checkout);
+    let released = false;
+    return {
+      connection: lease.connection,
+      [Symbol.asyncDispose]: () => {
+        if (released) return Promise.resolve();
+        released = true;
+        const retirement = lease[Symbol.asyncDispose]();
+        this.releases += 1;
+        if (this.releases === 1) {
+          if (this.#mode === 'throw') {
+            void Promise.resolve(retirement).catch(() => {});
+            throw this.failure;
+          }
+          return retirement.then(() => {
+            throw this.failure;
+          });
+        }
+        return retirement;
+      },
+    };
+  }
+}
 
 /** An explicit SSH-config read result, with every requested path recorded. */
 class FakeSshConfigFilesystem implements SshConfigFilesystem {
@@ -309,6 +347,58 @@ describe('Hosts checkout changes', () => {
 });
 
 describe('Hosts desired set', () => {
+  test.each([
+    'reject',
+    'throw',
+  ] as const)('an obsolete watched host observes a retirement that %ss exactly once', async mode => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await configuredSettings(settings, [ALPHA, BETA]);
+    const manager = new FirstReleaseFailureManager(mode, {
+      linkFor: () => new FakeLink(),
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const logged: string[] = [];
+    const message = 'could not retire alpha connection: retirement remained unconfirmed';
+    let observed = (): void => {};
+    const retirementObserved = new Promise<void>(resolve => {
+      observed = resolve;
+    });
+    const retired: string[] = [];
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: entry => {
+        logged.push(entry);
+        if (entry === message) observed();
+      },
+      push: () => {},
+      retire: host => retired.push(host),
+    });
+
+    await hosts.host(ALPHA, '10:100');
+    await manager.existing('ssh:alpha')?.ready();
+    await hosts.host(BETA, '10:100');
+
+    expect(manager.existing('ssh:alpha')).toBeNull();
+    expect(manager.existing('ssh:beta')).not.toBeNull();
+    expect(retired).toEqual(['ssh:alpha']);
+    expect(manager.releases).toBe(1);
+    await retirementObserved;
+    expect(logged).toEqual([message]);
+    await manager[Symbol.asyncDispose]();
+  });
+
   test('switching panels releases a host absent from the bounded recent set', async () => {
     const filesystem = new FakeSettingsFilesystem();
     const settings = new SettingsStore({
