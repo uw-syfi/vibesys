@@ -45,10 +45,10 @@ class InputError extends Error {}
 // must resolve symlinks. Located by content, never by directory name.
 const TOOLKIT_FILES = ['trace_parser.js', 'trace_analysis.js', 'decode.js', 'diagnose_setup.js'];
 
-// This extractor ships as first-party tooling inside the dial9-tokio skill
+// This extractor ships as first-party tooling inside the tokio-runtime-profiling skill
 // bundle, one level up from the vendored toolkit, so it resolves its sibling
 // toolkit by default and needs no --toolkit/DIAL9_TOOLKIT when run in place:
-//   dial9-tokio/ranker/extract/  (here)  ->  dial9-tokio/skills/dial9-toolkit/scripts/
+//   tokio-runtime-profiling/trace-ranking/extract/  (here)  ->  tokio-runtime-profiling/skills/dial9-toolkit/scripts/
 const BUNDLED_TOOLKIT = path.join(__dirname, '..', '..', 'skills', 'dial9-toolkit', 'scripts');
 
 function findToolkit(explicit) {

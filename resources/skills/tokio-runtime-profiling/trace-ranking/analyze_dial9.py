@@ -39,7 +39,7 @@ worse than no answer, because the loop would spend rounds attacking the wrong
 component.
 
 Usage (the profile-guided outer loop appends --vs-output itself):
-  python3 dial9/analyze_dial9.py \
+  python3 trace-ranking/analyze_dial9.py \
       --traces /tmp/dial9-traces \
       --window logs/workload.json \
       --vs-output logs/attribution.json

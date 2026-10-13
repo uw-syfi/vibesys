@@ -25,5 +25,5 @@ backends = ["rocm"]
 domains = ["kernel-writing"]
 
 [[rule]]
-path = "dial9-tokio"
+path = "tokio-runtime-profiling"
 domains = ["database"]

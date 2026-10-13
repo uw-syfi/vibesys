@@ -1,7 +1,7 @@
 # dial9 (Tokio runtime trace skills + ranker)
 
 This bundle has two parts: **vendored** dial9 Agent Skills under `skills/`, and a
-**first-party** trace ranker under `ranker/` (see "First-party: the ranker").
+**first-party** trace ranker under `trace-ranking/` (see "First-party: the ranker").
 
 The skills are **vendored** from the open-source
 [`dial9-rs/dial9`](https://github.com/dial9-rs/dial9) project, licensed under
@@ -49,7 +49,7 @@ the Rust crates are intentionally omitted.
 
 ## First-party: the ranker
 
-`ranker/` is **not** vendored. It is first-party VibeSys tooling that turns a
+`trace-ranking/` is **not** vendored. It is first-party VibeSys tooling that turns a
 dial9 trace into the profile-guided result protocol, and it is what makes this
 bundle useful for ranking rather than only for guided exploration. Upstream's
 `analyze.js` reports per-span **wall-clock** time keyed on spawn location, which
@@ -59,13 +59,13 @@ exactly one span, grouped per task) and emits one stable, validated JSON report.
 
 | Path | What it is |
 | ---- | ---------- |
-| `ranker/analyze_dial9.py` | Policy: which setup diagnostics invalidate a ranking, the cost model (in-window on-CPU poll seconds), the per-component evidence lines. Writes protocol v1. Stdlib only. |
-| `ranker/extract/dial9_extract.js` | Toolkit-side extractor: parses segments, claims on-CPU nanoseconds per span, writes one stable report. Resolves the sibling vendored `dial9-toolkit` by default, so no `--toolkit`/`DIAL9_TOOLKIT` is needed when run in place. |
-| `ranker/extract/check_invariants.js` | Independent cross-check of the extractor's claiming arithmetic. |
+| `trace-ranking/analyze_dial9.py` | Policy: which setup diagnostics invalidate a ranking, the cost model (in-window on-CPU poll seconds), the per-component evidence lines. Writes protocol v1. Stdlib only. |
+| `trace-ranking/extract/dial9_extract.js` | Toolkit-side extractor: parses segments, claims on-CPU nanoseconds per span, writes one stable report. Resolves the sibling vendored `dial9-toolkit` by default, so no `--toolkit`/`DIAL9_TOOLKIT` is needed when run in place. |
+| `trace-ranking/extract/check_invariants.js` | Independent cross-check of the extractor's claiming arithmetic. |
 
 All dial9 and Node knowledge sits on one side of a JSON boundary (`extract/`),
 all ranking policy on the other (`analyze_dial9.py`). `update.sh` wipes and
-recreates only `skills/`, so `ranker/` survives a re-vendor untouched. Because
+recreates only `skills/`, so `trace-ranking/` survives a re-vendor untouched. Because
 it lives under `resources/skills/`, which the repo's ruff and ty configs exempt
 as vendored, the ranker is not linted or type-checked by repo tooling; it is
 held to the repo baseline by hand.
@@ -78,4 +78,4 @@ held to the repo baseline by hand.
 
 **Do not hand-edit the vendored files** under `skills/` — they are a vendored
 copy; re-vendor with `./update.sh` to pull a newer upstream revision. The
-first-party `ranker/`, `README.md`, and `NOTICE` are ours to edit.
+first-party `trace-ranking/`, `README.md`, and `NOTICE` are ours to edit.
