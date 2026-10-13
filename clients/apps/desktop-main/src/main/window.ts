@@ -22,7 +22,7 @@ import {APP_ENTRY_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
 import {bindRunIpc, type PendingRunPort} from './run-ipc.js';
 import {observeRunPage, RunPageLifecycle} from './run-page-lifecycle.js';
-import {rendererGeneration, type WelcomeDocument} from './welcome-ipc.js';
+import type {WelcomeDocument} from './welcome-ipc.js';
 import {
   observeWelcomePage,
   WelcomePageLifecycle,
@@ -191,8 +191,10 @@ export class AppWindow {
     this.#window.contentView.addChildView(view);
     view.webContents.on('did-start-navigation', event => {
       if (this.#welcomePages.current === view && event.isMainFrame && !event.isSameDocument) {
-        const generation = rendererGeneration(event.frame);
-        for (const listener of [...this.#welcomeNewDocuments]) listener(generation);
+        // Electron reports the frame that is beginning the new document here. Its routing
+        // identity may already be the successor's, so it must not be named as the generation
+        // being retired. The document owner already tracks every active predecessor generation.
+        for (const listener of [...this.#welcomeNewDocuments]) listener(null);
       }
     });
     this.#layout();
