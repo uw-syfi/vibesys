@@ -322,11 +322,33 @@ class _Fragments:
                 _FRAGMENT_TEXTS.put(model, self.texts[index])
 
 
+@cache
+def _text_is_position_independent(model: type[BaseModel]) -> bool:
+    """Whether an instance's text is the same under every field that can hold it.
+
+    Pydantic writes a field by the schema of its declared class, so an instance of a class
+    that extends another model may be written with fewer fields where it sits in a field
+    declared as that other model, and in full where it sits in a field of its own class. Which
+    fields can hold it is not known here (and `model_copy` can put it anywhere), so such an
+    instance's text is not remembered and pydantic writes it every time. The answer depends only
+    on the class.
+    """
+    return not any(
+        base.model_fields
+        for base in model.__mro__[1:]
+        if isinstance(base, type) and issubclass(base, BaseModel)
+    )
+
+
 def emit_fragment(
     model: BaseModel, handler: Callable[[BaseModel], object], context: object
 ) -> object:
     """Serializer hook of every frozen value: a token inside `encode_json`, else plain data."""
-    if type(context) is _Fragments and model.model_config.get("frozen"):
+    if (
+        type(context) is _Fragments
+        and model.model_config.get("frozen")
+        and _text_is_position_independent(type(model))
+    ):
         return context.emit(model, handler)
     return handler(model)
 

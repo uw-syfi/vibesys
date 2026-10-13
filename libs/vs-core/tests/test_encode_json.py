@@ -6,14 +6,12 @@ from contextlib import contextmanager
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import field_serializer
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
-    EncodingMismatchError,
     EventCursor,
     HostFence,
     HostId,
@@ -171,7 +169,10 @@ def test_a_value_that_holds_a_mutable_container_is_never_served_from_memory() ->
     assert encode_json(holder) == holder.model_dump_json().encode()
 
 
-def test_a_text_that_depends_on_where_the_value_sits_is_reported_by_type() -> None:
+@given(extra=st.integers(), repeat=st.integers(min_value=1, max_value=3))
+def test_a_subclass_instance_put_in_a_base_typed_field_by_model_copy_is_written_as_pydantic_does(
+    extra: int, repeat: int
+) -> None:
     class Base(Value):
         a: int = 0
 
@@ -184,11 +185,11 @@ def test_a_text_that_depends_on_where_the_value_sits_is_reported_by_type() -> No
     class Own(Value):
         item: Wide
 
-    wide = Wide()
+    wide = Wide(a=extra)
+    plain = Plain(item=Base()).model_copy(update={"item": wide})  # skips validation
+    own = Own(item=wide)
     with _verifying():
-        holder = Plain(item=wide)
-        assert encode_json(holder) == holder.model_dump_json().encode()
-        # The same instance, remembered from the first call, is now asked for under a field of
-        # its own type, where the plain encoding writes `b`.
-        with pytest.raises(EncodingMismatchError, match="Wide"):
-            encode_json(Own(item=wide))
+        for _ in range(repeat):  # the same instance under both declarations, remembered or not
+            assert encode_json(plain) == plain.model_dump_json().encode()
+            assert encode_json(own) == own.model_dump_json().encode()
+    assert encode_json(plain) != encode_json(own)
