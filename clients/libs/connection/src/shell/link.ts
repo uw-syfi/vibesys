@@ -19,6 +19,7 @@
  */
 import {spawn} from 'node:child_process';
 import {homedir} from 'node:os';
+import type {ScheduleTimeout} from '@vibesys/transport';
 import {bootstrapUv, localBootstrap, remoteBootstrap} from './bootstrap.js';
 import {ConnectionError} from './helper-channel.js';
 import {fromChild, type SpawnedProcess} from './process.js';
@@ -117,7 +118,13 @@ export interface SshLinkOptions {
   /** The askpass helper the master uses for password and 2FA prompts. */
   readonly askpass: string;
   readonly spawn?: Spawn;
+  /** Every master control command is killed after this bound. */
+  readonly retirementCommandTimeoutMs?: number;
+  /** Injected timer boundary; production supplies the desktop's real timer implementation. */
+  readonly scheduleTimeout: ScheduleTimeout;
 }
+
+const DEFAULT_RETIREMENT_COMMAND_TIMEOUT_MS = 1_000;
 
 /** ssh's own exit status for a connection or authentication failure. */
 const SSH_FAILED = 255;
@@ -136,20 +143,38 @@ interface EstablishAttempt {
   promise: Promise<void>;
 }
 
+interface RetirementCommandResult {
+  /** Whether this exact control process was observed to terminate. */
+  readonly confirmed: boolean;
+  readonly code: number | null;
+}
+
 export class SshLink implements Link {
   readonly host: string;
   readonly #options: SshLinkOptions;
   readonly #spawn: Spawn;
+  readonly #retirementCommandTimeoutMs: number;
   /** Every establishment subprocess that has not exited, including retired generations. */
   readonly #attempts = new Set<EstablishAttempt>();
   #establishing: EstablishAttempt | null = null;
   #released = false;
+  #releasing: Promise<void> | null = null;
+  /** Killed control commands that did not confirm exit within their bounded grace period. */
+  readonly #unconfirmedRetirementCommands = new Set<Promise<number | null>>();
   /** The `uv` a bootstrap on the host found, passed to the next one. */
   #uv: string | null = null;
 
   constructor(options: SshLinkOptions) {
     this.#options = options;
     this.#spawn = options.spawn ?? nodeSpawn;
+    this.#retirementCommandTimeoutMs =
+      options.retirementCommandTimeoutMs ?? DEFAULT_RETIREMENT_COMMAND_TIMEOUT_MS;
+    if (
+      !Number.isSafeInteger(this.#retirementCommandTimeoutMs) ||
+      this.#retirementCommandTimeoutMs < 1
+    ) {
+      throw new RangeError('retirementCommandTimeoutMs must be a positive integer');
+    }
     this.host = options.alias;
   }
 
@@ -207,14 +232,79 @@ export class SshLink implements Link {
     return helperExit(code, stderr, where);
   }
 
-  async release(): Promise<void> {
+  release(): Promise<void> {
+    this.#releasing ??= this.#release();
+    return this.#releasing;
+  }
+
+  async #release(): Promise<void> {
     // Every active or retired attempt owns the same master this release closes. Kill each attempt
     // so quitting is not held hostage by ConnectTimeout, then wait for confirmed exits before
     // `-O exit`; otherwise a retired process could still fork a master after exit completed.
     this.#released = true;
     for (const attempt of this.#attempts) this.#cancel(attempt);
     await Promise.all([...this.#attempts].map(attempt => attempt.promise.catch(() => {})));
-    await this.#finish(this.#ssh(['-O', 'exit', '--', this.#options.alias]));
+    await this.#retireMaster();
+  }
+
+  async #retireMaster(): Promise<void> {
+    const exit = await this.#runRetirementCommand(['-O', 'exit', '--', this.#options.alias]);
+    if (!exit.confirmed) throw this.#unconfirmedTeardownError();
+    if (exit.code === 0) return;
+    const check = await this.#runRetirementCommand(['-O', 'check', '--', this.#options.alias]);
+    if (!check.confirmed || check.code === null) throw this.#unconfirmedTeardownError();
+    if (check.code === 0) {
+      throw new ConnectionError('link', 'the SSH master remained reachable after teardown');
+    }
+  }
+
+  #runRetirementCommand(args: readonly string[]): Promise<RetirementCommandResult> {
+    let process: SpawnedProcess;
+    try {
+      process = this.#ssh(args);
+    } catch {
+      return Promise.resolve({confirmed: false, code: null});
+    }
+    const finished = this.#finish(process);
+    return new Promise(resolve => {
+      let settled = false;
+      let cancelKill = (): void => {};
+      let cancelGrace = (): void => {};
+      const settle = (result: RetirementCommandResult): void => {
+        if (settled) return;
+        settled = true;
+        cancelKill();
+        cancelGrace();
+        resolve(result);
+      };
+      const ownUnconfirmedExit = (): void => {
+        const commandExit = process.exit;
+        this.#unconfirmedRetirementCommands.add(commandExit);
+        void commandExit.then(
+          () => this.#unconfirmedRetirementCommands.delete(commandExit),
+          () => this.#unconfirmedRetirementCommands.delete(commandExit),
+        );
+        settle({confirmed: false, code: null});
+      };
+      cancelKill = this.#options.scheduleTimeout(() => {
+        process.kill('SIGKILL');
+        cancelGrace = this.#options.scheduleTimeout(
+          ownUnconfirmedExit,
+          this.#retirementCommandTimeoutMs,
+        );
+      }, this.#retirementCommandTimeoutMs);
+      void finished.then(
+        result => settle({confirmed: true, code: result.code}),
+        () => {
+          process.kill('SIGKILL');
+          ownUnconfirmedExit();
+        },
+      );
+    });
+  }
+
+  #unconfirmedTeardownError(): ConnectionError {
+    return new ConnectionError('link', 'could not confirm teardown of the SSH master');
   }
 
   #begin(interactive: boolean): EstablishAttempt {

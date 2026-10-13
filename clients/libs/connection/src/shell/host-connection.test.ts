@@ -146,8 +146,15 @@ function fakeSsh(helper: FakeHelper) {
   return {spawn, seen};
 }
 
-function sshLink(spawn: Spawn): SshLink {
-  return new SshLink({alias: 'gpu', controlPath: '/tmp/cm-%C', askpass: '/askpass', spawn});
+function sshLink(spawn: Spawn, clock = new FakeClock()): SshLink {
+  return new SshLink({
+    alias: 'gpu',
+    controlPath: '/tmp/cm-%C',
+    askpass: '/askpass',
+    spawn,
+    scheduleTimeout: clock.scheduleTimeout,
+    retirementCommandTimeoutMs: 100,
+  });
 }
 
 describe('HostConnection over the FakeHelper', () => {
@@ -875,6 +882,60 @@ describe('ConnectionManager', () => {
     stale.end(null);
     await releasing;
     expect(actions).toEqual(['check-0', 'term-stale', 'check-1', 'term-fresh', 'exit']);
+  });
+
+  for (const outcome of [
+    {label: 'status 255', code: 255},
+    {label: 'a null signal status', code: null},
+  ] as const) {
+    test(`release rejects when exit returns ${outcome.label} and the master remains reachable`, async () => {
+      const operations: string[] = [];
+      const spawn: Spawn = (_command, args) => {
+        const operation = args.at(args.indexOf('-O') + 1) ?? 'missing';
+        operations.push(operation);
+        const process = fakeProcess();
+        process.end(operation === 'exit' ? outcome.code : 0);
+        return process.process;
+      };
+
+      const error = await rejection(sshLink(spawn).release());
+
+      expect(error).toBeInstanceOf(ConnectionError);
+      expect(error.message).toContain('remained reachable');
+      expect(operations).toEqual(['exit', 'check']);
+    });
+  }
+
+  test('release accepts a failed exit only after check confirms the master is absent', async () => {
+    const operations: string[] = [];
+    const spawn: Spawn = (_command, args) => {
+      const operation = args.at(args.indexOf('-O') + 1) ?? 'missing';
+      operations.push(operation);
+      const process = fakeProcess();
+      process.end(255);
+      return process.process;
+    };
+
+    await sshLink(spawn).release();
+
+    expect(operations).toEqual(['exit', 'check']);
+  });
+
+  test('release kills and rejects an exit command that stays unconfirmed past its bound', async () => {
+    const clock = new FakeClock();
+    const kills: string[] = [];
+    const hung = deferredKillProcess(signal => kills.push(signal));
+    const link = sshLink(() => hung.process, clock);
+
+    const releasing = link.release();
+    await clock.waitUntilScheduled(100);
+    clock.advanceBy(200);
+    const error = await rejection(releasing);
+
+    expect(kills).toEqual(['SIGKILL']);
+    expect(error).toBeInstanceOf(ConnectionError);
+    expect(error.message).toContain('could not confirm teardown');
+    hung.end(null);
   });
 
   test('abandoning one shared ssh waiter leaves the other waiter and process intact', async () => {

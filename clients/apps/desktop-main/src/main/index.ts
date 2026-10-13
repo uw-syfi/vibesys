@@ -126,7 +126,7 @@ async function connectionManager(): Promise<ConnectionManager> {
     linkFor: (host: HostId): Link =>
       host.kind === 'local'
         ? new LocalLink()
-        : new SshLink({alias: host.alias, controlPath, askpass}),
+        : new SshLink({alias: host.alias, controlPath, askpass, scheduleTimeout: realTimers}),
     appVersion: app.getVersion(),
     scheduleTimeout: realTimers,
     log,
