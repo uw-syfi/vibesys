@@ -110,7 +110,10 @@ async function openWindow(manager: ConnectionManager): Promise<Desktop> {
   const window = new AppWindow({
     log,
     connect: port => runs.connect(port),
-    closed: () => runs.detach(),
+    closed: () => {
+      runs.detach();
+      changed();
+    },
   });
   desktop = new Desktop({window, welcome, hosts, runs, settings, log});
   // A machine that slept has dead connections nobody has noticed yet: check them now.

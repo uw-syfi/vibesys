@@ -21,6 +21,7 @@ import {
 import {APP_ENTRY_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
 import {bindRunIpc, type PendingRunPort} from './run-ipc.js';
+import {observeRunPage, RunPageLifecycle} from './run-page-lifecycle.js';
 import {TITLEBAR_HEIGHT, windowChrome} from './window-chrome.js';
 
 export const WELCOME_URL = 'app://vibesys/welcome.html';
@@ -29,7 +30,7 @@ export interface AppWindowDeps {
   readonly log: (message: string) => void;
   /** The run page opened one connection. */
   readonly connect: (port: RelayPort) => void;
-  /** The window closed: the attached run's page is gone. */
+  /** The native window or its current run page disappeared: detach the attached run. */
   readonly closed: () => void;
 }
 
@@ -46,8 +47,8 @@ function pendingRunPort(port: MessagePortMain): PendingRunPort {
 export class AppWindow {
   readonly #deps: AppWindowDeps;
   readonly #window: BaseWindow;
+  readonly #runPages: RunPageLifecycle<WebContentsView>;
   readonly welcome: WebContentsView;
-  #run: WebContentsView | null = null;
   #mode: ChromeState['mode'] = 'welcome';
 
   constructor(deps: AppWindowDeps) {
@@ -60,10 +61,19 @@ export class AppWindow {
       title: 'VibeSys',
       ...windowChrome(process.platform),
     });
+    this.#runPages = new RunPageLifecycle({
+      retire: view => this.#retireRunPage(view),
+      showWelcome: () => this.#showWelcome(),
+      currentPageLost: () => this.#deps.closed(),
+    });
     this.welcome = sandboxedView('welcome.cjs');
     this.#window.contentView.addChildView(this.welcome);
     this.#window.on('resize', () => this.#layout());
-    this.#window.on('closed', () => deps.closed());
+    this.#window.on('closed', () => {
+      this.#runPages.abandon();
+      if (!this.welcome.webContents.isDestroyed()) this.welcome.webContents.close();
+      this.#deps.closed();
+    });
     this.#layout();
     this.welcome.webContents
       .loadURL(WELCOME_URL)
@@ -82,7 +92,7 @@ export class AppWindow {
         },
       },
       APP_ENTRY_URL,
-      () => this.#run?.webContents.id ?? null,
+      () => this.#runPages.current?.webContents.id ?? null,
       deps.connect,
       deps.log,
     );
@@ -94,27 +104,29 @@ export class AppWindow {
 
   /** Show `mode`'s view; without a run page, always the welcome view. */
   setMode(mode: ChromeState['mode']): void {
-    this.#mode = this.#run === null ? 'welcome' : mode;
+    this.#mode = this.#runPages.current === null ? 'welcome' : mode;
     this.#layout();
   }
 
   /** Replace the run page with a new one for a run on `hostLabel`, and show it. */
   openRunPage(hostLabel: string): {wake(): void; close(): void} {
-    this.#closeRunPage();
     const view = sandboxedView('run.cjs');
-    this.#run = view;
+    this.#runPages.replace(view);
     this.#window.contentView.addChildView(view);
     this.#window.setTitle(`VibeSys · ${hostLabel}`);
-    view.webContents
-      .loadURL(APP_ENTRY_URL)
-      .catch(() => this.#deps.log('could not load the run view'));
+    void observeRunPage(
+      view.webContents,
+      APP_ENTRY_URL,
+      () => this.#runPages.lost(view),
+      () => this.#deps.log('could not load the run view'),
+    );
     this.setMode('run');
     return {
       wake: () => {
         if (!view.webContents.isDestroyed()) view.webContents.send(WAKE_CHANNEL);
       },
       close: () => {
-        if (this.#run === view) this.#closeRunPage();
+        this.#runPages.close(view);
       },
     };
   }
@@ -144,12 +156,13 @@ export class AppWindow {
     this.#window.focus();
   }
 
-  #closeRunPage(): void {
-    const view = this.#run;
-    if (view === null) return;
-    this.#run = null;
+  #retireRunPage(view: WebContentsView): void {
     if (!this.#window.isDestroyed()) this.#window.contentView.removeChildView(view);
-    view.webContents.close();
+    if (!view.webContents.isDestroyed()) view.webContents.close();
+  }
+
+  #showWelcome(): void {
+    if (!this.#window.isDestroyed()) this.#window.setTitle('VibeSys');
     this.setMode('welcome');
   }
 
@@ -160,9 +173,10 @@ export class AppWindow {
     const full = {x: 0, y: 0, width, height};
     // The run page follows one dark theme; the welcome view follows the system's.
     nativeTheme.themeSource = this.#mode === 'run' ? 'dark' : 'system';
-    if (this.#run !== null) {
-      this.#run.setBounds(full);
-      this.#run.setVisible(this.#mode === 'run');
+    const run = this.#runPages.current;
+    if (run !== null) {
+      run.setBounds(full);
+      run.setVisible(this.#mode === 'run');
     }
     this.welcome.setBounds(this.#mode === 'run' ? {...full, height: TITLEBAR_HEIGHT} : full);
     // Re-adding moves the welcome view (the title strip) above the run view.
