@@ -1,6 +1,12 @@
 import {describe, expect, test} from 'bun:test';
 import type {ScheduleTimeout} from '@vibesys/transport';
-import {bootstrapGateway, type Fetch, fetchReplayFixture} from './backend.js';
+import {
+  bootstrapGateway,
+  EventSourceCampaignStream,
+  type Fetch,
+  fetchCampaignFixture,
+  fetchReplayFixture,
+} from './backend.js';
 
 const CAPABILITY = 'http://127.0.0.1:8765/?token=secret';
 
@@ -204,3 +210,55 @@ describe('fetchReplayFixture', () => {
     expect(events).toHaveLength(0);
   });
 });
+
+describe('campaign browser boundary', () => {
+  test('validates fixture data and forwards owner cancellation', async () => {
+    const controller = new AbortController();
+    const calls: RequestInit[] = [];
+    const fetcher: Fetch = async (_url, init) => {
+      if (init !== undefined) calls.push(init);
+      return Response.json({schemaVersion: 99});
+    };
+    await expect(fetchCampaignFixture(controller.signal, fetcher)).rejects.toThrow();
+    expect(calls[0]?.signal).toBe(controller.signal);
+    expect(calls[0]?.cache).toBe('no-store');
+    await expect(
+      fetchCampaignFixture(controller.signal, async () => new Response('', {status: 503})),
+    ).rejects.toThrow('503');
+  });
+
+  test('validates streamed frames, reports terminal errors, and releases the subscription', () => {
+    const source = new ManualCampaignSource();
+    const frames: unknown[] = [];
+    const errors: string[] = [];
+    const stream = new EventSourceCampaignStream('/campaign', () => source);
+    const close = stream.subscribe(
+      frame => frames.push(frame),
+      error => errors.push(error.message),
+    );
+    source.onmessage?.({data: '{bad json'});
+    source.onmessage?.({data: JSON.stringify({kind: 'status', seq: 1, status: 'completed'})});
+    expect(frames).toEqual([{kind: 'status', seq: 1, status: 'completed'}]);
+    expect(errors).toHaveLength(1);
+    source.readyState = 0;
+    source.onerror?.({});
+    expect(errors).toHaveLength(1);
+    source.readyState = 2;
+    source.onerror?.({});
+    expect(errors.at(-1)).toBe('Campaign stream connection error');
+    close();
+    expect(source.closed).toBe(true);
+    expect(source.onmessage).toBeNull();
+    expect(source.onerror).toBeNull();
+  });
+});
+
+class ManualCampaignSource {
+  onmessage: ((event: {readonly data: string}) => void) | null = null;
+  onerror: ((event: unknown) => void) | null = null;
+  readyState = 1;
+  closed = false;
+  close(): void {
+    this.closed = true;
+  }
+}

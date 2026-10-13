@@ -13,6 +13,7 @@ import {
   initialIterationNavigation,
   reduceEventBatch,
   reduceEventRebootstrap,
+  reduceResponseEvents,
   reduceSnapshot,
 } from '@vibesys/run-state';
 import {createStore, only, type Step, type Store} from '@vibesys/store';
@@ -22,6 +23,8 @@ export type RunAction =
   /** A replayed run's events, in order. */
   | {readonly type: 'events'; readonly events: readonly RunEvent[]}
   | {readonly type: 'snapshot'; readonly snapshot: RunSnapshot}
+  /** Request-response events must not claim the subscription cursor advanced. */
+  | {readonly type: 'response-events'; readonly events: readonly RunEvent[]}
   /** One stream batch and how the stream reconciler placed it. */
   | {
       readonly type: 'batch';
@@ -33,6 +36,8 @@ export function runStep(state: CoreState, action: RunAction): Step<CoreState, ne
   switch (action.type) {
     case 'events':
       return only(action.events.length === 0 ? state : reduceEventBatch(state, action.events));
+    case 'response-events':
+      return only(action.events.length === 0 ? state : reduceResponseEvents(state, action.events));
     case 'snapshot':
       return only(reduceSnapshot(state, action.snapshot));
     case 'batch': {

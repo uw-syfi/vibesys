@@ -14,6 +14,12 @@
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
   "references": [
+    {"path": "../../features/campaign/tsconfig.state.json"},
+    {"path": "../../features/campaign/tsconfig.renderer.json"},
+    {"path": "../../features/conversation/tsconfig.state.json"},
+    {"path": "../../features/conversation/tsconfig.renderer.json"},
+    {"path": "../../libs/run-state/tsconfig.lib.json"},
+    {"path": "../../libs/ui/tsconfig.lib.json"},
     {"path": "../../libs/contracts/tsconfig.lib.json"},
     {"path": "../../libs/transport/tsconfig.lib.json"},
     {"path": "../../libs/transport/tsconfig.websocket.json"},

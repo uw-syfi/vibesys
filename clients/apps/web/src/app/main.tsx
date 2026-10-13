@@ -14,13 +14,13 @@ import {
 import {connectRun, WebSession} from '@vibesys/run-session';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {openTransport} from '../platform/backend.js';
+import {EventSourceCampaignStream, openTransport} from '../platform/backend.js';
 import {markDesktopShell} from '../platform/desktop-shell.js';
 import {GatewaySessionStore} from '../platform/gateway-storage.js';
 import {browserLifecycle} from '../platform/lifecycle.js';
 import '../styles.css';
 import {bootPlan} from './boot.js';
-import {createDemoApp, createLiveApp} from './compose.js';
+import {createDemoApp, createLiveApp, createLiveCampaignApp, type PreviewPage} from './compose.js';
 import {applySessionTheme, applyWebTheme} from './theme.js';
 
 // Remove the launch secret before DOM validation, storage access, or any
@@ -38,8 +38,29 @@ const root = document.querySelector('#root');
 if (root === null) throw new Error('Web viewer root is missing');
 const reactRoot = createRoot(root);
 const storedSessions = new GatewaySessionStore(() => window.sessionStorage);
+let preview: PreviewPage | null = null;
+window.addEventListener('pagehide', event => {
+  // Cached documents resume with their existing stores and replay position.
+  if (!event.persisted) preview?.close();
+});
+
+function renderPreview(page: PreviewPage): void {
+  preview?.close();
+  preview = page;
+  reactRoot.render(<StrictMode>{page.view}</StrictMode>);
+}
 
 function start(): void {
+  const params = new URL(launchUrl).searchParams;
+  if (import.meta.env.DEV && params.has('campaign-live')) {
+    const interval = params.get('interval');
+    const streamUrl =
+      interval === null
+        ? '/__vibesys/campaign/stream'
+        : `/__vibesys/campaign/stream?interval=${encodeURIComponent(interval)}`;
+    renderPreview(createLiveCampaignApp(new EventSourceCampaignStream(streamUrl)));
+    return;
+  }
   const plan = bootPlan(launchUrl, storedSessions.remembered(), window.history.state);
   if (plan.kind === 'demo') {
     renderDemo(plan.error);
@@ -69,19 +90,19 @@ function renderDemo(
   initialGatewayError: string | null = null,
   initialGatewayTarget: GatewayBootstrapTarget | null = null,
 ): void {
-  reactRoot.render(
-    <StrictMode>
-      {createDemoApp({
-        page: window.location.href,
-        initialGatewayError,
-        initialGatewayTarget,
-        onGatewayConnected: gatewayConnected,
-      })}
-    </StrictMode>,
+  renderPreview(
+    createDemoApp({
+      page: window.location.href,
+      initialGatewayError,
+      initialGatewayTarget,
+      onGatewayConnected: gatewayConnected,
+    }),
   );
 }
 
 function renderLive(webSocketUrl: string, browserSession: string | null): void {
+  preview?.close();
+  preview = null;
   const url = webSocketUrlWithSession(webSocketUrl, browserSession);
   const session = new WebSession({
     lifecycle: browserLifecycle(),

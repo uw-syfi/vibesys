@@ -1,9 +1,11 @@
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import {defaultClientConditions, defineConfig, type Plugin} from 'vite';
 import {webBuildInputs} from './build-inputs.js';
 import {webBuildManifest} from './build-manifest.js';
+import {campaignStreamPlugin} from './campaign-stream.js';
 
 const workspaceRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
@@ -28,6 +30,8 @@ function replayFixturePlugin(): Plugin {
 export default defineConfig({
   plugins: [
     react(),
+    tailwindcss(),
+    campaignStreamPlugin(),
     replayFixturePlugin(),
     webBuildManifest({
       workspaceRoot,

@@ -3,6 +3,12 @@
   "compilerOptions": {
     "baseUrl": "..",
     "paths": {
+      "@vibesys/feature-campaign/renderer": ["features/campaign/src/renderer/index.ts"],
+      "@vibesys/feature-campaign/state": ["features/campaign/src/state/index.ts"],
+      "@vibesys/feature-campaign/styles.css": ["features/campaign/src/renderer/styles.css"],
+      "@vibesys/feature-conversation/renderer": ["features/conversation/src/renderer/index.ts"],
+      "@vibesys/feature-conversation/state": ["features/conversation/src/state/index.ts"],
+      "@vibesys/feature-conversation/styles.css": ["features/conversation/src/renderer/styles.css"],
       "@vibesys/app-desktop-main": ["apps/desktop-main/src/main/index.ts"],
       "@vibesys/app-desktop-main/preload-run": ["apps/desktop-main/src/preload/run.cts"],
       "@vibesys/app-desktop-main/preload-welcome": ["apps/desktop-main/src/preload/welcome.cts"],

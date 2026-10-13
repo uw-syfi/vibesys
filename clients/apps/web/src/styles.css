@@ -6,3 +6,9 @@ html[data-shell="desktop"] body { padding-top: var(--desktop-titlebar-height); }
 html[data-shell="desktop"] body::before { content: ""; position: fixed; inset: 0 0 auto 0; height: var(--desktop-titlebar-height); background: var(--page-background); -webkit-app-region: drag; z-index: 10; }
 html[data-shell="desktop"] .shell { padding-top: 12px; }
 html[data-shell="desktop"] button, html[data-shell="desktop"] input, html[data-shell="desktop"] a, html[data-shell="desktop"] select, html[data-shell="desktop"] textarea { -webkit-app-region: no-drag; }
+
+.run-header-actions { display: flex; align-items: center; gap: 12px; }
+.gateway-dialog { background: var(--surface); color: var(--text); padding: 24px; width: min(520px, calc(100vw - 32px)); border: 1px solid var(--border); border-radius: 8px; }
+.gateway-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.gateway-dialog h2 { margin: 0; font-size: 20px; }
+.gateway-dialog .gateway-connect { margin: 0; padding: 0; }

@@ -11,7 +11,7 @@ import {
   iterationRootsForCore,
 } from '@vibesys/run-state';
 import {type RoundKey, roundsWithPlan, sameRoundKey} from '@vibesys/run-state/rounds';
-import {type JSX, useState} from 'react';
+import {type JSX, type ReactNode, useState} from 'react';
 import {
   connectionBanners,
   emptyTranscriptCopy,
@@ -25,6 +25,7 @@ import {RunSummary} from './run-summary.js';
 import {Transcript} from './transcript.js';
 
 export interface RunPageProps {
+  readonly headerAction?: ReactNode;
   readonly run: CoreState;
   readonly iterations: IterationNavigationState;
   /** The live session's state; null on the replay page. */
@@ -42,6 +43,7 @@ export function RunPage({
   iterations,
   session,
   replayFailure,
+  headerAction,
   ...events
 }: RunPageProps): JSX.Element {
   const [requestedIterationId, setRequestedIterationId] = useState<string | null>(null);
@@ -63,7 +65,10 @@ export function RunPage({
           <p className="eyebrow">VIBESYS / RUN VIEWER</p>
           <h1>{header.heading}</h1>
         </div>
-        <span className={`status ${header.status.className}`}>{header.status.label}</span>
+        <div className="run-header-actions">
+          <span className={`status ${header.status.className}`}>{header.status.label}</span>
+          {headerAction}
+        </div>
       </header>
       <Banners banners={banners} replayFailure={replayFailure} {...events} />
       <RunSummary run={run} iterations={iterations} />

@@ -9,6 +9,13 @@
  */
 
 import {type RunEvent, validateRunEvent} from '@vibesys/contracts';
+import {
+  type CampaignFrame,
+  type CampaignRecord,
+  type CampaignStream,
+  parseCampaignFrame,
+  parseReplayScenario,
+} from '@vibesys/feature-campaign/state';
 import type {TransportHooks} from '@vibesys/run-session';
 import type {ControlTransport, ScheduleTimeout} from '@vibesys/transport';
 import {type WebSocketLike, WebSocketTransport} from '@vibesys/transport/websocket';
@@ -150,8 +157,12 @@ function abortReason(signal: AbortSignal): Error {
 }
 
 /** Fetch a JSONL replay fixture and validate every event; any bad line rejects the whole file. */
-export async function fetchReplayFixture(url: string, fetcher: Fetch = fetch): Promise<RunEvent[]> {
-  const response = await fetcher(url);
+export async function fetchReplayFixture(
+  url: string,
+  fetcher: Fetch = fetch,
+  signal?: AbortSignal,
+): Promise<RunEvent[]> {
+  const response = await fetcher(url, signal === undefined ? undefined : {signal});
   if (!response.ok) throw new Error(`Replay fixture request failed with ${response.status}`);
   const events: RunEvent[] = [];
   for (const [index, line] of (await response.text()).split('\n').entries()) {
@@ -175,4 +186,54 @@ export async function fetchReplayFixture(url: string, fetcher: Fetch = fetch): P
     }
   }
   return events;
+}
+
+/** Load and validate the source-backed campaign record at the browser's I/O boundary. */
+export async function fetchCampaignFixture(
+  signal: AbortSignal,
+  fetcher: Fetch = fetch,
+): Promise<CampaignRecord> {
+  const url = new URL('../../dev/fixtures/trajectory-replay.json', import.meta.url).href;
+  const response = await fetcher(url, {signal, cache: 'no-store'});
+  if (!response.ok) throw new Error(`Campaign fixture request failed with ${response.status}`);
+  return parseReplayScenario(await response.json());
+}
+
+interface CampaignEventSource {
+  onmessage: ((event: {readonly data: string}) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  readonly readyState: number;
+  close(): void;
+}
+
+/** Parsed SSE frames; the subscriber owns the connection and releases it on close. */
+export class EventSourceCampaignStream implements CampaignStream {
+  constructor(
+    private readonly url: string,
+    private readonly open: (url: string) => CampaignEventSource = url =>
+      new EventSource(url) as unknown as CampaignEventSource,
+  ) {}
+
+  subscribe(onFrame: (frame: CampaignFrame) => void, onError: (error: Error) => void): () => void {
+    const source = this.open(this.url);
+    source.onmessage = event => {
+      let frame: CampaignFrame;
+      try {
+        frame = parseCampaignFrame(JSON.parse(event.data));
+      } catch (error) {
+        onError(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      onFrame(frame);
+    };
+    source.onerror = () => {
+      // CONNECTING is recoverable: EventSource retries and the fold ignores replayed sequences.
+      if (source.readyState === 2) onError(new Error('Campaign stream connection error'));
+    };
+    return () => {
+      source.onmessage = null;
+      source.onerror = null;
+      source.close();
+    };
+  }
 }
