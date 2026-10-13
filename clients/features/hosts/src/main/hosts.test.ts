@@ -507,6 +507,46 @@ describe('Hosts desired set', () => {
     await olderRecent;
     expect(manager.existing('ssh:beta')).not.toBeNull();
   });
+
+  test('one host failing to acquire does not abort reconciling the others', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await configuredSettings(settings, [ALPHA, BETA]);
+    const manager = new ConnectionManager({
+      linkFor: () => {
+        throw new Error('reconcile must not open a link once the manager is disposed');
+      },
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    // The manager disposes (as it does mid-app-shutdown) before either host is acquired, so
+    // every acquisition in the pass below rejects the same way a real shutdown race would.
+    await manager[Symbol.asyncDispose]();
+    const logged: string[] = [];
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: message => logged.push(message),
+      push: () => {},
+      retire: () => {},
+    });
+
+    // Alpha and beta are both newly desired in this one reconcile pass, alpha attempted first.
+    await hosts.recent([ALPHA, BETA]);
+
+    expect(logged).toHaveLength(2);
+    expect(logged.some(message => message.includes('alpha'))).toBe(true);
+    expect(logged.some(message => message.includes('beta'))).toBe(true);
+  });
 });
 
 describe('Hosts inspection changes', () => {

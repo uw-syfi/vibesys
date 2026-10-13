@@ -385,7 +385,15 @@ export class Hosts {
     for (const key of this.#desired()) {
       if (generation !== this.#generation) return;
       if (this.#watched.has(key)) continue;
-      await this.#acquireDesired(key, generation, known.get(key));
+      try {
+        await this.#acquireDesired(key, generation, known.get(key));
+      } catch (error) {
+        // One host's acquisition failing (routinely: the manager disposing mid-shutdown) must
+        // not stop this pass from reaching every other desired host.
+        this.#deps.log(
+          `could not connect ${hostLabel(hostFromKey(key))}: ${(error as Error).message}`,
+        );
+      }
     }
   }
 
