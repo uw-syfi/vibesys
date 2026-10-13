@@ -20,12 +20,14 @@ export {
   type StreamTransport,
 } from './persistent-event-stream.js';
 export {
+  type AbortRegistration,
   type AbortSignalLike,
   abortReason,
   DEFAULT_REQUEST_POLICY,
   REQUEST_POLICIES,
   type RequestOptions,
   type RequestPolicy,
+  registerAbort,
   resolveRequestPolicy,
 } from './request-policy.js';
 export {

@@ -11,6 +11,7 @@ import {
   abortReason,
   type RequestOptions,
   type RequestPolicy,
+  registerAbort,
   resolveRequestPolicy,
 } from './request-policy.js';
 
@@ -128,10 +129,10 @@ interface ControlConnector {
    * how a one-shot connection is opened and closed is the transport's.
    *
    * The channel has already rejected a signal that was aborted before this
-   * call, so an implementation only owes the listener. One that awaits anything
-   * before attaching that listener must re-check `signal.aborted` afterwards:
-   * an abort in that window never fires the event, and the request would
-   * otherwise run on a connection the caller has given up on.
+   * call. The implementation still owns the registration handoff: it must
+   * reject when a structural signal changes state while its listener is being
+   * attached, whether or not that signal dispatches synchronously. The shared
+   * `registerAbort` operation provides that handoff.
    */
   runDedicated(request: IssuedRequest, signal?: AbortSignalLike): Promise<ProtocolResponse>;
 }
@@ -357,8 +358,12 @@ export class ControlChannel {
       };
       if (signal !== undefined) {
         const onAbort = (): void => this.#abort(entry, abortReason(signal));
-        signal.addEventListener('abort', onAbort, {once: true});
-        entry.detachAbort = () => signal.removeEventListener('abort', onAbort);
+        const registration = registerAbort(signal, onAbort);
+        entry.detachAbort = registration.detach;
+        if (registration.aborted) {
+          this.#settleReject(entry, abortReason(signal));
+          return;
+        }
       }
       this.#enqueue(entry);
     });
@@ -492,15 +497,37 @@ export class ControlChannel {
   /** Write one request to the live connection and arm its response deadline. */
   #send(entry: ControlRequest, connection: ControlConnection): void {
     const requestId = entry.requestId;
-    entry.cancelTimeout = this.#scheduleTimeout(() => {
-      entry.cancelTimeout = null;
-      this.#pending.delete(requestId);
-      this.#settleReject(
-        entry,
-        new BackendClientError('timeout', `Server request timed out after ${entry.timeoutMs}ms`),
-      );
-    }, entry.timeoutMs);
+    // Publish ownership before calling the structural scheduler: it may invoke
+    // the deadline synchronously, and that callback must be able to remove the
+    // request before this method decides whether a frame is still authorized.
     this.#pending.set(requestId, entry);
+    let cancelTimeout: () => void;
+    try {
+      cancelTimeout = this.#scheduleTimeout(() => {
+        entry.cancelTimeout = null;
+        this.#pending.delete(requestId);
+        this.#settleReject(
+          entry,
+          new BackendClientError('timeout', `Server request timed out after ${entry.timeoutMs}ms`),
+        );
+      }, entry.timeoutMs);
+    } catch (error) {
+      // The scheduler may have fired and then thrown. Preserve that first
+      // terminal result; otherwise roll back the published slot and listener.
+      if (this.#pending.get(requestId) === entry) {
+        this.#pending.delete(requestId);
+        this.#settleReject(entry, error instanceof Error ? error : new Error(String(error)));
+      }
+      return;
+    }
+    // A synchronous deadline returned its cancellation handle only after it
+    // had already settled the request. Retire that handle and do not transmit
+    // work the caller has been told timed out.
+    if (this.#pending.get(requestId) !== entry) {
+      cancelTimeout();
+      return;
+    }
+    entry.cancelTimeout = cancelTimeout;
     connection.send(JSON.stringify(entry.request));
   }
 

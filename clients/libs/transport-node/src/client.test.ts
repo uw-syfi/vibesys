@@ -4,9 +4,9 @@ import {createServer, type Server, type Socket} from 'node:net';
 import {join} from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 import {BackendClientError, ServerError} from '@vibesys/contracts';
-import type {ControlChannelState} from '@vibesys/transport';
+import type {AbortSignalLike, ControlChannelState} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
-import {ServerClient, type ServerClientOptions} from './client.js';
+import {type ClientClock, ServerClient, type ServerClientOptions} from './client.js';
 import {expect} from './test-support/expect.js';
 
 /** One reported state as a short string; see `websocket.test.ts`'s `trace`. */
@@ -38,6 +38,68 @@ class Signal {
   fire(): void {
     this.#fire();
   }
+}
+
+class RegistrationAbortSignal implements AbortSignalLike {
+  aborted = false;
+  readonly reason = new Error('registration abandoned');
+  readonly registrationError = new Error('abort registration failed');
+  readonly removalError = new Error('abort removal failed');
+  readonly #listeners = new Set<() => void>();
+  removeCalls = 0;
+
+  constructor(
+    private readonly behavior: 'dispatch' | 'reenter' | 'silent' | 'throw',
+    private readonly throwOnRemove = false,
+    private readonly onRegister: () => void = () => undefined,
+  ) {}
+
+  get listenerCount(): number {
+    return this.#listeners.size;
+  }
+
+  addEventListener(_type: 'abort', listener: () => void): void {
+    this.#listeners.add(listener);
+    if (this.behavior === 'throw') throw this.registrationError;
+    if (this.behavior === 'reenter') {
+      this.onRegister();
+      return;
+    }
+    this.aborted = true;
+    if (this.behavior === 'dispatch') listener();
+  }
+
+  removeEventListener(_type: 'abort', listener: () => void): void {
+    this.removeCalls += 1;
+    if (this.throwOnRemove) throw this.removalError;
+    this.#listeners.delete(listener);
+  }
+
+  abort(): void {
+    this.aborted = true;
+    for (const listener of [...this.#listeners]) listener();
+  }
+}
+
+class SwitchableClock implements ClientClock {
+  readonly #clock = new FakeClock();
+  synchronous = false;
+  cancellations = 0;
+
+  now(): number {
+    return this.#clock.now();
+  }
+
+  readonly scheduleTimeout = (callback: () => void, delayMs: number): (() => void) => {
+    if (!this.synchronous) return this.#clock.scheduleTimeout(callback, delayMs);
+    callback();
+    let live = true;
+    return () => {
+      if (!live) return;
+      live = false;
+      this.cancellations += 1;
+    };
+  };
 }
 
 /**
@@ -1138,6 +1200,117 @@ describe('ServerClient', () => {
         expect((await chat).name).toBe('AbortError');
       },
       {closeGraceMs: 30},
+    );
+  });
+
+  for (const behavior of ['dispatch', 'silent'] as const) {
+    it(`does not transmit a dedicated request when abort ${behavior === 'dispatch' ? 'dispatches' : 'changes state'} during registration`, async () => {
+      const received: string[] = [];
+      await withServer(
+        socket => {
+          socket.on('error', () => undefined);
+          respondToLines(socket, request => {
+            received.push(String(request['type']));
+            socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
+          });
+        },
+        async client => {
+          const signal = new RegistrationAbortSignal(behavior);
+          const rejected = client.request({type: 'query.chat', text: 'must not run'}, {signal});
+
+          await expect(rejected).rejects.toBe(signal.reason);
+          expect(signal.listenerCount).toBe(0);
+          const response = await client.request({type: 'command.pause'});
+          expect(response.ok).toBe(true);
+          expect(received).toEqual(['command.pause']);
+        },
+        {closeGraceMs: 30},
+      );
+    });
+  }
+
+  it('cleans a dedicated socket when abort registration and removal both throw', async () => {
+    const received: string[] = [];
+    await withServer(
+      socket => {
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          received.push(String(request['type']));
+          socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
+        });
+      },
+      async client => {
+        const signal = new RegistrationAbortSignal('throw', true);
+        const rejected = client.request({type: 'query.chat', text: 'must not run'}, {signal});
+
+        await expect(rejected).rejects.toBe(signal.registrationError);
+        expect(signal.removeCalls).toBe(1);
+        expect(() => signal.abort()).not.toThrow();
+        const response = await client.request({type: 'command.pause'});
+        expect(response.ok).toBe(true);
+        expect(received).toEqual(['command.pause']);
+      },
+      {closeGraceMs: 30},
+    );
+  });
+
+  it('detaches a dedicated listener when registration closes the client', async () => {
+    const received: string[] = [];
+    await withServer(
+      socket => {
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => received.push(String(request['type'])));
+      },
+      async client => {
+        let closing: Promise<void> | null = null;
+        let rejections = 0;
+        const signal = new RegistrationAbortSignal('reenter', false, () => {
+          closing = client.close();
+        });
+        const rejected = client
+          .request({type: 'query.chat', text: 'must not run'}, {signal})
+          .catch(error => {
+            rejections += 1;
+            return error;
+          });
+
+        await expect(rejected).resolves.toMatchObject({kind: 'disconnected'});
+        await closing;
+        signal.abort();
+        expect({rejections, listeners: signal.listenerCount, received}).toEqual({
+          rejections: 1,
+          listeners: 0,
+          received: [],
+        });
+      },
+      {closeGraceMs: 30},
+    );
+  });
+
+  it('does not transmit a dedicated request when its connect scheduler fires synchronously', async () => {
+    const received: string[] = [];
+    const clock = new SwitchableClock();
+    await withServer(
+      socket => {
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          received.push(String(request['type']));
+          socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
+        });
+      },
+      async client => {
+        clock.synchronous = true;
+        await expect(
+          client.request({type: 'query.chat', text: 'must not run'}),
+        ).rejects.toMatchObject({kind: 'timeout'});
+        expect(clock.cancellations).toBe(1);
+
+        clock.synchronous = false;
+        const response = await client.request({type: 'command.pause'});
+        expect(response.ok).toBe(true);
+        expect(received).toEqual(['command.pause']);
+      },
+      {clock, closeGraceMs: 30},
     );
   });
 

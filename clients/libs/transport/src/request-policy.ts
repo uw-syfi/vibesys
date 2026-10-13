@@ -70,6 +70,84 @@ export interface AbortSignalLike {
   removeEventListener(type: 'abort', listener: () => void): void;
 }
 
+/**
+ * The result of atomically attaching an abort listener.
+ *
+ * `aborted` is true when cancellation won while the listener was being
+ * attached. In that case the callback has deliberately not run: the caller
+ * still owns its not-yet-published operation and settles it before handing the
+ * operation to another owner. `detach` is idempotent and is already effective
+ * when `aborted` is true.
+ */
+export interface AbortRegistration {
+  readonly aborted: boolean;
+  detach(): void;
+}
+
+/**
+ * Attach one abort listener without a check/register gap.
+ *
+ * Structural signal implementations may change `aborted` or even dispatch the
+ * callback synchronously from `addEventListener`. That is an ownership
+ * handoff, not a normal later notification: latch it, remove whatever the
+ * registration installed, and let the caller settle its unpublished work via
+ * the returned `aborted` bit. Once registration succeeds, a later abort calls
+ * `onAbort` exactly once and detaches the listener on every exit path.
+ */
+export function registerAbort(signal: AbortSignalLike, onAbort: () => void): AbortRegistration {
+  let attached = false;
+  let aborted = signal.aborted;
+  let registering = true;
+  let active = true;
+  const detach = (): void => {
+    if (!active) return;
+    active = false;
+    if (!attached) return;
+    attached = false;
+    try {
+      signal.removeEventListener('abort', abort);
+    } catch {
+      // Logical detachment is the ownership boundary. A hostile structural
+      // implementation may retain or throw from physical removal; `active`
+      // keeps that retained callback inert, and cleanup must never replace the
+      // operation's actual terminal result.
+    }
+  };
+  const abort = (): void => {
+    if (!active || aborted) return;
+    aborted = true;
+    if (registering) return;
+    try {
+      onAbort();
+    } finally {
+      detach();
+    }
+  };
+  if (!aborted) {
+    // Own a possibly installed listener before crossing the structural
+    // boundary. If registration throws after installing it, `detach` still
+    // attempts removal and fences the retained callback.
+    attached = true;
+    try {
+      signal.addEventListener('abort', abort, {once: true});
+    } catch (error) {
+      detach();
+      throw error;
+    }
+    // `abort` may have run while `attached` was still false. It intentionally
+    // did not call the external callback during that incomplete handoff.
+    const abortedAtHandoff = aborted || signal.aborted;
+    registering = false;
+    if (abortedAtHandoff) {
+      aborted = true;
+      detach();
+    }
+  } else {
+    registering = false;
+  }
+  return {aborted, detach};
+}
+
 /** Per-call overrides layered onto a request type's table policy. */
 export interface RequestOptions {
   /** Override the response deadline in ms for this one call. */

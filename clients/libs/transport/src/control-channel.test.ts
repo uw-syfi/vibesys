@@ -2,6 +2,7 @@ import {describe, it} from 'node:test';
 import type {ProtocolResponse} from '@vibesys/contracts';
 import {BackendClientError} from '@vibesys/contracts';
 import {
+  type AbortSignalLike,
   ControlChannel,
   type ControlChannelState,
   type ControlConnection,
@@ -83,6 +84,55 @@ class FakeConnector {
   };
 }
 
+/**
+ * A structural signal that changes state while its listener is being
+ * registered. `dispatch` models a synchronous abort notification; `silent`
+ * models an implementation that exposes the new state without dispatching.
+ */
+class RegistrationAbortSignal implements AbortSignalLike {
+  aborted = false;
+  readonly reason = new Error('registration lost ownership');
+  readonly #listeners = new Set<() => void>();
+
+  constructor(private readonly behavior: 'dispatch' | 'none' | 'silent') {}
+
+  get listenerCount(): number {
+    return this.#listeners.size;
+  }
+
+  addEventListener(_type: 'abort', listener: () => void): void {
+    this.#listeners.add(listener);
+    if (this.behavior === 'none') return;
+    this.aborted = true;
+    if (this.behavior === 'dispatch') listener();
+  }
+
+  removeEventListener(_type: 'abort', listener: () => void): void {
+    this.#listeners.delete(listener);
+  }
+}
+
+/** A signal whose listener stays physically retained when removal fails. */
+class ThrowingRemovalAbortSignal implements AbortSignalLike {
+  aborted = false;
+  readonly reason = new Error('request abandoned');
+  readonly removalError = new Error('listener removal failed');
+  readonly #listeners = new Set<() => void>();
+
+  addEventListener(_type: 'abort', listener: () => void): void {
+    this.#listeners.add(listener);
+  }
+
+  removeEventListener(_type: 'abort', _listener: () => void): void {
+    throw this.removalError;
+  }
+
+  abort(): void {
+    this.aborted = true;
+    for (const listener of [...this.#listeners]) listener();
+  }
+}
+
 function deferred(): {readonly promise: Promise<void>; readonly resolve: () => void} {
   let settle = (): void => {};
   const promise = new Promise<void>(resolve => {
@@ -112,6 +162,183 @@ function channelWith(
 }
 
 describe('ControlChannel', () => {
+  for (const behavior of ['dispatch', 'silent'] as const) {
+    it(`does not send when abort ${behavior === 'dispatch' ? 'dispatches' : 'changes state'} during listener registration`, async () => {
+      const connector = new FakeConnector([]);
+      const signal = new RegistrationAbortSignal(behavior);
+      const sent: IssuedRequest[] = [];
+      let handlers: ControlConnectionHandlers | undefined;
+      const channel = new ControlChannel(connector, {
+        clientId: 'test-client',
+        reconnectDelaysMs: [],
+      });
+      channel.adopt(bound => {
+        handlers = bound;
+        return {
+          send: frame => sent.push(JSON.parse(frame) as IssuedRequest),
+          close: async () => undefined,
+        };
+      });
+
+      const rejected = channel.request({type: 'command.steer', text: 'must not run'}, {signal});
+
+      // Let the pre-fix implementation's wrongly transmitted request finish,
+      // so the silent-notification case fails by value instead of hanging.
+      const wronglyIssued = sent[0];
+      if (wronglyIssued !== undefined) {
+        handlers?.onFrame(
+          JSON.stringify({
+            protocol_version: 1,
+            request_id: wronglyIssued.request_id,
+            ok: true,
+          }),
+        );
+      }
+      const outcome = await rejected.then(
+        response => response,
+        error => error,
+      );
+
+      expect(outcome).toBe(signal.reason);
+      expect(sent).toEqual([]);
+      expect(signal.listenerCount).toBe(0);
+
+      // A response for an unknown, abandoned request cannot settle the next
+      // request or poison the channel's correlation state.
+      handlers?.onFrame(JSON.stringify({protocol_version: 1, request_id: 'abandoned', ok: true}));
+      const next = channel.request({type: 'command.pause'});
+      const issued = sent[0];
+      if (issued === undefined) throw new Error('The live request was not sent');
+      handlers?.onFrame(
+        JSON.stringify({protocol_version: 1, request_id: issued.request_id, ok: true}),
+      );
+      await expect(next).resolves.toMatchObject({request_id: issued.request_id, ok: true});
+      await channel.close();
+    });
+  }
+
+  it('does not send when its deadline scheduler settles synchronously', async () => {
+    const connector = new FakeConnector([]);
+    const sent: IssuedRequest[] = [];
+    let handlers: ControlConnectionHandlers | undefined;
+    let scheduled = 0;
+    let cancelled = 0;
+    const channel = new ControlChannel(connector, {
+      clientId: 'test-client',
+      reconnectDelaysMs: [],
+      scheduleTimeout: callback => {
+        scheduled += 1;
+        if (scheduled === 1) callback();
+        return () => {
+          cancelled += 1;
+        };
+      },
+    });
+    channel.adopt(bound => {
+      handlers = bound;
+      return {
+        send: frame => sent.push(JSON.parse(frame) as IssuedRequest),
+        close: async () => undefined,
+      };
+    });
+
+    await expect(
+      channel.request({type: 'command.steer', text: 'must not run'}),
+    ).rejects.toMatchObject({kind: 'timeout'});
+    expect(sent).toEqual([]);
+    expect(cancelled).toBe(1);
+
+    const next = channel.request({type: 'command.pause'});
+    const issued = sent[0];
+    if (issued === undefined) throw new Error('The live request was not sent');
+    handlers?.onFrame(
+      JSON.stringify({protocol_version: 1, request_id: issued.request_id, ok: true}),
+    );
+    await expect(next).resolves.toMatchObject({request_id: issued.request_id, ok: true});
+    await channel.close();
+  });
+
+  it('rolls back pending ownership when its deadline scheduler throws', async () => {
+    const connector = new FakeConnector([]);
+    const sent: IssuedRequest[] = [];
+    const signal = new RegistrationAbortSignal('none');
+    const schedulerError = new Error('scheduler failed');
+    let handlers: ControlConnectionHandlers | undefined;
+    let scheduled = 0;
+    const channel = new ControlChannel(connector, {
+      clientId: 'test-client',
+      reconnectDelaysMs: [],
+      scheduleTimeout: () => {
+        scheduled += 1;
+        if (scheduled === 1) throw schedulerError;
+        return () => undefined;
+      },
+    });
+    channel.adopt(bound => {
+      handlers = bound;
+      return {
+        send: frame => sent.push(JSON.parse(frame) as IssuedRequest),
+        close: async () => undefined,
+      };
+    });
+
+    await expect(
+      channel.request({type: 'command.steer', text: 'must not run'}, {signal}),
+    ).rejects.toBe(schedulerError);
+    expect(sent).toEqual([]);
+    expect(signal.listenerCount).toBe(0);
+
+    const next = channel.request({type: 'command.pause'});
+    const issued = sent[0];
+    if (issued === undefined) throw new Error('The live request was not sent');
+    handlers?.onFrame(
+      JSON.stringify({protocol_version: 1, request_id: issued.request_id, ok: true}),
+    );
+    await expect(next).resolves.toMatchObject({request_id: issued.request_id, ok: true});
+    await channel.close();
+  });
+
+  it('settles abort and stays routable when physical listener removal throws', async () => {
+    const connector = new FakeConnector([]);
+    const signal = new ThrowingRemovalAbortSignal();
+    const sent: IssuedRequest[] = [];
+    let handlers: ControlConnectionHandlers | undefined;
+    const channel = new ControlChannel(connector, {
+      clientId: 'test-client',
+      reconnectDelaysMs: [],
+    });
+    channel.adopt(bound => {
+      handlers = bound;
+      return {
+        send: frame => sent.push(JSON.parse(frame) as IssuedRequest),
+        close: async () => undefined,
+      };
+    });
+
+    const abandoned = channel.request({type: 'query.snapshot'}, {signal});
+    expect(() => signal.abort()).not.toThrow();
+    await expect(abandoned).rejects.toBe(signal.reason);
+    expect(() => signal.abort()).not.toThrow();
+
+    const abandonedRequest = sent[0];
+    if (abandonedRequest === undefined) throw new Error('The abandoned request was not sent');
+    handlers?.onFrame(
+      JSON.stringify({
+        protocol_version: 1,
+        request_id: abandonedRequest.request_id,
+        ok: true,
+      }),
+    );
+    const next = channel.request({type: 'command.pause'});
+    const issued = sent[1];
+    if (issued === undefined) throw new Error('The live request was not sent');
+    handlers?.onFrame(
+      JSON.stringify({protocol_version: 1, request_id: issued.request_id, ok: true}),
+    );
+    await expect(next).resolves.toMatchObject({request_id: issued.request_id, ok: true});
+    await channel.close();
+  });
+
   it('close joins a dial that resolves at the connection-ownership handoff', async () => {
     const openStarted = deferred();
     const releaseOpen = deferred();

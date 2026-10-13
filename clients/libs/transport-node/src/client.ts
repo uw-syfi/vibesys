@@ -9,6 +9,7 @@ import {
   streamFailure,
 } from '@vibesys/contracts';
 import {
+  type AbortRegistration,
   type AbortSignalLike,
   abortReason,
   ControlChannel,
@@ -20,6 +21,7 @@ import {
   type IssuedRequest,
   NewlineFramer,
   type RequestOptions,
+  registerAbort,
   type ScheduleTimeout,
   type SubscribeOptions,
   subscribeRequest,
@@ -471,10 +473,6 @@ export class ServerClient {
    */
   #requestLongRunning(request: IssuedRequest, signal?: AbortSignalLike): Promise<ProtocolResponse> {
     return new Promise((resolve, reject) => {
-      // No already-aborted check: the channel rejects that before it calls
-      // here, and this method reaches its `addEventListener` without awaiting
-      // anything, so there is no window for an abort to be missed. See
-      // `ControlConnector.runDedicated`.
       const socket = createConnection(this.#path);
       // A client-wide close() abandons an in-flight chat: fail it as a
       // disconnect and let close() destroy the socket.
@@ -483,43 +481,33 @@ export class ServerClient {
       });
       const frames = new NewlineFramer();
       let settled = false;
-      let onAbort: (() => void) | undefined;
+      let detachAbort = (): void => {};
       let cancelConnectTimeout = (): void => {};
-      cancelConnectTimeout = this.#clock.scheduleTimeout(() => {
-        fail(
-          new BackendClientError(
-            'timeout',
-            `Timed out connecting to server after ${this.#connectTimeoutMs}ms`,
-          ),
-        );
-      }, this.#connectTimeoutMs);
 
       const cleanup = (): void => {
         cancelConnectTimeout();
+        detachAbort();
         this.#secondarySockets.delete(socket);
         socket.off('error', fail);
         socket.off('close', disconnected);
-        if (signal !== undefined && onAbort !== undefined) {
-          signal.removeEventListener('abort', onAbort);
-        }
       };
-      const fail = (error: Error): void => {
+      const rejectOwned = (error: unknown): void => {
         if (settled) return;
         settled = true;
         cleanup();
         socket.destroy();
-        reject(error instanceof BackendClientError ? error : transportFailure(error));
+        reject(error);
+      };
+      const fail = (error: Error): void => {
+        rejectOwned(error instanceof BackendClientError ? error : transportFailure(error));
       };
       const disconnected = (): void =>
         fail(new BackendClientError('disconnected', 'Server disconnected during chat'));
+      const abandon = (): void => {
+        if (signal !== undefined) rejectOwned(abortReason(signal));
+      };
       const finish = (response: ProtocolResponse): void => {
         if (settled) return;
-        if (response.request_id !== request.request_id) {
-          fail(
-            new BackendClientError('parse', 'Server chat response has an unexpected request ID'),
-          );
-          return;
-        }
         settled = true;
         cleanup();
         // Keep the one-shot error listener until the socket actually closes.
@@ -531,15 +519,46 @@ export class ServerClient {
         if (response.ok) resolve(response);
         else reject(responseError(response));
       };
-      const handleChatResponseLine = (line: string): boolean => {
-        if (!line) return false;
-        try {
-          finish(parseProtocolResponse(line));
-        } catch (error) {
-          fail(toError(error));
+
+      if (signal !== undefined) {
+        const registered = abortRegistrationResult(signal, abandon);
+        if (!registered.ok) {
+          rejectOwned(registered.error);
+          return;
         }
-        return true;
-      };
+        detachAbort = registered.registration.detach;
+        // Listener registration is structural code and may close the client
+        // reentrantly. Adopt the returned cleanup even when that close already
+        // settled this request, then stop before acquiring another owner.
+        if (settled) {
+          detachAbort();
+          return;
+        }
+        if (registered.registration.aborted) {
+          abandon();
+          return;
+        }
+      }
+      const deadline = scheduleResult(this.#clock.scheduleTimeout, this.#connectTimeoutMs, () =>
+        fail(
+          new BackendClientError(
+            'timeout',
+            `Timed out connecting to server after ${this.#connectTimeoutMs}ms`,
+          ),
+        ),
+      );
+      if (!deadline.ok) {
+        // Scheduling is part of acquiring this socket's ownership. Roll every
+        // earlier owner back if the injected implementation cannot acquire it.
+        rejectOwned(deadline.error);
+        return;
+      }
+      const scheduledCancel = deadline.cancel;
+      cancelConnectTimeout = scheduledCancel;
+      if (settled) {
+        scheduledCancel();
+        return;
+      }
 
       socket.setEncoding('utf8');
       socket.once('connect', () => {
@@ -552,24 +571,15 @@ export class ServerClient {
         const lines = frameChunk(frames, chunk.toString(), fail);
         if (lines === null) return;
         for (const line of lines) {
-          if (handleChatResponseLine(line)) return;
+          const response = dedicatedResponse(line, request.request_id);
+          if (response === null) continue;
+          if (response instanceof Error) fail(response);
+          else finish(response);
+          return;
         }
       });
       socket.once('error', fail);
       onPeerEnd(socket, disconnected);
-      if (signal !== undefined) {
-        // Cancellation tears the dedicated socket down and rejects with the
-        // abort reason, bypassing the transport-failure wrap so the caller sees
-        // the abort, not a disconnect.
-        onAbort = (): void => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          socket.destroy();
-          reject(abortReason(signal));
-        };
-        signal.addEventListener('abort', onAbort, {once: true});
-      }
     });
   }
 }
@@ -691,6 +701,51 @@ function frameChunk(
 
 function delay(ms: number, scheduleTimeout: ScheduleTimeout): Promise<void> {
   return new Promise(resolve => scheduleTimeout(resolve, ms));
+}
+
+/** Parse the one response a dedicated socket owes, preserving protocol failures as values. */
+function dedicatedResponse(line: string, requestId: string): ProtocolResponse | Error | null {
+  if (!line) return null;
+  try {
+    const response = parseProtocolResponse(line);
+    if (response.request_id === requestId) return response;
+    return new BackendClientError('parse', 'Server chat response has an unexpected request ID');
+  } catch (error) {
+    return toError(error);
+  }
+}
+
+type ScheduleResult =
+  | {readonly ok: true; readonly cancel: () => void}
+  | {readonly ok: false; readonly error: unknown};
+
+/** Call the injected scheduler without losing a synchronous implementation failure. */
+function scheduleResult(
+  scheduleTimeout: ScheduleTimeout,
+  delayMs: number,
+  callback: () => void,
+): ScheduleResult {
+  try {
+    return {ok: true, cancel: scheduleTimeout(callback, delayMs)};
+  } catch (error) {
+    return {ok: false, error};
+  }
+}
+
+type AbortRegistrationResult =
+  | {readonly ok: true; readonly registration: AbortRegistration}
+  | {readonly ok: false; readonly error: unknown};
+
+/** Keep a structural listener-registration failure as an owned outcome. */
+function abortRegistrationResult(
+  signal: AbortSignalLike,
+  onAbort: () => void,
+): AbortRegistrationResult {
+  try {
+    return {ok: true, registration: registerAbort(signal, onAbort)};
+  } catch (error) {
+    return {ok: false, error};
+  }
 }
 
 function toError(error: unknown): Error {

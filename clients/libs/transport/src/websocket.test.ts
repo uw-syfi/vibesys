@@ -106,11 +106,31 @@ class DelayedCloseSocket extends FakeSocket {
   }
 }
 
-/** Structural abort signal whose listener lifetime is directly observable. */
+type ListenerRegistrationAction = 'none' | 'abort' | 'silent' | 'throw';
+
+/** Structural abort signal whose registration boundary is fully scriptable. */
 class TestAbortSignal implements AbortSignalLike {
   aborted = false;
   reason: unknown;
+  readonly addError = new Error('abort listener registration failed');
+  readonly removeError = new Error('abort listener removal failed');
+  addCalls = 0;
+  removeCalls = 0;
   readonly #listeners = new Set<() => void>();
+  readonly #addActions: readonly ListenerRegistrationAction[];
+  readonly #removeActions: readonly ListenerRegistrationAction[];
+
+  constructor(
+    options: {
+      addActions?: readonly ListenerRegistrationAction[];
+      removeActions?: readonly ListenerRegistrationAction[];
+      reason?: unknown;
+    } = {},
+  ) {
+    this.#addActions = options.addActions ?? [];
+    this.#removeActions = options.removeActions ?? [];
+    this.reason = options.reason;
+  }
 
   get listenerCount(): number {
     return this.#listeners.size;
@@ -118,9 +138,22 @@ class TestAbortSignal implements AbortSignalLike {
 
   addEventListener(_type: 'abort', listener: () => void): void {
     this.#listeners.add(listener);
+    const action = this.#addActions[this.addCalls] ?? 'none';
+    this.addCalls += 1;
+    if (action === 'abort') {
+      this.aborted = true;
+      listener();
+    } else if (action === 'silent') {
+      this.aborted = true;
+    } else if (action === 'throw') {
+      throw this.addError;
+    }
   }
 
   removeEventListener(_type: 'abort', listener: () => void): void {
+    const action = this.#removeActions[this.removeCalls] ?? 'none';
+    this.removeCalls += 1;
+    if (action === 'throw') throw this.removeError;
     this.#listeners.delete(listener);
   }
 
@@ -702,6 +735,148 @@ describe('WebSocketTransport', () => {
 
     expect((await chat).name).toBe('AbortError');
     expect(gateway.socket(0).closeCalls).toBe(1);
+    await transport.close();
+  });
+
+  it('closes a handshake when abort-listener registration throws', async () => {
+    const gateway = new FakeGateway();
+    gateway.outcome = 'stall';
+    const scheduler = new FakeClock();
+    const signal = new TestAbortSignal({
+      addActions: ['throw'],
+      removeActions: ['throw'],
+    });
+    const transport = controlTransport(gateway, scheduler, {});
+
+    const chat = rejection(
+      transport.request({type: 'query.chat', text: 'must not send'}, {signal}),
+    );
+    await tick();
+
+    expect(await chat).toBe(signal.addError);
+    expect({
+      addCalls: signal.addCalls,
+      removeCalls: signal.removeCalls,
+      listeners: signal.listenerCount,
+      closeCalls: gateway.socket(0).closeCalls,
+      sent: gateway.socket(0).sent,
+      pendingTimers: scheduler.pending,
+    }).toEqual({
+      addCalls: 1,
+      removeCalls: 1,
+      listeners: 1,
+      closeCalls: 1,
+      sent: [],
+      pendingTimers: 0,
+    });
+    signal.abort();
+    expect(gateway.socket(0).closeCalls).toBe(1);
+    await transport.close();
+  });
+
+  it('settles a synchronous handshake abort when listener removal throws', async () => {
+    const gateway = new FakeGateway();
+    gateway.outcome = 'stall';
+    const scheduler = new FakeClock();
+    const reason = new Error('cancel during handshake registration');
+    const signal = new TestAbortSignal({
+      addActions: ['abort'],
+      removeActions: ['throw'],
+      reason,
+    });
+    const transport = controlTransport(gateway, scheduler, {});
+
+    const chat = rejection(
+      transport.request({type: 'query.chat', text: 'must not send'}, {signal}),
+    );
+    await tick();
+
+    expect(await chat).toBe(reason);
+    expect({
+      addCalls: signal.addCalls,
+      removeCalls: signal.removeCalls,
+      listeners: signal.listenerCount,
+      closeCalls: gateway.socket(0).closeCalls,
+      sent: gateway.socket(0).sent,
+      pendingTimers: scheduler.pending,
+    }).toEqual({
+      addCalls: 1,
+      removeCalls: 1,
+      listeners: 1,
+      closeCalls: 1,
+      sent: [],
+      pendingTimers: 0,
+    });
+    await transport.close();
+  });
+
+  it('closes a claimed chat socket when abort registration throws', async () => {
+    const gateway = new FakeGateway();
+    const scheduler = new FakeClock();
+    const signal = new TestAbortSignal({
+      addActions: ['none', 'throw'],
+      removeActions: ['none', 'throw'],
+    });
+    const transport = controlTransport(gateway, scheduler, {});
+
+    const chat = rejection(
+      transport.request({type: 'query.chat', text: 'must not send'}, {signal}),
+    );
+    await tick();
+
+    expect(await chat).toBe(signal.addError);
+    expect({
+      addCalls: signal.addCalls,
+      removeCalls: signal.removeCalls,
+      listeners: signal.listenerCount,
+      closeCalls: gateway.socket(0).closeCalls,
+      sent: gateway.socket(0).sent,
+      pendingTimers: scheduler.pending,
+    }).toEqual({
+      addCalls: 2,
+      removeCalls: 2,
+      listeners: 1,
+      closeCalls: 1,
+      sent: [],
+      pendingTimers: 0,
+    });
+    signal.abort();
+    expect(gateway.socket(0).closeCalls).toBe(1);
+    await transport.close();
+  });
+
+  it('does not send after synchronous chat abort when listener removal throws', async () => {
+    const gateway = new FakeGateway();
+    const scheduler = new FakeClock();
+    const reason = new Error('cancel during chat registration');
+    const signal = new TestAbortSignal({
+      addActions: ['none', 'abort'],
+      removeActions: ['none', 'throw'],
+      reason,
+    });
+    const transport = controlTransport(gateway, scheduler, {});
+
+    const chat = rejection(
+      transport.request({type: 'query.chat', text: 'must not send'}, {signal}),
+    );
+    await tick();
+
+    expect(await chat).toBe(reason);
+    expect({
+      addCalls: signal.addCalls,
+      removeCalls: signal.removeCalls,
+      listeners: signal.listenerCount,
+      closeCalls: gateway.socket(0).closeCalls,
+      sent: gateway.socket(0).sent,
+      pendingTimers: scheduler.pending,
+    }).toEqual({
+      addCalls: 2,
+      removeCalls: 2,
+      listeners: 1,
+      closeCalls: 1,
+      sent: [],
+      pendingTimers: 0,
+    });
     await transport.close();
   });
 

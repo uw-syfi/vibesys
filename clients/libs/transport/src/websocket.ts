@@ -16,7 +16,12 @@ import {
   type IssuedRequest,
   type ScheduleTimeout,
 } from './control-channel.js';
-import {type AbortSignalLike, abortReason, type RequestOptions} from './request-policy.js';
+import {
+  type AbortSignalLike,
+  abortReason,
+  type RequestOptions,
+  registerAbort,
+} from './request-policy.js';
 import {
   type ControlTransport,
   type EventSubscription,
@@ -426,7 +431,7 @@ export class WebSocketTransport implements ControlTransport {
         detachAbort();
         return true;
       };
-      const fail = (error: Error, close: boolean): void => {
+      const fail = (error: unknown, close: boolean): void => {
         if (!finish()) return;
         this.#openingSockets.delete(socket);
         if (close) void this.#closeSocket(socket);
@@ -472,13 +477,21 @@ export class WebSocketTransport implements ControlTransport {
       if (settled) scheduledCancel();
       if (signal !== undefined) {
         const onAbort = (): void => fail(abortReason(signal), true);
-        detachAbort = () => signal.removeEventListener('abort', onAbort);
-        signal.addEventListener('abort', onAbort, {once: true});
-        // Likewise, client-wide close can re-enter from a structural signal's
-        // listener registration. Remove a listener installed after settlement.
-        if (settled) detachAbort();
-        // A structural signal can abort while the listener is being attached.
-        if (signal.aborted) onAbort();
+        try {
+          const registration = registerAbort(signal, onAbort);
+          detachAbort = registration.detach;
+          // Client-wide close can re-enter from a structural signal's listener
+          // registration. Remove a listener installed after settlement.
+          if (settled) {
+            detachAbort();
+            return;
+          }
+          if (registration.aborted) onAbort();
+        } catch (error) {
+          // Registration is part of adopting this opening socket. Preserve its
+          // exact failure while releasing every resource already published.
+          fail(error, true);
+        }
       }
     });
   }
@@ -532,46 +545,35 @@ export class WebSocketTransport implements ControlTransport {
         socket.onmessage = null;
         reject(disconnectedError('Client closed during chat'));
       };
+      const ownAbort = (): boolean => {
+        if (signal === undefined) return true;
+        const onAbort = (): void => finish(() => reject(abortReason(signal)));
+        try {
+          const registration = registerAbort(signal, onAbort);
+          detachAbort = registration.detach;
+          if (settled) {
+            detachAbort();
+            return false;
+          }
+          if (registration.aborted) onAbort();
+          return !settled;
+        } catch (error) {
+          // The socket is already claimed, so failed listener registration
+          // must synchronously release that claim and close the socket.
+          finish(() => reject(error));
+          return false;
+        }
+      };
       try {
         this.#claim(socket, 'Server disconnected before the chat socket opened', settle);
       } catch (error) {
         reject(error);
         return;
       }
-      if (signal !== undefined) {
-        // Cancellation tears the dedicated socket down and rejects with the
-        // abort reason, so the caller sees the abort, not a disconnect.
-        const onAbort = (): void => finish(() => reject(abortReason(signal)));
-        detachAbort = () => signal.removeEventListener('abort', onAbort);
-        signal.addEventListener('abort', onAbort, {once: true});
-        if (settled) {
-          detachAbort();
-          return;
-        }
-        // A structural signal can become aborted while its listener is being
-        // attached without dispatching. Preserve the signal contract anyway.
-        if (signal.aborted) onAbort();
-        if (settled) return;
-      }
-      socket.onmessage = event => {
-        try {
-          const response = parseProtocolResponse(textFrame(event.data));
-          if (response.request_id !== request.request_id) {
-            finish(() =>
-              reject(
-                new BackendClientError(
-                  'parse',
-                  'Server chat response has an unexpected request ID',
-                ),
-              ),
-            );
-            return;
-          }
-          finish(() => (response.ok ? resolve(response) : reject(responseError(response))));
-        } catch (error) {
-          finish(() => reject(streamFailure(error)));
-        }
-      };
+      // Cancellation owns the claimed socket before the first frame can leave.
+      if (!ownAbort()) return;
+      socket.onmessage = event =>
+        finish(() => settleDedicatedFrame(event.data, request, resolve, reject));
       socket.onerror = () =>
         finish(() => reject(transportFailure(new Error('WebSocket transport error'))));
       socket.onclose = () =>
@@ -610,6 +612,25 @@ export class WebSocketTransport implements ControlTransport {
     void closeSocket(socket, this.#closeGraceMs, this.#scheduleTimeout).then(complete);
     void closing.then(() => this.#closingSockets.delete(closing));
     return closing;
+  }
+}
+
+function settleDedicatedFrame(
+  data: unknown,
+  request: IssuedRequest,
+  resolve: (response: ProtocolResponse) => void,
+  reject: (error: Error) => void,
+): void {
+  try {
+    const response = parseProtocolResponse(textFrame(data));
+    if (response.request_id !== request.request_id) {
+      reject(new BackendClientError('parse', 'Server chat response has an unexpected request ID'));
+      return;
+    }
+    if (response.ok) resolve(response);
+    else reject(responseError(response));
+  } catch (error) {
+    reject(streamFailure(error));
   }
 }
 
