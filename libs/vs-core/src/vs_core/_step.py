@@ -34,7 +34,7 @@ from ._proofs import (
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
-from ._values import digest
+from ._values import digest, share_unchanged
 from ._waits import stalled_acquisitions, stalled_checkpoint_waits, undispatchable_requests
 from .types.attempts import (
     AttemptAdmitted,
@@ -304,6 +304,7 @@ def register_requests(
     """Allocate stable identities and persist every proposed request in the outbox."""
     records = list(state.intents.intents)
     allocated: list[Request] = []
+    added: dict[DecisionId | None, list[RequestId]] = {}
     for index, proposal in enumerate(requests):
         request_id = proposal.request_id or RequestId(
             root=f"{state.run.run_id.root}:{state.revision}:{index}:{digest(proposal)[:16]}"
@@ -327,31 +328,36 @@ def register_requests(
             )
         )
         allocated.append(request)
+        added.setdefault(request.decision_id, []).append(request_id)
+    if not allocated:
+        return state, ()
+    # A receipt no new request names is returned as the very object it was: the durable commit
+    # remembers per-instance facts about unchanged values, and rebuilding every receipt on every
+    # step would turn each into an equal but new object that misses them.
     receipts = tuple(
-        receipt.model_copy(
-            update={
-                "request_ids": tuple(
-                    dict.fromkeys(
-                        (
-                            *receipt.request_ids,
-                            *(
-                                request.request_id
-                                for request in allocated
-                                if request.decision_id == receipt.decision_id
-                            ),
-                        )
-                    )
-                )
-            }
-        )
+        _with_requests(receipt, added[receipt.decision_id])
+        if receipt.decision_id in added
+        else receipt
         for receipt in state.run.receipts
+    )
+    run = (
+        state.run
+        if all(new is old for new, old in zip(receipts, state.run.receipts, strict=True))
+        else state.run.model_copy(update={"receipts": receipts})
     )
     return state.model_copy(
         update={
             "intents": state.intents.model_copy(update={"intents": tuple(records)}),
-            "run": state.run.model_copy(update={"receipts": receipts}),
+            "run": run,
         }
     ), tuple(allocated)
+
+
+def _with_requests(receipt: DecisionReceipt, request_ids: list[RequestId]) -> DecisionReceipt:
+    merged = tuple(dict.fromkeys((*receipt.request_ids, *request_ids)))
+    if merged == receipt.request_ids:
+        return receipt
+    return receipt.model_copy(update={"request_ids": merged})
 
 
 def _validate_reopen_episode(
@@ -1502,13 +1508,21 @@ def _advance_event_time(state: CoreState, event: CoreEvent) -> CoreState:
     target = getattr(event, "target", None)
     if target is not None and hasattr(target, "observation"):
         supplied_times.append(target.observation.observed_at)
-    return state.model_copy(
-        update={"run": state.run.model_copy(update={"now_at": max(supplied_times)})}
-    )
+    now_at = max(supplied_times)
+    if now_at == state.run.now_at:
+        return state
+    return state.model_copy(update={"run": state.run.model_copy(update={"now_at": now_at})})
 
 
 def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transition:
-    """Consume one top-level event, advancing the sole revision exactly once."""
+    """Consume one top-level event, advancing the sole revision exactly once.
+
+    Whatever the event leaves equal comes back as the very object it was given. Every area's
+    reducer builds its part of the next state its own way, and a part rebuilt with the same
+    content would be a new object that every per-instance memo (immutability verdicts, JSON
+    text) has never seen. One owner at the exit keeps that true for all of them.
+    """
+    given = state
     _validate_observation_ingress(state, event)
     _validate_authorization(state, event)
     if isinstance(event, DecisionCompleted | RecoveryReady):
@@ -1523,9 +1537,8 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
         state = _advance_event_time(state, event)
         cause, requires = _event_cause(state, event)
         result = propagate(state, (event,), dispatch, initial_cause=(cause, requires))
-    return result.model_copy(
-        update={"state": result.state.model_copy(update={"revision": state.revision + 1})}
-    )
+    advanced = result.state.model_copy(update={"revision": state.revision + 1})
+    return result.model_copy(update={"state": share_unchanged(given, advanced)})
 
 
 def step(state: CoreState, event: CoreEvent, *, reducers: CoreReducers | None = None) -> Transition:

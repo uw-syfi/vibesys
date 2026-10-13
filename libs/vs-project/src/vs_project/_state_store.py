@@ -82,17 +82,25 @@ class FakeStateStore(StoreOperations):
         """Create a shared store with deterministic mutation and read faults."""
         super().__init__(fault_plan, lease_fault_plan, observation_fault_plan)
         self._contents: bytes | None = None
+        self._decoded: tuple[bytes, StoreDocument] | None = None
         self._lock = RLock()
 
     def __deepcopy__(self, memo: dict[int, object]) -> FakeStateStore:
         """An independent store holding the same document and the same place in its fault plans.
 
         The lock is the one attribute that is not data: the copy gets a new lock of its own kind.
+        The decoded document is only a memo of the bytes, so the copy decodes them afresh when read.
         """
         clone = type(self).__new__(type(self))
         memo[id(self)] = clone
         for name, value in vars(self).items():
-            setattr(clone, name, type(value)() if name == "_lock" else copy.deepcopy(value, memo))
+            if name == "_lock":
+                copied: object = type(value)()
+            elif name == "_decoded":
+                copied = None
+            else:
+                copied = copy.deepcopy(value, memo)
+            setattr(clone, name, copied)
         return clone
 
     def replace_document(self, contents: bytes) -> None:
@@ -114,10 +122,21 @@ class FakeStateStore(StoreOperations):
             raise OSError(message)
         if self._contents is None:
             return StoreDocument()
-        return _decode_store_document(self._contents, location="store.json")
+        # Every operation reads the whole document and a commit writes a new one, so decoding
+        # it each time costs the size of the run's record on every call. The bytes are
+        # immutable and the document frozen: the document last written, or decoded from these
+        # very bytes, is what decoding them again would give. Bytes replaced by hand
+        # (`replace_document`) are a different object, so they are decoded, and refused if
+        # damaged, exactly as before.
+        if self._decoded is not None and self._decoded[0] is self._contents:
+            return self._decoded[1]
+        document = _decode_store_document(self._contents, location="store.json")
+        self._decoded = (self._contents, document)
+        return document
 
     def _write(self, document: StoreDocument) -> None:
         self._contents = document.model_dump_json().encode()
+        self._decoded = (self._contents, document)
 
 
 class FakeStateStores:

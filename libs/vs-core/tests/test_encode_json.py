@@ -1,0 +1,141 @@
+"""`encode_json` writes the bytes pydantic writes, whatever it remembers from earlier calls."""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+from hypothesis import given
+from hypothesis import strategies as st
+from pydantic import field_serializer
+
+from vs_core.api import (
+    ENVELOPE_SCHEMA_VERSION,
+    EventCursor,
+    HostFence,
+    HostId,
+    RunEnvelope,
+    StrategyState,
+    Value,
+    encode_json,
+    initial_state,
+)
+
+
+class Color(StrEnum):
+    RED = "red"
+    BLUE = "blue"
+
+
+class Leaf(Value):
+    """A value with every kind of leaf the wire has: floats, bytes, enums, optional fields."""
+
+    ratio: float
+    blob: bytes = b""
+    color: Color = Color.RED
+    note: str | None = None
+    members: frozenset[str] = frozenset()
+
+
+class Tree(StrategyState):
+    """A strategy state that nests to any depth and carries leaves anywhere."""
+
+    label: str = ""
+    leaf: Leaf | None = None
+    children: tuple[Tree, ...] = ()
+
+
+_TOKEN_LOOKALIKES = ("\x00F0\x00", "\x00F1\x00", '"\x00F2\x00"', "\\u0000F3\\u0000", "\x00F99\x00")
+_texts = st.one_of(st.text(max_size=6), st.sampled_from(_TOKEN_LOOKALIKES))
+_leaves = st.builds(
+    Leaf,
+    ratio=st.floats(),  # includes nan, inf and tiny and huge magnitudes
+    blob=st.text(max_size=4).map(str.encode),
+    color=st.sampled_from(Color),
+    note=st.none() | _texts,
+    members=st.frozensets(_texts, max_size=3),
+)
+_trees: st.SearchStrategy[Tree] = st.recursive(
+    st.builds(Tree, schema_version=st.just(1), label=_texts, leaf=st.none() | _leaves),
+    lambda children: st.builds(
+        Tree,
+        schema_version=st.just(1),
+        label=_texts,
+        leaf=st.none() | _leaves,
+        children=st.lists(children, max_size=3).map(tuple),
+    ),
+    max_leaves=10,
+)
+
+
+def _envelope(tree: Tree) -> RunEnvelope[Tree]:
+    state = initial_state()
+    return RunEnvelope[Tree](
+        schema_version=ENVELOPE_SCHEMA_VERSION,
+        fence=HostFence(host_id=HostId(root="host"), epoch=1),
+        strategy_id=state.run.declaration.strategy_id,
+        state_schema=state.run.declaration.state_schema,
+        core=state,
+        strategy=tree.model_copy(
+            update={"schema_version": state.run.declaration.state_schema.version}
+        ),
+        event_cursor=EventCursor(sequence=0),
+    )
+
+
+@given(tree=_trees)
+def test_the_encoding_equals_the_plain_encoding_first_and_when_remembered(tree: Tree) -> None:
+    envelope = _envelope(tree)
+    plain = envelope.model_dump_json().encode()
+    assert encode_json(envelope) == plain
+    assert encode_json(envelope) == plain  # every sub-tree now comes from memory
+    assert encode_json(_envelope(tree)) == plain  # an equal envelope that shares its sub-trees
+
+
+@given(first=_trees, second=_trees, label=_texts)
+def test_a_successor_that_shares_sub_trees_encodes_like_a_fresh_value(
+    first: Tree, second: Tree, label: str
+) -> None:
+    encode_json(_envelope(first))
+    successor = first.model_copy(update={"label": label, "children": (second, *first.children)})
+    envelope = _envelope(successor)
+    assert encode_json(envelope) == envelope.model_dump_json().encode()
+
+
+def test_a_string_that_spells_a_splice_token_is_written_as_the_string() -> None:
+    twin = Tree(schema_version=1, label="\x00F1\x00")
+    tree = Tree(schema_version=1, label="outer", children=(twin, Tree(schema_version=1)))
+    for _ in range(2):
+        envelope = _envelope(tree)
+        assert encode_json(envelope) == envelope.model_dump_json().encode()
+
+
+class Counted(Value):
+    """A value that counts how often it is serialized."""
+
+    n: int = 0
+
+    @field_serializer("n")
+    def _count(self, value: int) -> int:
+        WRITES.append(self)
+        return value
+
+
+WRITES: list[Counted] = []
+
+
+class Holder(Value):
+    items: tuple[Counted, ...]
+
+
+@given(size=st.integers(min_value=1, max_value=8))
+def test_only_values_new_since_the_last_encoding_are_serialized(size: int) -> None:
+    items = tuple(Counted(n=index) for index in range(size))
+    WRITES.clear()
+    encode_json(Holder(items=items))
+    assert len(WRITES) == size
+    WRITES.clear()
+    extra = Counted(n=size)
+    holder = Holder(items=(*items, extra))
+    encoded = encode_json(holder)
+    assert [extra] == WRITES
+    assert encoded == holder.model_dump_json().encode()

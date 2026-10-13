@@ -3,9 +3,22 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_serializer,
+    model_serializer,
+    model_validator,
+)
+
+from vs_core._values import emit_fragment
+
+if TYPE_CHECKING:
+    from pydantic import SerializationInfo
 
 
 class CheckpointDecline(StrEnum):
@@ -56,6 +69,11 @@ class Value(BaseModel):
             )
             object.__setattr__(self, "_hash", value)
             return value
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler, info: SerializationInfo) -> object:
+        # Writes nothing of its own: `encode_json` asks each frozen value for its remembered text.
+        return emit_fragment(self, handler, info.context)
 
 
 type Seconds = Annotated[float, Field(ge=0, allow_inf_nan=False)]

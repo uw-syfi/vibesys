@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import weakref
 from enum import Enum
 from functools import cache
@@ -14,14 +15,15 @@ from typing import (
     Literal,
     TypeAliasType,
     Union,
+    cast,
     get_args,
     get_origin,
 )
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 
 class ImmutableSchemaError(ValueError):
@@ -253,3 +255,134 @@ def _canonical(value: object, serialized: object) -> object:
 def digest(value: BaseModel) -> str:
     """Deterministic value fingerprint, with no clock or random identity source."""
     return sha256(canonical_json(value).encode()).hexdigest()
+
+
+_FRAGMENT_TEXTS: InstanceMemo[str] = InstanceMemo()
+_FRAGMENT_TOKEN = re.compile(r'"\\u0000F([0-9]+)\\u0000"')
+_FRAGMENT_DATA: TypeAdapter[object] = TypeAdapter(
+    object, config=ConfigDict(ser_json_inf_nan="null")
+)
+
+
+class _Fragments:
+    """What one `encode_json` call collects while pydantic walks the model.
+
+    Pydantic calls `emit_fragment` for every frozen value. A value whose JSON text is remembered
+    is replaced by a token and never walked; any other is serialized into plain data in which
+    its own children are tokens already. The tokens are spliced back after pydantic has written
+    the document, so the bytes are the ones pydantic writes and nothing else needs to know its
+    rules for aliases, field serializers, enums, floats or escaping.
+    """
+
+    def __init__(self) -> None:
+        self.texts: list[str] = []  # "" until a value serialized in this call is resolved
+        self.pending: list[tuple[int, BaseModel, object]] = []
+        self.used = 0
+
+    def emit(self, model: BaseModel, handler: Callable[[BaseModel], object]) -> str:
+        text = _FRAGMENT_TEXTS.get(model)
+        if text is None:
+            data = handler(model)  # children are tokens, so they were all emitted before this
+            self.pending.append((len(self.texts), model, data))
+        self.texts.append(text or "")
+        return f"\x00F{len(self.texts) - 1}\x00"
+
+    def expand(self, template: str) -> str:
+        """The template with every token replaced by the text it stands for."""
+        parts = _FRAGMENT_TOKEN.split(template)
+        if len(parts) == 1:
+            return template
+        pieces = [parts[0]]
+        for position in range(1, len(parts), 2):
+            pieces.append(self.texts[int(parts[position])])
+            pieces.append(parts[position + 1])
+        self.used += len(parts) // 2
+        return "".join(pieces)
+
+    def resolve(self, document: str) -> str | None:
+        """The finished text, or None when the tokens did not all appear exactly once.
+
+        A string in the data that spells a token would be spliced as if it were one; counting
+        each token's single use catches it, and the caller then writes the plain encoding.
+        """
+        try:
+            for index, _, data in self.pending:
+                self.texts[index] = self.expand(_FRAGMENT_DATA.dump_json(data).decode())
+            text = self.expand(document)
+        except IndexError:
+            return None
+        return text if self.used == len(self.texts) else None
+
+    def remember(self) -> None:
+        """Keep the text of every value this call serialized, for the next call."""
+        for index, model, _ in self.pending:
+            if _frozen_model_is_deeply_immutable(model):
+                _FRAGMENT_TEXTS.put(model, self.texts[index])
+
+
+def emit_fragment(
+    model: BaseModel, handler: Callable[[BaseModel], object], context: object
+) -> object:
+    """Serializer hook of every frozen value: a token inside `encode_json`, else plain data."""
+    if type(context) is _Fragments and model.model_config.get("frozen"):
+        return context.emit(model, handler)
+    return handler(model)
+
+
+def encode_json(model: BaseModel) -> bytes:
+    """The bytes of ``model.model_dump_json()``, reusing the text of unchanged frozen values.
+
+    Each durable write encodes the whole run, and consecutive writes share almost every
+    sub-tree as the identical object. The text of a frozen value depends only on its class
+    and field values, so it is remembered per instance (see `InstanceMemo`) and a value that
+    came through unchanged is not walked or encoded again: only values built since the last
+    call are. The output is byte-for-byte the plain encoding, which is also what is written if
+    the fragments cannot be proven to splice back exactly.
+    """
+    fragments = _Fragments()
+    text = fragments.resolve(model.model_dump_json(context=fragments))
+    if text is None:
+        return model.model_dump_json().encode()
+    fragments.remember()
+    return text.encode()
+
+
+def share_unchanged[V](old: V, new: V) -> V:
+    """``new``, except that every part equal to the same part of ``old`` is the object in ``old``.
+
+    Models are compared field by field and tuples position by position, so only the parts that
+    were rebuilt are walked: a part that is already the very object in ``old`` is skipped at
+    once. Anything that is neither (a frozenset, a number, a string) is kept as ``new`` has it.
+    The result equals ``new``.
+    """
+    return cast("V", _share(old, new))
+
+
+def _share(old: object, new: object) -> object:
+    if old is new:
+        return new
+    if isinstance(new, BaseModel) and type(old) is type(new):
+        return _share_model(old, new)
+    if type(old) is tuple and type(new) is tuple:
+        return _share_tuple(old, new)
+    return new
+
+
+def _share_model(old: BaseModel, new: BaseModel) -> BaseModel:
+    names = _field_names(type(new))
+    shared = {name: _share(getattr(old, name), getattr(new, name)) for name in names}
+    if all(shared[name] is getattr(old, name) for name in names):
+        return old
+    changed = {name: part for name, part in shared.items() if part is not getattr(new, name)}
+    return new.model_copy(update=changed) if changed else new
+
+
+def _share_tuple(old: tuple[object, ...], new: tuple[object, ...]) -> tuple[object, ...]:
+    parts = tuple(_share(before, after) for before, after in zip(old, new, strict=False))
+    if len(new) == len(old) and all(
+        part is before for part, before in zip(parts, old, strict=True)
+    ):
+        return old
+    if all(part is after for part, after in zip(parts, new, strict=False)):
+        return new
+    return (*parts, *new[len(parts) :])

@@ -249,6 +249,7 @@ PURE_EXPORTS = {
             "PrivateAttr",
             "ValidationInfo",
             "RootModel",
+            "SerializationInfo",
             "SerializeAsAny",
             "SerializerFunctionWrapHandler",
             "StrictBool",

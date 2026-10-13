@@ -34,8 +34,10 @@ from vs_core.api import (
     StrategyState,
     Transition,
     TurnObserved,
+    encode_json,
     orphan_waits,
     project,
+    share_unchanged,
     step,
     validate_startup,
 )
@@ -736,6 +738,12 @@ class CoreRuntime[S: StrategyState]:
         self._release_held()
 
     def _commit(self, candidate: RuntimeRecord[S], now_at: float) -> None:
+        # Whatever the candidate leaves equal to the committed record is that record's object,
+        # whichever path built it (a strategy's fold returns an equal state of its own making).
+        # The checks and the encoding below remember what they learn per object, so only values
+        # that actually changed cost anything.
+        if self._record is not None:
+            candidate = share_unchanged(self._record, candidate)
         # One serialization per commit. What the candidate must satisfy is checked on the
         # value (no encode-then-decode round trip); that its bytes decode back to the same
         # record is a property of the codec, tested over generated records and enforced
@@ -744,15 +752,18 @@ class CoreRuntime[S: StrategyState]:
         self._registry.validate_envelope(candidate.envelope)
         # A strategy state built with `model_copy(update=...)` never ran its field validators;
         # validating it on the value keeps an invalid state from becoming a durable record
-        # that no later process can load.
+        # that no later process can load. The committed record's state was validated when it
+        # was committed (or decoded), so a candidate that carries the very same object needs
+        # nothing again.
         strategy = candidate.envelope.strategy
-        type(strategy).model_validate(strategy.model_dump(warnings=False))
+        if self._record is None or self._record.envelope.strategy is not strategy:
+            type(strategy).model_validate(strategy.model_dump(warnings=False))
         candidate.check_publications()
         self._check_identity(candidate.envelope)
         stored = StoredEnvelope(
             revision=0 if self._storage_revision is None else self._storage_revision + 1,
             schema_version=1,
-            payload=candidate.model_dump_json().encode(),
+            payload=encode_json(candidate),
         )
         if self._fence is None:
             message = "runtime has no lease"

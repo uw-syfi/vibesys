@@ -13,8 +13,10 @@ from __future__ import annotations
 import argparse
 import time
 
-from tests.composition._loop import _crash as crash
+from tests.composition._loop.dst_world import SubjectWorld
 from tests.composition._loop.subjects import SUBJECTS
+
+from vs_dst.api import simulate
 
 
 def _measure(name: str, repeat: int) -> tuple[int, float]:
@@ -23,11 +25,9 @@ def _measure(name: str, repeat: int) -> tuple[int, float]:
     commits = 0
     for attempt in range(repeat + 1):  # attempt 0 warms import-time and value caches
         started = time.perf_counter()
-        survived = crash.run_with_crash(
-            subject, subject.smallest_world(), None, crash.CrashPoint.AFTER_COMMIT
-        )
+        run = simulate(SubjectWorld(subject, subject.smallest_world()))
         elapsed = time.perf_counter() - started
-        commits = survived.commits
+        commits = run.commits
         if attempt:
             best = min(best, elapsed)
     return commits, best * 1000 / commits

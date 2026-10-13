@@ -1113,7 +1113,7 @@ expose = ["[a-z_]+\\.[A-Z].*", "intents\\.request_lifecycle", "job_observations\
 [[modules]]
 path = "vs_core.types.common"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_core._values"]
 
 [[interfaces]]
 from = ["vs_core.types.common"]
@@ -1126,7 +1126,7 @@ depends_on = []
 
 [[interfaces]]
 from = ["vs_core._values"]
-expose = ["canonical_json", "deeply_immutable", "digest", "ImmutableSchemaError", "InstanceMemo", "validate_immutable_schema"]
+expose = ["canonical_json", "deeply_immutable", "digest", "emit_fragment", "encode_json", "ImmutableSchemaError", "InstanceMemo", "share_unchanged", "validate_immutable_schema"]
 
 [[modules]]
 path = "vs_core._outcomes"

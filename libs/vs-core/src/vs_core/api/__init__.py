@@ -97,6 +97,7 @@ from vs_core._turn_chain import (
     Charge,
     TurnChain,
 )
+from vs_core._values import encode_json, share_unchanged
 from vs_core._waitable import (
     SuspendedTurn,
     Waitable,
@@ -981,6 +982,7 @@ __all__ = [
     "decision_of_operation",
     "declared_operation",
     "dependency_status",
+    "encode_json",
     "evidence_view",
     "initial_state",
     "invocation_for",
@@ -1002,6 +1004,7 @@ __all__ = [
     "session_view",
     "settle",
     "settlement_view",
+    "share_unchanged",
     "step",
     "suspension_refusal",
     "trace_step",
