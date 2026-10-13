@@ -163,11 +163,7 @@ async function verifyUnauthorizedWelcome(
 }
 
 test('a crashed welcome renderer is replaced once without losing its open run', async () => {
-  const args = [
-    APP,
-    ...(process.platform === 'linux' ? ['--headless'] : []),
-    ...electronRuntimeArgs(),
-  ];
+  const args = [APP, ...electronRuntimeArgs()];
   const electronApp = await bounded('launching Electron', electron.launch({args}));
   try {
     await expect

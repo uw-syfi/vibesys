@@ -256,7 +256,9 @@ jobs:
           # The downloaded Electron runtime's SUID helper cannot have Chromium's required root
           # ownership on a hosted runner. This opt-out is scoped to the E2E child process.
           VIBESYS_ELECTRON_E2E_DISABLE_CHROMIUM_SANDBOX: "1"
-        run: ./support/repoctl/repoctl run-checks --group tui_e2e
+        # Electron's native windows require a display; Playwright's dependency install above
+        # provides Xvfb on this Linux runner. The wrapper owns the display for this one check group.
+        run: xvfb-run -a ./support/repoctl/repoctl run-checks --group tui_e2e
 
   queue-native:
     needs: changes
