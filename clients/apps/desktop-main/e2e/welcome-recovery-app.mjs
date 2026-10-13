@@ -195,6 +195,54 @@ function ownedWelcomeContents() {
   return id === null ? null : (webContents.fromId(id) ?? null);
 }
 
+function requiredContents(contents, label) {
+  if (contents === null || contents.isDestroyed()) {
+    throw new Error(`the ${label} contents are unavailable`);
+  }
+  return contents;
+}
+
+function inspectWelcomeContents(contents) {
+  return requiredContents(contents, 'welcome').executeJavaScript(
+    `(async () => {
+      const visible = element => {
+        if (element === null) return false;
+        const style = getComputedStyle(element);
+        const bounds = element.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && bounds.width > 0 && bounds.height > 0;
+      };
+      const text = selector => Array.from(document.querySelectorAll(selector), element => element.textContent?.trim() ?? '');
+      return {
+        titleStripVisible: visible(document.querySelector('#title-strip')),
+        headings: text('h1, h2, h3'),
+        buttons: text('button'),
+        bodyText: document.body.textContent ?? '',
+        confinement: {
+          bridge: typeof window.vibesysWelcome,
+          nodeRequire: typeof globalThis.require,
+          nodeProcess: typeof globalThis.process,
+        },
+        hosts: await window.vibesysWelcome.hosts(),
+      };
+    })()`,
+    true,
+  );
+}
+
+function clickWelcomeButton(label) {
+  return requiredContents(ownedWelcomeContents(), 'welcome').executeJavaScript(
+    `(() => {
+      const label = ${JSON.stringify(label)};
+      const button = Array.from(document.querySelectorAll('button')).find(
+        element => element.textContent?.trim() === label,
+      );
+      if (button === undefined) throw new Error('welcome button is unavailable: ' + label);
+      button.click();
+    })()`,
+    true,
+  );
+}
+
 registerAppScheme();
 app.on('web-contents-created', (_event, contents) => confineContents(contents, log));
 app.on('window-all-closed', () => app.quit());
@@ -222,6 +270,7 @@ window.openRunPage('This Mac');
 desktop.chromeChanged();
 
 let unauthorizedWindow = null;
+let unauthorizedView = null;
 globalThis.vibesysWelcomeRecoveryE2E = {
   state() {
     const currentWelcomeId = ownedWelcomeId();
@@ -246,6 +295,12 @@ globalThis.vibesysWelcomeRecoveryE2E = {
   hasContents(id) {
     return webContents.fromId(id) !== undefined;
   },
+  inspectWelcome() {
+    return inspectWelcomeContents(ownedWelcomeContents());
+  },
+  clickWelcomeButton(label) {
+    return clickWelcomeButton(label);
+  },
   async openUnauthorizedWelcome() {
     unauthorizedWindow?.close();
     const holder = new BaseWindow({show: false, width: 960, height: 600});
@@ -253,11 +308,17 @@ globalThis.vibesysWelcomeRecoveryE2E = {
     holder.contentView.addChildView(view);
     view.setBounds({x: 0, y: 0, width: 960, height: 600});
     unauthorizedWindow = holder;
+    unauthorizedView = view;
     await view.webContents.loadURL(WELCOME_URL);
     return {unauthorizedId: view.webContents.id, currentId: ownedWelcomeId()};
+  },
+  inspectUnauthorizedWelcome() {
+    const contents = unauthorizedView?.webContents ?? null;
+    return inspectWelcomeContents(contents);
   },
   closeUnauthorizedWelcome() {
     unauthorizedWindow?.close();
     unauthorizedWindow = null;
+    unauthorizedView = null;
   },
 };
