@@ -26,6 +26,7 @@ const INSTANCE_ID = '0123456789ab';
 const logs = [];
 const fatals = [];
 let appWindow = null;
+let initializationFailure = null;
 let unauthorizedWindow = null;
 let unauthorizedView = null;
 
@@ -267,22 +268,27 @@ void app.whenReady().then(() => {
 
   const runs = new FakeRuns();
   const welcome = new WelcomeFeed();
-  appWindow = new AppWindow({
+  const window = new AppWindow({
     log,
     connect: port => runs.connect(port),
     closed: () => runs.detach(),
     fatal: error => fatals.push(error.message),
   });
   const desktop = new Desktop({
-    window: appWindow,
+    window,
     welcome,
     hosts: new FakeHosts(),
     runs,
     settings: new FakeSettings(),
     log,
   });
-  appWindow.openRunPage('This Mac');
+  window.openRunPage('This Mac');
   desktop.chromeChanged();
+  // Publish readiness only after every composition step succeeded. The control surface below is
+  // installed earlier so Playwright can poll pending startup without racing a partial shell.
+  appWindow = window;
+}).catch(error => {
+  initializationFailure = error instanceof Error ? error : new Error(String(error));
 });
 
 globalThis.vibesysWelcomeRecoveryE2E = {
@@ -291,6 +297,7 @@ globalThis.vibesysWelcomeRecoveryE2E = {
     // polling immediately. Initialization may still be constructing AppWindow at that instant;
     // expose a total not-ready snapshot rather than turning an ordinary startup race into a
     // terminal evaluate error.
+    if (initializationFailure !== null) throw initializationFailure;
     if (appWindow === null) {
       return {
         currentWelcomeId: null,
