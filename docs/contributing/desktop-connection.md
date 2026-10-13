@@ -61,7 +61,7 @@ desktop main process (apps/desktop-main)              host (local or ssh)
 |   settings store (sole writer)            |        |   channel; stateless)               |
 | ConnectionManager                         |  stdio | entrypoints.host_helper             |
 |   HostConnection per host                 |<------>|   -> server.host_helper (channel)   |
-|     link (ssh master | none)              |  (ssh  |   -> server.host_api   (contracts)  |
+|     link (ssh master pool | none)         |  (ssh  |   -> server.host_api   (contracts)  |
 |     control channel  -> helper            |  exec  |   -> server.registry   (records)    |
 |     run channels     -> helper -> relay   |  chan- |   -> server.relay (relay)    |
 |     supervisor (XState machine + shell)   |  nels) |                                     |
@@ -184,9 +184,21 @@ same statuses as the bridge.
 | Limits | None from ssh. | OpenSSH `MaxSessions` (default 10) bounds channels per master: 1 control plus up to 3 per attached run. The manager counts channels and opens a second master for the host past the limit; this is its job, not a caller's. |
 
 B wins on every criterion that removes a bug class (isolation, failure typing, simplicity), and its
-cost is a startup paid on attach, not per action. Both kinds of channel are opened by one function
-(`HostConnection.open(kind)`), which performs the bootstrap and `hello` and returns a typed channel
-or a typed failure; there is no other way to reach a host.
+cost is a startup paid on attach, not per action. Both kinds of channel are opened through the
+role-aware `Link` contract. Its closed roles are `host-control`, `run-control`, `subscribe`, and
+`chat`; `run-control` maps to the helper's existing `control` wire role. The link performs admission
+before the bootstrap and `hello`, and returns a typed capacity failure without changing the host
+connection's health; there is no other way to reach a host.
+
+An SSH link reserves two of its conservative eight application slots per master for control roles.
+Passive subscriptions and chats spill to another owned master once they reach the non-reserved
+limit. The pure admission policy owns queued demand as well as leases: it selects role priority
+first and FIFO within a role, reserves a spill master before spawning, and offers a newly ready
+master to the whole queue before retiring it. A helper stays leased to its chosen master until its
+process exits. A pre-handshake OpenSSH session refusal is normalized by the SSH implementation and
+retried once away from that master. The pool is bounded to four masters; exhaustion is a typed
+channel-capacity result, not a host-link failure. Local links carry the same roles and lifecycle
+contract without an artificial session limit.
 
 The Electron message-port hop preserves that per-channel backpressure with symmetric byte credits.
 The main-process relay and sandbox preload each grant one bounded window. A sender spends the UTF-8
@@ -391,6 +403,12 @@ Rules:
    channel still serves; an outcome it does not accept hands the channel back (`discard`), and one
    it stopped waiting for is closed when the operation's signal aborts. A check that finds the host
    answering but the run gone emits `run-unreachable` and returns to `ready`.
+7. **SSH admission is role-aware and link-owned.** A pure capacity policy owns queued demand and
+   leases, reserves operator slots, selects demand by role priority with a FIFO tie-break, selects
+   the least-loaded eligible master deterministically, and authorizes at most one new master for
+   concurrent demand. The SSH shell interprets its start/stop/grant results, releases leases on
+   every exit path, and exposes only bounded per-role counts. Connection and UI code never see
+   control paths, commands, credentials, or host configuration through those diagnostics.
 
 ## Screen stores
 
@@ -539,7 +557,7 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Lifecycle phases, progress, tombstones (phase 3) | built: phases with failure reason in the record, tombstones, startup stages and image-build progress (`run_startup_progress`, record version 4); the desktop renders phase, stage, and progress in the live run table, and ended-run tombstones with their reason in the host panel |
 | Control envelope split (phase 4, step one) | built (`server.control_envelope`) |
 | Host helper and its contract (phase 4) | built: every method, `host-helper.schema.json` and its TypeScript types, the `helper-*` conformance scenarios and runner (in process and over stdio), the import-closure and start-up guards; `entrypoints.stdio_bridge` deleted in phase 5 |
-| Connection manager (phase 5) | built: `ConnectionManager` and `HostConnection` (an XState machine, shell with disposal scopes), the bootstrap, typed channels with one strict validator, run channels, watch-pushed listings, path completion, the HostConnection contract suite over the `FakeHelper` and the real helper; not built: the Playwright journey job, a second master past `MaxSessions`, and checkout completion on a host with no checkout yet (it needs a helper) |
+| Connection manager (phase 5) | built: `ConnectionManager` and `HostConnection` (an XState machine, shell with disposal scopes), the bootstrap, typed channels with one strict validator, role-aware SSH admission with spillover masters and bounded diagnostics, run channels, watch-pushed listings, path completion, the HostConnection contract suite over the `FakeHelper` and the real helper; not built: the Playwright journey job and checkout completion on a host with no checkout yet (it needs a helper) |
 | Screen stores and app lifecycle (phase 6) | built (#1839) |
 
 ## Decisions and alternatives

@@ -26,6 +26,7 @@ import {
 import {ConnectionError} from '../shell/helper-channel.js';
 import type {Link} from '../shell/link.js';
 import type {SpawnedProcess} from '../shell/process.js';
+import type {ChannelRole, LinkPoolDiagnostics} from '../state/channel-admission.js';
 import type {Cause} from '../state/host-connection.js';
 import {type FakeProcess, fakeProcess} from './fake-process.js';
 
@@ -158,6 +159,8 @@ export class FakeHelper {
   readonly stops: {readonly instanceId: string; readonly force: boolean}[] = [];
   /** Every valid helper request received, including each channel's hello. */
   readonly requests: HelperRequest[] = [];
+  /** Run-channel wire roles received, in order. */
+  readonly connectRoles: Array<'control' | 'subscribe' | 'chat'> = [];
   /** Features this helper version recognizes. */
   readonly features = new Set<HelperFeature>([
     'instances_watch',
@@ -467,7 +470,7 @@ class HelperSession {
         this.#stop(request);
         return;
       case 'run.connect':
-        this.#connect(id, request.instance_id);
+        this.#connect(id, request.instance_id, request.role);
         return;
       case 'paths.complete':
         this.#complete(id, request.prefix);
@@ -624,8 +627,9 @@ class HelperSession {
     this.#send({type: 'run.start', request_id: id, launch: live});
   }
 
-  #connect(id: string, instanceId: string): void {
+  #connect(id: string, instanceId: string, role: 'control' | 'subscribe' | 'chat'): void {
     const helper = this.#helper;
+    helper.connectRoles.push(role);
     const live = helper.host.instances.find(entry => entry.id === instanceId);
     const server = helper.host.runs.get(instanceId);
     if (this.#watches.size > 0) {
@@ -770,6 +774,9 @@ export class FakeLink implements Link {
   readonly #establishes: PendingEstablish[] = [];
   /** Every line a bootstrap reported, in order. */
   readonly heardLines: string[] = [];
+  /** Every semantic helper role admitted, in order. */
+  readonly roles: ChannelRole[] = [];
+  #closed = false;
 
   constructor(helper = new FakeHelper()) {
     this.helper = helper;
@@ -792,13 +799,25 @@ export class FakeLink implements Link {
 
   networkChanged(): void {}
 
-  spawnHelper(checkout: string): SpawnedProcess {
+  async withHelper<T>(
+    checkout: string,
+    role: ChannelRole,
+    _signal: AbortSignal,
+    open: (process: SpawnedProcess) => Promise<T>,
+  ): Promise<T> {
+    if (this.#closed) throw new ConnectionError('link', 'the fake connection was released');
+    if (_signal.aborted) {
+      throw _signal.reason instanceof Error
+        ? _signal.reason
+        : new DOMException('the fake channel was abandoned', 'AbortError');
+    }
+    this.roles.push(role);
     if (this.linkFault !== null) {
       const channel = fakeProcess();
       channel.end(255, '', 'ssh: connect to host fake: Network is unreachable\n');
-      return channel.process;
+      return open(channel.process);
     }
-    return this.helper.spawn(checkout);
+    return open(this.helper.spawn(checkout));
   }
 
   heard(line: string): void {
@@ -813,7 +832,14 @@ export class FakeLink implements Link {
     return new ConnectionError('incompatible', `the helper for ${where} exited with ${code}`);
   }
 
+  diagnostics(): LinkPoolDiagnostics {
+    const opening = {'host-control': 0, 'run-control': 0, subscribe: 0, chat: 0};
+    const active = {'host-control': 0, 'run-control': 0, subscribe: 0, chat: 0};
+    return {masterCount: 0, opening, active, masters: []};
+  }
+
   async release(): Promise<void> {
+    this.#closed = true;
     this.released += 1;
   }
 }

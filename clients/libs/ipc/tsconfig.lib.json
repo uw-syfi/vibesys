@@ -24,6 +24,9 @@
     },
     {
       "path": "../runs/tsconfig.lib.json"
+    },
+    {
+      "path": "../transport/tsconfig.lib.json"
     }
   ]
 }

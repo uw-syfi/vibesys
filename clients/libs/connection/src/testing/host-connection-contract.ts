@@ -71,7 +71,7 @@ export function hostConnectionContract(name: string, host: ContractHost, skip = 
 
     test('a run channel to a run that is not there fails run-gone, and the host stays ready', async () => {
       await using connection = host.working();
-      const error = await rejection(connection.openRun('0123456789ab'));
+      const error = await rejection(connection.openRun('0123456789ab', 'run-control'));
       expect(error).toBeInstanceOf(ConnectionError);
       expect((error as ConnectionError).reason).toBe('run-gone');
       expect(connection.phase.kind).toBe('ready');

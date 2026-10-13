@@ -109,7 +109,7 @@ async function openWindow(manager: ConnectionManager): Promise<Desktop> {
   });
   const window = new AppWindow({
     log,
-    connect: port => runs.connect(port),
+    connect: (port, role) => runs.connect(port, role),
     closed: () => {
       runs.detach();
       changed();

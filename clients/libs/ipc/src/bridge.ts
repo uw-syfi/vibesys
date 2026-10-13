@@ -11,6 +11,10 @@
  * both sides honest.
  */
 
+import type {RunChannelRole} from '@vibesys/transport';
+
+export type {RunChannelRole} from '@vibesys/transport';
+
 /** The platforms the desktop shell reports (`process.platform` values it supports). */
 export const DESKTOP_PLATFORMS = ['darwin', 'win32', 'linux'] as const;
 
@@ -35,7 +39,7 @@ export interface DesktopSocket {
 
 /** The connection half of the bridge. */
 export interface DesktopBridge {
-  connect(handlers: DesktopSocketHandlers): DesktopSocket;
+  connect(role: RunChannelRole, handlers: DesktopSocketHandlers): DesktopSocket;
   onWake(listener: () => void): void;
 }
 

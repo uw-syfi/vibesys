@@ -32,6 +32,7 @@ import {
 import type {ChromeState, StartOutcome} from '@vibesys/ipc';
 import type {ResumeRunId, StopView} from '@vibesys/runs';
 import type {StoredRecentRun} from '@vibesys/settings';
+import type {RunChannelRole} from '@vibesys/transport';
 import {type RelayPort, relay} from './relay.js';
 import {StopController} from './stop-controller.js';
 
@@ -252,7 +253,7 @@ export class RunControl {
   }
 
   /** Relay one connection the run page opened to the attached run, over a run channel. */
-  connect(port: RelayPort): void {
+  connect(port: RelayPort, role: RunChannelRole): void {
     const run = this.#run;
     if (run === null) {
       port.close();
@@ -260,7 +261,7 @@ export class RunControl {
     }
     void relay(port, async signal => {
       try {
-        return (await run.connection.openRun(run.instanceId, signal)).stream;
+        return (await run.connection.openRun(run.instanceId, role, signal)).stream;
       } catch (error) {
         if (error instanceof Error && 'reason' in error && error.reason === 'run-gone') {
           this.#ended(run);

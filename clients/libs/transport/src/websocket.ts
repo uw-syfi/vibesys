@@ -1,12 +1,15 @@
-import type {ProtocolResponse, RequestInput, ServerMessage} from '@vibesys/contracts';
 import {
   BackendClientError,
+  type ProtocolResponse,
   parseProtocolResponse,
   parseServerMessage,
+  type RequestInput,
   responseError,
   ServerError,
+  type ServerMessage,
   streamFailure,
 } from '@vibesys/contracts';
+import type {RunChannelRole} from './channel-role.js';
 import {
   ControlChannel,
   type ControlChannelState,
@@ -61,7 +64,7 @@ export interface WebSocketTransportOptions {
    */
   onConnectionState?: (state: ControlChannelState) => void;
   /** Override the browser constructor in tests or an embedded web runtime. */
-  webSocket?: (url: string) => WebSocketLike;
+  webSocket?: (url: string, role: RunChannelRole) => WebSocketLike;
   /** Override timeout scheduling in deterministic tests. */
   scheduleTimeout?: ScheduleTimeout;
 }
@@ -89,7 +92,7 @@ export class WebSocketTransport implements ControlTransport {
   readonly #clientId: string;
   readonly #connectTimeoutMs: number;
   readonly #closeGraceMs: number;
-  readonly #webSocket: (url: string) => WebSocketLike;
+  readonly #webSocket: (url: string, role: RunChannelRole) => WebSocketLike;
   /**
    * Every socket a consumer has claimed, mapped to the hook that settles its
    * current operation. This includes the control connection: retaining it here
@@ -168,7 +171,7 @@ export class WebSocketTransport implements ControlTransport {
   ): Promise<EventSubscription> {
     if (this.#closed) throw disconnectedError('Client is closed');
     const request = this.#envelope(subscribeRequest(afterSequence, options));
-    const socket = await this.#openSocket();
+    const socket = await this.#openSocket('subscribe');
     let settleClaimed = (): void => {};
     this.#claim(socket, 'Server disconnected before the subscription opened', () =>
       settleClaimed(),
@@ -337,7 +340,7 @@ export class WebSocketTransport implements ControlTransport {
 
   /** Open one control socket for the channel and route its frames back. */
   async #openControl(handlers: ControlConnectionHandlers): Promise<ControlConnection> {
-    const socket = await this.#openSocket();
+    const socket = await this.#openSocket('run-control');
     const connection: ControlConnection = {
       send: frame => {
         try {
@@ -390,11 +393,11 @@ export class WebSocketTransport implements ControlTransport {
    * the still-opening socket immediately rather than waiting for the browser's
    * connect timeout; the settled fence makes a queued late socket event inert.
    */
-  async #openSocket(signal?: AbortSignalLike): Promise<WebSocketLike> {
+  async #openSocket(role: RunChannelRole, signal?: AbortSignalLike): Promise<WebSocketLike> {
     if (signal?.aborted) throw abortReason(signal);
     let socket: WebSocketLike;
     try {
-      socket = this.#webSocket(this.#url);
+      socket = this.#webSocket(this.#url, role);
     } catch (error) {
       throw transportFailure(error);
     }
@@ -495,7 +498,10 @@ export class WebSocketTransport implements ControlTransport {
     request: IssuedRequest,
     signal?: AbortSignalLike,
   ): Promise<ProtocolResponse> {
-    const socket = await this.#openSocket(signal);
+    const socket = await this.#openSocket(
+      request.type === 'query.chat' ? 'chat' : 'run-control',
+      signal,
+    );
     if (signal?.aborted) {
       // Re-checked after the dial: cancellation can land in the microtask gap
       // between the handshake settling (which detaches its listener) and this
@@ -613,7 +619,7 @@ export class WebSocketTransport implements ControlTransport {
   }
 }
 
-function defaultWebSocket(url: string): WebSocketLike {
+function defaultWebSocket(url: string, _role: RunChannelRole): WebSocketLike {
   if (typeof globalThis.WebSocket !== 'function') {
     throw new BackendClientError('disconnected', 'WebSocket is unavailable in this runtime', {
       retryable: false,

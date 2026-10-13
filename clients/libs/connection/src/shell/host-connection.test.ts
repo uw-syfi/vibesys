@@ -413,7 +413,7 @@ describe('HostConnection over the FakeHelper', () => {
     link.helper.publish(record('00000000000b', 'run-b'));
     link.helper.host.runs.set('00000000000b', ECHO_SERVER);
     await using connection = fakeConnection(link);
-    const {runId, stream} = await connection.openRun('00000000000b');
+    const {runId, stream} = await connection.openRun('00000000000b', 'run-control');
     expect(runId).toBe('run-b');
     const echoed = new Promise<string>(resolve =>
       stream.once('data', (chunk: Buffer) => resolve(chunk.toString())),
@@ -421,6 +421,21 @@ describe('HostConnection over the FakeHelper', () => {
     stream.write('{"type":"query.snapshot"}\n');
     expect(JSON.parse(await echoed)).toEqual({echo: '{"type":"query.snapshot"}'});
     stream.destroy();
+    expect(link.roles).toEqual(['host-control', 'run-control']);
+    expect(link.helper.connectRoles).toEqual(['control']);
+  });
+
+  test('maps every semantic run role to the host-helper wire role', async () => {
+    const link = new FakeLink();
+    link.helper.publish(record('00000000000a', 'run-a'));
+    link.helper.host.runs.set('00000000000a', ECHO_SERVER);
+    await using connection = fakeConnection(link);
+    for (const role of ['run-control', 'subscribe', 'chat'] as const) {
+      const {stream} = await connection.openRun('00000000000a', role);
+      stream.destroy();
+    }
+    expect(link.roles).toEqual(['host-control', 'run-control', 'subscribe', 'chat']);
+    expect(link.helper.connectRoles).toEqual(['control', 'subscribe', 'chat']);
   });
 
   test('a coalesced connect reply preserves the first run frame at every byte split', async () => {
@@ -444,7 +459,7 @@ describe('HostConnection over the FakeHelper', () => {
       ];
       await using connection = fakeConnection(link);
 
-      const {runId, stream} = await connection.openRun('00000000000b');
+      const {runId, stream} = await connection.openRun('00000000000b', 'run-control');
       const expected = Buffer.from(`${greeting}\n`);
       const delivered = await new Promise<Buffer>(resolve => {
         const chunks: Buffer[] = [];
@@ -472,7 +487,7 @@ describe('HostConnection over the FakeHelper', () => {
     await using connection = fakeConnection(link);
     await connection.ready();
 
-    const error = await rejection(connection.openRun('00000000000b'));
+    const error = await rejection(connection.openRun('00000000000b', 'run-control'));
 
     expect(error).toBeInstanceOf(ConnectionError);
     if (!(error instanceof ConnectionError)) throw error;
@@ -528,7 +543,7 @@ describe('HostConnection over the FakeHelper', () => {
     await using connection = fakeConnection(link);
     const controllers = Array.from({length: 4}, () => new AbortController());
     const dials = controllers.map(controller =>
-      rejection(connection.openRun('00000000000c', controller.signal)),
+      rejection(connection.openRun('00000000000c', 'run-control', controller.signal)),
     );
     await establishing.received;
 
@@ -554,7 +569,7 @@ describe('HostConnection over the FakeHelper', () => {
     link.helper.host.runs.set('00000000000c', ECHO_SERVER);
     await using connection = fakeConnection(link);
     const controller = new AbortController();
-    const {stream} = await connection.openRun('00000000000c', controller.signal);
+    const {stream} = await connection.openRun('00000000000c', 'run-control', controller.signal);
     const closed = new Promise<void>(resolve => stream.once('close', resolve));
     stream.on('error', () => {});
 
@@ -570,7 +585,7 @@ describe('HostConnection over the FakeHelper', () => {
     link.helper.publish(record('00000000000c', 'run-c'));
     link.helper.host.runs.set('00000000000c', ECHO_SERVER);
     const connection = fakeConnection(link);
-    const {stream} = await connection.openRun('00000000000c');
+    const {stream} = await connection.openRun('00000000000c', 'run-control');
     const ended = new Promise<void>(resolve => stream.once('close', () => resolve()));
     expect(link.helper.running).toBe(2);
     await connection[Symbol.asyncDispose]();
@@ -591,7 +606,9 @@ describe('HostConnection over the FakeHelper', () => {
     expect(link.helper.running).toBe(0);
     expect(await ready).toBeInstanceOf(ConnectionError);
     // A closed connection starts nothing.
-    expect(await rejection(connection.openRun('00000000000c'))).toBeInstanceOf(ConnectionError);
+    expect(await rejection(connection.openRun('00000000000c', 'run-control'))).toBeInstanceOf(
+      ConnectionError,
+    );
     expect(link.helper.spawned).toBe(1);
   });
 
@@ -618,7 +635,7 @@ describe('HostConnection over the FakeHelper', () => {
     link.helper.host.runs.set('00000000000d', ECHO_SERVER);
     link.helper.host.denied.add('00000000000d');
     await using connection = fakeConnection(link);
-    const error = await rejection(connection.openRun('00000000000d'));
+    const error = await rejection(connection.openRun('00000000000d', 'run-control'));
     expect((error as ConnectionError).reason).toBe('denied');
     expect(connection.phase.kind).toBe('ready');
   });
@@ -675,7 +692,7 @@ describe('HostConnection over the FakeHelper', () => {
       await using connection = fakeConnection(link);
       await connection.ready();
       arrange(link);
-      const error = await rejection(connection.openRun('0000000000f0'));
+      const error = await rejection(connection.openRun('0000000000f0', 'run-control'));
       expect((error as ConnectionError).reason).toBe(cause);
       await phaseReached(connection, nextPhase);
     });
@@ -754,7 +771,7 @@ describe('HostConnection over the FakeHelper', () => {
       link.helper.publish(record('00000000000e', 'run-e'));
       link.helper.host.runs.set('00000000000e', stream => stream.onLine(() => stream.end(outcome)));
       await using connection = fakeConnection(link);
-      const {stream} = await connection.openRun('00000000000e');
+      const {stream} = await connection.openRun('00000000000e', 'run-control');
       const ended = new Promise<Error | null>(resolve => {
         stream.once('error', error => resolve(error));
         stream.once('end', () => resolve(null));
@@ -1048,7 +1065,7 @@ describe('ConnectionManager', () => {
       const error = await rejection(sshLink(spawn).release());
 
       expect(error).toBeInstanceOf(ConnectionError);
-      expect(error.message).toContain('remained reachable');
+      expect(error.message).toContain('could not confirm teardown of 1 SSH master');
       expect(operations).toEqual(['exit', 'check']);
     });
   }
@@ -1310,7 +1327,7 @@ describe('ConnectionManager', () => {
     helper.preamble = [];
     helper.publish(record('00000000000f', 'run-f'));
     helper.host.runs.set('00000000000f', ECHO_SERVER);
-    const {stream} = await connection.openRun('00000000000f');
+    const {stream} = await connection.openRun('00000000000f', 'run-control');
     stream.destroy();
     const uv = `x${Buffer.from('/opt/uv/bin/uv').toString('hex')}`;
     expect(seen.helpers.map(command => command.split(' ').at(-1))).toEqual(['x', uv]);

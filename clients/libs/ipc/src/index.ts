@@ -17,6 +17,7 @@ export {
   type MainToPage,
   type PageToMain,
   parsePageMessage,
+  type RunChannelRole,
   WAKE_CHANNEL,
 } from './bridge.js';
 export {

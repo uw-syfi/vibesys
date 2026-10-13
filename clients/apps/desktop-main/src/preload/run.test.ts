@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {createRequire} from 'node:module';
-import type {MainToPage, PageToMain} from '@vibesys/ipc';
+import type {MainToPage, PageToMain, RunChannelRole} from '@vibesys/ipc';
 
 const createRunPreload = createRequire(import.meta.url)('./run.cjs') as typeof import('./run.cjs');
 
@@ -26,7 +26,7 @@ class FakePort {
 class FakePreload {
   readonly platform = 'test';
   readonly ports: FakePort[] = [];
-  readonly attached: object[] = [];
+  readonly attached: Array<{readonly remote: object; readonly role: RunChannelRole}> = [];
   #wake: (() => void) | null = null;
 
   createChannel(): {port: FakePort; remote: object} {
@@ -36,8 +36,8 @@ class FakePreload {
     return {port, remote};
   }
 
-  attach(remote: object): void {
-    this.attached.push(remote);
+  attach(remote: object, role: RunChannelRole): void {
+    this.attached.push({remote, role});
   }
 
   onWake(listener: () => void): void {
@@ -55,7 +55,7 @@ function connection() {
   const messages: string[] = [];
   const closed: string[] = [];
   const bridge = createRunPreload(capabilities);
-  const socket = bridge.connect({
+  const socket = bridge.connect('run-control', {
     onOpen: () => opened.push('open'),
     onMessage: data => messages.push(data),
     onClose: () => closed.push('close'),
@@ -76,7 +76,7 @@ describe('run preload bridge', () => {
     capabilities.wake();
 
     const messages: string[] = [];
-    const socket = bridge.connect({
+    const socket = bridge.connect('subscribe', {
       onOpen: () => undefined,
       onMessage: data => messages.push(data),
       onClose: () => undefined,
@@ -89,6 +89,7 @@ describe('run preload bridge', () => {
     expect(bridge.platform).toBe('test');
     expect(woke).toBe(true);
     expect(capabilities.attached).toHaveLength(1);
+    expect(capabilities.attached[0]?.role).toBe('subscribe');
     expect(messages).toEqual(['é']);
     expect(port.posted).toEqual([
       {type: 'credit', bytes: 3},

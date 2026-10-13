@@ -9,7 +9,13 @@
  */
 
 import type {RelayPort} from '@vibesys/feature-run-control/main';
-import {type ChromeState, CONNECT_CHANNEL, WAKE_CHANNEL, type WelcomeEvent} from '@vibesys/ipc';
+import {
+  type ChromeState,
+  CONNECT_CHANNEL,
+  type RunChannelRole,
+  WAKE_CHANNEL,
+  type WelcomeEvent,
+} from '@vibesys/ipc';
 import {
   BaseWindow,
   dialog,
@@ -29,7 +35,7 @@ export const WELCOME_URL = 'app://vibesys/welcome.html';
 export interface AppWindowDeps {
   readonly log: (message: string) => void;
   /** The run page opened one connection. */
-  readonly connect: (port: RelayPort) => void;
+  readonly connect: (port: RelayPort, role: RunChannelRole) => void;
   /** The native window or its current run page disappeared: detach the attached run. */
   readonly closed: () => void;
 }
@@ -81,12 +87,13 @@ export class AppWindow {
     bindRunIpc(
       {
         onConnect: listener => {
-          ipcMain.on(CONNECT_CHANNEL, event => {
+          ipcMain.on(CONNECT_CHANNEL, (event, value: unknown) => {
             const port = event.ports[0];
             listener({
               port: port === undefined ? null : pendingRunPort(port),
               senderId: event.sender.id,
               senderUrl: event.senderFrame?.url ?? null,
+              value,
             });
           });
         },

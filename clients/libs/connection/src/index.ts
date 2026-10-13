@@ -16,5 +16,17 @@ export {
 } from './shell/connection-manager.js';
 export {ConnectionError, HelperRequestError} from './shell/helper-channel.js';
 export {HostConnection} from './shell/host-connection.js';
-export {type Link, LocalLink, SshLink} from './shell/link.js';
+export {
+  ChannelCapacityError,
+  DEFAULT_SSH_POOL_CONFIG,
+  type Link,
+  LocalLink,
+  SshLink,
+} from './shell/link.js';
+export type {
+  ChannelCounts,
+  ChannelRole,
+  LinkPoolDiagnostics,
+  MasterPoolDiagnostic,
+} from './state/channel-admission.js';
 export type {Phase} from './state/host-connection.js';

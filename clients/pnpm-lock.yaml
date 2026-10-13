@@ -516,6 +516,9 @@ importers:
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../runs
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../transport
     devDependencies:
       '@types/bun':
         specifier: 1.4.2

@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "@vibesys/hosts": "workspace:*",
-    "@vibesys/runs": "workspace:*"
+    "@vibesys/runs": "workspace:*",
+    "@vibesys/transport": "workspace:*"
   }
 }

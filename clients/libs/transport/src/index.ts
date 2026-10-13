@@ -1,5 +1,10 @@
 export {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 export {
+  parseRunChannelRole,
+  RUN_CHANNEL_ROLES,
+  type RunChannelRole,
+} from './channel-role.js';
+export {
   ControlChannel,
   type ControlChannelState,
   type ControlConnection,

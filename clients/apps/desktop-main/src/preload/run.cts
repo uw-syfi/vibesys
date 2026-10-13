@@ -14,6 +14,7 @@ import type {
   DesktopSocketHandlers,
   MainToPage,
   PageToMain,
+  RunChannelRole,
 } from '@vibesys/ipc';
 
 const CONNECT_CHANNEL: typeof import('@vibesys/ipc').CONNECT_CHANNEL = 'vibesys:connect';
@@ -29,7 +30,7 @@ interface PreloadMessagePort {
 interface RunPreloadCapabilities<RemotePort> {
   readonly platform: string;
   createChannel(): {readonly port: PreloadMessagePort; readonly remote: RemotePort};
-  attach(remote: RemotePort): void;
+  attach(remote: RemotePort, role: RunChannelRole): void;
   onWake(listener: () => void): void;
 }
 
@@ -39,18 +40,19 @@ function createRunPreload<RemotePort>(
 ): DesktopPreload {
   return {
     platform: capabilities.platform,
-    connect: handlers => connect(capabilities, handlers),
+    connect: (role, handlers) => connect(capabilities, role, handlers),
     onWake: listener => capabilities.onWake(listener),
   };
 }
 
 function connect<RemotePort>(
   capabilities: RunPreloadCapabilities<RemotePort>,
+  role: RunChannelRole,
   handlers: DesktopSocketHandlers,
 ): DesktopSocket {
   const {port, remote} = capabilities.createChannel();
   const connection = new PortConnection(port, handlers);
-  capabilities.attach(remote);
+  capabilities.attach(remote, role);
   return {
     send: data => connection.send(data),
     close: () => connection.close(),
@@ -228,7 +230,7 @@ if (process.type === 'renderer') {
         const {port1: port, port2: remote} = new MessageChannel();
         return {port, remote};
       },
-      attach: remote => electron.ipcRenderer.postMessage(CONNECT_CHANNEL, null, [remote]),
+      attach: (remote, role) => electron.ipcRenderer.postMessage(CONNECT_CHANNEL, role, [remote]),
       onWake: listener => electron.ipcRenderer.on(WAKE_CHANNEL, () => listener()),
     }),
   );

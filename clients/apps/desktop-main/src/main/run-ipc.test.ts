@@ -44,7 +44,7 @@ function expectAdmission(
 ): void {
   const port = new FakePendingRunPort();
   const connectionsBefore = connected.length;
-  ipc.request({port, senderId, senderUrl});
+  ipc.request({port, senderId, senderUrl, value: 'run-control'});
   expect({senderId, senderUrl, starts: port.starts}).toEqual({
     senderId,
     senderUrl,
@@ -73,7 +73,7 @@ describe('bindRunIpc', () => {
       ipc,
       APP_ENTRY_URL,
       () => currentSenderId,
-      port => connected.push(port),
+      (port, _role) => connected.push(port),
       message => refused.push(message),
     );
 
@@ -107,7 +107,12 @@ describe('bindRunIpc', () => {
     currentSenderId = null;
     const detachedPort = new FakePendingRunPort();
     const connectionsBefore = connected.length;
-    ipc.request({port: detachedPort, senderId: 41, senderUrl: APP_ENTRY_URL});
+    ipc.request({
+      port: detachedPort,
+      senderId: 41,
+      senderUrl: APP_ENTRY_URL,
+      value: 'run-control',
+    });
     expect(detachedPort.starts).toBe(0);
     expect(detachedPort.closes).toBe(1);
     expect(connected).toHaveLength(connectionsBefore);
@@ -122,13 +127,39 @@ describe('bindRunIpc', () => {
       ipc,
       APP_ENTRY_URL,
       () => 41,
-      port => connected.push(port),
+      (port, _role) => connected.push(port),
       message => refused.push(message),
     );
 
-    ipc.request({port: null, senderId: 41, senderUrl: APP_ENTRY_URL});
+    ipc.request({
+      port: null,
+      senderId: 41,
+      senderUrl: APP_ENTRY_URL,
+      value: 'run-control',
+    });
 
     expect(connected).toEqual([]);
     expect(refused).toEqual([]);
+  });
+
+  test('rejects an unknown run channel role before starting the port', () => {
+    const ipc = new FakeRunIpc();
+    const connected: Array<{readonly port: RelayPort; readonly role: string}> = [];
+    const refused: string[] = [];
+    bindRunIpc(
+      ipc,
+      APP_ENTRY_URL,
+      () => 41,
+      (port, role) => connected.push({port, role}),
+      message => refused.push(message),
+    );
+    const port = new FakePendingRunPort();
+
+    ipc.request({port, senderId: 41, senderUrl: APP_ENTRY_URL, value: 'unknown-role'});
+
+    expect(connected).toEqual([]);
+    expect(port.starts).toBe(0);
+    expect(port.closes).toBe(1);
+    expect(refused).toHaveLength(1);
   });
 });

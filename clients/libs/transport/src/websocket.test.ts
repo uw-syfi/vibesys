@@ -7,7 +7,7 @@ import type {
   RequestInput,
 } from '@vibesys/contracts';
 import {parseProtocolResponse, ServerError} from '@vibesys/contracts';
-import type {AbortSignalLike, ControlChannelState} from './index.js';
+import type {AbortSignalLike, ControlChannelState, RunChannelRole} from './index.js';
 import {REQUEST_POLICIES} from './index.js';
 import {expect} from './test-support/expect.js';
 import {FakeClock} from './testing/index.js';
@@ -136,16 +136,18 @@ class TestAbortSignal implements AbortSignalLike {
  */
 class FakeGateway {
   readonly sockets: FakeSocket[] = [];
+  readonly roles: RunChannelRole[] = [];
   /** How the next dial resolves. */
   outcome: 'open' | 'fail' | 'stall' = 'open';
   /** `FakeSocket.failSendAfter` for every socket dialed from now on. */
   failSendAfter: number | null = null;
   refusedDials = 0;
 
-  readonly connect = (): WebSocketLike => {
+  readonly connect = (_url: string, role: RunChannelRole): WebSocketLike => {
     const socket = new FakeSocket();
     socket.failSendAfter = this.failSendAfter;
     this.sockets.push(socket);
+    this.roles.push(role);
     if (this.outcome === 'open') queueMicrotask(() => socket.open());
     if (this.outcome === 'fail') {
       this.refusedDials += 1;
@@ -631,6 +633,7 @@ describe('WebSocketTransport', () => {
     expect(gateway.sockets).toHaveLength(2);
     expect(gateway.socket(0).frames()[0]?.['type']).toBe('query.chat');
     expect(gateway.socket(1).frames()[0]?.['type']).toBe('query.snapshot');
+    expect(gateway.roles).toEqual(['chat', 'run-control']);
     gateway.socket(0).answerAll({chat: {question: 'q', answer: 'a', effect: 'none'}});
     gateway.socket(1).answerAll();
 

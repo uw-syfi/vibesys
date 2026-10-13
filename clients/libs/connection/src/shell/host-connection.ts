@@ -24,8 +24,9 @@
 
 import type {InstanceList} from '@vibesys/contracts/host-helper';
 import {clockFrom} from '@vibesys/machine';
-import {abortReason, type ScheduleTimeout} from '@vibesys/transport';
+import {abortReason, type RunChannelRole, type ScheduleTimeout} from '@vibesys/transport';
 import {type Actor, createActor, fromPromise} from 'xstate';
+import type {LinkPoolDiagnostics} from '../state/channel-admission.js';
 import {
   type Cause,
   type CheckTarget,
@@ -43,7 +44,7 @@ import {
   type ReplyOf,
   type RunStream,
 } from './helper-channel.js';
-import type {Link} from './link.js';
+import {ChannelCapacityError, type Link} from './link.js';
 
 export interface HostConnectionOptions {
   readonly link: Link;
@@ -115,8 +116,8 @@ export class HostConnection implements AsyncDisposable {
   readonly #runs = new Set<HelperChannel>();
   /** Control channels opened by an operation and not yet installed or closed. */
   readonly #opened = new Set<HelperChannel>();
-  /** The exits of every helper process this connection started that has not exited yet. */
-  readonly #exits = new Set<Promise<number | null>>();
+  /** Helper handshakes that have not yet returned a channel to their owning operation. */
+  readonly #openingChannels = new Set<Promise<HelperChannel>>();
   readonly #phaseListeners = new Set<(phase: Phase) => void>();
   readonly #unreachable = new Set<(instanceId: string, detail: string) => void>();
   readonly #watchers = new Set<(listing: InstanceList) => void>();
@@ -171,6 +172,9 @@ export class HostConnection implements AsyncDisposable {
     });
     // Released in reverse: the channels, and every process, after the machine stopped.
     this.#stack.defer(async () => {
+      // Aborting the lifetime ends these handshakes. Join them before snapshotting the channel
+      // sets, because an accepted outcome can move a channel into one of those sets as it settles.
+      await Promise.all([...this.#openingChannels].map(opening => opening.catch(() => null)));
       const channels = [
         ...this.#runs,
         ...this.#opened,
@@ -180,7 +184,6 @@ export class HostConnection implements AsyncDisposable {
       this.#opened.clear();
       this.#control = null;
       await Promise.all(channels.map(channel => channel[Symbol.asyncDispose]()));
-      await Promise.all(this.#exits);
     });
     // Stopping the machine stops every operation (aborting its signal) and cancels every timer.
     this.#stack.defer(() => {
@@ -192,6 +195,11 @@ export class HostConnection implements AsyncDisposable {
 
   get phase(): Phase {
     return this.#phase;
+  }
+
+  /** Bounded role counts for connection inspection; the link exposes no transport configuration. */
+  get poolDiagnostics(): LinkPoolDiagnostics {
+    return this.#options.link.diagnostics();
   }
 
   /** The checkout the control channel's helper runs from, once it answered `hello`. */
@@ -328,6 +336,7 @@ export class HostConnection implements AsyncDisposable {
    */
   async openRun(
     instanceId: string,
+    role: RunChannelRole,
     signal?: AbortSignal,
   ): Promise<{runId: string; stream: RunStream}> {
     await this.ready(signal);
@@ -335,11 +344,12 @@ export class HostConnection implements AsyncDisposable {
       signal === undefined ? this.#abort.signal : AbortSignal.any([this.#abort.signal, signal]);
     try {
       if (lifetime.aborted) throw abortReason(lifetime);
-      return await this.#connectRun(instanceId, lifetime);
+      return await this.#connectRun(instanceId, role, lifetime);
     } catch (error) {
       // Losing the page that owns this dial is ordinary resource cleanup, not evidence that either
       // the run or its host failed. Preserve the caller's cancellation outside that taxonomy.
       if (signal?.aborted === true) throw abortReason(signal);
+      if (error instanceof ChannelCapacityError) throw error;
       const failure = asConnectionError(error);
       this.#send({type: 'run-ended', instanceId, cause: failure.reason, detail: failure.message});
       throw failure;
@@ -371,14 +381,15 @@ export class HostConnection implements AsyncDisposable {
 
   async #connectRun(
     instanceId: string,
+    role: RunChannelRole,
     signal: AbortSignal,
   ): Promise<{runId: string; stream: RunStream}> {
-    const channel = await this.#openChannel(signal);
+    const channel = await this.#openChannel(role, signal);
     this.#runs.add(channel);
     void channel.ended.then(() => this.#runs.delete(channel));
     let connected: {runId: string; stream: RunStream};
     try {
-      connected = await channel.connectRun(instanceId);
+      connected = await channel.connectRun(instanceId, role);
     } catch (error) {
       await channel[Symbol.asyncDispose]();
       throw error;
@@ -395,27 +406,37 @@ export class HostConnection implements AsyncDisposable {
    * Start a helper and its channel, living until `signal` aborts; aborting `opening` before it
    * answered ends it too. Nothing starts once the connection is closing.
    */
-  #openChannel(signal: AbortSignal, opening?: AbortSignal): Promise<HelperChannel> {
+  #openChannel(
+    role: 'host-control' | RunChannelRole,
+    signal: AbortSignal,
+    opening?: AbortSignal,
+  ): Promise<HelperChannel> {
     const {link, checkout, appVersion, config, scheduleTimeout} = this.#options;
     if (this.#abort.signal.aborted) {
       return Promise.reject(new ConnectionError('link', 'the connection was closed'));
     }
-    const process = link.spawnHelper(checkout);
-    this.#exits.add(process.exit);
-    void process.exit.then(() => this.#exits.delete(process.exit));
-    return HelperChannel.open(
-      process,
-      {
-        where: this.where,
-        appVersion,
-        deadlineMs: config.deadlineMs,
-        scheduleTimeout,
-        signal,
-        explain: (code, stderr) => link.explain(code, stderr, this.where),
-        heard: line => link.heard(line),
-      },
-      opening,
+    const admissionSignal = opening === undefined ? signal : AbortSignal.any([signal, opening]);
+    const channel = link.withHelper(checkout, role, admissionSignal, process =>
+      HelperChannel.open(
+        process,
+        {
+          where: this.where,
+          appVersion,
+          deadlineMs: config.deadlineMs,
+          scheduleTimeout,
+          signal,
+          explain: (code, stderr) => link.explain(code, stderr, this.where),
+          heard: line => link.heard(line),
+        },
+        opening,
+      ),
     );
+    this.#openingChannels.add(channel);
+    void channel.then(
+      () => this.#openingChannels.delete(channel),
+      () => this.#openingChannels.delete(channel),
+    );
+    return channel;
   }
 
   /**
@@ -424,7 +445,7 @@ export class HostConnection implements AsyncDisposable {
    * installing it, it is closed here.
    */
   async #openControl(signal: AbortSignal): Promise<HelperChannel> {
-    const channel = await this.#openChannel(this.#abort.signal, signal);
+    const channel = await this.#openChannel('host-control', this.#abort.signal, signal);
     this.#opened.add(channel);
     signal.addEventListener('abort', () => void this.#discard(channel), {once: true});
     // Pushes reach watchers only once the machine installed this channel (`#install`).
@@ -498,7 +519,7 @@ export class HostConnection implements AsyncDisposable {
       if (target.kind === 'run') {
         // The check is the operation that failed: a fresh run.connect to the same run.
         const lifetime = AbortSignal.any([this.#abort.signal, signal]);
-        const {stream} = await this.#connectRun(target.instanceId, lifetime);
+        const {stream} = await this.#connectRun(target.instanceId, 'run-control', lifetime);
         stream.destroy();
       }
     } catch (error) {

@@ -15,6 +15,7 @@ import {
   type DesktopBridge,
   type DesktopPlatform,
   type DesktopSocket,
+  type RunChannelRole,
 } from '@vibesys/ipc';
 import {
   type BrowserLifecycle,
@@ -62,8 +63,8 @@ export function desktopBridge(bridge: unknown): DesktopBridge | null {
   const {connect, onWake} = bridge as {readonly connect?: unknown; readonly onWake?: unknown};
   if (typeof connect !== 'function' || typeof onWake !== 'function') return null;
   return {
-    connect: handlers => {
-      const socket: unknown = connect(handlers);
+    connect: (role, handlers) => {
+      const socket: unknown = connect(role, handlers);
       const {send, close} = (socket ?? {}) as {readonly send?: unknown; readonly close?: unknown};
       if (typeof send !== 'function' || typeof close !== 'function') {
         throw new Error('The desktop bridge returned an unusable connection');
@@ -88,8 +89,8 @@ class BridgeSocket implements WebSocketLike {
   #readyState = CONNECTING;
   readonly #socket: DesktopSocket;
 
-  constructor(bridge: DesktopBridge) {
-    this.#socket = bridge.connect({
+  constructor(bridge: DesktopBridge, role: RunChannelRole) {
+    this.#socket = bridge.connect(role, {
       onOpen: () => {
         if (this.#readyState !== CONNECTING) return;
         this.#readyState = OPEN;
@@ -128,8 +129,8 @@ class BridgeSocket implements WebSocketLike {
 }
 
 /** Open a bridge connection shaped as the socket `WebSocketTransport` drives. */
-function desktopWebSocket(bridge: DesktopBridge): WebSocketLike {
-  return new BridgeSocket(bridge);
+function desktopWebSocket(bridge: DesktopBridge, role: RunChannelRole): WebSocketLike {
+  return new BridgeSocket(bridge, role);
 }
 
 /**
@@ -197,7 +198,8 @@ export function desktopSessionOptions(
     // The shell binds the window to its server, so the transport's URL names nothing; it is kept
     // only because the transport's constructor takes one.
     connect: connectRun(
-      hooks => openTransport('vibesys-desktop:', hooks, timing, () => desktopWebSocket(bridge)),
+      hooks =>
+        openTransport('vibesys-desktop:', hooks, timing, role => desktopWebSocket(bridge, role)),
       timing,
     ),
   };

@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent} from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
-import type {DesktopSocketHandlers} from '@vibesys/ipc';
+import type {DesktopSocketHandlers, RunChannelRole} from '@vibesys/ipc';
 import {type BrowserLifecycle, WebSession} from '@vibesys/run-session';
 import {FakeLifecycle} from '@vibesys/run-session/testing';
 import type {ScheduleTimeout} from '@vibesys/transport';
@@ -59,13 +59,15 @@ describe('markDesktopShell', () => {
 class FakeShell {
   readonly events: RunEvent[] = [];
   connections = 0;
+  readonly roles: RunChannelRole[] = [];
   readonly #open = new Set<DesktopSocketHandlers>();
   readonly #wake = new Set<() => void>();
 
   readonly bridge = {
     platform: 'darwin',
-    connect: (handlers: DesktopSocketHandlers) => {
+    connect: (role: RunChannelRole, handlers: DesktopSocketHandlers) => {
       this.connections += 1;
+      this.roles.push(role);
       let open = false;
       queueMicrotask(() => {
         open = true;
@@ -182,6 +184,7 @@ describe('desktop session', () => {
     expect(session.getState()).toMatchObject({status: 'connected', error: null});
     // One connection for the control channel, one for the event stream.
     expect(shell.connections).toBe(2);
+    expect([...shell.roles].sort()).toEqual(['run-control', 'subscribe']);
     await session.close();
   });
 

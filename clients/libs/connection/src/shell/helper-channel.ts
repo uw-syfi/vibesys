@@ -26,7 +26,7 @@ import {
   parseChannelEnd,
   parseHelperMessage,
 } from '@vibesys/contracts/host-helper';
-import type {ScheduleTimeout} from '@vibesys/transport';
+import type {RunChannelRole, ScheduleTimeout} from '@vibesys/transport';
 import type {Cause} from '../state/host-connection.js';
 import {bootstrapProblem} from './bootstrap.js';
 import type {SpawnedProcess} from './process.js';
@@ -238,10 +238,17 @@ export class HelperChannel implements AsyncDisposable {
    * helper reported. Rejects with `run-gone`, `denied`, or `link`; a failed connect leaves the
    * channel a request channel, which the caller disposes.
    */
-  async connectRun(instanceId: string): Promise<{runId: string; stream: RunStream}> {
+  async connectRun(
+    instanceId: string,
+    role: RunChannelRole,
+  ): Promise<{runId: string; stream: RunStream}> {
     try {
       return await this.#request(
-        {type: 'run.connect', instance_id: instanceId, role: 'control'},
+        {
+          type: 'run.connect',
+          instance_id: instanceId,
+          role: role === 'run-control' ? 'control' : role,
+        },
         reply => {
           // This callback runs synchronously while #line owns the reply. Transfer the complete
           // remainder before #data can interpret another newline as a helper control message.

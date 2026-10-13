@@ -10,7 +10,7 @@
 
 import {type RunEvent, validateRunEvent} from '@vibesys/contracts';
 import type {TransportHooks} from '@vibesys/run-session';
-import type {ControlTransport, ScheduleTimeout} from '@vibesys/transport';
+import type {ControlTransport, RunChannelRole, ScheduleTimeout} from '@vibesys/transport';
 import {type WebSocketLike, WebSocketTransport} from '@vibesys/transport/websocket';
 
 export type {ControlTransport, WebSocketLike};
@@ -30,12 +30,14 @@ export function openTransport(
   url: string,
   hooks: TransportHooks,
   timing: TransportTiming = {},
-  webSocket?: () => WebSocketLike,
+  webSocket?: (role: RunChannelRole) => WebSocketLike,
 ): ControlTransport {
   const {scheduleTimeout, reconnectDelaysMs} = timing;
   return new WebSocketTransport(url, {
     onConnectionState: hooks.onConnectionState,
-    ...(webSocket === undefined ? {} : {webSocket}),
+    ...(webSocket === undefined
+      ? {}
+      : {webSocket: (_url: string, role: RunChannelRole) => webSocket(role)}),
     ...(scheduleTimeout === undefined ? {} : {scheduleTimeout}),
     ...(reconnectDelaysMs === undefined ? {} : {reconnectDelaysMs}),
   });

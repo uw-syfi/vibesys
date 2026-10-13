@@ -623,7 +623,7 @@ describe('RunControl over the FakeHelper', () => {
 
     const ports = Array.from({length: 4}, () => new FakeRelayPort());
     for (const port of ports) {
-      w.runs.connect(port);
+      w.runs.connect(port, 'run-control');
       port.disconnect();
       port.disconnect();
     }

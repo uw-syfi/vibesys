@@ -725,7 +725,9 @@ describe('Hosts inspection changes', () => {
     const instance = '000000000001';
     link.helper.publish(record(instance, 'run-1'));
     await using manager = new ConnectionManager({
-      linkFor: () => link,
+      // A released Link is terminal. Preserve the helper's host state while giving each new
+      // ConnectionManager generation a fresh transport owner, as production linkFor does.
+      linkFor: () => new FakeLink(link.helper),
       appVersion: 'test',
       scheduleTimeout: new FakeClock().scheduleTimeout,
       config: CONFIG,
