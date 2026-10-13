@@ -69,6 +69,6 @@ recovery).
 
 `SimulatedRun.crash_points()` follows one setting, not a choice per test: a sample of 12
 commits per crash kind, evenly spaced and always including the first and the last, or every
-commit. The pytest plugin in `pytest_plugin/vs_dst_pytest.py` (outside `src`, because it imports
-pytest, and loaded by the root `conftest.py`) sets it from
-`--dst-crash-points=sampled|all`. Pull requests sample; the nightly job passes `all`.
+commit. It is the session's one crash-sweep breadth (`vs_sim.api.testing.sweep_breadth`), which
+the vs-sim pytest plugin sets from `--crash-points=sampled|all`, so every crash sweep of the
+repository follows it. Pull requests sample; the nightly job passes `all`.

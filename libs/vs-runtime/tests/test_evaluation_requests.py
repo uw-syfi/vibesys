@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import shlex
 import tempfile
 from contextlib import asynccontextmanager
@@ -64,6 +65,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
+from vs_sim.api.testing import swept
 from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
@@ -78,6 +80,10 @@ if TYPE_CHECKING:
         ResourceRequirements,
     )
     from vs_project.api import StateNamespace
+
+# Each example builds real workspaces. A pull request draws a sample; the nightly workflow
+# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
 
 pytestmark = pytest.mark.asyncio
 
@@ -510,7 +516,7 @@ async def test_close_releases_every_job_however_far_its_submission_got() -> None
         sub = submission(candidate=probe.stack.snapshot)
         handle = resource_of(await requests.execute(sub, context_for(sub)))
         writes = faulting.writes
-    for crash_at in range(writes):
+    for crash_at in swept(writes, 3):
         async with world() as w:
             sub = submission(candidate=w.stack.snapshot)
             requests, _ = w.requests(crash_at)
@@ -549,7 +555,9 @@ async def test_a_revision_the_workspace_named_is_measurable() -> None:
 
 
 @settings(
-    max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=25 if _FULL else 5,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(
     digest=st.one_of(
@@ -617,7 +625,7 @@ async def test_crash_at_every_write_boundary_recovers_exactly_once(name: str) ->
         writes = store.writes
         want = baseline.observation.observation
     assert writes > 0
-    for crash_at in range(writes + 1):
+    for crash_at in swept(writes + 1, 3):
         async with world() as w:
             request = (await _boundary_scenarios(w))[name]
             before = list(w.cluster.submissions)
@@ -924,7 +932,9 @@ async def _failed_target(
 
 
 @settings(
-    max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=12 if _FULL else 2,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(output=st.sampled_from(_NO_RECORD), exit_code=st.sampled_from((0, 1, 137)))
 async def test_a_benchmark_without_a_result_record_is_ambiguous_and_keeps_its_evidence(
@@ -942,7 +952,9 @@ async def test_a_benchmark_without_a_result_record_is_ambiguous_and_keeps_its_ev
 
 
 @settings(
-    max_examples=6, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=6 if _FULL else 2,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(output=st.sampled_from(_NO_RECORD))
 async def test_a_benchmark_that_reported_no_exit_status_is_infrastructure_with_its_evidence(
@@ -984,7 +996,9 @@ async def test_a_server_that_never_became_ready_is_classified_from_its_log(
 
 
 @settings(
-    max_examples=6, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=6 if _FULL else 2,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(exit_code=st.sampled_from((1, 2, 3)))
 async def test_a_benchmark_that_wrote_its_record_and_failed_is_the_workloads_permanent_fact(

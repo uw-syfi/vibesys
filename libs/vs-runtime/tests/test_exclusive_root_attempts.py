@@ -15,6 +15,7 @@ as a restarted shell does.
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
@@ -40,6 +41,7 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
     revision_ref,
 )
+from vs_sim.api.testing import swept
 
 from .test_session_access import HostDied
 from .test_workspace_requests import (
@@ -58,6 +60,10 @@ if TYPE_CHECKING:
     from vs_core.api import AttemptRef, Request, RevisionRef
     from vs_project.api import GitRepository
     from vs_runtime.api.infrastructure import RuntimeWorkspace
+
+# Each example builds real workspaces. A pull request draws a sample; the nightly workflow
+# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
 
 _ROOT = WorkspaceMode.EXCLUSIVE_ROOT
 _ARTIFACT_DIR = "roadmap"
@@ -331,7 +337,9 @@ def _play(
 
 
 @settings(
-    max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=25 if _FULL else 5,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(rounds=st.lists(_ROUND, min_size=1, max_size=4))
 def test_the_root_is_held_until_its_attempt_is_discarded_and_every_grant_starts_from_base(
@@ -340,7 +348,7 @@ def test_the_root_is_held_until_its_attempt_is_discarded_and_every_grant_starts_
     _play(tmp_path_factory, monkeypatch, rounds)
 
 
-@pytest.mark.parametrize("dies_at", range(_WRITES_PER_REQUEST))
+@pytest.mark.parametrize("dies_at", swept(_WRITES_PER_REQUEST, 3))
 def test_a_host_that_dies_at_any_write_of_a_grant_or_a_release_loses_nothing(
     tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, dies_at: int
 ) -> None:
@@ -490,7 +498,9 @@ async def _replay(env: WorkspaceEnv, ops: list[Op], crash: RestoreCrash) -> None
 
 
 @settings(
-    max_examples=40, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=40 if _FULL else 8,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(ops=st.lists(_OPS, min_size=1, max_size=14))
 @example(  # a refused ensure of generation 1 still retires generation 0 of that attempt

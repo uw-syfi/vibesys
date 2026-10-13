@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import shutil
 import threading
 import weakref
@@ -104,6 +105,10 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import ExecutionLease
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration, WorkspaceResourceProvider
     from vs_sandbox.api import CommandRunner
+
+# Each example builds real workspaces. A pull request draws a sample; the nightly workflow
+# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
 
 
 @dataclass
@@ -886,7 +891,7 @@ _COMMIT = st.text(alphabet="0123456789abcdef", min_size=40, max_size=40)
 # Each example opens one workspace and tries several forgeries against it, because opening
 # the workspace costs far more than a rejected request.
 @settings(
-    max_examples=6,
+    max_examples=6 if _FULL else 2,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -1034,7 +1039,9 @@ _TREE = st.dictionaries(
 
 
 @settings(
-    max_examples=8, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=8 if _FULL else 2,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(tree=_TREE)
 def test_f1_adopt_reproduces_any_candidate_tree_in_the_root(

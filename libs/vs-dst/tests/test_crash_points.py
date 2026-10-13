@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -18,13 +15,10 @@ from vs_dst.api import (
     CrashPointPolicy,
     crash_point_policy,
     simulate,
-    using_crash_point_policy,
 )
+from vs_sim.api.testing import SweepBreadth, using_sweep_breadth
 
 from ._tiny import TinyWorld
-
-pytest_plugins = ["pytester"]
-PLUGIN_DIR = Path(__file__).resolve().parents[1] / "pytest_plugin"
 
 
 @given(
@@ -57,7 +51,7 @@ def test_a_run_offers_a_sample_by_default_and_every_point_when_the_setting_says_
 
     assert crash_point_policy() == SAMPLED
     assert len(normal.crash_points()) == 2 * SAMPLE_SIZE
-    with using_crash_point_policy(EVERY_POINT):
+    with using_sweep_breadth(SweepBreadth.ALL):
         assert len(normal.crash_points()) == 2 * normal.commits
     assert len(normal.crash_points()) == 2 * SAMPLE_SIZE
 
@@ -118,33 +112,3 @@ def test_a_recovered_run_reads_back_the_world_it_left() -> None:
 
     assert recovered.world is not normal.world
     assert type(recovered.world) is TinyWorld
-
-
-@pytest.fixture
-def suite(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> pytest.Pytester:
-    """A scratch project that loads the plugin, as the repository's root conftest does."""
-    monkeypatch.setenv(
-        "PYTHONPATH", os.pathsep.join(filter(None, [str(PLUGIN_DIR), os.environ.get("PYTHONPATH")]))
-    )
-    pytester.makeini("[pytest]\naddopts = -p vs_dst_pytest -p no:cacheprovider\n")
-    pytester.makepyfile(
-        """
-        from vs_dst.api import EVERY_POINT, SAMPLED, crash_point_policy
-
-        def test_policy():
-            print("POLICY", "all" if crash_point_policy() == EVERY_POINT else "sampled")
-        """
-    )
-    return pytester
-
-
-@pytest.mark.parametrize(
-    ("arguments", "chosen"), [([], "sampled"), (["--dst-crash-points=all"], "all")]
-)
-def test_the_pytest_option_sets_the_one_policy_of_the_session(
-    suite: pytest.Pytester, arguments: list[str], chosen: str
-) -> None:
-    result = suite.runpytest_subprocess("-s", *arguments)
-
-    result.assert_outcomes(passed=1)
-    result.stdout.fnmatch_lines([f"*POLICY {chosen}*"])

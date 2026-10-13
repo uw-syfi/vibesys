@@ -1,21 +1,16 @@
 """Where a host can die in a run, and how many of those places a suite tries.
 
 A durable boundary is one committed envelope. A host dies just before a commit reaches the
-store or just after it. The suite chooses how many boundaries to try in one place
-(`CrashPointPolicy`): the plugin sets it from `--dst-crash-points`, and no test picks its own.
+store or just after it. How many boundaries a run offers follows the session's one sweep
+breadth (`vs_sim.api.testing.sweep_breadth`, set by the vs-sim plugin's `--crash-points`).
 """
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
 
-from vs_sim.api.testing import evenly_spaced
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
+from vs_sim.api.testing import SweepBreadth, evenly_spaced, sweep_breadth
 
 SAMPLE_SIZE = 12
 """Boundaries tried per crash kind when a suite samples."""
@@ -63,28 +58,6 @@ SAMPLED = CrashPointPolicy(SAMPLE_SIZE)
 EVERY_POINT = CrashPointPolicy(None)
 
 
-class _Setting:
-    """The one place the suite's policy lives."""
-
-    policy = SAMPLED
-
-
 def crash_point_policy() -> CrashPointPolicy:
-    """The policy every run's `crash_points()` follows."""
-    return _Setting.policy
-
-
-def set_crash_point_policy(policy: CrashPointPolicy) -> None:
-    """Choose the policy for the rest of the session (the pytest plugin does, from its option)."""
-    _Setting.policy = policy
-
-
-@contextmanager
-def using_crash_point_policy(policy: CrashPointPolicy) -> Iterator[None]:
-    """Follow ``policy`` inside the block, then return to the previous one."""
-    previous = crash_point_policy()
-    set_crash_point_policy(policy)
-    try:
-        yield
-    finally:
-        set_crash_point_policy(previous)
+    """The policy every run's `crash_points()` follows: the session's sweep breadth."""
+    return EVERY_POINT if sweep_breadth() is SweepBreadth.ALL else SAMPLED

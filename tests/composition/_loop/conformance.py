@@ -102,7 +102,7 @@ class Subject:
     """Request kinds the strategy's own decisions cause in a run that has no fault."""
     sweeps_crashes: bool = True
     """Whether the crash sweep (C2) runs on this subject: at a sample of its durable boundaries
-    in CI, at every one under `--dst-crash-points=all`."""
+    in CI, at every one under `--crash-points=all`."""
 
 
 # Kinds core issues only to recover from a fault, to cancel, or to resume a suspended turn.

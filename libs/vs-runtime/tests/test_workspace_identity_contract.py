@@ -65,6 +65,10 @@ if TYPE_CHECKING:
     from vs_runtime.api import CandidateWorkspace, RevisionLedger, Workspaces
     from vs_sandbox.api import CommandRunner
 
+# Each example builds real workspaces. A pull request draws a sample; the nightly workflow
+# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+
 
 type Implementation = Literal["fake", "git"]
 _IMPLEMENTATIONS: tuple[Implementation, ...] = ("fake", "git")
@@ -157,7 +161,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
             await workspaces.close()
 
 
-@settings(max_examples=12)
+@settings(max_examples=12 if _FULL else 2)
 @given(member_id=st.text(max_size=160))
 @example(member_id=" H1")
 @example(member_id="H1\n")
@@ -199,7 +203,7 @@ async def _assert_discarded(candidate: CandidateWorkspace, revision: str) -> Non
             await operation()
 
 
-@settings(max_examples=6)
+@settings(max_examples=6 if _FULL else 2)
 @given(members=st.lists(st.sampled_from(["H1", "h1", "a/b", "a b", ".."]), min_size=1, max_size=6))
 @example(members=["H1", "h1", "H1"])
 def test_member_ownership_revision_and_reuse(members: list[str]) -> None:
@@ -309,7 +313,7 @@ def test_discarded_candidate_operations(implementation: Implementation, operatio
     asyncio.run(exercise())
 
 
-@settings(max_examples=6)
+@settings(max_examples=6 if _FULL else 2)
 @given(member_id=st.sampled_from(["H1", "h1", "a/b", "a b", ".."]))
 @example(member_id="H1")
 def test_candidate_restore_preserves_revision_identity(member_id: str) -> None:
@@ -338,7 +342,7 @@ def test_candidate_restore_preserves_revision_identity(member_id: str) -> None:
         asyncio.run(exercise(implementation))
 
 
-@settings(max_examples=6)
+@settings(max_examples=6 if _FULL else 2)
 @given(member_id=st.sampled_from(["H1", "h1", "a/b", "a b", ".."]))
 @example(member_id="H1")
 def test_revision_mismatch_does_not_acquire_member(member_id: str) -> None:
@@ -357,7 +361,7 @@ def test_revision_mismatch_does_not_acquire_member(member_id: str) -> None:
         asyncio.run(exercise(implementation))
 
 
-@settings(max_examples=6)
+@settings(max_examples=6 if _FULL else 2)
 @given(source=st.sampled_from(["root", "sibling"]), discard_source=st.booleans())
 @example(source="root", discard_source=False)
 @example(source="sibling", discard_source=False)
@@ -389,7 +393,7 @@ def test_live_candidates_share_revision_availability(source: str, *, discard_sou
         asyncio.run(exercise(implementation))
 
 
-@settings(max_examples=6)
+@settings(max_examples=6 if _FULL else 2)
 @given(member_id=st.sampled_from(["H1", "h1", "a/b", "a b", ".."]))
 @example(member_id="H1")
 def test_concurrent_member_creation_has_one_owner(member_id: str) -> None:
@@ -460,7 +464,7 @@ def _dangling_revision(workspaces: Workspaces, serial: int) -> str:
     return created.stdout.strip()
 
 
-@settings(max_examples=5, deadline=None)
+@settings(max_examples=5 if _FULL else 2, deadline=None)
 @given(steps=st.lists(st.sampled_from(["root", "candidate", "dangling"]), min_size=1, max_size=6))
 @example(steps=["dangling"])
 def test_retention_is_reachability_not_presence(steps: list[str]) -> None:

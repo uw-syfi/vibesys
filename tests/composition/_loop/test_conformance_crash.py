@@ -5,7 +5,7 @@ instance restarts over the store the dead one left, and the executors keep their
 must reach the result an uninterrupted run reaches, end in an equal strategy state, and execute
 no request identity twice. The boundaries are the commits of the subject's smallest full run.
 
-The crash points tried are the suite's one setting (`--dst-crash-points`): CI samples, the
+The crash points tried are the suite's one setting (`--crash-points`): CI samples, the
 nightly job tries every commit (the policy of #1491). Trying every commit of the largest subject
 takes longer than one test may (`faulthandler_timeout` in `pyproject.toml`), so the exhaustive
 setting splits each sweep into interleaved parts that the workers share.

@@ -20,8 +20,6 @@ from vs_dst._crash_points import (
     CrashPoint,
     CrashPointPolicy,
     crash_point_policy,
-    set_crash_point_policy,
-    using_crash_point_policy,
 )
 from vs_dst._effects import Effects, RecoverableExecutors
 from vs_dst._simulate import SimulatedRun, simulate
@@ -45,7 +43,5 @@ __all__ = [
     "World",
     "WorldNotCopyableError",
     "crash_point_policy",
-    "set_crash_point_policy",
     "simulate",
-    "using_crash_point_policy",
 ]

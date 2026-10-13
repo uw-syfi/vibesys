@@ -392,3 +392,24 @@ def test_explore_budget_stops_extra_runs_but_never_the_first(suite: pytest.Pytes
     result = suite.runpytest_subprocess("--sim-explore=50", "--sim-explore-budget=0")
     result.assert_outcomes(passed=1)
     result.stdout.fnmatch_lines(["vs-sim exploration: 1 of 50 planned runs in *"])
+
+
+@pytest.mark.parametrize(
+    ("arguments", "chosen"), [([], "sampled"), (["--crash-points=all"], "all")]
+)
+def test_the_crash_points_option_sets_the_one_sweep_breadth_of_the_session(
+    suite: pytest.Pytester, arguments: list[str], chosen: str
+) -> None:
+    suite.makepyfile(
+        """
+        from vs_sim.api.testing import sweep_breadth, swept
+
+        def test_breadth():
+            print("BREADTH", sweep_breadth().value, *swept(10, 3))
+        """
+    )
+    result = suite.runpytest_subprocess("-s", *arguments)
+
+    result.assert_outcomes(passed=1)
+    swept_points = "0 1 2 3 4 5 6 7 8 9" if chosen == "all" else "0 4 9"
+    result.stdout.fnmatch_lines([f"*BREADTH {chosen} {swept_points}*"])

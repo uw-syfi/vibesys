@@ -7,11 +7,13 @@ there means; these helpers own the restart loop and the choice of which points t
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Hashable, Sequence
+    from collections.abc import Awaitable, Callable, Hashable, Iterator, Sequence
 
 
 class RestartLimitError(AssertionError):
@@ -72,3 +74,52 @@ def evenly_spaced(count: int, samples: int) -> list[int]:
 def after_crash[T](recorded: Sequence[T], crash_index: int) -> Sequence[T]:
     """What the restarted host recorded: everything after the point the first host died at."""
     return recorded[crash_index + 1 :]
+
+
+class SweepBreadth(StrEnum):
+    """How many of its crash points a sweep tries: the one setting of a test session.
+
+    A pull request samples every sweep; the nightly job tries every point. The pytest plugin
+    sets it from ``--crash-points``, and no test picks its own.
+    """
+
+    SAMPLED = "sampled"
+    ALL = "all"
+
+
+class _Breadth:
+    """The one place the session's breadth lives."""
+
+    value = SweepBreadth.SAMPLED
+
+
+def sweep_breadth() -> SweepBreadth:
+    """The breadth every crash sweep of this session follows."""
+    return _Breadth.value
+
+
+def set_sweep_breadth(breadth: SweepBreadth) -> None:
+    """Choose the breadth for the rest of the session (the pytest plugin does, from its option)."""
+    _Breadth.value = breadth
+
+
+@contextmanager
+def using_sweep_breadth(breadth: SweepBreadth) -> Iterator[None]:
+    """Follow ``breadth`` inside the block, then return to the previous one."""
+    previous = sweep_breadth()
+    set_sweep_breadth(breadth)
+    try:
+        yield
+    finally:
+        set_sweep_breadth(previous)
+
+
+def swept(count: int, sample: int) -> list[int]:
+    """The indexes of ``range(count)`` a crash sweep tries under the session's breadth.
+
+    Every one under ``SweepBreadth.ALL``; otherwise ``sample`` evenly spaced ones, always
+    including the first and the last (`evenly_spaced`).
+    """
+    if sweep_breadth() is SweepBreadth.ALL:
+        return list(range(count))
+    return evenly_spaced(count, sample)

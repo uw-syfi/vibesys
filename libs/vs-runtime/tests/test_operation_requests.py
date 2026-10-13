@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import os
 import tempfile
 from contextlib import contextmanager
 from dataclasses import replace
@@ -78,6 +79,10 @@ if TYPE_CHECKING:
 
     from vs_core.api import OperationRequest, Request
     from vs_project.api import StateNamespace
+
+# Each example builds real workspaces. A pull request draws a sample; the nightly workflow
+# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
 
 FENCE = HostFence(host_id=HostId(root="host"), epoch=1)
 POINTS = ("before_intent", "after_intent", "before_result", "after_result")
@@ -253,7 +258,9 @@ async def test_crash_at_every_boundary_then_restart_yields_one_effect_and_the_sa
         assert scenario.effects() == expected_effects
 
 
-@settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(
+    max_examples=40 if _FULL else 8, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+)
 @given(
     name=st.sampled_from(SCENARIO_NAMES),
     crashes=st.lists(st.sampled_from(POINTS), max_size=4),
@@ -597,7 +604,9 @@ async def test_parent_verification_requires_a_retained_canonical_revision(
         assert getattr(result.outcome, "verified", None) is verified
 
 
-@settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(
+    max_examples=40 if _FULL else 8, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+)
 @given(
     retained=st.sets(st.sampled_from(["r1", "r2", "r3"])),
     dangling=st.sets(st.sampled_from(["d1", "d2", "d3"])),

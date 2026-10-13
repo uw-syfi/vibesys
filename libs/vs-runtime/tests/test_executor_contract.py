@@ -21,6 +21,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.executor_contexts import RevocableLease
 from vs_runtime.api.executor_contracts import ProcessKilledError
 from vs_runtime.api.observation_contracts import assert_core_accepts
+from vs_sim.api.testing import swept
 
 if TYPE_CHECKING:
     from vs_core.api import Observation, RequestBase
@@ -135,7 +136,7 @@ async def test_crash_at_every_durable_boundary_recovers_once_and_core_accepts(
         boundaries = 2 * probe.writes()
         wanted_effects = probe.effects() - before
     dispatching = scenario.kind in (DispatchTurn, ResumeSessionTurn)
-    crash_points: list[int | None] = list(range(boundaries))
+    crash_points: list[int | None] = list(swept(boundaries, 3))
     if dispatching:
         crash_points.append(None)
     for crash_at in crash_points:

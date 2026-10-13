@@ -14,6 +14,7 @@ The host dies at any durable write or restore step, exactly as in
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -43,6 +44,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_project.api import GitRepository
+
+# Each example builds real workspaces. A pull request draws a sample; the nightly workflow
+# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
 
 _ROOT = WorkspaceMode.EXCLUSIVE_ROOT
 _IGNORE_RULES = "*.cache\nbuild/\n.venv/\ndata/\n"
@@ -165,7 +170,9 @@ def _play(
 
 
 @settings(
-    max_examples=40, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=40 if _FULL else 8,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(
     present=st.lists(st.sampled_from(_PRE_RUN), unique=True).map(tuple),

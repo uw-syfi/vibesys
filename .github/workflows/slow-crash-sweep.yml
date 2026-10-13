@@ -33,4 +33,4 @@ jobs:
         run: uv run pytest -m slow -n auto --no-cov
 
       - name: Crash the conformance suite at every commit
-        run: uv run pytest tests/composition/_loop/test_conformance_crash.py --dst-crash-points=all -n auto --no-cov
+        run: uv run pytest tests/composition/_loop/test_conformance_crash.py --crash-points=all -n auto --no-cov
