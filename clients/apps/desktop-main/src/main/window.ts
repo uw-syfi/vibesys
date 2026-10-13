@@ -22,6 +22,12 @@ import {APP_ENTRY_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
 import {bindRunIpc, type PendingRunPort} from './run-ipc.js';
 import {observeRunPage, RunPageLifecycle} from './run-page-lifecycle.js';
+import {rendererGeneration, type WelcomeDocument} from './welcome-ipc.js';
+import {
+  observeWelcomePage,
+  WelcomePageLifecycle,
+  type WelcomePageLoss,
+} from './welcome-page-lifecycle.js';
 import {TITLEBAR_HEIGHT, windowChrome} from './window-chrome.js';
 
 export const WELCOME_URL = 'app://vibesys/welcome.html';
@@ -32,6 +38,8 @@ export interface AppWindowDeps {
   readonly connect: (port: RelayPort) => void;
   /** The native window or its current run page disappeared: detach the attached run. */
   readonly closed: () => void;
+  /** The welcome surface exhausted its bounded recovery; enter fatal app shutdown. */
+  readonly fatal: (error: Error) => void;
 }
 
 function pendingRunPort(port: MessagePortMain): PendingRunPort {
@@ -48,7 +56,11 @@ export class AppWindow {
   readonly #deps: AppWindowDeps;
   readonly #window: BaseWindow;
   readonly #runPages: RunPageLifecycle<WebContentsView>;
-  readonly welcome: WebContentsView;
+  readonly #welcomePages: WelcomePageLifecycle<WebContentsView>;
+  readonly #welcomeNewDocuments = new Set<(generation: string | null) => void>();
+  readonly #welcomeDestroyed = new Set<() => void>();
+  /** Stable welcome-document authority across the one allowed WebContentsView recreation. */
+  readonly welcome: WelcomeDocument;
   #mode: ChromeState['mode'] = 'welcome';
 
   constructor(deps: AppWindowDeps) {
@@ -66,18 +78,29 @@ export class AppWindow {
       showWelcome: () => this.#showWelcome(),
       currentPageLost: () => this.#deps.closed(),
     });
-    this.welcome = sandboxedView('welcome.cjs');
-    this.#window.contentView.addChildView(this.welcome);
+    this.#welcomePages = new WelcomePageLifecycle({
+      recreate: () => sandboxedView('welcome.cjs'),
+      activate: (view, lost) => this.#activateWelcomePage(view, lost),
+      retire: view => this.#retireWelcomePage(view),
+      documentRetired: () => {
+        for (const listener of [...this.#welcomeNewDocuments]) listener(null);
+      },
+      recovering: reason => deps.log(`recovering the welcome view after ${reason}`),
+      fatal: reason => deps.fatal(new Error(`could not recover the welcome view after ${reason}`)),
+    });
+    this.welcome = {
+      currentId: () => this.#welcomePages.current?.webContents.id ?? null,
+      onNewDocument: listener => this.#welcomeNewDocuments.add(listener),
+      onDestroyed: listener => this.#welcomeDestroyed.add(listener),
+    };
     this.#window.on('resize', () => this.#layout());
     this.#window.on('closed', () => {
       this.#runPages.abandon();
-      if (!this.welcome.webContents.isDestroyed()) this.welcome.webContents.close();
+      this.#welcomePages.abandon();
+      for (const listener of [...this.#welcomeDestroyed]) listener();
       this.#deps.closed();
     });
-    this.#layout();
-    this.welcome.webContents
-      .loadURL(WELCOME_URL)
-      .catch(() => deps.log('could not load the welcome view'));
+    this.#welcomePages.start(sandboxedView('welcome.cjs'));
     bindRunIpc(
       {
         onConnect: listener => {
@@ -133,7 +156,10 @@ export class AppWindow {
 
   /** Send one ordered `event` to the welcome view on `channel`. */
   sendWelcome<T>(channel: string, event: WelcomeEvent<T>): void {
-    if (!this.welcome.webContents.isDestroyed()) this.welcome.webContents.send(channel, event);
+    const welcome = this.#welcomePages.current;
+    if (welcome !== null && !welcome.webContents.isDestroyed()) {
+      welcome.webContents.send(channel, event);
+    }
   }
 
   /** Ask the user a stop question; resolves true on "Stop". */
@@ -161,6 +187,23 @@ export class AppWindow {
     if (!view.webContents.isDestroyed()) view.webContents.close();
   }
 
+  #activateWelcomePage(view: WebContentsView, lost: (reason: WelcomePageLoss) => void): void {
+    this.#window.contentView.addChildView(view);
+    view.webContents.on('did-start-navigation', event => {
+      if (this.#welcomePages.current === view && event.isMainFrame && !event.isSameDocument) {
+        const generation = rendererGeneration(event.frame);
+        for (const listener of [...this.#welcomeNewDocuments]) listener(generation);
+      }
+    });
+    this.#layout();
+    observeWelcomePage(view.webContents, WELCOME_URL, lost);
+  }
+
+  #retireWelcomePage(view: WebContentsView): void {
+    if (!this.#window.isDestroyed()) this.#window.contentView.removeChildView(view);
+    if (!view.webContents.isDestroyed()) view.webContents.close();
+  }
+
   #showWelcome(): void {
     if (!this.#window.isDestroyed()) this.#window.setTitle('VibeSys');
     this.setMode('welcome');
@@ -178,8 +221,11 @@ export class AppWindow {
       run.setBounds(full);
       run.setVisible(this.#mode === 'run');
     }
-    this.welcome.setBounds(this.#mode === 'run' ? {...full, height: TITLEBAR_HEIGHT} : full);
-    // Re-adding moves the welcome view (the title strip) above the run view.
-    this.#window.contentView.addChildView(this.welcome);
+    const welcome = this.#welcomePages.current;
+    if (welcome !== null) {
+      welcome.setBounds(this.#mode === 'run' ? {...full, height: TITLEBAR_HEIGHT} : full);
+      // Re-adding moves the welcome view (the title strip) above the run view.
+      this.#window.contentView.addChildView(welcome);
+    }
   }
 }

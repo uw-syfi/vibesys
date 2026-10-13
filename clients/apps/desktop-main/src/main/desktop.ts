@@ -19,7 +19,7 @@ import type {RecentFile, SettingsStore} from '@vibesys/settings';
 import {ipcMain} from 'electron';
 import type {LaunchPlan} from './launch-args.js';
 import type {WelcomeFeed} from './welcome-feed.js';
-import {bindWelcomeIpc} from './welcome-ipc.js';
+import {bindWelcomeIpc, rendererGeneration} from './welcome-ipc.js';
 import type {AppWindow} from './window.js';
 import {WELCOME_URL} from './window.js';
 
@@ -30,12 +30,6 @@ export interface DesktopDeps {
   readonly runs: RunControl;
   readonly settings: SettingsStore;
   readonly log: (message: string) => void;
-}
-
-function rendererGeneration(
-  frame: {readonly processId: number; readonly routingId: number} | null | undefined,
-): string | null {
-  return frame === null || frame === undefined ? null : `${frame.processId}:${frame.routingId}`;
 }
 
 /** The recent runs as the welcome view lists them. */
@@ -63,7 +57,6 @@ export class Desktop {
       deps.window.sendWelcome(WELCOME_EVENTS.recent, deps.welcome.recent(value));
       void this.#watchRecent(recent, generation);
     });
-    const welcome = deps.window.welcome.webContents;
     bindWelcomeIpc(
       {
         handle: (channel, listener) =>
@@ -78,19 +71,7 @@ export class Desktop {
             ),
           ),
       },
-      {
-        id: welcome.id,
-        onNewDocument: listener => {
-          welcome.on('did-start-navigation', event => {
-            if (event.isMainFrame && !event.isSameDocument) {
-              listener(rendererGeneration(event.frame));
-            }
-          });
-        },
-        onDestroyed: listener => {
-          welcome.on('destroyed', listener);
-        },
-      },
+      deps.window.welcome,
       WELCOME_URL,
       (request, rendererGeneration) => this.#answer(request, rendererGeneration),
       async rendererGeneration => {

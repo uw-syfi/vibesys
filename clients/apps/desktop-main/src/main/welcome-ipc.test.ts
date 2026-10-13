@@ -40,10 +40,26 @@ class FakeWelcomeIpc implements WelcomeIpc {
     channel: string,
     ...args: unknown[]
   ): Promise<WelcomeResult<unknown>> {
-    return this.invokeFromUrl('app://vibesys/welcome.html', rendererGeneration, channel, ...args);
+    return this.invokeFromSender(
+      7,
+      'app://vibesys/welcome.html',
+      rendererGeneration,
+      channel,
+      ...args,
+    );
   }
 
   invokeFromUrl(
+    senderUrl: string,
+    rendererGeneration: string,
+    channel: string,
+    ...args: unknown[]
+  ): Promise<WelcomeResult<unknown>> {
+    return this.invokeFromSender(7, senderUrl, rendererGeneration, channel, ...args);
+  }
+
+  invokeFromSender(
+    senderId: number,
     senderUrl: string,
     rendererGeneration: string,
     channel: string,
@@ -53,7 +69,7 @@ class FakeWelcomeIpc implements WelcomeIpc {
     if (handler === undefined) throw new Error(`no handler for ${channel}`);
     return handler(
       {
-        senderId: 7,
+        senderId,
         senderUrl,
         rendererGeneration,
       },
@@ -63,9 +79,13 @@ class FakeWelcomeIpc implements WelcomeIpc {
 }
 
 class FakeWelcomeDocument implements WelcomeDocument {
-  readonly id = 7;
+  #id: number | null = 7;
   readonly #newDocuments = new Set<(retiringGeneration: string | null) => void>();
   readonly #destroyed = new Set<() => void>();
+
+  currentId(): number | null {
+    return this.#id;
+  }
 
   onNewDocument(listener: (retiringGeneration: string | null) => void): void {
     this.#newDocuments.add(listener);
@@ -77,6 +97,12 @@ class FakeWelcomeDocument implements WelcomeDocument {
 
   navigate(retiringGeneration: string | null): void {
     for (const listener of this.#newDocuments) listener(retiringGeneration);
+  }
+
+  replace(id: number): void {
+    this.#id = null;
+    this.navigate(null);
+    this.#id = id;
   }
 
   destroy(): void {
@@ -230,5 +256,36 @@ describe('bindWelcomeIpc', () => {
       ok: false,
       error: 'welcome view was replaced',
     });
+  });
+
+  test('a recreated welcome page revokes the old sender and admits only its successor', async () => {
+    const ipc = new FakeWelcomeIpc();
+    const document = new FakeWelcomeDocument();
+    const retired: string[] = [];
+    const answered: string[] = [];
+    bindWelcomeIpc(
+      ipc,
+      document,
+      'app://vibesys/welcome.html',
+      async (_request, generation) => {
+        answered.push(generation);
+        return null;
+      },
+      async generation => {
+        retired.push(generation);
+      },
+    );
+
+    await ipc.invokeFromSender(7, 'app://vibesys/welcome.html', '10:100', WELCOME_CHANNELS.hosts);
+    document.replace(8);
+
+    await expect(
+      ipc.invokeFromSender(7, 'app://vibesys/welcome.html', '10:100', WELCOME_CHANNELS.hosts),
+    ).resolves.toMatchObject({ok: false, error: 'not the welcome view'});
+    await expect(
+      ipc.invokeFromSender(8, 'app://vibesys/welcome.html', '11:101', WELCOME_CHANNELS.hosts),
+    ).resolves.toEqual({ok: true, value: null});
+    expect(retired).toEqual(['10:100']);
+    expect(answered).toEqual(['10:100', '11:101']);
   });
 });

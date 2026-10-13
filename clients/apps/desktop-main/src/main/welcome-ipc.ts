@@ -30,11 +30,20 @@ export interface WelcomeInvokeEvent {
   readonly rendererGeneration: string | null;
 }
 
-/** One renderer web contents, with document replacement reported by the Electron wiring. */
+/** Stable ownership of the current welcome WebContents, across its one allowed recreation. */
 export interface WelcomeDocument {
-  readonly id: number;
+  /** The exact current welcome WebContents, or null while it is being replaced or closed. */
+  currentId(): number | null;
   onNewDocument(listener: (retiringGeneration: string | null) => void): void;
+  /** The stable welcome owner closed with its native window. */
   onDestroyed(listener: () => void): void;
+}
+
+/** The main-process identity of an exact renderer document, when Electron can provide it. */
+export function rendererGeneration(
+  frame: {readonly processId: number; readonly routingId: number} | null | undefined,
+): string | null {
+  return frame === null || frame === undefined ? null : `${frame.processId}:${frame.routingId}`;
 }
 
 function failure(error: unknown): WelcomeResult<never> {
@@ -81,7 +90,7 @@ export function bindWelcomeIpc(
   });
   for (const channel of Object.values(WELCOME_CHANNELS)) {
     ipc.handle(channel, async (event, ...args) => {
-      if (event.senderId !== welcome.id || !isSameAppPage(event.senderUrl, url)) {
+      if (event.senderId !== welcome.currentId() || !isSameAppPage(event.senderUrl, url)) {
         return failure(new Error('not the welcome view'));
       }
       const requestGeneration = event.rendererGeneration;

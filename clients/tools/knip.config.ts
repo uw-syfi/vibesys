@@ -60,9 +60,16 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
   'apps/desktop-main': {
     // The Electron main process and the two sandboxed preloads (`.cts`, loaded by path from
     // `src/main/app-security.ts`) are the package's exports, entries by default; the build's copy
-    // step (`scripts/copy-ui.mjs`) is found from the `build` script.
-    entry: ['src/**/*.test.ts'],
-    project: ['src/**/*.ts', 'src/**/*.cts', 'scripts/*.mjs'],
+    // step (`scripts/copy-ui.mjs`) is found from the `build` script. The opt-in Electron journey
+    // uses its own composition entry so production keeps no test-only control surface.
+    entry: ['src/**/*.test.ts', 'e2e/**/*.spec.ts', 'e2e/*.mjs'],
+    project: [
+      'src/**/*.ts',
+      'src/**/*.cts',
+      'scripts/*.mjs',
+      'playwright.config.ts',
+      'e2e/**/*.{ts,mjs}',
+    ],
   },
   'apps/desktop-renderer': {
     // The welcome page's entry (`welcome.html`, built by `vite.config.ts`).

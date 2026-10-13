@@ -108,6 +108,7 @@ timeout_seconds = 1200
 commands = [
   ["pnpm", "--filter", "@vibesys/app-web", "test:e2e"],
   ["pnpm", "--filter", "@vibesys/app-desktop-renderer", "test:e2e"],
+  ["pnpm", "--filter", "@vibesys/app-desktop-main", "test:e2e"],
 ]
 
 [[check_groups]]

@@ -76,7 +76,10 @@ function watchNetwork(manager: ConnectionManager): void {
   realTimers(poll, NETWORK_POLL_MS);
 }
 
-async function openWindow(manager: ConnectionManager): Promise<Desktop> {
+async function openWindow(
+  manager: ConnectionManager,
+  fatal: (error: Error) => void,
+): Promise<Desktop> {
   lockDownSession(log);
   serveBundledUi();
   Menu.setApplicationMenu(applicationMenu());
@@ -114,6 +117,7 @@ async function openWindow(manager: ConnectionManager): Promise<Desktop> {
       runs.detach();
       changed();
     },
+    fatal,
   });
   desktop = new Desktop({window, welcome, hosts, runs, settings, log});
   // A machine that slept has dead connections nobody has noticed yet: check them now.
@@ -146,14 +150,19 @@ function main(): void {
   }
   registerAppScheme();
   const launches = new AppLaunches<LaunchPlan>(error => log(error.message));
+  let lifecycle: AppLifecycle;
   const startup = new AppStartup<LaunchPlan, ConnectionManager, Desktop>({
     ready: () => app.whenReady(),
     connectionManager,
-    openWindow,
+    openWindow: manager =>
+      openWindow(manager, error => {
+        log(error.message);
+        lifecycle.quit(1);
+      }),
     openInitial: (desktop, initial) => launches.ready(desktop, initial),
     log,
   });
-  const lifecycle = new AppLifecycle({
+  lifecycle = new AppLifecycle({
     // Runs are detached and keep going; quitting ends this app's channels and ssh masters only.
     release: () => startup.release(),
     // The app's one exit call site.

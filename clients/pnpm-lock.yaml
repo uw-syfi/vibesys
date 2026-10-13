@@ -58,6 +58,9 @@ importers:
         specifier: workspace:*
         version: link:../../libs/transport
     devDependencies:
+      '@playwright/test':
+        specifier: 1.55.0
+        version: 1.55.0
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
