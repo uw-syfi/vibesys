@@ -27,7 +27,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.orchestration.profile_focus.attribution import parse_attribution
+from vibesys.profile_focus.attribution import parse_attribution
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -128,16 +128,14 @@ def test_result_parses_against_the_protocol(analyze: ModuleType, report: dict[st
 @pytest.mark.parametrize(
     "mutate",
     [
-        pytest.param(lambda r: r.__setitem__("schema", 2), id="schema-bump"),
+        pytest.param(lambda r: r.update({"schema": 2}), id="schema-bump"),
+        pytest.param(lambda r: r["trace"].update({"hasFullTaskCoverage": False}), id="no-coverage"),
+        pytest.param(lambda r: r["trace"].update({"hasSpans": False}), id="no-spans"),
+        pytest.param(lambda r: r["totals"].update({"pollOnCpuNs": 0}), id="no-poll-time"),
         pytest.param(
-            lambda r: r["trace"].__setitem__("hasFullTaskCoverage", False), id="no-coverage"
+            lambda r: r["totals"].update({"unresolvedSpanCount": 1}), id="unresolved-span"
         ),
-        pytest.param(lambda r: r["trace"].__setitem__("hasSpans", False), id="no-spans"),
-        pytest.param(lambda r: r["totals"].__setitem__("pollOnCpuNs", 0), id="no-poll-time"),
-        pytest.param(
-            lambda r: r["totals"].__setitem__("unresolvedSpanCount", 1), id="unresolved-span"
-        ),
-        pytest.param(lambda r: r.__setitem__("components", []), id="no-components"),
+        pytest.param(lambda r: r.update({"components": []}), id="no-components"),
         pytest.param(
             lambda r: r["diagnostics"].append({"check": "missing-frame-pointers", "message": "x"}),
             id="fatal-diagnostic",
@@ -206,4 +204,5 @@ def test_build_result_invariants_hold_for_any_report(
         assert built["cost"] == pytest.approx(source["selfOnCpuNs"] / 1e9)
         assert built["cost"] >= 0
         assert 0 <= built["share"] <= 1
-        assert built["evidence"] and all(isinstance(line, str) for line in built["evidence"])
+        assert built["evidence"]
+        assert all(isinstance(line, str) for line in built["evidence"])
