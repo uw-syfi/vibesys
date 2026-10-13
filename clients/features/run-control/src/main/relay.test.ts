@@ -376,6 +376,43 @@ describe('relay', () => {
     expect(port.closedByMain).toBe(true);
   });
 
+  test('a synchronously firing host-to-page deadline is cancelled before returning', async () => {
+    let cancellations = 0;
+    const scheduleTimeout: ScheduleTimeout = callback => {
+      callback();
+      return () => {
+        cancellations += 1;
+      };
+    };
+    const port = new FakePort();
+    const stream = new ControlledReadStream();
+    const done = relay(port, async () => stream, scheduleTimeout);
+    await port.until(posted => posted.some(message => message.type === 'open'));
+
+    stream.line('waiting-for-page-credit');
+    await done;
+
+    expect(cancellations).toBe(1);
+    expect(port.posted.at(-1)).toEqual({type: 'close'});
+    expect(port.closedByMain).toBe(true);
+  });
+
+  test('a host-to-page deadline scheduling failure closes without escaping', async () => {
+    const scheduleTimeout: ScheduleTimeout = () => {
+      throw new Error('clock unavailable');
+    };
+    const port = new FakePort();
+    const stream = new ControlledReadStream();
+    const done = relay(port, async () => stream, scheduleTimeout);
+    await port.until(posted => posted.some(message => message.type === 'open'));
+
+    expect(() => stream.line('waiting-for-page-credit')).not.toThrow();
+    await done;
+
+    expect(port.posted.at(-1)).toEqual({type: 'close'});
+    expect(port.closedByMain).toBe(true);
+  });
+
   test('a clean EOF buffered after credit is exhausted still reaches bounded cleanup', async () => {
     const clock = new FakeClock();
     const {port, done, host} = await connected(() => {}, false, clock.scheduleTimeout);
@@ -444,6 +481,145 @@ describe('relay', () => {
     port.disconnect();
     await done;
   });
+
+  test('a page-to-host write that makes no progress ends at the relay deadline', async () => {
+    const clock = new FakeClock();
+    const port = new FakePort();
+    const stream = new HeldWriteStream();
+    const done = relay(port, async () => stream, clock.scheduleTimeout);
+    await port.until(posted => posted.some(message => message.type === 'open'));
+
+    port.send({type: 'send', data: 'request'});
+    expect(clock.pendingDelays()).toEqual([40_000]);
+    clock.advanceBy(39_999);
+    expect(port.closedByMain).toBe(false);
+
+    clock.advanceBy(1);
+    await done;
+    expect(port.posted.at(-1)).toEqual({type: 'close'});
+    expect(port.closedByMain).toBe(true);
+    expect(clock.pendingDelays()).toEqual([]);
+  });
+
+  test('a synchronously firing page-to-host deadline is cancelled before returning', async () => {
+    let cancellations = 0;
+    const scheduleTimeout: ScheduleTimeout = callback => {
+      callback();
+      return () => {
+        cancellations += 1;
+      };
+    };
+    const port = new FakePort();
+    const stream = new HeldWriteStream();
+    const done = relay(port, async () => stream, scheduleTimeout);
+    await port.until(posted => posted.some(message => message.type === 'open'));
+
+    port.send({type: 'send', data: 'request'});
+    await done;
+
+    expect(cancellations).toBe(1);
+    expect(stream.writes).toEqual([]);
+    expect(port.posted.at(-1)).toEqual({type: 'close'});
+    expect(port.closedByMain).toBe(true);
+  });
+
+  test('a page-to-host deadline scheduling failure closes without writing', async () => {
+    const scheduleTimeout: ScheduleTimeout = () => {
+      throw new Error('clock unavailable');
+    };
+    const port = new FakePort();
+    const stream = new HeldWriteStream();
+    const done = relay(port, async () => stream, scheduleTimeout);
+    await port.until(posted => posted.some(message => message.type === 'open'));
+
+    expect(() => port.send({type: 'send', data: 'request'})).not.toThrow();
+    await done;
+
+    expect(stream.writes).toEqual([]);
+    expect(port.posted.at(-1)).toEqual({type: 'close'});
+    expect(port.closedByMain).toBe(true);
+  });
+
+  test('page-to-host write progress restarts the deadline while bytes remain', async () => {
+    const clock = new FakeClock();
+    const port = new FakePort();
+    const stream = new HeldWriteStream();
+    const done = relay(port, async () => stream, clock.scheduleTimeout);
+    await port.until(posted => posted.some(message => message.type === 'open'));
+
+    port.send({type: 'send', data: 'first'});
+    port.send({type: 'send', data: 'second'});
+    clock.advanceBy(39_999);
+    stream.acceptNext();
+    expect(port.closedByMain).toBe(false);
+    expect(clock.pendingDelays()).toEqual([40_000]);
+
+    clock.advanceBy(39_999);
+    expect(port.closedByMain).toBe(false);
+    clock.advanceBy(1);
+    await done;
+    expect(port.closedByMain).toBe(true);
+  });
+
+  test('queueing more page bytes does not count as host write progress', async () => {
+    const clock = new FakeClock();
+    const port = new FakePort();
+    const stream = new HeldWriteStream();
+    const done = relay(port, async () => stream, clock.scheduleTimeout);
+    await port.until(posted => posted.some(message => message.type === 'open'));
+
+    port.send({type: 'send', data: 'first'});
+    clock.advanceBy(20_000);
+    port.send({type: 'send', data: 'second'});
+    expect(clock.pendingDelays()).toEqual([20_000]);
+    clock.advanceBy(19_999);
+    expect(port.closedByMain).toBe(false);
+
+    clock.advanceBy(1);
+    await done;
+    expect(port.closedByMain).toBe(true);
+  });
+
+  test('accepting every page-to-host write cancels its progress deadline', async () => {
+    const clock = new FakeClock();
+    const port = new FakePort();
+    const stream = new HeldWriteStream();
+    const done = relay(port, async () => stream, clock.scheduleTimeout);
+    await port.until(posted => posted.some(message => message.type === 'open'));
+
+    port.send({type: 'send', data: 'first'});
+    port.send({type: 'send', data: 'second'});
+    expect(clock.pendingDelays()).toEqual([40_000]);
+    stream.acceptNext();
+    expect(clock.pendingDelays()).toEqual([40_000]);
+    stream.acceptNext();
+    expect(clock.pendingDelays()).toEqual([]);
+    clock.advanceBy(400_000);
+    expect(port.closedByMain).toBe(false);
+
+    port.disconnect();
+    await done;
+  });
+
+  for (const terminal of ['page disconnect', 'stream error'] as const) {
+    test(`${terminal} cancels a page-to-host write deadline`, async () => {
+      const clock = new FakeClock();
+      const port = new FakePort();
+      const stream = new HeldWriteStream();
+      const done = relay(port, async () => stream, clock.scheduleTimeout);
+      await port.until(posted => posted.some(message => message.type === 'open'));
+
+      port.send({type: 'send', data: 'request'});
+      expect(clock.pendingDelays()).toEqual([40_000]);
+      if (terminal === 'page disconnect') port.disconnect();
+      else stream.destroy(new Error('host stream failed'));
+      await done;
+
+      expect(clock.pendingDelays()).toEqual([]);
+      clock.advanceBy(400_000);
+      expect(port.closedByMain).toBe(true);
+    });
+  }
 
   test('page input beyond its outstanding byte credit closes before another write', async () => {
     const port = new FakePort();

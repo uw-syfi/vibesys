@@ -12,27 +12,27 @@
  * ends the connection; the stream is destroyed whenever the page side goes away. Each direction
  * has one fixed UTF-8 byte-credit window. A sender cannot move more bytes across the port until the
  * receiver has accepted and returned them. Invalid framing or credit ends the connection. A
- * complete host frame waiting on page credit may do so for at most `PAGE_CREDIT_DEADLINE_MS`; past
- * it the relay ends unconditionally, the same way a stalled write toward either peer ends
- * `server.relay` at its own write deadline. Keeping the stream flowing until bounded pending output
- * exists also lets a clean EOF behind an exhausted credit window reach the relay.
+ * complete host frame waiting on page credit, or page bytes waiting for the host stream to accept
+ * them, may make no progress for at most `RELAY_PROGRESS_DEADLINE_MS`; past it the relay ends
+ * unconditionally, the same way a stalled write toward either peer ends `server.relay` at its own
+ * write deadline. Keeping the stream flowing until bounded pending output exists also lets a clean
+ * EOF behind an exhausted credit window reach the relay.
  */
 import type {Duplex} from 'node:stream';
 import {BRIDGE_CREDIT_WINDOW_BYTES, type MainToPage, parsePageMessage} from '@vibesys/ipc';
 import {defaultScheduleTimeout, NewlineFramer, type ScheduleTimeout} from '@vibesys/transport';
 
 /**
- * How long a complete host frame may wait on the page granting more receive credit before the
- * relay ends the connection unconditionally.
+ * How long either direction may wait without delivery progress before the relay ends the connection
+ * unconditionally.
  *
  * Mirrors `server.relay`'s `BridgeLimits.write_deadline_seconds` (also the WebSocket gateway's
- * ceiling): a page that stops granting credit right as its run ends should pin the stream and the
- * page's message port no longer than a dead peer pins resources on those other paths. Progress (the
- * page granting any credit, even short of enough to finish draining) pushes this back out rather
- * than counting down from the moment of EOF, the same way a write deadline bounds a lack of
- * progress rather than total elapsed time.
+ * ceiling): neither a page that stops granting credit nor a host stream that stops accepting page
+ * bytes should pin the stream and message port longer than a dead peer does on those other paths.
+ * Progress (the page granting credit or the host completing a write) pushes the corresponding
+ * deadline back out rather than charging total elapsed time.
  */
-const PAGE_CREDIT_DEADLINE_MS = 40_000;
+const RELAY_PROGRESS_DEADLINE_MS = 40_000;
 
 /** The page side of one connection: a started message port. */
 export interface RelayPort {
@@ -53,8 +53,8 @@ interface PendingFrame {
  * sides; never rejects (a failed dial is reported to the page as `close` without `open`).
  *
  * The relay owns the signal passed to `dial`: ending either side cancels a dial still waiting and
- * the channel it opened. `scheduleTimeout` is the seam for the post-EOF credit deadline; tests
- * inject a deterministic clock, production takes the real timer.
+ * the channel it opened. `scheduleTimeout` is the seam for both progress deadlines; tests inject a
+ * deterministic clock, production takes the real timer.
  */
 export function relay(
   port: RelayPort,
@@ -81,6 +81,8 @@ class StreamRelay {
   #dialSettled = false;
   #closed = false;
   #settled = false;
+  /** Cancels the deadline for page bytes still awaiting a host-stream write callback. */
+  #hostWriteDeadline: (() => void) | null = null;
   /** Cancels the pending-page-output deadline armed by `#armCreditDeadline`, while one is live. */
   #creditDeadline: (() => void) | null = null;
 
@@ -181,7 +183,9 @@ class StreamRelay {
       this.#finish();
       return;
     }
+    const writesWereDrained = this.#pageSendCredit === BRIDGE_CREDIT_WINDOW_BYTES;
     this.#pageSendCredit -= bytes;
+    if (writesWereDrained && !this.#armHostWriteDeadline()) return;
     try {
       stream.write(`${data}\n`, error => this.#streamWriteCompleted(bytes, error));
     } catch {
@@ -196,7 +200,26 @@ class StreamRelay {
       return;
     }
     this.#pageSendCredit += bytes;
+    if (this.#pageSendCredit === BRIDGE_CREDIT_WINDOW_BYTES) this.#cancelHostWriteDeadline();
+    else if (!this.#armHostWriteDeadline()) return;
     this.#post({type: 'credit', bytes});
+  }
+
+  /** Restart the no-progress bound after the host accepts some, but not all, outstanding bytes. */
+  #armHostWriteDeadline(): boolean {
+    this.#cancelHostWriteDeadline();
+    const cancel = this.#scheduleProgressDeadline(() => {
+      this.#hostWriteDeadline = null;
+      this.#finish();
+    });
+    if (cancel === null) return false;
+    this.#hostWriteDeadline = cancel;
+    return true;
+  }
+
+  #cancelHostWriteDeadline(): void {
+    this.#hostWriteDeadline?.();
+    this.#hostWriteDeadline = null;
   }
 
   #receiveStreamChunk(chunk: string): void {
@@ -250,17 +273,37 @@ class StreamRelay {
   }
 
   /** (Re)start the pending-page-output deadline after a stall or some insufficient progress. */
-  #armCreditDeadline(): void {
+  #armCreditDeadline(): boolean {
     this.#cancelCreditDeadline();
-    this.#creditDeadline = this.#scheduleTimeout(() => {
+    const cancel = this.#scheduleProgressDeadline(() => {
       this.#creditDeadline = null;
       this.#finish();
-    }, PAGE_CREDIT_DEADLINE_MS);
+    });
+    if (cancel === null) return false;
+    this.#creditDeadline = cancel;
+    return true;
   }
 
   #cancelCreditDeadline(): void {
     this.#creditDeadline?.();
     this.#creditDeadline = null;
+  }
+
+  /** Acquire one deadline without letting a reentrant or failed scheduler strand the relay. */
+  #scheduleProgressDeadline(expire: () => void): (() => void) | null {
+    try {
+      const cancel = this.#scheduleTimeout(expire, RELAY_PROGRESS_DEADLINE_MS);
+      // A structural scheduler may invoke `expire` before returning its cancellation handle. The
+      // callback has already closed the relay, so retire the newly returned handle immediately.
+      if (this.#closed) {
+        cancel();
+        return null;
+      }
+      return cancel;
+    } catch {
+      this.#finish();
+      return null;
+    }
   }
 
   #endStream(): void {
@@ -289,6 +332,7 @@ class StreamRelay {
     if (this.#closed) return;
     this.#closed = true;
     this.#dialAbort.abort();
+    this.#cancelHostWriteDeadline();
     this.#cancelCreditDeadline();
     this.#pending.length = 0;
     this.#pendingBytes = 0;
