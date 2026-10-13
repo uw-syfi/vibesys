@@ -251,13 +251,24 @@ export class ConnectionManager implements AsyncDisposable {
       return Promise.resolve();
     }
     this.#links.delete(key);
-    const releasing = managed.link.release().catch(() => {});
+    const releasing = managed.link.release();
     this.#retiring.set(key, releasing);
     this.#releasing.add(releasing);
-    void releasing.then(() => {
-      if (this.#retiring.get(key) === releasing) this.#retiring.delete(key);
-      this.#releasing.delete(releasing);
-    });
+    void releasing.then(
+      () => {
+        if (this.#retiring.get(key) === releasing) this.#retiring.delete(key);
+        this.#releasing.delete(releasing);
+      },
+      error => {
+        // A failed release means the old control master may still own this host's control path.
+        // Keep the rejected promise as a terminal admission barrier: replacing the link could run
+        // two masters against the same path. A later host operation and manager disposal surface
+        // the original failure, while this observer prevents an unhandled background rejection.
+        this.#options.log(
+          `could not retire ${key}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      },
+    );
     return releasing;
   }
 
@@ -271,9 +282,14 @@ export class ConnectionManager implements AsyncDisposable {
     for (const connection of connections) this.#close(connection);
     await Promise.all(this.#closing);
     this.#links.clear();
-    await Promise.all(managed.map(entry => entry.link.release().catch(() => {})));
-    await Promise.all(this.#releasing);
+    const releases = [...managed.map(entry => entry.link.release()), ...this.#releasing];
+    const outcomes = await Promise.allSettled(releases);
     this.#retiring.clear();
+    this.#releasing.clear();
+    const failed = outcomes.find(
+      (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
+    );
+    if (failed !== undefined) throw failed.reason;
   }
 
   #active(): void {

@@ -74,6 +74,15 @@ class HeldReleaseLink extends FakeLink {
   }
 }
 
+class FailedReleaseLink extends FakeLink {
+  readonly failure = new ConnectionError('link', 'the old master is still reachable');
+
+  override async release(): Promise<void> {
+    this.released += 1;
+    throw this.failure;
+  }
+}
+
 async function rejection(promise: Promise<unknown>): Promise<Error> {
   try {
     await promise;
@@ -842,6 +851,83 @@ describe('ConnectionManager', () => {
     await current[Symbol.asyncDispose]();
     expect(second.released).toBe(1);
     await manager[Symbol.asyncDispose]();
+  });
+
+  test('a failed link release remains an admission barrier and is surfaced', async () => {
+    const first = new FailedReleaseLink();
+    const replacement = new FakeLink();
+    const links = [first, replacement];
+    const logged: string[] = [];
+    const manager = new ConnectionManager({
+      linkFor: () => {
+        const link = links.shift();
+        if (link === undefined) throw new Error('unexpected third link');
+        return link;
+      },
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      log: message => logged.push(message),
+      config: CONFIG,
+    });
+    const obsolete = await manager.acquire(GPU, '/a');
+    await obsolete.connection.ready();
+
+    await obsolete[Symbol.asyncDispose]();
+    const acquisitionError = await rejection(manager.acquire(GPU, '/b'));
+
+    expect(acquisitionError).toBe(first.failure);
+    expect(first.released).toBe(1);
+    expect(links).toEqual([replacement]);
+    expect(replacement.helper.running).toBe(0);
+    expect(logged.at(-1)).toBe('could not retire ssh:gpu: the old master is still reachable');
+    expect(await rejection(manager[Symbol.asyncDispose]())).toBe(first.failure);
+  });
+
+  test('manager disposal surfaces an active link retirement failure', async () => {
+    const link = new FailedReleaseLink();
+    const manager = fakeManager(() => link);
+    const lease = await manager.acquire(GPU, '/active');
+    await lease.connection.ready();
+
+    const error = await rejection(manager[Symbol.asyncDispose]());
+
+    expect(error).toBe(link.failure);
+    expect(link.released).toBe(1);
+    expect(lease.connection.phase.kind).toBe('closed');
+  });
+
+  test('manager disposal settles every host before surfacing a retirement failure', async () => {
+    const failed = new FailedReleaseLink();
+    const held = new HeldReleaseLink();
+    const links: FakeLink[] = [failed, held];
+    const manager = fakeManager(() => {
+      const link = links.shift();
+      if (link === undefined) throw new Error('unexpected third link');
+      return link;
+    });
+    const first = await manager.acquire({kind: 'ssh', alias: 'first'}, '/first');
+    const second = await manager.acquire({kind: 'ssh', alias: 'second'}, '/second');
+    await Promise.all([first.connection.ready(), second.connection.ready()]);
+
+    const disposing = manager[Symbol.asyncDispose]();
+    let settled = false;
+    void disposing.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await held.releaseStarted;
+
+    expect(settled).toBe(false);
+    expect(first.connection.phase.kind).toBe('closed');
+    expect(second.connection.phase.kind).toBe('closed');
+    held.finishRelease();
+    expect(await rejection(disposing)).toBe(failed.failure);
+    expect(failed.released).toBe(1);
+    expect(held.released).toBe(1);
   });
 
   test('release cancels every ssh attempt and waits for every retired process to exit', async () => {
