@@ -25,6 +25,9 @@ const CREDIT_BYTES = 16 * 1024 * 1024;
 const INSTANCE_ID = '0123456789ab';
 const logs = [];
 const fatals = [];
+let appWindow = null;
+let unauthorizedWindow = null;
+let unauthorizedView = null;
 
 const attached = {
   host: 'local',
@@ -184,7 +187,8 @@ function contentsAt(url) {
 }
 
 function ownedWelcomeId() {
-  const owner = window.welcome;
+  if (appWindow === null) throw new Error('the app window is unavailable');
+  const owner = appWindow.welcome;
   if (typeof owner.currentId === 'function') return owner.currentId();
   // Merge-base compatibility: before #2270, AppWindow exposed the one concrete view directly.
   return owner.webContents.id;
@@ -252,31 +256,35 @@ function clickWelcomeButton(label) {
 registerAppScheme();
 app.on('web-contents-created', (_event, contents) => confineContents(contents, log));
 app.on('window-all-closed', () => app.quit());
-await app.whenReady();
-lockDownSession(log);
-serveBundledUi();
 
-const runs = new FakeRuns();
-const welcome = new WelcomeFeed();
-const window = new AppWindow({
-  log,
-  connect: port => runs.connect(port),
-  closed: () => runs.detach(),
-  fatal: error => fatals.push(error.message),
-});
-const desktop = new Desktop({
-  window,
-  welcome,
-  hosts: new FakeHosts(),
-  runs,
-  settings: new FakeSettings(),
-  log,
-});
-window.openRunPage('This Mac');
-desktop.chromeChanged();
+// Playwright's Electron loader releases its substituted `app.whenReady()` only after attaching
+// both debuggers. Awaiting that promise at module top level prevents the loader from completing
+// the attachment and deadlocks `electron.launch()`. Schedule readiness work so this entry module
+// finishes evaluating first; the test polls the control below until initialization is complete.
+void app.whenReady().then(() => {
+  lockDownSession(log);
+  serveBundledUi();
 
-let unauthorizedWindow = null;
-let unauthorizedView = null;
+  const runs = new FakeRuns();
+  const welcome = new WelcomeFeed();
+  appWindow = new AppWindow({
+    log,
+    connect: port => runs.connect(port),
+    closed: () => runs.detach(),
+    fatal: error => fatals.push(error.message),
+  });
+  const desktop = new Desktop({
+    window: appWindow,
+    welcome,
+    hosts: new FakeHosts(),
+    runs,
+    settings: new FakeSettings(),
+    log,
+  });
+  appWindow.openRunPage('This Mac');
+  desktop.chromeChanged();
+});
+
 globalThis.vibesysWelcomeRecoveryE2E = {
   state() {
     const currentWelcomeId = ownedWelcomeId();
@@ -286,7 +294,7 @@ globalThis.vibesysWelcomeRecoveryE2E = {
       currentWelcomeUrl: ownedWelcomeContents()?.getURL() ?? null,
       runId: run?.id ?? null,
       runUrl: run?.getURL() ?? null,
-      mode: window.mode,
+      mode: appWindow.mode,
       logs: [...logs],
       fatals: [...fatals],
     };
