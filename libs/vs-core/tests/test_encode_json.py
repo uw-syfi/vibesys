@@ -139,3 +139,11 @@ def test_only_values_new_since_the_last_encoding_are_serialized(size: int) -> No
     encoded = encode_json(holder)
     assert [extra] == WRITES
     assert encoded == holder.model_dump_json().encode()
+
+
+def test_a_value_that_holds_a_mutable_container_is_never_served_from_memory() -> None:
+    items = [Counted(n=1)]
+    holder = Holder.model_construct(items=items)  # skips validation, so the list gets in
+    assert encode_json(holder) == holder.model_dump_json().encode()
+    items.append(Counted(n=2))  # the "frozen" value changes under the memory's feet
+    assert encode_json(holder) == holder.model_dump_json().encode()

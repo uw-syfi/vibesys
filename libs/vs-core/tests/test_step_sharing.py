@@ -92,3 +92,33 @@ def test_a_step_returns_what_it_left_unchanged_as_the_same_objects(count: int) -
         assert _rebuilt(state, result.state) == []
         assert len(result.state.run.receipts) == index + 1
         state = result.state
+
+
+class Node(core.Value):
+    label: str = ""
+    children: tuple[Node, ...] = ()
+
+
+type Shape = tuple[str, tuple[Shape, ...]]
+
+_shapes: st.SearchStrategy[Shape] = st.recursive(
+    st.tuples(st.text(max_size=2), st.just(())),
+    lambda children: st.tuples(st.text(max_size=2), st.lists(children, max_size=3).map(tuple)),
+    max_leaves=12,
+)
+
+
+def _build(shape: Shape) -> Node:
+    label, children = shape
+    return Node(label=label, children=tuple(_build(child) for child in children))
+
+
+@given(before=_shapes, after=_shapes)
+def test_sharing_gives_an_equal_value_that_reuses_every_equal_part(
+    before: Shape, after: Shape
+) -> None:
+    old, new = _build(before), _build(after)  # equal parts of the two are distinct objects
+    shared = core.share_unchanged(old, new)
+    assert shared == new
+    assert _rebuilt(old, shared) == []
+    assert core.share_unchanged(old, _build(before)) is old
