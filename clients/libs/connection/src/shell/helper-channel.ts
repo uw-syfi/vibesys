@@ -174,6 +174,17 @@ export class HelperChannel implements AsyncDisposable {
 
   /** Send `body` and resolve with its reply; rejects with `HelperRequestError` or `ConnectionError`. */
   request<T extends string>(body: Body & {readonly type: T}): Promise<ReplyOf<T>> {
+    return this.#request(body, reply => reply);
+  }
+
+  /**
+   * Register one request and synchronously accept its successful reply inside the line parser.
+   * `accept` therefore owns any bytes already buffered after the reply before parsing continues.
+   */
+  #request<T extends string, Result>(
+    body: Body & {readonly type: T},
+    accept: (reply: ReplyOf<T>) => Result,
+  ): Promise<Result> {
     if (this.#failure !== null) return Promise.reject(this.#failure);
     const required = helperFeatureForRequest(body.type);
     if (this.hello !== null && required !== null && !this.hello.features.includes(required)) {
@@ -189,14 +200,20 @@ export class HelperChannel implements AsyncDisposable {
     }
     const requestId = `r${this.#nextId++}`;
     const {deadlineMs, scheduleTimeout} = this.#options;
-    return new Promise<ReplyOf<T>>((resolve, reject) => {
+    return new Promise<Result>((resolve, reject) => {
       const cancel = scheduleTimeout(() => {
         this.#pending.delete(requestId);
         reject(new ConnectionError('link', `the helper did not answer ${body.type} in time`));
       }, deadlineMs + DEADLINE_SLACK_MS);
       this.#pending.set(requestId, {
         responseType: body.type,
-        resolve: message => resolve(message as ReplyOf<T>),
+        resolve: message => {
+          try {
+            resolve(accept(message as ReplyOf<T>));
+          } catch (error) {
+            reject(error as Error);
+          }
+        },
         reject,
         cancel,
       });
@@ -222,16 +239,21 @@ export class HelperChannel implements AsyncDisposable {
    * channel a request channel, which the caller disposes.
    */
   async connectRun(instanceId: string): Promise<{runId: string; stream: RunStream}> {
-    let reply: ReplyOf<'run.connect'>;
     try {
-      reply = await this.request({type: 'run.connect', instance_id: instanceId, role: 'control'});
+      return await this.#request(
+        {type: 'run.connect', instance_id: instanceId, role: 'control'},
+        reply => {
+          // This callback runs synchronously while #line owns the reply. Transfer the complete
+          // remainder before #data can interpret another newline as a helper control message.
+          const stream = new RunStream(this.#process, this.#buffer, this.ended, () => this.#stderr);
+          this.#buffer = Buffer.alloc(0);
+          this.#relay = stream;
+          return {runId: reply.run_id, stream};
+        },
+      );
     } catch (error) {
       throw connectError(error);
     }
-    const stream = new RunStream(this.#process, this.#buffer, this.ended, () => this.#stderr);
-    this.#buffer = Buffer.alloc(0);
-    this.#relay = stream;
-    return {runId: reply.run_id, stream};
   }
 
   async [Symbol.asyncDispose](): Promise<void> {

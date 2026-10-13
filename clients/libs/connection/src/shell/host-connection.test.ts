@@ -407,6 +407,67 @@ describe('HostConnection over the FakeHelper', () => {
     stream.destroy();
   });
 
+  test('a coalesced connect reply preserves the first run frame at every byte split', async () => {
+    const greeting = '{"type":"event_batch","events":[]}';
+    const reply = JSON.stringify({
+      type: 'run.connect',
+      request_id: 'r2',
+      run_id: 'run-b',
+      protocol_version: 1,
+    });
+    const payloadLength = Buffer.byteLength(`${reply}\n${greeting}\n`);
+
+    for (let split = 0; split <= payloadLength; split += 1) {
+      const link = new FakeLink();
+      link.helper.publish(record('00000000000b', 'run-b'));
+      link.helper.host.runs.set('00000000000b', ECHO_SERVER);
+      link.helper.runGreeting = greeting;
+      link.helper.runConnectChunks = payload => [
+        payload.subarray(0, split),
+        payload.subarray(split),
+      ];
+      await using connection = fakeConnection(link);
+
+      const {runId, stream} = await connection.openRun('00000000000b');
+      const expected = Buffer.from(`${greeting}\n`);
+      const delivered = await new Promise<Buffer>(resolve => {
+        const chunks: Buffer[] = [];
+        let length = 0;
+        stream.on('data', (chunk: Buffer) => {
+          chunks.push(chunk);
+          length += chunk.length;
+          if (length >= expected.length) resolve(Buffer.concat(chunks));
+        });
+      });
+
+      expect(runId).toBe('run-b');
+      expect(delivered).toEqual(expected);
+      expect(connection.phase.kind).toBe('ready');
+      expect(link.helper.running).toBe(2);
+      stream.destroy();
+    }
+  });
+
+  test('an invalid run.connect reply never transfers the channel to relay mode', async () => {
+    const link = new FakeLink();
+    link.helper.publish(record('00000000000b', 'run-b'));
+    link.helper.host.runs.set('00000000000b', ECHO_SERVER);
+    link.helper.garbled.add('run.connect');
+    await using connection = fakeConnection(link);
+    await connection.ready();
+
+    const error = await rejection(connection.openRun('00000000000b'));
+
+    expect(error).toBeInstanceOf(ConnectionError);
+    if (!(error instanceof ConnectionError)) throw error;
+    expect(error.reason).toBe('incompatible');
+    expect(connection.phase.kind).toBe('incompatible');
+    const runChannel = link.helper.channels.at(-1);
+    if (runChannel === undefined) throw new Error('the run helper was not spawned');
+    expect(await runChannel.process.exit).toBeNull();
+    expect(link.helper.running).toBe(1);
+  });
+
   test('a link that is down walks the whole schedule, goes offline, and a wake starts over', async () => {
     const clock = new FakeClock();
     const link = new FakeLink();

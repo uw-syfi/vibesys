@@ -146,6 +146,10 @@ export class FakeHelper {
   readonly garbled = new Set<string>();
   /** Every new channel's helper exits with this status and stdout right after answering `hello`. */
   exitAfterHello: {readonly code: number; readonly stdout: string} | null = null;
+  /** Optional first run-protocol line written with the successful `run.connect` reply. */
+  runGreeting: string | null = null;
+  /** How that combined reply/greeting payload reaches stdout; tests may split it at any byte. */
+  runConnectChunks: (payload: Buffer) => readonly Buffer[] = payload => [payload];
   /** Every channel ever started, in order. */
   readonly channels: FakeProcess[] = [];
   /** How many helpers were started: one per channel. */
@@ -361,10 +365,12 @@ class HelperSession {
     this.#channel.end(code, '', stderr);
   }
 
-  #send(reply: Reply): void {
+  #send(reply: Reply, trailing = ''): void {
     const send = (): void => {
-      if (!this.#channel.stdout.writableEnded)
-        this.#channel.stdout.write(`${JSON.stringify(reply)}\n`);
+      if (this.#channel.stdout.writableEnded) return;
+      const payload = Buffer.from(`${JSON.stringify(reply)}\n${trailing}`);
+      const chunks = trailing === '' ? [payload] : this.#helper.runConnectChunks(payload);
+      for (const chunk of chunks) this.#channel.stdout.write(chunk);
     };
     const requestId = reply['request_id'];
     const pending =
@@ -634,7 +640,11 @@ class HelperSession {
       this.#send(this.#error(id, 'connect_denied', `run ${instanceId} is not yours`));
       return;
     }
-    this.#send({type: 'run.connect', request_id: id, run_id: live.run_id, protocol_version: 1});
+    const greeting = helper.runGreeting === null ? '' : `${helper.runGreeting}\n`;
+    this.#send(
+      {type: 'run.connect', request_id: id, run_id: live.run_id, protocol_version: 1},
+      greeting,
+    );
     const listeners: ((line: string) => void)[] = [];
     this.#relay = line => {
       for (const listener of listeners) listener(line);
