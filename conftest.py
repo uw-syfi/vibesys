@@ -16,8 +16,6 @@ import pytest
 from hypothesis import settings
 from tests.support.scratch_tree import remove_scratch_tree
 
-from vs_core.api import verify_encoding
-
 # `--shard=I/N` splits the suite across CI runners (see tests/support/sharding.py).
 pytest_plugins = [
     "vs_sim_pytest",
@@ -31,10 +29,6 @@ pytest_plugins = [
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
-
-# Every durable commit of every test also writes the plain encoding and compares: a value whose
-# remembered JSON text depended on where it sits would otherwise silently change bytes.
-verify_encoding(enabled=True)
 
 
 @pytest.fixture

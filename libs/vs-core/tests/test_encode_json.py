@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from hypothesis import given
@@ -23,6 +24,9 @@ from vs_core.api import (
     initial_state,
     verify_encoding,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class Color(StrEnum):
@@ -86,31 +90,44 @@ def _envelope(tree: Tree) -> RunEnvelope[Tree]:
     )
 
 
+@contextmanager
+def _verifying() -> Iterator[None]:
+    """Make `encode_json` check itself against the plain encoding, as the byte-identity tests do."""
+    verify_encoding(enabled=True)
+    try:
+        yield
+    finally:
+        verify_encoding(enabled=False)
+
+
 @given(tree=_trees)
 def test_the_encoding_equals_the_plain_encoding_first_and_when_remembered(tree: Tree) -> None:
     envelope = _envelope(tree)
     plain = envelope.model_dump_json().encode()
-    assert encode_json(envelope) == plain
-    assert encode_json(envelope) == plain  # every sub-tree now comes from memory
-    assert encode_json(_envelope(tree)) == plain  # an equal envelope that shares its sub-trees
+    with _verifying():
+        assert encode_json(envelope) == plain
+        assert encode_json(envelope) == plain  # every sub-tree now comes from memory
+        assert encode_json(_envelope(tree)) == plain  # an equal envelope sharing its sub-trees
 
 
 @given(first=_trees, second=_trees, label=_texts)
 def test_a_successor_that_shares_sub_trees_encodes_like_a_fresh_value(
     first: Tree, second: Tree, label: str
 ) -> None:
-    encode_json(_envelope(first))
     successor = first.model_copy(update={"label": label, "children": (second, *first.children)})
     envelope = _envelope(successor)
-    assert encode_json(envelope) == envelope.model_dump_json().encode()
+    with _verifying():
+        encode_json(_envelope(first))
+        assert encode_json(envelope) == envelope.model_dump_json().encode()
 
 
 def test_a_string_that_spells_a_splice_token_is_written_as_the_string() -> None:
     twin = Tree(schema_version=1, label="\x00F1\x00")
     tree = Tree(schema_version=1, label="outer", children=(twin, Tree(schema_version=1)))
-    for _ in range(2):
-        envelope = _envelope(tree)
-        assert encode_json(envelope) == envelope.model_dump_json().encode()
+    with _verifying():
+        for _ in range(2):
+            envelope = _envelope(tree)
+            assert encode_json(envelope) == envelope.model_dump_json().encode()
 
 
 def _counting_values() -> tuple[Any, Any, list[Any]]:
@@ -133,14 +150,6 @@ def _counting_values() -> tuple[Any, Any, list[Any]]:
 
 @given(size=st.integers(min_value=1, max_value=8))
 def test_only_values_new_since_the_last_encoding_are_serialized(size: int) -> None:
-    verify_encoding(enabled=False)  # checking writes every value a second time
-    try:
-        _only_new_values_are_serialized(size)
-    finally:
-        verify_encoding(enabled=True)
-
-
-def _only_new_values_are_serialized(size: int) -> None:
     counted, holder_of, writes = _counting_values()
     items = tuple(counted(n=index) for index in range(size))
     encode_json(holder_of(items=items))
@@ -172,18 +181,14 @@ def test_a_text_that_depends_on_where_the_value_sits_is_reported_by_type() -> No
     class Plain(Value):
         item: Base  # declared as the base, so a Wide in it is written without `b`
 
-    wide = Wide()
-    holder = Plain(item=wide)
-    verify_encoding(enabled=True)
-    try:
-        assert encode_json(holder) == holder.model_dump_json().encode()
+    class Own(Value):
+        item: Wide
 
+    wide = Wide()
+    with _verifying():
+        holder = Plain(item=wide)
+        assert encode_json(holder) == holder.model_dump_json().encode()
         # The same instance, remembered from the first call, is now asked for under a field of
         # its own type, where the plain encoding writes `b`.
-        class Own(Value):
-            item: Wide
-
         with pytest.raises(EncodingMismatchError, match="Wide"):
             encode_json(Own(item=wide))
-    finally:
-        verify_encoding(enabled=True)

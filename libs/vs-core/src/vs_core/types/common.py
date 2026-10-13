@@ -440,6 +440,10 @@ class SignalCycleError(Exception):
 class OperationSchemaRef(Value):
     """Operation schema ref lifecycle contract."""
 
+    # Fields declared with this class hold exactly this class (a subclass instance is rebuilt as
+    # one on validation), so one remembered JSON text per instance holds wherever it sits.
+    model_config = ConfigDict(revalidate_instances="subclass-instances")
+
     kind: str = Field(min_length=1)
     request_schema: SchemaRef
     outcome_schema: SchemaRef

@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from .common import (
     ArtifactRef,
@@ -111,6 +111,10 @@ class SessionView(Value):
     reserved_inputs field, while this persisted model stores no duplicate input
     authority. Idle is not session release proof.
     """
+
+    # Fields declared with this class hold exactly this class (a subclass instance is rebuilt as
+    # one on validation), so one remembered JSON text per instance holds wherever it sits.
+    model_config = ConfigDict(revalidate_instances="subclass-instances")
 
     spec: SessionSpec
     scope: Scope

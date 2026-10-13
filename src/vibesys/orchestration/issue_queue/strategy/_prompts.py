@@ -10,7 +10,7 @@ issue as a list from the prompt, not from files.
 from enum import StrEnum
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from vs_core.api import EvidenceRef, RevisionRef, RolePromptContext, SchemaRef, Value
 
@@ -30,6 +30,10 @@ class PromptTemplate(StrEnum):
 
 class IssueBrief(Value):
     """One issue as the list the agents see."""
+
+    # Fields declared with this class hold exactly this class (a subclass instance is rebuilt as
+    # one on validation), so one remembered JSON text per instance holds wherever it sits.
+    model_config = ConfigDict(revalidate_instances="subclass-instances")
 
     id: int = Field(ge=1)
     type: str

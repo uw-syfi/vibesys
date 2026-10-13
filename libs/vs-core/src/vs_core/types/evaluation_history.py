@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from .common import (
     ContractValidationError,
@@ -85,6 +85,10 @@ class EvaluationTerminalFacts(Value):
     scope and stage identities before constructing the durable history record.
     Absent facts on accepted execution mean history is unavailable, never empty.
     """
+
+    # Fields declared with this class hold exactly this class (a subclass instance is rebuilt as
+    # one on validation), so one remembered JSON text per instance holds wherever it sits.
+    model_config = ConfigDict(revalidate_instances="subclass-instances")
 
     stages: tuple[EvaluationStageResult, ...] = ()
     traceback_signature: str | None = Field(default=None, min_length=1)

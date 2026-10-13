@@ -344,8 +344,9 @@ class EncodingMismatchError(ValueError):
 class _Verification:
     """Whether `encode_json` also checks itself against the plain encoding.
 
-    A test run turns this on (the pytest configuration calls `verify_encoding`); product code
-    never does, and keeps the fast path.
+    Only the byte-identity tests turn this on: checking writes every value a second time.
+    Product code and the rest of the suite keep the fast path, and the mechanism it guards
+    against is closed statically (tests/quality/test_value_fields_name_exact_types.py).
     """
 
     enabled = False
