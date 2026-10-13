@@ -4,6 +4,7 @@ import {
   ConnectionManager,
   DEFAULT_CONNECTION_CONFIG,
   HostConnection,
+  type Phase,
 } from '@vibesys/connection';
 import {FakeLink, phaseReached, record} from '@vibesys/connection/testing';
 import type {InstanceList} from '@vibesys/contracts/host-helper';
@@ -41,15 +42,16 @@ function gate(): Gate {
   };
 }
 
-function lease(connection: HostConnection): ConnectionLease {
+function lease(connection: HostConnection, onRelease: () => void = () => {}): ConnectionLease {
   const release = connection.hold();
-  let released = false;
+  let done = false;
   return {
     connection,
     async [Symbol.asyncDispose]() {
-      if (released) return;
-      released = true;
+      if (done) return;
+      done = true;
       release();
+      onRelease();
     },
   };
 }
@@ -126,28 +128,85 @@ class FakeRecentRuns {
   }
 }
 
+type SubscriptionStage = 'onPhase' | 'watchInstances' | 'onRunUnreachable';
+type BindingStage = 'openPage' | SubscriptionStage | 'changed';
+
+/** A real FakeLink-backed connection with deterministic registration faults and ownership counts. */
+class FaultInjectingHostConnection extends HostConnection {
+  readonly subscriptions: Record<SubscriptionStage, number> = {
+    onPhase: 0,
+    watchInstances: 0,
+    onRunUnreachable: 0,
+  };
+  readonly #fail: (stage: BindingStage) => void;
+
+  constructor(
+    options: ConstructorParameters<typeof HostConnection>[0],
+    fail: (stage: BindingStage) => void,
+  ) {
+    super(options);
+    this.#fail = fail;
+  }
+
+  override onPhase(listener: (phase: Phase) => void): () => void {
+    this.#fail('onPhase');
+    return this.#tracked('onPhase', super.onPhase(listener));
+  }
+
+  override watchInstances(listener: (listing: InstanceList) => void): () => void {
+    this.#fail('watchInstances');
+    return this.#tracked('watchInstances', super.watchInstances(listener));
+  }
+
+  override onRunUnreachable(listener: (instanceId: string, detail: string) => void): () => void {
+    this.#fail('onRunUnreachable');
+    return this.#tracked('onRunUnreachable', super.onRunUnreachable(listener));
+  }
+
+  #tracked(stage: SubscriptionStage, unsubscribe: () => void): () => void {
+    this.subscriptions[stage] += 1;
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      this.subscriptions[stage] -= 1;
+      unsubscribe();
+    };
+  }
+}
+
 /** A RunControl over one FakeHelper host, with the pages it opened and the runs it remembered. */
 function world(
   options: {
     readonly failConnectionCall?: number;
     readonly deferConnectionCall?: number;
     readonly deferConnectionCalls?: readonly number[];
+    readonly failBindingStage?: BindingStage;
   } = {},
 ) {
   const link = new FakeLink();
   link.helper.host.projects.set('/p', ['spsc']);
-  const connection = new HostConnection({
-    link,
-    checkout: '/src/vibesys',
-    appVersion: 'test',
-    config: DEFAULT_CONNECTION_CONFIG,
-    scheduleTimeout: new FakeClock().scheduleTimeout,
-    log: () => {},
-  });
+  let failurePending = options.failBindingStage !== undefined;
+  const fail = (stage: BindingStage): void => {
+    if (!failurePending || options.failBindingStage !== stage) return;
+    failurePending = false;
+    throw new Error(`binding ${stage} failed`);
+  };
+  const connection = new FaultInjectingHostConnection(
+    {
+      link,
+      checkout: '/src/vibesys',
+      appVersion: 'test',
+      config: DEFAULT_CONNECTION_CONFIG,
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      log: () => {},
+    },
+    fail,
+  );
   const recents = new FakeRecentRuns();
   const pages = {opened: 0, closed: 0, woken: 0, confirms: 0};
   const log = new FakeLog();
-  const calls = {connections: 0};
+  const calls = {connections: 0, releases: 0, changes: 0};
   const deferredConnections = new Map(
     [
       ...(options.deferConnectionCall === undefined ? [] : [options.deferConnectionCall]),
@@ -168,9 +227,12 @@ function world(
         await deferred.wait;
       }
       if (call === options.failConnectionCall) throw new Error('the cleanup connection failed');
-      return lease(connection);
+      return lease(connection, () => {
+        calls.releases += 1;
+      });
     },
     openPage: () => {
+      fail('openPage');
       pages.opened += 1;
       return {wake: () => (pages.woken += 1), close: () => (pages.closed += 1)};
     },
@@ -179,7 +241,10 @@ function world(
       return true;
     },
     remember: (run, current) => recents.remember(run, current),
-    changed: () => {},
+    changed: () => {
+      calls.changes += 1;
+      fail('changed');
+    },
     log: message => log.write(message),
     now: () => 7,
   });
@@ -606,6 +671,76 @@ describe('RunControl over the FakeHelper', () => {
     expect(w.connection.held).toBe(true);
     w.runs.detach();
     expect(w.connection.held).toBe(false);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test.each([
+    ['openPage', 0],
+    ['onPhase', 1],
+    ['watchInstances', 1],
+    ['onRunUnreachable', 1],
+    ['changed', 1],
+  ] as const)('a failed %s binding stage rolls every provisional resource back', async (stage, opened) => {
+    const w = world({failBindingStage: stage});
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+
+    await expect(w.runs.attach(HOST, RUN_A)).rejects.toThrow(`binding ${stage} failed`);
+
+    expect(w.runs.attached()).toBeNull();
+    expect(w.pages).toMatchObject({opened, closed: opened});
+    expect(w.connection.subscriptions).toEqual({
+      onPhase: 0,
+      watchInstances: 0,
+      onRunUnreachable: 0,
+    });
+    expect(w.calls.releases).toBe(1);
+    expect(w.connection.held).toBe(false);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test.each([
+    ['start', (runs: RunControl) => runs.start(HOST, '/p', 'spsc', [])],
+    ['resume', (runs: RunControl) => runs.resume(HOST, '/p', exactResumeRunId('run-a'))],
+  ] as const)('a failed %s publication releases its binding intent and resources', async (kind, run) => {
+    const w = world({failBindingStage: 'changed'});
+    if (kind === 'resume') w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+
+    await expect(run(w.runs)).rejects.toThrow('binding changed failed');
+
+    expect(w.runs.attached()).toBeNull();
+    expect(w.pages).toMatchObject({opened: 1, closed: 1});
+    expect(w.connection.subscriptions).toEqual({
+      onPhase: 0,
+      watchInstances: 0,
+      onRunUnreachable: 0,
+    });
+    expect(w.calls.releases).toBe(1);
+    expect(w.connection.held).toBe(false);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a failed same-target binding settles the stale launch waiting on adoption', async () => {
+    const w = world({failBindingStage: 'changed'});
+    const delayedStart = w.link.helper.deferNext('run.start');
+
+    const older = w.runs.start(HOST, '/p', 'spsc', []);
+    await delayedStart.received;
+    const launched = w.link.helper.host.instances[0];
+    if (launched === undefined) throw new Error('run.start did not publish its serving record');
+    const delayedAttach = w.link.helper.deferNext('instances.list');
+    const adopting = w.runs.attach(HOST, launched.id);
+    await delayedAttach.received;
+
+    delayedStart.release();
+    await w.waitForLog(`waiting for the newer selection of run ${launched.id}`);
+    delayedAttach.release();
+    await expect(adopting).rejects.toThrow('binding changed failed');
+    expect(await older).toBe('cancelled');
+
+    expect(w.runs.attached()).toBeNull();
+    expect(w.pages).toMatchObject({opened: 1, closed: 1});
+    expect(w.link.helper.stops).toEqual([{instanceId: launched.id, force: false}]);
+    expect(w.link.helper.host.instances).toEqual([]);
     await w.connection[Symbol.asyncDispose]();
   });
 

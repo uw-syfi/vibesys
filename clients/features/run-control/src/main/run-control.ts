@@ -158,7 +158,6 @@ export class RunControl {
   async attach(id: HostId, instanceId: string, task: string | null = null): Promise<void> {
     const generation = this.#claim({id, instanceId});
     let lease: ConnectionLease | null = null;
-    let transferred = false;
     try {
       lease = await this.#deps.connection(id);
       const connection = lease.connection;
@@ -167,9 +166,12 @@ export class RunControl {
       if (!this.#owns(generation)) return;
       const observation = instanceObservation(listing, instanceId);
       switch (observation.kind) {
-        case 'live':
-          transferred = await this.#bind(generation, id, lease, observation.record, task);
+        case 'live': {
+          const bindingLease = lease;
+          lease = null;
+          await this.#bind(generation, id, bindingLease, observation.record, task);
           break;
+        }
         case 'unverified':
           throw new Error(
             `${hostLabel(id)} could not confirm whether run ${instanceId} is still live`,
@@ -186,7 +188,7 @@ export class RunControl {
       this.#forgetIntended(generation);
       throw error;
     } finally {
-      if (!transferred) await lease?.[Symbol.asyncDispose]();
+      await lease?.[Symbol.asyncDispose]();
     }
   }
 
@@ -293,8 +295,7 @@ export class RunControl {
     resume: Resume,
     intent: StartIntent,
   ): Promise<StartOutcome> {
-    const lease = await this.#deps.connection(id);
-    let transferred = false;
+    let lease: ConnectionLease | null = await this.#deps.connection(id);
     try {
       const connection = lease.connection;
       if (!this.#active(intent)) return 'cancelled';
@@ -326,14 +327,19 @@ export class RunControl {
           ? `the run is already live as ${record.id}; attaching to it`
           : `started run ${record.run_id} as ${record.id}`,
       );
-      transferred = await this.#bind(intent.generation, id, lease, record, task);
-      if (!transferred) {
+      const bindingLease = lease;
+      lease = null;
+      const bound = await this.#bind(intent.generation, id, bindingLease, record, task);
+      if (!bound) {
         if (!alreadyLive) await this.#stopSuperseded(id, record, intent.cancelled);
         return 'cancelled';
       }
       return 'started';
+    } catch (error) {
+      this.#forgetIntended(intent.generation);
+      throw error;
     } finally {
-      if (!transferred) await lease[Symbol.asyncDispose]();
+      await lease?.[Symbol.asyncDispose]();
     }
   }
 
@@ -427,10 +433,35 @@ export class RunControl {
     record: LiveInstanceRecord,
     task: string | null,
   ): Promise<boolean> {
-    if (!this.#owns(generation)) return false;
     const connection = lease.connection;
-    let bound = false;
+    const subscriptions: (() => void)[] = [];
+    const pendingObservations: (() => void)[] = [];
+    let observationPhase: 'buffering' | 'live' | 'closed' = 'buffering';
+    let page: RunPage | null = null;
+    let pageClosed = false;
+    let released = false;
+    let leaseRelease: PromiseLike<void> | null = null;
+    let binding: Binding | null = null;
+    let installed = false;
+    const observe = (observation: () => void): void => {
+      if (observationPhase === 'live') observation();
+      else if (observationPhase === 'buffering') pendingObservations.push(observation);
+    };
+    const closePage = (): void => {
+      if (pageClosed || page === null) return;
+      pageClosed = true;
+      page.close();
+    };
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      observationPhase = 'closed';
+      pendingObservations.splice(0);
+      for (const unsubscribe of subscriptions.splice(0).reverse()) unsubscribe();
+      leaseRelease = lease[Symbol.asyncDispose]();
+    };
     try {
+      if (!this.#owns(generation)) return false;
       await this.#remember(generation, {
         host: hostKey(id),
         project: record.project_root,
@@ -441,42 +472,54 @@ export class RunControl {
       });
       if (!this.#owns(generation)) return false;
       this.#releaseBinding();
-      const page = this.#deps.openPage(hostLabel(id));
-      // The provisional lease becomes the binding's lease. It is released once by `release`.
-      const releases: (() => void)[] = [() => void lease[Symbol.asyncDispose]()];
-      const binding: Binding = {
+      page = this.#deps.openPage(hostLabel(id));
+      const provisional: Binding = {
         id,
         instanceId: record.id,
         runId: record.run_id,
         project: record.project_root,
         task,
         connection,
-        page,
+        page: {wake: () => page?.wake(), close: closePage},
         status: connectionStatus(connection.phase),
         seenLive: false,
-        release: () => {
-          for (const release of releases.splice(0)) release();
-        },
+        release,
       };
-      this.#run = binding;
-      bound = true;
-      this.#settleAdoption(id, record.id, true);
-      // Subscribed once the binding exists: a listing the connection already holds arrives at once.
-      const addRelease = (release: () => void): void => {
-        if (this.#run === binding) releases.push(release);
-        else release();
-      };
-      addRelease(connection.onPhase(phase => this.#phase(binding, phase)));
-      addRelease(connection.watchInstances(listing => this.#listing(binding, listing)));
-      addRelease(
+      binding = provisional;
+      // Buffer synchronous initial observations until every subscription returned its cleanup.
+      subscriptions.push(
+        connection.onPhase(phase => observe(() => this.#phase(provisional, phase))),
+      );
+      subscriptions.push(
+        connection.watchInstances(listing => observe(() => this.#listing(provisional, listing))),
+      );
+      subscriptions.push(
         connection.onRunUnreachable(instanceId => {
-          if (instanceId === binding.instanceId) this.#ended(binding);
+          observe(() => {
+            if (instanceId === provisional.instanceId) this.#ended(provisional);
+          });
         }),
       );
+      this.#run = provisional;
+      observationPhase = 'live';
+      for (const observation of pendingObservations.splice(0)) observation();
       this.#deps.changed();
+      if (!this.#owns(generation) || this.#run !== provisional) return false;
+      installed = true;
+      this.#settleAdoption(id, record.id, true);
       return true;
     } finally {
-      if (!bound) await lease[Symbol.asyncDispose]();
+      if (!installed) {
+        observationPhase = 'closed';
+        if (binding !== null && this.#run === binding) this.#run = null;
+        try {
+          release();
+        } finally {
+          closePage();
+          this.#forgetIntended(generation);
+        }
+        await leaseRelease;
+      }
     }
   }
 
