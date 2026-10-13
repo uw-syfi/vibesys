@@ -24,7 +24,7 @@ export interface SpawnedProcess {
 }
 
 /** What bounded retirement proved about the exact child process. */
-export type ProcessRetirementOutcome =
+type ProcessRetirementOutcome =
   | {readonly kind: 'confirmed'; readonly code: number | null}
   | {readonly kind: 'unconfirmed'};
 
