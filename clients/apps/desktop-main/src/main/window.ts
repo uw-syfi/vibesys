@@ -18,8 +18,9 @@ import {
   nativeTheme,
   type WebContentsView,
 } from 'electron';
-import {APP_ENTRY_URL, isAppPage} from './app-assets.js';
+import {APP_ENTRY_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
+import {bindRunIpc, type PendingRunPort} from './run-ipc.js';
 import {TITLEBAR_HEIGHT, windowChrome} from './window-chrome.js';
 
 export const WELCOME_URL = 'app://vibesys/welcome.html';
@@ -32,8 +33,9 @@ export interface AppWindowDeps {
   readonly closed: () => void;
 }
 
-function relayPort(port: MessagePortMain): RelayPort {
+function pendingRunPort(port: MessagePortMain): PendingRunPort {
   return {
+    start: () => port.start(),
     post: message => port.postMessage(message),
     onMessage: listener => port.on('message', event => listener(event.data)),
     onClose: listener => port.on('close', listener),
@@ -66,19 +68,24 @@ export class AppWindow {
     this.welcome.webContents
       .loadURL(WELCOME_URL)
       .catch(() => deps.log('could not load the welcome view'));
-    ipcMain.on(CONNECT_CHANNEL, event => {
-      const [port] = event.ports;
-      if (port === undefined) return;
-      const run = this.#run;
-      const url = event.senderFrame?.url ?? '';
-      if (run === null || event.sender.id !== run.webContents.id || !isAppPage(url)) {
-        deps.log('refused a connection from a view that is not bound to a run');
-        port.close();
-        return;
-      }
-      port.start();
-      deps.connect(relayPort(port));
-    });
+    bindRunIpc(
+      {
+        onConnect: listener => {
+          ipcMain.on(CONNECT_CHANNEL, event => {
+            const port = event.ports[0];
+            listener({
+              port: port === undefined ? null : pendingRunPort(port),
+              senderId: event.sender.id,
+              senderUrl: event.senderFrame?.url ?? null,
+            });
+          });
+        },
+      },
+      APP_ENTRY_URL,
+      () => this.#run?.webContents.id ?? null,
+      deps.connect,
+      deps.log,
+    );
   }
 
   get mode(): ChromeState['mode'] {

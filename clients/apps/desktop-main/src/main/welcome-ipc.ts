@@ -13,6 +13,7 @@ import {
   type WelcomeRequest,
   type WelcomeResult,
 } from '@vibesys/ipc';
+import {isSameAppPage} from './app-assets.js';
 
 /** The narrow IPC boundary needed by the welcome request binder. */
 export interface WelcomeIpc {
@@ -45,23 +46,6 @@ function failure(error: unknown): WelcomeResult<never> {
 }
 
 /**
- * Whether `candidate` names the same served resource as `expected`. Query and fragment state do not
- * select a different bundled document; a merely prefix-sharing path does.
- */
-function samePage(candidate: string | null, expected: URL): boolean {
-  if (candidate === null) return false;
-  const parsed = URL.parse(candidate);
-  return (
-    parsed !== null &&
-    parsed.protocol === expected.protocol &&
-    parsed.username === expected.username &&
-    parsed.password === expected.password &&
-    parsed.host === expected.host &&
-    parsed.pathname === expected.pathname
-  );
-}
-
-/**
  * Answer every welcome channel with `answer`, for `welcome` (the welcome view's web contents on
  * `url`) only; any other sender is refused. Each request carries the invoking Electron frame's
  * process/routing identity. A replacement document cannot issue work until `retire` has settled
@@ -74,7 +58,6 @@ export function bindWelcomeIpc(
   answer: (request: WelcomeRequest, rendererGeneration: string) => Promise<unknown>,
   retire: (rendererGeneration: string) => Promise<void>,
 ): void {
-  const expectedPage = new URL(url);
   let alive = true;
   /** Every replacement advances this even when Electron cannot identify the retiring frame. */
   let documentEpoch = 0;
@@ -98,7 +81,7 @@ export function bindWelcomeIpc(
   });
   for (const channel of Object.values(WELCOME_CHANNELS)) {
     ipc.handle(channel, async (event, ...args) => {
-      if (event.senderId !== welcome.id || !samePage(event.senderUrl, expectedPage)) {
+      if (event.senderId !== welcome.id || !isSameAppPage(event.senderUrl, url)) {
         return failure(new Error('not the welcome view'));
       }
       const requestGeneration = event.rendererGeneration;

@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
-import {APP_ENTRY_URL, assetPath, isAppPage} from './app-assets.js';
+import {APP_ENTRY_URL, assetPath, isAppPage, isSameAppPage} from './app-assets.js';
 
 const ROOT = '/opt/vibesys/ui';
 
@@ -67,5 +67,37 @@ describe('isAppPage', () => {
     for (const url of ['http://127.0.0.1:8765/', 'app://evil/', 'https://vibesys/', 'nope']) {
       expect(isAppPage(url)).toBe(false);
     }
+  });
+});
+
+describe('isSameAppPage', () => {
+  test('admits only the exact resource, independent of query or fragment', () => {
+    for (const url of [
+      APP_ENTRY_URL,
+      `${APP_ENTRY_URL}?source=launch`,
+      `${APP_ENTRY_URL}#run`,
+      `${APP_ENTRY_URL}?source=launch#run`,
+    ]) {
+      expect({url, same: isSameAppPage(url, APP_ENTRY_URL)}).toEqual({url, same: true});
+    }
+    for (const url of [
+      null,
+      'app://vibesys/welcome.html',
+      'app://vibesys/desktop.html-preview.html',
+      'app://vibesys/desktop.html/child',
+      'app://other/desktop.html',
+      'app://user@vibesys/desktop.html',
+      'app://vibesys:443/desktop.html',
+      'https://vibesys/desktop.html',
+      'not a url',
+    ]) {
+      expect({url, same: isSameAppPage(url, APP_ENTRY_URL)}).toEqual({url, same: false});
+    }
+  });
+
+  test('refuses an expected URL outside the app origin', () => {
+    expect(isSameAppPage('https://vibesys/desktop.html', 'https://vibesys/desktop.html')).toBe(
+      false,
+    );
   });
 });

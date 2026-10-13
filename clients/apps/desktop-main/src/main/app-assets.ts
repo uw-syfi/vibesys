@@ -49,6 +49,30 @@ export function isAppPage(url: string): boolean {
 }
 
 /**
+ * Whether `candidate` selects the same bundled document as `expected`.
+ *
+ * Query and fragment state do not select another resource. Credentials, a port, or a different
+ * path do, even when the URL otherwise shares the app origin. Main-process capability boundaries
+ * use this narrower predicate; `isAppPage` remains the origin-wide navigation and asset policy.
+ */
+export function isSameAppPage(candidate: string | null, expected: string): boolean {
+  if (candidate === null) return false;
+  const actual = URL.parse(candidate);
+  const wanted = URL.parse(expected);
+  return (
+    actual !== null &&
+    wanted !== null &&
+    isAppPage(candidate) &&
+    isAppPage(expected) &&
+    actual.protocol === wanted.protocol &&
+    actual.username === wanted.username &&
+    actual.password === wanted.password &&
+    actual.host === wanted.host &&
+    actual.pathname === wanted.pathname
+  );
+}
+
+/**
  * The file under `root` that serves `url`, or null when `url` is not an app asset: another origin,
  * an unknown file type, or a path that escapes `root` (decoded `..` or separators included).
  */
