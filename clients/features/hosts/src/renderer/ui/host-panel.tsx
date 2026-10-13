@@ -28,6 +28,16 @@ export interface HostPanelSenders {
   readonly startRun: (host: {readonly key: HostKey; readonly label: string}) => void;
 }
 
+/** `run`'s status cell text: its phase, with the failure reason appended when it has one. */
+function runStatusText(run: HostRun): string {
+  return run.reason === null ? run.status : `${run.status}: ${run.reason}`;
+}
+
+/** `run`'s started-at cell text, blank for a run that has not reported starting yet. */
+function runStartedText(run: HostRun): string {
+  return run.startedAt === 0 ? '' : new Date(run.startedAt * 1000).toLocaleString();
+}
+
 function RunRow(props: {
   readonly run: HostRun;
   readonly host: HostKey;
@@ -39,8 +49,8 @@ function RunRow(props: {
     <tr>
       <td>{run.runId}</td>
       <td className="path">{run.projectRoot}</td>
-      <td>{run.reason === null ? run.status : `${run.status}: ${run.reason}`}</td>
-      <td>{run.startedAt === 0 ? '' : new Date(run.startedAt * 1000).toLocaleString()}</td>
+      <td>{runStatusText(run)}</td>
+      <td>{runStartedText(run)}</td>
       <td className="actions-cell">
         <Button variant="primary" onClick={() => actions.attach(host, run.id)}>
           Attach
@@ -48,6 +58,19 @@ function RunRow(props: {
         {actions.stopControls(host, run.id)}
         <Button onClick={() => actions.inspect(host, hostLabel, run)}>Inspect</Button>
       </td>
+    </tr>
+  );
+}
+
+/** One of a host's ended runs (its registry tombstone): identity and outcome, no live actions. */
+function EndedRunRow(props: {readonly run: HostRun}): JSX.Element {
+  const {run} = props;
+  return (
+    <tr>
+      <td>{run.runId}</td>
+      <td className="path">{run.projectRoot}</td>
+      <td>{runStatusText(run)}</td>
+      <td>{runStartedText(run)}</td>
     </tr>
   );
 }
@@ -101,9 +124,31 @@ function RunTable(props: {
         </tbody>
       </table>
     );
+  const ended =
+    listing.ended.length === 0 ? null : (
+      <>
+        <p className="muted">Ended runs on {data.label}:</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Run</th>
+              <th>Project</th>
+              <th>Status</th>
+              <th>Started</th>
+            </tr>
+          </thead>
+          <tbody>
+            {listing.ended.map(run => (
+              <EndedRunRow key={run.id} run={run} />
+            ))}
+          </tbody>
+        </table>
+      </>
+    );
   return (
     <>
       {runs}
+      {ended}
       {unreadable}
       {unverified}
     </>
