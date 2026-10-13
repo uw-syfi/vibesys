@@ -1,0 +1,5 @@
+dial9
+Copyright The dial9 Authors (https://github.com/dial9-rs/dial9).
+
+Upstream ships no NOTICE file. This one carries the Apache-2.0 attribution for
+the skill sources vendored under `skills/`, so `update.sh` leaves it in place.

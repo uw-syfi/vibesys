@@ -23,3 +23,7 @@ domains = ["kernel-writing"]
 path = "kernel-rocprof-analysis"
 backends = ["rocm"]
 domains = ["kernel-writing"]
+
+[[rule]]
+path = "dial9-tokio"
+domains = ["database"]

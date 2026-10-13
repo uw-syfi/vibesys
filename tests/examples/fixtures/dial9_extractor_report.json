@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "trace": {
+    "hasFullTaskCoverage": true,
+    "hasSpans": true,
+    "hasTaskTracking": true,
+    "hasCpuTime": true,
+    "workerCount": 3
+  },
+  "window": {
+    "startNs": 1000000000,
+    "endNs": 61000000000,
+    "basis": "unix"
+  },
+  "totals": {
+    "pollOnCpuNs": 402000000000,
+    "attributedOnCpuNs": 402000000000,
+    "unattributedOnCpuNs": 0,
+    "unresolvedSpanCount": 0,
+    "pollCount": 300000
+  },
+  "components": [
+    {
+      "name": "fragment 2 StreamHashJoin",
+      "selfOnCpuNs": 349000000000,
+      "onCpuNs": 349000000000,
+      "wallNs": 480000000000,
+      "share": 0.7540,
+      "count": 8,
+      "taskCount": 8
+    },
+    {
+      "name": "fragment 4 StreamProject",
+      "selfOnCpuNs": 43000000000,
+      "onCpuNs": 43000000000,
+      "wallNs": 480000000000,
+      "share": 0.0928,
+      "count": 8,
+      "taskCount": 8
+    },
+    {
+      "name": "fragment 3 StreamNoOp",
+      "selfOnCpuNs": 10000000000,
+      "onCpuNs": 30000000000,
+      "wallNs": 35000000000,
+      "share": 0.0216,
+      "count": 8,
+      "taskCount": 8
+    }
+  ],
+  "workers": [
+    {"utilization": 0.33},
+    {"utilization": 0.31},
+    {"utilization": 0.32}
+  ],
+  "schedDelay": {
+    "count": 600000,
+    "p50Ns": 714708,
+    "p99Ns": 15141070,
+    "maxNs": 111940366
+  },
+  "queueDepth": {
+    "max": 37,
+    "avg": 0.064,
+    "samples": 14922
+  },
+  "clock": {
+    "anchorCount": 9,
+    "offsetSpreadNs": 256
+  },
+  "diagnostics": []
+}

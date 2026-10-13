@@ -1,0 +1,198 @@
+---
+name: dial9-trace-loading
+description: Parse already-local dial9 Tokio runtime trace files or buffers and understand the ParsedTrace data model. Use when trace bytes are available locally or in memory; do not use to retrieve a viewer URL, API object, or S3 object.
+---
+
+# Loading and Parsing Traces
+
+## Scope
+
+This skill begins after trace bytes are local or already in memory. A viewer URL,
+API endpoint, or S3 location requires the environment's request or retrieval
+skill first. Do not select this skill merely because the eventual operation may
+decompress or parse a trace.
+
+## ParsedTrace structure
+
+`parseTrace(path)` yields `ParsedTrace` objects:
+
+```
+{
+  magic: string,                   // "D9TF" format identifier
+  version: number,                 // trace format version
+  events: TraceEvent[],          // PollStart, PollEnd, WorkerPark, WorkerUnpark, QueueSample, WakeEvent
+  minTs: number|null,            // earliest event timestamp (ns), null if no events
+  maxTs: number|null,            // latest event timestamp (ns), null if no events
+  recordMinTs: number|null,      // earliest sliceable timestamped record (ns), null if none
+  recordMaxTs: number|null,      // latest sliceable timestamped record (ns), null if none
+  cpuSamples: CpuSample[],      // Periodic stack traces from perf/eBPF
+  customEvents: CustomEvent[],   // Custom events; also spans when no spanEventSink is configured
+  spawnLocations: Map<string, string>,    // spawn location ID → source location
+  taskSpawnLocs: Map<number, string|null>,// task ID → spawn location (null if unknown)
+  taskSpawnTimes: Map<number, number>,    // task ID → spawn timestamp (ns)
+  taskTerminateTimes: Map<number, number>,// task ID → terminate timestamp (ns)
+  callframeSymbols: Map<string, {symbol, location}|[{symbol, location}]>, // address → resolved symbol (array for inlined frames)
+  threadNames: Map<number, string>,       // thread ID → name
+  clockOffsetNs: number|null,            // monotonic-to-wall-clock offset
+  clockSyncAnchors: [{monotonicNs, realtimeNs}],
+  runtimeWorkers: Map<string, number[]>, // runtime name → worker IDs
+  segmentMetadata: Map<string, string>,  // latest segment metadata key → value
+  runtimeMetrics: [{t, runtimeName, globalQueue, aliveTasks}], // per-runtime scheduler samples (empty on pre-RuntimeMetrics traces)
+  legacyActiveTaskSamples: [{t, count}], // process-wide QueueSample active-task samples from the transitional format
+  truncated: boolean,
+  timeFiltered: boolean,
+  filterStartTime: number|null,          // start of time range filter (ns), null if unfiltered
+  filterEndTime: number|null,            // end of time range filter (ns), null if unfiltered
+  hasCpuTime: boolean,                   // trace includes CPU time data
+  hasSchedWait: boolean,                 // trace includes kernel scheduling wait data
+  hasTaskTracking: boolean,              // poll events carry task IDs (always true on current parser); for spawn/terminate checks use hasTaskLifetimes
+  hasFullTaskCoverage: boolean,          // false => only dial9-spawned tasks are covered
+  hasLocalQueueDepth: boolean,           // whether per-worker queue depth is available
+  hasTaskLifetimes: boolean,             // false => no task spawn events in the trace
+  sealedFiles: number,                   // files carrying a seal record (0 on traces predating it)
+  incompleteFiles: number,               // of those, how many lost buffered events or inherited them; > 0 means counts are understated
+  taskInstrumented: Map<number, boolean>, // task ID → whether task has tracing instrumentation
+  taskDumps: Map<number, [{timestamp, callchain}]>, // task ID → async stack captures (sorted by timestamp); see dial9-tokio-telemetry `taskdump` feature
+  allocEvents: AllocEvent[],     // Sampled memory allocations (requires dial9-tokio-telemetry memory-profiling feature)
+  freeEvents: FreeEvent[],       // Deallocations paired with sampled allocs (requires `track_liveset`)
+  memoryOverflows: [{timestamp, droppedAllocs, droppedFrees}], // Ring buffer overflow events (dropped samples per flush period)
+  blockInPlaceGaps: [{workerId, fromTid, toTid, startNs, endNs}], // Detected block_in_place handoff intervals (worker attribution unknowable during gap)
+  tidToWorker: Map<number, number>,  // thread ID → worker ID mapping (derived from park/unpark events)
+  tidBindings: Map<number, [{timestamp, workerId}]>, // historical bindings for time-local context resolution
+  stableTidToWorker: Map<number, number>, // TIDs bound to exactly one worker across the trace
+}
+```
+
+Without a `spanEventSink`, an annotated completed span remains a custom event
+and carries a normalized `singleEventSpan` projection. The primary viewer
+configures a sink, so legacy and single-event spans are instead stored in the
+optional `spanEvents` columns and are absent from `customEvents`. The normalized
+projection contains `start`, `end`, `name`, `spanType`, `threadId`, `taskId`,
+`workerId`, `fields`, and `units`; structural-role fields are excluded from
+`fields`, except that the `span.name` field remains an attribute. Consumers
+should read both storage paths through the shared span-data builder rather than
+matching schema or physical field names.
+
+Span timing uses any two of `start`, `duration`, and `end`. A packed event
+timestamp supplies `end` when present; fields carrying
+`dial9.role=span.start` or `dial9.role=span.duration` supply the other timing
+quantities using their `unit` annotations. Timestamp-less schemas must provide
+both timing fields. See `docs/design/single-event-spans.md` for the schema
+convention.
+
+## Event types
+
+```javascript
+const EVENT_TYPES = {
+  PollStart: 0,   // Worker begins polling a task
+  PollEnd: 1,     // Worker finishes polling a task
+  WorkerPark: 2,  // Worker goes to sleep (no work available)
+  WorkerUnpark: 3,// Worker wakes up
+  QueueSample: 4, // Global queue depth sample
+  WakeEvent: 9,   // One task wakes another
+};
+```
+
+## TraceEvent fields
+
+| Field | Present on | Description |
+|-------|-----------|-------------|
+| `timestamp` | all | Monotonic nanoseconds |
+| `workerId` | PollStart/End, Park/Unpark | Which worker thread |
+| `taskId` | PollStart | Which task is being polled |
+| `spawnLoc` | PollStart | Source location where the task was spawned |
+| `localQueue` | PollStart, Park, Unpark | Worker's local queue depth |
+| `globalQueue` | QueueSample | Global injection queue depth |
+| `cpuTime` | Park, Unpark | Cumulative CPU time (ns) for this worker |
+| `schedWait` | Unpark | Kernel scheduling wait time (ns) since last park |
+| `wakerTaskId` | WakeEvent | Task that sent the wake |
+| `wokenTaskId` | WakeEvent | Task that was woken |
+| `targetWorker` | WakeEvent | Worker the wake was sent to |
+
+## CpuSample fields
+
+| Field | Description |
+|-------|-------------|
+| `timestamp` | Monotonic nanoseconds |
+| `workerId` | Worker thread that was sampled |
+| `tid` | OS thread ID |
+| `source` | 0 = CPU profiling sample, 1 = scheduling (off-CPU) sample |
+| `callchain` | Array of address strings like `"0x55cc6d053893"` |
+
+## AllocEvent fields
+
+| Field | Description |
+|-------|-------------|
+| `timestamp` | Monotonic nanoseconds at the allocation |
+| `tid` | OS thread ID of the allocating thread |
+| `size` | Allocation size in bytes |
+| `addr` | Returned pointer address as a decimal string (BigInt-safe) |
+| `callchain` | Array of address strings like `"0x55cc6d053893"` |
+
+## FreeEvent fields
+
+| Field | Description |
+|-------|-------------|
+| `timestamp` | Monotonic nanoseconds at the free |
+| `tid` | OS thread ID of the freeing thread |
+| `addr` | Pointer that was freed, as a decimal string (BigInt-safe) |
+| `size` | Size of the allocation being freed (denormalized from the matching `AllocEvent`) |
+| `allocTimestampNs` | Monotonic-ns timestamp of the original allocation (denormalized) |
+
+## Parse options
+
+```javascript
+const trace = await parseTrace('/path/to/trace.bin', {
+  maxEvents: 100000,        // Cap event count (metadata/symbols always parsed)
+  startTime: 1000000000,    // Filter events to time range (absolute ns)
+  endTime:   2000000000,
+});
+```
+
+## Converting timestamps
+
+Trace timestamps are monotonic nanoseconds. To convert to wall clock:
+
+```javascript
+if (trace.clockOffsetNs != null) {
+  const wallNs = event.timestamp + trace.clockOffsetNs;
+  const wallDate = new Date(wallNs / 1e6);
+}
+```
+
+To get relative time from trace start:
+
+```javascript
+const relativeMs = (event.timestamp - trace.minTs) / 1e6;
+```
+
+## Symbol resolution
+
+```javascript
+const { formatFrame, symbolizeChain, deduplicateSamples } = require('./trace_parser.js');
+
+// Resolve a full callchain to frame objects
+const frames = symbolizeChain(sample.callchain, trace.callframeSymbols);
+// [{symbol: "hyper::proto::h1::dispatch::Dispatcher<...>::poll_inner", location: "hyper-0.14.28/src/proto/h1/dispatch.rs:174"}, ...]
+
+// Format a single frame for display
+const { text, docsUrl } = formatFrame(frames[0]);
+// text: "Dispatcher::poll_inner dispatch.rs:174"
+
+// Deduplicate samples by stack trace
+const groups = deduplicateSamples(trace.cpuSamples, trace.callframeSymbols);
+// [{count: 8932, leaf: "__schedule", frames: [...]}, ...]
+```
+
+## Handling gzip
+
+`parseTrace` automatically decompresses gzip input. Pass `.bin.gz` files directly.
+
+## Merging multiple trace files
+
+Trace files can be concatenated back-to-back. The parser handles multiple concatenated segments transparently (headers, string pools, and schemas are re-read at each boundary).
+
+```bash
+gunzip -k segment-001.bin.gz segment-002.bin.gz segment-003.bin.gz
+cat segment-001.bin segment-002.bin segment-003.bin > combined.bin
+```

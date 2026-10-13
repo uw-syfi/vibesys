@@ -1,0 +1,1126 @@
+#!/usr/bin/env node
+// dial9 trace analysis script: the toolkit's command-line entry point
+// Usage: node analyze.js <trace.bin or directory>
+//   --force    Ignore cached results and re-parse all files
+//   --sample N Only analyze N evenly-spaced files from a directory
+// Modify this script to drill deeper into specific findings.
+
+const fs = require('fs');
+const path = require('path');
+const { createHistogram } = require('perf_hooks');
+
+// The shared trace libraries ship inside the toolkit skill, whose installed
+// directory name belongs to the installer (Symposium suffixes a hash on a
+// collision), so the toolkit is located by content, never by name.
+const TOOLKIT_FILES = ['trace_parser.js', 'trace_analysis.js', 'decode.js'];
+
+function* toolkitCandidates() {
+  yield __dirname;
+  const skillsRoot = path.resolve(__dirname, '..', '..');
+  let siblings = [];
+  try { siblings = fs.readdirSync(skillsRoot).sort(); } catch { /* no skills root above this script */ }
+  for (const entry of siblings) yield path.join(skillsRoot, entry, 'scripts');
+  yield path.resolve(__dirname, '..', '..', '..', 'ui');
+}
+
+function findToolkitDir() {
+  const searched = [];
+  const found = [];
+  const libraries = new Set();
+  for (const dir of toolkitCandidates()) {
+    if (searched.includes(dir) || found.includes(dir)) continue;
+    if (!TOOLKIT_FILES.every(f => fs.existsSync(path.join(dir, f)))) {
+      searched.push(dir);
+      continue;
+    }
+    // One library reached by two routes is not a conflict: a checkout symlinks
+    // the toolkit's scripts/ at ui/, so both qualify and resolve to one file.
+    const first = path.join(dir, TOOLKIT_FILES[0]);
+    let library;
+    try { library = fs.realpathSync(first); } catch { library = first; }
+    if (libraries.has(library)) continue;
+    libraries.add(library);
+    found.push(dir);
+  }
+  if (found.length > 1) {
+    // Copies can be different versions. Choosing one silently would surface as
+    // a decode failure deep in the parser rather than as a resolution problem.
+    console.warn(
+      `warning: ${found.length} dial9 toolkit copies found, using ${found[0]}\n  also: ` +
+      found.slice(1).join('\n  also: ') +
+      '\n  They may be different versions. Remove the ones you do not want.'
+    );
+  }
+  if (found.length > 0) return found[0];
+  throw new Error(
+    `cannot find the dial9 toolkit scripts (${TOOLKIT_FILES.join(', ')}). Searched:\n  ` +
+    searched.join('\n  ') +
+    '\nInstall the dial9-toolkit skill alongside this one, or run from a dial9 checkout.'
+  );
+}
+
+const TOOLKIT_DIR = findToolkitDir();
+function resolve(name) { return path.join(TOOLKIT_DIR, name); }
+
+const { parseTrace, EVENT_TYPES, formatFrame, symbolizeChain, deduplicateSamples, deriveCapabilities } = require(resolve('trace_parser.js'));
+const { activeTaskSeries, buildWorkerSpans, attachCpuSamples, buildActiveTaskTimeline,
+        computeSchedulingDelays, buildSpanData, analyzeAllocations,
+        globalQueueSeries } = require(resolve('trace_analysis.js'));
+const { diagnoseSetup } = require(resolve('diagnose_setup.js'));
+
+// ── Helpers ──
+
+function maxBy(arr, fn) { return arr.reduce((m, x) => Math.max(m, fn(x)), -Infinity); }
+function minBy(arr, fn) { return arr.reduce((m, x) => Math.min(m, fn(x)), Infinity); }
+
+/** Classify a symbol as kernel, libc, allocator, tokio-runtime, or application code */
+function frameKind(sym) {
+  if (!sym || sym.startsWith('0x')) return 'unknown';
+  // C symbols (no :: separator) — check libc first to avoid __GI_ matching kernel __
+  if (!sym.includes('::')) {
+    if (/^(__GI_|__libc_|__pthread_|__clone|start_thread|__poll|__epoll|__futex|malloc|free|mmap|munmap|brk|sbrk)/.test(sym)) return 'libc';
+    if (/^(je_|arena_|tcache_|extent_|large_|slab_|jemalloc)/.test(sym) || /^(mi_|_mi_|mi_heap_|mimalloc)/.test(sym)) return 'allocator';
+    if (/^(__|do_|sys_|entry_|exit_to|irq_|page_|rcu_|synchronize_)/.test(sym)) return 'kernel';
+    if (/^(schedule|expand_fd|expand_files|alloc_fd|ep_poll|ep_send|futex_|sock_|inet_|tcp_|vfs_|filp_|fd_install|ksys_|fput|fget)/.test(sym)) return 'kernel';
+  }
+  // Tokio runtime internals
+  if (/^<?tokio::runtime::(scheduler|task|blocking|context|coop)/.test(sym)) return 'runtime';
+  if (/^std::(panicking|sys|thread)::/.test(sym)) return 'runtime';
+  if (/^<std::(sys|thread)::/.test(sym)) return 'runtime';
+  if (/^core::(ops::function|panicking)::/.test(sym)) return 'runtime';
+  return 'app';
+}
+
+/** Walk a symbolized stack to find the interesting frames:
+ *  - The syscall (first libc frame)
+ *  - The blocking kernel operation (kernel frame that isn't generic plumbing)
+ *  - The first application frame that triggered it
+ *  Returns { syscall, blocker, trigger, classified } */
+function diagnoseStack(frames) {
+  let syscall = null;
+  let trigger = null;
+  let blocker = null;
+  const classified = frames.map(f => ({ ...f, kind: frameKind(f.symbol), display: formatFrame(f).text }));
+
+  // Generic kernel plumbing — not the interesting part
+  const PLUMBING = /^(__schedule|schedule$|schedule_timeout|do_syscall_64|entry_SYSCALL|__x64_sys_|__sys_|__wait_for_common|__wait_rcu_gp)/;
+
+  for (let i = 0; i < classified.length; i++) {
+    const f = classified[i];
+    if (!syscall && f.kind === 'libc') syscall = f;
+    if (!blocker && f.kind === 'kernel' && !PLUMBING.test(f.symbol)) blocker = f;
+    if (!trigger && f.kind === 'app') { trigger = f; break; }
+  }
+  return { syscall, blocker, trigger, classified };
+}
+
+/**
+ * Group off-CPU (scheduling) samples, splitting real blocking from idle parking.
+ *
+ * An off-CPU sample taken *inside a poll* means a task voluntarily blocked
+ * mid-poll — that is real blocking. An off-CPU sample taken *between polls*
+ * means a worker parked because it had no work — that is idle, even though the
+ * park is itself a futex/condvar wait at the kernel level. Reporting both as
+ * "blocking calls" makes a mostly-idle runtime look 100% blocked on a futex.
+ *
+ * attachCpuSamples sets sample.inPoll (true when the sample landed within a
+ * poll). We split on that flag, deduplicate the in-poll stacks for the blocking
+ * report, and attribute them per spawn location.
+ *
+ * Caveat: an async lock wait (lock().await returning Pending) ends the poll, so
+ * its subsequent off-CPU time is tagged between-polls (idle), not in-poll. The
+ * in-poll bucket captures synchronous blocking but not .await-style async lock
+ * waits, so the "idle" bucket should not itself be over-trusted.
+ *
+ * Shared by both analysis paths (accumulateTrace and analyzeWorkerMain) so they
+ * cannot drift apart.
+ *
+ * @param {Array} offCpu - off-CPU samples (source === 1), each with .inPoll/.spawnLoc set
+ * @param {Map} callframeSymbols
+ * @returns {{ inPollGroups: Array, inPollCount: number, idleCount: number, inPollByLoc: Array<{loc: string, count: number}> }}
+ */
+function groupOffCpuSamples(offCpu, callframeSymbols) {
+  const inPoll = [];
+  let idleCount = 0;
+  const byLoc = new Map();
+  for (const s of offCpu) {
+    if (s.inPoll) {
+      inPoll.push(s);
+      const loc = s.spawnLoc || '(unknown spawn location)';
+      byLoc.set(loc, (byLoc.get(loc) || 0) + 1);
+    } else {
+      idleCount++;
+    }
+  }
+  return {
+    inPollGroups: deduplicateSamples(inPoll, callframeSymbols),
+    inPollCount: inPoll.length,
+    idleCount,
+    inPollByLoc: [...byLoc.entries()]
+      .map(([loc, count]) => ({ loc, count }))
+      .sort((a, b) => b.count - a.count),
+  };
+}
+
+function fmtDur(ns) {
+  if (ns >= 1e9) return (ns / 1e9).toFixed(2) + 's';
+  if (ns >= 1e6) return (ns / 1e6).toFixed(2) + 'ms';
+  if (ns >= 1e3) return (ns / 1e3).toFixed(1) + 'µs';
+  return ns + 'ns';
+}
+
+function fmtRel(ns, minTs) { return fmtDur(ns - minTs); }
+
+// ── Main ──
+
+/** Create an empty accumulator for multi-trace analysis. */
+function createAccumulator() {
+  return {
+    workerIds: new Set(),
+    minTs: Infinity, maxTs: -Infinity,
+    eventCount: 0, cpuSampleCount: 0,
+    onCpuSampleCount: 0, offCpuSampleCount: 0,
+    taskSpawnCount: 0, taskAliveAtEnd: 0,
+    maxLocalQueue: 0,
+    workerStats: {},
+    // `longPolls` retains only the worst; `longPollCount` is how many there
+    // actually were, so the report never says "found 100" after truncating.
+    longPolls: [], longPollCount: 0,
+    schedDelayTotal: 0, schedDelayHighCount: 0, schedDelayWorst: [],
+    queueMax: 0, queueSum: 0, queueCount: 0,
+    taskTimelineSamples: [],
+    taskSpawnLocs: new Map(),
+    taskSpawnTimes: new Map(),
+    taskTerminateTimes: new Map(),
+    callframeSymbols: new Map(),
+    cpuGroupMap: new Map(),
+    schedGroupMap: new Map(),
+    // Off-CPU split: in-poll = real blocking, idle = worker parked with no work.
+    inPollGroupMap: new Map(),     // stack key -> in-poll blocking sample group
+    offCpuInPollCount: 0,          // off-CPU samples taken inside a poll (real blocking)
+    offCpuIdleCount: 0,            // off-CPU samples taken between polls (idle parking)
+    inPollByLocMap: new Map(),     // spawnLoc -> in-poll blocking sample count
+    spanStats: new Map(), // spanName -> Histogram
+    pollDurationByLoc: new Map(), // spawnLoc -> Histogram
+    schedDelayHist: null, // Histogram
+    allocEvents: [],
+    freeEvents: [],
+    memoryOverflows: [],
+    tidToWorker: new Map(),
+    pollEvents: [], // PollStart events for per-task alloc attribution
+  };
+}
+
+/** Accumulate one trace's analysis into the running accumulator. */
+function accumulateTrace(acc, trace, sourceFile) {
+  const workerIds = [...new Set(
+    trace.events.filter(e => e.eventType !== EVENT_TYPES.QueueSample && e.eventType !== EVENT_TYPES.WakeEvent)
+      .map(e => e.workerId)
+  )].sort((a, b) => a - b);
+
+  const minTs = trace.minTs;
+  const maxTs = trace.maxTs;
+
+  const spans = buildWorkerSpans(trace.events, workerIds, maxTs, trace.blockInPlaceGaps);
+  attachCpuSamples(trace.cpuSamples, spans.workerSpans);
+  const taskTimeline = buildActiveTaskTimeline(trace.taskSpawnTimes, trace.taskTerminateTimes);
+  const activeTaskSamples = activeTaskSeries(trace, taskTimeline);
+  const schedDelays = computeSchedulingDelays(spans.workerSpans, workerIds, spans.wakesByTask);
+
+  // Scalars
+  for (const w of workerIds) acc.workerIds.add(w);
+  if (minTs < acc.minTs) acc.minTs = minTs;
+  if (maxTs > acc.maxTs) acc.maxTs = maxTs;
+  acc.eventCount += trace.events.length;
+  acc.cpuSampleCount += trace.cpuSamples.length;
+  const onCpu = trace.cpuSamples.filter(s => s.source === 0);
+  const offCpu = trace.cpuSamples.filter(s => s.source === 1);
+  acc.onCpuSampleCount += onCpu.length;
+  acc.offCpuSampleCount += offCpu.length;
+  acc.taskSpawnCount += trace.taskSpawnTimes.size;
+  acc.taskAliveAtEnd += trace.taskSpawnTimes.size - trace.taskTerminateTimes.size;
+  if (spans.maxLocalQueue > acc.maxLocalQueue) acc.maxLocalQueue = spans.maxLocalQueue;
+
+  // Per-worker stats
+  for (const w of workerIds) {
+    const ws = acc.workerStats[w] || (acc.workerStats[w] = {
+      activeNs: 0, parkNs: 0, ratioSum: 0, activeCount: 0,
+      pollCount: 0, parkCount: 0, schedWaits: [],
+    });
+    const s = spans.workerSpans[w];
+    for (const a of s.actives) { ws.activeNs += a.end - a.start; ws.ratioSum += a.ratio; ws.activeCount++; }
+    for (const p of s.parks) { ws.parkNs += p.end - p.start; ws.parkCount++; if (p.schedWait > 0) ws.schedWaits.push(p.schedWait); }
+    ws.pollCount += s.polls.length;
+
+    for (const p of s.polls) {
+      const dur = p.end - p.start;
+      // Poll duration histogram by spawn location
+      const loc = p.spawnLoc || '(unknown)';
+      let h = acc.pollDurationByLoc.get(loc);
+      if (!h) { h = createHistogram(); acc.pollDurationByLoc.set(loc, h); }
+      h.record(Math.max(1, Math.round(dur)));
+
+      if (dur > 1e6) {
+        acc.longPollCount++;
+        acc.longPolls.push({ dur, poll: p, worker: w, file: sourceFile });
+        if (acc.longPolls.length > 200) { acc.longPolls.sort((a, b) => b.dur - a.dur); acc.longPolls.length = 100; }
+      }
+    }
+  }
+
+  // Queue depth
+  for (const q of globalQueueSeries(trace, spans)) {
+    if (q.global > acc.queueMax) acc.queueMax = q.global;
+    acc.queueSum += q.global;
+    acc.queueCount++;
+  }
+
+  // Scheduling delays
+  for (const sd of schedDelays) {
+    acc.schedDelayTotal++;
+    // Histogram
+    if (!acc.schedDelayHist) { acc.schedDelayHist = createHistogram(); }
+    acc.schedDelayHist.record(Math.max(1, Math.round(sd.delay)));
+
+    if (sd.delay > 1e6) {
+      acc.schedDelayHighCount++;
+      acc.schedDelayWorst.push(sd);
+      if (acc.schedDelayWorst.length > 200) { acc.schedDelayWorst.sort((a, b) => b.delay - a.delay); acc.schedDelayWorst.length = 100; }
+    }
+  }
+
+  // Task timeline
+  for (const s of activeTaskSamples) acc.taskTimelineSamples.push(s);
+
+  // Maps
+  for (const [k, v] of trace.taskSpawnLocs) acc.taskSpawnLocs.set(k, v);
+  for (const [k, v] of trace.taskSpawnTimes) acc.taskSpawnTimes.set(k, v);
+  for (const [k, v] of trace.taskTerminateTimes) acc.taskTerminateTimes.set(k, v);
+  for (const [k, v] of trace.callframeSymbols) acc.callframeSymbols.set(k, v);
+
+  // Sample groups — key by full stack to avoid merging unrelated stacks with same leaf
+  for (const g of deduplicateSamples(onCpu, trace.callframeSymbols)) {
+    const key = g.frames.map(f => f.symbol).join('\0');
+    const e = acc.cpuGroupMap.get(key);
+    if (e) e.count += g.count; else acc.cpuGroupMap.set(key, { ...g });
+  }
+  for (const g of deduplicateSamples(offCpu, trace.callframeSymbols)) {
+    const key = g.frames.map(f => f.symbol).join('\0');
+    const e = acc.schedGroupMap.get(key);
+    if (e) e.count += g.count; else acc.schedGroupMap.set(key, { ...g });
+  }
+  // Off-CPU split: real blocking (in-poll) vs idle parking (between polls).
+  const offCpuSplit = groupOffCpuSamples(offCpu, trace.callframeSymbols);
+  acc.offCpuInPollCount += offCpuSplit.inPollCount;
+  acc.offCpuIdleCount += offCpuSplit.idleCount;
+  for (const g of offCpuSplit.inPollGroups) {
+    const key = g.frames.map(f => f.symbol).join('\0');
+    const e = acc.inPollGroupMap.get(key);
+    if (e) e.count += g.count; else acc.inPollGroupMap.set(key, { ...g });
+  }
+  for (const { loc, count } of offCpuSplit.inPollByLoc) {
+    acc.inPollByLocMap.set(loc, (acc.inPollByLocMap.get(loc) || 0) + count);
+  }
+
+  // Span durations (native HDR histogram for bounded memory, exact percentiles)
+  if (trace.customEvents && trace.customEvents.length > 0) {
+    const { allSpans } = buildSpanData(trace.customEvents);
+    for (const s of allSpans) {
+      const dur = Math.max(1, Math.round(s.end - s.start));
+      let h = acc.spanStats.get(s.spanName);
+      if (!h) { h = createHistogram(); acc.spanStats.set(s.spanName, h); }
+      h.record(dur);
+    }
+  }
+
+  // Memory events
+  if (trace.allocEvents) for (const e of trace.allocEvents) acc.allocEvents.push(e);
+  if (trace.freeEvents) for (const e of trace.freeEvents) acc.freeEvents.push(e);
+  if (trace.memoryOverflows) for (const e of trace.memoryOverflows) acc.memoryOverflows.push(e);
+  if (trace.tidToWorker) for (const [k, v] of trace.tidToWorker) acc.tidToWorker.set(k, v);
+  for (const e of trace.events) {
+    if (e.eventType === 0 && e.taskId) acc.pollEvents.push(e); // PollStart
+  }
+}
+
+/** Finalize accumulator into the shape reportAnalysis expects. */
+function finalizeAccumulator(acc) {
+  acc.longPolls.sort((a, b) => b.dur - a.dur);
+  acc.schedDelayWorst.sort((a, b) => b.delay - a.delay);
+  acc.taskTimelineSamples.sort((a, b) => a.t - b.t);
+
+  const workerIds = [...acc.workerIds].sort((a, b) => a - b);
+  const workerSpans = {};
+  for (const w of workerIds) {
+    const ws = acc.workerStats[w] || { activeNs: 0, parkNs: 0, ratioSum: 0, activeCount: 0, pollCount: 0, parkCount: 0, schedWaits: [] };
+    const total = ws.activeNs + ws.parkNs;
+    ws.schedWaits.sort((a, b) => b - a);
+    workerSpans[w] = {
+      utilization: total > 0 ? ws.activeNs / total : 0,
+      avgCpuRatio: ws.activeCount > 0 ? ws.ratioSum / ws.activeCount : 0,
+      pollCount: ws.pollCount, parkCount: ws.parkCount, activeCount: ws.activeCount,
+      schedWaits: ws.schedWaits,
+    };
+  }
+
+  return {
+    workerIds, minTs: acc.minTs, maxTs: acc.maxTs,
+    durationMs: (acc.maxTs - acc.minTs) / 1e6,
+    eventCount: acc.eventCount, cpuSampleCount: acc.cpuSampleCount,
+    onCpuSampleCount: acc.onCpuSampleCount, offCpuSampleCount: acc.offCpuSampleCount,
+    taskSpawnCount: acc.taskSpawnCount, taskAliveAtEnd: acc.taskAliveAtEnd,
+    maxLocalQueue: acc.maxLocalQueue,
+    workerSpans,
+    longPolls: acc.longPolls, longPollCount: acc.longPollCount,
+    schedDelayStats: { total: acc.schedDelayTotal, highCount: acc.schedDelayHighCount, worst: acc.schedDelayWorst },
+    schedDelays: acc.schedDelayWorst,
+    queueDepthStats: { max: acc.queueMax, avg: acc.queueCount > 0 ? acc.queueSum / acc.queueCount : 0, samples: acc.queueCount },
+    taskTimeline: { activeTaskSamples: acc.taskTimelineSamples },
+    taskSpawnLocs: acc.taskSpawnLocs, taskSpawnTimes: acc.taskSpawnTimes,
+    taskTerminateTimes: acc.taskTerminateTimes, callframeSymbols: acc.callframeSymbols,
+    cpuGroups: [...acc.cpuGroupMap.values()].sort((a, b) => b.count - a.count),
+    schedGroups: [...acc.schedGroupMap.values()].sort((a, b) => b.count - a.count),
+    // Off-CPU split: in-poll groups are real blocking; idle is parked-with-no-work.
+    inPollGroups: [...acc.inPollGroupMap.values()].sort((a, b) => b.count - a.count),
+    offCpuInPollCount: acc.offCpuInPollCount,
+    offCpuIdleCount: acc.offCpuIdleCount,
+    inPollByLoc: [...acc.inPollByLocMap.entries()]
+      .map(([loc, count]) => ({ loc, count }))
+      .sort((a, b) => b.count - a.count),
+    spanStats: acc.spanStats,
+    pollDurationByLoc: acc.pollDurationByLoc,
+    schedDelayHist: acc.schedDelayHist,
+    memory: analyzeAllocations(acc.allocEvents, acc.freeEvents, {
+      events: acc.pollEvents,
+      tidToWorker: acc.tidToWorker,
+      memoryOverflows: acc.memoryOverflows,
+    }),
+  };
+}
+
+/** Print analysis report from pre-computed results. */
+function reportAnalysis(a, label) {
+  const { workerIds, minTs, durationMs,
+          callframeSymbols, taskSpawnLocs, taskSpawnTimes, taskTerminateTimes } = a;
+
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`TRACE SUMMARY: ${label}`);
+  console.log(`${'='.repeat(60)}`);
+  if (a.files && a.files.length > 0) {
+    console.log(`Files (${a.files.length}):`);
+    for (const f of a.files) console.log(`  ${f}`);
+  }
+  console.log(`Duration:       ${durationMs.toFixed(1)}ms`);
+  console.log(`Workers:        ${workerIds.length} (IDs: ${workerIds.join(', ')})`);
+  console.log(`Events:         ${a.eventCount.toLocaleString()}`);
+  console.log(`CPU samples:    ${a.cpuSampleCount.toLocaleString()}`);
+  console.log(`Tasks spawned:  ${a.taskSpawnCount}`);
+
+  // ── Worker utilization ──
+  console.log(`\n${'─'.repeat(60)}`);
+  console.log(`WORKER UTILIZATION`);
+  console.log(`${'─'.repeat(60)}`);
+  for (const w of workerIds) {
+    const ws = a.workerSpans[w];
+    const total = ws.utilization;
+    const util = (total * 100).toFixed(1);
+    const avgCpu = ws.activeCount > 0 ? ws.avgCpuRatio.toFixed(3) : 'N/A';
+    console.log(`  Worker ${w}: ${util}% active, ${ws.pollCount} polls, ${ws.parkCount} parks, avg CPU ratio: ${avgCpu}`);
+  }
+
+  // ── Long polls ──
+  //
+  // Severity-ranked: the >1ms line is the pass/fail signal ("none found" means
+  // a healthy trace), and what follows is the WORST few of however many
+  // crossed it - never a count of the truncated list.
+  console.log(`\n${'─'.repeat(60)}`);
+  console.log(`LONG POLLS (>1ms)`);
+  console.log(`${'─'.repeat(60)}`);
+  const longPolls = a.longPolls;
+  const longPollCount = a.longPollCount != null ? a.longPollCount : longPolls.length;
+
+  if (longPollCount === 0) {
+    console.log('  None found ✅');
+  } else {
+    const shown = Math.min(longPolls.length, 10);
+    const worst = longPolls.length > 0 ? fmtDur(longPolls[0].dur) : 'n/a';
+    console.log(`  Found ${longPollCount} long poll(s) — worst ${worst}`);
+    console.log(`  Showing the worst ${shown}, ranked by duration\n`);
+    for (const lp of longPolls.slice(0, 10)) {
+      const p = lp.poll;
+      console.log(`  ▸ ${fmtDur(lp.dur)} on worker ${lp.worker} at ${fmtRel(p.start, minTs)}${lp.file ? ' [' + lp.file + ']' : ''}`);
+      console.log(`    Task ${p.taskId}, spawn: ${p.spawnLoc || '(unknown)'}`);
+
+      if (p.schedSamples?.length) {
+        console.log(`    ${p.schedSamples.length} scheduling sample(s) — blocking call stacks:`);
+        for (const s of p.schedSamples) {
+          const frames = symbolizeChain(s.callchain, callframeSymbols);
+          const { syscall, blocker, trigger, classified } = diagnoseStack(frames);
+          if (blocker) console.log(`      Blocked by:  ${blocker.symbol} (kernel)`);
+          if (syscall) console.log(`      Syscall:     ${syscall.display}`);
+          if (trigger) {
+            console.log(`      Called from:  ${trigger.display}`);
+            if (trigger.location) console.log(`        at ${trigger.location}`);
+          }
+          const kernelPath = classified.filter(f => f.kind === 'kernel').map(f => f.symbol);
+          if (kernelPath.length > 1) console.log(`      Kernel path: ${kernelPath.join(' → ')}`);
+          const appFrames = classified.filter(f => f.kind === 'app');
+          if (appFrames.length > 0) {
+            console.log(`      App call chain (${appFrames.length} frames):`);
+            const show = appFrames.length <= 8 ? appFrames : [
+              ...appFrames.slice(0, 3),
+              { display: `... ${appFrames.length - 6} more frames ...`, kind: 'ellipsis' },
+              ...appFrames.slice(-3),
+            ];
+            for (const f of show) console.log(`        ${f.display}`);
+          }
+        }
+      }
+      if (p.cpuSamples?.length) {
+        console.log(`    ${p.cpuSamples.length} CPU sample(s) — on-CPU stacks:`);
+        for (const s of p.cpuSamples.slice(0, 3)) {
+          const frames = symbolizeChain(s.callchain, callframeSymbols);
+          const { classified } = diagnoseStack(frames);
+          const appFrames = classified.filter(f => f.kind === 'app');
+          if (appFrames.length > 0) {
+            const show = appFrames.length <= 8 ? appFrames : [
+              ...appFrames.slice(0, 3),
+              { display: `... ${appFrames.length - 6} more frames ...`, location: null },
+              ...appFrames.slice(-3),
+            ];
+            for (const f of show) {
+              const loc = f.location ? ` [${f.location}]` : '';
+              console.log(`      ${f.display}${loc}`);
+            }
+            if (p.cpuSamples.length > 1) console.log();
+          }
+        }
+      }
+      if (!p.schedSamples?.length && !p.cpuSamples?.length) {
+        console.log(`    (no profiling samples captured during this poll)`);
+      }
+      console.log();
+    }
+  }
+
+  // ── Scheduling delays ──
+  console.log(`${'─'.repeat(60)}`);
+  console.log(`SCHEDULING DELAYS (wake → poll latency)`);
+  console.log(`${'─'.repeat(60)}`);
+  const sds = a.schedDelayStats;
+  if (sds.total === 0) {
+    console.log('  No tasks instrumented — use dial9::spawn() to measure scheduling delays');
+  } else if (sds.highCount === 0) {
+    console.log('  No delays > 1ms ✅');
+  } else {
+    const sorted = sds.worst.slice().sort((a, b) => b.delay - a.delay);
+    console.log(`  ${sds.highCount} delays > 1ms`);
+    if (a.schedDelayHist) {
+      console.log(`  p50: ${fmtDur(a.schedDelayHist.percentile(50))}, p99: ${fmtDur(a.schedDelayHist.percentile(99))}, max: ${fmtDur(a.schedDelayHist.max)}`);
+    }
+    console.log(`\n  Top 5 worst:`);
+    for (const d of sorted.slice(0, 5)) {
+      console.log(`    ${fmtDur(d.delay)} — task ${d.taskId} (spawn: ${d.poll?.spawnLoc || '?'}) at ${fmtRel(d.wakeTime, minTs)}`);
+    }
+  }
+
+  // ── Poll duration by spawn location ──
+  if (a.pollDurationByLoc && a.pollDurationByLoc.size > 0) {
+    console.log(`\n${'─'.repeat(60)}`);
+    console.log(`POLL DURATION BY SPAWN LOCATION`);
+    console.log(`${'─'.repeat(60)}`);
+    const entries = [...a.pollDurationByLoc.entries()].sort((x, y) => y[1].max - x[1].max);
+    for (const [loc, h] of entries) {
+      const maxMs = h.max / 1e6;
+      const flag = maxMs > 10 ? ' ⚠️' : maxMs > 1 ? ' 🟡' : '';
+      console.log(`  ${loc}: count=${h.count} p50=${(h.percentile(50)/1e3).toFixed(1)}µs p99=${(h.percentile(99)/1e3).toFixed(1)}µs max=${maxMs.toFixed(2)}ms${flag}`);
+    }
+  }
+
+  // ── Task lifecycle ──
+  console.log(`\n${'─'.repeat(60)}`);
+  console.log(`TASK LIFECYCLE`);
+  console.log(`${'─'.repeat(60)}`);
+  const spawnCounts = new Map();
+  for (const [, loc] of taskSpawnLocs) {
+    spawnCounts.set(loc || '(unknown)', (spawnCounts.get(loc || '(unknown)') || 0) + 1);
+  }
+  console.log('  Spawns by location:');
+  for (const [loc, count] of [...spawnCounts.entries()].sort((a, b) => b[1] - a[1])) {
+    console.log(`    ${String(count).padStart(5)} × ${loc}`);
+  }
+
+  const atSamples = a.taskTimeline.activeTaskSamples;
+  if (atSamples.length > 0) {
+    const first = atSamples[0].count;
+    const alive = atSamples[atSamples.length - 1].count;
+    const peak = atSamples.reduce((m, s) => Math.max(m, s.count), -Infinity);
+    console.log(`\n  Peak active tasks: ${peak}`);
+    console.log(`  Active at first sample: ${first}`);
+    console.log(`  Active at last sample: ${alive}`);
+    if (alive > peak / 2 && alive === peak) {
+      console.log('  ⚠ POSSIBLE TASK LEAK — active count grew monotonically');
+      const alive = new Map();
+      for (const [taskId] of taskSpawnTimes) {
+        if (!taskTerminateTimes.has(taskId)) {
+          const loc = taskSpawnLocs.get(taskId) || '(unknown)';
+          alive.set(loc, (alive.get(loc) || 0) + 1);
+        }
+      }
+      for (const [loc, count] of [...alive.entries()].sort((a, b) => b[1] - a[1])) {
+        console.log(`    ${count} leaked from ${loc}`);
+      }
+    }
+  }
+
+  // ── Blocking calls ──
+  console.log(`\n${'─'.repeat(60)}`);
+  console.log(`BLOCKING CALLS (scheduling/off-CPU samples)`);
+  console.log(`${'─'.repeat(60)}`);
+  if (a.offCpuSampleCount === 0) {
+    console.log('  ℹ️  Schedule profiling not enabled — no off-CPU stack traces available.');
+    console.log('     Enable with DIAL9_SCHEDULE_PROFILE_ENABLED=true to capture blocking call stacks.');
+    // Show any active periods where CPU ratio was low (worker was off-CPU during active work)
+    const offCpuPeriods = [];
+    for (const w of workerIds) {
+      const ws = a.workerSpans[w];
+      if (ws.schedWaits && ws.schedWaits.length > 0) {
+        const over1ms = ws.schedWaits.filter(w => w > 1e6);
+        if (over1ms.length > 0) {
+          offCpuPeriods.push({ worker: w, count: over1ms.length, maxMs: over1ms[0] / 1e6 });
+        }
+      }
+    }
+    if (offCpuPeriods.length > 0) {
+      console.log(`\n  Workers with kernel scheduling delays > 1ms (possible blocking):`);
+      for (const p of offCpuPeriods.sort((a, b) => b.maxMs - a.maxMs)) {
+        console.log(`    Worker ${p.worker}: ${p.count} events, max ${p.maxMs.toFixed(1)}ms`);
+      }
+    }
+  } else {
+    const inPoll = a.offCpuInPollCount || 0;
+    const idle = a.offCpuIdleCount || 0;
+    console.log(`  ${a.offCpuSampleCount} off-CPU sample(s): ${inPoll} IN-POLL (real blocking), ${idle} idle-park`);
+    console.log(`  NOTE: idle-park = a worker with no work parked between polls (itself a futex/condvar`);
+    console.log(`        wait); it is NOT blocking. Only IN-POLL samples are a task blocked mid-poll.\n`);
+
+    if (inPoll === 0) {
+      console.log('  No in-poll blocking detected — all off-CPU samples are idle worker parking. ✅');
+    } else {
+      // Per-spawn-location attribution of the real (in-poll) blocking.
+      console.log(`  IN-POLL blocking by task spawn location:`);
+      for (const { loc, count } of (a.inPollByLoc || []).slice(0, 10)) {
+        const pct = (count / inPoll * 100).toFixed(1);
+        console.log(`    ${String(count).padStart(5)} (${pct}%) — ${loc}`);
+      }
+      // Blocking call stacks for the in-poll samples (the actionable part).
+      console.log(`\n  IN-POLL blocking call stacks:`);
+      for (const g of (a.inPollGroups || []).slice(0, 10)) {
+        const pct = (g.count / inPoll * 100).toFixed(1);
+        const { syscall, blocker, trigger } = diagnoseStack(g.frames);
+        console.log(`  ${String(g.count).padStart(5)} samples (${pct}%) — leaf: ${g.leaf}`);
+        if (blocker) console.log(`         blocked by: ${blocker.symbol} (kernel)`);
+        if (syscall) console.log(`         syscall:    ${syscall.display}`);
+        if (trigger) console.log(`         called from: ${trigger.display}`);
+      }
+    }
+    // Caveat: an async lock wait (lock().await returning Pending) ends the poll,
+    // so its subsequent off-CPU time is tagged idle, not in-poll. The in-poll
+    // bucket captures synchronous blocking but not .await-style async lock waits.
+    console.log(`\n  Caveat: an async lock wait (lock().await) ends the poll, so its off-CPU time`);
+    console.log(`          is counted as idle-park, not in-poll. The IN-POLL bucket captures`);
+    console.log(`          synchronous blocking but not .await-style async lock waits. To see async lock wait, consider enabling task dumps`);
+  }
+
+  // ── CPU hotspots ──
+  console.log(`\n${'─'.repeat(60)}`);
+  console.log(`CPU HOTSPOTS (on-CPU samples)`);
+  console.log(`${'─'.repeat(60)}`);
+  if (a.onCpuSampleCount === 0) {
+    console.log('  No CPU samples in trace');
+  } else {
+    console.log(`  ${a.onCpuSampleCount} CPU sample(s)\n`);
+    // Build a flamegraph tree from app-level frames
+    const root = { name: '(all)', count: 0, self: 0, children: new Map() };
+    for (const g of a.cpuGroups) {
+      const { classified } = diagnoseStack(g.frames);
+      const appFrames = classified.filter(f => f.kind === 'app');
+      if (appFrames.length === 0) continue;
+      // Walk from root (deepest caller) to leaf
+      let node = root;
+      node.count += g.count;
+      for (let i = appFrames.length - 1; i >= 0; i--) {
+        const name = appFrames[i].display;
+        let child = node.children.get(name);
+        if (!child) { child = { name, count: 0, self: 0, children: new Map() }; node.children.set(name, child); }
+        child.count += g.count;
+        if (i === 0) child.self += g.count;
+        node = child;
+      }
+    }
+    // Print top-down, collapsing single-child chains
+    function printTree(node, indent, minPct) {
+      const sorted = [...node.children.values()].sort((a, b) => b.count - a.count);
+      for (const child of sorted) {
+        const pct = (child.count / a.onCpuSampleCount * 100);
+        if (pct < minPct) continue;
+        const selfStr = child.self > 0 ? ` (self: ${child.self})` : '';
+        console.log(`${indent}${child.count} samples (${pct.toFixed(1)}%) ${child.name}${selfStr}`);
+        if (child.children.size > 0) printTree(child, indent + '  ', minPct);
+      }
+    }
+    printTree(root, '  ', 1.0);
+  }
+
+  // ── Queue depth ──
+  console.log(`\n${'─'.repeat(60)}`);
+  console.log(`QUEUE DEPTH`);
+  console.log(`${'─'.repeat(60)}`);
+  const qd = a.queueDepthStats;
+  if (qd.samples > 0) {
+    console.log(`  Global queue: max=${qd.max}, avg=${qd.avg.toFixed(1)}, samples=${qd.samples}`);
+    if (qd.max > 100) console.log('  ⚠ High queue depth — runtime may be overloaded');
+  } else {
+    console.log('  No queue samples');
+  }
+  console.log(`  Max local queue: ${a.maxLocalQueue}`);
+
+  // ── Kernel scheduling wait ──
+  console.log(`\n${'─'.repeat(60)}`);
+  console.log(`KERNEL SCHEDULING WAIT`);
+  console.log(`${'─'.repeat(60)}`);
+  for (const w of workerIds) {
+    const ws = a.workerSpans[w];
+    if (ws.schedWaits.length === 0) continue;
+    const waits = ws.schedWaits;
+    const max = waits[0]; // already sorted descending
+    const p50 = waits[Math.floor(waits.length * 0.5)];
+    console.log(`  Worker ${w}: max=${(max/1e6).toFixed(1)}ms, p50=${(p50/1e6).toFixed(2)}ms, ${waits.filter(w => w > 1e6).length} events > 1ms`);
+  }
+
+  // ── Span durations ──
+  if (a.spanStats && a.spanStats.size > 0) {
+    console.log(`\n${'─'.repeat(60)}`);
+    console.log(`SPAN DURATIONS`);
+    console.log(`${'─'.repeat(60)}`);
+    for (const [name, h] of [...a.spanStats.entries()].sort((x, y) => y[1].count - x[1].count)) {
+      console.log(`  ${name}: count=${h.count} p50=${(h.percentile(50)/1e3).toFixed(1)}µs p99=${(h.percentile(99)/1e3).toFixed(1)}µs max=${(h.max/1e3).toFixed(1)}µs`);
+    }
+  }
+
+  // ── Memory ──
+  if (a.memory && a.memory.summary.totalAllocCount > 0) {
+    const m = a.memory;
+    console.log(`\n${'─'.repeat(60)}`);
+    console.log(`MEMORY ALLOCATIONS`);
+    console.log(`${'─'.repeat(60)}`);
+    console.log(`  Sample rate:  ${m.sampleRateBytes.toLocaleString()} bytes`);
+    console.log(`  Formula:      weight(s) = s / (1 - exp(-s / R)),  estimated_total = Σ weight(s_i)`);
+    console.log(`  Total allocs: ${m.summary.totalAllocCount} sampled, ~${m.summary.estimatedTotalBytes.toLocaleString()} bytes estimated`);
+    console.log(`  Total frees:  ${m.summary.totalFreeCount}`);
+    console.log(`  Leaked:       ${m.summary.leakedCount} allocs, ${m.summary.leakedBytes.toLocaleString()} sampled bytes`);
+    if (m.summary.totalDroppedAllocs > 0 || m.summary.totalDroppedFrees > 0) {
+      console.log(`  ⚠️  Ring buffer overflow: ${m.summary.totalDroppedAllocs} alloc samples and ${m.summary.totalDroppedFrees} free samples dropped`);
+      if (m.summary.totalDroppedAllocs > 0) {
+        console.log(`      Dropped allocs cause underreporting of allocation volume — increase ring_capacity`);
+      }
+      if (m.summary.totalDroppedFrees > 0) {
+        console.log(`      Dropped frees cause false positives in leak analysis — increase ring_capacity`);
+      }
+    }
+    if (m.topSites.length > 0) {
+      console.log(`\n  Top allocation sites:`);
+      for (const s of m.topSites.slice(0, 10)) {
+        const frames = symbolizeChain(s.callchain, callframeSymbols);
+        const syms = frames.slice(0, 16).map(f => f.symbol);
+        if (frames.length > 16) syms.push(`... ${frames.length - 16} more`);
+        console.log(`    ~${Math.round(s.estimatedBytes).toLocaleString()} bytes estimated (${s.count} samples)`);
+        console.log(`      ${syms.join(' > ')}`);
+      }
+    }
+    if (m.perTask.size > 0) {
+      console.log(`\n  Per-task allocations (top 20):`);
+      const sorted = [...m.perTask.entries()].sort((a, b) => b[1].estimatedBytes - a[1].estimatedBytes);
+      for (const [taskId, t] of sorted.slice(0, 20)) {
+        const loc = taskSpawnLocs.get(taskId) || '(unknown)';
+        console.log(`    task ${taskId}: ~${Math.round(t.estimatedBytes).toLocaleString()} bytes (${t.count} samples)  ${loc}`);
+      }
+    }
+  }
+
+  console.log(`\n${'='.repeat(60)}`);
+}
+
+/**
+ * Analyze traces from a file or directory. Returns a finalized accumulator
+ * with aggregated stats, histograms, and top-N results.
+ * For directories, parsing and analysis run in parallel subprocesses.
+ * @param {string} tracePath - file or directory path
+ * @param {Object} [opts] - { force, sample, onParseProgress }
+ */
+async function analyzeTraces(tracePath, opts) {
+  opts = opts || {};
+  const isDir = fs.statSync(tracePath).isDirectory();
+  const acc = createAccumulator();
+
+  if (!isDir) {
+    const { onParseProgress, onParseComplete, onAnalysisProgress, ...parseOpts } = opts;
+    const iter = parseTrace(tracePath, parseOpts);
+    for await (const trace of iter) {
+      accumulateTrace(acc, trace, path.basename(tracePath));
+    }
+    const result = finalizeAccumulator(acc);
+    result.files = [path.basename(tracePath)];
+    return result;
+  }
+
+  // Phase 1: parallel parse (populate cache)
+  const parseOpts = { ...opts };
+  parseOpts.onParseProgress = opts.onParseProgress || null;
+  const iter = parseTrace(tracePath, parseOpts);
+  if (iter.allCached) await iter.allCached;
+  else { for await (const _ of iter) {} }
+  if (opts.onParseComplete) opts.onParseComplete();
+
+  // Phase 2: parallel analysis via accumulate workers
+  const { execFile } = require('child_process');
+  const os = require('os');
+  const cacheDir = path.join(tracePath, '.d9-cache');
+  const cacheFiles = iter.files.map(f => f.replace(/\.(bin|bin\.gz)$/, '') + '.json');
+
+  const accWorkerCandidate = path.resolve(__dirname, 'analyze.js');
+  const accWorkerFallback = path.resolve(__dirname, '..', 'skills', 'analyze.js');
+  const accWorkerScript = fs.existsSync(accWorkerCandidate) ? accWorkerCandidate : accWorkerFallback;
+
+  const concurrency = Math.min(os.cpus().length, 32);
+  let analyzed = 0;
+
+  await new Promise((resolveAll, rejectAll) => {
+    let nextIdx = 0;
+    let active = 0;
+    let failed = false;
+
+    function dispatch() {
+      while (active < concurrency && nextIdx < cacheFiles.length) {
+        const cf = cacheFiles[nextIdx++];
+        active++;
+        execFile(process.execPath, [accWorkerScript, '--analyze-worker', path.join(cacheDir, cf)], { maxBuffer: 256 * 1024 * 1024 }, (err, stdout, stderr) => {
+          if (failed) return;
+          if (err) { failed = true; rejectAll(new Error(`Analysis failed for ${cf}: ${stderr || err.message}`)); return; }
+          try {
+            mergePartial(acc, JSON.parse(stdout));
+            analyzed++;
+            if (opts.onAnalysisProgress) opts.onAnalysisProgress({ done: analyzed, total: cacheFiles.length, file: cf });
+          } catch (e) { failed = true; rejectAll(e); return; }
+          active--;
+          if (analyzed === cacheFiles.length) resolveAll();
+          else dispatch();
+        });
+      }
+    }
+    dispatch();
+  });
+
+  const result = finalizeAccumulator(acc);
+  result.files = iter.files || [];
+  return result;
+}
+
+async function main() {
+  const TRACE_PATH = process.argv[2];
+  if (!TRACE_PATH) { console.error('Usage: node analyze.js <trace.bin or directory>'); process.exit(1); }
+  const FORCE = process.argv.includes('--force');
+  const sampleIdx = process.argv.indexOf('--sample');
+  const SAMPLE = sampleIdx !== -1 ? Number(process.argv[sampleIdx + 1]) : null;
+
+  const isDir = fs.statSync(TRACE_PATH).isDirectory();
+
+  if (isDir) process.stderr.write(`Analyzing directory: ${TRACE_PATH}\n`);
+  else process.stderr.write(`Loading ${TRACE_PATH}...\n`);
+
+  const result = await analyzeTraces(TRACE_PATH, {
+    force: FORCE,
+    sample: SAMPLE || undefined,
+    onParseProgress: isDir ? ({ done, total, cached }) => {
+      if (done === 0) process.stderr.write(`Found ${total} trace file(s)\n`);
+      else if (done === total || done % Math.max(1, Math.floor(total / 100)) === 0) {
+        const cachedStr = cached > 0 ? ` (${cached} cached)` : '';
+        process.stderr.write(`\r  parsing: [${done}/${total}]${cachedStr}\x1b[K`);
+      }
+    } : undefined,
+    onParseComplete: isDir ? () => {
+      process.stderr.write('\n');
+    } : undefined,
+    onAnalysisProgress: isDir ? ({ done, total }) => {
+      if (done === total || done % Math.max(1, Math.floor(total / 100)) === 0) process.stderr.write(`\r  analyzing: [${done}/${total}]\x1b[K`);
+    } : undefined,
+  });
+  if (isDir) process.stderr.write('\n');
+
+  const label = isDir ? `${result.files ? result.files.length : ''} files in ${path.basename(TRACE_PATH)}` : path.basename(TRACE_PATH);
+  await diagnoseSetup(TRACE_PATH);
+  reportAnalysis(result, label);
+}
+
+/** Merge a partial accumulator (from accumulate_worker) into the main accumulator. */
+function mergePartial(acc, p) {
+  for (const w of p.workerIds) acc.workerIds.add(w);
+  if (p.minTs < acc.minTs) acc.minTs = p.minTs;
+  if (p.maxTs > acc.maxTs) acc.maxTs = p.maxTs;
+  acc.eventCount += p.eventCount;
+  acc.cpuSampleCount += p.cpuSampleCount;
+  acc.onCpuSampleCount += p.onCpuSampleCount;
+  acc.offCpuSampleCount += p.offCpuSampleCount;
+  acc.taskSpawnCount += p.taskSpawnCount;
+  acc.taskAliveAtEnd += p.taskAliveAtEnd;
+  if (p.maxLocalQueue > acc.maxLocalQueue) acc.maxLocalQueue = p.maxLocalQueue;
+
+  // Worker stats
+  for (const [w, ws] of Object.entries(p.workerStats)) {
+    const dst = acc.workerStats[w] || (acc.workerStats[w] = {
+      activeNs: 0, parkNs: 0, ratioSum: 0, activeCount: 0, pollCount: 0, parkCount: 0, schedWaits: [],
+    });
+    dst.activeNs += ws.activeNs; dst.parkNs += ws.parkNs;
+    dst.ratioSum += ws.ratioSum; dst.activeCount += ws.activeCount;
+    dst.pollCount += ws.pollCount; dst.parkCount += ws.parkCount;
+    for (const sw of ws.schedWaits) dst.schedWaits.push(sw);
+  }
+
+  // Long polls
+  acc.longPollCount += p.longPollCount;
+  for (const lp of p.longPolls) acc.longPolls.push(lp);
+  if (acc.longPolls.length > 200) { acc.longPolls.sort((a, b) => b.dur - a.dur); acc.longPolls.length = 100; }
+
+  // Queue
+  if (p.queueMax > acc.queueMax) acc.queueMax = p.queueMax;
+  acc.queueSum += p.queueSum;
+  acc.queueCount += p.queueCount;
+
+  // Sched delays
+  acc.schedDelayTotal += p.schedDelayTotal;
+  acc.schedDelayHighCount += p.schedDelayHighCount;
+  for (const sd of p.schedDelayWorst) acc.schedDelayWorst.push(sd);
+  if (acc.schedDelayWorst.length > 200) { acc.schedDelayWorst.sort((a, b) => b.delay - a.delay); acc.schedDelayWorst.length = 100; }
+  // Feed delay values into histogram
+  if (p.schedDelayValues) {
+    if (!acc.schedDelayHist) acc.schedDelayHist = createHistogram();
+    for (const v of p.schedDelayValues) acc.schedDelayHist.record(v);
+  }
+
+  // Task timeline
+  for (const s of p.taskTimelineSamples) acc.taskTimelineSamples.push(s);
+
+  // Maps
+  if (p.taskSpawnLocs) for (const [k, v] of p.taskSpawnLocs) acc.taskSpawnLocs.set(k, v);
+  if (p.taskSpawnTimes) for (const [k, v] of p.taskSpawnTimes) acc.taskSpawnTimes.set(k, v);
+  if (p.taskTerminateTimes) for (const [k, v] of p.taskTerminateTimes) acc.taskTerminateTimes.set(k, v);
+  if (p.callframeSymbols) for (const [k, v] of p.callframeSymbols) acc.callframeSymbols.set(k, v);
+
+  // Sample groups — key by full stack to avoid merging unrelated stacks with same leaf
+  for (const g of (p.cpuGroups || [])) {
+    const key = g.frames.map(f => f.symbol).join('\0');
+    const e = acc.cpuGroupMap.get(key);
+    if (e) e.count += g.count; else acc.cpuGroupMap.set(key, { ...g });
+  }
+  for (const g of (p.schedGroups || [])) {
+    const key = g.frames.map(f => f.symbol).join('\0');
+    const e = acc.schedGroupMap.get(key);
+    if (e) e.count += g.count; else acc.schedGroupMap.set(key, { ...g });
+  }
+  // Off-CPU split: in-poll blocking groups + in-poll/idle counts + per-loc attribution.
+  acc.offCpuInPollCount += p.offCpuInPollCount || 0;
+  acc.offCpuIdleCount += p.offCpuIdleCount || 0;
+  for (const g of (p.inPollGroups || [])) {
+    const key = g.frames.map(f => f.symbol).join('\0');
+    const e = acc.inPollGroupMap.get(key);
+    if (e) e.count += g.count; else acc.inPollGroupMap.set(key, { ...g });
+  }
+  for (const { loc, count } of (p.inPollByLoc || [])) {
+    acc.inPollByLocMap.set(loc, (acc.inPollByLocMap.get(loc) || 0) + count);
+  }
+
+  // Poll durations by location -> histogram
+  for (const [loc, durations] of Object.entries(p.pollDurationsByLoc || {})) {
+    let h = acc.pollDurationByLoc.get(loc);
+    if (!h) { h = createHistogram(); acc.pollDurationByLoc.set(loc, h); }
+    for (const d of durations) h.record(d);
+  }
+
+  // Span durations -> histogram
+  for (const [name, durations] of Object.entries(p.spanDurations || {})) {
+    let h = acc.spanStats.get(name);
+    if (!h) { h = createHistogram(); acc.spanStats.set(name, h); }
+    for (const d of durations) h.record(d);
+  }
+}
+
+// Run CLI if executed directly, export if required as module
+// ── Worker modes (invoked as subprocesses) ──
+
+function mapToEntries(m) { return m instanceof Map ? [...m.entries()] : m; }
+
+async function parseWorkerMain(traceFile, cachePath) {
+  const trace = await parseTrace(fs.readFileSync(traceFile));
+  const tmpPath = cachePath + '.tmp';
+  const stream = fs.createWriteStream(tmpPath);
+  function writeLine(obj) { stream.write(JSON.stringify(obj) + '\n'); }
+
+  writeLine({ t: 'm', d: {
+    magic: trace.magic, version: trace.version,
+    minTs: trace.minTs, maxTs: trace.maxTs,
+    recordMinTs: trace.recordMinTs, recordMaxTs: trace.recordMaxTs,
+    truncated: trace.truncated, timeFiltered: trace.timeFiltered,
+    filterStartTime: trace.filterStartTime, filterEndTime: trace.filterEndTime,
+    hasCpuTime: trace.hasCpuTime, hasSchedWait: trace.hasSchedWait, hasTaskTracking: trace.hasTaskTracking,
+    hasFullTaskCoverage: trace.hasFullTaskCoverage, hasLocalQueueDepth: trace.hasLocalQueueDepth, hasTaskLifetimes: trace.hasTaskLifetimes,
+    sealedFiles: trace.sealedFiles, incompleteFiles: trace.incompleteFiles,
+    spawnLocations: mapToEntries(trace.spawnLocations),
+    taskSpawnLocs: mapToEntries(trace.taskSpawnLocs),
+    taskSpawnTimes: mapToEntries(trace.taskSpawnTimes),
+    taskTerminateTimes: mapToEntries(trace.taskTerminateTimes),
+    callframeSymbols: mapToEntries(trace.callframeSymbols),
+    threadNames: mapToEntries(trace.threadNames),
+    runtimeWorkers: mapToEntries(trace.runtimeWorkers),
+    segmentMetadata: mapToEntries(trace.segmentMetadata),
+    taskDumps: mapToEntries(trace.taskDumps),
+    clockSyncAnchors: trace.clockSyncAnchors, clockOffsetNs: trace.clockOffsetNs,
+    blockInPlaceGaps: trace.blockInPlaceGaps || [],
+    // Per-runtime scheduler samples: the global-queue series comes from these on
+    // current traces (buildWorkerSpans' queueSamples is empty once producers
+    // emit RuntimeMetricsEvent instead of QueueSampleEvent).
+    runtimeMetrics: trace.runtimeMetrics || [],
+    legacyActiveTaskSamples: trace.legacyActiveTaskSamples || [],
+  }});
+  for (const e of trace.events) writeLine({ t: 'e', d: e });
+  for (const s of trace.cpuSamples) writeLine({ t: 'c', d: s });
+  if (trace.customEvents) for (const x of trace.customEvents) writeLine({ t: 'x', d: x });
+  if (trace.allocEvents) for (const a of trace.allocEvents) writeLine({ t: 'a', d: a });
+  if (trace.freeEvents) for (const f of trace.freeEvents) writeLine({ t: 'f', d: f });
+  if (trace.memoryOverflows) for (const o of trace.memoryOverflows) writeLine({ t: 'o', d: o });
+
+  await new Promise((res, rej) => { stream.end(() => { fs.renameSync(tmpPath, cachePath); res(); }); stream.on('error', rej); });
+  process.stdout.write('OK\n');
+}
+
+function loadCacheFile(cachePath) {
+  const buf = fs.readFileSync(cachePath);
+  let pos = 0;
+  function nextLine() {
+    const nl = buf.indexOf(10, pos);
+    if (nl === -1) { if (pos < buf.length) { const s = buf.toString('utf8', pos, buf.length); pos = buf.length; return s; } return null; }
+    const s = buf.toString('utf8', pos, nl); pos = nl + 1; return s;
+  }
+  let raw = null;
+  const events = [], cpuSamples = [], customEvents = [];
+  const allocEvents = [], freeEvents = [];
+  let line;
+  while ((line = nextLine()) !== null) {
+    if (!line) continue;
+    const rec = JSON.parse(line);
+    switch (rec.t) {
+      case 'm': raw = rec.d;
+        for (const k of ['spawnLocations','taskSpawnLocs','taskSpawnTimes','taskTerminateTimes','callframeSymbols','threadNames','runtimeWorkers','segmentMetadata','taskDumps'])
+          if (raw[k]) raw[k] = new Map(raw[k]);
+        break;
+      case 'e': events.push(rec.d); break;
+      case 'c': cpuSamples.push(rec.d); break;
+      case 'x': customEvents.push(rec.d); break;
+      case 'a': allocEvents.push(rec.d); break;
+      case 'f': freeEvents.push(rec.d); break;
+    }
+  }
+  raw.events = events; raw.cpuSamples = cpuSamples; raw.customEvents = customEvents;
+  if (!raw.segmentMetadata) raw.segmentMetadata = new Map();
+  if (!raw.runtimeMetrics) raw.runtimeMetrics = []; // pre-RuntimeMetrics cache files
+  if (!raw.legacyActiveTaskSamples) raw.legacyActiveTaskSamples = [];
+  // Cache files written before the seal counters, and traces whose files carry
+  // no seal record.
+  if (raw.sealedFiles === undefined) { raw.sealedFiles = 0; raw.incompleteFiles = 0; }
+  // Pre-capability cache files: re-derive from the cached metadata and spawn times.
+  if (raw.hasFullTaskCoverage === undefined) Object.assign(raw, deriveCapabilities(raw.segmentMetadata, raw.taskSpawnTimes ?? new Map()));
+  raw.allocEvents = allocEvents; raw.freeEvents = freeEvents;
+  return raw;
+}
+
+function analyzeWorkerMain(cachePath) {
+  const trace = loadCacheFile(cachePath);
+  const sourceFile = path.basename(cachePath).replace(/\.json$/, '.bin');
+  const wids = [...new Set(trace.events.filter(e => e.eventType !== EVENT_TYPES.QueueSample && e.eventType !== EVENT_TYPES.WakeEvent).map(e => e.workerId))].sort((a, b) => a - b);
+  const minTs = trace.events.reduce((m, e) => Math.min(m, e.timestamp), Infinity);
+  const maxTs = trace.events.reduce((m, e) => Math.max(m, e.timestamp), -Infinity);
+  const spans = buildWorkerSpans(trace.events, wids, maxTs, trace.blockInPlaceGaps);
+  attachCpuSamples(trace.cpuSamples, spans.workerSpans);
+  const taskTimeline = buildActiveTaskTimeline(trace.taskSpawnTimes, trace.taskTerminateTimes);
+  const activeTaskSamples = activeTaskSeries(trace, taskTimeline);
+  const schedDelays = computeSchedulingDelays(spans.workerSpans, wids, spans.wakesByTask);
+  const onCpu = trace.cpuSamples.filter(s => s.source === 0);
+  const offCpu = trace.cpuSamples.filter(s => s.source === 1);
+  const offCpuSplit = groupOffCpuSamples(offCpu, trace.callframeSymbols);
+
+  const partial = {
+    workerIds: wids, minTs, maxTs,
+    eventCount: trace.events.length, cpuSampleCount: trace.cpuSamples.length,
+    onCpuSampleCount: onCpu.length, offCpuSampleCount: offCpu.length,
+    taskSpawnCount: trace.taskSpawnTimes.size,
+    taskAliveAtEnd: trace.taskSpawnTimes.size - trace.taskTerminateTimes.size,
+    maxLocalQueue: spans.maxLocalQueue,
+    workerStats: {}, longPolls: [], longPollCount: 0,
+    queueMax: 0, queueSum: 0, queueCount: 0,
+    schedDelayTotal: schedDelays.length, schedDelayHighCount: 0, schedDelayWorst: [],
+    schedDelayValues: schedDelays.map(sd => Math.max(1, Math.round(sd.delay))),
+    taskTimelineSamples: activeTaskSamples,
+    taskSpawnLocs: mapToEntries(trace.taskSpawnLocs),
+    taskSpawnTimes: mapToEntries(trace.taskSpawnTimes),
+    taskTerminateTimes: mapToEntries(trace.taskTerminateTimes),
+    callframeSymbols: mapToEntries(trace.callframeSymbols),
+    cpuGroups: deduplicateSamples(onCpu, trace.callframeSymbols),
+    schedGroups: deduplicateSamples(offCpu, trace.callframeSymbols),
+    // Off-CPU split: in-poll = real blocking, idle = parked with no work.
+    inPollGroups: offCpuSplit.inPollGroups,
+    offCpuInPollCount: offCpuSplit.inPollCount,
+    offCpuIdleCount: offCpuSplit.idleCount,
+    inPollByLoc: offCpuSplit.inPollByLoc,
+    pollDurationsByLoc: {}, spanDurations: {},
+    blockInPlaceGaps: trace.blockInPlaceGaps || [],
+  };
+
+  for (const w of wids) {
+    const s = spans.workerSpans[w];
+    const ws = { activeNs: 0, parkNs: 0, ratioSum: 0, activeCount: 0, pollCount: s.polls.length, parkCount: s.parks.length, schedWaits: [] };
+    for (const a of s.actives) { ws.activeNs += a.end - a.start; ws.ratioSum += a.ratio; ws.activeCount++; }
+    for (const p of s.parks) { ws.parkNs += p.end - p.start; if (p.schedWait > 0) ws.schedWaits.push(p.schedWait); }
+    partial.workerStats[w] = ws;
+    for (const p of s.polls) {
+      const dur = p.end - p.start;
+      const loc = p.spawnLoc || '(unknown)';
+      (partial.pollDurationsByLoc[loc] || (partial.pollDurationsByLoc[loc] = [])).push(Math.max(1, Math.round(dur)));
+      if (dur > 1e6) { partial.longPollCount++; partial.longPolls.push({ dur, poll: p, worker: w, file: sourceFile }); }
+    }
+  }
+  partial.longPolls.sort((a, b) => b.dur - a.dur);
+  partial.longPolls.length = Math.min(partial.longPolls.length, 100);
+  for (const q of globalQueueSeries(trace, spans)) { if (q.global > partial.queueMax) partial.queueMax = q.global; partial.queueSum += q.global; partial.queueCount++; }
+  for (const sd of schedDelays) { if (sd.delay > 1e6) { partial.schedDelayHighCount++; partial.schedDelayWorst.push(sd); } }
+  partial.schedDelayWorst.sort((a, b) => b.delay - a.delay);
+  partial.schedDelayWorst.length = Math.min(partial.schedDelayWorst.length, 100);
+  if (trace.customEvents && trace.customEvents.length > 0) {
+    const { allSpans } = buildSpanData(trace.customEvents);
+    for (const s of allSpans)
+      (partial.spanDurations[s.spanName] || (partial.spanDurations[s.spanName] = [])).push(Math.max(1, Math.round(s.end - s.start)));
+  }
+  process.stdout.write(JSON.stringify(partial) + '\n');
+}
+
+// ── Entry point ──
+
+if (require.main === module) {
+  if (process.argv[2] === '--parse-worker') {
+    parseWorkerMain(process.argv[3], process.argv[4]).catch(err => { process.stderr.write(err.stack + '\n'); process.exit(1); });
+  } else if (process.argv[2] === '--analyze-worker') {
+    analyzeWorkerMain(process.argv[3]);
+  } else {
+    main().catch(err => { console.error(err); process.exit(1); });
+  }
+}
+
+module.exports = { analyzeTraces };

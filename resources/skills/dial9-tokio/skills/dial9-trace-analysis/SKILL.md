@@ -1,0 +1,288 @@
+---
+name: dial9-trace-analysis
+description: Analysis pipeline API for dial9 traces. Covers analyzeTraces() aggregation, buildWorkerSpans, attachCpuSamples, scheduling delays, flamegraphs, span data, and the full return schema. Use when analyzing parsed traces or building custom analysis pipelines.
+---
+
+# Analysis Pipeline
+
+After parsing, run the analysis pipeline to derive higher-level structures. All functions are in `trace_analysis.js`.
+
+## Quick reference
+
+For aggregated results across all files (recommended):
+
+```javascript
+const { analyzeTraces } = require('./analyze.js');
+const result = await analyzeTraces('/path/to/traces/'); // options: { sample, force }
+// result.longPolls, result.workerSpans, result.schedDelayHist, result.cpuGroups, result.spanStats
+```
+
+For per-trace raw data (flamegraphs, field filtering, wake chains):
+
+```javascript
+const { parseTrace } = require('./trace_parser.js');
+const { buildWorkerSpans, attachCpuSamples } = require('./trace_analysis.js');
+
+for await (const trace of parseTrace('/path/to/traces/')) {
+  // full ParsedTrace with events, cpuSamples, callframeSymbols, etc.
+}
+```
+
+For directories with 1000+ files, `{ sample: 50 }` gives a quick overview. Follow up without `sample` for accurate percentiles.
+
+For progress on large directories, pass `onParseProgress` and `onAnalysisProgress` callbacks:
+
+```javascript
+const result = await analyzeTraces('/path/to/traces/', {
+  onParseProgress: ({ done, total, cached }) => process.stderr.write(`\rparsing: [${done}/${total}]${cached ? ` (${cached} cached)` : ''}`),
+  onParseComplete: () => process.stderr.write('\n'),
+  onAnalysisProgress: ({ done, total }) => process.stderr.write(`\ranalyzing: [${done}/${total}]`),
+});
+process.stderr.write('\n');
+```
+
+## Pipeline steps
+
+1. Parse: `for await (const trace of parseTrace(path))` yields one `ParsedTrace` per file
+2. Extract worker IDs from non-queue, non-wake events
+3. `buildWorkerSpans(events, workerIds, maxTs)` reconstructs poll/park/active spans
+4. `attachCpuSamples(cpuSamples, workerSpans)` attaches profiling data to poll spans
+5. `buildActiveTaskTimeline(taskSpawnTimes, taskTerminateTimes)` builds the lifecycle fallback and task-first-poll index
+6. `activeTaskSeries(trace, taskTimeline)` selects the sampled process-wide task count when available
+7. `computeSchedulingDelays(workerSpans, workerIds, wakesByTask)` computes wake-to-poll latencies
+
+## analyzeTraces return schema
+
+`analyzeTraces(path, opts?)` returns a single object aggregated across all trace files:
+
+```
+{
+  // ── Metadata ──
+  files: string[],                  // base filenames of analyzed trace files
+  workerIds: number[],              // sorted worker thread IDs
+  minTs: number,                    // earliest timestamp (ns)
+  maxTs: number,                    // latest timestamp (ns)
+  durationMs: number,               // (maxTs - minTs) in milliseconds
+  eventCount: number,               // total events processed
+  cpuSampleCount: number,           // total CPU profiling samples
+  onCpuSampleCount: number,         // samples where thread was on-CPU (source=0)
+  offCpuSampleCount: number,        // samples where thread was off-CPU/descheduled (source=1)
+  taskSpawnCount: number,           // total tasks spawned
+  taskAliveAtEnd: number,           // tasks spawned but not terminated by trace end
+  maxLocalQueue: number,            // peak local work-stealing queue depth
+
+  // ── Per-worker summaries ──
+  workerSpans: {
+    [workerId]: {
+      utilization: number,          // fraction of time active (0..1)
+      avgCpuRatio: number,          // average CPU ratio during active spans
+      pollCount: number,
+      parkCount: number,
+      activeCount: number,
+      schedWaits: number[],         // kernel scheduling delays (ns), sorted descending
+    }
+  },
+
+  // ── Scheduling delays ──
+  schedDelayStats: {
+    total: number,                  // total scheduling delay events
+    highCount: number,              // delays > 1ms
+    worst: [{wakeTime, pollTime, delay, taskId, wakerTaskId, worker, poll}],  // top 100 by delay
+  },
+  schedDelays: [{wakeTime, pollTime, delay, taskId, wakerTaskId, worker, poll}],  // same as schedDelayStats.worst
+  schedDelayHist: Histogram|null,    // Node.js perf_hooks Histogram of all delay values (ns), null if no delays
+
+  // ── Long polls ──
+  longPolls: [{dur, poll, worker, file}], // polls > 1ms, top 100 sorted by duration descending
+  longPollCount: number,            // how many polls crossed 1ms in total; longPolls holds only the worst of them
+                                    // poll: {start, end, taskId, spawnLoc}; file: source trace filename
+
+  // ── Queue depth ──
+  queueDepthStats: {
+    max: number,                    // peak global queue depth
+    avg: number,                    // average global queue depth
+    samples: number,                // number of queue depth samples
+  },
+
+  // ── Task lifecycle ──
+  taskTimeline: {
+    activeTaskSamples: [{t, count}],  // task count over time, sorted by t
+  },
+  taskSpawnLocs: Map<taskId, string|null>,  // taskId → spawn location string (null if unknown)
+  taskSpawnTimes: Map<taskId, number>,      // taskId → spawn timestamp (ns)
+  taskTerminateTimes: Map<taskId, number>,  // taskId → termination timestamp (ns)
+
+  // ── CPU profiling ──
+  callframeSymbols: Map<address, {symbol, location}|[{symbol, location}]>, // address → resolved symbol (array for inlined frames)
+  cpuGroups: [{count, leaf, leafRaw, frames}],       // on-CPU sample groups, sorted by count descending
+  schedGroups: [{count, leaf, leafRaw, frames}],     // off-CPU sample groups (all), sorted by count descending
+
+  // ── Off-CPU split: real blocking vs idle parking ──
+  // An off-CPU sample inside a poll = a task blocked mid-poll (real blocking);
+  // between polls = a worker parked with no work (idle, though itself a futex/condvar wait).
+  // Caveat: an async lock wait (lock().await) ends the poll, so it counts as idle, not in-poll.
+  inPollGroups: [{count, leaf, leafRaw, frames}],    // in-poll (real blocking) sample groups, sorted by count descending
+  offCpuInPollCount: number,        // off-CPU samples taken inside a poll (real blocking)
+  offCpuIdleCount: number,          // off-CPU samples taken between polls (idle parking)
+  inPollByLoc: [{loc, count}],      // in-poll blocking sample count by task spawn location, sorted by count descending
+
+  // ── Histograms ──
+  spanStats: Map<spanName, Histogram>,      // tracing span duration histograms (ns)
+  pollDurationByLoc: Map<spawnLoc, Histogram>,  // poll duration histograms by spawn location (ns)
+
+  // ── Memory profiling ──
+  memory: {                                 // null/undefined if no alloc events in trace
+    topSites: [{callchain, totalBytes, count, estimatedBytes}],  // top 10 allocation sites by estimated bytes
+    leaks: [{callchain, size, timestamp, addr}],                 // allocations with no matching free
+    perTask: Map<taskId, {sampledBytes, count, estimatedBytes}>, // per-task allocation attribution
+    sampleRateBytes: number,                                     // mean bytes between samples (default 524288)
+    summary: {
+      totalAllocBytes: number,              // sum of sampled allocation sizes
+      totalAllocCount: number,              // number of sampled allocations
+      totalFreeCount: number,               // number of matched frees
+      leakedBytes: number,                  // sum of leaked allocation sizes
+      leakedCount: number,                  // allocations with no matching free
+      estimatedTotalBytes: number,          // unbiased estimate of total allocation volume
+      totalDroppedAllocs: number,           // alloc samples lost to ring buffer overflow
+      totalDroppedFrees: number,            // free samples lost to ring buffer overflow (causes false leaks)
+    },
+  },
+}
+```
+
+Histogram objects are Node.js `perf_hooks.createHistogram()` instances. Key methods: `h.count`, `h.min`, `h.max`, `h.mean`, `h.percentile(p)` (p is 0..100).
+
+## buildWorkerSpans(events, workerIds, maxTs)
+
+Reconstructs structured spans from raw events. Returns:
+
+```
+{
+  workerSpans: {
+    [workerId]: {
+      polls: [{start, end, taskId, spawnLoc, cpuSamples?, schedSamples?}],
+      parks: [{start, end, schedWait}],
+      actives: [{start, end, ratio}],  // ratio = CPU time / wall time
+      cpuSampleTimes: number[],
+    }
+  },
+  queueSamples: [{t, global}],
+  workerQueueSamples: {[workerId]: [{t, local}]},
+  maxLocalQueue: number,
+  wakesByTask: {[taskId]: [{timestamp, wakerTaskId, targetWorker}]},
+  wakesByWorker: {[workerId]: [{timestamp, wakerTaskId, wokenTaskId}]},
+}
+```
+
+Key concepts:
+- **Poll span**: PollStart → PollEnd. Duration is how long a single `.poll()` call took.
+- **Park span**: WorkerPark → WorkerUnpark. Worker had no work and went to sleep.
+- **Active span**: WorkerUnpark → WorkerPark. Worker was awake and processing tasks. `ratio` is CPU utilization (1.0 = fully on-CPU, <1.0 = some time descheduled by kernel).
+- **schedWait**: On Unpark events, how long the kernel took to reschedule the worker thread after it was woken.
+
+## attachCpuSamples(cpuSamples, workerSpans)
+
+Attaches each CPU sample to the poll span it falls within. After calling:
+- `poll.cpuSamples`: CPU profiling samples (source=0) during this poll
+- `poll.schedSamples`: scheduling/off-CPU samples (source=1) during this poll
+- `sample.spawnLoc`: spawn location of the task being polled
+
+## buildActiveTaskTimeline(taskSpawnTimes, taskTerminateTimes)
+
+Returns `{activeTaskSamples: [{t, count}], taskFirstPoll}`. The count is derived from spawn/terminate events and is the fallback for traces without sampled counts.
+
+## activeTaskSeries(trace, taskTimeline)
+
+Returns the authoritative process-wide `[{t, count}]` series. Current
+per-runtime `RuntimeMetricsEvent.alive_tasks` samples are summed by flush cycle;
+transitional `QueueSampleEvent.active_tasks` samples are already process-wide;
+older traces fall back to `taskTimeline.activeTaskSamples`. Prefer this helper
+for charts, summaries, and leak detection because sampled counts include tasks
+that were already alive when a partial trace began.
+
+## computeSchedulingDelays(workerSpans, workerIds, wakesByTask)
+
+Returns `[{wakeTime, pollTime, delay, taskId, wakerTaskId, worker, poll}]` sorted by wakeTime. Delay is `pollStart - wakeTime`.
+
+## filterPointsOfInterest(filterType, workerSpans, workerIds, schedDelays, opts)
+
+Returns the **worst N** events of one kind, ranked by severity. There is no
+fixed cutoff: a cutoff answers the wrong question in both directions — ">1ms"
+buries five real outliers under ten thousand borderline matches on a busy trace,
+and reports nothing at all on a fast one whose worst poll is 800µs and still
+worth seeing.
+
+`filterType` is one of:
+- `"sched"` — Kernel scheduling delay on worker unpark, ranked by delay
+- `"long-poll"` — Polls, ranked by duration
+- `"cpu-sampled"` — Polls that have CPU or scheduling samples attached, ranked by duration
+- `"wake-delay"` — Wake-to-poll delays, ranked by delay
+- `"uninstrumented"` — Polls of tasks spawned via raw `tokio::spawn`, ranked by duration
+- `"spawn-delay"` — Spawn-to-first-poll delays, ranked by delay
+- `"off-cpu-active"` — Awake worker periods, ranked by how much of the period the
+  kernel spent descheduling the worker (`value` is off-CPU nanoseconds); the same
+  signal as the `cpu-contention` check in `dial9-red-flags`
+
+`opts`:
+- `limit` — how many of the worst to return (default 50, exported as `POI_DEFAULT_WORST_N`)
+- `onTotal(n)` — receives the TRUE match count before the cap, so you can report "worst 50 of 12,431"
+- `hasSchedWait: true` — enables the `"sched"` filter (requires schedWait data in trace)
+- `sortByWorst: true` — presents the survivors severity-first instead of chronologically
+- `taskInstrumented` — required by the `"uninstrumented"` filter (`trace.taskInstrumented`)
+- `taskSpawnTimes` — required by the `"spawn-delay"` filter (`trace.taskSpawnTimes`, empty unless the recorder had task tracking on)
+- `spawnDelayThresholdUs` — optional severity floor for `"spawn-delay"`, in microseconds (default 0: no floor)
+- `hasWorkerCpuTime: true` - enables `"off-cpu-active"`. Worker CPU time reads
+  as a hardcoded 0 off Linux, which pins every ratio to 0
+
+Selection is always by severity, and `sortByWorst` only chooses how the
+survivors are *presented*. Asking for the worst 50 in chronological order is
+meaningful; the first 50 chronologically would silently drop every outlier
+behind them.
+
+Because the detectors rank rather than threshold, a non-zero result is **not**
+by itself a problem — every trace has a worst poll. Read `value`, not the count.
+For a pass/fail signal, compare against your own floor, or use the
+`dial9-red-flags` scan, whose severity tiers stay fixed.
+
+Returns `[{time, worker, type, value, span, schedDelay?}]`. `value` units vary by
+filter: nanoseconds for `"sched"`, milliseconds for the poll-duration filters,
+microseconds for `"wake-delay"` and `"spawn-delay"`. For `"spawn-delay"`, `time`
+is the spawn timestamp and `span` is the first poll that followed it.
+
+## buildFgData(samples, callframeSymbols)
+
+Builds a flamegraph from CPU samples. Returns `{nodes, maxDepth, totalSamples}` where each node has `{name, depth, x, w, count, self}`. `x` and `w` are fractions of total width (0–1).
+
+Filter samples before passing to get per-spawn-location or per-worker flamegraphs:
+
+```javascript
+const workerSamples = trace.cpuSamples.filter(s => s.workerId === 0);
+const fgData = buildFgData(workerSamples, trace.callframeSymbols);
+```
+
+## buildSpanData(customEvents)
+
+Pairs `SpanEnter`/`SpanExit` custom events into complete span objects. Requires the `tracing-layer` feature on `dial9-utils` and `Dial9TracingLayer` in the subscriber.
+
+```javascript
+const { allSpans, spanMeta, maxDepth, childrenByParent } = buildSpanData(trace.customEvents);
+```
+
+Returns:
+```
+{
+  allSpans: [{start, end, spanId, spanName, fields, parentSpanId, segments: [{start, end, workerId}], activeNs, depth}],
+  spanMeta: Map<spanId, {spanName, fields, parentSpanId}>,
+  maxDepth: number,
+  unmatchedSpans: number,
+  childrenByParent: Map<spanId, [spanId]>,
+}
+```
+
+Key concepts:
+- **allSpans**: Flat array of all completed spans, sorted by start time.
+- **segments**: Each span may run across multiple polls (and workers). `segments` records each enter/exit pair with its `workerId`. Filter by `s.segments.some(seg => seg.workerId === w)` to find spans on a specific worker.
+- **fields**: User-defined span fields (e.g., `{request_id: "abc", metric_name: "cpu"}`). Base fields (`worker_id`, `span_id`, `span_name`) are excluded.
+- **parentSpanId**: Only set for explicit parents (`span!(parent: &x, ..)`). Most `#[instrument]` spans have `null`. Use timestamp containment to infer nesting.
+- **depth**: Computed from the parent chain. 0 for root spans, incremented for each ancestor.
+- Schema names follow the pattern `SpanEnter:{target}::{name}:{file}:{line}` (one schema per callsite).

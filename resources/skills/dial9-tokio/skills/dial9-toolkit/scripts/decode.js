@@ -1,0 +1,428 @@
+// dial9-trace-format decoder (read-only)
+// See SPEC.md for the binary format specification.
+
+const MAGIC = [0x54, 0x52, 0x43, 0x00];
+const TAG_SCHEMA = 0x01;
+const TAG_EVENT = 0x02;
+const TAG_STRING_POOL = 0x03;
+const TAG_STACK_POOL = 0x04;
+const TAG_TIMESTAMP_RESET = 0x05;
+const TAG_SCHEMA_ANNOTATIONS = 0x06;
+
+const FieldType = {
+  I64: 1, F64: 2, Bool: 3, String: 4,
+  Bytes: 5, PooledStackFrames: 6, PooledString: 7, StackFrames: 8, Varint: 9,
+  StringMap: 10, U8: 11, U16: 12, U32: 13,
+  DynamicList: 14, DynamicMap: 15,
+};
+
+function decodeULEB128(view, offset) {
+  let result = 0n;
+  let shift = 0n;
+  let pos = offset;
+  while (true) {
+    const byte = view.getUint8(pos++);
+    result |= BigInt(byte & 0x7f) << shift;
+    shift += 7n;
+    if ((byte & 0x80) === 0) return [result, pos - offset];
+  }
+}
+
+const OPTIONAL_BIT = 0x80;
+
+function decodeFieldValue(view, offset, fieldType) {
+  // Handle optional modifier: high bit set means 1-byte presence prefix.
+  if (fieldType & OPTIONAL_BIT) {
+    const prefix = view.getUint8(offset);
+    if (prefix === 0x00) return [null, 1];
+    const [val, size] = decodeFieldValue(view, offset + 1, fieldType & 0x7F);
+    return [val, 1 + size];
+  }
+  switch (fieldType) {
+    case FieldType.I64: return [view.getBigInt64(offset, true), 8];
+    case FieldType.F64: return [view.getFloat64(offset, true), 8];
+    case FieldType.Bool: return [view.getUint8(offset) !== 0, 1];
+    case FieldType.String:
+    case FieldType.Bytes: {
+      const len = view.getUint32(offset, true);
+      const bytes = new Uint8Array(view.buffer, view.byteOffset + offset + 4, len);
+      const val = fieldType === FieldType.String
+        ? new TextDecoder().decode(bytes)
+        : Array.from(new Uint8Array(bytes));
+      return [val, 4 + len];
+    }
+    case FieldType.Varint: {
+      const [val, consumed] = decodeULEB128(view, offset);
+      return [val.toString(), consumed];
+    }
+    case FieldType.PooledString: return [view.getUint32(offset, true), 4];
+    case FieldType.PooledStackFrames: return [view.getUint32(offset, true), 4];
+    case FieldType.StackFrames: {
+      const count = view.getUint32(offset, true);
+      let pos = 4;
+      const addrs = [];
+      for (let i = 0; i < count; i++) {
+        const lo = view.getUint32(offset + pos, true);
+        const hi = view.getUint32(offset + pos + 4, true);
+        addrs.push((BigInt(hi) << 32n | BigInt(lo)).toString());
+        pos += 8;
+      }
+      return [addrs, pos];
+    }
+    case FieldType.StringMap: {
+      const count = view.getUint32(offset, true);
+      let pos = 4;
+      const pairs = {};
+      const td = new TextDecoder();
+      for (let i = 0; i < count; i++) {
+        const kLen = view.getUint32(offset + pos, true); pos += 4;
+        const key = td.decode(new Uint8Array(view.buffer, view.byteOffset + offset + pos, kLen)); pos += kLen;
+        const vLen = view.getUint32(offset + pos, true); pos += 4;
+        const val = td.decode(new Uint8Array(view.buffer, view.byteOffset + offset + pos, vLen)); pos += vLen;
+        if (key in pairs) console.warn(`StringMap: duplicate key "${key}", overwriting previous value`);
+        pairs[key] = val;
+      }
+      return [pairs, pos];
+    }
+    case FieldType.U8: return [view.getUint8(offset), 1];
+    case FieldType.U16: return [view.getUint16(offset, true), 2];
+    case FieldType.U32: return [view.getUint32(offset, true), 4];
+    case FieldType.DynamicList: {
+      const count = view.getUint32(offset, true);
+      let pos = 4;
+      const items = [];
+      for (let i = 0; i < count; i++) {
+        const tag = view.getUint8(offset + pos); pos += 1;
+        const [val, consumed] = decodeFieldValue(view, offset + pos, tag);
+        items.push(val);
+        pos += consumed;
+      }
+      return [items, pos];
+    }
+    case FieldType.DynamicMap: {
+      const count = view.getUint32(offset, true);
+      let pos = 4;
+      const entries = [];
+      for (let i = 0; i < count; i++) {
+        const keyTag = view.getUint8(offset + pos); pos += 1;
+        const [key, keySize] = decodeFieldValue(view, offset + pos, keyTag);
+        pos += keySize;
+        const valTag = view.getUint8(offset + pos); pos += 1;
+        const [val, valSize] = decodeFieldValue(view, offset + pos, valTag);
+        pos += valSize;
+        entries.push([key, val]);
+      }
+      return [entries, pos];
+    }
+    default: throw new Error(`Unknown field type: ${fieldType}`);
+  }
+}
+
+class TraceDecoder {
+  constructor(buffer) {
+    const ab = buffer instanceof ArrayBuffer ? buffer : buffer.buffer;
+    const off = buffer.byteOffset || 0;
+    const len = buffer.byteLength;
+    this._view = new DataView(ab, off, len);
+    this._pos = 0;
+    this.schemas = new Map();
+    this.stringPool = new Map();
+    this.stackPool = new Map();
+    this.version = 0;
+    this._timestampBaseNs = 0n;
+    // Streaming mode. When false (default, whole-buffer decode), a frame that
+    // runs off the end of the buffer is a truncated tail: `nextFrame()` stops
+    // gracefully at EOF. When true, the same condition means "the buffer holds
+    // only a partial frame; more bytes are coming" — `nextFrame()` returns null
+    // WITHOUT consuming the partial frame and sets `needMoreBytes`, so the
+    // streaming caller can roll back, append more bytes, and retry.
+    this._streaming = false;
+    // Set by `nextFrame()` (streaming mode only) when it returned null because
+    // the trailing bytes are an incomplete frame rather than a real EOF.
+    this.needMoreBytes = false;
+  }
+
+  /**
+   * Enable streaming mode (see the `_streaming` field). In this mode a frame
+   * that runs past the end of the accumulated buffer is treated as incomplete
+   * (more bytes coming) rather than as a truncated EOF tail.
+   */
+  enableStreaming() {
+    this._streaming = true;
+  }
+
+  /**
+   * Replace the underlying buffer with a (typically longer) one that shares the
+   * same already-decoded prefix, preserving decode position and accumulated
+   * decoder state (schemas, pools, timestamp base, version). Used by the
+   * streaming parser to grow the readable window as chunks arrive without
+   * re-decoding what was already produced.
+   */
+  setBuffer(buffer) {
+    const ab = buffer instanceof ArrayBuffer ? buffer : buffer.buffer;
+    const off = buffer.byteOffset || 0;
+    const len = buffer.byteLength;
+    this._view = new DataView(ab, off, len);
+  }
+
+  /**
+   * Snapshot the positional decode state so the streaming caller can roll back
+   * after an incomplete frame. Only `_pos` and `_timestampBaseNs` are mutated
+   * mid-frame: schema/pool maps are updated with idempotent `.set()` calls
+   * (re-decoding the same frame overwrites with identical values), but the
+   * timestamp base is ADDITIVE — re-decoding a delta-encoded event without a
+   * rollback would double-apply the delta. See `_decodeEvent`.
+   */
+  snapshot() {
+    return { pos: this._pos, timestampBaseNs: this._timestampBaseNs };
+  }
+
+  /** Restore a snapshot produced by `snapshot()`. */
+  restore(snap) {
+    this._pos = snap.pos;
+    this._timestampBaseNs = snap.timestampBaseNs;
+  }
+
+  /**
+   * Reset the read position to the start of the current buffer WITHOUT
+   * touching accumulated decoder state (schemas, pools, timestamp base,
+   * version). Used by the streaming parser after it drops the consumed prefix
+   * and re-wraps the decoder over the unconsumed tail (which now starts at
+   * offset 0). See `setBuffer`.
+   */
+  rewindToStart() {
+    this._pos = 0;
+  }
+
+  decodeHeader() {
+    for (let i = 0; i < 4; i++) {
+      if (this._view.getUint8(this._pos + i) !== MAGIC[i]) return false;
+    }
+    this.version = this._view.getUint8(this._pos + 4);
+    this._pos += 5;
+    return true;
+  }
+
+  nextFrame() {
+    this.needMoreBytes = false;
+    if (this._pos >= this._view.byteLength) return null;
+    try {
+      const tag = this._view.getUint8(this._pos);
+      // Mid-stream header = reset frame (concatenated thread-local batch)
+      if (tag === MAGIC[0]) {
+        if (this._pos + 5 > this._view.byteLength) {
+          // A would-be header straddles the end of the buffer. We can't tell
+          // yet whether it's a real header or a coincidental 0x54 frame tag
+          // until more bytes arrive. In streaming mode, ask for them; in
+          // whole-buffer mode this is a truncated tail.
+          if (this._streaming) { this.needMoreBytes = true; return null; }
+          this._pos = this._view.byteLength;
+          return null;
+        }
+        let isHeader = true;
+        for (let i = 1; i < 4; i++) {
+          if (this._view.getUint8(this._pos + i) !== MAGIC[i]) { isHeader = false; break; }
+        }
+        if (isHeader) {
+          this.schemas = new Map();
+          this.stringPool = new Map();
+          this.stackPool = new Map();
+          this._timestampBaseNs = 0n;
+          this._pos += 5; // skip header
+          return this.nextFrame();
+        }
+      }
+      this._pos++;
+      switch (tag) {
+        case TAG_SCHEMA: return this._decodeSchema();
+        case TAG_EVENT: return this._decodeEvent();
+        case TAG_STRING_POOL: return this._decodeStringPool();
+        case TAG_STACK_POOL: return this._decodeStackPool();
+        case TAG_SCHEMA_ANNOTATIONS: return this._decodeSchemaAnnotations();
+        case TAG_TIMESTAMP_RESET: {
+          const lo = this._view.getUint32(this._pos, true);
+          const hi = this._view.getUint32(this._pos + 4, true);
+          this._timestampBaseNs = BigInt(hi) << 32n | BigInt(lo);
+          this._pos += 8;
+          return this.nextFrame(); // consume silently
+        }
+        default: throw new Error(`Unknown frame tag: 0x${tag.toString(16)}`);
+      }
+    } catch (e) {
+      if (e instanceof RangeError) {
+        if (this._streaming) {
+          // The buffer holds only part of this frame; more bytes are coming.
+          // Leave `_pos` untouched — the streaming caller rolls back via the
+          // snapshot it took before this call — and ask for more data.
+          this.needMoreBytes = true;
+          return null;
+        }
+        // Truncated frame at end of segment; stop gracefully.
+        this._pos = this._view.byteLength;
+        return null;
+      }
+      throw e;
+    }
+  }
+
+  decodeAll() {
+    const frames = [];
+    let f;
+    while ((f = this.nextFrame()) !== null) frames.push(f);
+    return frames;
+  }
+
+  _decodeSchema() {
+    const typeId = this._view.getUint16(this._pos, true); this._pos += 2;
+    const nameLen = this._view.getUint16(this._pos, true); this._pos += 2;
+    const name = new TextDecoder().decode(
+      new Uint8Array(this._view.buffer, this._view.byteOffset + this._pos, nameLen));
+    this._pos += nameLen;
+    const hasTimestamp = this._view.getUint8(this._pos) !== 0; this._pos += 1;
+    const fieldCount = this._view.getUint16(this._pos, true); this._pos += 2;
+    const fields = [];
+    for (let i = 0; i < fieldCount; i++) {
+      const fnLen = this._view.getUint16(this._pos, true); this._pos += 2;
+      const fn_ = new TextDecoder().decode(
+        new Uint8Array(this._view.buffer, this._view.byteOffset + this._pos, fnLen));
+      this._pos += fnLen;
+      const ft = this._view.getUint8(this._pos); this._pos++;
+      fields.push({ name: fn_, fieldType: ft });
+    }
+    const schema = { typeId, name, hasTimestamp, fields };
+    this.schemas.set(typeId, schema);
+    return { type: 'schema', ...schema };
+  }
+
+  _decodeEvent() {
+    const typeId = this._view.getUint16(this._pos, true); this._pos += 2;
+    const schema = this.schemas.get(typeId);
+    if (!schema) throw new Error(`Unknown type_id: ${typeId}`);
+
+    let timestampNs = null;
+    if (schema.hasTimestamp) {
+      const b0 = this._view.getUint8(this._pos);
+      const b1 = this._view.getUint8(this._pos + 1);
+      const b2 = this._view.getUint8(this._pos + 2);
+      const deltaNs = b0 | (b1 << 8) | (b2 << 16);
+      this._pos += 3;
+      timestampNs = (this._timestampBaseNs + BigInt(deltaNs)).toString();
+      this._timestampBaseNs = this._timestampBaseNs + BigInt(deltaNs);
+    }
+
+    const values = {};
+    for (const field of schema.fields) {
+      const [val, consumed] = decodeFieldValue(this._view, this._pos, field.fieldType);
+      const innerType = field.fieldType & 0x7F;
+      if (innerType === FieldType.PooledString && val !== null) {
+        values[field.name] = this.stringPool.get(val) ?? `<unresolved pool#${val}>`;
+      } else if (innerType === FieldType.PooledStackFrames && val !== null) {
+        values[field.name] = this.stackPool.get(val) ?? `<unresolved stack#${val}>`;
+      } else {
+        values[field.name] = val;
+      }
+      this._pos += consumed;
+    }
+    const result = { type: 'event', typeId, name: schema.name, values };
+    if (timestampNs !== null) result.timestamp_ns = timestampNs;
+    return result;
+  }
+
+  _decodeSchemaAnnotations() {
+    // Unlike schema/event frames, type_id is LEB128 here.
+    const [typeIdBig, consumed] = decodeULEB128(this._view, this._pos);
+    this._pos += consumed;
+    const typeId = Number(typeIdBig);
+    const count = this._view.getUint16(this._pos, true); this._pos += 2;
+    const td = new TextDecoder();
+    const annotations = [];
+    for (let i = 0; i < count; i++) {
+      const fieldIndex = this._view.getUint16(this._pos, true); this._pos += 2;
+      const keyLen = this._view.getUint16(this._pos, true); this._pos += 2;
+      const key = td.decode(
+        new Uint8Array(this._view.buffer, this._view.byteOffset + this._pos, keyLen));
+      this._pos += keyLen;
+      const valueLen = this._view.getUint32(this._pos, true); this._pos += 4;
+      const value = td.decode(
+        new Uint8Array(this._view.buffer, this._view.byteOffset + this._pos, valueLen));
+      this._pos += valueLen;
+      annotations.push({ fieldIndex, key, value });
+    }
+    // Lenient like the Rust decoder: annotations for an unknown schema are
+    // parsed (to keep the stream aligned) but not attached.
+    const schema = this.schemas.get(typeId);
+    if (schema) {
+      schema.annotations ??= [];
+      schema.units ??= {};
+      schema.fieldKinds ??= {};
+      schema.annotations.push(...annotations);
+      for (const a of annotations) {
+        const field = schema.fields[a.fieldIndex];
+        if (a.key === 'unit' && field) schema.units[field.name] = a.value;
+        if (a.key === 'kind' && field) schema.fieldKinds[field.name] = a.value;
+      }
+    }
+    return { type: 'schema_annotations', typeId, annotations };
+  }
+
+  /** Current byte offset into the buffer. */
+  get position() { return this._pos; }
+
+  /** Total byte length of the buffer. */
+  get byteLength() { return this._view.byteLength; }
+
+  _decodeStringPool() {
+    const count = this._view.getUint32(this._pos, true); this._pos += 4;
+    const entries = [];
+    for (let i = 0; i < count; i++) {
+      const poolId = this._view.getUint32(this._pos, true); this._pos += 4;
+      const len = this._view.getUint32(this._pos, true); this._pos += 4;
+      const data = new TextDecoder().decode(
+        new Uint8Array(this._view.buffer, this._view.byteOffset + this._pos, len));
+      this._pos += len;
+      this.stringPool.set(poolId, data);
+      entries.push({ poolId, data });
+    }
+    return { type: 'string_pool', entries };
+  }
+
+  _decodeStackPool() {
+    const count = this._view.getUint32(this._pos, true); this._pos += 4;
+    const entries = [];
+    for (let i = 0; i < count; i++) {
+      const poolId = this._view.getUint32(this._pos, true); this._pos += 4;
+      const frameCount = this._view.getUint32(this._pos, true); this._pos += 4;
+      const addrs = [];
+      for (let j = 0; j < frameCount; j++) {
+        const lo = this._view.getUint32(this._pos, true);
+        const hi = this._view.getUint32(this._pos + 4, true);
+        addrs.push((BigInt(hi) << 32n | BigInt(lo)).toString());
+        this._pos += 8;
+      }
+      this.stackPool.set(poolId, addrs);
+      entries.push({ poolId, addrs });
+    }
+    return { type: 'stack_pool', entries };
+  }
+
+}
+
+// --- CLI: decode a file and print JSON ---
+if (typeof require !== 'undefined' && require.main === module) {
+  const fs = require('fs');
+  const file = process.argv[2];
+  if (!file) { console.error('Usage: node decode.js <trace-file>'); process.exit(1); }
+  const buf = fs.readFileSync(file);
+  const dec = new TraceDecoder(buf);
+  if (!dec.decodeHeader()) { console.error('Bad header'); process.exit(1); }
+  const frames = dec.decodeAll();
+  const json = JSON.stringify({
+    version: dec.version,
+    frames,
+    stringPool: Object.fromEntries(dec.stringPool),
+    stackPool: Object.fromEntries(dec.stackPool),
+  }, (_, v) => typeof v === 'bigint' ? v.toString() : v, 2);
+  console.log(json);
+}
+
+if (typeof module !== 'undefined') module.exports = { TraceDecoder, FieldType };

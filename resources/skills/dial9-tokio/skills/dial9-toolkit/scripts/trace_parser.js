@@ -1,0 +1,2944 @@
+// trace_parser.js - Binary trace parser using dial9-trace-format decoder
+// Can be used in browser or Node.js
+
+(function (exports) {
+    "use strict";
+
+    const MAX_EVENTS = Infinity; // no cap — use time range filtering for large traces
+
+    function getTraceDecoder() {
+        if (typeof require !== "undefined") {
+            const path = require("path");
+            return require(path.resolve(__dirname, "decode.js")).TraceDecoder;
+        }
+        // Browser: decode.js must be loaded before this script
+        if (typeof TraceDecoder !== "undefined") return TraceDecoder;
+        throw new Error(
+            "TraceDecoder not found. Load decode.js before trace_parser.js",
+        );
+    }
+
+    /** Parse a string/bigint/number to a JS number */
+    function num(v) {
+        if (typeof v === "number") return v;
+        if (typeof v === "bigint") return Number(v);
+        if (typeof v === "string" && v !== "")
+            if (!isNaN(Number(v))) return Number(v);
+
+        throw new Error(`Invalid number: ${v}`);
+    }
+
+    /**
+     * Decode the optional active-task count carried by the superseded
+     * QueueSampleEvent. Traces predating that field legitimately omit it, so
+     * absence means "no sample", never zero.
+     */
+    function decodeLegacyActiveTaskSample(timestamp, fields) {
+        if (fields.active_tasks == null) return null;
+        return { t: timestamp, count: num(fields.active_tasks) };
+    }
+
+    /**
+     * Decode one per-runtime scheduler-metrics sample. `alive_tasks` is absent
+     * from older on-wire RuntimeMetricsEvent schemas; preserve that absence so
+     * analysis can fall back instead of inventing a zero-valued task series.
+     */
+    function decodeRuntimeMetricsSample(timestamp, fields) {
+        return {
+            t: timestamp,
+            runtimeName:
+                fields.runtime_name != null ? String(fields.runtime_name) : "",
+            globalQueue: num(fields.global_queue_depth),
+            aliveTasks:
+                fields.alive_tasks != null ? num(fields.alive_tasks) : null,
+        };
+    }
+
+    /**
+     * Intern a callchain frame address to its "0x…" hex string, deduped per
+     * parse. Callchains across millions of samples/dumps/allocs share very few
+     * distinct addresses (same code paths), so caching the hex string collapses
+     * millions of identical strings to a handful. Same output as the inline
+     * `"0x" + BigInt(addr).toString(16)` — purely a memory (retained-string)
+     * optimization; retrocompat-neutral (a missing callchain still yields []).
+     */
+    function internHex(cache, addr) {
+        let s = cache.get(addr);
+        if (s === undefined) {
+            s = "0x" + BigInt(addr).toString(16);
+            cache.set(addr, s);
+        }
+        return s;
+    }
+
+    /** Decompress gzip data if detected, otherwise return as-is. */
+    async function maybeGunzip(buf) {
+        const b = buf instanceof ArrayBuffer ? new Uint8Array(buf) : buf;
+        if (b.length < 2 || b[0] !== 0x1f || b[1] !== 0x8b) {
+            return buf;
+        }
+        if (typeof DecompressionStream !== "undefined") {
+            return await new Response(
+                new Blob([b])
+                    .stream()
+                    .pipeThrough(new DecompressionStream("gzip")),
+            ).arrayBuffer();
+        }
+        // Fallback for older Node.js without DecompressionStream
+        const zlib = require("zlib");
+        const decompressed = zlib.gunzipSync(Buffer.from(b));
+        return decompressed.buffer.slice(
+            decompressed.byteOffset,
+            decompressed.byteOffset + decompressed.byteLength,
+        );
+    }
+
+    /**
+     * Whether `url` resolves to the same origin as the current page.
+     *
+     * Security-critical: credential headers (see `fetchTraces`) must never be
+     * attached to a cross-origin request, or a crafted `?trace=https://attacker/`
+     * link would exfiltrate the user's AWS credentials. Off-browser (Node tests),
+     * there is no origin concept, so we treat everything as same-origin — the
+     * exfiltration risk only exists in the browser.
+     *
+     * Conservative on failure: an unparseable URL is treated as cross-origin so
+     * headers are withheld rather than sent.
+     */
+    function isSameOrigin(url) {
+        if (typeof location === "undefined" || !location.origin) return true;
+        try {
+            return new URL(url, location.href).origin === location.origin;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Fetch one or more trace URLs, gunzip each component individually, and
+     * concatenate them into a single ArrayBuffer.
+     *
+     * The `trace` query parameter is repeatable: each component is fetched
+     * independently (in parallel) and may be gzipped on its own — the S3 browser
+     * points each at `/api/object`, which serves one file's raw, still-gzipped
+     * bytes. We therefore ungzip every component here, then concatenate the raw
+     * bytes. The trace decoder treats a concatenated stream as multiple segments
+     * — a mid-stream `TRC\0` header resets the frame parser — so the combined
+     * buffer parses as one trace.
+     *
+     * @param {string|string[]} urls one URL or a list of URLs (order preserved)
+     * @param {{signal?: AbortSignal, headers?: Object}} [opts] `headers` is
+     *   attached to every request (e.g. bring-your-own-credentials headers). This
+     *   module stays storage-agnostic — the caller supplies the headers.
+     * @returns {Promise<ArrayBuffer>}
+     */
+    async function fetchTraces(urls, opts = {}) {
+        const list = Array.isArray(urls) ? urls : [urls];
+        const parts = await Promise.all(
+            list.map(async (url) => {
+                // Only attach credential headers to same-origin requests. A
+                // cross-origin `trace=` URL (e.g. a presigned S3 link, or an
+                // attacker-crafted one) is fetched WITHOUT them, so the user's AWS
+                // credentials can never be sent to a foreign host.
+                const headers = isSameOrigin(url) ? opts.headers : undefined;
+                const resp = await fetch(url, {
+                    signal: opts.signal,
+                    headers,
+                });
+                if (!resp.ok)
+                    throw new Error(`HTTP ${resp.status} fetching ${url}`);
+                const raw = await maybeGunzip(await resp.arrayBuffer());
+                return raw instanceof ArrayBuffer ? new Uint8Array(raw) : raw;
+            }),
+        );
+        if (parts.length === 1) return parts[0].buffer;
+        let total = 0;
+        for (const p of parts) total += p.length;
+        const out = new Uint8Array(total);
+        let off = 0;
+        for (const p of parts) {
+            out.set(p, off);
+            off += p.length;
+        }
+        return out.buffer;
+    }
+
+    /**
+     * Whether the current runtime can stream a `fetch` response body and gunzip
+     * it incrementally. Node test runtimes (and older browsers) lack a real
+     * streaming `response.body` or `DecompressionStream`; callers fall back to
+     * the buffered `fetchTraces` + `parseTraceBuffer` path there.
+     */
+    function canStreamDecode() {
+        return (
+            typeof ReadableStream !== "undefined" &&
+            typeof DecompressionStream !== "undefined"
+        );
+    }
+
+    /**
+     * Wrap an already-buffered `Uint8Array` in the minimal subset of the
+     * `ReadableStreamDefaultReader` interface that {@link fetchTraceStream} uses
+     * (`read()` / `cancel()`). Yields the whole buffer in one chunk, then EOF.
+     * Used only as a fallback when a `fetch` response has no streamable `body`.
+     */
+    function oneShotReader(bytes) {
+        let done = false;
+        return {
+            async read() {
+                if (done) return { value: undefined, done: true };
+                done = true;
+                return { value: bytes, done: false };
+            },
+            async cancel() {
+                done = true;
+            },
+        };
+    }
+
+    /**
+     * Fetch a single trace URL and return an async iterable of raw (gunzipped, if
+     * the body was gzipped) `Uint8Array` chunks. Pair with
+     * {@link parseTraceStream} so download and decode overlap.
+     *
+     * We peek the first chunk's first two bytes for the gzip magic (1f 8b). If
+     * present, the remaining body is piped through `DecompressionStream("gzip")`
+     * after re-feeding the peeked chunk; otherwise chunks pass through raw.
+     * `headers` follow the same same-origin credential-withholding rule as
+     * {@link fetchTraces}.
+     *
+     * @param {string} url single trace URL
+     * @param {{signal?: AbortSignal, headers?: Object}} [opts]
+     * @returns {Promise<AsyncIterable<Uint8Array>>}
+     */
+    async function fetchTraceStream(url, opts = {}) {
+        const headers = isSameOrigin(url) ? opts.headers : undefined;
+        const resp = await fetch(url, { signal: opts.signal, headers });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
+
+        // Some runtimes hand back an ok response with no readable `body` stream
+        // even though canStreamDecode() reported support (e.g. certain cached or
+        // synthesized responses). Rather than throwing a bare TypeError on
+        // `null.getReader()`, buffer the whole body and adapt it to the same
+        // reader interface so the gzip-sniff + DecompressionStream path below is
+        // identical — we just lose the download/parse overlap for this response.
+        const reader = resp.body
+            ? resp.body.getReader()
+            : oneShotReader(new Uint8Array(await resp.arrayBuffer()));
+        // Read the first non-empty chunk to sniff the gzip magic.
+        let first = null;
+        for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value && value.byteLength > 0) {
+                first =
+                    value instanceof Uint8Array ? value : new Uint8Array(value);
+                break;
+            }
+        }
+
+        const isGzip =
+            first != null &&
+            first.length >= 2 &&
+            first[0] === 0x1f &&
+            first[1] === 0x8b;
+
+        // A ReadableStream that re-emits the peeked first chunk then drains the
+        // rest of the body reader.
+        const rawStream = new ReadableStream({
+            start(controller) {
+                if (first != null) controller.enqueue(first);
+            },
+            async pull(controller) {
+                const { value, done } = await reader.read();
+                if (done) {
+                    controller.close();
+                    return;
+                }
+                if (value && value.byteLength > 0) controller.enqueue(value);
+            },
+            cancel(reason) {
+                return reader.cancel(reason);
+            },
+        });
+
+        const byteStream = isGzip
+            ? rawStream.pipeThrough(new DecompressionStream("gzip"))
+            : rawStream;
+
+        return {
+            [Symbol.asyncIterator]() {
+                const r = byteStream.getReader();
+                return {
+                    async next() {
+                        const { value, done } = await r.read();
+                        if (done) return { done: true, value: undefined };
+                        const u8 =
+                            value instanceof Uint8Array
+                                ? value
+                                : new Uint8Array(value);
+                        return { done: false, value: u8 };
+                    },
+                    async return() {
+                        await r.cancel();
+                        return { done: true, value: undefined };
+                    },
+                };
+            },
+        };
+    }
+
+    /**
+     * Stream MULTIPLE trace URLs as one logical trace: yield every component's
+     * raw (gunzipped) chunks back-to-back, in `urls` order. Pair with
+     * {@link parseTraceStream} — the decoder treats the concatenation as multiple
+     * segments (a mid-stream `TRC\0` header resets schemas/pools/timestamp base),
+     * so N components stream in as one trace, exactly as if they'd been
+     * downloaded, gunzipped, and concatenated by {@link fetchTraces}.
+     *
+     * Why this beats `fetchTraces` for N > 1: `fetchTraces` awaits ALL downloads,
+     * concatenates into one big buffer, THEN parses — zero fetch/parse overlap.
+     * Here every component's `fetch()` is dispatched up front (so the requests
+     * run concurrently, same as `Promise.all`), but we hand chunks to the parser
+     * as soon as the FIRST component starts arriving. Parsing segment 0 then
+     * overlaps the in-flight downloads of segments 1..N — the same
+     * ~max(download, parse) win the single-URL path already gets, now for the
+     * multi-trace case (issue #595). Components are emitted strictly in order so
+     * the result is byte-identical to the buffered concat.
+     *
+     * @param {string[]} urls one or more trace URLs (order preserved)
+     * @param {{signal?: AbortSignal, headers?: Object}} [opts]
+     * @returns {AsyncIterable<Uint8Array>}
+     */
+    function fetchTracesStream(urls, opts = {}) {
+        const list = Array.isArray(urls) ? urls : [urls];
+        // Dispatch every component's fetch up front so the network requests run
+        // concurrently (the `fetch()` inside fetchTraceStream starts on call).
+        // We hold the per-URL stream PROMISES and await them in order below, so a
+        // later component that finishes its headers first still can't jump the
+        // queue — emission stays strictly ordered.
+        //
+        // A later component can reject (e.g. HTTP 404) BEFORE we await it while
+        // an earlier one is still draining. Without a handler attached at
+        // creation time that rejection is "unhandled" until the loop reaches it,
+        // which fires Node's unhandledRejection / the browser's
+        // `unhandledrejection` event (noisy; trips error reporters). So we attach
+        // a no-op catch to each promise immediately to mark it handled; the loop
+        // below still awaits the ORIGINAL promise, so the real error surfaces
+        // (and rejects the iterator) when emission reaches that component.
+        const streamPromises = list.map((url) => {
+            const p = fetchTraceStream(url, opts);
+            p.catch(() => {});
+            return p;
+        });
+        // Cancel a not-yet-consumed component's stream so its open response body
+        // / connection closes promptly instead of lingering until GC. Fire and
+        // forget: if the fetch already failed there is nothing to cancel, and any
+        // error from cancel() itself is irrelevant to the caller.
+        function cancelUnconsumed(sp) {
+            Promise.resolve(sp)
+                .then((stream) => {
+                    const it =
+                        stream && typeof stream[Symbol.asyncIterator] === "function"
+                            ? stream[Symbol.asyncIterator]()
+                            : null;
+                    return it && typeof it.return === "function"
+                        ? it.return()
+                        : undefined;
+                })
+                .catch(() => {});
+        }
+        return {
+            async *[Symbol.asyncIterator]() {
+                let i = 0;
+                try {
+                    for (; i < streamPromises.length; i++) {
+                        const stream = await streamPromises[i];
+                        for await (const chunk of stream) yield chunk;
+                    }
+                } finally {
+                    // Early exit (a component threw, or the consumer stopped
+                    // iterating): the components AFTER the current one already had
+                    // their fetch() dispatched and may hold an open body. The
+                    // current one (i) is handled by for-await-of's own
+                    // iterator-return on break/throw; cancel the rest.
+                    for (let j = i + 1; j < streamPromises.length; j++) {
+                        cancelUnconsumed(streamPromises[j]);
+                    }
+                }
+            },
+        };
+    }
+
+    /**
+     * @typedef {{
+     *   eventType: number,
+     *   timestamp: number,
+     *   workerId: number,
+     *   localQueue: number,
+     *   globalQueue: number,
+     *   cpuTime: number,
+     *   schedWait: number|null,
+     *   taskId: number,
+     *   spawnLocId: string|null,
+     *   spawnLoc: string|null,
+     *   wakerTaskId?: number,
+     *   wokenTaskId?: number,
+     *   targetWorker?: number,
+     * }} TraceEvent
+     */
+
+    /**
+     * @typedef {{
+     *   timestamp: number,
+     *   workerId: number,
+     *   tid: number,
+     *   source: number,
+     *   callchain: string[],
+     *   cpu: number|null,
+     * }} CpuSample
+     */
+
+    /**
+     * @typedef {{ symbol: string, location: string|null }} SymbolFrame
+     */
+
+    /**
+     * @typedef {{
+     *   magic: "D9TF",
+     *   version: number,
+     *   events: TraceEvent[],
+     *   minTs: number|null,
+     *   maxTs: number|null,
+     *   recordMinTs: number|null,
+     *   recordMaxTs: number|null,
+     *   truncated: boolean,
+     *   hasCpuTime: boolean,
+     *   hasSchedWait: boolean,
+     *   hasTaskTracking: boolean,
+     *   spawnLocations: Map<string, string>,
+     *   taskSpawnLocs: Map<number, string|null>,
+     *   taskSpawnTimes: Map<number, number>,
+     *   taskTerminateTimes: Map<number, number>,
+     *   taskInstrumented: Map<number, boolean>,
+     *   cpuSamples: CpuSample[],
+     *   callframeSymbols: Map<string, SymbolFrame|SymbolFrame[]>,
+     *   threadNames: Map<number, string>,
+     *   runtimeWorkers: Map<string, number[]>,
+     *   segmentMetadata: Map<string, string>,
+     *   legacyActiveTaskSamples: Array<{t: number, count: number}>,
+     * }} ParsedTrace
+     */
+
+    const EVENT_TYPES = {
+        PollStart: 0,
+        PollEnd: 1,
+        WorkerPark: 2,
+        WorkerUnpark: 3,
+        QueueSample: 4,
+        WakeEvent: 9,
+        // Per-runtime scheduler metrics (queue depth + alive tasks), one per
+        // runtime per sample; supersedes QueueSample, and both are still parsed
+        // so old traces keep working.
+        //
+        // RESERVED, not observed: these events decode into the `runtimeMetrics`
+        // SIDE-CHANNEL and are never pushed into `trace.events`, so no event
+        // ever carries this discriminant. It is listed to reserve the number and
+        // to document that absence — consumers that group `trace.events` by
+        // worker (e.g. lifecycleWorkerIds) therefore need not exclude it, the way
+        // they must exclude the worker-less QueueSample and WakeEvent. Routing
+        // these into `trace.events` later would mean revisiting every such site.
+        RuntimeMetrics: 10,
+    };
+
+    /**
+     * Sentinel `workerId` used for CPU samples that cannot be confidently
+     * attributed to a specific worker. Matches the producer-side
+     * `WorkerId::UNKNOWN` value (also `WorkerId::BLOCKING - 1`).
+     */
+    const OFF_WORKER_WORKER_ID = 255;
+
+    /**
+     * Derive block-in-place gaps from WorkerPark/WorkerUnpark events and
+     * rewrite `cpuSamples[i].workerId` for samples that fall inside a gap.
+     *
+     * See `CONTEXT.md` (Block-in-place gap), ADR-0001 and ADR-0002. The
+     * detection algorithm is: for each worker `W`, track the currently-bound
+     * tid via park/unpark events. When the next park/unpark on `W` carries a
+     * tid that doesn't match the currently-bound tid, a `block_in_place`
+     * handoff happened at an unknown instant in the interval. The whole
+     * interval is a "gap"; samples on the old or new tid in this interval
+     * cannot be confidently attributed to `W` and have their `workerId`
+     * rewritten to {@link OFF_WORKER_WORKER_ID}.
+     *
+     * Old traces lacking `tid` on park/unpark events are silently ignored
+     * — gap detection is a no-op on them, no rewriting happens.
+     *
+     * Mutates `cpuSamples` in place. Returns the gap list sorted by start.
+     *
+     * @param {Array<TraceEvent>} events events sorted by timestamp
+     * @param {Array<CpuSample>} cpuSamples cpu samples to (possibly) rewrite
+     * @returns {Array<{workerId:number, fromTid:number, toTid:number, startNs:number, endNs:number}>}
+     */
+    function deriveBlockInPlaceGaps(events, cpuSamples) {
+        const gaps = [];
+        // Per-worker state: { currentTid: number|null, lastEventTs: number }.
+        // null currentTid means the worker is parked (or has never unparked).
+        const state = new Map();
+
+        for (const e of events) {
+            if (
+                e.eventType !== EVENT_TYPES.WorkerPark &&
+                e.eventType !== EVENT_TYPES.WorkerUnpark
+            )
+                continue;
+            // Ignore events without a tid (older traces predate the field).
+            if (e.tid === undefined) continue;
+
+            const w = e.workerId;
+            const s = state.get(w);
+            if (s === undefined) {
+                // First event for this worker. Establish the binding.
+                state.set(w, {
+                    currentTid:
+                        e.eventType === EVENT_TYPES.WorkerUnpark ? e.tid : null,
+                    lastEventTs: e.timestamp,
+                    // For a Park-first worker, we still know `tid` was bound to W up
+                    // until the park, but we can't know for how long. Track the tid
+                    // so a subsequent (mismatched) event flags a gap.
+                    lastSeenTid: e.tid,
+                });
+                continue;
+            }
+
+            // Check for handoff: the event's tid differs from the tid we believe
+            // is currently bound to this worker.
+            const expectedTid =
+                s.currentTid != null ? s.currentTid : s.lastSeenTid;
+            if (expectedTid !== e.tid) {
+                gaps.push({
+                    workerId: w,
+                    fromTid: expectedTid,
+                    toTid: e.tid,
+                    startNs: s.lastEventTs,
+                    endNs: e.timestamp,
+                });
+            }
+
+            // Update state regardless of whether a gap was detected.
+            s.currentTid =
+                e.eventType === EVENT_TYPES.WorkerUnpark ? e.tid : null;
+            s.lastEventTs = e.timestamp;
+            s.lastSeenTid = e.tid;
+        }
+
+        // Sort gaps by start timestamp for downstream consumers.
+        gaps.sort((a, b) => a.startNs - b.startNs);
+
+        if (gaps.length === 0) return gaps;
+
+        // Build per-worker gap lists for sample rewriting.
+        // We index by worker because gaps belong to a worker, but we suppress
+        // samples by tid: any sample whose tid matches the gap's fromTid OR
+        // toTid, falling inside the gap window, is unattributable.
+        const gapsByWorker = new Map();
+        for (const g of gaps) {
+            let arr = gapsByWorker.get(g.workerId);
+            if (!arr) {
+                arr = [];
+                gapsByWorker.set(g.workerId, arr);
+            }
+            arr.push(g);
+        }
+
+        // Rewrite cpu samples in-place. For each sample, check the wire
+        // workerId's gap list (if any) and any gap matching the sample's tid.
+        // We iterate gaps directly per sample because:
+        //  - the per-worker gap count is small (typically 0–few per trace);
+        //  - samples might land inside a gap whose worker_id doesn't match
+        //    the wire value (the wire value is unreliable, ADR-0001), so we
+        //    must check by tid against ALL gaps the tid is involved in.
+        // To avoid an O(samples * gaps) blowup, build per-tid gap lists too.
+        const gapsByTid = new Map();
+        for (const g of gaps) {
+            for (const t of [g.fromTid, g.toTid]) {
+                let arr = gapsByTid.get(t);
+                if (!arr) {
+                    arr = [];
+                    gapsByTid.set(t, arr);
+                }
+                arr.push(g);
+            }
+        }
+        // Sort each tid's list by start so we can early-exit.
+        for (const arr of gapsByTid.values()) {
+            arr.sort((a, b) => a.startNs - b.startNs);
+        }
+
+        for (const sample of cpuSamples) {
+            const tidGaps = gapsByTid.get(sample.tid);
+            if (!tidGaps) continue;
+            const ts = sample.timestamp;
+            for (const g of tidGaps) {
+                if (g.startNs > ts) break; // sorted by start, no more matches
+                if (ts < g.endNs) {
+                    // sample falls within [startNs, endNs)
+                    sample.workerId = OFF_WORKER_WORKER_ID;
+                    break;
+                }
+            }
+        }
+
+        return gaps;
+    }
+
+    /**
+     * Parse dial9 trace data from a buffer, file path, or directory.
+     *
+     * - Buffer/ArrayBuffer/Uint8Array: returns Promise<ParsedTrace> (browser compatible).
+     * - String (file path): returns AsyncIterable yielding one ParsedTrace (Node.js only).
+     * - String (directory): returns AsyncIterable yielding one ParsedTrace per file,
+     *   with parallel parsing and caching (Node.js only).
+     *
+     * In the browser, fetch trace data via the viewer API and pass the ArrayBuffer.
+     *
+     * @param {ArrayBuffer|Uint8Array|string} input - Binary data, file path, or directory path
+     * @param {Object} [options] - Optional parsing options
+     * @param {number} [options.maxEvents] - Maximum number of events to parse (default: Infinity)
+     * @param {number} [options.startTime] - Start of time range filter (absolute ns, inclusive)
+     * @param {number} [options.endTime] - End of time range filter (absolute ns, inclusive)
+     * @param {function} [options.onParseProgress] - Called with {done, total, file} as files complete
+     * @param {boolean} [options.cache] - Enable disk caching for directories (default: true)
+     * @param {boolean} [options.parallel] - Enable parallel parsing for directories (default: true)
+     * @param {boolean} [options.force] - Ignore cached results and re-parse (default: false)
+     * @param {number} [options.sample] - Only parse N evenly-spaced files from a directory
+     * @returns {AsyncIterable<ParsedTrace>}
+     */
+    function parseTrace(input, options) {
+        if (typeof input === "string") {
+            if (typeof require === "undefined") {
+                throw new Error(
+                    "File/directory paths require Node.js. In the browser, fetch trace " +
+                        "data via the viewer API (e.g. /api/object) and pass the ArrayBuffer " +
+                        "to parseTrace().",
+                );
+            }
+            const fs = require("fs");
+            const stat = fs.statSync(input);
+            if (stat.isDirectory()) {
+                return parseTraceDir(input, options);
+            }
+            // Single file path: async iterable yielding one trace
+            return wrapSingle(
+                parseTraceBuffer(fs.readFileSync(input), options),
+            );
+        }
+        // Buffer: return Promise<ParsedTrace> directly (backwards compatible with browser)
+        return parseTraceBuffer(input, options);
+    }
+
+    /** Wrap a Promise<ParsedTrace> as an async iterable that yields once.
+     *  Also thenable, so `await parseTrace('file.bin')` works directly. */
+    function wrapSingle(promise) {
+        const iterable = {
+            [Symbol.asyncIterator]() {
+                let done = false;
+                return {
+                    async next() {
+                        if (done) return { done: true, value: undefined };
+                        done = true;
+                        return { done: false, value: await promise };
+                    },
+                };
+            },
+            then(resolve, reject) {
+                return promise.then(resolve, reject);
+            },
+            catch(reject) {
+                return promise.catch(reject);
+            },
+            finally(cb) {
+                return promise.finally(cb);
+            },
+        };
+        return iterable;
+    }
+
+    const UNCAPPED_FRAMES = new Set([
+        "TaskSpawnEvent",
+        "TaskTerminateEvent",
+        "CpuSampleEvent",
+        "TaskDumpEvent",
+        "SymbolTableEntry",
+        "SegmentMetadataEvent",
+        "ClockSyncEvent",
+    ]);
+    const TRACE_BOUND_EXCLUDED_FRAMES = new Set([
+        "SymbolTableEntry",
+        "SegmentMetadataEvent",
+        "ClockSyncEvent",
+    ]);
+    // Legacy classifier: epoch ns are ~1e18, monotonic ns are much smaller.
+    // 2020 is a practical floor that separates those ranges.
+    const LEGACY_EPOCH_FLOOR_MS = 1_577_836_800_000; // 2020-01-01
+
+    /**
+     * @private Build the mutable accumulator that {@link processFrame} fills and
+     * {@link finalizeParse} drains. Shared by the whole-buffer
+     * ({@link parseTraceBuffer}) and streaming ({@link parseTraceStream}) paths
+     * so there is exactly one copy of the frame-handling and post-processing
+     * logic. Returns the same `ParsedTrace` for the same concatenated bytes
+     * regardless of how those bytes were chunked.
+     */
+    function createParseState(options) {
+        const maxEvents =
+            options && options.maxEvents != null
+                ? options.maxEvents
+                : MAX_EVENTS;
+        const startTime =
+            options && options.startTime != null ? options.startTime : 0;
+        const endTime =
+            options && options.endTime != null ? options.endTime : Infinity;
+        const hasTimeFilter = startTime > 0 || endTime < Infinity;
+        return {
+            maxEvents,
+            startTime,
+            endTime,
+            hasTimeFilter,
+            // Optional pluggable event store. Defaults to a plain array. The
+            // viewer passes a columnar sink
+            // (src/lib/trace/columnar-events.ts) whose `.push(event)` writes the
+            // event's fields into typed-array columns and drops the object, so a
+            // large trace never materializes millions of fat event objects.
+            events: (options && options.eventSink) || [],
+            spawnLocations: new Map(),
+            taskSpawnLocs: new Map(),
+            taskSpawnTimes: new Map(),
+            taskTerminateTimes: new Map(),
+            taskInstrumented: new Map(), // taskId -> bool (true if spawned via dial9::spawn)
+            callframeSymbols: new Map(),
+            // Optional columnar cpu-sample sink (src/lib/trace/columnar-cpu-samples.ts).
+            // Its `.pushSample(...)` stores callchains in a flat pool; without it,
+            // samples remain fat objects in a plain array.
+            cpuSamples: (options && options.cpuSampleSink) || [],
+            allocEvents: [],
+            freeEvents: [],
+            memoryOverflows: [],
+            threadNames: new Map(),
+            // Last-seen mapping retained for sample/allocation attribution.
+            tidToWorker: new Map(),
+            // Per-TID historical bindings for context resolution at span start.
+            tidBindings: new Map(),
+            // Unfiltered park/unpark history used to derive block-in-place
+            // handoff gaps that cross a requested time-range boundary.
+            parkUnparkHistory: [],
+            // Historical fallback consumers must only use TIDs that remained
+            // bound to one worker for the entire segment.
+            stableTidToWorker: new Map(),
+            ambiguousTids: new Set(),
+            runtimeWorkers: new Map(), // runtime name → [workerId, ...]
+            segmentMetadata: new Map(), // latest segment metadata key → value
+            // Sealed files seen, and how many reported losing or inheriting
+            // events.
+            sealedFiles: 0,
+            incompleteFiles: 0,
+            // Per-runtime scheduler-metrics samples (one per runtime per flush
+            // cycle): { t, runtimeName, globalQueue, aliveTasks }. Low-volume
+            // (a handful per 10ms), so kept as a plain side-channel array rather
+            // than routed through the columnar scheduler-event store.
+            runtimeMetrics: [],
+            // QueueSampleEvent briefly carried a process-wide active-task count
+            // before RuntimeMetricsEvent replaced it. Keep that optional field
+            // in a side channel so traces from that generation remain useful.
+            legacyActiveTaskSamples: [],
+            taskDumps: new Map(), // taskId → [{timestamp, callchain}] sorted by timestamp
+            customEvents: [], // unrecognized event types: {name, timestamp, fields}
+            // Schema active when each custom event was decoded. Kept parallel to
+            // customEvents only until finalizeParse so annotation frames that
+            // legally arrive after an event still reach that event's metadata.
+            customEventSchemas: [],
+            // Optional columnar sink for SPAN custom events (SpanEnter/Exit/Close):
+            // when supplied, those route into typed columns instead of the fat
+            // customEvents array (buildSpanData reads them). Mirrors eventSink /
+            // cpuSampleSink. null => all custom events stay fat (unchanged).
+            spanEventSink: (options && options.spanEventSink) || null,
+            // { monotonicNs, realtimeNs } anchors used to recover wall clock.
+            clockSyncAnchors: [],
+            // Per-parse callchain-address -> hex-string cache (see internHex).
+            hexIntern: new Map(),
+            legacySegmentMetaWallNs: null,
+            // Smallest monotonic ts seen across all event frames.
+            // Used as the monotonic timestamp for the legacy synthesized anchor.
+            minMonoTs: null,
+            recordMinTs: Infinity,
+            recordMaxTs: -Infinity,
+            singleEventMinTs: Infinity,
+            singleEventMaxTs: -Infinity,
+            singleEventDecodeErrors: 0,
+        };
+    }
+
+    /**
+     * Record both the last-seen TID binding and the subset that stayed stable
+     * across the entire input. This runs before event caps and time filtering
+     * because historical single-event span placement must not ignore an
+     * out-of-window remap.
+     */
+    function recordTidBinding(state, values, timestamp) {
+        if (values.tid == null || timestamp == null) return;
+        const tid = num(values.tid);
+        const workerId = num(values.worker_id);
+        state.tidToWorker.set(tid, workerId);
+        let bindings = state.tidBindings.get(tid);
+        if (bindings === undefined) {
+            bindings = [];
+            state.tidBindings.set(tid, bindings);
+        }
+        // Cross-worker frames are not globally timestamp ordered. Retain every
+        // binding here; finalizeParse sorts and coalesces them chronologically.
+        bindings.push({ timestamp, workerId });
+        const previousWorker = state.stableTidToWorker.get(tid);
+        if (!state.ambiguousTids.has(tid) && previousWorker === undefined) {
+            state.stableTidToWorker.set(tid, workerId);
+        } else if (previousWorker !== undefined && previousWorker !== workerId) {
+            state.stableTidToWorker.delete(tid);
+            state.ambiguousTids.add(tid);
+        }
+    }
+
+    const DIAL9_ROLE_KEY = "dial9.role";
+    const DIAL9_SPAN_TYPE_KEY = "dial9.span.type";
+    const DEFAULT_SINGLE_EVENT_SPAN_TYPE = "single-event";
+    const SINGLE_EVENT_ROLES = Object.freeze({
+        start: "span.start",
+        duration: "span.duration",
+        name: "span.name",
+        threadId: "thread_id",
+        taskId: "tokio.task_id",
+        workerId: "tokio.worker_id",
+    });
+    const INTEGER_FIELD_TYPES = new Set([1, 9, 11, 12, 13]);
+    const STRING_FIELD_TYPES = new Set([4, 7]);
+
+    function innerFieldType(fieldType) {
+        return fieldType & 0x7f;
+    }
+
+    function compileSingleEventSpanSchema(schema) {
+        const annotations = schema.annotations || [];
+        const cached = schema._singleEventSpanLayout;
+        if (
+            cached &&
+            cached.annotations === annotations &&
+            cached.annotationCount === annotations.length
+        ) {
+            return cached.result;
+        }
+
+        const roleByField = new Array(schema.fields.length).fill(null);
+        const roleIndices = new Map();
+        let error = null;
+        let sawTiming = false;
+        for (const annotation of annotations) {
+            if (annotation.key !== DIAL9_ROLE_KEY) continue;
+            const role = Object.values(SINGLE_EVENT_ROLES).includes(annotation.value)
+                ? annotation.value
+                : null;
+            if (role == null) continue;
+            if (
+                role === SINGLE_EVENT_ROLES.start ||
+                role === SINGLE_EVENT_ROLES.duration
+            ) {
+                sawTiming = true;
+            }
+            const index = annotation.fieldIndex;
+            if (index < 0 || index >= schema.fields.length) {
+                error ||= `${DIAL9_ROLE_KEY} references missing field ${index}`;
+                continue;
+            }
+            const existingFieldRole = roleByField[index];
+            if (existingFieldRole === role) continue;
+            if (existingFieldRole != null) {
+                error ||= `field ${index} has conflicting structural roles`;
+                continue;
+            }
+            roleByField[index] = role;
+            if (roleIndices.has(role)) {
+                error ||= `duplicate ${role} role`;
+            } else {
+                roleIndices.set(role, index);
+            }
+        }
+
+        // Resolve the layout, or an error/not-span sentinel. Written as an IIFE
+        // so the many validation exits read as early returns.
+        const multipliers = {
+            ns: 1,
+            us: 1_000,
+            ms: 1_000_000,
+            s: 1_000_000_000,
+        };
+        const result = (() => {
+            // Not a span at all unless it carries some timing role.
+            if (!sawTiming) return { kind: "not-span" };
+            if (error != null) return { kind: "invalid", error };
+
+            const annotationValue = (fieldIndex, key) => {
+                let value = null;
+                for (const annotation of annotations) {
+                    if (
+                        annotation.fieldIndex !== fieldIndex ||
+                        annotation.key !== key
+                    ) {
+                        continue;
+                    }
+                    if (value != null && value !== annotation.value) {
+                        return { error: `conflicting ${key} annotations` };
+                    }
+                    value = annotation.value;
+                }
+                return { value };
+            };
+
+            // A timing field: validate integer type + resolve unit multiplier.
+            // Per spec, an absent unit defaults to ns.
+            const timingField = (role) => {
+                const index = roleIndices.get(role);
+                if (index == null) return { present: false };
+                if (
+                    !INTEGER_FIELD_TYPES.has(
+                        innerFieldType(schema.fields[index].fieldType),
+                    )
+                ) {
+                    return { error: `${role} field must have an integer wire type` };
+                }
+                const unit = annotationValue(index, "unit");
+                if (unit.error) return { error: unit.error };
+                if (unit.value != null && !Object.prototype.hasOwnProperty.call(multipliers, unit.value)) {
+                    return { error: `unsupported ${role} unit ${JSON.stringify(unit.value)}` };
+                }
+                return {
+                    present: true,
+                    field: schema.fields[index].name,
+                    multiplier: unit.value == null ? 1 : multipliers[unit.value],
+                    index,
+                };
+            };
+
+            const start = timingField(SINGLE_EVENT_ROLES.start);
+            const duration = timingField(SINGLE_EVENT_ROLES.duration);
+            for (const t of [start, duration]) {
+                if (t.error) return { kind: "invalid", error: t.error };
+            }
+
+            // A span is placed from any two of {start, duration, end}; the end
+            // is the packed event timestamp.
+            const packedEnd = !!schema.hasTimestamp;
+            const quantities =
+                (start.present ? 1 : 0) +
+                (duration.present ? 1 : 0) +
+                (packedEnd ? 1 : 0);
+            if (quantities < 2) {
+                return {
+                    kind: "invalid",
+                    error:
+                        "single-event span schema needs two of span.start, " +
+                        "span.duration, and the packed event timestamp (the span end)",
+                };
+            }
+
+            const nameIndex = roleIndices.get(SINGLE_EVENT_ROLES.name);
+            if (
+                nameIndex != null &&
+                !STRING_FIELD_TYPES.has(
+                    innerFieldType(schema.fields[nameIndex].fieldType),
+                )
+            ) {
+                return {
+                    kind: "invalid",
+                    error: "span.name field must have a string wire type",
+                };
+            }
+            const contextIndices = [
+                roleIndices.get(SINGLE_EVENT_ROLES.threadId),
+                roleIndices.get(SINGLE_EVENT_ROLES.taskId),
+                roleIndices.get(SINGLE_EVENT_ROLES.workerId),
+            ].filter((index) => index != null);
+            if (
+                contextIndices.some(
+                    (index) =>
+                        !INTEGER_FIELD_TYPES.has(
+                            innerFieldType(schema.fields[index].fieldType),
+                        ),
+                )
+            ) {
+                return {
+                    kind: "invalid",
+                    error: "execution-context field must have an integer wire type",
+                };
+            }
+
+            // Span type rides on whichever timing field is present.
+            const spanTypeIndex = [start, duration].find((t) => t.present).index;
+            const spanType = annotationValue(spanTypeIndex, DIAL9_SPAN_TYPE_KEY);
+            if (spanType.error) return { kind: "invalid", error: spanType.error };
+
+            const fieldName = (role) => {
+                const index = roleIndices.get(role);
+                return index == null ? null : schema.fields[index].name;
+            };
+            return {
+                kind: "layout",
+                schemaName: schema.name,
+                timing: {
+                    start: start.present
+                        ? { field: start.field, multiplier: start.multiplier }
+                        : null,
+                    duration: duration.present
+                        ? { field: duration.field, multiplier: duration.multiplier }
+                        : null,
+                    packedEnd,
+                },
+                nameField: fieldName(SINGLE_EVENT_ROLES.name),
+                threadIdField: fieldName(SINGLE_EVENT_ROLES.threadId),
+                taskIdField: fieldName(SINGLE_EVENT_ROLES.taskId),
+                workerIdField: fieldName(SINGLE_EVENT_ROLES.workerId),
+                spanType: spanType.value || DEFAULT_SINGLE_EVENT_SPAN_TYPE,
+                attributeFields: schema.fields
+                    .filter(
+                        (_, index) =>
+                            roleByField[index] == null ||
+                            roleByField[index] === SINGLE_EVENT_ROLES.name,
+                    )
+                    .map((field) => field.name),
+            };
+        })();
+
+        schema._singleEventSpanLayout = {
+            annotations,
+            annotationCount: annotations.length,
+            result,
+        };
+        if (result.kind === "invalid") {
+            console.warn(
+                `Ignoring invalid single-event span schema ${JSON.stringify(schema.name)}: ${result.error}`,
+            );
+        }
+        return result;
+    }
+
+    /**
+     * Resolve (start, end) in ns from any two of start, duration, and end,
+     * where the end is the event's packed timestamp (`packedEnd`, ns, or null).
+     * Returns null if fewer than two quantities are present at runtime or the
+     * arithmetic is invalid.
+     */
+    function resolveSpanTiming(timing, values, packedEnd) {
+        const read = (t) => {
+            if (t == null) return null;
+            const raw = values[t.field];
+            if (raw == null) return null;
+            const value = Number(raw) * t.multiplier;
+            return Number.isFinite(value) && value >= 0 ? value : NaN;
+        };
+        const start = read(timing.start);
+        const duration = read(timing.duration);
+        const end = timing.packedEnd ? packedEnd : null;
+
+        // A read that produced NaN is a malformed value, not an absent one.
+        if ([start, duration, end].some((v) => Number.isNaN(v))) return null;
+
+        if (start != null && end != null) {
+            return start > end ? null : { start, end };
+        }
+        if (duration != null && end != null) {
+            // Duration is unsigned; a start after end is unrepresentable.
+            return { start: Math.max(0, end - duration), end };
+        }
+        if (start != null && duration != null) {
+            return { start, end: start + duration };
+        }
+        return null;
+    }
+
+    function decodeSingleEventSpan(layout, schema, values, packedEnd) {
+        const resolved = resolveSpanTiming(layout.timing, values, packedEnd);
+        if (resolved == null) return null;
+        const { start, end } = resolved;
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+        const context = (field, positiveOnly) => {
+            if (field == null || values[field] == null) {
+                return { valid: true, value: null };
+            }
+            const value = Number(values[field]);
+            if (!Number.isFinite(value) || value < 0) {
+                return { valid: false, value: null };
+            }
+            return {
+                valid: true,
+                value: positiveOnly && value === 0 ? null : value,
+            };
+        };
+        const threadId = context(layout.threadIdField, false);
+        const taskId = context(layout.taskIdField, true);
+        const workerId = context(layout.workerIdField, false);
+        if (!threadId.valid || !taskId.valid || !workerId.valid) return null;
+        const rawName =
+            layout.nameField == null ? null : values[layout.nameField];
+        const dynamicName = rawName == null ? "" : String(rawName);
+        const fields = {};
+        const units = {};
+        for (const field of layout.attributeFields) {
+            // Optional wire fields decode as null. They are absent values, not
+            // span attributes; match the Rust decoder's FieldValueRef::None path.
+            if (values[field] == null) continue;
+            fields[field] = values[field];
+            if (schema.units?.[field] != null) {
+                units[field] = schema.units[field];
+            }
+        }
+        return {
+            start,
+            end,
+            name: dynamicName.trim() ? dynamicName : layout.schemaName,
+            spanType: layout.spanType,
+            threadId: threadId.value,
+            taskId: taskId.value,
+            workerId: workerId.value,
+            fields,
+            units: Object.keys(units).length > 0 ? units : null,
+        };
+    }
+
+    /**
+     * @private Handle a single decoded frame, mutating `state`. `dec` is the
+     * decoder the frame came from (used only to read a custom event's schema
+     * metadata). This is the single shared switch body — do not duplicate it.
+     */
+    function processFrame(frame, state, dec) {
+        const { startTime, endTime } = state;
+        if (frame.type !== "event") return;
+        const v = frame.values;
+        const ts =
+            frame.timestamp_ns == null ? null : num(frame.timestamp_ns);
+        // Track smallest monotonic ts for legacy anchor synthesis.
+        // Skip SegmentMetadata (legacy wall clock) and SymbolTableEntry.
+        if (
+            ts != null &&
+            frame.name !== "SegmentMetadataEvent" &&
+            frame.name !== "SymbolTableEntry" &&
+            (state.minMonoTs == null || ts < state.minMonoTs)
+        ) {
+            state.minMonoTs = ts;
+        }
+
+        if (frame.name === "WorkerParkEvent" || frame.name === "WorkerUnparkEvent") {
+            recordTidBinding(state, v, ts);
+            if (ts != null) {
+                state.parkUnparkHistory.push({
+                    eventType:
+                        frame.name === "WorkerParkEvent"
+                            ? EVENT_TYPES.WorkerPark
+                            : EVENT_TYPES.WorkerUnpark,
+                    timestamp: ts,
+                    workerId: num(v.worker_id),
+                    tid: v.tid != null ? num(v.tid) : undefined,
+                });
+            }
+        }
+
+        const capped = state.events.length >= state.maxEvents;
+        if (capped && !UNCAPPED_FRAMES.has(frame.name)) return;
+
+        const schema = dec.schemas.get(frame.typeId);
+        const singleEventLayout =
+            schema && schema.annotations && schema.annotations.length > 0
+                ? compileSingleEventSpanSchema(schema)
+                : { kind: "not-span" };
+        const isSingleEventSchema = singleEventLayout.kind !== "not-span";
+        const singleEventSpan =
+            singleEventLayout.kind === "layout"
+                ? decodeSingleEventSpan(singleEventLayout, schema, v, ts)
+                : null;
+        if (singleEventLayout.kind === "layout" && singleEventSpan == null) {
+            state.singleEventDecodeErrors++;
+        }
+
+        // Time range filtering: skip events outside the requested range
+        // (uncapped frames like symbols/metadata are always processed)
+        const inTimeRange =
+            ts != null && ts >= startTime && ts <= endTime;
+        const spanInTimeRange =
+            singleEventSpan != null &&
+            singleEventSpan.start <= endTime &&
+            singleEventSpan.end > startTime;
+        const recordInTimeRange =
+            singleEventSpan != null ? spanInTimeRange : inTimeRange;
+        const uncappedRuntimeFrame =
+            !isSingleEventSchema && UNCAPPED_FRAMES.has(frame.name);
+        if (
+            !recordInTimeRange &&
+            !uncappedRuntimeFrame
+        ) {
+            return;
+        }
+        if (
+            recordInTimeRange &&
+            !TRACE_BOUND_EXCLUDED_FRAMES.has(frame.name)
+        ) {
+            const boundStart = spanInTimeRange
+                ? Math.max(singleEventSpan.start, startTime)
+                : ts;
+            const boundEnd = spanInTimeRange
+                ? Math.min(singleEventSpan.end, endTime)
+                : ts;
+            if (boundStart != null && boundStart < state.recordMinTs) {
+                state.recordMinTs = boundStart;
+            }
+            if (boundEnd != null && boundEnd > state.recordMaxTs) {
+                state.recordMaxTs = boundEnd;
+            }
+            if (spanInTimeRange) {
+                if (boundStart < state.singleEventMinTs) {
+                    state.singleEventMinTs = boundStart;
+                }
+                if (boundEnd > state.singleEventMaxTs) {
+                    state.singleEventMaxTs = boundEnd;
+                }
+            }
+        }
+
+        const events = state.events;
+        const spawnLocations = state.spawnLocations;
+        const taskSpawnLocs = state.taskSpawnLocs;
+        const taskSpawnTimes = state.taskSpawnTimes;
+        const taskTerminateTimes = state.taskTerminateTimes;
+        const taskInstrumented = state.taskInstrumented;
+        const callframeSymbols = state.callframeSymbols;
+        const cpuSamples = state.cpuSamples;
+        const allocEvents = state.allocEvents;
+        const freeEvents = state.freeEvents;
+        const memoryOverflows = state.memoryOverflows;
+        const threadNames = state.threadNames;
+        const runtimeWorkers = state.runtimeWorkers;
+        const segmentMetadata = state.segmentMetadata;
+        const runtimeMetrics = state.runtimeMetrics;
+        const legacyActiveTaskSamples = state.legacyActiveTaskSamples;
+        const taskDumps = state.taskDumps;
+        const customEvents = state.customEvents;
+        const spanEventSink = state.spanEventSink;
+        const clockSyncAnchors = state.clockSyncAnchors;
+        if (singleEventSpan != null) {
+            const storedInSink =
+                spanEventSink &&
+                spanEventSink.pushIfSpan(
+                    frame.name,
+                    singleEventSpan.end,
+                    v,
+                    singleEventSpan,
+                );
+            if (!storedInSink) {
+                // units/fieldKinds resolved in finalizeParse (see below).
+                customEvents.push({
+                    name: frame.name,
+                    timestamp: ts,
+                    fields: v,
+                    units: null,
+                    fieldKinds: null,
+                    singleEventSpan,
+                });
+                state.customEventSchemas.push(schema);
+            }
+        } else if (isSingleEventSchema && ts != null) {
+            // Invalid schemas and per-event projection failures remain visible
+            // as ordinary custom events, but must not mutate runtime state based
+            // only on a colliding schema name.
+            customEvents.push({
+                name: frame.name,
+                timestamp: ts,
+                fields: v,
+                units: null,
+                fieldKinds: null,
+                singleEventSpan: null,
+            });
+            state.customEventSchemas.push(schema);
+        }
+        if (isSingleEventSchema) {
+            return;
+        }
+        if (!inTimeRange && !UNCAPPED_FRAMES.has(frame.name)) return;
+
+        switch (frame.name) {
+            case "PollStartEvent": {
+                const spawnLoc = v.spawn_loc || null;
+                if (spawnLoc) spawnLocations.set(spawnLoc, spawnLoc);
+                const taskId = num(v.task_id);
+                if (taskId && spawnLoc && !taskSpawnLocs.has(taskId)) {
+                    taskSpawnLocs.set(taskId, spawnLoc);
+                }
+                if (events.pushEvent) {
+                    events.pushEvent(0, ts, num(v.worker_id), num(v.local_queue), 0, 0, 0, taskId, spawnLoc, undefined, undefined, undefined);
+                    break;
+                }
+                events.push({
+                    eventType: 0,
+                    timestamp: ts,
+                    workerId: num(v.worker_id),
+                    localQueue: num(v.local_queue),
+                    globalQueue: 0,
+                    cpuTime: 0,
+                    schedWait: 0,
+                    taskId,
+                    spawnLocId: spawnLoc,
+                    spawnLoc,
+                });
+                break;
+            }
+            case "PollEndEvent":
+                if (events.pushEvent) {
+                    events.pushEvent(1, ts, num(v.worker_id), 0, 0, 0, 0, 0, null, undefined, undefined, undefined);
+                    break;
+                }
+                events.push({
+                    eventType: 1,
+                    timestamp: ts,
+                    workerId: num(v.worker_id),
+                    globalQueue: 0,
+                    localQueue: 0,
+                    cpuTime: 0,
+                    schedWait: 0,
+                    taskId: 0,
+                    spawnLocId: null,
+                    spawnLoc: null,
+                });
+                break;
+            case "WorkerParkEvent":
+                if (events.pushEvent) {
+                    events.pushEvent(2, ts, num(v.worker_id), num(v.local_queue), 0, num(v.cpu_time_ns), 0, 0, null, v.tid != null ? num(v.tid) : undefined, undefined, undefined);
+                    break;
+                }
+                events.push({
+                    eventType: 2,
+                    timestamp: ts,
+                    workerId: num(v.worker_id),
+                    localQueue: num(v.local_queue),
+                    cpuTime: num(v.cpu_time_ns),
+                    // tid was added later; old traces won't have it. Leave undefined
+                    // so the block-in-place gap detection can skip them.
+                    tid: v.tid != null ? num(v.tid) : undefined,
+                    globalQueue: 0,
+                    schedWait: 0,
+                    taskId: 0,
+                    spawnLocId: null,
+                    spawnLoc: null,
+                });
+                break;
+            case "WorkerUnparkEvent":
+                if (events.pushEvent) {
+                    events.pushEvent(3, ts, num(v.worker_id), num(v.local_queue), 0, num(v.cpu_time_ns), v.sched_wait_ns == null ? null : num(v.sched_wait_ns), 0, null, v.tid != null ? num(v.tid) : undefined, undefined, undefined);
+                    break;
+                }
+                events.push({
+                    eventType: 3,
+                    timestamp: ts,
+                    workerId: num(v.worker_id),
+                    localQueue: num(v.local_queue),
+                    cpuTime: num(v.cpu_time_ns),
+                    // sched_wait_ns is optional: null when this park->unpark
+                    // pair was not sampled for schedstat. Keep null distinct
+                    // from 0 (a sampled zero-wait) so downstream sched-delay
+                    // detection skips unsampled unparks rather than treating
+                    // them as instantaneous.
+                    schedWait: v.sched_wait_ns == null ? null : num(v.sched_wait_ns),
+                    // tid was added later; old traces won't have it. Leave undefined
+                    // so the block-in-place gap detection can skip them.
+                    tid: v.tid != null ? num(v.tid) : undefined,
+                    globalQueue: 0,
+                    taskId: 0,
+                    spawnLocId: null,
+                    spawnLoc: null,
+                });
+                break;
+            case "QueueSampleEvent":
+                {
+                    const activeTaskSample = decodeLegacyActiveTaskSample(ts, v);
+                    if (activeTaskSample != null) {
+                        legacyActiveTaskSamples.push(activeTaskSample);
+                    }
+                }
+                if (events.pushEvent) {
+                    events.pushEvent(4, ts, 0, 0, num(v.global_queue), 0, 0, 0, null, undefined, undefined, undefined);
+                    break;
+                }
+                events.push({
+                    eventType: 4,
+                    timestamp: ts,
+                    globalQueue: num(v.global_queue),
+                    workerId: 0,
+                    localQueue: 0,
+                    cpuTime: 0,
+                    schedWait: 0,
+                    taskId: 0,
+                    spawnLocId: null,
+                    spawnLoc: null,
+                });
+                break;
+            case "RuntimeMetricsEvent":
+                // Per-runtime scheduler metrics. Low-volume, so recorded in a
+                // side-channel array rather than the columnar event store.
+                runtimeMetrics.push(decodeRuntimeMetricsSample(ts, v));
+                break;
+            case "TaskSpawnEvent": {
+                const taskId = num(v.task_id);
+                const spawnLoc = v.spawn_loc || null;
+                const instrumented = v.instrumented ?? true;
+                if (spawnLoc) spawnLocations.set(spawnLoc, spawnLoc);
+                taskSpawnLocs.set(taskId, spawnLoc);
+                taskSpawnTimes.set(taskId, ts);
+                taskInstrumented.set(taskId, !!instrumented);
+                break;
+            }
+            case "TaskTerminateEvent":
+                taskTerminateTimes.set(num(v.task_id), ts);
+                break;
+            case "WakeEventEvent":
+                if (events.pushEvent) {
+                    events.pushEvent(9, ts, num(v.target_worker), 0, 0, 0, 0, 0, null, undefined, num(v.waker_task_id), num(v.woken_task_id));
+                    break;
+                }
+                events.push({
+                    eventType: 9,
+                    timestamp: ts,
+                    workerId: num(v.target_worker),
+                    wakerTaskId: num(v.waker_task_id),
+                    wokenTaskId: num(v.woken_task_id),
+                    targetWorker: num(v.target_worker),
+                    globalQueue: 0,
+                    localQueue: 0,
+                    cpuTime: 0,
+                    schedWait: 0,
+                    taskId: 0,
+                    spawnLocId: null,
+                    spawnLoc: null,
+                });
+                break;
+            case "CpuSampleEvent": {
+                // `cpu` is encoded as OptionalVarint: null when the backend could
+                // not determine the CPU. Varints decode as strings for BigInt safety;
+                // CPU ids always fit in a Number.
+                const cpu = v.cpu == null ? null : Number(v.cpu);
+                if (cpuSamples.pushSample) {
+                    // Columnar sink: pass the RAW callchain (no per-sample hex
+                    // array); the sink interns frames into its flat pool.
+                    cpuSamples.pushSample(
+                        ts,
+                        num(v.worker_id),
+                        num(v.tid),
+                        num(v.source),
+                        v.callchain || [],
+                        cpu,
+                    );
+                } else {
+                    const chain = (v.callchain || []).map(
+                        (addr) => internHex(state.hexIntern, addr),
+                    );
+                    cpuSamples.push({
+                        timestamp: ts,
+                        workerId: num(v.worker_id),
+                        tid: num(v.tid),
+                        source: num(v.source),
+                        callchain: chain,
+                        cpu,
+                    });
+                }
+                const tn = v.thread_name;
+                if (tn) {
+                    threadNames.set(num(v.tid), tn);
+                }
+                break;
+            }
+            case "TaskDumpEvent": {
+                const taskId = num(v.task_id);
+                const chain = (v.callchain || []).map(
+                    (addr) => internHex(state.hexIntern, addr),
+                );
+                if (!taskDumps.has(taskId)) taskDumps.set(taskId, []);
+                taskDumps.get(taskId).push({ timestamp: ts, callchain: chain });
+                break;
+            }
+            case "AllocEvent": {
+                const chain = (v.callchain || []).map(
+                    (addr) => internHex(state.hexIntern, addr),
+                );
+                allocEvents.push({
+                    timestamp: ts,
+                    tid: num(v.tid),
+                    size: num(v.size),
+                    addr: BigInt(v.addr || 0).toString(),
+                    callchain: chain,
+                });
+                break;
+            }
+            case "FreeEvent": {
+                freeEvents.push({
+                    timestamp: ts,
+                    tid: num(v.tid),
+                    addr: BigInt(v.addr || 0).toString(),
+                    size: num(v.size),
+                    allocTimestampNs: num(v.alloc_timestamp_ns),
+                });
+                break;
+            }
+            case "MemoryProfileOverflowEvent": {
+                memoryOverflows.push({
+                    timestamp: ts,
+                    droppedAllocs: num(v.dropped_allocs),
+                    droppedFrees: num(v.dropped_frees),
+                });
+                break;
+            }
+            case "ClockSyncEvent": {
+                const real = num(v.realtime_ns);
+                if (real > 0) {
+                    clockSyncAnchors.push({
+                        monotonicNs: ts,
+                        realtimeNs: real,
+                    });
+                }
+                break;
+            }
+            case "SegmentMetadataEvent": {
+                // If this looks epoch-scale, treat it as legacy wall clock.
+                if (
+                    state.legacySegmentMetaWallNs == null &&
+                    ts != null &&
+                    ts / 1e6 >= LEGACY_EPOCH_FLOOR_MS
+                ) {
+                    state.legacySegmentMetaWallNs = ts;
+                }
+                const entries = v.entries || {};
+                // Written once per file, as it is sealed. Files predating the
+                // key carry no seal record, so they go uncounted.
+                if ("segment.complete" in entries) {
+                    state.sealedFiles++;
+                    if (String(entries["segment.complete"]) === "false") {
+                        state.incompleteFiles++;
+                    }
+                }
+                for (const [key, val] of Object.entries(entries)) {
+                    const value = String(val);
+                    segmentMetadata.set(key, value);
+                    if (key.startsWith("runtime.")) {
+                        const name = key.slice("runtime.".length);
+                        const ids = value
+                            .split(",")
+                            .map(Number)
+                            .filter((n) => !isNaN(n));
+                        if (ids.length > 0) runtimeWorkers.set(name, ids);
+                    }
+                }
+                break;
+            }
+            case "SymbolTableEntry": {
+                const addrKey = "0x" + BigInt(v.addr).toString(16);
+                const depth = Number(v.inline_depth || 0);
+                const sf = v.source_file || "";
+                const sl = Number(v.source_line || 0);
+                const location = sf ? (sl ? `${sf}:${sl}` : sf) : null;
+                const entry = { symbol: v.symbol_name, location };
+                if (depth === 0) {
+                    // Outermost frame: store directly (or as first element of array)
+                    const existing = callframeSymbols.get(addrKey);
+                    if (Array.isArray(existing)) {
+                        existing[0] = entry;
+                    } else {
+                        callframeSymbols.set(addrKey, entry);
+                    }
+                } else {
+                    // Inlined frame: promote to array
+                    let arr = callframeSymbols.get(addrKey);
+                    if (!Array.isArray(arr)) {
+                        arr = [arr || { symbol: addrKey, location: null }];
+                        callframeSymbols.set(addrKey, arr);
+                    }
+                    arr[depth] = entry;
+                }
+                break;
+            }
+            default: {
+                // Unrecognized event type: capture as a custom event. Events
+                // that produce spans route to the columnar spanEventSink when
+                // present; everything else stays fat.
+                if (ts != null) {
+                    if (
+                        !(
+                            spanEventSink &&
+                            spanEventSink.pushIfSpan(frame.name, ts, v, null)
+                        )
+                    ) {
+                        // units/fieldKinds are resolved in finalizeParse from
+                        // the parallel customEventSchemas array (trailing
+                        // annotation frames may still update the schema).
+                        customEvents.push({
+                            name: frame.name,
+                            timestamp: ts,
+                            fields: v,
+                            units: null,
+                            fieldKinds: null,
+                            singleEventSpan: null,
+                        });
+                        state.customEventSchemas.push(schema);
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    /**
+     * @private Capability fields from segment metadata and spawn-event
+     * evidence. The NDJSON cache loaders re-derive them for older caches.
+     */
+    function deriveCapabilities(segmentMetadata, taskSpawnTimes) {
+        return {
+            // What the recorder says the trace holds. `dial9-spawns-only` means
+            // poll events cover just the tasks spawned through dial9's own
+            // helpers, and there are no task spawn/terminate events. Traces
+            // predating these keys all carried the full set, so absent means
+            // full.
+            hasFullTaskCoverage: segmentMetadata.get("tokio.poll_coverage") !== "dial9-spawns-only",
+            hasLocalQueueDepth: segmentMetadata.get("tokio.local_queue") !== "false",
+            // false means the lifetime column is "not captured", not "instant tasks".
+            hasTaskLifetimes: taskSpawnTimes.size > 0,
+        };
+    }
+
+    /**
+     * @private Run the post-frame-loop passes (clock anchors, tid→worker
+     * resolution, block-in-place gaps) and assemble the final `ParsedTrace`.
+     * Identical for the whole-buffer and streaming paths. `version` is read from
+     * the decoder after the last frame.
+     */
+    function finalizeParse(state, version) {
+        const {
+            events,
+            spawnLocations,
+            taskSpawnLocs,
+            taskSpawnTimes,
+            taskTerminateTimes,
+            taskInstrumented,
+            callframeSymbols,
+            cpuSamples: cpuSamplesSink,
+            allocEvents,
+            freeEvents,
+            memoryOverflows,
+            threadNames,
+            tidToWorker,
+            tidBindings,
+            parkUnparkHistory,
+            stableTidToWorker,
+            runtimeWorkers,
+            segmentMetadata,
+            runtimeMetrics,
+            legacyActiveTaskSamples,
+            taskDumps,
+            customEvents,
+            customEventSchemas,
+            spanEventSink,
+            clockSyncAnchors,
+            maxEvents,
+            startTime,
+            endTime,
+            hasTimeFilter,
+        } = state;
+
+        // A columnar cpu-sample sink exposes its materialized samples via
+        // `.samples`; the rest of finalize (tid->worker resolution, block-in-place
+        // gap rewrite, and the returned ParsedTrace.cpuSamples) works on that plain
+        // array. A legacy plain-array sink IS the array.
+        const cpuSamples =
+            cpuSamplesSink && cpuSamplesSink.samples !== undefined
+                ? cpuSamplesSink.samples
+                : cpuSamplesSink;
+
+        // Metadata annotations (unit/kind) may legally follow the event they
+        // describe, so resolve them against the exact schema active for each
+        // event now that every frame has been consumed. Span *classification*,
+        // by contrast, is not recomputed here: span-role annotations
+        // (`dial9.role`) are required by the wire format to precede any event of
+        // their type (see docs/design/single-event-spans.md), so the decode-time
+        // projection in processFrame is already final. Both decoders classify in
+        // a single pass; neither re-resolves spans after the fact.
+        for (let i = 0; i < customEvents.length; i++) {
+            const event = customEvents[i];
+            const schema = customEventSchemas[i];
+            event.units = schema?.units || null;
+            event.fieldKinds = schema?.fieldKinds || null;
+        }
+
+        // Legacy fallback: synthesize an anchor from legacy SegmentMetadata wall
+        // time + earliest monotonic event timestamp. This is best-effort only.
+        if (
+            clockSyncAnchors.length === 0 &&
+            state.legacySegmentMetaWallNs != null &&
+            state.minMonoTs != null
+        ) {
+            clockSyncAnchors.push({
+                monotonicNs: state.minMonoTs,
+                realtimeNs: state.legacySegmentMetaWallNs,
+            });
+        }
+
+        clockSyncAnchors.sort((a, b) => {
+            if (a.monotonicNs < b.monotonicNs) return -1;
+            if (a.monotonicNs > b.monotonicNs) return 1;
+            return 0;
+        });
+
+        // Sort task dumps by timestamp for efficient lookup during rendering
+        for (const arr of taskDumps.values()) {
+            arr.sort((a, b) => a.timestamp - b.timestamp);
+        }
+        for (const [tid, bindings] of tidBindings) {
+            bindings.sort((a, b) => a.timestamp - b.timestamp);
+            const coalesced = [];
+            for (const binding of bindings) {
+                if (
+                    coalesced.length === 0 ||
+                    coalesced[coalesced.length - 1].workerId !== binding.workerId
+                ) {
+                    coalesced.push(binding);
+                }
+            }
+            tidBindings.set(tid, coalesced);
+        }
+        if (state.singleEventDecodeErrors > 0) {
+            console.warn(
+                `Ignored ${state.singleEventDecodeErrors} invalid single-event span event(s)`,
+            );
+        }
+
+        let clockOffsetNs = null;
+        if (clockSyncAnchors.length > 0) {
+            const a0 = clockSyncAnchors[0];
+            clockOffsetNs = a0.realtimeNs - a0.monotonicNs;
+        }
+        // Runtime events and completed single-event spans both contribute bounds.
+        let evMinTs = Infinity,
+            evMaxTs = -Infinity;
+        if (typeof events.minTs === "number" && typeof events.maxTs === "number") {
+            // A columnar event sink (src/lib/trace/columnar-events.ts) tracks its
+            // own ts bounds during push; it has no numeric index (events[i]),
+            // so read the bounds it accumulated.
+            evMinTs = events.minTs;
+            evMaxTs = events.maxTs;
+        } else {
+            for (let i = 0; i < events.length; i++) {
+                const t = events[i].timestamp;
+                if (t < evMinTs) evMinTs = t;
+                if (t > evMaxTs) evMaxTs = t;
+            }
+        }
+        evMinTs = Math.min(evMinTs, state.singleEventMinTs);
+        evMaxTs = Math.max(evMaxTs, state.singleEventMaxTs);
+
+        // Second pass: derive worker attribution from WorkerPark/WorkerUnpark
+        // tid fields, detect block-in-place gaps, and rewrite cpuSamples.workerId.
+        // See ADR-0001 (worker_id derived at analysis) and ADR-0002 (block-in-place
+        // gap is unknowable).
+        //
+        // Samples are attributed by tid: resolve each through the tid -> worker map.
+        // Leave the wire value untouched when the tid is unmapped, so legacy traces
+        // (park/unpark without a tid) keep their pre-resolved worker id.
+        for (const sample of cpuSamples) {
+            const w = tidToWorker.get(sample.tid);
+            if (w !== undefined) sample.workerId = w;
+        }
+        const blockInPlaceGaps = deriveBlockInPlaceGaps(
+            parkUnparkHistory,
+            cpuSamples,
+        );
+
+        return {
+            magic: "D9TF",
+            version,
+            events,
+            minTs: Number.isFinite(evMinTs) ? evMinTs : null,
+            maxTs: Number.isFinite(evMaxTs) ? evMaxTs : null,
+            recordMinTs:
+                state.recordMinTs < Infinity ? state.recordMinTs : null,
+            recordMaxTs:
+                state.recordMaxTs > -Infinity ? state.recordMaxTs : null,
+            truncated: events.length >= maxEvents,
+            timeFiltered: hasTimeFilter,
+            filterStartTime: hasTimeFilter ? startTime : null,
+            filterEndTime: hasTimeFilter ? endTime : null,
+            hasCpuTime: true,
+            hasSchedWait: true,
+            hasTaskTracking: true,
+            ...deriveCapabilities(segmentMetadata, taskSpawnTimes),
+            sealedFiles: state.sealedFiles,
+            incompleteFiles: state.incompleteFiles,
+            spawnLocations,
+            taskSpawnLocs,
+            taskSpawnTimes,
+            taskInstrumented,
+            cpuSamples,
+            allocEvents,
+            freeEvents,
+            memoryOverflows,
+            callframeSymbols,
+            threadNames,
+            tidToWorker,
+            tidBindings,
+            stableTidToWorker,
+            taskTerminateTimes,
+            runtimeWorkers,
+            segmentMetadata,
+            runtimeMetrics,
+            legacyActiveTaskSamples,
+            customEvents,
+            taskDumps,
+            clockSyncAnchors,
+            clockOffsetNs,
+            blockInPlaceGaps,
+        };
+    }
+
+    // Both parse loops (whole-buffer and streaming) must periodically hand the
+    // main thread back to the browser so the loading spinner can repaint. A
+    // `setTimeout(0)` is clamped to ~4ms in browsers AND forces a repaint, so
+    // yielding too often — once per 100KB (whole-buffer) or once per chunk
+    // (streaming) — produces a paint storm that dominates parse time. Issue #595:
+    // the whole-buffer path (used by multi-trace `trace=` loads) yielded on a
+    // byte cadence and so painted ~100+ times and parsed much slower than the
+    // single-trace streaming path, which had already moved to this wall-clock
+    // throttle. Both paths now share ONE policy so it can't drift again.
+    const PAINT_INTERVAL_MS = 200; // at most ~5 repaint yields per second
+
+    /**
+     * @private Wall-clock throttle for the parse loops' spinner-repaint yields.
+     * `await throttle.yieldIfDue()` is a no-op until `PAINT_INTERVAL_MS` of
+     * wall-clock has elapsed since the last yield, then it yields a macrotask.
+     * Independent of trace size and chunking. Used by both {@link parseTraceBuffer}
+     * and {@link parseTraceStream}.
+     */
+    function makePaintThrottle() {
+        // Wall-clock source that works in browser and Node. Node 16+ exposes a
+        // global `performance`, but guard anyway in case it's absent.
+        const nowMs =
+            typeof performance !== "undefined" && performance.now
+                ? () => performance.now()
+                : () => Date.now();
+        let lastYieldMs = nowMs();
+        return {
+            async yieldIfDue() {
+                const t = nowMs();
+                if (t - lastYieldMs >= PAINT_INTERVAL_MS) {
+                    lastYieldMs = t;
+                    await new Promise((r) => setTimeout(r, 0));
+                }
+            },
+        };
+    }
+
+    /** @private Parse a binary trace buffer. */
+    async function parseTraceBuffer(buffer, options) {
+        buffer = await maybeGunzip(buffer);
+        const onProgress = (options && options.onParseProgress) || null;
+        // Cheap per-frame gate. Every PROGRESS_BYTES of decoded bytes we refresh
+        // the progress counter (a cheap textContent write) and check the paint
+        // throttle. Bytes (not a clock read) are the gate so we don't touch the
+        // throttle on all ~300k frames of a large trace.
+        const PROGRESS_BYTES = 100 * 1024;
+        const paint = makePaintThrottle();
+        const TD = getTraceDecoder();
+        const dec = new TD(
+            buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer,
+        );
+        if (!dec.decodeHeader()) throw new Error("Invalid trace header");
+        const totalBytes = dec.byteLength;
+        const state = createParseState(options);
+
+        let lastProgressPos = 0;
+        let frame;
+        while ((frame = dec.nextFrame()) !== null) {
+            if (onProgress && dec.position - lastProgressPos >= PROGRESS_BYTES) {
+                lastProgressPos = dec.position;
+                onProgress({
+                    bytesRead: dec.position,
+                    totalBytes,
+                    eventCount: state.events.length,
+                });
+                // Hand the main thread back so the spinner can paint, throttled
+                // to PAINT_INTERVAL_MS — not on every byte milestone.
+                await paint.yieldIfDue();
+            }
+            processFrame(frame, state, dec);
+        }
+
+        return finalizeParse(state, dec.version);
+    }
+
+    /**
+     * Parse a trace from an async stream of raw (already-gunzipped) byte chunks.
+     * Decoding overlaps with the network download: each chunk is appended to a
+     * growable buffer, and all *complete* frames it newly exposes are drained
+     * immediately; an incomplete trailing frame is rolled back and re-attempted
+     * once the next chunk arrives. The same {@link processFrame} /
+     * {@link finalizeParse} logic runs as for {@link parseTraceBuffer}, so the
+     * result is byte-for-byte identical to parsing the concatenated buffer.
+     *
+     * @param {AsyncIterable<Uint8Array>} chunks raw trace bytes (post-gunzip)
+     * @param {Object} [options] same options as {@link parseTrace}, plus
+     *   `onParseProgress({bytesRead, totalBytes, eventCount})`. `totalBytes` is
+     *   `null` here — when streaming we don't know the trace's full size until the
+     *   stream ends, so callers must not compute a percentage from it.
+     * @returns {Promise<ParsedTrace>}
+     */
+    async function parseTraceStream(chunks, options) {
+        const onProgress = (options && options.onParseProgress) || null;
+        const TD = getTraceDecoder();
+        const state = createParseState(options);
+
+        // Coalesce incoming chunks before draining. The browser's
+        // DecompressionStream("gzip") emits tiny ~16KB chunks (measured: ~708
+        // chunks of median/max 16384 bytes for the 10.27MB demo trace). Draining
+        // on every chunk pays a full-tail grow() copy + decode setup ~708 times,
+        // which dominates parse time (~66-78% overhead vs the whole-buffer
+        // baseline). Waiting until ≥256KB of undrained bytes have accumulated
+        // collapses those ~708 grow+drain cycles into ~40 and brings streaming back
+        // to/below the whole-buffer baseline. The 5-byte header is still decoded as
+        // soon as it arrives so a tiny trace (well under 256KB) still parses.
+        const MIN_DRAIN_BYTES = 256 * 1024;
+        // Yield a macrotask (setTimeout(0)) to the browser on a wall-clock cadence
+        // rather than per-chunk or per-byte. KEY FACT: the `for await` over `chunks`
+        // already awaits each decompressed chunk, so the network read +
+        // DecompressionStream pump make progress on their own — the macrotask yield
+        // does NOT drive download/parse overlap. Its ONLY purpose is to hand the
+        // main thread back to the browser so it can repaint the spinner. Each yield
+        // therefore permits (roughly) one repaint, and a byte cadence fired ~100
+        // times for a 10MB trace — ~100 paints during an ~8s parse. Throttling by
+        // elapsed wall-clock time instead caps paints to a few per second
+        // regardless of trace size, with zero effect on overlap or decode output.
+        // We don't drop the yield entirely: the spinner must still tick a few
+        // times/sec so the user sees progress. onProgress still fires on EVERY
+        // batch drain (cheap) so the event/byte counters stay current; only the
+        // (relatively expensive) repaint yield is rate-limited. The throttle is
+        // shared with parseTraceBuffer (see makePaintThrottle) so the policy can't
+        // drift between the two paths (issue #595).
+        const paint = makePaintThrottle();
+
+        // Unconsumed-tail accumulator. The decoder reads pooled strings/stacks via
+        // its `stringPool`/`stackPool` maps (resolved values are copied into the
+        // maps), and event field reads only touch the current frame's bytes — never
+        // earlier offsets. So once a frame is fully decoded its bytes are dead, and
+        // we can drop the consumed prefix after each drain. That keeps `acc`
+        // bounded by (largest single frame + one chunk) and makes appends O(tail)
+        // instead of O(total) — avoiding O(n²) blow-up on many small chunks.
+        let acc = new Uint8Array(0);
+        let dec = null;
+        let headerDecoded = false;
+        let sawAnyBytes = false;
+        let consumedBytes = 0; // total bytes already decoded (for progress only)
+
+        function grow(chunk) {
+            if (chunk.length === 0) return;
+            // Always copy into a buffer sized EXACTLY to the accumulated bytes.
+            // Aliasing an incoming chunk (which may be a `subarray` view into a
+            // larger underlying ArrayBuffer) is unsafe: the field decoders build
+            // `new Uint8Array(view.buffer, …, len)` directly on the underlying
+            // buffer, bypassing the DataView's length bound, and would happily read
+            // bytes that lie past the logical end of the stream-so-far. Keeping
+            // `acc.buffer.byteLength === acc.length` makes such over-reads throw
+            // RangeError (→ needMoreBytes), which is exactly the incomplete-frame
+            // signal the streaming loop relies on.
+            const next = new Uint8Array(acc.length + chunk.length);
+            next.set(acc, 0);
+            next.set(chunk, acc.length);
+            acc = next;
+        }
+
+        // Drain every complete frame currently in `acc`, then drop the consumed
+        // prefix so the accumulator holds only the (incomplete) trailing frame.
+        function drainComplete() {
+            for (;;) {
+                const snap = dec.snapshot();
+                const frame = dec.nextFrame();
+                if (frame === null) {
+                    if (dec.needMoreBytes) {
+                        // Partial frame at the tail: undo any positional advance so the
+                        // re-wrapped decoder re-attempts this frame from the same offset.
+                        dec.restore(snap);
+                    }
+                    break;
+                }
+                processFrame(frame, state, dec);
+            }
+            // Drop everything the decoder has already consumed. `dec.position` points
+            // at the start of the incomplete trailing frame (or end-of-buffer).
+            const keepFrom = dec.position;
+            if (keepFrom > 0) {
+                consumedBytes += keepFrom;
+                acc = acc.slice(keepFrom);
+            }
+        }
+
+        // Decode the header (once ≥5 bytes are buffered) and then drain every
+        // complete frame currently in `acc`. Shared by the batched in-loop path and
+        // the final end-of-stream flush so both go through identical logic.
+        function drainBatch() {
+            if (!headerDecoded) {
+                // Need at least the 5-byte header before any frames. Wait for more.
+                if (acc.length < 5) return;
+                dec = new TD(acc);
+                dec.enableStreaming();
+                if (!dec.decodeHeader())
+                    throw new Error("Invalid trace header");
+                headerDecoded = true;
+            } else {
+                // Re-wrap the decoder over the grown tail, rebasing its position to 0
+                // (the consumed prefix was dropped by the previous drainComplete()).
+                // Accumulated state (schemas, pools, timestamp base) is preserved.
+                dec.setBuffer(acc);
+                dec.rewindToStart();
+            }
+            drainComplete();
+        }
+
+        for await (const rawChunk of chunks) {
+            const chunk =
+                rawChunk instanceof Uint8Array
+                    ? rawChunk
+                    : new Uint8Array(rawChunk);
+            if (chunk.length === 0) continue;
+            sawAnyBytes = true;
+            grow(chunk);
+
+            // Batch tiny chunks: keep accumulating until the undrained tail reaches
+            // MIN_DRAIN_BYTES, then drain once. `acc` only ever holds bytes that have
+            // NOT yet been consumed (drainComplete drops the consumed prefix), so its
+            // length is exactly the pending-but-undrained count. The header is the
+            // one exception — decode it as soon as ≥5 bytes exist so small traces
+            // don't stall waiting for a 256KB batch.
+            if (acc.length < MIN_DRAIN_BYTES && headerDecoded) continue;
+
+            drainBatch();
+
+            if (onProgress) {
+                onProgress({
+                    bytesRead: consumedBytes,
+                    // Total is unknown while streaming (we haven't seen the whole trace),
+                    // so report null rather than `consumedBytes + acc.length` — `acc` is
+                    // just the small undrained tail, which would peg any percentage at
+                    // ~99% the entire time.
+                    totalBytes: null,
+                    eventCount: state.events.length,
+                });
+                // Yield so the browser can paint the spinner, throttled to
+                // PAINT_INTERVAL_MS — not once per (tiny) chunk and not on a byte
+                // cadence. Because the `for await` above already pumps the
+                // network/decompression, this throttle reduces repaints without
+                // slowing download/parse overlap.
+                await paint.yieldIfDue();
+            }
+        }
+
+        // Drain the final partial batch: bytes that arrived after the last
+        // MIN_DRAIN_BYTES drain (or, for a sub-256KB trace, the only batch).
+        if (acc.length > 0 || (sawAnyBytes && !headerDecoded)) {
+            drainBatch();
+            if (onProgress) {
+                onProgress({
+                    bytesRead: consumedBytes,
+                    totalBytes: null, // unknown while streaming — see note above
+                    eventCount: state.events.length,
+                });
+            }
+        }
+
+        if (!sawAnyBytes || !headerDecoded) {
+            throw new Error("Invalid trace header");
+        }
+
+        // Stream ended. Any bytes still pending are a genuinely truncated tail
+        // (the file ended mid-frame) — finalize with whatever we decoded, matching
+        // the whole-buffer decoder's graceful EOF behavior.
+        return finalizeParse(state, dec.version);
+    }
+
+    // ── Directory parsing (Node-only) ──
+
+    /** Reconstruct Maps from [key, value] arrays produced by parse_worker.js. */
+    function entriesToMap(arr) {
+        return new Map(arr);
+    }
+
+    /** Load a cached ParsedTrace from NDJSON, reconstructing Maps. */
+    async function loadCachedTrace(cachePath) {
+        const fs = require("fs");
+        const buf = await fs.promises.readFile(cachePath);
+        let pos = 0;
+        function nextLine() {
+            const nl = buf.indexOf(10, pos);
+            if (nl === -1) {
+                if (pos < buf.length) {
+                    const s = buf.toString("utf8", pos, buf.length);
+                    pos = buf.length;
+                    return s;
+                }
+                return null;
+            }
+            const s = buf.toString("utf8", pos, nl);
+            pos = nl + 1;
+            return s;
+        }
+
+        let raw = null;
+        const events = [];
+        const cpuSamples = [];
+        const customEvents = [];
+        const allocEvents = [];
+        const freeEvents = [];
+        const memoryOverflows = [];
+
+        let line;
+        while ((line = nextLine()) !== null) {
+            if (!line) continue;
+            const rec = JSON.parse(line);
+            switch (rec.t) {
+                case "m":
+                    raw = rec.d;
+                    if (raw.spawnLocations)
+                        raw.spawnLocations = entriesToMap(raw.spawnLocations);
+                    if (raw.taskSpawnLocs)
+                        raw.taskSpawnLocs = entriesToMap(raw.taskSpawnLocs);
+                    if (raw.taskSpawnTimes)
+                        raw.taskSpawnTimes = entriesToMap(raw.taskSpawnTimes);
+                    if (raw.taskTerminateTimes)
+                        raw.taskTerminateTimes = entriesToMap(
+                            raw.taskTerminateTimes,
+                        );
+                    if (raw.callframeSymbols)
+                        raw.callframeSymbols = entriesToMap(
+                            raw.callframeSymbols,
+                        );
+                    if (raw.threadNames)
+                        raw.threadNames = entriesToMap(raw.threadNames);
+                    if (raw.runtimeWorkers)
+                        raw.runtimeWorkers = entriesToMap(raw.runtimeWorkers);
+                    if (raw.segmentMetadata)
+                        raw.segmentMetadata = entriesToMap(raw.segmentMetadata);
+                    if (raw.taskDumps)
+                        raw.taskDumps = entriesToMap(raw.taskDumps);
+                    break;
+                case "e":
+                    events.push(rec.d);
+                    break;
+                case "c":
+                    cpuSamples.push(rec.d);
+                    break;
+                case "x":
+                    customEvents.push(rec.d);
+                    break;
+                case "a":
+                    allocEvents.push(rec.d);
+                    break;
+                case "f":
+                    freeEvents.push(rec.d);
+                    break;
+                case "o":
+                    memoryOverflows.push(rec.d);
+                    break;
+            }
+        }
+        raw.events = events;
+        raw.cpuSamples = cpuSamples;
+        if (!raw.segmentMetadata) raw.segmentMetadata = new Map();
+        if (!raw.runtimeMetrics) raw.runtimeMetrics = [];
+        if (!raw.legacyActiveTaskSamples) raw.legacyActiveTaskSamples = [];
+        // Cache files written before the capability fields were serialized:
+        // re-derive them from the cached metadata and spawn times.
+        if (raw.hasFullTaskCoverage === undefined) {
+            Object.assign(
+                raw,
+                deriveCapabilities(
+                    raw.segmentMetadata,
+                    raw.taskSpawnTimes ?? new Map(),
+                ),
+            );
+        }
+        raw.customEvents = customEvents;
+        raw.allocEvents = allocEvents;
+        raw.freeEvents = freeEvents;
+        raw.memoryOverflows = memoryOverflows;
+        return raw;
+    }
+
+    /**
+     * Locate analyze.js, the parse worker. It sits next to this file in every
+     * toolkit copy; in a source checkout this file lives in ui/ and the worker
+     * under whichever skills/ entry ships the toolkit, found by content since
+     * that directory's name is not fixed.
+     * @private
+     */
+    function findParseWorker(fs, path) {
+        const candidates = [path.resolve(__dirname, "analyze.js")];
+        const skillsRoot = path.resolve(__dirname, "..", "skills");
+        let entries = [];
+        try {
+            entries = fs.readdirSync(skillsRoot).sort();
+        } catch {
+            // not a source checkout
+        }
+        for (const entry of entries) {
+            candidates.push(
+                path.join(skillsRoot, entry, "scripts", "analyze.js"),
+            );
+        }
+        const found = candidates.find((c) => fs.existsSync(c));
+        if (!found) {
+            throw new Error(
+                "cannot find analyze.js (parse worker). Searched:\n  " +
+                    candidates.join("\n  "),
+            );
+        }
+        return found;
+    }
+
+    /**
+     * Parse all trace files in a directory with caching and parallelism.
+     * Workers do parse + analysis. Cache holds pre-computed analysis results.
+     * Returns {files, [Symbol.asyncIterator]} where each item is {file, analysis}.
+     * @private
+     */
+    function parseTraceDir(dirPath, options) {
+        const fs = require("fs");
+        const path = require("path");
+        const os = require("os");
+        const { execFile } = require("child_process");
+
+        const opts = options || {};
+        const useCache = opts.cache !== false;
+        const force = opts.force === true;
+        const sampleN = opts.sample != null ? opts.sample : null;
+        const onProgress = opts.onParseProgress || null;
+
+        const TRACE_EXT = /\.(bin|bin\.gz)$/;
+        let files = fs
+            .readdirSync(dirPath)
+            .filter((f) => TRACE_EXT.test(f))
+            .sort();
+
+        if (files.length === 0) {
+            throw new Error(`No .bin or .bin.gz files found in ${dirPath}`);
+        }
+
+        if (sampleN != null) {
+            if (sampleN < 1) throw new Error("sample must be >= 1");
+            if (sampleN < files.length) {
+                const step = files.length / sampleN;
+                const sampled = [];
+                for (let i = 0; i < sampleN; i++) {
+                    sampled.push(files[Math.floor(i * step)]);
+                }
+                files = sampled;
+            }
+        }
+
+        const cacheDir = path.join(dirPath, ".d9-cache");
+        if (useCache) {
+            fs.mkdirSync(cacheDir, { recursive: true });
+        }
+
+        const concurrency =
+            opts.parallel === false ? 1 : Math.min(os.cpus().length, 32);
+        const workerScript = findParseWorker(fs, path);
+
+        function cachePathFor(file) {
+            return path.join(cacheDir, file.replace(TRACE_EXT, "") + ".json");
+        }
+
+        function isCacheValid(file) {
+            if (!useCache || force) return false;
+            const cp = cachePathFor(file);
+            try {
+                const cacheStat = fs.statSync(cp);
+                const srcStat = fs.statSync(path.join(dirPath, file));
+                return cacheStat.mtimeMs > srcStat.mtimeMs;
+            } catch {
+                return false;
+            }
+        }
+
+        // Ensure file is cached (spawn worker if needed). Returns Promise<boolean> (true = cache hit).
+        function ensureCached(file) {
+            if (isCacheValid(file)) return Promise.resolve(true);
+            const tracePath = path.join(dirPath, file);
+            const cp = useCache
+                ? cachePathFor(file)
+                : path.join(
+                      os.tmpdir(),
+                      "d9-" + process.pid + "-" + file + ".json",
+                  );
+            const args = [workerScript, "--parse-worker", tracePath, cp];
+            return new Promise((resolve, reject) => {
+                execFile(
+                    process.execPath,
+                    args,
+                    { maxBuffer: 10 * 1024 * 1024 },
+                    (err, stdout, stderr) => {
+                        if (err)
+                            reject(
+                                new Error(
+                                    `Failed to process ${file}: ${stderr || err.message}`,
+                                ),
+                            );
+                        else resolve(false);
+                    },
+                );
+            });
+        }
+
+        // Dispatch all workers with concurrency limiting.
+        // Workers run independently of the iterator.
+        if (onProgress)
+            onProgress({ done: 0, total: files.length, file: null });
+
+        let workersCompleted = 0;
+        let cacheHits = 0;
+        const fileReady = [];
+        let active = 0;
+        const waiters = [];
+
+        for (let i = 0; i < files.length; i++) {
+            fileReady.push(
+                new Promise((resolve, reject) => {
+                    function go() {
+                        active++;
+                        ensureCached(files[i]).then((wasCached) => {
+                            workersCompleted++;
+                            if (wasCached) cacheHits++;
+                            active--;
+                            if (onProgress)
+                                onProgress({
+                                    done: workersCompleted,
+                                    total: files.length,
+                                    file: files[i],
+                                    cached: cacheHits,
+                                });
+                            resolve();
+                            if (waiters.length > 0) waiters.shift()();
+                        }, reject);
+                    }
+                    if (active < concurrency) go();
+                    else waiters.push(go);
+                }),
+            );
+        }
+
+        return {
+            files: files,
+            allCached: Promise.all(fileReady),
+            [Symbol.asyncIterator]() {
+                let idx = 0;
+                return {
+                    async next() {
+                        if (idx >= files.length)
+                            return { done: true, value: undefined };
+                        const i = idx++;
+                        await fileReady[i];
+                        const cp = useCache
+                            ? cachePathFor(files[i])
+                            : path.join(
+                                  os.tmpdir(),
+                                  "d9-" +
+                                      process.pid +
+                                      "-" +
+                                      files[i] +
+                                      ".json",
+                              );
+                        const trace = await loadCachedTrace(cp);
+                        if (!useCache)
+                            try {
+                                fs.unlinkSync(cp);
+                            } catch {}
+                        return { done: false, value: trace };
+                    },
+                };
+            },
+        };
+    }
+
+    // ── Symbol formatting utilities ──
+
+    function _stripBoringGenerics(s) {
+        const boring = /^[A-Z]$|^(Fut|Req|Res|Bs|InnerFuture)$/;
+        return s.replace(/<([^<>]*)>/g, (match, inner) => {
+            const params = inner.split(",").map((p) => p.trim());
+            if (params.every((p) => boring.test(p))) return "";
+            const kept = params.filter((p) => !boring.test(p));
+            return kept.length ? `<${kept.join(",")}>` : "";
+        });
+    }
+
+    function _lastSeg(s) {
+        return s.split("::").pop();
+    }
+
+    function _isRustClosureSegment(s) {
+        return s === "{{closure}}" || /^\{closure#\d+\}$/.test(s);
+    }
+
+    function _shortenPath(s) {
+        const parts = s.split("::");
+        let closures = 0;
+        for (let i = parts.length - 1; i >= 0; i--) {
+            if (_isRustClosureSegment(parts[i])) closures++;
+            else break;
+        }
+        const meaningful = parts.length - closures;
+        if (meaningful <= 3) return s;
+        return parts.slice(meaningful - 3).join("::");
+    }
+
+    function _matchingAngle(s, open) {
+        let depth = 0;
+        for (let i = open; i < s.length; i++) {
+            if (s[i] === "<") depth++;
+            else if (s[i] === ">" && --depth === 0) return i;
+        }
+        return -1;
+    }
+
+    function _stripOuterAngles(s) {
+        s = s.trim();
+        while (s[0] === "<") {
+            const close = _matchingAngle(s, 0);
+            if (close !== s.length - 1) break;
+            s = s.slice(1, -1).trim();
+        }
+        return s;
+    }
+
+    function _topLevelIndex(s, needle) {
+        let angles = 0;
+        let parens = 0;
+        let brackets = 0;
+        for (let i = 0; i <= s.length - needle.length; i++) {
+            const ch = s[i];
+            if (ch === "<") angles++;
+            else if (ch === ">") angles--;
+            else if (ch === "(") parens++;
+            else if (ch === ")") parens--;
+            else if (ch === "[") brackets++;
+            else if (ch === "]") brackets--;
+            if (
+                angles === 0 &&
+                parens === 0 &&
+                brackets === 0 &&
+                s.startsWith(needle, i)
+            ) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    function _lastTopLevelPathSep(s) {
+        let targetAngles = 0;
+        let targetParens = 0;
+        let targetBrackets = 0;
+        for (const ch of s) {
+            if (ch === "<") targetAngles++;
+            else if (ch === ">") targetAngles--;
+            else if (ch === "(") targetParens++;
+            else if (ch === ")") targetParens--;
+            else if (ch === "[") targetBrackets++;
+            else if (ch === "]") targetBrackets--;
+        }
+        let angles = 0;
+        let parens = 0;
+        let brackets = 0;
+        let found = -1;
+        for (let i = 0; i < s.length - 1; i++) {
+            const ch = s[i];
+            if (ch === "<") angles++;
+            else if (ch === ">") angles--;
+            else if (ch === "(") parens++;
+            else if (ch === ")") parens--;
+            else if (ch === "[") brackets++;
+            else if (ch === "]") brackets--;
+            if (
+                angles === targetAngles &&
+                parens === targetParens &&
+                brackets === targetBrackets &&
+                ch === ":" &&
+                s[i + 1] === ":"
+            ) {
+                found = i++;
+            }
+        }
+        return found;
+    }
+
+    function _tailAtFinalNesting(s) {
+        let targetAngles = 0;
+        let targetParens = 0;
+        let targetBrackets = 0;
+        for (const ch of s) {
+            if (ch === "<") targetAngles++;
+            else if (ch === ">") targetAngles--;
+            else if (ch === "(") targetParens++;
+            else if (ch === ")") targetParens--;
+            else if (ch === "[") targetBrackets++;
+            else if (ch === "]") targetBrackets--;
+        }
+
+        let angles = 0;
+        let parens = 0;
+        let brackets = 0;
+        let start = 0;
+        for (let i = 0; i < s.length; i++) {
+            const ch = s[i];
+            if (ch === "<") {
+                angles++;
+                if (
+                    angles === targetAngles &&
+                    parens === targetParens &&
+                    brackets === targetBrackets
+                ) {
+                    start = i + 1;
+                }
+            } else if (ch === ">") {
+                angles--;
+            } else if (ch === "(") {
+                parens++;
+            } else if (ch === ")") {
+                parens--;
+            } else if (ch === "[") {
+                brackets++;
+            } else if (ch === "]") {
+                brackets--;
+            } else if (
+                ch === "," &&
+                angles === targetAngles &&
+                parens === targetParens &&
+                brackets === targetBrackets
+            ) {
+                start = i + 1;
+            }
+        }
+        return s.slice(start).trim();
+    }
+
+    function _rustOuterTypeName(type_) {
+        let s = _stripOuterAngles(type_)
+            .replace(/^&(?:mut\s+)?/, "")
+            .replace(/^dyn\s+/, "")
+            .trim();
+        const asAt = _topLevelIndex(s, " as ");
+        if (asAt >= 0) s = s.slice(0, asAt).trim();
+        const closure = s.match(/(?:\{\{closure\}\}|\{closure#\d+\})$/);
+        if (closure) return closure[0].replace(/[{}]/g, "");
+        const genericAt = s.indexOf("<");
+        if (genericAt >= 0) s = s.slice(0, genericAt);
+        const name = s.match(/([A-Za-z_][A-Za-z0-9_]*)\s*$/);
+        return name ? name[1] : _lastSeg(s);
+    }
+
+    function _rustTypeLabel(type_, includeModule = true) {
+        let s = _stripOuterAngles(type_)
+            .replace(/^&(?:mut\s+)?/, "")
+            .replace(/^dyn\s+/, "")
+            .trim();
+        const asAt = _topLevelIndex(s, " as ");
+        if (asAt >= 0) s = s.slice(0, asAt).trim();
+        const boundAt = _topLevelIndex(s, " + ");
+        if (boundAt >= 0) s = s.slice(0, boundAt).trim();
+        const assignedAt = _topLevelIndex(s, " = ");
+        if (assignedAt >= 0) {
+            return _rustTypeLabel(s.slice(assignedAt + 3), includeModule);
+        }
+
+        const genericAt = s.indexOf("<");
+        const path = (genericAt >= 0 ? s.slice(0, genericAt) : s).trim();
+        const pathParts = path.split("::").filter(Boolean);
+        const outerName = _rustOuterTypeName(s);
+        const shortPath = includeModule
+            ? pathParts.slice(-2).join("::") || outerName
+            : outerName;
+        if (genericAt < 0) {
+            return /^[A-Z]$|^'[A-Za-z_][A-Za-z0-9_]*$|^\d+$/.test(
+                shortPath,
+            )
+                ? ""
+                : shortPath;
+        }
+
+        const args = _rustGenericArgs(s);
+        const transparent =
+            /^(Arc|Box|Pin|Mutex|RwLock|Option|Result|Poll|Stream|Future)$/;
+        if (transparent.test(outerName)) {
+            for (const arg of args) {
+                const nested = _rustTypeLabel(arg, includeModule);
+                if (nested) return nested;
+            }
+            return "";
+        }
+
+        const genericNames = args
+            .map((arg) => _rustTypeLabel(arg, false))
+            .filter(Boolean);
+        return genericNames.length
+            ? `${shortPath}<${genericNames.join(", ")}>`
+            : shortPath;
+    }
+
+    function _rustGenericArgs(type_) {
+        const s = _stripOuterAngles(type_);
+        const open = s.indexOf("<");
+        if (open < 0) return [];
+        const close = _matchingAngle(s, open);
+        if (close < 0) return [];
+        const inner = s.slice(open + 1, close);
+        const args = [];
+        let start = 0;
+        let angles = 0;
+        let parens = 0;
+        let brackets = 0;
+        for (let i = 0; i < inner.length; i++) {
+            const ch = inner[i];
+            if (ch === "<") angles++;
+            else if (ch === ">") angles--;
+            else if (ch === "(") parens++;
+            else if (ch === ")") parens--;
+            else if (ch === "[") brackets++;
+            else if (ch === "]") brackets--;
+            else if (
+                ch === "," &&
+                angles === 0 &&
+                parens === 0 &&
+                brackets === 0
+            ) {
+                args.push(inner.slice(start, i).trim());
+                start = i + 1;
+            }
+        }
+        args.push(inner.slice(start).trim());
+        return args.filter(Boolean);
+    }
+
+    function _stripTrailingRustGenerics(s) {
+        s = s.trim();
+        while (s.endsWith(">")) {
+            let depth = 0;
+            let open = -1;
+            for (let i = s.length - 1; i >= 0; i--) {
+                if (s[i] === ">") depth++;
+                else if (s[i] === "<" && --depth === 0) {
+                    open = i;
+                    break;
+                }
+            }
+            if (open <= 0) break;
+            s = s.slice(0, open).trim();
+        }
+        return s;
+    }
+
+    function _splitRustQualifiedMethod(sym) {
+        if (!sym.startsWith("<")) return null;
+        const close = _matchingAngle(sym, 0);
+        if (close < 0 || sym.slice(close + 1, close + 3) !== "::") return null;
+        const inside = sym.slice(1, close);
+        const asAt = _topLevelIndex(inside, " as ");
+        return {
+            implType:
+                asAt >= 0 ? inside.slice(0, asAt).trim() : inside.trim(),
+            trait: asAt >= 0 ? inside.slice(asAt + 4).trim() : null,
+            method: sym.slice(close + 3),
+        };
+    }
+
+    function _rustPayloadLabel(type_) {
+        const boring =
+            /^[A-Z]$|^(Arc|Box|Pin|Handle|Schedule|BlockingSchedule)$/;
+        const args = _rustGenericArgs(type_);
+        const outerName = _rustOuterTypeName(type_);
+        // Tokio's TaskLocalFuture stores the scoped value first and the future
+        // being polled second. Prefer that semantic payload over context types.
+        const candidates =
+            outerName === "TaskLocalFuture" && args.length > 1
+                ? [args[1], args[0], ...args.slice(2)]
+                : args;
+        for (const arg of candidates) {
+            const name = _rustOuterTypeName(arg);
+            if (name && !boring.test(name)) return _rustTypeLabel(arg);
+        }
+        return null;
+    }
+
+    /**
+     * Recover the function that produced a Rust async closure hidden inside a
+     * Future/Stream wrapper. This is usually the most useful identity in a
+     * flamegraph: `TransformStage::into_stream` distinguishes stacks that
+     * otherwise all format as `{closure#0}>::poll_next`.
+     */
+    function _rustClosureOwner(type_) {
+        const closureRe = /::(?:\{\{closure\}\}|\{closure#\d+\})/g;
+        let match;
+        let last = null;
+        while ((match = closureRe.exec(type_))) last = match;
+        if (!last) return null;
+
+        let before = type_.slice(0, last.index);
+        const trailingClosureRe =
+            /::(?:\{\{closure\}\}|\{closure#\d+\})$/;
+        while (trailingClosureRe.test(before)) {
+            before = before.replace(trailingClosureRe, "");
+        }
+        before = _stripTrailingRustGenerics(before);
+        const sep = _lastTopLevelPathSep(before);
+        if (sep < 0) return null;
+
+        const method = before.slice(sep + 2);
+        const receiverPrefix = before.slice(0, sep);
+        const receiver = _stripOuterAngles(
+            _tailAtFinalNesting(receiverPrefix),
+        );
+        const receiverName = _rustOuterTypeName(receiver);
+        if (!receiverName || !method) return null;
+
+        // Multi-parameter transform wrappers often differ only in their final
+        // transform type. Keep that one concise discriminator without exposing
+        // the enormous nested Future/Stream payload.
+        const args = _rustGenericArgs(receiver);
+        const argLabel =
+            args.length > 1 ? _rustTypeLabel(args[args.length - 1]) : "";
+        const qualifiedReceiver =
+            argLabel && argLabel.length > 1
+                ? `${argLabel} · ${receiverName}`
+                : receiverName;
+        return `${qualifiedReceiver}::${method}`;
+    }
+
+    /**
+     * Try to build a docs.rs source link from a location path containing a crate-version segment.
+     * Matches any path like: .../hyper-0.14.28/src/client/connect/http.rs:474
+     * Returns URL string or null. Exported as `docsRsUrl`: first-party code has
+     * no target, since the trace records the path on the recording machine
+     * rather than a repo or commit.
+     */
+    function _docsRsUrl(location) {
+        if (!location) return null;
+        // A stack frame's location ends at `:line`, but a task's spawn location
+        // carries `:line:col`. Without the optional column group the column is
+        // read as the line and the real line leaks into the file path, yielding
+        // ".../tokio.rs:115.html#9" instead of ".../tokio.rs.html#115".
+        const m = location.match(
+            /\/([a-z][a-z0-9_-]*)-(\d+\.\d+[^/]*)\/(.+?)(?::(\d+))?(?::\d+)?$/,
+        );
+        if (!m) return null;
+        const [, crate_, version, rawPath, line] = m;
+        const crateSrc = crate_.replace(/-/g, "_");
+        const path = rawPath.replace(/^src\//, "");
+        let url = `https://docs.rs/${crate_}/${version}/src/${crateSrc}/${path}.html`;
+        if (line) url += `#${line}`;
+        return url;
+    }
+
+    /**
+     * Extract just the filename from a location string.
+     * e.g. "/home/user/.cargo/registry/src/.../hyper-0.14.28/src/client/connect/http.rs:474" → "http.rs"
+     */
+    function _fileName(location) {
+        if (!location) return null;
+        const m = location.match(/([^/]+\.rs)(?::\d+)?$/);
+        return m ? m[1] : null;
+    }
+
+    /**
+     * Format a stack frame for human-readable display.
+     * Accepts either a resolved frame object or a raw address + callframeSymbols map.
+     * @param {{symbol: string, location: string|null}|string} frame - Resolved frame or address string
+     * @param {Map<string, {symbol: string, location: string|null}>} [callframeSymbols] - Required when frame is an address string
+     * @returns {{text: string, docsUrl: string|null}}
+     */
+    function formatFrame(frame, callframeSymbols) {
+        if (typeof frame === "string") {
+            if (!callframeSymbols)
+                throw new Error(
+                    "formatFrame requires callframeSymbols when given an address string",
+                );
+            const entry = callframeSymbols.get(frame);
+            if (!entry) return { text: frame || "(unknown)", docsUrl: null };
+            frame = Array.isArray(entry) ? entry[0] : entry;
+        }
+        const { symbol: sym, location } = frame;
+        if (!sym || sym.startsWith("0x"))
+            return { text: sym || "(unknown)", docsUrl: null };
+
+        let result = sym;
+        const traitImpl = _splitRustQualifiedMethod(result);
+        if (traitImpl) {
+            const shortType = _rustOuterTypeName(traitImpl.implType);
+            const traitName = traitImpl.trait
+                ? _rustOuterTypeName(traitImpl.trait)
+                : null;
+            const method = _shortenPath(
+                _stripBoringGenerics(traitImpl.method),
+            );
+            const closureOwner = _rustClosureOwner(traitImpl.implType);
+            if (closureOwner) {
+                result = closureOwner;
+            } else {
+                const payload = _rustPayloadLabel(traitImpl.implType);
+                if (payload && payload !== shortType) {
+                    result = payload;
+                } else {
+                    result =
+                        shortType.length <= 2 && traitName
+                            ? `${traitName}::${method}`
+                            : `${shortType}::${method}`;
+                }
+            }
+        } else if (result.includes("::")) {
+            result = _shortenPath(_stripBoringGenerics(result));
+        }
+
+        const fileName = _fileName(location);
+        if (location) {
+            const m = location.match(/:(\d+)$/);
+            if (m) result += ` ${fileName || ""}:${m[1]}`;
+        }
+        return { text: result, docsUrl: _docsRsUrl(location) };
+    }
+
+    /**
+     * Resolve a callchain (array of address strings) to frame objects.
+     *
+     * A callchain is leaf→root, and so is the returned array. An address with
+     * inlined frames is stored in `callframeSymbols` as an array indexed by
+     * inline depth (`[0]` = the function that owns the machine code, `[i>0]` =
+     * successively deeper inlined callees), so the group is expanded in place in
+     * *reverse*: innermost callee first, keeping the whole array leaf→root.
+     * Expanding it depth-0-first would make callers appear below their callees
+     * for consumers that read `[0]` as the leaf or reverse the array wholesale.
+     * @param {string[]} callchain - Address strings like "0x55cc6d053893"
+     * @param {Map<string, {symbol: string, location: string|null}|Array>} callframeSymbols
+     * @returns {{symbol: string, location: string|null}[]}
+     */
+    function symbolizeChain(callchain, callframeSymbols) {
+        const result = [];
+        for (const addr of callchain) {
+            const entry = callframeSymbols.get(addr);
+            if (!entry) {
+                result.push({ symbol: addr, location: null });
+                continue;
+            }
+            if (Array.isArray(entry)) {
+                for (let i = entry.length - 1; i >= 0; i--) {
+                    // Sparse arrays can miss an inline slot when a depth>0
+                    // SymbolTableEntry arrives without its depth-0 sibling.
+                    const e = entry[i];
+                    if (e) result.push(e);
+                }
+                continue;
+            }
+            if (typeof entry === "string") {
+                result.push({ symbol: entry, location: null });
+                continue;
+            }
+            result.push(entry);
+        }
+        return result;
+    }
+
+    /**
+     * Deduplicate CPU/sched samples by symbolized stack trace.
+     * @param {Object[]} samples - Array of {callchain, ...} sample objects
+     * @param {Map} callframeSymbols
+     * @returns {{count: number, frames: Object[], leaf: string, leafRaw: string}[]}
+     */
+    function deduplicateSamples(samples, callframeSymbols) {
+        const groups = new Map();
+        for (const sample of samples) {
+            const frames = symbolizeChain(sample.callchain, callframeSymbols);
+            const key = frames.map((f) => f.symbol).join("\0");
+            if (!groups.has(key)) {
+                groups.set(key, {
+                    count: 0,
+                    frames,
+                    leaf: frames[0] ? formatFrame(frames[0]).text : "(unknown)",
+                    leafRaw: frames[0] ? frames[0].symbol : "",
+                });
+            }
+            groups.get(key).count++;
+        }
+        return [...groups.values()].sort((a, b) => b.count - a.count);
+    }
+
+    /**
+     * Parse a single trace file and return the ParsedTrace directly.
+     * Accepts a file path (string) or a Buffer. Always returns Promise<ParsedTrace>.
+     */
+    async function parseOne(input, options) {
+        if (typeof input === "string" && typeof require !== "undefined") {
+            const fs = require("fs");
+            const stat = fs.statSync(input);
+            if (stat.isDirectory()) {
+                throw new Error(
+                    "parseOne expects a single file, not a directory. Use parseTrace for directories.",
+                );
+            }
+            return parseTraceBuffer(fs.readFileSync(input), options);
+        }
+        return parseTraceBuffer(input, options);
+    }
+
+    // Export for both browser and Node.js
+    if (typeof module !== "undefined" && module.exports) {
+        module.exports = {
+            EVENT_TYPES,
+            OFF_WORKER_WORKER_ID,
+            parseTrace,
+            parseTraceStream,
+            parseOne,
+            fetchTraces,
+            fetchTraceStream,
+            fetchTracesStream,
+            canStreamDecode,
+            formatFrame,
+            docsRsUrl: _docsRsUrl,
+            symbolizeChain,
+            deduplicateSamples,
+            deriveBlockInPlaceGaps,
+            deriveCapabilities,
+            // Exported for focused backwards-compatibility tests. Not part of
+            // the browser API.
+            decodeLegacyActiveTaskSample,
+            decodeRuntimeMetricsSample,
+            // Exported for unit tests: the single-event span schema compiler
+            // and its runtime timing resolution. Not part of the browser API.
+            compileSingleEventSpanSchema,
+            resolveSpanTiming,
+        };
+    } else {
+        exports.TraceParser = {
+            EVENT_TYPES,
+            OFF_WORKER_WORKER_ID,
+            parseTrace,
+            parseTraceStream,
+            fetchTraces,
+            fetchTraceStream,
+            fetchTracesStream,
+            canStreamDecode,
+            formatFrame,
+            docsRsUrl: _docsRsUrl,
+            symbolizeChain,
+            deduplicateSamples,
+            deriveBlockInPlaceGaps,
+        };
+    }
+})(typeof exports === "undefined" ? this : exports);
