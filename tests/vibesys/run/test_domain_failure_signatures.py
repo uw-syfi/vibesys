@@ -25,7 +25,6 @@ _LLM_SERVING_LOGS = (
     "ValueError: No available memory for the cache blocks",
     "ValueError: The decoder prompt (length 9000) is larger than the maximum number of "
     "tokens that can be stored in KV cache",
-    "error: unrecognized arguments: --max-batch 99",
 )
 
 
@@ -54,7 +53,8 @@ def test_a_domain_without_server_causes_gets_only_the_generic_facts(name: Domain
     assert causes == ()
     for log in _LLM_SERVING_LOGS:
         assert _kinds(log, causes) == {BenchmarkFailureKind.AMBIGUOUS}
-    assert _kinds("CUDA out of memory", causes) == {BenchmarkFailureKind.WORKLOAD}
+    for log in ("CUDA out of memory", "error: unrecognized arguments: --x"):
+        assert _kinds(log, causes) == {BenchmarkFailureKind.WORKLOAD}
     assert TerminalSignal.NO_EXIT_STATUS is signal_of(None)
 
 

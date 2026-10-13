@@ -60,13 +60,17 @@ _GENERIC_CANDIDATE_LOGS = (
     "torch.OutOfMemoryError: CUDA out of memory",
     "HIP error: out of memory",
     "OSError: [Errno 12] Cannot allocate memory",
+    "error: unrecognized arguments: --max-batch 99",
 )
 # What one task's server prints: only that task's domain can say so.
 _TASK_LOGS = (
     "ValueError: No available memory for the cache blocks",
-    "error: unrecognized arguments: --max-batch 99",
+    "ValueError: prompt is larger than the maximum number of tokens that can be stored in kv cache",
 )
-_TASK_CAUSES = (r"no available memory for the cache blocks", r"unrecognized arguments")
+_TASK_CAUSES = (
+    r"no available memory for the cache blocks",
+    r"larger than the maximum number of tokens that can be stored in kv cache",
+)
 _NODE_LOGS = (
     "HSA_STATUS_ERROR_OUT_OF_RESOURCES: hip device lost",
     "OSError: [Errno 5] Input/output error: '/shared/model/model.safetensors'",

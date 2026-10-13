@@ -105,8 +105,9 @@ _COLUMNS = tuple(RecordState)
 # a signature of a fault in the node or its storage shows too: that one proves nothing, so
 # the failure stays ambiguous.
 #
-# Only facts true of any process live here: the operating system running out of memory. What
-# else a task's server prints when its candidate is at fault (a full KV cache, a rejected flag)
+# Only facts true of any process live here: the operating system running out of memory, and
+# argparse rejecting a flag. What
+# else a task's server prints when its candidate is at fault (a full KV cache)
 # is the task's knowledge: the domain supplies it as `candidate_startup_causes`, and a domain
 # with none gets only these. These patterns describe why a candidate failed; whether an
 # infrastructure failure is measured again is the backend's decision, not made here.
@@ -114,6 +115,7 @@ _GENERIC_STARTUP_CAUSES = (
     r"out[ _-]?of[ _-]?memory",
     r"\bOOM\b",
     r"cannot allocate memory",
+    r"unrecognized arguments",
 )
 _NODE_FAULT_SIGNATURES = tuple(
     re.compile(pattern, re.IGNORECASE)
