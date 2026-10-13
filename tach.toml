@@ -1126,7 +1126,7 @@ depends_on = []
 
 [[interfaces]]
 from = ["vs_core._values"]
-expose = ["canonical_json", "deeply_immutable", "digest", "emit_fragment", "encode_json", "ImmutableSchemaError", "InstanceMemo", "share_unchanged", "validate_immutable_schema"]
+expose = ["canonical_json", "deeply_immutable", "digest", "emit_fragment", "encode_json", "EncodingMismatchError", "verify_encoding", "ImmutableSchemaError", "InstanceMemo", "share_unchanged", "validate_immutable_schema"]
 
 [[modules]]
 path = "vs_core._outcomes"

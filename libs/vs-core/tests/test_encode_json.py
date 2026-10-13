@@ -5,12 +5,14 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import field_serializer
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
+    EncodingMismatchError,
     EventCursor,
     HostFence,
     HostId,
@@ -19,6 +21,7 @@ from vs_core.api import (
     Value,
     encode_json,
     initial_state,
+    verify_encoding,
 )
 
 
@@ -130,6 +133,14 @@ def _counting_values() -> tuple[Any, Any, list[Any]]:
 
 @given(size=st.integers(min_value=1, max_value=8))
 def test_only_values_new_since_the_last_encoding_are_serialized(size: int) -> None:
+    verify_encoding(enabled=False)  # checking writes every value a second time
+    try:
+        _only_new_values_are_serialized(size)
+    finally:
+        verify_encoding(enabled=True)
+
+
+def _only_new_values_are_serialized(size: int) -> None:
     counted, holder_of, writes = _counting_values()
     items = tuple(counted(n=index) for index in range(size))
     encode_json(holder_of(items=items))
@@ -149,3 +160,30 @@ def test_a_value_that_holds_a_mutable_container_is_never_served_from_memory() ->
     assert encode_json(holder) == holder.model_dump_json().encode()
     items.append(counted(n=2))  # the "frozen" value changes under the memory's feet
     assert encode_json(holder) == holder.model_dump_json().encode()
+
+
+def test_a_text_that_depends_on_where_the_value_sits_is_reported_by_type() -> None:
+    class Base(Value):
+        a: int = 0
+
+    class Wide(Base):
+        b: int = 1
+
+    class Plain(Value):
+        item: Base  # declared as the base, so a Wide in it is written without `b`
+
+    wide = Wide()
+    holder = Plain(item=wide)
+    verify_encoding(enabled=True)
+    try:
+        assert encode_json(holder) == holder.model_dump_json().encode()
+
+        # The same instance, remembered from the first call, is now asked for under a field of
+        # its own type, where the plain encoding writes `b`.
+        class Own(Value):
+            item: Wide
+
+        with pytest.raises(EncodingMismatchError, match="Wide"):
+            encode_json(Own(item=wide))
+    finally:
+        verify_encoding(enabled=True)

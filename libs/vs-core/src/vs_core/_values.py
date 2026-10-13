@@ -275,11 +275,13 @@ class _Fragments:
     """
 
     def __init__(self) -> None:
+        self.seen: list[BaseModel] = []
         self.texts: list[str] = []  # "" until a value serialized in this call is resolved
         self.pending: list[tuple[int, BaseModel, object]] = []
         self.used = 0
 
     def emit(self, model: BaseModel, handler: Callable[[BaseModel], object]) -> str:
+        self.seen.append(model)
         text = _FRAGMENT_TEXTS.get(model)
         if text is None:
             data = handler(model)  # children are tokens, so they were all emitted before this
@@ -329,6 +331,41 @@ def emit_fragment(
     return handler(model)
 
 
+class EncodingMismatchError(ValueError):
+    """Spliced fragments differ from the plain encoding, so a remembered text is not the value's."""
+
+    def __init__(self, culprits: tuple[str, ...]) -> None:
+        super().__init__(
+            "encode_json differs from model_dump_json; a value's text depends on where it sits "
+            f"(a subclass in a superclass-typed field without SerializeAsAny?): {', '.join(culprits)}"
+        )
+
+
+class _Verification:
+    """Whether `encode_json` also checks itself against the plain encoding.
+
+    A test run turns this on (the pytest configuration calls `verify_encoding`); product code
+    never does, and keeps the fast path.
+    """
+
+    enabled = False
+
+
+def verify_encoding(*, enabled: bool) -> None:
+    """Make `encode_json` compare its bytes with the plain encoding and raise on a difference."""
+    _Verification.enabled = enabled
+
+
+def _mismatch(fragments: _Fragments, model: BaseModel) -> EncodingMismatchError:
+    """Name the types whose own plain text differs from the text spliced for them."""
+    culprits = {
+        type(seen).__name__
+        for seen in fragments.seen
+        if (text := _FRAGMENT_TEXTS.get(seen)) is not None and text != seen.model_dump_json()
+    }
+    return EncodingMismatchError(tuple(sorted(culprits)) or (type(model).__name__,))
+
+
 def encode_json(model: BaseModel) -> bytes:
     """The bytes of ``model.model_dump_json()``, reusing the text of unchanged frozen values.
 
@@ -343,6 +380,8 @@ def encode_json(model: BaseModel) -> bytes:
     text = fragments.resolve(model.model_dump_json(context=fragments))
     if text is None:
         return model.model_dump_json().encode()
+    if _Verification.enabled and text != model.model_dump_json():
+        raise _mismatch(fragments, model)
     fragments.remember()
     return text.encode()
 
