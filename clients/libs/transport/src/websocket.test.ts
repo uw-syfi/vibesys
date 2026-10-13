@@ -7,7 +7,7 @@ import type {
   RequestInput,
 } from '@vibesys/contracts';
 import {parseProtocolResponse, ServerError} from '@vibesys/contracts';
-import type {ControlChannelState} from './index.js';
+import type {AbortSignalLike, ControlChannelState} from './index.js';
 import {REQUEST_POLICIES} from './index.js';
 import {expect} from './test-support/expect.js';
 import {FakeClock} from './testing/index.js';
@@ -85,6 +85,48 @@ class FakeSocket implements WebSocketLike {
       this.#answered += 1;
       if (frame !== undefined) this.respond(okResponse(String(frame['request_id']), body));
     }
+  }
+}
+
+/** A browser-style close: CLOSING now, with the close event delivered later. */
+class DelayedCloseSocket extends FakeSocket {
+  override close(): void {
+    this.closeCalls += 1;
+    this.readyState = 2;
+  }
+
+  finishClose(): void {
+    this.readyState = 3;
+    this.onclose?.();
+  }
+
+  /** Deliver an `open` callback that the browser queued before close began. */
+  deliverLateOpen(): void {
+    this.onopen?.();
+  }
+}
+
+/** Structural abort signal whose listener lifetime is directly observable. */
+class TestAbortSignal implements AbortSignalLike {
+  aborted = false;
+  reason: unknown;
+  readonly #listeners = new Set<() => void>();
+
+  get listenerCount(): number {
+    return this.#listeners.size;
+  }
+
+  addEventListener(_type: 'abort', listener: () => void): void {
+    this.#listeners.add(listener);
+  }
+
+  removeEventListener(_type: 'abort', listener: () => void): void {
+    this.#listeners.delete(listener);
+  }
+
+  abort(): void {
+    this.aborted = true;
+    for (const listener of [...this.#listeners]) listener();
   }
 }
 
@@ -661,6 +703,259 @@ describe('WebSocketTransport', () => {
     expect((await chat).name).toBe('AbortError');
     expect(gateway.socket(0).closeCalls).toBe(1);
     await transport.close();
+  });
+
+  it('aborts a dedicated request while its WebSocket handshake is pending', async () => {
+    const gateway = new FakeGateway();
+    gateway.outcome = 'stall';
+    const scheduler = new FakeClock();
+    const transport = controlTransport(gateway, scheduler, {});
+    const controller = new AbortController();
+
+    const chat = rejection(
+      transport.request({type: 'query.chat', text: 'never sent'}, {signal: controller.signal}),
+    );
+    let abortName: string | undefined;
+    void chat.then(error => {
+      abortName = error.name;
+    });
+    await tick();
+    expect(gateway.sockets).toHaveLength(1);
+
+    controller.abort();
+    await tick();
+    const afterAbort = {
+      abortName,
+      closeCalls: gateway.socket(0).closeCalls,
+      sent: [...gateway.socket(0).sent],
+      pendingTimers: scheduler.pending,
+    };
+
+    // Let a pre-fix transport settle through its deterministic handshake
+    // timeout too, so the regression fails by value rather than hanging.
+    scheduler.runPending();
+    await tick();
+
+    // A browser event already queued before close cannot revive or write to
+    // the socket after cancellation settled the request.
+    gateway.socket(0).open();
+    await tick();
+    await transport.close();
+
+    expect(afterAbort).toEqual({
+      abortName: 'AbortError',
+      closeCalls: 1,
+      sent: [],
+      pendingTimers: 0,
+    });
+    expect(gateway.socket(0).sent).toEqual([]);
+  });
+
+  it('lets transport close win once over abort during a dedicated handshake', async () => {
+    const gateway = new FakeGateway();
+    gateway.outcome = 'stall';
+    const scheduler = new FakeClock();
+    const transport = controlTransport(gateway, scheduler, {});
+    const controller = new AbortController();
+    const chat = rejection(
+      transport.request({type: 'query.chat', text: 'never sent'}, {signal: controller.signal}),
+    );
+    await tick();
+
+    const closing = transport.close();
+    controller.abort();
+
+    await closing;
+    expect(await chat).toMatchObject({kind: 'disconnected'});
+    expect(gateway.socket(0).closeCalls).toBe(1);
+    expect(gateway.socket(0).sent).toEqual([]);
+    expect(scheduler.pending).toBe(0);
+  });
+
+  it('owns a delayed browser close once when shutdown beats handshake abort', async () => {
+    const socket = new DelayedCloseSocket();
+    const signal = new TestAbortSignal();
+    const scheduler = new FakeClock();
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: scheduler.schedule,
+      webSocket: () => socket,
+    });
+    const chat = rejection(transport.request({type: 'query.chat', text: 'never sent'}, {signal}));
+    await tick();
+    expect(signal.listenerCount).toBe(1);
+
+    const closing = transport.close();
+    expect(signal.listenerCount).toBe(0);
+    signal.abort();
+    await tick();
+
+    expect(await chat).toMatchObject({kind: 'disconnected'});
+    expect(socket.closeCalls).toBe(1);
+    expect(socket.sent).toEqual([]);
+    // The handshake deadline is gone. Only the physical close's grace timer
+    // remains until the browser reports that the socket reached CLOSED.
+    expect(scheduler.pendingDelays()).toEqual([50]);
+
+    socket.deliverLateOpen();
+    socket.fail();
+    expect(socket.sent).toEqual([]);
+    expect(socket.closeCalls).toBe(1);
+
+    socket.finishClose();
+    await closing;
+    socket.deliverLateOpen();
+    socket.fail();
+    socket.finishClose();
+    expect(socket.sent).toEqual([]);
+    expect(socket.closeCalls).toBe(1);
+    expect(signal.listenerCount).toBe(0);
+    expect(scheduler.pending).toBe(0);
+  });
+
+  it('keeps a dedicated socket owned while its handshake is handed to the request', async () => {
+    const socket = new DelayedCloseSocket();
+    const scheduler = new FakeClock();
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: scheduler.schedule,
+      webSocket: () => socket,
+    });
+    const chat = rejection(transport.request({type: 'query.chat', text: 'must not send'}));
+    await tick();
+
+    socket.open();
+    const {closing} = await closeInClaimHandoff(transport);
+    let closed = false;
+    void closing.then(() => {
+      closed = true;
+    });
+    await tick();
+
+    const duringClose = {closed, closeCalls: socket.closeCalls};
+    socket.finishClose();
+    await closing;
+    expect(await chat).toMatchObject({kind: 'disconnected'});
+    expect(scheduler.pending).toBe(0);
+    expect(duringClose).toEqual({closed: false, closeCalls: 1});
+  });
+
+  it('keeps a subscription socket owned while its handshake is handed to the stream', async () => {
+    const socket = new DelayedCloseSocket();
+    const scheduler = new FakeClock();
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: scheduler.schedule,
+      webSocket: () => socket,
+    });
+    const subscription = rejection(
+      transport.subscribe(
+        0,
+        () => {},
+        () => {},
+      ),
+    );
+    await tick();
+
+    socket.open();
+    const {closing} = await closeInClaimHandoff(transport);
+    let closed = false;
+    void closing.then(() => {
+      closed = true;
+    });
+    await tick();
+
+    const duringClose = {closed, closeCalls: socket.closeCalls};
+    socket.finishClose();
+    await closing;
+    expect(await subscription).toMatchObject({kind: 'disconnected'});
+    expect(scheduler.pending).toBe(0);
+    expect(duringClose).toEqual({closed: false, closeCalls: 1});
+  });
+
+  it('keeps a control socket owned while its handshake is handed to the channel', async () => {
+    const socket = new DelayedCloseSocket();
+    const scheduler = new FakeClock();
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: scheduler.schedule,
+      webSocket: () => socket,
+    });
+    const snapshot = rejection(transport.request({type: 'query.snapshot'}));
+    await tick();
+
+    socket.open();
+    const {closing} = await closeInClaimHandoff(transport);
+    let closed = false;
+    void closing.then(() => {
+      closed = true;
+    });
+    await tick();
+
+    const duringClose = {closed, closeCalls: socket.closeCalls};
+    socket.finishClose();
+    await closing;
+    expect(await snapshot).toMatchObject({kind: 'disconnected'});
+    expect(scheduler.pending).toBe(0);
+    expect(duringClose).toEqual({closed: false, closeCalls: 1});
+  });
+
+  it('joins the close that handshake abort started before transport shutdown', async () => {
+    const socket = new DelayedCloseSocket();
+    const signal = new TestAbortSignal();
+    const scheduler = new FakeClock();
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: scheduler.schedule,
+      webSocket: () => socket,
+    });
+    const chat = rejection(transport.request({type: 'query.chat', text: 'never sent'}, {signal}));
+    await tick();
+
+    signal.abort();
+    const closing = transport.close();
+    let closed = false;
+    void closing.then(() => {
+      closed = true;
+    });
+    await tick();
+
+    expect((await chat).name).toBe('AbortError');
+    expect({closed, closeCalls: socket.closeCalls, sent: socket.sent}).toEqual({
+      closed: false,
+      closeCalls: 1,
+      sent: [],
+    });
+    socket.finishClose();
+    await closing;
+    expect(signal.listenerCount).toBe(0);
+    expect(scheduler.pending).toBe(0);
+  });
+
+  it('catches abort after open but before a dedicated request claims its socket', async () => {
+    const socket = new DelayedCloseSocket();
+    const signal = new TestAbortSignal();
+    const scheduler = new FakeClock();
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: scheduler.schedule,
+      webSocket: () => socket,
+    });
+    const chat = rejection(transport.request({type: 'query.chat', text: 'never sent'}, {signal}));
+    await tick();
+
+    socket.open();
+    signal.abort();
+    await tick();
+
+    expect((await chat).name).toBe('AbortError');
+    expect(socket.closeCalls).toBe(1);
+    expect(socket.sent).toEqual([]);
+    const closing = transport.close();
+    socket.finishClose();
+    await closing;
+    expect(signal.listenerCount).toBe(0);
+    expect(scheduler.pending).toBe(0);
   });
 
   it('rejects a request whose signal was already aborted without opening a socket', async () => {
@@ -1921,4 +2216,21 @@ function rejection(pending: Promise<unknown>): Promise<BackendClientError> {
 
 async function tick(turns = 5): Promise<void> {
   for (let turn = 0; turn < turns; turn += 1) await Promise.resolve();
+}
+
+/**
+ * Open-socket resolution itself has one promise-adoption job. Two queued turns
+ * therefore place shutdown after the consumer has resumed and entered its
+ * claim handoff, while that consumer's next continuation is still queued.
+ */
+function closeInClaimHandoff(
+  transport: WebSocketTransport,
+): Promise<{readonly closing: Promise<void>}> {
+  return new Promise(resolve => {
+    queueMicrotask(() => {
+      queueMicrotask(() => {
+        resolve({closing: transport.close()});
+      });
+    });
+  });
 }
