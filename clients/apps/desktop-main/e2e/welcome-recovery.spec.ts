@@ -11,7 +11,7 @@ interface RecoveryState {
   readonly currentWelcomeUrl: string | null;
   readonly runId: number | null;
   readonly runUrl: string | null;
-  readonly mode: 'welcome' | 'run';
+  readonly mode: 'welcome' | 'run' | null;
   readonly logs: readonly string[];
   readonly fatals: readonly string[];
 }

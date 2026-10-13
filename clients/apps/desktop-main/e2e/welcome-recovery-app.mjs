@@ -287,6 +287,21 @@ void app.whenReady().then(() => {
 
 globalThis.vibesysWelcomeRecoveryE2E = {
   state() {
+    // The control surface is installed before `app.whenReady()` finishes so Playwright can begin
+    // polling immediately. Initialization may still be constructing AppWindow at that instant;
+    // expose a total not-ready snapshot rather than turning an ordinary startup race into a
+    // terminal evaluate error.
+    if (appWindow === null) {
+      return {
+        currentWelcomeId: null,
+        currentWelcomeUrl: null,
+        runId: null,
+        runUrl: null,
+        mode: null,
+        logs: [...logs],
+        fatals: [...fatals],
+      };
+    }
     const currentWelcomeId = ownedWelcomeId();
     const run = contentsAt(RUN_URL);
     return {
