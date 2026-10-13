@@ -24,7 +24,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, assert_never
 
 from ._dispatch_episode import episode_ended
-from ._proofs import dependency_failed
+from ._proofs import blocked_unnamed, dependency_failed
 from .types.attempts import AttemptPhase, SnapshotAndRetain
 from .types.common import (
     InvocationRef,
@@ -75,6 +75,7 @@ class WaitKind(StrEnum):
     DISPATCH = "dispatch"
     RETRY = "retry"
     TURN_ACQUISITION = "turn-acquisition"
+    BLOCKED_RECORD = "blocked-record"
 
 
 class Producer(StrEnum):
@@ -140,6 +141,11 @@ RESOLUTIONS: Mapping[WaitKind, Resolution] = MappingProxyType(
             reason="the turn ends cancelled with TurnResult.detail naming that nothing carried "
             "its acquisition forward; its decision completes cancelled",
         ),
+        WaitKind.BLOCKED_RECORD: Resolution(
+            outcome=Outcome.FAILS_WITH_REASON,
+            reason="the record ends failed (diagnostic names the close), keeping the ownership "
+            "facts it reported; the strategy already heard IntentBlocked",
+        ),
         WaitKind.SESSION: Resolution(
             outcome=Outcome.HALTS_THE_RUN,
             reason="an intent blocked by its reconciliation bound is not routed to the session",
@@ -150,7 +156,8 @@ RESOLUTIONS: Mapping[WaitKind, Resolution] = MappingProxyType(
         ),
         WaitKind.OWNED_JOB: Resolution(
             outcome=Outcome.HALTS_THE_RUN,
-            reason="a job whose poll was blocked at its bound is not routed to the job",
+            reason="a job with no poll live and no timer armed (a blocked poll is polled anew, but a "
+            "poll lost some other way is not routed to the job)",
         ),
         WaitKind.RELEASE_DEPENDENCY: Resolution(
             outcome=Outcome.HALTS_THE_RUN,
@@ -630,6 +637,58 @@ def _dispatch_waits(core: CoreState) -> list[Wait]:
     ]
 
 
+def _addresses(row: Intent, record: Intent) -> bool:
+    """Whether *row* is a live request that can still end *record*: a cancel or inspection of it."""
+    return (
+        intent_waits(row.phase)
+        and row.request_id != record.request_id
+        and getattr(row.request, "target", None) == record.request_id
+    )
+
+
+def _blocked_records(core: CoreState) -> tuple[Intent, ...]:
+    """The blocked intents a closing run holds closure on, whether or not anything addresses them.
+
+    A blocked record outside a close is the strategy's to handle (it heard ``IntentBlocked``).
+    Once the run closes, closure waits on it, except on one that never owned anything
+    (``blocked_unnamed``).
+    """
+    if core.run.status != RunStatus.CLOSING:
+        return ()
+    return tuple(
+        row
+        for row in core.intents.intents
+        if row.phase == IntentPhase.BLOCKED and not blocked_unnamed(row)
+    )
+
+
+def stalled_blocked_records(core: CoreState) -> tuple[RequestId, ...]:
+    """The blocked records of a closing run that no live cancellation or inspection can end.
+
+    Each is a wait nothing produces: its bound passed and the close would sit on it forever, so
+    the step ends it (``BlockedRecordStalled``).
+    """
+    return tuple(
+        record.request_id
+        for record in _blocked_records(core)
+        if not any(_addresses(row, record) for row in core.intents.intents)
+    )
+
+
+def _blocked_record_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
+    found = []
+    for record in _blocked_records(core):
+        related = [row for row in core.intents.intents if _addresses(row, record)]
+        found.append(
+            Wait(
+                waiter=WaitKind.BLOCKED_RECORD,
+                subject=record.request_id.root,
+                producer=_producer(related, outbox),
+            )
+        )
+    return found
+
+
 def _retry_waits(core: CoreState) -> list[Wait]:
     """A retryably failed request waits for its backoff timer, which core's clock tick fires."""
     return [
@@ -661,6 +720,7 @@ def waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[Wait, ...]
         *_yield_waits(core, pending),
         *_dispatch_waits(core),
         *_retry_waits(core),
+        *_blocked_record_waits(core, pending),
     )
 
 
@@ -684,6 +744,7 @@ __all__ = [
     "orphan_waits",
     "phase_waits",
     "stalled_acquisitions",
+    "stalled_blocked_records",
     "stalled_checkpoint_waits",
     "undispatchable_requests",
     "waits",

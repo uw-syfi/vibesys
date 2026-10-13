@@ -326,6 +326,7 @@ from vs_core.types.evaluation_history import (
     RepeatedFailureGuidance,
 )
 from vs_core.types.intents import (
+    BlockedRecordStalled,
     BlockIntent,
     CancelOwnedResource,
     ChildLease,
@@ -605,6 +606,7 @@ __all__ = [
     "AttemptsState",
     "BenchmarkFailure",
     "BlockIntent",
+    "BlockedRecordStalled",
     "Cancel",
     "CancelOwnedJob",
     "CancelOwnedResource",

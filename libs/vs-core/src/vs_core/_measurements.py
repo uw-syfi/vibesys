@@ -1342,6 +1342,18 @@ def _next_poll(
     return ObservePacing(next_at=context.run.now_at + delay, retries=retries)
 
 
+def _lapsed_polls(context: EvaluationContext, resource: ResourceId) -> int:
+    """How many polls of *resource* blocked, or 0 when one is live (it will answer or block)."""
+    polls = [
+        row
+        for row in context.intents.intents
+        if isinstance(row.request, ObserveOwnedJob) and row.request.resource_id == resource
+    ]
+    if any(row.phase not in (IntentPhase.COMPLETED, IntentPhase.BLOCKED) for row in polls):
+        return 0
+    return sum(row.phase == IntentPhase.BLOCKED for row in polls)
+
+
 def _poll_due(
     state: EvaluationState, context: EvaluationContext, event: ObservationsDue
 ) -> AreaChange[EvaluationState]:
@@ -1352,7 +1364,18 @@ def _poll_due(
 
     def release[J: OwnedJob | RegisteredOwnedJob](job: J) -> J:
         due = job.pacing.next_at
-        if due is None or due > event.now_at or job.resource_id is None:
+        if job.resource_id is None or job.terminal:
+            return job
+        if due is None:
+            # A poll that reached its reconciliation bound blocked, for example because the host
+            # was down past it. Nothing else will ask again, so the job is polled anew.
+            lapsed = _lapsed_polls(context, job.resource_id)
+            request = _job_request(ObserveOwnedJob, job, context, "observe")
+            if lapsed and request.request_id is not None:
+                identity = RequestId(root=f"{request.request_id.root}:b{lapsed}")
+                requests.append(request.model_copy(update={"request_id": identity}))
+            return job
+        if due > event.now_at:
             return job
         requests.append(_job_request(ObserveOwnedJob, job, context, "observe"))
         return job.model_copy(update={"pacing": job.pacing.model_copy(update={"next_at": None})})

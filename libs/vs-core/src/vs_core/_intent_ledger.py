@@ -46,10 +46,12 @@ from .types.common import (
     OperationNormalizationKind,
     RequestId,
     RevisionAuthority,
+    RunStatus,
     SetupFailureKind,
 )
 from .types.evaluation import RegisteredJobRequested
 from .types.intents import (
+    BlockedRecordStalled,
     BlockIntent,
     CancelOwnedResource,
     DecisionDependencyResolved,
@@ -122,6 +124,8 @@ def advance(
             change = _retry(state, context, event)
         case RequestUndispatchable():
             change = _undispatchable(state, context, event)
+        case BlockedRecordStalled():
+            change = _end_stalled_block(state, context, event)
         case _:
             raise ContractValidationError("event.kind", "event is owned by intent recovery")
     return change
@@ -593,6 +597,53 @@ def _undispatchable(
     ):
         return AreaChange(state=state)
     return _cancel_prepared(state, context, (intent,))
+
+
+def _end_stalled_block(
+    state: IntentsState, context: IntentsContext, event: BlockedRecordStalled
+) -> AreaChange[IntentsState]:
+    """End the blocked record a closing run waits on, as a conclusive failure.
+
+    The record's bound passed and nothing addresses it, so no executor answer will come. The
+    failure keeps what the executor reported (acceptance, resource, children, release), so
+    the end never claims a release nobody proved: an owner whose release is unproven keeps
+    holding closure until its own cancellation proves it.
+    """
+    intent = _unique(state, event.request_id)
+    if (
+        intent is None
+        or intent.phase != IntentPhase.BLOCKED
+        or context.run.status != RunStatus.CLOSING
+    ):
+        return AreaChange(state=state)
+    previous = intent.observation
+    request = intent.request
+    ended = (
+        Observation(
+            event_id=EventId(root=f"blocked-at-close:{intent.request_id.root}"),
+            request_id=intent.request_id,
+            scope=request.scope,
+            sequence=0,
+            observed_at=context.run.now_at,
+            status=ObservationStatus.FAILED,
+            terminal=True,
+            admission_id=request.admission_id,
+        )
+        if previous is None
+        else previous.model_copy(
+            update={
+                "event_id": EventId(root=f"blocked-at-close:{intent.request_id.root}"),
+                "sequence": previous.sequence + 1,
+                "observed_at": context.run.now_at,
+                "status": ObservationStatus.FAILED,
+                "terminal": True,
+            }
+        )
+    ).model_copy(update={"diagnostic": _BLOCKED_AT_CLOSE})
+    return _apply(state, context, intent, TargetObservation(observation=ended))
+
+
+_BLOCKED_AT_CLOSE = "the run closed while this request was blocked at its reconciliation bound"
 
 
 def _record(

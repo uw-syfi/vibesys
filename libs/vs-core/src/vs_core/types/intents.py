@@ -551,6 +551,20 @@ class RequestUndispatchable(Value):
     request_id: RequestId
 
 
+class BlockedRecordStalled(Value):
+    """Internal signal: a closing run holds a blocked record that nothing can still end.
+
+    Raised by the step when it reaches quiescence with the run closing and a ``BLOCKED`` intent
+    that no live cancellation or inspection addresses: the bound already passed, the strategy
+    was told (``IntentBlocked``), and only the close is waiting on the record. The ledger ends
+    it with a conclusive failure that keeps every ownership fact the executor reported (a
+    resource it named or children it found are not released by this signal). Never shell input.
+    """
+
+    kind: Literal["blocked_record_stalled"] = "blocked_record_stalled"
+    request_id: RequestId
+
+
 class DecisionDependencyResolved(Value):
     """Completion wakes intents to release or reject prepared dependents."""
 
@@ -598,6 +612,7 @@ type IntentsEvent = Annotated[
     | ReconciliationDeadline
     | RetryDue
     | RequestUndispatchable
+    | BlockedRecordStalled
     | OperationRetireRequested
     | DecisionDependencyResolved,
     Field(discriminator="kind"),

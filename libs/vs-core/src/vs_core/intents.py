@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from . import _intent_ledger, _intent_recovery
 from .types.intents import (
+    BlockedRecordStalled,
     DecisionDependencyResolved,
     DispatchAuthorized,
     OperationRetireRequested,
@@ -64,6 +65,7 @@ EVENT_TO_SUBAREA: Mapping[type[IntentsEvent], Reducer] = MappingProxyType(
         ReconciliationDeadline: _intent_recovery.advance,
         RetryDue: _intent_ledger.advance,
         RequestUndispatchable: _intent_ledger.advance,
+        BlockedRecordStalled: _intent_ledger.advance,
     }
 )
 

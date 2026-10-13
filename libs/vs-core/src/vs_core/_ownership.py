@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._proofs import Proven, released_owner
+from ._proofs import Proven, blocked_unnamed, released_owner
 from .types.attempts import AttemptPhase
 from .types.common import LifecycleClass
 from .types.evaluation import ContinuationPhase
@@ -43,7 +43,7 @@ def cleanup_pending(state: CoreState) -> bool:
                 for job in (*state.evaluation.jobs, *state.evaluation.registered_jobs)
             ),
             any(
-                not _blocked_unnamed(intent)
+                not blocked_unnamed(intent)
                 and (
                     intent.phase != IntentPhase.COMPLETED
                     or (
@@ -65,25 +65,6 @@ def cleanup_pending(state: CoreState) -> bool:
                 _invocation_pending(state, invocation) for invocation in state.sessions.invocations
             ),
         )
-    )
-
-
-def _blocked_unnamed(intent: Intent) -> bool:
-    """A blocked intent that was never accepted and named nothing owns nothing to release.
-
-    Reconciliation blocked it after its executor answered without a conclusion. With the
-    launch unaccepted and no resource or children in that answer there is no identity left
-    to cancel or wait on, so the block ends the intent's claim on the run's closure; the strategy has
-    already been told (``IntentBlocked``). A blocked intent that named a resource still
-    holds closure until that resource is proven released.
-    """
-    observation = intent.observation
-    return (
-        intent.phase == IntentPhase.BLOCKED
-        and observation is not None
-        and not observation.accepted
-        and observation.resource_id is None
-        and not observation.children
     )
 
 

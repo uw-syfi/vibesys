@@ -35,7 +35,12 @@ from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
 from ._values import digest, share_unchanged
-from ._waits import stalled_acquisitions, stalled_checkpoint_waits, undispatchable_requests
+from ._waits import (
+    stalled_acquisitions,
+    stalled_blocked_records,
+    stalled_checkpoint_waits,
+    undispatchable_requests,
+)
 from .types.attempts import (
     AttemptAdmitted,
     AttemptRegistered,
@@ -74,6 +79,7 @@ from .types.evaluation import (
 )
 from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import (
+    BlockedRecordStalled,
     DecisionDependencyResolved,
     DispatchAuthorized,
     ExecuteRegisteredOperation,
@@ -625,7 +631,8 @@ def _stall_entries(
 
     The waits are a checkpoint wait without a producer (``CheckpointStalled``), a turn acquiring
     with nothing to carry it (``AcquisitionStalled``) and a prepared
-    request that can never be dispatched (``RequestUndispatchable``). A signal already raised
+    request that can never be dispatched (``RequestUndispatchable``), and a blocked record a closing
+    run waits on that no live request addresses (``BlockedRecordStalled``). A signal already raised
     in this step is not raised again: if its reducer could not end the wait (an ambiguous
     record it refuses to act on), the wait stays visible to the orphan check instead of the
     step looping on it.
@@ -646,6 +653,10 @@ def _stall_entries(
         *(
             RequestUndispatchable(request_id=request_id)
             for request_id in undispatchable_requests(state)
+        ),
+        *(
+            BlockedRecordStalled(request_id=request_id)
+            for request_id in stalled_blocked_records(state)
         ),
     )
     return [

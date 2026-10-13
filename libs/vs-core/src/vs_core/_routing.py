@@ -50,6 +50,7 @@ from .types.evaluation import (
     TurnSuspended,
 )
 from .types.intents import (
+    BlockedRecordStalled,
     DecisionDependencyResolved,
     DispatchAuthorized,
     OperationRetireRequested,
@@ -235,6 +236,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | ReconciliationDeadline()
             | RetryDue()
             | RequestUndispatchable()
+            | BlockedRecordStalled()
             | OperationRetireRequested()
             | DecisionCompleted()
         ):

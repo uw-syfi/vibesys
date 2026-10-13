@@ -291,7 +291,7 @@ def test_inspection_command_success_cannot_release_its_parent_targets_child(
 
 
 @given(accepted=st.booleans(), identified=st.booleans())
-def test_a_blocked_intent_releases_closure_only_when_it_was_never_accepted_and_unnamed(
+def test_a_blocked_intent_holds_closure_only_while_a_cancellation_of_its_resource_is_owed(
     *, accepted: bool, identified: bool
 ) -> None:
     state = _silent(core.IntentPhase.BLOCKED, core.ObservationStatus.UNKNOWN, terminal=False)
@@ -310,5 +310,11 @@ def test_a_blocked_intent_releases_closure_only_when_it_was_never_accepted_and_u
             )
         }
     )
-    closed = close_run(state) == core.RunStatus.TERMINAL
-    assert closed == (not accepted and not identified)
+    # A closing run waits on the record unless it never owned anything. Nothing live addresses
+    # it here, so the wait has no producer and the step ends the record (BlockedRecordStalled;
+    # see test_blocked_close).
+    held = [
+        wait for wait in core.waits(stopped(state)) if wait.waiter == core.WaitKind.BLOCKED_RECORD
+    ]
+    assert bool(held) == (accepted or identified)
+    assert all(wait.producer is None for wait in held)

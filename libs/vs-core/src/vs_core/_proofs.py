@@ -976,6 +976,25 @@ def _session_release_binding(owner: SessionView, observation: Observation) -> Ve
     return Proven(observation)
 
 
+def blocked_unnamed(intent: Intent) -> bool:
+    """A blocked intent that was never accepted and named nothing owns nothing to release.
+
+    Reconciliation blocked it after its executor answered without a conclusion. With the
+    launch unaccepted and no resource or children in that answer there is no identity left
+    to cancel or wait on, so the block ends the intent's claim on the run's closure; the strategy has
+    already been told (``IntentBlocked``). A blocked intent that named a resource still
+    holds closure until that resource is proven released.
+    """
+    observation = intent.observation
+    return (
+        intent.phase == IntentPhase.BLOCKED
+        and observation is not None
+        and not observation.accepted
+        and observation.resource_id is None
+        and not observation.children
+    )
+
+
 def released_owner(
     owner: Intent | OwnedJob | RegisteredOwnedJob | SessionView | ChildLease | None,
     sources: tuple[Intent, ...],

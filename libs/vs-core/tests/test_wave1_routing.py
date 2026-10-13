@@ -143,6 +143,7 @@ EXPECTED_TARGET = {
                 "operation_retire_requested",
                 "retry_due",
                 "request_undispatchable",
+                "blocked_record_stalled",
             ),
         ),
         (
