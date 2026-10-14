@@ -20,13 +20,15 @@ from vs_sandbox.api import (
     SandboxKind,
     create_compute_backend,
 )
+from vs_sim.api.testing import ManualClock
 
 _PROBE = """
 import sys
 
 from vs_sandbox.api import ComputeBackend, create_compute_backend
+from vs_sim.api import SystemClock
 
-create_compute_backend(ComputeBackend.{backend}, log_dir={log_dir!r})
+create_compute_backend(ComputeBackend.{backend}, log_dir={log_dir!r}, clock=SystemClock())
 print("vs_sandbox.docker_sandbox" in sys.modules)
 """
 
@@ -52,7 +54,9 @@ def test_constructing_a_compute_backend_does_not_import_docker_sandbox(tmp_path:
 
 def test_local_sandbox_construction_builds_a_local_shell_sandbox(tmp_path: Path) -> None:
     """The local sandbox kind resolves to the first-party local shell."""
-    sandbox = create_compute_backend(ComputeBackend.CPU, log_dir=tmp_path).make_sandbox(
+    sandbox = create_compute_backend(
+        ComputeBackend.CPU, log_dir=tmp_path, clock=ManualClock()
+    ).make_sandbox(
         SandboxKind.LOCAL,
         host_workspace=str(tmp_path),
         log_path=None,
@@ -72,4 +76,4 @@ def test_backend_registry_still_resolves_every_default(tmp_path: Path) -> None:
         ComputeBackend.ROCM,
         ComputeBackend.TRAINIUM,
     ):
-        assert create_compute_backend(backend, log_dir=tmp_path) is not None
+        assert create_compute_backend(backend, log_dir=tmp_path, clock=ManualClock()) is not None

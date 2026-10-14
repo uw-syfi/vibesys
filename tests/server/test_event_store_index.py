@@ -16,7 +16,7 @@ import server.events as events_module
 from server.event_index import event_index_path, load_event_index
 from server.events import EventStore, EventType, RunEvent, make_event
 from server.journal import WireJournal
-from vs_sim.api.testing import SimThreads
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -29,7 +29,7 @@ type _SidecarMutation = Callable[[dict[str, object], list[list[object]]], None]
 def _journal() -> WireJournal:
     """A journal whose locks and event store run on simulated threads."""
     threads = SimThreads()
-    return WireJournal(threads.condition(), threads=threads)
+    return WireJournal(threads.condition(), threads=threads, clock=ManualClock())
 
 
 class _OpenOptions(TypedDict, total=False):
@@ -568,7 +568,7 @@ def test_valid_unterminated_record_stays_outside_the_safe_cache_boundary(
     store = EventStore(path, run_id="second")
 
     assert scanned == 1
-    store.append(make_event(EventType.OUTPUT, "third"))
+    store.append(make_event(EventType.OUTPUT, "third", timestamp=datetime(2026, 1, 1, tzinfo=UTC)))
     assert [event.text for event in EventStore(path, run_id="third").read()] == [
         "event-0",
         "event-1",
@@ -585,7 +585,9 @@ def test_malformed_tail_stays_repairable_after_warm_attach(tmp_path: Path) -> No
     assert [event.text for event in first.read()] == ["event-0"]
 
     second = EventStore(path, run_id="second")
-    second.append(make_event(EventType.OUTPUT, "after repair"))
+    second.append(
+        make_event(EventType.OUTPUT, "after repair", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+    )
 
     assert [event.text for event in EventStore(path, run_id="third").read()] == [
         "event-0",
@@ -600,7 +602,9 @@ def test_legacy_sequence_repair_survives_cache_reuse_and_rebuild(tmp_path: Path)
     assert [event.sequence for event in EventStore(path, run_id="first").read()] == [2, 3, 4]
     warm = EventStore(path, run_id="second")
     assert [event.sequence for event in warm.read()] == [2, 3, 4]
-    warm.append(make_event(EventType.OUTPUT, "appended"))
+    warm.append(
+        make_event(EventType.OUTPUT, "appended", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+    )
 
     assert [event.sequence for event in EventStore(path, run_id="third").read()] == [2, 3, 4, 5]
 

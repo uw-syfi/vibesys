@@ -37,6 +37,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import ComputeBackend, ComputeBackendImpl, DockerSandbox, create_compute_backend
 from vs_sandbox.api.slurm import load_slurm_operator_settings
+from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -167,7 +168,9 @@ def ensure_base_image(image: str) -> None:
 
 def make_backend(base: Base, log_dir: Path) -> ComputeBackendImpl:
     """The compute backend of *base*, configured as a run on a host without its GPU is."""
-    return create_compute_backend(base.backend, log_dir, log=lambda _: None, image=base.image)
+    return create_compute_backend(
+        base.backend, log_dir, log=lambda _: None, image=base.image, clock=SystemClock()
+    )
 
 
 def _slurm_config(directory: Path) -> Path:

@@ -7,7 +7,7 @@ import re
 import uuid
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from typing import (
     TYPE_CHECKING,
@@ -1543,11 +1543,13 @@ def _repair_legacy_sequences(events: list[RunEvent]) -> list[RunEvent]:
 def make_event(
     event_type: EventType,
     text: str = "",
+    *,
+    timestamp: datetime,
     **fields: object,
 ) -> RunEvent:
-    """Build a timestamped event from its type, text, and payload fields."""
+    """Build an event that happened at ``timestamp`` from its type, text, and payload fields."""
     return RunEvent.model_validate(
-        {"timestamp": datetime.now(UTC), "type": event_type, "text": text, **fields}
+        {"timestamp": timestamp, "type": event_type, "text": text, **fields}
     )
 
 

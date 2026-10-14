@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from tests.server.support import agent_descriptor, build_server_parts, run_record
@@ -72,7 +73,7 @@ def _project_run(project: Path, objectives: tuple[str, ...]) -> tuple[Project, s
     project.mkdir()
     (project / "OBJECTIVE.md").write_text("Make the queue fast.\n", encoding="utf-8")
     vibesys_project = Project.open(project)
-    vibesys_project.state.create_project("queue")
+    vibesys_project.state.create_project("queue", now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = vibesys_project.state.new_run_manifest(
         "queue",
         run_id="queue-run",
@@ -82,6 +83,7 @@ def _project_run(project: Path, objectives: tuple[str, ...]) -> tuple[Project, s
         execution=run_execution_record(),
         orchestration=agent_descriptor(metric_space=_configuration(objectives)),
         trusted_input_baseline="0" * 40,
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     vibesys_project.state.create_run(manifest)
     return vibesys_project, manifest.run_id

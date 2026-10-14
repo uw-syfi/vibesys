@@ -33,6 +33,7 @@ from vs_agent.client import AgentDiagnosticLog
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
+from vs_sim.api.testing import ManualClock
 
 PROVIDERS = ("claude", "codex", "gemini", "opencode")
 ROLES = ("planner", "implementer", "judge")
@@ -141,6 +142,7 @@ def _client(provider: str, fake: FakeExecutor, home: Path) -> tuple[AgentClient,
         provider=provider,
         diagnostic_log=AgentDiagnosticLog(log),
         check_readiness=True,
+        clock=ManualClock(),
     )
     return client, log
 
@@ -241,7 +243,7 @@ def test_a_failure_is_not_remembered_so_a_fixed_environment_is_rechecked(
         executor_factory=lambda: current[0],
         launcher_env=lambda: _env_of(home),
     )
-    client = AgentClient(launcher, provider=provider, check_readiness=True)
+    client = AgentClient(launcher, provider=provider, check_readiness=True, clock=ManualClock())
 
     with pytest.raises(ProviderNotReadyError):
         _invoke(client, tmp_path)

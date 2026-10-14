@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from vs_sim.api import Clock
+
 
 def fake_docker_environment(docker: FakeDockerEngine | None = None) -> RunEnvironmentSpec:
     """Return a Docker environment spec whose host effects are in-memory fakes."""
@@ -43,6 +45,8 @@ def host_container_backend(
     log_dir: Path,
     log: Callable[[str], None] | None = None,
     image: str | None = None,
+    clock: Clock,
 ) -> HostExecutedContainerBackend:
     """Build the ``backend_factory`` product: a CPU backend with host-executing containers."""
+    del clock  # the fake backend records no timestamps
     return HostExecutedContainerBackend(log_dir, log=log, image=image)

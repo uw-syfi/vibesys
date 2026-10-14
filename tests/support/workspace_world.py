@@ -36,6 +36,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -173,6 +174,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
         log_emit=_emit,
         on_log_ready=lambda _path: None,
         git_repository=_git_factory(disk, wrap_git),
+        clock=ManualClock(),
     )
     with open_project_run_resources(
         request, effects=effects, resolve_resume=unexpected_resume
@@ -196,6 +198,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                 ),
             ),
             open_session if open_session is not None else lambda _request: _Session(),
+            clock=ManualClock(),
         )
         with closing(environment):
             factory = WorkspaceResourceFactory(

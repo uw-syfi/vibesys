@@ -30,6 +30,7 @@ from vs_agent.api.testing import (
     assistant_text,
 )
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -58,7 +59,8 @@ def test_executor_initial_and_strict_continuation_share_one_conversation(
                 answer={"value": 7},
                 on_turn=calls.append,
                 turn=[assistant_text('{"value":7}')],
-            )
+            ),
+            clock=ManualClock(),
         )
     else:
         executor = FakeAgentClient(
@@ -116,7 +118,9 @@ def test_cancelling_and_releasing_one_key_leaves_the_client_usable_for_others(
     tmp_path: Path, implementation: str
 ) -> None:
     if implementation == "client":
-        executor: AgentTurnExecutor = AgentClient(FakeProvider(answer={"value": 7}))
+        executor: AgentTurnExecutor = AgentClient(
+            FakeProvider(answer={"value": 7}), clock=ManualClock()
+        )
     else:
         fake = FakeAgentClient(
             capabilities=AgentCapabilities(provider_session_resume=True, session_reuse=True)

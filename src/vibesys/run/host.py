@@ -342,9 +342,10 @@ class _ProductHostFactory:
             )
         )
         ownership.callback(environment.close)
-        events = CoreAgentEventSink(self.integration.events.record)
+        events = CoreAgentEventSink(self.integration.events.record, self.timing.clock)
         client = self.agent_client_factory(
             spec=base,
+            clock=self.timing.clock,
             session_store=session_store,
             backends=(
                 {role.id: environment.backends["chat"] for role in self.plugin.agents}

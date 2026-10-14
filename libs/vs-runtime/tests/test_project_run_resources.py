@@ -28,6 +28,7 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
 )
 from vs_runtime.api.testing import FakeProjectMaterializationEffects
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -99,6 +100,7 @@ def _effects(events: list[str]) -> ProjectRunEffects:
         git_repository=_DISK.repository,
         log_emit=emit,
         on_log_ready=on_log_ready,
+        clock=ManualClock(),
     )
 
 

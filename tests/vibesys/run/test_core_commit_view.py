@@ -17,6 +17,7 @@ from vibesys.events import CoreEvent, CoreEventType, WinnerSelectedData
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import StoredEnvelope
 from vs_runtime.api.core import RuntimeRecord, winner_selection
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +36,7 @@ async def test_one_core_run_notifies_the_listener_per_commit_and_announces_its_w
 
     Budget: one skeleton run on real Git, the cheapest way to see the production loop's commits.
     """
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     heard: list[CoreEvent] = []
     integration.events.subscribe(heard.append)
     with open_skeleton_world(tmp_path) as world:

@@ -10,6 +10,7 @@ import pytest
 from vibesys.api import CoreEventType, RunStopped
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
 def test_control_transitions_keep_the_existing_persisted_event_format(
     tmp_path: Path,
 ) -> None:
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     integration.attach(tmp_path, run_id="run-1")
     unsubscribe = integration.events.subscribe(
         lambda event: integration.control.resume() if event.type is CoreEventType.PAUSED else None

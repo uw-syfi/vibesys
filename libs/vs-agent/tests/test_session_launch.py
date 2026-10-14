@@ -69,7 +69,7 @@ from vs_agent.contracts import (
 )
 from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeDockerConfinement
-from vs_sim.api.testing import HANG_GUARD_S, start_thread
+from vs_sim.api.testing import HANG_GUARD_S, ManualClock, start_thread
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -1496,7 +1496,9 @@ def test_an_agent_client_keeps_the_conversation_through_a_schema_failure(
     workspace = tmp_path / "ws"
     workspace.mkdir()
     key = AgentSessionKey(SessionScope.MEMBER, "planner:p")
-    with AgentClient(launcher, provider="claude", event_sink=NULL_AGENT_EVENT_SINK) as client:
+    with AgentClient(
+        launcher, provider="claude", event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock()
+    ) as client:
 
         def turn(prompt: str) -> str:
             return client.invoke_text(
@@ -2092,7 +2094,11 @@ def test_a_session_finds_the_run_skills_where_its_provider_looks(
     logs: list[str] = []
     launcher, _fake = _launcher(provider, run, log=logs.append)
     client = AgentClient(
-        launcher, provider=provider, skills=[tmp_path / "skills"], event_sink=NULL_AGENT_EVENT_SINK
+        launcher,
+        provider=provider,
+        skills=[tmp_path / "skills"],
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
     )
     with client:
         client.invoke_text(
@@ -2282,7 +2288,7 @@ def test_process_spawn_os_errors_are_retryable_typed_faults(
             executor_factory=lambda: executor,
             launcher_env=dict,
         )
-        client = AgentClient(launcher, provider="claude", containerized=True)
+        client = AgentClient(launcher, provider="claude", containerized=True, clock=ManualClock())
         try:
             with pytest.raises(RuntimeError, match="could not start") as raised:
                 client.invoke_text(

@@ -5,7 +5,6 @@
 {"path": "libs/vs-agent/src/vs_agent/host_resource_declarations.py", "rule": "process", "count": 1}
 {"path": "libs/vs-agent/src/vs_agent/orphans.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-agent/src/vs_agent/shim_translation.py", "rule": "process", "count": 1}
-{"path": "libs/vs-agent/src/vs_agent/usage_records.py", "rule": "wall_clock", "count": 1}
 {"path": "libs/vs-agent/tests/test_hostsandbox.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-agent/tests/test_session_launch.py", "rule": "process", "count": 1}
 {"path": "libs/vs-core/tests/test_payload_contracts.py", "rule": "bare_wait", "count": 1}
@@ -31,9 +30,7 @@
 {"path": "libs/vs-project/src/vs_project/_git_process.py", "rule": "subprocess", "count": 5}
 {"path": "libs/vs-project/src/vs_project/_git_remote.py", "rule": "subprocess", "count": 3}
 {"path": "libs/vs-project/src/vs_project/_logger.py", "rule": "threading", "count": 1}
-{"path": "libs/vs-project/src/vs_project/_logger.py", "rule": "wall_clock", "count": 2}
 {"path": "libs/vs-project/src/vs_project/_state.py", "rule": "fs_sync", "count": 1}
-{"path": "libs/vs-project/src/vs_project/_state.py", "rule": "wall_clock", "count": 2}
 {"path": "libs/vs-project/src/vs_project/_state_io.py", "rule": "fs_sync", "count": 3}
 {"path": "libs/vs-project/src/vs_project/_state_store.py", "rule": "fs_sync", "count": 1}
 {"path": "libs/vs-project/src/vs_project/_state_store.py", "rule": "threading", "count": 1}
@@ -77,8 +74,6 @@
 {"path": "libs/vs-runtime/tests/test_workspace_requests.py", "rule": "threading", "count": 3}
 {"path": "libs/vs-sandbox/src/vs_sandbox/command_execution.py", "rule": "subprocess", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/container_runtime.py", "rule": "subprocess", "count": 2}
-{"path": "libs/vs-sandbox/src/vs_sandbox/cuda_backend.py", "rule": "wall_clock", "count": 1}
-{"path": "libs/vs-sandbox/src/vs_sandbox/device_lease.py", "rule": "wall_clock", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/docker_cli.py", "rule": "subprocess", "count": 5}
 {"path": "libs/vs-sandbox/src/vs_sandbox/docker_sandbox.py", "rule": "signal", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/docker_sandbox.py", "rule": "subprocess", "count": 7}
@@ -175,7 +170,6 @@
 {"path": "src/server/chat/manager.py", "rule": "threading", "count": 1}
 {"path": "src/server/control_envelope.py", "rule": "wall_clock", "count": 2}
 {"path": "src/server/event_index.py", "rule": "fs_sync", "count": 2}
-{"path": "src/server/events.py", "rule": "wall_clock", "count": 1}
 {"path": "src/server/execution.py", "rule": "threading", "count": 2}
 {"path": "src/server/registry.py", "rule": "fs_sync", "count": 2}
 {"path": "src/server/transport/discovery.py", "rule": "process", "count": 1}
@@ -183,8 +177,6 @@
 {"path": "src/server/transport/websocket.py", "rule": "executor", "count": 1}
 {"path": "src/server/transport/websocket.py", "rule": "socket_io", "count": 1}
 {"path": "src/server/transport/websocket.py", "rule": "threading", "count": 19}
-{"path": "src/vibesys/events.py", "rule": "wall_clock", "count": 1}
-{"path": "src/vibesys/repository.py", "rule": "wall_clock", "count": 1}
 {"path": "tests/architecture/test_delegated_merge.py", "rule": "subprocess", "count": 13}
 {"path": "tests/architecture/test_ordered_map_evaluator.py", "rule": "subprocess", "count": 10}
 {"path": "tests/architecture/test_prompt_resource_contract.py", "rule": "process", "count": 1}

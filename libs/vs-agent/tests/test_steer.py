@@ -43,6 +43,7 @@ from vs_agent.client import AgentDiagnosticLog
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -152,6 +153,7 @@ def test_a_steer_reaches_the_running_turn_through_the_client(tmp_path: Path, hom
         provider="codex",
         event_sink=_Sink(),
         diagnostic_log=AgentDiagnosticLog(io.StringIO()),
+        clock=ManualClock(),
     )
 
     answer = client.invoke_text(
@@ -264,6 +266,7 @@ def test_a_client_with_no_turn_in_flight_reports_none_running(home: Path) -> Non
     client = AgentClient(
         _launcher("claude", fake, home, agentshim.TransportKind.ONE_SHOT),
         provider="claude",
+        clock=ManualClock(),
     )
 
     assert client.steer(TEXT, on_rejected=lambda: None) is SteerOutcome.NO_RUNNING_TURN

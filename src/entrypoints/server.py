@@ -56,7 +56,7 @@ from vibesys.api.request import generate_experiment_name, repository_name_from_e
 from vs_github.api import GitHubCLI, GitHubCLIError
 from vs_project.api import Project
 from vs_sandbox.api import relay_signals
-from vs_sim.api import OsThreads, SystemClock
+from vs_sim.api import OsThreads, SystemClock, utc_datetime
 
 _WEB_PORT_MAX = 65_535
 _DETACHED_START_TIMEOUT_SECONDS = 10.0
@@ -273,7 +273,9 @@ def _resolve_tui_defaults(  # noqa: PLR0913  # lint-waiver: LW-011105 [PLR0913];
         launch_config_path = directory_config if directory_config.is_file() else None
     resolved_input = input_path.expanduser().resolve() if input_path is not None else None
     resolved_runs_dir = (runs_dir or Path.cwd() / "exp_env").expanduser().resolve()
-    resolved_name = experiment_name or generate_experiment_name(resolved_input)
+    resolved_name = experiment_name or generate_experiment_name(
+        resolved_input, now=utc_datetime(SystemClock())
+    )
     return InteractiveSetupDefaults(
         runs_dir=str(resolved_runs_dir),
         input_path=str(resolved_input) if resolved_input is not None else "",
@@ -1075,6 +1077,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                 instance_path=instance_path,
                 detach=detach,
                 read_only_log=read_only_log,
+                clock=SystemClock(),
             )
         else:
             runtime = server_runtime(
@@ -1085,6 +1088,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                 tui_defaults=_tui_defaults_from_argv(arguments),
                 detach=detach,
                 observer=observer,
+                clock=SystemClock(),
             )
         with _termination_signal(runtime):
             result = runtime.run(lambda: None if request is None else runtime.drive(request))

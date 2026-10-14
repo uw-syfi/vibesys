@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from vs_mcp.api import ToolServerDescriptor
     from vs_runtime._agent_execution import AgentExecutionEnvironment
     from vs_sandbox.api import HostResource
+    from vs_sim.api import Clock
 
 
 class _Closeable(Protocol):
@@ -170,18 +171,20 @@ def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR09
     additional_host_resources: tuple[HostResource, ...] = (),
     client_factory: Callable[..., AgentClientProtocol] = build_agent_client,
     agent_homes_directory: Path | None = None,
+    clock: Clock,
 ) -> ManagedConversation:
     """Build one auxiliary conversation and own all transferred resources.
 
     Calling this function transfers ``environment`` immediately. Construction
     failures close every acquired resource and preserve the construction error;
     a successful conversation owns the environment, logger, and client until
-    its idempotent ``close``.
+    its idempotent ``close``. ``clock`` counts seconds since the epoch; it names the
+    conversation's log file and times and stamps its turns.
     """
     ownership = ExitStack()
     ownership.callback(environment.close)
     try:
-        logger = RunLogger(log_directory, tee_stderr=False)
+        logger = RunLogger(log_directory, clock=clock, tee_stderr=False)
         ownership.callback(logger.close)
         logger.switch(f"auxiliary-{spec.role}")
         client = client_factory(
@@ -193,6 +196,7 @@ def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR09
             use_docker=environment.use_docker,
             log_dir=log_directory,
             agent_homes_dir=agent_homes_directory,
+            clock=clock,
             project_path_policy=environment.project_path_policy,
             require_host_sandbox=not environment.use_docker,
             host_resources=(*environment.host_resources, *additional_host_resources),

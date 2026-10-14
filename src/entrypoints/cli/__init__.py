@@ -68,6 +68,7 @@ from vibesys.api.request import (
     with_operator_constraints,
 )
 from vs_project.api import generate_run_id
+from vs_sim.api import SystemClock, utc_datetime
 
 if TYPE_CHECKING:
     import argparse
@@ -194,8 +195,10 @@ def _allocate_run_id(args: argparse.Namespace) -> None:
     if args.run_id is not None:
         return
     if args.exp_name is None:
-        args.exp_name = generate_experiment_name(args.input_bundle.root)
-    args.run_id = generate_run_id(args.exp_name)
+        args.exp_name = generate_experiment_name(
+            args.input_bundle.root, now=utc_datetime(SystemClock())
+        )
+    args.run_id = generate_run_id(args.exp_name, now=utc_datetime(SystemClock()))
 
 
 def dispatch(argv: list[str], runs: Runs | None = None) -> None:

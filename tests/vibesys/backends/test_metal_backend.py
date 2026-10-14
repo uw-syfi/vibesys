@@ -15,20 +15,23 @@ from vs_sandbox.api import (
     SandboxKind,
     create_compute_backend,
 )
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
 def _make_backend(tmp_path: Path) -> LocalBackend:
-    impl = create_compute_backend(ComputeBackend.METAL, log_dir=tmp_path / "logs")
+    impl = create_compute_backend(
+        ComputeBackend.METAL, log_dir=tmp_path / "logs", clock=ManualClock()
+    )
     assert isinstance(impl, LocalBackend)
     return impl
 
 
 class TestMetalRegistry:
     def test_metal_in_registry(self, tmp_path: Path) -> None:
-        impl = create_compute_backend(ComputeBackend.METAL, log_dir=tmp_path)
+        impl = create_compute_backend(ComputeBackend.METAL, log_dir=tmp_path, clock=ManualClock())
         assert isinstance(impl, LocalBackend)
         assert impl.name is ComputeBackend.METAL
 

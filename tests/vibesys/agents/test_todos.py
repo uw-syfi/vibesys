@@ -9,6 +9,7 @@ from vibesys.api import CoreAgentEventSink
 from vibesys.events import CoreEvent, TodoItemData, TodoUpdateData
 from vs_agent.api import todos_from_tool_call
 from vs_agent.callbacks import AgentLogger
+from vs_sim.api.testing import ManualClock
 
 
 class TestProviderShapes:
@@ -103,7 +104,7 @@ class TestDegradation:
 class TestAgentLoggerPublishing:
     def test_cli_todo_tool_call_publishes_a_todo_update(self) -> None:
         seen: list[CoreEvent] = []
-        logger = AgentLogger(event_sink=CoreAgentEventSink(seen.append))
+        logger = AgentLogger(event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()))
         logger.on_tool_call("TodoWrite", {"todos": [{"content": "A", "status": "pending"}]})
         updates = [e.data for e in seen if isinstance(e.data, TodoUpdateData)]
         assert len(updates) == 1
@@ -111,7 +112,7 @@ class TestAgentLoggerPublishing:
 
     def test_non_todo_tool_call_publishes_no_todo_update(self) -> None:
         seen: list[CoreEvent] = []
-        logger = AgentLogger(event_sink=CoreAgentEventSink(seen.append))
+        logger = AgentLogger(event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()))
         logger.on_tool_call("Bash", {"command": "make"})
         assert not any(isinstance(e.data, TodoUpdateData) for e in seen)
 
@@ -119,6 +120,6 @@ class TestAgentLoggerPublishing:
         # The sink drops empty lists, so a cleared plan is a no-op on the
         # wire rather than an event with no payload.
         seen: list[CoreEvent] = []
-        logger = AgentLogger(event_sink=CoreAgentEventSink(seen.append))
+        logger = AgentLogger(event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()))
         logger.on_tool_call("TodoWrite", {"todos": []})
         assert not any(isinstance(e.data, TodoUpdateData) for e in seen)

@@ -48,7 +48,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.testing import FakeRunControlEventSink
-from vs_sim.api.testing import clock_from
+from vs_sim.api.testing import ManualClock, clock_from
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -105,7 +105,9 @@ def _agents(sent: Sent) -> Callable[[Path], SessionHost]:
             sent.record(request)
             writer(request)
 
-        client = AgentClient(FakeProvider(answer=writer.answer, on_turn=on_turn))
+        client = AgentClient(
+            FakeProvider(answer=writer.answer, on_turn=on_turn), clock=ManualClock()
+        )
         resolver = MessageResolver(
             root,
             TemplateRenderer(root),

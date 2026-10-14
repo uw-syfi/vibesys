@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -50,7 +51,7 @@ def test_public_run_store_rejects_pre_v5_manifests_explicitly(
     schema_version: int,
 ) -> None:
     project = Project.open(tmp_path)
-    project.state.create_project("legacy run project")
+    project.state.create_project("legacy run project", now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = project.state.new_run_manifest(
         "legacy run",
         run_id=f"v{schema_version}-run",
@@ -60,6 +61,7 @@ def test_public_run_store_rejects_pre_v5_manifests_explicitly(
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="plain", config_version=1, options={}),
         trusted_input_baseline="0" * 40,
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     project.state.create_run(manifest)
     manifest_path = tmp_path / ".vibesys" / "state" / "runs" / manifest.run_id / "run.json"
@@ -78,7 +80,7 @@ def test_public_run_store_rejects_pre_v5_manifests_explicitly(
 def test_plain_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
     (tmp_path / "OBJECTIVE.md").write_text("Implement the service.\n")
     project = Project.open(tmp_path)
-    project.state.create_project("plain project")
+    project.state.create_project("plain project", now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = project.state.new_run_manifest(
         "plain run",
         run_id="plain-run",
@@ -96,6 +98,7 @@ def test_plain_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
             },
         ),
         trusted_input_baseline="0" * 40,
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     project.state.create_run(manifest)
     # A plain run is a core run: its state is the runtime record, and a run that committed none
@@ -120,7 +123,7 @@ def test_plain_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
 def test_unknown_v5_run_has_generic_history_view(tmp_path: Path) -> None:
     (tmp_path / "OBJECTIVE.md").write_text("Explore candidates.\n")
     project = Project.open(tmp_path)
-    project.state.create_project("custom project")
+    project.state.create_project("custom project", now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = project.state.new_run_manifest(
         "custom run",
         run_id="team-run",
@@ -132,6 +135,7 @@ def test_unknown_v5_run_has_generic_history_view(tmp_path: Path) -> None:
             id="team-search", config_version=2, options={"workers": 3}
         ),
         trusted_input_baseline="0" * 40,
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     project.state.create_run(manifest)
 
@@ -158,7 +162,7 @@ def test_workspace_changes_hide_the_registered_plugins_memory(tmp_path: Path) ->
     baseline = _git(root, "rev-parse", "HEAD")
 
     project = Project.open(root)
-    project.state.create_project("custom memory project")
+    project.state.create_project("custom memory project", now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = project.state.new_run_manifest(
         "custom memory run",
         run_id="custom-memory-run",
@@ -168,6 +172,7 @@ def test_workspace_changes_hide_the_registered_plugins_memory(tmp_path: Path) ->
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="memory-policy", config_version=1, options={}),
         trusted_input_baseline=baseline,
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     project.state.create_run(manifest)
 

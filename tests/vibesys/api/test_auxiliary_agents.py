@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
@@ -35,6 +36,7 @@ from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecor
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.infrastructure import HostEnvironmentFacts, RunEnvironmentPresentation
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -175,7 +177,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
     project_root.mkdir()
     (project_root / "OBJECTIVE.md").write_text("Test the auxiliary API.\n", encoding="utf-8")
     project = Project.open(project_root)
-    project.state.create_project("test")
+    project.state.create_project("test", now=datetime(2026, 1, 1, tzinfo=UTC))
     project.state.create_run(
         project.state.new_run_manifest(
             "test",
@@ -186,6 +188,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
             execution=run_execution_record(),
             orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={}),
             trusted_input_baseline="0" * 40,
+            now=datetime(2026, 1, 1, tzinfo=UTC),
         )
     )
     shared_session = _EnvironmentSession()
@@ -215,6 +218,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
         backend=ComputeBackend.CPU,
         skill_source_dirs=(),
         host_resources=(),
+        clock=ManualClock(),
     )
 
 

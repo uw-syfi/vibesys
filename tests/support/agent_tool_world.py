@@ -55,7 +55,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.contracts import AgentRole, AgentTool
 from vs_sim.api import MonotonicClock, OsThreads
-from vs_sim.api.testing import SimNetwork
+from vs_sim.api.testing import ManualClock, SimNetwork
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -212,7 +212,7 @@ async def scenario(
             writer=agent,
         )
         resolvers.append(resolver)
-        client = AgentClient(FakeProvider(answer=agent.answer, on_turn=agent))
+        client = AgentClient(FakeProvider(answer=agent.answer, on_turn=agent), clock=ManualClock())
         return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
 
     def yields(workspaces: RuntimeWorkspaces, receipts: StateNamespace) -> TurnYields:

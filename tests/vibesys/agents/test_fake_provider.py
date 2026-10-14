@@ -39,6 +39,7 @@ from vs_agent.api.testing import (
     usage as usage_event,
 )
 from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,12 +63,17 @@ def _invoke_plan(
     The client is left open: the caller may run further turns on the same
     provider, and closing it would close the provider with it.
     """
-    event_sink = NULL_AGENT_EVENT_SINK if events is None else CoreAgentEventSink(events.append)
+    event_sink = (
+        NULL_AGENT_EVENT_SINK
+        if events is None
+        else CoreAgentEventSink(events.append, clock=ManualClock())
+    )
     client = AgentClient(
         provider,
         provider="mock",
         model_name="mock-model",
         event_sink=event_sink,
+        clock=ManualClock(),
     )
     return client.invoke(
         kind="orchestrator",

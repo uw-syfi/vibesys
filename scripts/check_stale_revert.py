@@ -155,7 +155,9 @@ def _edits(root: Path, base: str, head: str, changed: list[str]) -> dict[str, _E
         elif line.startswith("+") and not line.startswith("+++ "):
             added[path].append(line[1:])
     return {
-        path: _Edit(frozenset(deleted[path]), frozenset(x.strip() for x in added[path]), len(added[path]))
+        path: _Edit(
+            frozenset(deleted[path]), frozenset(x.strip() for x in added[path]), len(added[path])
+        )
         for path in deleted
     }
 
@@ -284,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(
             f"{stale.path}: {what} {stale.undone[:12]} ({stale.subject}); "
             "rebuild the file from the base branch, or declare the undo "
-            "(\"Reverts #N\", \"Reland #N\" or \"Restores #N\" on its own line of the message)\n"
+            '("Reverts #N", "Reland #N" or "Restores #N" on its own line of the message)\n'
         )
     return 1 if found else 0
 

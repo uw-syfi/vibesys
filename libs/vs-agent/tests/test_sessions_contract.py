@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -53,7 +54,7 @@ from vs_project.api import (
     RunExecutionRecord,
 )
 from vs_prompts.api import TemplateRenderer
-from vs_sim.api.testing import HANG_GUARD_S
+from vs_sim.api.testing import HANG_GUARD_S, ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -70,7 +71,7 @@ KEY = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
 
 def _namespace(root: Path) -> StateNamespace:
     project = Project.open(root)
-    project.state.create_project("session-contract")
+    project.state.create_project("session-contract", now=datetime(2026, 1, 1, tzinfo=UTC))
     run = project.state.new_run_manifest(
         "session-contract",
         run_id="run-1",
@@ -87,6 +88,7 @@ def _namespace(root: Path) -> StateNamespace:
             agent_roles={},
         ),
         orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     project.state.create_run(run)
     return project.state.local_namespace(run.run_id, "agent")
@@ -152,7 +154,9 @@ def harness(
         launcher = fake_agentshim_launcher(provider="codex", executor=FakeExecutor(execute))
 
     def new_client() -> AgentClient:
-        return AgentClient(launcher, provider="codex", session_store=checkpoints)
+        return AgentClient(
+            launcher, provider="codex", session_store=checkpoints, clock=ManualClock()
+        )
 
     client = new_client()
     spec = AgentSessionSpec(
@@ -372,7 +376,7 @@ class _NoResumeProvider(FakeProvider):
 
 
 def test_unsupported_provider_is_typed_preflight_error() -> None:
-    client = AgentClient(_NoResumeProvider(answer="done"))
+    client = AgentClient(_NoResumeProvider(answer="done"), clock=ManualClock())
     try:
         with pytest.raises(SessionConfigurationError, match="provider_session_resume"):
             ClientAgentSessions(client, FakeAgentInvocationStore())
@@ -676,6 +680,7 @@ def test_initial_reply_replays_after_all_services_reconstructed(
             FakeProvider(answer="waiting", on_turn=calls.append),
             provider="codex",
             session_store=checkpoints,
+            clock=ManualClock(),
         )
         return client, factory(client, reopened.slot("invocations.json", AgentInvocationState))
 
@@ -730,7 +735,7 @@ def test_initial_schema_rejection_without_checkpoint_fences_live_and_recovered_c
             detail = "value must be an integer"
             raise AgentOutputSchemaError(detail)
 
-    client = AgentClient(FakeProvider(answer="done", on_turn=execute))
+    client = AgentClient(FakeProvider(answer="done", on_turn=execute), clock=ManualClock())
     ledger = FakeAgentInvocationStore()
     sessions = ClientAgentSessions(client, ledger)
     spec = AgentSessionSpec(

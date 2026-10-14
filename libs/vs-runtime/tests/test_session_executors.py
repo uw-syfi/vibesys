@@ -46,6 +46,7 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStatus,
 )
 from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -127,7 +128,10 @@ class Run:
             session_spec=spec,
         )
         client = report_turns(
-            AgentClient(FakeProvider(answer={"value": 7}, on_turn=self.provider.on_turn)),
+            AgentClient(
+                FakeProvider(answer={"value": 7}, on_turn=self.provider.on_turn),
+                clock=ManualClock(),
+            ),
             self.lifecycle,
         )
         self.executors = open_session_requests(

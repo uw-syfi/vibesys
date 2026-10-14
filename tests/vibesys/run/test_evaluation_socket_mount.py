@@ -24,7 +24,7 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDockerBuildRunner
 from vs_runtime.api.core import RunTiming
 from vs_sandbox.api.testing import FakeDockerEngine
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 
 def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]:
@@ -36,8 +36,9 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
     engine = FakeDockerEngine(root / "engine")
 
     def backend_factory(
-        _name: object, *, log_dir: Path, log: object = None, image: str | None = None
+        _name: object, *, log_dir: Path, log: object = None, image: str | None = None, clock: object
     ) -> _DaemonBackend:
+        del clock  # the fake backend records no timestamps
         made = _DaemonBackend(log_dir, log=log, image=image)  # ty: ignore[invalid-argument-type]
         made.engine = engine
         return made
@@ -50,7 +51,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             ),
         }
     )
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     clock = VirtualClock(at=0.0)
 
     def reaches(run_id: str) -> list[bool]:

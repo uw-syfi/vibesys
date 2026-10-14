@@ -22,6 +22,7 @@ from vs_agent.api import AgentClient, AgentQuotaError, QuotaCondition
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
+from vs_sim.api.testing import ManualClock
 
 PROVIDERS = ("claude", "codex")
 _NOT_QUOTA = (agentshim.FailureKind.AUTH, agentshim.FailureKind.OTHER)
@@ -48,6 +49,7 @@ def _client(provider: str, runs: list[FakeRun], home: Path) -> AgentClient:
         ),
         provider=provider,
         run_log_file=None,
+        clock=ManualClock(),
     )
 
 

@@ -32,11 +32,12 @@ from server.events import (
     RunEvent,
     make_event,
 )
+from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_sim.api import Condition, Threads
+    from vs_sim.api import Clock, Condition, Threads
 
 _MAX_EXCEPTION_CHAIN = 8
 DIAGNOSTIC_FAILURE_EVENTS = frozenset(
@@ -147,9 +148,12 @@ def _read_only_run_id(headers: list[EventHeader], explicit: str | None) -> str:
 class WireJournal:
     """Own event serialization, replay compatibility, and failure identity."""
 
-    def __init__(self, condition: Condition, *, threads: Threads | None = None) -> None:
-        """Initialize journal state over the shared server condition."""
+    def __init__(
+        self, condition: Condition, *, clock: Clock, threads: Threads | None = None
+    ) -> None:
+        """Journal over the shared server condition, stamping events by epoch ``clock``."""
         self._condition = condition
+        self._clock = clock
         self._threads = threads
         self._store: EventStore | None = None
         self._pending_events: list[RunEvent] = []
@@ -248,7 +252,9 @@ class WireJournal:
     ) -> RunEvent:
         """Construct and append one server wire event."""
         _require_failure_diagnostic(event_type, fields.get("status"), fields.get("diagnostic"))
-        event = make_event(event_type, text, data=data, **fields)
+        event = make_event(
+            event_type, text, timestamp=utc_datetime(self._clock), data=data, **fields
+        )
         with self._condition:
             if self._read_only:
                 return event

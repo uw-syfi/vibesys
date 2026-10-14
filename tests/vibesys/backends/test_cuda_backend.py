@@ -12,6 +12,7 @@ from vs_sandbox.api import (
     HostResourceAccess,
     SandboxKind,
 )
+from vs_sim.api.testing import ManualClock
 
 
 def test_cpu_only_control_plane_docker_skips_gpu_runtime(
@@ -19,7 +20,7 @@ def test_cpu_only_control_plane_docker_skips_gpu_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     docker = recording_docker_cli()
-    backend = CudaBackend(tmp_path, docker=docker)
+    backend = CudaBackend(tmp_path, docker=docker, clock=ManualClock())
     pick_device = MagicMock()
     monkeypatch.setattr("vs_sandbox.cuda_backend.pick_gpu", pick_device)
 
@@ -39,7 +40,7 @@ def test_cpu_only_control_plane_docker_skips_gpu_runtime(
 def test_ephemeral_setup_sandbox_is_not_restarted_on_reselection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    backend = CudaBackend(tmp_path)
+    backend = CudaBackend(tmp_path, clock=ManualClock())
 
     sandbox = backend.make_sandbox(
         SandboxKind.DOCKER,
@@ -68,7 +69,7 @@ def test_ephemeral_setup_sandbox_is_not_restarted_on_reselection(
 
 def test_docker_forwards_resources_to_the_sandbox(tmp_path: Path) -> None:
     docker = recording_docker_cli()
-    backend = CudaBackend(tmp_path, docker=docker)
+    backend = CudaBackend(tmp_path, docker=docker, clock=ManualClock())
     resource = HostResource(tmp_path / "history", HostResourceAccess.READ_ONLY, "history")
 
     sandbox = backend.make_sandbox(

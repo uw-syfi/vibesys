@@ -48,7 +48,7 @@ from vs_runtime.api import (
 )
 from vs_runtime.api.core import RunTiming
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -142,7 +142,7 @@ def _open(
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> CoreServices:
@@ -172,7 +172,7 @@ def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> str:
@@ -376,7 +376,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     clock = VirtualClock(at=0.0)
     request = _request(project_root).model_copy(update={"run_id": "core-run"})
     plugin = replace(

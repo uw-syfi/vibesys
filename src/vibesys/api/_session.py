@@ -156,6 +156,7 @@ class _LocalRunSession:
             implementations.git_repository,
             implementations.slurm_process,
             implementations.state_stores,
+            clock=implementations.timing.clock,
         )
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)

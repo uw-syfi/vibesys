@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from vs_sim.api.testing import ManualClock
+
 if TYPE_CHECKING:
     from pathlib import Path
 from vibesys.api import agent_spec_from_config
@@ -61,6 +63,7 @@ def _build_client(
             use_docker=kwargs.get("use_docker", False),
             require_host_sandbox=kwargs.get("require_host_sandbox", False),
             project_path_policy=kwargs.get("project_path_policy"),
+            clock=ManualClock(),
         ),
     )
 

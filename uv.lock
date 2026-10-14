@@ -3167,12 +3167,14 @@ source = { editable = "libs/vs-project" }
 dependencies = [
     { name = "pydantic" },
     { name = "pygit2" },
+    { name = "vs-sim" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "pygit2", specifier = ">=1.18,<2" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 
 [[package]]

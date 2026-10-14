@@ -35,7 +35,7 @@ from vs_core.api import (
 )
 from vs_runtime.api import CoreOperation
 from vs_runtime.api.core import EVALUATION_TOOL_ID, OperationRole, RunTiming
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -80,7 +80,7 @@ def _services(tmp_path: Path) -> CoreServices:
         prompt_templates=policy.prompt_templates,
     )
     plugin = type(plugin)(id=plugin.id, agents=plugin.agents, options=EmptyOptions, core=policy)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> CoreServices:

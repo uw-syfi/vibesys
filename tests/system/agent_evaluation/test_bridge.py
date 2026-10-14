@@ -69,7 +69,14 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.contracts import AgentRole, AgentTool
 from vs_sim.api import MonotonicClock, OsThreads
-from vs_sim.api.testing import SimNetwork, VirtualClock, clock_from, examples, run_virtual
+from vs_sim.api.testing import (
+    ManualClock,
+    SimNetwork,
+    VirtualClock,
+    clock_from,
+    examples,
+    run_virtual,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -184,7 +191,9 @@ async def scenario(
             writer=writer,
         )
         resolvers.append(resolver)
-        client = AgentClient(FakeProvider(answer=writer.answer, on_turn=writer))
+        client = AgentClient(
+            FakeProvider(answer=writer.answer, on_turn=writer), clock=ManualClock()
+        )
         return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
 
     def yields(workspaces: RuntimeWorkspaces, receipts: StateNamespace) -> AgentEvaluationBridge:

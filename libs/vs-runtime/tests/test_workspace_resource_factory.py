@@ -33,6 +33,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeAgentExecutionEnvironment, unconfined_host_environment
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from typing import TextIO
@@ -93,6 +94,7 @@ def _effects() -> ProjectRunEffects:
         git_repository=_DISK.repository,
         log_emit=emit,
         on_log_ready=lambda _path: None,
+        clock=ManualClock(),
     )
 
 
@@ -133,6 +135,7 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
             project_path_policy=ProjectPathPolicy(),
         ),
         open_session,
+        clock=ManualClock(),
     )
     events: list[WorkspaceRestoreFailed] = []
     factory = WorkspaceResourceFactory(
@@ -183,6 +186,7 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
             framework_root=tmp_path,
         ),
         lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
+        clock=ManualClock(),
     )
     opened = FakeAgentExecutionEnvironment(project_path_policy=ProjectPathPolicy())
     configurations: list[AgentExecutionConfiguration] = []
@@ -250,7 +254,9 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             objective_paths.append(session.view.paths.objective)
             return session
 
-        with closing(open_run_environment_resources(request, open_session)) as environment:
+        with closing(
+            open_run_environment_resources(request, open_session, clock=ManualClock())
+        ) as environment:
             factory = WorkspaceResourceFactory(
                 project,
                 environment,

@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
+    from vs_sim.api import Clock
 
 # AWS Neuron DLC.  Tag chosen to match the host's Neuron tools (2.30):
 # PyTorch 2.9 / Python 3.12 / Neuron SDK 2.30 on Ubuntu 24.04.  Carries
@@ -71,7 +72,10 @@ class TrainiumBackend:
 
     name = ComputeBackend.TRAINIUM
 
-    def __init__(
+    # lint-waiver: LW-731408 [PLR0913]; the registry's shared construction keywords plus discovery.
+    # > Grouping them would only rename the keywords create_compute_backend passes every
+    # > registered backend; dropping clock would make the registry branch on a backend.
+    def __init__(  # noqa: PLR0913
         self,
         log_dir: Path,
         *,
@@ -79,8 +83,10 @@ class TrainiumBackend:
         image: str | None = None,
         accelerator_discovery: AcceleratorDiscovery | None = None,
         docker: DockerCli | None = None,
+        clock: Clock,
     ) -> None:
         """Configure Trainium execution with its log directory and image override."""
+        del clock  # nothing this backend records carries a timestamp
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image or _DEFAULT_IMAGE

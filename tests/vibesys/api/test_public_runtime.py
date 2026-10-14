@@ -25,6 +25,7 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.core import RunTiming
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import SystemClock
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -86,7 +87,7 @@ def _request(project_root: Path) -> RunRequest:
 def test_root_workspace_capabilities(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
 
     async def exercise() -> None:
         async with open_core_host(_request(project_root), integration, plugin=_PLUGIN) as ctx:
@@ -113,7 +114,7 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
 def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     backend = _LifecycleBackend()
 
     def backend_factory(*_args: object, **_kwargs: object) -> _LifecycleBackend:

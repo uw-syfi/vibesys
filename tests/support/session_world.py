@@ -57,6 +57,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.testing import FakeWorkspace
 from vs_runtime.contracts import WorkspaceAccess
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -350,7 +351,7 @@ def open_host(
             raise ConnectionError(message)
 
     driver = FakeProvider(answer=answer or {"value": 7}, on_turn=on_turn)
-    client = AgentClient(driver)
+    client = AgentClient(driver, clock=ManualClock())
     return SessionHost(
         FakeSessionResolver(workspace, TemplateRenderer(workspace)),
         client,

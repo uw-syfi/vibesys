@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, assert_never, cast
@@ -22,7 +21,7 @@ from vs_sandbox.gpu_monitor import (
     NvidiaSmiTelemetry,
     pick_gpu,
 )
-from vs_sim.api import OsThreads, SubprocessProbe, Threads
+from vs_sim.api import OsThreads, SubprocessProbe, Threads, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -33,7 +32,7 @@ if TYPE_CHECKING:
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
     from vs_sandbox.local_shell import LocalShellRunner
-    from vs_sim.api import CommandProbe
+    from vs_sim.api import Clock, CommandProbe
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
 _DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
@@ -59,8 +58,13 @@ class CudaBackend:
         threads: Threads | None = None,
         docker: DockerCli | None = None,
         probe: CommandProbe | None = None,
+        clock: Clock,
     ) -> None:
-        """Configure CUDA execution with its log directory, image override and GPU telemetry."""
+        """Configure CUDA execution with its log directory, image override and GPU telemetry.
+
+        ``clock`` counts seconds since the epoch; it stamps each GPU selection in ``gpu.json``.
+        """
+        self._clock = clock
         self._probe: CommandProbe = probe or SubprocessProbe()
         self._telemetry: GpuTelemetry = gpu_telemetry or NvidiaSmiTelemetry(probe=self._probe)
         self._threads: Threads = threads or OsThreads()
@@ -297,7 +301,7 @@ class CudaBackend:
         data = {
             "selected_gpu": _gpu_to_dict(gpu),
             "all_gpus_at_selection": [_gpu_to_dict(g) for g in all_gpus],
-            "selected_at": datetime.now(UTC).isoformat(),
+            "selected_at": utc_datetime(self._clock).isoformat(),
             "contention_detected": False,
             "contention_events": 0,
         }

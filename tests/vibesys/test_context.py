@@ -52,6 +52,7 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox.api import HostResourceAccess
 from vs_sandbox.api.evaluator_tools import tool_install_root
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api.testing import ManualClock
 
 
 class _PortableStateProbe(BaseModel):
@@ -207,7 +208,7 @@ def _create_context(
     try:
         prepared = open_run_resources(
             request,
-            options.get("integration") or LocalRunIntegration(),
+            options.get("integration") or LocalRunIntegration(clock=ManualClock()),
             ownership=ownership,
             agent_specs=resolve_agent_specs(
                 request.config,
@@ -468,7 +469,7 @@ def test_evaluator_tools_built_for_one_project_are_reused_by_another(tmp_path: P
 def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     try:
         with _create_context(project, evaluator=evaluator, integration=integration) as ctx:
             changed = [
@@ -837,7 +838,7 @@ def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: 
     _git(project, "remote", "add", "origin", str(remote))
     _git(project, "push", "-q", "-u", "origin", f"vibesys-runs/{run_id}")
     published = _git(remote, "rev-parse", f"refs/heads/vibesys-runs/{run_id}")
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
 
     def reject_resources(_resources: object) -> None:
         message = "resource publication failed"

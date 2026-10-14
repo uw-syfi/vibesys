@@ -13,6 +13,7 @@ from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan, Portfol
 from vibesys.orchestration.multi.models import PreRoundDecision
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeExecutor, fake_agentshim_launcher, scripted_turn
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -82,7 +83,7 @@ def test_planner_native_schema_preserves_field_annotations(
     payload = response.model_dump(mode="json")
     executor = FakeExecutor(scripted_turn(provider, structured_output=payload))
     launcher = fake_agentshim_launcher(provider=provider, executor=executor)
-    with AgentClient(launcher, provider=provider) as client:
+    with AgentClient(launcher, provider=provider, clock=ManualClock()) as client:
         result = client.invoke(
             kind="orchestrator",
             workspace=tmp_path,

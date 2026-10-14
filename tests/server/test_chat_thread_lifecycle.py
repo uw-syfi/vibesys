@@ -44,6 +44,7 @@ def _remember_thread(parts: ServerParts, thread_id: str = "thread-1") -> ChatThr
             chat_thread_id=thread_id,
             agent_kind="chat",
             data=spec,
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
     )
     return spec

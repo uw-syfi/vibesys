@@ -58,7 +58,7 @@ from vs_runtime.api.testing import (
     MemoryValidationPasses,
 )
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -122,6 +122,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                         git_events=NullGitTrackerEvents(),
                         log_emit=_emit,
                         on_log_ready=lambda _path: None,
+                        clock=ManualClock(),
                     ),
                     resolve_resume=lambda _manifest: pytest.fail("unexpected resume"),
                 )
@@ -141,6 +142,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                     FakeCommandRunner(),
                     RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True),
                 ),
+                clock=ManualClock(),
             )
             ownership.callback(environment.close)
             resources = WorkspaceResourceFactory(

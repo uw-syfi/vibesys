@@ -15,6 +15,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -100,7 +101,7 @@ def test_root_resources_close_device_before_session_and_reselect(tmp_path: Path)
     session = _session(events)
 
     resources = open_run_environment_resources(
-        _request(tmp_path, backend), lambda _request: session
+        _request(tmp_path, backend), lambda _request: session, clock=ManualClock()
     )
     resources.reselect_device()
     resources.close()
@@ -114,8 +115,7 @@ def test_workspace_resources_borrow_device_without_closing_it(tmp_path: Path) ->
     events: list[str] = []
     backend = _Backend(_Monitor(events))
     root = open_run_environment_resources(
-        _request(tmp_path, backend),
-        lambda _request: _session(events),
+        _request(tmp_path, backend), lambda _request: _session(events), clock=ManualClock()
     )
     workspace_request = _request(tmp_path, backend)
     workspace = root.open_workspace(workspace_request)
@@ -139,8 +139,7 @@ def test_monitor_start_failure_preserves_error_and_closes_session(tmp_path: Path
 
     with pytest.raises(RuntimeError, match="monitor failed") as raised:
         open_run_environment_resources(
-            _request(tmp_path, backend),
-            lambda _request: session,
+            _request(tmp_path, backend), lambda _request: session, clock=ManualClock()
         )
 
     assert raised.value is failure

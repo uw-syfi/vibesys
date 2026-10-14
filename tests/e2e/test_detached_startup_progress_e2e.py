@@ -88,7 +88,7 @@ def _serve(
 
     def serve() -> None:
         hostname, version = host_facts()
-        integration = LocalRunIntegration()
+        integration = LocalRunIntegration(clock=clock)
         try:
             with registry.register(instance_id) as hold:
                 publisher = RecordPublisher(
@@ -115,6 +115,7 @@ def _serve(
                     socket_path=socket_path,
                     detach=True,
                     observer=publisher,
+                    clock=clock,
                 )
                 integration.events.subscribe(runtime.integration.project_event)
                 try:

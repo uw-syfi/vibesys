@@ -24,6 +24,7 @@ from vs_project.api import generate_run_id
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.wiring import InProcessRuns
 from vs_sandbox.api import create_compute_backend
+from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -138,7 +139,9 @@ def default_runs(settings: LaunchSettings | None = None) -> Runs:
     def prepare(request: RunRequest) -> RunRequest:
         if request.resume is not None or request.run_id is not None:
             return request
-        return request.model_copy(update={"run_id": generate_run_id(request.resolved_run_id)})
+        timing = RunTiming.production() if selected.timing is None else selected.timing
+        run_id = generate_run_id(request.resolved_run_id, now=utc_datetime(timing.clock))
+        return request.model_copy(update={"run_id": run_id})
 
     runs: InProcessRuns[RunRequest, CoreEvent, RunResult, RunSession] = InProcessRuns(
         session_factory,

@@ -373,7 +373,7 @@ def _write_project_run(
     fixture_options = options or _RunFixtureOptions()
     vibesys_project = Project.open(project)
     store = vibesys_project.state
-    store.create_project(project.name)
+    store.create_project(project.name, now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = store.new_run_manifest(
         project.name,
         run_id=run_id,
@@ -1517,7 +1517,7 @@ def test_v5_agent_resume_restores_config_constraints_and_budget(
         ),
     )
     store = Project.open(project).state
-    store.create_project(project.name)
+    store.create_project(project.name, now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = store.new_run_manifest(
         project.name,
         run_id=run_id,
@@ -1587,7 +1587,7 @@ def test_v5_plain_resume_restores_options_and_budget(
     run_id = "20260811-120000-11111111-plain-v5"
     configuration = _plain_configuration()
     store = Project.open(project).state
-    store.create_project(project.name)
+    store.create_project(project.name, now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = store.new_run_manifest(
         project.name,
         run_id=run_id,
@@ -1663,7 +1663,7 @@ def test_v5_evolve_resume_restores_openevolve_settings_and_budget(
     run_id = "20260811-120000-11111111-evolve-v5"
     configuration = _evolve_configuration()
     store = Project.open(project).state
-    store.create_project(project.name)
+    store.create_project(project.name, now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = store.new_run_manifest(
         project.name,
         run_id=run_id,

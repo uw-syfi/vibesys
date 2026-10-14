@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from launch import default_runs
 from server.runtime import ServerRuntime
+from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -49,6 +50,7 @@ def main() -> int:
         web_assets=arguments.web_assets,
         instance_path=arguments.store_directory / "web-gateway.json",
         detach=True,
+        clock=SystemClock(),
     )
 
     def request_stop(_signal: int, _frame: FrameType | None) -> None:

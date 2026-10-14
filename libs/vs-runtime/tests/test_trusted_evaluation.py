@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 from collections import deque
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -458,7 +459,7 @@ def test_benchmark_execution_error_is_typed_and_cleanup_failure_is_suppressed(
 
 def test_model_request_failure_prevents_trusted_command(tmp_path: Path) -> None:
     project = Project.open(tmp_path)
-    project.state.create_project("trusted evaluation")
+    project.state.create_project("trusted evaluation", now=datetime(2026, 1, 1, tzinfo=UTC))
     project.configuration_root().resolve("models.json", must_exist=False).write_text(
         '[{"id":"blocked/model"}]'
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tomllib
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -89,7 +90,7 @@ def test_provision_project_places_source_at_root_and_removes_private_files(
 ) -> None:
     input_root = _write_input(tmp_path / "input")
     (input_root / ".git").mkdir()
-    Project.open(input_root).state.create_project("input")
+    Project.open(input_root).state.create_project("input", now=datetime(2026, 1, 1, tzinfo=UTC))
     (input_root / "agent.toml").write_text("[model]\nname = 'private'\n")
     (input_root / ".env").write_text("TOKEN=secret\n")
     (input_root / ".env.local").write_text("TOKEN=more-secret\n")
@@ -243,7 +244,9 @@ def test_provision_project_materializes_git_source_without_nested_metadata(
     repository.mkdir()
     _git(repository, "init", "-q", "-b", "main")
     (repository / "library.py").write_text("VALUE = 2\n")
-    Project.open(repository).state.create_project("source repository")
+    Project.open(repository).state.create_project(
+        "source repository", now=datetime(2026, 1, 1, tzinfo=UTC)
+    )
     _git(repository, "add", ".")
     _git(
         repository,

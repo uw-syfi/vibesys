@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
 
 def _checkpoint_store(tmp_path: Path) -> DurableSessionStore:
     project = Project.open(tmp_path)
-    project.state.create_project("checkpoint")
+    project.state.create_project("checkpoint", now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = project.state.new_run_manifest(
         "checkpoint",
         run_id="checkpoint",
@@ -51,6 +52,7 @@ def _checkpoint_store(tmp_path: Path) -> DurableSessionStore:
             agent_roles={},
         ),
         orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     project.state.create_run(manifest)
     return DurableSessionStore(

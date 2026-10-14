@@ -66,7 +66,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_runtime.api.testing import ProbedRunClock
-from vs_sim.api.testing import clock_from
+from vs_sim.api.testing import ManualClock, clock_from
 from vs_slurm.api import ClusterUnknown, Ended, Queued, SlurmJobStatus
 
 if TYPE_CHECKING:
@@ -405,7 +405,9 @@ class FaultedHost(SessionHost):
 def _faulted_agents(plan: FaultPlan) -> Callable[[Path], SessionHost]:
     def open_agents(root: Path) -> SessionHost:
         writer = CandidateWriter(root)
-        client = AgentClient(FakeProvider(answer=writer.answer, on_turn=writer))
+        client = AgentClient(
+            FakeProvider(answer=writer.answer, on_turn=writer), clock=ManualClock()
+        )
         resolver = CandidateResolver(
             root,
             TemplateRenderer(root),

@@ -25,6 +25,7 @@ from vs_agent.api import AgentClient, AgentRateLimit
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
+from vs_sim.api.testing import ManualClock
 
 STATUSES = ("allowed", "allowed_warning", "rejected", None)
 WINDOW_NAMES = ("five_hour", "seven_day", "seven_day_opus")
@@ -72,7 +73,7 @@ def _run_turn(info: dict[str, object], root: Path, home: Path) -> tuple[list[Cor
     turn = scripted_turn("claude", text="done")
     frame = json.dumps({"type": "rate_limit_event", "rate_limit_info": info}) + "\n"
     fake = FakeExecutor(FakeRun(stdout=[frame, *turn.stdout]))
-    journal = EventJournal()
+    journal = EventJournal(clock=ManualClock())
     journal.attach(root / "run", "run-1")
     log = io.StringIO()
     client = AgentClient(
@@ -87,7 +88,8 @@ def _run_turn(info: dict[str, object], root: Path, home: Path) -> tuple[list[Cor
         ),
         provider="claude",
         run_log_file=log,
-        event_sink=CoreAgentEventSink(journal.record),
+        event_sink=CoreAgentEventSink(journal.record, clock=ManualClock()),
+        clock=ManualClock(),
     )
     client.invoke_text(
         kind="implementer",

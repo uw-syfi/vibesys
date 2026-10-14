@@ -11,6 +11,7 @@ the application ``backend_factory`` seam.
 from __future__ import annotations
 
 import inspect
+from functools import partial
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,6 +27,7 @@ from vs_sandbox.api import (
     TrainiumBackend,
 )
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -42,7 +44,7 @@ class _RecordingHooks(SandboxLifecycleHooks):
 
 
 _FACTORIES = {
-    "real": CudaBackend,
+    "real": partial(CudaBackend, clock=ManualClock()),
     "fake": FakeComputeBackend,
 }
 

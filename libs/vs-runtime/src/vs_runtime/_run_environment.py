@@ -148,6 +148,7 @@ if TYPE_CHECKING:
         WorkspaceSandbox,
     )
     from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
+    from vs_sim.api import Clock
 
 
 @dataclass(frozen=True)
@@ -503,8 +504,10 @@ def _close_failed_environment_resources(
 def open_run_environment_resources(
     request: RunEnvironmentRequest,
     open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession],
+    *,
+    clock: Clock,
 ) -> RunEnvironmentResources:
-    """Open a root session and own its newly started device lease."""
+    """Open a root session and own its newly started device lease; ``clock`` counts epoch seconds."""
     ownership = ExitStack()
     try:
         with boot_trace.span("environment_open"):
@@ -513,6 +516,7 @@ def open_run_environment_resources(
             device = DeviceLease(
                 request.backend,
                 log_dir=request.log_dir,
+                clock=clock,
                 run_environment_view=session.view,
             )
             ownership.callback(device.close)

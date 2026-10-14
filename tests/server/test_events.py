@@ -1,5 +1,7 @@
 """Serialization tests for the run-event wire contract."""
 
+from datetime import UTC, datetime
+
 import pytest
 from pydantic import ValidationError
 
@@ -50,6 +52,7 @@ class TestNewEventDataRoundTrip:
         event = make_event(
             EventType.TOOL_CALL,
             data=ToolCallData(tool="shell", args={"cmd": "ls", "count": 3}, status=status),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, ToolCallData)
@@ -61,6 +64,7 @@ class TestNewEventDataRoundTrip:
         event = make_event(
             EventType.TOOL_RESULT,
             data=ToolResultData(tool="shell", content="out", is_error=True),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, ToolResultData)
@@ -72,6 +76,7 @@ class TestNewEventDataRoundTrip:
         event = make_event(
             EventType.TOOL_RESULT,
             data=ToolResultData(tool="shell", content="out", payload=payload),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, ToolResultData)
@@ -86,6 +91,7 @@ class TestNewEventDataRoundTrip:
             data=ToolResultData(
                 tool="query", content='{"rows": [1, 2], "ok": true}', payload=payload
             ),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, ToolResultData)
@@ -113,6 +119,7 @@ class TestNewEventDataRoundTrip:
         event = make_event(
             EventType.TODO_UPDATE,
             data=TodoUpdateData(todos=[TodoItemData(content="a", status="pending")]),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, TodoUpdateData)
@@ -122,6 +129,7 @@ class TestNewEventDataRoundTrip:
         event = make_event(
             EventType.USAGE_UPDATE,
             data=UsageUpdateData(input_tokens=5_000, context_window=1_000_000, model="m"),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, UsageUpdateData)
@@ -133,6 +141,7 @@ class TestNewEventDataRoundTrip:
             data=RateLimitUpdateData(
                 provider="claude", window="five_hour", used_fraction=0.5, exhausted=False
             ),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, RateLimitUpdateData)
@@ -149,10 +158,15 @@ class TestNewEventDataRoundTrip:
                     detail="429",
                     resets_at=1.5e9,
                 ),
+                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
             )
         )
         resumed = _round_trip(
-            make_event(EventType.QUOTA_RESUMED, data=QuotaResumedData(provider="claude"))
+            make_event(
+                EventType.QUOTA_RESUMED,
+                data=QuotaResumedData(provider="claude"),
+                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+            )
         )
         assert isinstance(paused.data, QuotaPausedData)
         assert (paused.data.condition, paused.data.resets_at) == ("rate_limited", 1.5e9)
@@ -169,6 +183,7 @@ class TestNewEventDataRoundTrip:
                     reason="operator",
                     detail="the operator resumed with the fallback",
                 ),
+                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
             )
         )
         assert isinstance(restored.data, ProviderSwitchedData)
@@ -178,6 +193,7 @@ class TestNewEventDataRoundTrip:
         bare = make_event(
             EventType.AGENT_OUTPUT_CHUNK,
             data=AgentOutputChunkData(channel="assistant", content="hi"),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(bare)
         assert isinstance(restored.data, AgentOutputChunkData)
@@ -187,6 +203,7 @@ class TestNewEventDataRoundTrip:
         rich = make_event(
             EventType.AGENT_OUTPUT_CHUNK,
             data=AgentOutputChunkData(channel="assistant", content="hi", status=status),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(rich)
         assert isinstance(restored.data, AgentOutputChunkData)
@@ -243,6 +260,7 @@ class TestRoundFinishedProfileSkipped:
                 perf_unit="req/s",
                 profile_skipped=True,
             ),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, RoundFinishedData)
@@ -270,6 +288,7 @@ class TestFrameworkEventRoundTrip:
                 recipe="focused-tests",
                 command="uv run pytest -q",
             ),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, GateStartedData)
@@ -290,6 +309,7 @@ class TestFrameworkEventRoundTrip:
                 value=42.5,
                 unit="tok/s",
             ),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, GateFinishedData)
@@ -308,6 +328,7 @@ class TestFrameworkEventRoundTrip:
                 gate=GateKind.ACCURACY,
                 output_tail="assertion mismatch",
             ),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, GateFinishedData)
@@ -325,6 +346,7 @@ class TestFrameworkEventRoundTrip:
         event = make_event(
             EventType.WORKSPACE_SNAPSHOT,
             data=WorkspaceSnapshotData(label="round-2", commit="a" * 40),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, WorkspaceSnapshotData)
@@ -346,6 +368,7 @@ class TestFrameworkEventRoundTrip:
                 benchmark_contract=True,
                 pareto_objectives="[latency(min)], frontier_bias=0.5",
             ),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, RunConfiguredData)
@@ -370,6 +393,7 @@ class TestFrameworkEventRoundTrip:
                 severity=DiagnosticSeverity.WARNING,
                 source="loop",
             ),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
         restored = _round_trip(event)
         assert isinstance(restored.data, FrameworkWarningData)

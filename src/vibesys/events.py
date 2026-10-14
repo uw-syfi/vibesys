@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Literal, Protocol
 
@@ -604,11 +604,13 @@ class CoreEvent(BaseModel):
 def make_core_event(
     event_type: CoreEventType,
     text: str = "",
+    *,
+    timestamp: datetime,
     **fields: object,
 ) -> CoreEvent:
-    """Create an unrecorded event using the current UTC time."""
+    """Create an unrecorded event that happened at ``timestamp``."""
     return CoreEvent.model_validate(
-        {"timestamp": datetime.now(UTC), "type": event_type, "text": text, **fields}
+        {"timestamp": timestamp, "type": event_type, "text": text, **fields}
     )
 
 

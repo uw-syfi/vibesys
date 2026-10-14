@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
+    from vs_sim.api import Clock
 
 _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 
@@ -161,8 +162,10 @@ def metal_backend(
     log: Callable[[str], None] | None = None,
     image: str | None = None,
     docker: DockerCli | None = None,
+    clock: Clock,
 ) -> LocalBackend:
-    """Apple Silicon / Metal backend (local execution only)."""
+    """Apple Silicon / Metal backend (local execution only); it records no timestamps."""
+    del clock
     return LocalBackend(
         ComputeBackend.METAL,
         log_dir,
@@ -178,8 +181,10 @@ def cpu_backend(
     log: Callable[[str], None] | None = None,
     image: str | None = None,
     docker: DockerCli | None = None,
+    clock: Clock,
 ) -> LocalBackend:
-    """CPU-only backend (no GPU; CPU-bound targets like KV stores / servers)."""
+    """CPU-only backend (no GPU; CPU-bound targets like KV stores / servers); no timestamps."""
+    del clock
     return LocalBackend(
         ComputeBackend.CPU,
         log_dir,

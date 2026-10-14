@@ -270,6 +270,7 @@ def test_chat_thread_wire_shapes_round_trip() -> None:
             model="opus",
             created_at=_TIMESTAMP,
         ),
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
     )
     restored = RunEvent.model_validate_json(event.model_dump_json())
     assert restored.chat_thread_id == "thread-1"
@@ -281,6 +282,7 @@ def test_chat_thread_wire_shapes_round_trip() -> None:
         "why?",
         chat_thread_id="thread-1",
         data=ChatData(answer="because", thread_title="why?"),
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
     )
     restored_chat = RunEvent.model_validate_json(chat_event.model_dump_json())
     assert isinstance(restored_chat.data, ChatData)

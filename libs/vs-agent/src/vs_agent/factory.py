@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from vs_agent.skills import SkillSelection
     from vs_agent.spec import AgentSpec
     from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
+    from vs_sim.api import Clock
 
 
 def agent_supports_tool_servers(spec: AgentSpec) -> bool | None:
@@ -58,12 +59,14 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
     agent_homes_dir: Path | None = None,
+    clock: Clock,
 ) -> AgentClientProtocol:
     """Build the configured application-level agent service from ``spec``.
 
     ``agent_homes_dir`` is the run's root for dedicated provider CLI homes
     (``Project.agent_homes_directory_for``); without it a provider that can
     only isolate through such a home runs with the operator's configuration.
+    ``clock`` counts seconds since the epoch; it times turns and stamps usage rows.
     """
     host_resources = tuple(host_resources)
     backend = spec.backend
@@ -144,4 +147,5 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
         session_store=session_store,
         event_sink=events,
         check_readiness=True,
+        clock=clock,
     )

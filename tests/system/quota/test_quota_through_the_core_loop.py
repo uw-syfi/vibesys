@@ -47,7 +47,7 @@ from vs_runtime.api.infrastructure import (
     install_capacity_gate,
 )
 from vs_runtime.api.testing import FakeCapacityTimer, ProbedRunClock
-from vs_sim.api.testing import clock_from
+from vs_sim.api.testing import ManualClock, clock_from
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -108,7 +108,7 @@ async def _play(
         writer = CandidateWriter(root)
         played.writer = writer
         script = FakeTurnScript(answers=(*([error] * stops), writer.answer))
-        client = AgentClient(FakeProvider(script=script, on_turn=writer))
+        client = AgentClient(FakeProvider(script=script, on_turn=writer), clock=ManualClock())
         install_capacity_gate(
             client,
             control=channel,

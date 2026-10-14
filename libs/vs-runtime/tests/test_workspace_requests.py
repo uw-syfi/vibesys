@@ -92,7 +92,7 @@ from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import examples, swept, wait_or_fail, wait_until_started
+from vs_sim.api.testing import ManualClock, examples, swept, wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
@@ -205,7 +205,10 @@ def _env(
         pytest.fail("fresh run resumed")
 
     effects = ProjectRunEffects(
-        git_events=NullGitTrackerEvents(), log_emit=_emit, on_log_ready=lambda _path: None
+        git_events=NullGitTrackerEvents(),
+        log_emit=_emit,
+        on_log_ready=lambda _path: None,
+        clock=ManualClock(),
     )
     with open_project_run_resources(
         request, effects=effects, resolve_resume=unexpected_resume
@@ -224,6 +227,7 @@ def _env(
                 git_history_root=project.git.history_root,
             ),
             lambda _request: _Session(),
+            clock=ManualClock(),
         )
         with closing(environment):
             factory = WorkspaceResourceFactory(

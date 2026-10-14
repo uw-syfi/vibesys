@@ -199,7 +199,9 @@ def _execute(
         log_dir: Path,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
+        clock: object,
     ) -> _DaemonBackend:
+        del clock  # the fake backend records no timestamps
         backend = _DaemonBackend(log_dir, log=log, image=image)
         backend.engine = engine
         return backend

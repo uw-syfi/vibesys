@@ -781,16 +781,17 @@ class _Digest(Protocol):
 def generate_run_id(
     display_name: str,
     *,
-    now: datetime | None = None,
+    now: datetime,
     unique: UUID | None = None,
 ) -> str:
     """Return a sortable, path-safe run ID.
 
-    ``now`` and ``unique`` are injectable so callers can reproduce IDs in tests.
+    ``now`` names the run's creation time; ``unique`` is injectable so tests can
+    reproduce IDs.
     The display name is cosmetic: unsafe characters are normalized and an empty
     result becomes ``run``.
     """
-    timestamp = now or datetime.now(UTC)
+    timestamp = now
     if timestamp.tzinfo is None:
         raise ProjectStateError.run_id_timestamp_timezone_missing()
     timestamp = timestamp.astimezone(UTC)
@@ -989,7 +990,7 @@ class ProjectState:
         self,
         display_name: str,
         *,
-        now: datetime | None = None,
+        now: datetime,
     ) -> ProjectManifest:
         """Create the project manifest, or return the existing manifest unchanged."""
         self._validate_storage_roots()
@@ -1025,7 +1026,7 @@ class ProjectState:
         trusted_input_baseline: GitObjectId,
         task_name: str | None = None,
         run_id: str | None = None,
-        now: datetime | None = None,
+        now: datetime,
         unique: UUID | None = None,
     ) -> OrchestrationRunManifest:
         """Build the current run manifest; the orchestration validates its options."""
@@ -1350,8 +1351,7 @@ class ProjectState:
         _atomic_write_text(self._metadata_gitignore_path, f"{existing}{separator}{required}\n")
 
 
-def _aware_now(value: datetime | None) -> datetime:
-    timestamp = value or datetime.now(UTC)
+def _aware_now(timestamp: datetime) -> datetime:
     if timestamp.tzinfo is None:
         raise ProjectStateError.metadata_timestamp_timezone_missing()
     return timestamp.astimezone(UTC)

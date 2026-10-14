@@ -34,6 +34,7 @@ from vs_agent.api.testing import (
     usage,
 )
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -70,7 +71,8 @@ def test_resume_publishes_turn_events_and_one_usage_record(
         log_dir=tmp_path,
         model_name="test-model",
         default_reasoning_effort="high",
-        event_sink=CoreAgentEventSink(events.append),
+        event_sink=CoreAgentEventSink(events.append, clock=ManualClock()),
+        clock=ManualClock(),
     ) as client:
         client.invoke_text(
             kind="implementer",
@@ -139,7 +141,7 @@ def test_failed_resume_writes_unknown_usage_once_and_never_replays(tmp_path: Pat
     )
     (tmp_path / "resume.j2").write_text("Evaluation settled.", encoding="utf-8")
     message = TemplateRenderer(tmp_path).render_template("resume.j2")
-    with AgentClient(provider, provider="codex", log_dir=tmp_path) as client:
+    with AgentClient(provider, provider="codex", log_dir=tmp_path, clock=ManualClock()) as client:
         client.invoke_text(
             kind="implementer",
             workspace=tmp_path,

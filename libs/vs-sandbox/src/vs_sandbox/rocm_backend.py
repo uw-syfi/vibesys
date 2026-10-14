@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
+    from vs_sim.api import Clock
 
 # ROCm PyTorch image. Carries the ROCm runtime + a matching torch build.
 # Pinned rather than ``:latest`` for reproducibility and because the
@@ -83,7 +84,10 @@ class RocmBackend:
 
     name = ComputeBackend.ROCM
 
-    def __init__(
+    # lint-waiver: LW-731407 [PLR0913]; the registry's shared construction keywords plus discovery.
+    # > Grouping them would only rename the keywords create_compute_backend passes every
+    # > registered backend; dropping clock would make the registry branch on a backend.
+    def __init__(  # noqa: PLR0913
         self,
         log_dir: Path,
         *,
@@ -91,8 +95,10 @@ class RocmBackend:
         image: str | None = None,
         accelerator_discovery: AcceleratorDiscovery | None = None,
         docker: DockerCli | None = None,
+        clock: Clock,
     ) -> None:
         """Configure ROCm execution with its log directory and image override."""
+        del clock  # nothing this backend records carries a timestamp
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image or _DEFAULT_IMAGE

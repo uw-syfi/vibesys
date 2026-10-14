@@ -29,7 +29,7 @@ from vs_core.api import ObservationStatus, ReplyErrorCode
 from vs_project.api import Project
 from vs_runtime.api import AgentId
 from vs_runtime.api.core import ExecutionResult, ReceiptStore
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 
 
 class Named(BaseModel):
@@ -91,7 +91,7 @@ def test_a_provider_that_gave_up_on_the_schema_hands_core_its_last_errors_whole(
     with tempfile.TemporaryDirectory() as raw:
         host = open_host(Path(raw))
         script = FakeTurnScript((AgentOutputSchemaError(reason),))
-        host.client = AgentClient(FakeProvider(script=script))
+        host.client = AgentClient(FakeProvider(script=script), clock=ManualClock())
         errors = _failed_with_errors(_dispatch(host))
 
     (error,) = errors

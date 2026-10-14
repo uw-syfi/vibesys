@@ -24,7 +24,7 @@ from vibesys.events import CoreEventType, EventStatus
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads, examples
+from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimNetwork, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -136,6 +136,7 @@ def test_a_subscriber_reads_the_event_that_ends_the_run_before_the_server_closes
             detach=ending.detach,
             threads=threads,
             network=network,
+            clock=ManualClock(),
         )
         seen: list[list[str]] = []
         read = threads.event()
@@ -223,6 +224,7 @@ def _runtime(socket_path: Path, threads: SimThreads, network: SimNetwork) -> Ser
         socket_path=socket_path,
         threads=threads,
         network=network,
+        clock=ManualClock(),
     )
 
 
@@ -355,7 +357,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
             name="subscriber",
             daemon=False,
         )
-        integration = LocalRunIntegration()
+        integration = LocalRunIntegration(clock=ManualClock())
         integration.events.subscribe(runtime.integration.project_event)
 
         def run() -> str:
@@ -404,7 +406,7 @@ def test_runtime_does_not_duplicate_core_terminal_event(
             name="subscriber",
             daemon=False,
         )
-        core_events = CoreEventJournal()
+        core_events = CoreEventJournal(clock=ManualClock())
         core_events.subscribe(runtime.integration.project_event)
 
         runtime.run(

@@ -32,7 +32,7 @@ from pydantic import ValidationError
 from server.api.protocol import PROTOCOL_VERSION, ProtocolRequest, Response
 from server.events import RunEvent
 from server.journal import WireJournal
-from vs_sim.api.testing import SimThreads
+from vs_sim.api.testing import ManualClock, SimThreads
 
 _HARNESS_DIR = Path(__file__).resolve().parents[2] / "clients" / "tui" / "dev"
 _FIXTURE_DIR = _HARNESS_DIR / "fixtures"
@@ -46,7 +46,7 @@ _UPDATE_CANONICAL_ENV = "UPDATE_CANONICAL_EVENTS"
 def _journal() -> WireJournal:
     """A journal whose locks and event store run on simulated threads."""
     threads = SimThreads()
-    return WireJournal(threads.condition(), threads=threads)
+    return WireJournal(threads.condition(), threads=threads, clock=ManualClock())
 
 
 class SchemaAge(StrEnum):

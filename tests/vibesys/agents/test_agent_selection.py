@@ -21,7 +21,7 @@ from vs_agent.api import (
     build_agent_client,
 )
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -55,6 +55,7 @@ def _build(
         use_docker=options.get("use_docker", False),
         log_dir=options.get("log_dir"),
         host_resources=options.get("host_resources", ()),
+        clock=ManualClock(),
     )
     # Every case here selects the cli backend, whose concrete client is what
     # these tests inspect.
@@ -186,6 +187,7 @@ def test_a_container_client_accepts_a_workspace_sandbox_lookup() -> None:
         skill_source_dirs=[],
         run_log_file=None,
         use_docker=True,
+        clock=ManualClock(),
     )
 
     assert isinstance(client, AgentClient)
@@ -203,6 +205,7 @@ def test_a_lookup_without_docker_is_refused_not_dropped() -> None:
             skill_source_dirs=[],
             run_log_file=None,
             use_docker=False,
+            clock=ManualClock(),
         )
 
 
@@ -216,4 +219,5 @@ def test_a_docker_client_without_sandboxes_is_refused_at_build() -> None:
             skill_source_dirs=[],
             run_log_file=None,
             use_docker=True,
+            clock=ManualClock(),
         )

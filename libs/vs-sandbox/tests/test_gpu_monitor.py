@@ -362,13 +362,14 @@ class TestReselectGpu:
             gpu_telemetry=ctx.telemetry,
             threads=ctx.threads,
             docker=docker,
+            clock=ManualClock(),
         )
         backend_impl.selected_device = selected_gpu
         ctx.backend_impl = backend_impl
 
         # DeviceLease coordinates reselection and monitor ownership.
 
-        ctx.device = DeviceLease(backend_impl, log_dir=ctx.log_dir)
+        ctx.device = DeviceLease(backend_impl, log_dir=ctx.log_dir, clock=ManualClock())
 
         # Sandboxes built through the backend are registered with it, so
         # reselect_device finds them; Docker ones talk to a scripted CLI.

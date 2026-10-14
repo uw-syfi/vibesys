@@ -30,7 +30,7 @@ from vs_agent.api.testing import FakeAgentInvocationStore
 from vs_mcp.api import StdioServerDescriptor
 from vs_runtime.api import AgentRole, AgentTool, OrchestrationPlugin
 from vs_runtime.api.core import RunTiming
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,7 +62,7 @@ def _compose(
         options=EmptyOptions,
         core=_policy(templates),
     )
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> None:

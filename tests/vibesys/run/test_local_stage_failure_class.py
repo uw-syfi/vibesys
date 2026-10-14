@@ -70,6 +70,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import CommandResult, CommandRunner, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -222,7 +223,7 @@ def _measure_with_lost_command(
     root = tmp_path / "project"
     _write_project(root)
     sandbox = _LosesStageCommands(lost)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     request = ProjectRunRequest(
         project_root=root,
         run_id=_RUN_ID,
@@ -236,7 +237,10 @@ def _measure_with_lost_command(
         trusted_input_paths=(".vibesys/tasks",),
     )
     effects = ProjectRunEffects(
-        git_events=NullGitTrackerEvents(), log_emit=_emit, on_log_ready=lambda _path: None
+        git_events=NullGitTrackerEvents(),
+        log_emit=_emit,
+        on_log_ready=lambda _path: None,
+        clock=ManualClock(),
     )
     with (
         closing(integration),
@@ -258,6 +262,7 @@ def _measure_with_lost_command(
                 git_history_root=project.git.history_root,
             ),
             lambda _request: _Session(sandbox),
+            clock=ManualClock(),
         )
         with closing(environment):
             factory = WorkspaceResourceFactory(

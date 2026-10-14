@@ -122,7 +122,7 @@ from vs_sandbox.api import (
     HostResource,
     create_compute_backend,
 )
-from vs_sim.api import MonotonicClock
+from vs_sim.api import utc_datetime
 
 
 def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
@@ -222,8 +222,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     backend = request.backend
     remote_repo = request.remote_repo
     repo_visibility = request.repo_visibility
-    boot_clock = MonotonicClock()
-    context_start = boot_clock.now()
+    clock = integration.clock
+    context_start = clock.now()
     # Boot spans recorded before this function ran (the dispatch preamble)
     # come first, so the run log reads in the order the work happened once
     # the buffer below flushes into ``RunLogger``. Assembly's own spans stay
@@ -262,7 +262,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             run_id = (
                 request.resolved_run_id
                 if existing or request.run_id is not None
-                else generate_run_id(exp_name)
+                else generate_run_id(exp_name, now=utc_datetime(clock))
             )
             collection_root = runs_dir.expanduser().resolve() if runs_dir is not None else None
             copied_project = not existing and collection_root is not None
@@ -317,6 +317,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 log_dir=Project.log_directory_for(project_root, run_id),
                 log=buffered_logs.append,
                 image=environment.backend_image,
+                clock=clock,
             )
             model_name = config.model.name
         with boot_trace.span("execution_record"):
@@ -465,6 +466,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     git_events=CoreGitTrackerEvents(integration.events),
                     log_emit=run_log_emitter(integration.agent_events),
                     on_log_ready=integration.attach,
+                    clock=clock,
                     git_repository=integration.git_repository,
                     state_stores=integration.state_stores,
                     resume_recovery=recover_existing_run if existing else None,
@@ -501,7 +503,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 data=ExperimentsChangedData(reason="project_attached"),
             )
             logger.lprint(
-                f"experiments gate open after {(boot_clock.now() - context_start) * 1000:.0f}ms"
+                f"experiments gate open after {(clock.now() - context_start) * 1000:.0f}ms"
             )
 
             project_ref_dir = (
@@ -619,6 +621,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         environment_resources = open_run_environment_resources(
             run_environment_request,
             lambda request: open_run_environment(environment, request),
+            clock=clock,
         )
         # Later containers (candidates, auxiliary agents) reuse this request;
         # their builds are not the run's startup.
@@ -673,6 +676,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 backend=backend,
                 skill_source_dirs=tuple(skill_source_paths),
                 host_resources=agent_host_resources,
+                clock=clock,
             )
         )
         project_resources.mark_ready()

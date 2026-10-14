@@ -261,7 +261,9 @@ def test_a_corrupt_final_record_is_ignored_and_repaired_by_append(tmp_path: Path
     store = EventStore(path, run_id="active-run")
     assert _dump(store.read()) == _dump(_EagerEventStore(path, run_id="reference").read())
 
-    appended = store.append(make_event(EventType.OUTPUT, "after repair"))
+    appended = store.append(
+        make_event(EventType.OUTPUT, "after repair", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+    )
     reopened = EventStore(path, run_id="reopened-run")
 
     assert [event.text for event in reopened.read(appended.sequence - 1)] == ["after repair"]
@@ -281,7 +283,9 @@ def test_lazy_store_matches_eager_store_for_a_valid_unterminated_tail(tmp_path: 
     eager_path = tmp_path / "eager.jsonl"
     lazy_path.write_text(serialized.rstrip("\n"))
     eager_path.write_text(serialized.rstrip("\n"))
-    appended = make_event(EventType.OUTPUT, "after repair")
+    appended = make_event(
+        EventType.OUTPUT, "after repair", timestamp=datetime(2026, 1, 1, tzinfo=UTC)
+    )
     EventStore(lazy_path, run_id="reference").append(appended)
     _EagerEventStore(eager_path, run_id="reference").append(appended)
 

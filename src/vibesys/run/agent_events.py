@@ -28,6 +28,7 @@ from vibesys.events import (
     UsageUpdateData,
     make_core_event,
 )
+from vs_sim.api import Clock, utc_datetime
 
 if TYPE_CHECKING:
     from vs_agent.api import (
@@ -71,9 +72,10 @@ class CoreAgentEventSink:
     process-global state.
     """
 
-    def __init__(self, sink: EventSink) -> None:
-        """Create an adapter that sends every translated event to ``sink``."""
+    def __init__(self, sink: EventSink, clock: Clock) -> None:
+        """Send every translated event to ``sink``, stamped by epoch ``clock``."""
         self._sink = sink
+        self._clock = clock
 
     def _emit(
         self,
@@ -96,6 +98,7 @@ class CoreAgentEventSink:
         self._sink(
             make_core_event(
                 event_type,
+                timestamp=utc_datetime(self._clock),
                 data=data,
                 agent_kind=agent_kind,
                 round_label=round_label,

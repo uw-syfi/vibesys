@@ -20,6 +20,7 @@ from vibesys.api.request import (
     validate_experiment_name,
 )
 from vs_project.api import Project, ProjectLayoutError
+from vs_sim.api import SystemClock, utc_datetime
 
 if TYPE_CHECKING:
     import argparse
@@ -137,7 +138,9 @@ def _synthesize_standalone_input(args: argparse.Namespace) -> Path:
     )
 
     if args.exp_name is None:
-        args.exp_name = generate_experiment_name(Path(str(args.input_domain)))
+        args.exp_name = generate_experiment_name(
+            Path(str(args.input_domain)), now=utc_datetime(SystemClock())
+        )
     destination = args.runs_dir / "_inputs" / args.exp_name
     try:
         return synthesize_input_bundle(spec, destination)

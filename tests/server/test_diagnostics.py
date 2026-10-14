@@ -1,5 +1,7 @@
 """Tests for the server diagnostic contract."""
 
+from datetime import UTC, datetime
+
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from server.api.protocol import ProtocolErrorMessage, Response, SubscribeRequest
@@ -47,7 +49,12 @@ def test_diagnostic_round_trips_on_protocol_and_event_models() -> None:
         == diagnostic
     )
 
-    event = make_event(EventType.RUN_FAILED, diagnostic.summary, diagnostic=diagnostic)
+    event = make_event(
+        EventType.RUN_FAILED,
+        diagnostic.summary,
+        diagnostic=diagnostic,
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+    )
     restored_event = RunEvent.model_validate_json(event.model_dump_json())
     assert restored_event.diagnostic == diagnostic
 

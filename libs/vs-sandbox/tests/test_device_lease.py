@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_sandbox.api import ComputeBackend, DeviceLease
-from vs_sim.api.testing import file_size_limit
+from vs_sim.api.testing import ManualClock, file_size_limit
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -69,12 +69,12 @@ class _FakeBackend:
 
 def test_gpu_env_pins_selected_device(tmp_path: Path) -> None:
     backend = _FakeBackend(_FakeDevice(3))
-    lease = DeviceLease(backend, log_dir=tmp_path)
+    lease = DeviceLease(backend, log_dir=tmp_path, clock=ManualClock())
     assert lease.gpu_env() == {"CUDA_VISIBLE_DEVICES": "3"}
 
 
 def test_gpu_env_empty_without_device(tmp_path: Path) -> None:
-    lease = DeviceLease(_FakeBackend(), log_dir=tmp_path)
+    lease = DeviceLease(_FakeBackend(), log_dir=tmp_path, clock=ManualClock())
     assert lease.gpu_env() == {}
 
 
@@ -84,6 +84,7 @@ def test_reselect_skipped_when_view_disallows_host_reselect(tmp_path: Path) -> N
         backend,
         log_dir=tmp_path,
         run_environment_view=_View(host_device_reselect=False),
+        clock=ManualClock(),
     )
     lease.reselect()
     assert backend.reselection_count == 0
@@ -92,7 +93,7 @@ def test_reselect_skipped_when_view_disallows_host_reselect(tmp_path: Path) -> N
 def test_reselect_delegates_and_adopts_backend_monitor(tmp_path: Path) -> None:
     monitor = _RecordingMonitor()
     backend = _FakeBackend(monitor=monitor)
-    lease = DeviceLease(backend, log_dir=tmp_path)
+    lease = DeviceLease(backend, log_dir=tmp_path, clock=ManualClock())
 
     lease.reselect()
 
@@ -106,8 +107,10 @@ def test_close_stops_monitor_and_finalizes_gpu_json(tmp_path: Path) -> None:
 
     monitor = _RecordingMonitor()
     backend = _FakeBackend(monitor=monitor)
-    lease = DeviceLease(backend, log_dir=tmp_path)
+    clock = ManualClock(1_767_225_600.0)
+    lease = DeviceLease(backend, log_dir=tmp_path, clock=clock)
     lease.monitor = monitor
+    clock.advance(90)
 
     lease.close()
 
@@ -115,11 +118,11 @@ def test_close_stops_monitor_and_finalizes_gpu_json(tmp_path: Path) -> None:
     data = json.loads((tmp_path / "gpu.json").read_text())
     assert data["contention_detected"] is True
     assert data["contention_events"] == 2
-    assert "finished_at" in data
+    assert data["finished_at"] == "2026-01-01T00:01:30+00:00"  # the clock's reading at close
 
 
 def test_close_without_gpu_json_is_a_noop(tmp_path: Path) -> None:
-    lease = DeviceLease(_FakeBackend(), log_dir=tmp_path)
+    lease = DeviceLease(_FakeBackend(), log_dir=tmp_path, clock=ManualClock())
     lease.close()
     assert not (tmp_path / "gpu.json").exists()
 
@@ -127,7 +130,7 @@ def test_close_without_gpu_json_is_a_noop(tmp_path: Path) -> None:
 def test_close_interrupted_at_every_byte_preserves_gpu_metadata(tmp_path: Path) -> None:
     path = tmp_path / "gpu.json"
     old = b'{"name":"device"}'
-    lease = DeviceLease(_FakeBackend(), log_dir=tmp_path)
+    lease = DeviceLease(_FakeBackend(), log_dir=tmp_path, clock=ManualClock())
     for interruption in range(100):
         path.write_bytes(old)
         with file_size_limit(interruption), pytest.raises(OSError, match="File too large"):

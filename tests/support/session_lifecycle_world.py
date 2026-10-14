@@ -39,6 +39,7 @@ from vs_runtime.api.core import (
     SessionLifecycleRequests,
     SessionRequestRouter,
 )
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -55,7 +56,7 @@ class RecordingClient(AgentClient):
 
     def __init__(self, driver: FakeProvider, store: SessionStore) -> None:
         """Wrap the Fake driver; *store* keeps the checkpoint across a release."""
-        super().__init__(driver, session_store=store)
+        super().__init__(driver, session_store=store, clock=ManualClock())
         self.cancelled: list[AgentSessionKey] = []
         self.released: list[AgentSessionKey] = []
 

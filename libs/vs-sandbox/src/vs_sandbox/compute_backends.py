@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
+    from vs_sim.api import Clock
 
 
 class ComputeBackend(StrEnum):
@@ -194,25 +195,30 @@ def backend_is_host_only(backend: ComputeBackend) -> bool:
     return backend in _HOST_ONLY
 
 
-def create_compute_backend(
+def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]; one keyword per construction input every registered backend shares.
+    # > A settings object would only rename these keywords for the one caller and the
+    # > registered factories; splitting the factory per backend would branch on a
+    # > backend name, which the registry exists to avoid.
     backend: ComputeBackend,
     log_dir: Path,
     *,
     log: Callable[[str], None] | None = None,
     image: str | None = None,
     docker: DockerCli | None = None,
+    clock: Clock,
 ) -> ComputeBackendImpl:
     """Construct the registered implementation for one compute stack.
 
     A supplied *docker* replaces the built-in Docker CLI for built-in backends.
+    ``clock`` counts seconds since the epoch; a backend stamps what it records with it.
     """
     _ensure_defaults()
     if backend not in _REGISTRY:
         message = f"No backend impl registered for {backend!r}"
         raise ValueError(message)
     if docker is None:
-        return _REGISTRY[backend](log_dir=log_dir, log=log, image=image)
-    return _REGISTRY[backend](log_dir=log_dir, log=log, image=image, docker=docker)
+        return _REGISTRY[backend](log_dir=log_dir, log=log, image=image, clock=clock)
+    return _REGISTRY[backend](log_dir=log_dir, log=log, image=image, docker=docker, clock=clock)
 
 
 def _register_defaults() -> None:

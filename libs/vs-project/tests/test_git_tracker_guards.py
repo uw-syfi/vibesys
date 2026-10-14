@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -97,7 +98,7 @@ def _initialized_tracker(root: Path, run_id: str = "guard-run") -> GitTracker:
 
 def _project(root: Path, tracker: GitTracker) -> Project:
     project = Project.open(root)
-    project.state.create_project("Guard test")
+    project.state.create_project("Guard test", now=datetime(2026, 1, 1, tzinfo=UTC))
     assert tracker.trusted_input_baseline is not None
     project.state.create_run(
         project.state.new_run_manifest(
@@ -109,6 +110,7 @@ def _project(root: Path, tracker: GitTracker) -> Project:
             run_environment=RunEnvironmentRecord(name="docker"),
             execution=run_execution_record(),
             orchestration=OrchestrationDescriptor(id="guard", config_version=1, options={}),
+            now=datetime(2026, 1, 1, tzinfo=UTC),
         )
     )
     tracker.snapshot_with_framework_metadata(

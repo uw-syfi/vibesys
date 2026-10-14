@@ -24,6 +24,7 @@ from vs_runtime.api.infrastructure import (
     open_managed_conversation,
 )
 from vs_sandbox.api import HostResource, ProjectPathPolicy
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from vs_sandbox.api import CommandRunner
@@ -195,6 +196,7 @@ def test_open_conversation_builds_client_and_owns_environment(tmp_path: Path) ->
         agent_events=NULL_AGENT_EVENT_SINK,
         additional_host_resources=(additional,),
         client_factory=build_client,
+        clock=ManualClock(),
     )
 
     assert conversation.turn("inspect") == "answer"
@@ -223,6 +225,7 @@ def test_open_conversation_preserves_construction_error_when_cleanup_fails(
             log_directory=tmp_path,
             agent_events=NULL_AGENT_EVENT_SINK,
             client_factory=fail_client,
+            clock=ManualClock(),
         )
 
     assert environment.close_count == 1

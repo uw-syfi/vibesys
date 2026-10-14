@@ -79,7 +79,7 @@ if TYPE_CHECKING:
     from server.host_api import RunStatus
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
-    from vs_sim.api import Network, Threads
+    from vs_sim.api import Clock, Network, Threads
 
 
 _RunValueT = TypeVar("_RunValueT")
@@ -174,8 +174,12 @@ class ServerRuntime:
         observer: ServerLifecycleObserver | None = None,
         threads: Threads | None = None,
         network: Network | None = None,
+        clock: Clock,
     ) -> None:
         """Compose all server components around one shared condition.
+
+        ``clock`` counts seconds since the epoch; it stamps every journaled event
+        and execution start.
 
         ``run_id`` names the run every journaled event belongs to, from the
         first; only a read-only reopen (``read_only_log``) takes it from the
@@ -202,8 +206,8 @@ class ServerRuntime:
         # client learns it can dial without polling the filesystem.
         self.transport_listening = self.threads.event()
         self.condition = self.threads.condition(self.threads.rlock())
-        self.journal = WireJournal(self.condition, threads=self.threads)
-        self.executions = ExecutionTracker(self.condition, self.journal)
+        self.journal = WireJournal(self.condition, clock=clock, threads=self.threads)
+        self.executions = ExecutionTracker(self.condition, self.journal, clock=clock)
         self.controller = RunController(self.condition, self.journal, self.executions)
         if read_only_log is not None:
             self._attach_journal = partial(self.controller.attach_read_only, read_only_log)

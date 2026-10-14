@@ -32,6 +32,7 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine, HostExecutedContainerBackend
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -109,12 +110,14 @@ def _candidate_container_counts(
         log_dir: Path,
         log: object = None,
         image: str | None = None,
+        clock: object,
     ) -> _DaemonBackend:
+        del clock  # the fake backend records no timestamps
         made = _DaemonBackend(log_dir, log=log, image=image)  # ty: ignore[invalid-argument-type]
         made.engine = engine
         return made
 
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
 
     async def exercise() -> tuple[bool, int, int, int]:
         async with open_core_host(

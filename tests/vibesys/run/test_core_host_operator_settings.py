@@ -34,7 +34,7 @@ from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import AgentRole, CorePlan, CoreRunContext, OrchestrationPlugin, RunStatus
 from vs_runtime.api.core import RunTiming
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -88,7 +88,7 @@ def _run(
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
     )
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     # A paused run asks for nothing; it stays open until the deadline stops it.
     if strategy is None:
         integration.control.request_pause()

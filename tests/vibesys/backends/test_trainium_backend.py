@@ -21,6 +21,7 @@ from vs_sandbox.api import (
     create_compute_backend,
 )
 from vs_sandbox.api.testing import FakeAcceleratorDiscovery
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -39,12 +40,15 @@ def _make_backend(
             trainium=AcceleratorInventory(tuple(devices))
         ),
         docker=docker,
+        clock=ManualClock(),
     )
 
 
 class TestTrainiumRegistry:
     def test_trainium_in_registry(self, tmp_path: Path) -> None:
-        impl = create_compute_backend(ComputeBackend.TRAINIUM, log_dir=tmp_path)
+        impl = create_compute_backend(
+            ComputeBackend.TRAINIUM, log_dir=tmp_path, clock=ManualClock()
+        )
         assert isinstance(impl, TrainiumBackend)
         assert impl.name is ComputeBackend.TRAINIUM
 

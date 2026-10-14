@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -65,7 +66,7 @@ def _project_run(root: Path) -> tuple[Project, str]:
     root.mkdir()
     (root / "OBJECTIVE.md").write_text("Make the queue fast.\n", encoding="utf-8")
     project = Project.open(root)
-    project.state.create_project("queue")
+    project.state.create_project("queue", now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = project.state.new_run_manifest(
         "queue",
         run_id="queue-run",
@@ -75,6 +76,7 @@ def _project_run(root: Path) -> tuple[Project, str]:
         execution=run_execution_record(),
         orchestration=agent_descriptor(),
         trusted_input_baseline="0" * 40,
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     project.state.create_run(manifest)
     return project, manifest.run_id

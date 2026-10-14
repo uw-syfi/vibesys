@@ -25,7 +25,7 @@ from vs_agent.api import (
     reply_breach,
 )
 from vs_agent.api.testing import FakeAgentClient, FakeProvider, assistant_text
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -56,7 +56,8 @@ def _executors(chunks: list[str]) -> dict[str, AgentClient | FakeAgentClient]:
     fake.stream_output("worker", chunks)
     return {
         "client": AgentClient(
-            FakeProvider(answer="".join(chunks), turn=[assistant_text(c) for c in chunks])
+            FakeProvider(answer="".join(chunks), turn=[assistant_text(c) for c in chunks]),
+            clock=ManualClock(),
         ),
         "fake": fake,
     }

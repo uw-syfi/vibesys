@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -26,7 +27,7 @@ from vs_agent.api.testing import (
 )
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 
 TOKEN_FIELDS = (
     "input_tokens",
@@ -39,7 +40,7 @@ TOKEN_FIELDS = (
 def _resumed_records(root: Path, *, cumulative: int, increment: int) -> list[dict]:
     (root / "OBJECTIVE.md").write_text("Reduce loop cost.\n", encoding="utf-8")
     project = Project.open(root)
-    project.state.create_project("usage-regression")
+    project.state.create_project("usage-regression", now=datetime(2026, 1, 1, tzinfo=UTC))
     run = project.state.new_run_manifest(
         "Run 1",
         run_id="run-1",
@@ -49,13 +50,16 @@ def _resumed_records(root: Path, *, cumulative: int, increment: int) -> list[dic
         run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="multi-agent", config_version=1, options={}),
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     project.state.create_run(run)
     slot = project.state.local_namespace("run-1", "agent").slot("sessions.json", AgentSessionState)
     store = DurableSessionStore(slot)
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
     first_provider = FakeProvider(turn=[usage(input_tokens=100, output_tokens=0)])
-    with AgentClient(first_provider, provider="codex", session_store=store, log_dir=root) as client:
+    with AgentClient(
+        first_provider, provider="codex", session_store=store, log_dir=root, clock=ManualClock()
+    ) as client:
         _invoke(client, root, key)
     checkpoint = store.get(key)
     assert checkpoint is not None
@@ -71,7 +75,9 @@ def _resumed_records(root: Path, *, cumulative: int, increment: int) -> list[dic
         ]
     )
     launcher = fake_agentshim_launcher(provider="codex", executor=executor)
-    with AgentClient(launcher, provider="codex", session_store=store, log_dir=root) as client:
+    with AgentClient(
+        launcher, provider="codex", session_store=store, log_dir=root, clock=ManualClock()
+    ) as client:
         _invoke(client, root, key)
         _invoke(client, root, key)
     assert "resume" in executor.requests[1].argv

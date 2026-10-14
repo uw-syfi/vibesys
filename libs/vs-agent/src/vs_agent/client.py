@@ -39,7 +39,7 @@ from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.usage_records import USAGE_FILE, append_usage_record, usage_dict
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -222,7 +222,7 @@ class AgentClient:
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
         check_readiness: bool = False,
         threads: Threads | None = None,
-        clock: Clock | None = None,
+        clock: Clock,
     ) -> None:
         """Create a client that owns ``launcher`` and every session it opens.
 
@@ -230,6 +230,9 @@ class AgentClient:
         provider CLI first (see :meth:`_require_ready`). Product wiring turns
         it on; a client built around a scripted provider leaves it off, since a
         probe is a command the script would have to answer.
+
+        ``clock`` counts seconds since the epoch: it times each turn and stamps
+        each usage row.
         """
         self._launcher = launcher
         self._sink = event_sink
@@ -545,6 +548,7 @@ class AgentClient:
                 reasoning_effort=reasoning_effort,
                 usage=usage,
                 skills=skills,
+                recorded_at=utc_datetime(self._clock),
             )
         except OSError as exc:
             _emit_and_log(

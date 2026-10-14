@@ -30,6 +30,7 @@ from vs_agent.api.testing import (
     fake_agentshim_launcher,
 )
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import ManualClock
 
 
 @dataclass
@@ -54,7 +55,7 @@ def _client(implementation: str, execution: _Execution) -> AgentClient:
         if implementation == "fake"
         else fake_agentshim_launcher(provider="codex", executor=FakeExecutor(execution.execute))
     )
-    return AgentClient(driver, provider="codex")
+    return AgentClient(driver, provider="codex", clock=ManualClock())
 
 
 def _sessions(

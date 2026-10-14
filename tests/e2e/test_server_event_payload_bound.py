@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from inspect import signature
 from typing import TYPE_CHECKING, cast
 
@@ -45,6 +46,7 @@ def test_one_event_past_the_peer_frame_cap_arrives_cut_and_the_socket_stays_open
     produced = make_event(
         EventType.OUTPUT,
         data=OutputData(stream="stdout", content=content),
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
     )
     stamped = produced.model_copy(
         update={"sequence": parts.api.latest_sequence + 1, "run_id": parts.journal.run_id_locked()}

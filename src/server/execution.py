@@ -33,7 +33,6 @@ from server.events import (
 )
 from vibesys.api import AgentExecutionStartedData as CoreAgentExecutionStartedData
 from vibesys.api import CoreEvent
-from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -90,10 +89,10 @@ class ExecutionTracker:
         condition: Condition,
         journal: WireJournal,
         *,
-        clock: Clock | None = None,
+        clock: Clock,
     ) -> None:
-        """Initialize live execution state over the shared server condition."""
-        self._clock = clock or SystemClock()
+        """Track executions over the shared server condition; ``clock`` counts epoch seconds."""
+        self._clock = clock
         self._condition = condition
         self._journal = journal
         self._active: dict[str, ActiveAgentExecution] = {}

@@ -15,7 +15,14 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vs_sim.blocking import BlockingRunner, ThreadBlockingRunner
-    from vs_sim.clock import Clock, MonotonicClock, Sleeper, SleepingClock, SystemClock
+    from vs_sim.clock import (
+        Clock,
+        MonotonicClock,
+        Sleeper,
+        SleepingClock,
+        SystemClock,
+        utc_datetime,
+    )
     from vs_sim.concurrency import Condition, Event, Lock, OsThreads, Threads, Worker
     from vs_sim.network import Connection, Listener, Network, UnixNetwork
     from vs_sim.probes import CommandProbe, ProbeResult, SubprocessProbe
@@ -60,6 +67,7 @@ _MODULES: dict[str, str] = {
     "Sleeper": "vs_sim.clock",
     "SleepingClock": "vs_sim.clock",
     "SystemClock": "vs_sim.clock",
+    "utc_datetime": "vs_sim.clock",
     "Condition": "vs_sim.concurrency",
     "Event": "vs_sim.concurrency",
     "Lock": "vs_sim.concurrency",
@@ -176,5 +184,6 @@ __all__ = [
     "derive_seed",
     "run_foreground",
     "sync_descriptor",
+    "utc_datetime",
     "yield_now",
 ]

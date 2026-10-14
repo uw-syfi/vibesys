@@ -25,10 +25,12 @@ from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._recorded_environment import migrate_recorded_run_environment
 from vs_runtime._run_state import RunState
 from vs_runtime.contracts import OrchestrationResumeDecision
+from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
     from vs_project.api import GitRepository, GitRepositoryFactory, StateStoreFactory
     from vs_runtime._project_materialization import ProjectMaterializer
+    from vs_sim.api import Clock
 
 type LogEmitter = Callable[[str, TextIO], None]
 type LogReady = Callable[[Path], None]
@@ -124,6 +126,8 @@ class ProjectRunEffects:
     git_events: GitTrackerEvents
     log_emit: LogEmitter
     on_log_ready: LogReady
+    clock: Clock
+    """Seconds since the epoch: names log files and stamps new project and run manifests."""
     git_repository: GitRepositoryFactory | None = None
     """Builds the ``GitRepository`` of the project root and of every candidate worktree.
 
@@ -212,7 +216,9 @@ class ProjectRunResources:
                         symlinks=True,
                         ignore=shutil.ignore_patterns("__pycache__"),
                     )
-            logger = RunLogger(log_dir, tee_stderr=False, emit=self._effects.log_emit)
+            logger = RunLogger(
+                log_dir, clock=self._effects.clock, tee_stderr=False, emit=self._effects.log_emit
+            )
             teardown_stack.callback(logger.close)
             git = GitTracker(
                 workspace,
@@ -335,7 +341,7 @@ def _assemble_project_run_resources(
 
     with boot_trace.span("log_bootstrap"):
         effects.on_log_ready(log_dir)
-        logger = RunLogger(log_dir, emit=effects.log_emit)
+        logger = RunLogger(log_dir, clock=effects.clock, emit=effects.log_emit)
         teardown_stack.callback(logger.close)
         for message in buffered_logs:
             logger.lprint(message)
@@ -364,7 +370,8 @@ def _assemble_project_run_resources(
             _apply_resume_decision(request.run_id, project, git, decision)
             project_state.set_current_run(request.run_id)
         else:
-            project_state.create_project(project.root.name)
+            created_at = utc_datetime(effects.clock)
+            project_state.create_project(project.root.name, now=created_at)
             trusted_input_baseline = git.trusted_input_baseline
             if trusted_input_baseline is None:
                 raise ProjectRunBaselineMissingError
@@ -378,6 +385,7 @@ def _assemble_project_run_resources(
                 execution=request.execution,
                 orchestration=request.orchestration,
                 trusted_input_baseline=trusted_input_baseline,
+                now=created_at,
             )
             project_state.create_run(run_manifest)
             git.snapshot_with_framework_metadata(

@@ -28,7 +28,7 @@ def _rendering_sink(*, max_result_len: int | None = None) -> CoreAgentEventSink:
     renderer = HeadlessRenderer()
     if max_result_len is not None:
         renderer.max_result_len = max_result_len
-    return CoreAgentEventSink(renderer.handle)
+    return CoreAgentEventSink(renderer.handle, clock=ManualClock())
 
 
 class TestOnThinkingChannel:
@@ -37,7 +37,9 @@ class TestOnThinkingChannel:
     @staticmethod
     def _chunks(*events: AgentEvent) -> list[AgentOutputChunkData]:
         seen: list[CoreEvent] = []
-        observer = _LoggerObserver(AgentLogger(event_sink=CoreAgentEventSink(seen.append)))
+        observer = _LoggerObserver(
+            AgentLogger(event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()))
+        )
         for event in events:
             observer.on_event(event)
         return [event.data for event in seen if isinstance(event.data, AgentOutputChunkData)]
@@ -68,7 +70,7 @@ class TestOnThinkingChannel:
     def test_empty_text_publishes_nothing_directly(self) -> None:
         """``on_thinking`` and ``on_diagnostic`` share a no-op-on-empty helper."""
         seen: list[CoreEvent] = []
-        AgentLogger(event_sink=CoreAgentEventSink(seen.append)).on_thinking("")
+        AgentLogger(event_sink=CoreAgentEventSink(seen.append, clock=ManualClock())).on_thinking("")
 
         assert [event.data for event in seen if isinstance(event.data, AgentOutputChunkData)] == []
 
@@ -87,7 +89,9 @@ class TestOnDiagnostic:
     @staticmethod
     def _chunks(text: str) -> list[AgentOutputChunkData]:
         seen: list[CoreEvent] = []
-        AgentLogger(event_sink=CoreAgentEventSink(seen.append)).on_diagnostic(text)
+        AgentLogger(event_sink=CoreAgentEventSink(seen.append, clock=ManualClock())).on_diagnostic(
+            text
+        )
         return [event.data for event in seen if isinstance(event.data, AgentOutputChunkData)]
 
     def test_text_publishes_verbatim_on_the_diagnostic_channel(self) -> None:
@@ -113,7 +117,7 @@ class TestOnDiagnostic:
 class TestToolCorrelation:
     def test_cli_events_get_stable_fifo_call_ids(self) -> None:
         seen: list[CoreEvent] = []
-        logger = AgentLogger(event_sink=CoreAgentEventSink(seen.append))
+        logger = AgentLogger(event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()))
         logger.on_tool_call("Read", {"path": "a"})
         logger.on_tool_call("Read", {"path": "b"})
         logger.on_tool_result("Read", stdout="result a")

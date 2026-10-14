@@ -28,6 +28,7 @@ from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, RunStopped
 from vs_sim.api import SystemClock
+from vs_sim.api.testing import ManualClock
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
@@ -102,7 +103,7 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
     _write_slurm_config(config_path, state, "ssh")
     project_root = tmp_path / "project"
     _write_project(project_root)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=ManualClock())
     submitted_ids: list[str] = []
 
     async def exercise() -> None:

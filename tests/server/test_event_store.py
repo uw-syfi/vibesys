@@ -80,7 +80,9 @@ class TestEventStore:
         assert [event.text for event in store.read()] == ["one", "two"]
         assert [event.text for event in store.read(after_sequence=1)] == ["two"]
         assert store.read(after_sequence=2) == []
-        appended = store.append(make_event(EventType.OUTPUT, "three"))
+        appended = store.append(
+            make_event(EventType.OUTPUT, "three", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
         assert appended.sequence == 3
         assert appended.run_id == "active-run"
         assert [event.sequence for event in store.read(after_sequence=1)] == [2, 3]
@@ -196,7 +198,12 @@ class TestEventStore:
         ]
         assert path.read_bytes() == original
         assert [event.text for event in store.read(after_sequence=2)] == ["one", "three"]
-        assert store.append(make_event(EventType.OUTPUT, "four")).sequence == 5
+        assert (
+            store.append(
+                make_event(EventType.OUTPUT, "four", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+            ).sequence
+            == 5
+        )
 
         reopened = EventStore(path, run_id="reopened-run")
         assert [(event.sequence, event.text) for event in reopened.read()] == [
@@ -299,7 +306,9 @@ class TestEventStore:
         path.write_text(valid + "\n" + tail)
         store = EventStore(path, run_id="active-run")
 
-        store.append(make_event(EventType.OUTPUT, "after repair"))
+        store.append(
+            make_event(EventType.OUTPUT, "after repair", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
         reopened = EventStore(path, run_id="reopened-run")
 
         assert [(event.sequence, event.text) for event in reopened.read()] == [
@@ -313,7 +322,9 @@ class TestEventStore:
         store = EventStore(path, run_id="active-run")
         assert [event.text for event in store.read()] == ["unterminated"]
 
-        store.append(make_event(EventType.OUTPUT, "appended"))
+        store.append(
+            make_event(EventType.OUTPUT, "appended", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
 
         assert [event.text for event in store.read()] == ["unterminated", "appended"]
         reopened = EventStore(path, run_id="reopened-run")
@@ -334,7 +345,9 @@ class TestEventStore:
         original = path.read_bytes()
         store = EventStore(path, run_id="active-run")
 
-        appended = store.append(make_event(EventType.OUTPUT, "two"))
+        appended = store.append(
+            make_event(EventType.OUTPUT, "two", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
 
         assert path.read_bytes() == original + (appended.model_dump_json() + "\n").encode()
 
@@ -343,8 +356,12 @@ class TestEventStore:
         path.write_text(_persisted_event(1, "unterminated").model_dump_json())
         store = EventStore(path, run_id="active-run")
 
-        store.append(make_event(EventType.OUTPUT, "second"))
-        store.append(make_event(EventType.OUTPUT, "third"))
+        store.append(
+            make_event(EventType.OUTPUT, "second", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
+        store.append(
+            make_event(EventType.OUTPUT, "third", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
 
         raw = path.read_text()
         assert "\n\n" not in raw
@@ -363,7 +380,9 @@ class TestEventStore:
         store = EventStore(path, run_id="active-run")
         path.unlink()
 
-        appended = store.append(make_event(EventType.OUTPUT, "fresh"))
+        appended = store.append(
+            make_event(EventType.OUTPUT, "fresh", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
 
         assert path.read_bytes() == (appended.model_dump_json() + "\n").encode()
         assert [event.text for event in EventStore(path, run_id="reopened-run").read()] == ["fresh"]
@@ -421,7 +440,9 @@ class TestEventStore:
             ]
             for registered in waiting:
                 wait_or_fail(registered, "a reader to start waiting")
-            appended = store.append(make_event(EventType.OUTPUT, "visible"))
+            appended = store.append(
+                make_event(EventType.OUTPUT, "visible", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+            )
             return appended, [reader.result() for reader in readers]
 
         appended, batches = threads.run(scenario)
@@ -434,7 +455,9 @@ class TestEventStore:
 
     def test_cached_events_are_isolated_from_reader_mutation(self, tmp_path: Path) -> None:
         store = EventStore(tmp_path / "events.jsonl", run_id="active-run")
-        appended = store.append(make_event(EventType.OUTPUT, "durable"))
+        appended = store.append(
+            make_event(EventType.OUTPUT, "durable", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
 
         first_read = store.read()
         with pytest.raises(ValidationError):
@@ -446,7 +469,9 @@ class TestEventStore:
     def test_reader_projections_do_not_disturb_stored_history(self, tmp_path: Path) -> None:
         """The read path builds variants by copy, which the store never sees."""
         store = EventStore(tmp_path / "events.jsonl", run_id="active-run")
-        store.append(make_event(EventType.OUTPUT, "durable"))
+        store.append(
+            make_event(EventType.OUTPUT, "durable", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
 
         projected = store.read()[0].model_copy(update={"text": "projected"})
 
@@ -456,7 +481,11 @@ class TestEventStore:
     def test_appended_events_are_immutable(self, tmp_path: Path) -> None:
         store = EventStore(tmp_path / "events.jsonl", run_id="active-run")
         appended = store.append(
-            make_event(EventType.TOOL_CALL, data=ToolCallData(tool="Bash", call_id="c1"))
+            make_event(
+                EventType.TOOL_CALL,
+                data=ToolCallData(tool="Bash", call_id="c1"),
+                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+            )
         )
 
         with pytest.raises(ValidationError):
@@ -503,7 +532,9 @@ class TestEventStore:
         monkeypatch.setattr(Path, "open", open_with_close_failure)
 
         with pytest.raises(OSError, match="close failed"):
-            store.append(make_event(EventType.OUTPUT, "ghost"))
+            store.append(
+                make_event(EventType.OUTPUT, "ghost", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+            )
 
         assert store.read() == []
         assert store.last_sequence == 0

@@ -61,7 +61,7 @@ from vs_runtime.api.testing import (
     FakeWorkspace,
     MemoryValidationPasses,
 )
-from vs_sim.api.testing import hostile_json_frames
+from vs_sim.api.testing import ManualClock, hostile_json_frames
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -246,7 +246,9 @@ def _validation_recipes(frame: bytes, workspace: Path) -> None:
 
 def _tool_result(frame: bytes, _: Path) -> None:
     payloads: list[object] = []
-    CoreAgentEventSink(payloads.append).tool_result("shell", frame.decode("utf-8", "replace"))
+    CoreAgentEventSink(payloads.append, ManualClock()).tool_result(
+        "shell", frame.decode("utf-8", "replace")
+    )
     assert len(payloads) == 1
 
 

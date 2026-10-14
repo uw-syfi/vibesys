@@ -278,7 +278,7 @@ def _project_with_run(root: Path) -> Path:
         objective="Make the queue faster.\n",
     )
     project = Project.open(root)
-    project.state.create_project(root.name)
+    project.state.create_project(root.name, now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = project.state.new_run_manifest(
         root.name,
         run_id=_RUN_ID,

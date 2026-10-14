@@ -52,7 +52,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.infrastructure import AgentExecutionConfiguration
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -123,7 +123,9 @@ def open_production(env: WorkspaceEnv, declared: AgentRole) -> Production:
         ),
         session_spec=spec,
     )
-    client = AgentClient(FakeProvider(answer={"value": 7}, on_turn=turns.append))
+    client = AgentClient(
+        FakeProvider(answer={"value": 7}, on_turn=turns.append), clock=ManualClock()
+    )
     requests = open_session_requests(
         inputs, client=client, invocation_slot=FakeAgentInvocationStore(), store=store
     ).turns

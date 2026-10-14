@@ -28,6 +28,7 @@ from vs_agent.api.testing import (
 )
 from vs_faults.api import FaultPlan
 from vs_sandbox.api.testing import FakeDockerConfinement
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from vs_agent.api.testing import StreamPeers
@@ -84,6 +85,6 @@ def open_stream_host(
         executor=executor,
         sandboxes=dict.fromkeys((role.root for role in resolver.roles), sandbox),
     )
-    client = AgentClient(launcher, provider=provider, containerized=True)
+    client = AgentClient(launcher, provider=provider, containerized=True, clock=ManualClock())
     host = SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
     return StreamHost(host, executor, peers)

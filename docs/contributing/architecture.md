@@ -146,6 +146,7 @@ graph TD
     launch --> vs_project
     launch --> vs_runtime
     launch --> vs_sandbox
+    launch --> vs_sim
     launch --> vs_slurm
     server --> vibesys
     server --> vs_async_ops
@@ -183,6 +184,7 @@ graph TD
     vs_issue_tracker --> vs_core
     vs_issue_tracker --> vs_github
     vs_issue_tracker --> vs_sim
+    vs_project --> vs_sim
     vs_runtime --> vs_agent
     vs_runtime --> vs_async_ops
     vs_runtime --> vs_core

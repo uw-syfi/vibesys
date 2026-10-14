@@ -34,6 +34,7 @@ from vs_agent.api.testing import (
     scripted_turn,
 )
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import ManualClock
 
 
 def _spec(workspace: Path, role: str = "implementer") -> AgentSessionSpec:
@@ -73,7 +74,7 @@ def test_journaled_turn_sequence_preserves_resume_proof(
         launcher = fake_agentshim_launcher(provider="codex", executor=executor)
         key = AgentSessionKey(SessionScope.MEMBER, f"{role}:worker")
         ledger = FakeAgentInvocationStore()
-        with AgentClient(launcher, provider="codex") as client:
+        with AgentClient(launcher, provider="codex", clock=ManualClock()) as client:
             sessions = ClientAgentSessions(client, ledger)
             spec = _spec(workspace, role)
             sessions.bind(key, spec, AgentTurnRequest(message="", label="resume"))
@@ -122,7 +123,7 @@ def test_journaled_later_start_never_replays_after_provider_refuses_resume(
         policy=AgentExecutionPolicy(require_enforcement=False),
     )
     ledger = FakeAgentInvocationStore()
-    with AgentClient(launcher, provider=provider) as client:
+    with AgentClient(launcher, provider=provider, clock=ManualClock()) as client:
         sessions = ClientAgentSessions(client, ledger)
         first = sessions.start(key, spec, AgentTurnRequest(message="work", invocation_id="first"))
         assert isinstance(first, Completed)
@@ -144,7 +145,7 @@ def test_journaled_initial_turn_without_provider_identity_stays_unresolved(tmp_p
     spec = _spec(tmp_path)
     turn = AgentTurnRequest(message="work", invocation_id="first")
     ledger = FakeAgentInvocationStore()
-    with AgentClient(launcher, provider="codex") as client:
+    with AgentClient(launcher, provider="codex", clock=ManualClock()) as client:
         sessions = ClientAgentSessions(client, ledger)
         outcome = sessions.start(key, spec, turn)
         assert isinstance(outcome, Unknown)
@@ -164,7 +165,7 @@ def test_journaled_later_start_refuses_replaced_provider_identity(tmp_path: Path
     spec = _spec(tmp_path)
     turn = AgentTurnRequest(message="more", invocation_id="later")
     ledger = FakeAgentInvocationStore()
-    with AgentClient(launcher, provider="codex") as client:
+    with AgentClient(launcher, provider="codex", clock=ManualClock()) as client:
         sessions = ClientAgentSessions(client, ledger)
         first = sessions.start(key, spec, AgentTurnRequest(message="work", invocation_id="first"))
         assert isinstance(first, Completed)
@@ -214,7 +215,7 @@ def test_later_start_refuses_lost_checkpoint_after_reconstruction(
         script=FakeTurnScript(answers=("waiting", AgentOutputSchemaError("invalid reply"))),
         on_turn=calls.append,
     )
-    with AgentClient(first_provider, provider="codex") as client:
+    with AgentClient(first_provider, provider="codex", clock=ManualClock()) as client:
         first = ClientAgentSessions(client, ledger).start(
             key, spec, AgentTurnRequest(message="work", invocation_id="first")
         )
@@ -228,7 +229,9 @@ def test_later_start_refuses_lost_checkpoint_after_reconstruction(
     # The inert default checkpoint store deliberately models lost persisted
     # provider state after the journal has acknowledged accepted work.
     with AgentClient(
-        FakeProvider(answer="must not replay", on_turn=calls.append), provider="codex"
+        FakeProvider(answer="must not replay", on_turn=calls.append),
+        provider="codex",
+        clock=ManualClock(),
     ) as client:
         recovered = ClientAgentSessions(client, ledger)
         with pytest.raises(SessionResumeError, match="acknowledged provider checkpoint is missing"):
@@ -243,7 +246,7 @@ def test_later_start_refuses_changed_configuration_before_dispatch(tmp_path: Pat
     spec = _spec(tmp_path)
     ledger = FakeAgentInvocationStore()
     with AgentClient(
-        FakeProvider(answer="waiting", on_turn=calls.append), provider="codex"
+        FakeProvider(answer="waiting", on_turn=calls.append), provider="codex", clock=ManualClock()
     ) as client:
         sessions = ClientAgentSessions(client, ledger)
         first = sessions.start(key, spec, AgentTurnRequest(message="work", invocation_id="first"))

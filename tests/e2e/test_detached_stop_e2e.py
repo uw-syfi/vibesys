@@ -146,9 +146,13 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     socket_path.parent.mkdir(parents=True, mode=0o700)
     registry = LiveRegistry(FileInstanceStore(root), SystemClock())
     runtime = ServerRuntime(
-        run_id="run-1", runs=default_runs(), socket_path=socket_path, detach=True
+        run_id="run-1",
+        runs=default_runs(),
+        socket_path=socket_path,
+        detach=True,
+        clock=SystemClock(),
     )
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(clock=SystemClock())
     integration.events.subscribe(runtime.integration.project_event)
     threads = OsThreads()
     outcome: list[object] = []

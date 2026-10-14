@@ -28,6 +28,7 @@ from vs_runtime.api.infrastructure import (
     create_run_control_channel,
 )
 from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -202,9 +203,10 @@ def build_server_parts(
     ``SimThreads`` to run them on the simulator.
     """
     threads = threads or OsThreads()
+    clock = ManualClock()
     condition = threads.condition(threads.rlock())
-    journal = WireJournal(condition, threads=threads)
-    executions = ExecutionTracker(condition, journal)
+    journal = WireJournal(condition, threads=threads, clock=clock)
+    executions = ExecutionTracker(condition, journal, clock=clock)
     controller = RunController(condition, journal, executions)
     chat = ChatManager(
         condition,
@@ -224,7 +226,7 @@ def build_server_parts(
             chat_agent_builder=chat_agent_builder,
         )
     chat.set_fallback_answer(RunInspector(integration).answer)
-    core_events = CoreEventJournal()
+    core_events = CoreEventJournal(clock=clock)
     core_events.subscribe(integration.project_event)
     control = create_run_control_channel(
         lambda transition: _record_control_transition(core_events, transition)
