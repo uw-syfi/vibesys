@@ -739,11 +739,31 @@ jobs:
         if: steps.select.outputs.selected == 'true'
         run: uv sync --dev
 
+      # The (test, seed) pairs that failed on this PR's previous push, replayed first so a
+      # failure found under a salted seed is retried until it passes. One entry per run;
+      # the newest of this PR's entries is restored. Best effort: a miss replays nothing.
+      - name: Restore this pull request's failing seeds
+        if: steps.select.outputs.selected == 'true'
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/seed-failures.jsonl
+          key: seed-failures-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: seed-failures-pr-${{ github.event.pull_request.number }}-
+
       - name: Explore the changed tests across seeds and schedules
         if: steps.select.outputs.selected == 'true'
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: uv run --no-sync python scripts/explore_changed_tests.py run --ids-file "$RUNNER_TEMP/changed-tests.txt" --salt "$HEAD_SHA"
+        run: uv run --no-sync python scripts/explore_changed_tests.py run --ids-file "$RUNNER_TEMP/changed-tests.txt" --salt "$HEAD_SHA" --failures-file "$RUNNER_TEMP/seed-failures.jsonl"
+
+      - name: Save this pull request's failing seeds
+        if: always() && steps.select.outputs.selected == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/seed-failures.jsonl
+          key: seed-failures-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   # Exercises the real Linux workspace-confinement boundary (issue #149). The
   # main `test` job skips these (no bubblewrap), so this job installs it and

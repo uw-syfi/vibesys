@@ -17,6 +17,7 @@ from scripts.explore_changed_tests import (
     UNEXPLORED_WARNING_SHARE,
     Explored,
     changed_lines,
+    failures,
     function_spans,
     outcome,
     read_report,
@@ -133,6 +134,7 @@ _ROWS = st.lists(
         runs=st.integers(0, 24),
         planned=st.integers(0, 24),
         outcome=st.sampled_from(["passed", "failed", "skipped", "not explored"]),
+        seed=st.none() | st.integers(0, 2**63),
     ),
     max_size=80,
     unique_by=lambda row: row.test,
@@ -143,6 +145,19 @@ _ROWS = st.lists(
 def test_a_report_reads_back_the_rows_it_was_written_from(rows: list[Explored]) -> None:
     text = "".join(f"{json.dumps(dataclasses.asdict(row))}\n" for row in rows)
     assert read_report(text) == rows
+
+
+@given(_ROWS)
+def test_the_failures_file_lists_each_failing_seeded_test_with_its_seed(
+    rows: list[Explored],
+) -> None:
+    listed = [json.loads(line) for line in failures(rows).splitlines()]
+
+    assert listed == [
+        {"test": row.test, "seed": row.seed}
+        for row in rows
+        if row.outcome == "failed" and row.seed is not None
+    ]
 
 
 @given(_ROWS, st.floats(1, 600))
@@ -205,6 +220,44 @@ def test_the_plugins_exploration_report_is_what_the_summary_reads(
 
     rows = read_report((pytester.path / "explored.jsonl").read_text())
     assert sorted(rows, key=lambda row: row.test) == [
-        Explored("test_pair.py::test_plain", 2, 2, "passed"),
-        Explored("test_pair.py::test_sim", 4, 4, "passed"),
+        Explored("test_pair.py::test_plain", 2, 2, "passed", None),
+        Explored("test_pair.py::test_sim", 4, 4, "passed", None),
     ]
+
+
+def test_a_failure_the_step_records_fails_first_on_the_next_push(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.syspath_prepend(str(PLUGIN_DIR))
+    pytester.makeini("[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider -p no:tach\n")
+    pytester.makepyfile(
+        test_race="""
+        import asyncio
+
+        async def test_race():
+            order = []
+
+            async def claim(name):
+                await asyncio.sleep(1)
+                order.append(name)
+
+            await asyncio.gather(claim("a"), claim("b"))
+            assert order == ["a", "b"]
+        """
+    )
+    pytester.runpytest_inprocess(
+        "--sim-explore=24", "--sim-explore-salt=push-1", "--sim-explore-report=first.jsonl"
+    ).assert_outcomes(failed=1)
+    recorded = pytester.path / "failures.jsonl"
+    recorded.write_text(failures(read_report((pytester.path / "first.jsonl").read_text())))
+
+    pytester.runpytest_inprocess(
+        "--sim-explore=1",
+        "--sim-explore-salt=push-2",
+        f"--sim-explore-replay={recorded}",
+        "--sim-explore-report=second.jsonl",
+    ).assert_outcomes(failed=1)
+
+    [second] = read_report((pytester.path / "second.jsonl").read_text())
+    [first] = read_report((pytester.path / "first.jsonl").read_text())
+    assert (second.outcome, second.runs, second.seed) == ("failed", 1, first.seed)

@@ -20,11 +20,15 @@ runs only what the PR touched, so the cost follows the size of the change:
   every changed test once. Exploration runs in rounds (every test once, then every test
   again), and the PR's head commit salts the seeds and the test each round starts from, so
   a large PR's pushes still cover all its tests over time. The job summary lists what ran
-  and what the cap left unexplored.
+  and what the cap left unexplored. With ``--failures-file``, the (test, seed) pairs that
+  failed on the previous push run first, and the file is rewritten with this push's
+  failures: a failure found under a salted seed is retried until it passes, not lost
+  when the next push changes the salt. CI keeps the file in a per-PR cache entry.
 
 Usage:
     python3 scripts/explore_changed_tests.py select --base origin/main --ids-file ids.txt
-    uv run python scripts/explore_changed_tests.py run --ids-file ids.txt --salt "$HEAD_SHA"
+    uv run python scripts/explore_changed_tests.py run --ids-file ids.txt --salt "$HEAD_SHA" \
+        --failures-file failures.jsonl
 """
 
 from __future__ import annotations
@@ -197,11 +201,22 @@ class Explored:
     runs: int
     planned: int
     outcome: str
+    seed: int | None = None
+    """The seed of a sim test's failing run."""
 
 
 def read_report(text: str) -> list[Explored]:
     """The rows of an exploration report (JSON lines)."""
     return [Explored(**json.loads(line)) for line in text.splitlines() if line.strip()]
+
+
+def failures(rows: list[Explored]) -> str:
+    """The replay file for the next push: each failing sim test with its failing seed."""
+    return "".join(
+        json.dumps({"test": row.test, "seed": row.seed}) + "\n"
+        for row in rows
+        if row.outcome == "failed" and row.seed is not None
+    )
 
 
 def summary(
@@ -281,12 +296,17 @@ def _run(args: argparse.Namespace) -> int:
             sys.executable, "-m", "pytest", "-q", "--no-cov", "-p", "no:cacheprovider",
             f"--sim-explore={args.seeds}", f"--sim-repeat={args.repeats}",
             f"--sim-explore-budget={max(args.cap - TAIL_SECONDS, 0.0):g}",
-            f"--sim-explore-salt={args.salt}", f"--sim-explore-report={report}", *ids,
+            f"--sim-explore-salt={args.salt}", f"--sim-explore-report={report}",
+            *([f"--sim-explore-replay={args.failures_file}"] if args.failures_file else []), *ids,
         ]  # fmt: skip
         started = time.monotonic()
         code, capped = _pytest_within(command, args.cap)
         elapsed = time.monotonic() - started
-        rows = read_report(report.read_text(encoding="utf-8")) if report.exists() else []
+        reported = report.exists()
+        rows = read_report(report.read_text(encoding="utf-8")) if reported else []
+    # Without a report (pytest stopped before writing one) the earlier failures stay listed.
+    if args.failures_file and reported:
+        Path(args.failures_file).write_text(failures(rows), encoding="utf-8")
     failed, verdict = outcome(code, capped=capped)
     text = summary(rows, selections=len(ids), cap=args.cap, elapsed=elapsed, verdict=verdict)
     print(text)
@@ -315,6 +335,11 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--repeats", type=int, default=DEFAULT_REPEATS)
     run.add_argument("--cap", type=float, default=DEFAULT_CAP_SECONDS, help="wall seconds")
     run.add_argument("--salt", default="", help="varies seeds and order (CI: the head commit)")
+    run.add_argument(
+        "--failures-file",
+        default=None,
+        help="replay the failures listed here first, then rewrite it with this run's",
+    )
     args = parser.parse_args(argv)
     return _select(args) if args.command == "select" else _run(args)
 

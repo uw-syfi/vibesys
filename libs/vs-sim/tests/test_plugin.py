@@ -514,6 +514,49 @@ def test_the_salt_picks_the_exploration_seeds(suite: pytest.Pytester) -> None:
     assert not set(salted[fixed:]) & set(unsalted)
 
 
+def test_a_failure_found_under_one_salt_is_replayed_first_under_the_next(
+    suite: pytest.Pytester,
+) -> None:
+    suite.makepyfile(test_race=ORDER_DEPENDENT_SUITE)
+    found = suite.path / "found.jsonl"
+    suite.runpytest_inprocess(
+        "--sim-explore=24", "--sim-explore-salt=push-1", f"--sim-explore-report={found}"
+    ).assert_outcomes(failed=1)
+    [row] = [json.loads(line) for line in found.read_text().splitlines()]
+    assert row["outcome"] == "failed"
+    assert isinstance(row["seed"], int)
+    replays = suite.path / "replays.jsonl"
+    replays.write_text(json.dumps({"test": row["test"], "seed": row["seed"]}) + "\n")
+    again = suite.path / "again.jsonl"
+
+    # One run under a new salt is the replayed seed, so it fails the same way.
+    suite.runpytest_inprocess(
+        "--sim-explore=1",
+        "--sim-explore-salt=push-2",
+        f"--sim-explore-replay={replays}",
+        f"--sim-explore-report={again}",
+    ).assert_outcomes(failed=1)
+    [replayed] = [json.loads(line) for line in again.read_text().splitlines()]
+    assert (replayed["runs"], replayed["seed"]) == (1, row["seed"])
+
+
+def test_a_missing_replay_file_replays_nothing_and_a_bad_row_is_rejected_by_name(
+    suite: pytest.Pytester,
+) -> None:
+    suite.makepyfile("async def test_sim(sim):\n    pass\n")
+    missing = suite.path / "missing.jsonl"
+    suite.runpytest_inprocess("--sim-explore=2", f"--sim-explore-replay={missing}").assert_outcomes(
+        passed=1
+    )
+    bad = suite.path / "bad.jsonl"
+    bad.write_text('{"test": "test_x.py::test_sim", "seed": 1, "salt": "x"}\n')
+
+    result = suite.runpytest_inprocess("--sim-explore=2", f"--sim-explore-replay={bad}")
+
+    assert result.ret != 0
+    result.stderr.fnmatch_lines([f"*{bad}:1: a replay row has exactly the keys*"])
+
+
 def _explored(report: Path) -> dict[str, tuple[int, int, str]]:
     """Each test's exploration runs, planned runs and outcome, from ``--sim-explore-report``."""
     rows = [json.loads(line) for line in report.read_text().splitlines()]

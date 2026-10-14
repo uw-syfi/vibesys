@@ -45,7 +45,12 @@ What it does:
   seed that failed on one push runs again on the next. A test the budget left unexplored is reported as skipped.
   ``--sim-explore-report=PATH`` writes one JSON object per selected test (``test``: node id,
   ``runs``: exploration runs done, ``planned``: runs asked for, ``outcome``: ``passed``,
-  ``failed``, ``skipped`` or ``not explored``) for the CI step's job summary. The terminal
+  ``failed``, ``skipped`` or ``not explored``, ``seed``: the seed of a sim test's failing
+  run, else ``null``) for the CI step's job summary.
+  ``--sim-explore-replay=PATH`` reads earlier failures (JSON lines of ``test`` and ``seed``,
+  as the report writes them; a missing file replays nothing) and gives each listed test's
+  first runs those seeds, so a failure found under any salt is retried first on the next
+  push; the test's usual seeds follow. The terminal
   summary reports how many runs happened and how long they took.
 """
 
@@ -103,9 +108,42 @@ class _Exploration:
         self.skipped = 0
         self.stopped_by_interrupt = False
         self.outcomes: list[dict[str, object]] = []
+        replay: str | None = config.getoption("sim_explore_replay")
+        self.replays = _read_replays(Path(replay)) if replay is not None else {}
+
+    def seed(self, test: str, run: int) -> int:
+        """The seed of exploration run ``run`` of ``test``: replays first, then the usual seeds."""
+        replays = self.replays.get(test, [])
+        if run < len(replays):
+            return replays[run]
+        run -= len(replays)
+        return explore_seed(test, run if run < FIXED_EXPLORATION_RUNS else self.offset + run)
 
     def out_of_budget(self) -> bool:
         return self.budget is not None and time.monotonic() - self.started >= self.budget
+
+
+_REPLAY_KEYS = frozenset({"test", "seed"})
+
+
+def _read_replays(path: Path) -> dict[str, list[int]]:
+    """Each test's failing seeds from a replay file; unknown keys are rejected by name."""
+    if not path.exists():
+        return {}
+    replays: dict[str, list[int]] = {}
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict) or set(row) - _REPLAY_KEYS:
+            message = f"{path}:{number}: a replay row has exactly the keys {sorted(_REPLAY_KEYS)}"
+            raise pytest.UsageError(message)
+        test, seed = row.get("test"), row.get("seed")
+        if not isinstance(test, str) or isinstance(seed, bool) or not isinstance(seed, int):
+            message = f"{path}:{number}: 'test' must be a node id and 'seed' an integer"
+            raise pytest.UsageError(message)
+        replays.setdefault(test, []).append(seed)
+    return replays
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -167,6 +205,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         metavar="PATH",
         help="with --sim-explore, write each test's exploration runs and outcome as JSON lines",
+    )
+    group.addoption(
+        "--sim-explore-replay",
+        default=None,
+        metavar="PATH",
+        help="with --sim-explore, run these earlier failing (test, seed) pairs first (JSON lines)",
     )
     parser.addini(
         "sim_real_tiers",
@@ -279,8 +323,7 @@ def _sim_for(item: pytest.Item) -> Sim:
         seed = seed_for_test(item.nodeid, item.config.getoption("sim_seed"))
         schedule_seed = item.config.getoption("sim_schedule_seed")
     else:
-        offset = 0 if run < FIXED_EXPLORATION_RUNS else item.config.stash[_EXPLORATION].offset
-        seed = schedule_seed = explore_seed(item.nodeid, offset + run)
+        seed = schedule_seed = item.config.stash[_EXPLORATION].seed(item.nodeid, run)
     trace = EventTrace() if item.config.getoption("sim_determinism_check") else None
     sim = Sim(seed=seed, trace=trace, schedule_seed=schedule_seed)
     setattr(item, SIM_ATTRIBUTE, sim)
@@ -418,7 +461,8 @@ def _explore_in_rounds(
                 done[item] += 1
                 state.done += 1
                 if not all(report.passed or report.skipped for report in reports[item]):
-                    _log_exploration(state, item, (done[item], runs[item]), reports[item])
+                    seed = state.seed(item.nodeid, round_index) if _is_sim_test(item) else None
+                    _log_exploration(state, item, (done[item], runs[item]), reports[item], seed)
                     unlogged.remove(item)
                 if session.shouldfail or session.shouldstop:
                     return
@@ -447,8 +491,12 @@ def _log_exploration(
     item: pytest.Function,
     runs: tuple[int, int],
     reports: list[pytest.TestReport] | None,
+    failing_seed: int | None = None,
 ) -> None:
-    """Log a test's last run (``runs`` is done and planned), or a skip when it never ran."""
+    """Log a test's last run (``runs`` is done and planned), or a skip when it never ran.
+
+    ``failing_seed`` is the seed of a sim test's failing run, for the report.
+    """
     if reports is None:
         outcome = "not explored"
         reason = "not explored: the budget or an interrupt ended exploration first"
@@ -466,7 +514,13 @@ def _log_exploration(
         outcome = "skipped" if any(report.skipped for report in reports) else "passed"
     done, planned = runs
     state.outcomes.append(
-        {"test": item.nodeid, "runs": done, "planned": planned, "outcome": outcome}
+        {
+            "test": item.nodeid,
+            "runs": done,
+            "planned": planned,
+            "outcome": outcome,
+            "seed": failing_seed,
+        }
     )
     item.ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
     _log(item, reports)
