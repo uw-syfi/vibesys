@@ -330,6 +330,26 @@ def exited_in_grace(record: LiveInstanceRecord, now: float) -> bool:
     return record.ended_at is not None and now - record.ended_at < EXIT_GRACE_SECONDS
 
 
+def listed_live(observation: InstanceObservation, now: float) -> LiveInstanceRecord | None:
+    """The record of a server every reader reports as running, else ``None``.
+
+    That is a live holder, or one wedged in its exit: still holding its lock
+    ``EXIT_GRACE_SECONDS`` after its tombstone. ``survey``, ``LiveRegistry.find``
+    and ``InstanceInspector`` all decide through here, so a listing, an attach
+    and an inspection agree on whether a server is running.
+    """
+    record = observation.record
+    if not isinstance(record, LiveInstanceRecord):
+        return None
+    match judge(observation, now):
+        case Verdict.LIVE:
+            return record
+        case Verdict.EXITING if not exited_in_grace(record, now):
+            return record
+        case _:
+            return None
+
+
 def _judge_left_behind(record: LiveInstanceRecord | UnreadableRecord | None, now: float) -> Verdict:
     """Decide what an owner that no longer holds its lock left behind."""
     match record:
@@ -389,7 +409,7 @@ def survey(observations: Iterable[InstanceObservation], now: float) -> Survey:
             case Verdict.LIVE, LiveInstanceRecord():
                 live.append(record)
             case Verdict.EXITING, LiveInstanceRecord():
-                (ended if exited_in_grace(record, now) else live).append(record)
+                (live if listed_live(observation, now) else ended).append(record)
             case Verdict.ENDED, LiveInstanceRecord():
                 ended.append(record)
             case Verdict.CRASHED, LiveInstanceRecord():
@@ -1092,11 +1112,17 @@ class InstanceInspector:
         store: InstanceStore,
         logs: InstanceLogs,
         metadata: InstanceMetadataStore,
+        clock: Clock,
     ) -> None:
-        """Compose registry observations with ID-scoped retained artifacts."""
+        """Compose registry observations with ID-scoped retained artifacts.
+
+        ``clock`` is on the epoch timeline records are stamped with (``SystemClock``);
+        it decides when a holder wedged after its tombstone inspects as live again.
+        """
         self._store = store
         self._logs = logs
         self._metadata = metadata
+        self._clock = clock
 
     def inspect(self, instance_id: str, *, include_log: bool = False) -> InstanceInspection:
         """Observe one id and optionally load its bounded diagnostic tail."""
@@ -1105,12 +1131,13 @@ class InstanceInspector:
         before = self._store.observe(instance_id)
         log = self._logs.tail(instance_id) if include_log else None
         after = self._store.observe(instance_id) if include_log else before
-        state = _inspection_state(after)
+        now = self._clock.now()
+        state = _inspection_state(after, now)
         record = (
             after.record
             if state is InspectionState.LIVE and isinstance(after.record, LiveInstanceRecord)
             else before.record
-            if _inspection_state(before) is InspectionState.LIVE
+            if _inspection_state(before, now) is InspectionState.LIVE
             and isinstance(before.record, LiveInstanceRecord)
             else None
         )
@@ -1130,12 +1157,10 @@ class InstanceInspector:
         )
 
 
-def _inspection_state(observation: InstanceObservation) -> InspectionState:
-    # A holder with its tombstone inspects as ended at any age: the record is
-    # the tombstone either way, and ``stop`` acts on it (``Verdict.EXITING``).
+def _inspection_state(observation: InstanceObservation, now: float) -> InspectionState:
+    if listed_live(observation, now) is not None:
+        return InspectionState.LIVE
     match observation.lock, observation.record:
-        case LockState.HELD, LiveInstanceRecord(ended_at=None):
-            return InspectionState.LIVE
         case LockState.HELD, LiveInstanceRecord():
             return InspectionState.ENDED
         case LockState.HELD | LockState.UNKNOWN, _:
@@ -1191,14 +1216,8 @@ class LiveRegistry:
         return survey((self._store.observe(instance_id) for instance_id in self._store.ids()), now)
 
     def find(self, instance_id: str) -> LiveInstanceRecord | None:
-        """Return the record of a live server, else ``None``."""
-        observation = self._store.observe(instance_id)
-        live = judge(observation, self._clock.now()) is Verdict.LIVE
-        return (
-            observation.record
-            if live and isinstance(observation.record, LiveInstanceRecord)
-            else None
-        )
+        """Return the record of a server ``listed_live`` reports running, else ``None``."""
+        return listed_live(self._store.observe(instance_id), self._clock.now())
 
     @contextmanager
     def register(self, instance_id: str) -> Iterator[InstanceHold]:
@@ -1215,8 +1234,9 @@ class LiveRegistry:
         """Stop a live server and wait, at most ``STOP_TIMEOUT_SECONDS``, for its lock to drop.
 
         A server that has written its tombstone but still holds its lock is
-        exiting: it is given ``STOP_TIMEOUT_SECONDS`` to let go, then (or at
-        once, under ``force``) sent SIGTERM, since its control socket no longer
+        exiting: within ``EXIT_GRACE_SECONDS`` of its tombstone it is given
+        ``STOP_TIMEOUT_SECONDS`` to let go, then (or at once, under ``force``, or
+        once past the grace) sent SIGTERM, since its control socket no longer
         serves. A live server is first asked over its control socket, which stops the run
         at its next safe boundary on every platform. Only a server that does
         not acknowledge (wedged, or still binding), or a ``force`` stop, is
@@ -1225,12 +1245,20 @@ class LiveRegistry:
         """
         observation = self._store.observe(instance_id)
         record = observation.record
-        verdict = judge(observation, self._clock.now())
+        now = self._clock.now()
+        verdict = judge(observation, now)
         if verdict not in {Verdict.LIVE, Verdict.EXITING} or not isinstance(
             record, LiveInstanceRecord
         ):
             return InstanceStopResult(id=instance_id, outcome=StopOutcome.NOT_RUNNING)
-        if verdict is Verdict.EXITING and not force and self._await_release(instance_id, effects):
+        # Only a holder still within its exit grace may yet let go by itself; one
+        # past it is wedged, and waiting longer would not change that.
+        if (
+            verdict is Verdict.EXITING
+            and not force
+            and exited_in_grace(record, now)
+            and self._await_release(instance_id, effects)
+        ):
             # It wrote its tombstone and let go: it stopped by itself.
             return InstanceStopResult(id=instance_id, outcome=StopOutcome.STOPPED)
         if (

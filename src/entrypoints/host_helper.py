@@ -44,6 +44,7 @@ from vs_sim.api import (
     PidfdProcessSignaller,
     SubprocessLauncher,
     SubprocessProbe,
+    SystemClock,
     UnixNetwork,
 )
 
@@ -62,12 +63,15 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
     network = UnixNetwork()
     root = instance_root(environ, uid)
     store = FileInstanceStore(root)
+    # Records carry epoch times, so they age on the epoch clock, not ``threads``' monotonic one.
+    epoch = SystemClock()
     return HelperHost(
-        registry=LiveRegistry(store, threads),
+        registry=LiveRegistry(store, epoch),
         inspector=InstanceInspector(
             store,
             FileInstanceLogs(root),
             FileInstanceMetadataStore(root),
+            epoch,
         ),
         stop_effects=StopEffects(
             requester=ControlSocketStopRequester(network),

@@ -465,6 +465,7 @@ def _run(
             store,
             logs if logs is not None else FakeInstanceLogs(),
             metadata if metadata is not None else FakeInstanceMetadataStore(),
+            ManualClock(),
         ),
         # Nothing listens on the simulated network, so every stop falls back
         # to the signal path, as it does for a server that does not answer.
@@ -701,7 +702,9 @@ def test_resolved_project_replaces_the_launch_directory_before_listening(tmp_pat
         publisher.resolved(project_root=project, task="latency")
         publisher.listening()
 
-        inspection = InstanceInspector(store, FakeInstanceLogs(), metadata).inspect(INSTANCE)
+        inspection = InstanceInspector(store, FakeInstanceLogs(), metadata, ManualClock()).inspect(
+            INSTANCE
+        )
         assert inspection.state.value == "live"
         assert inspection.record is not None
         assert inspection.metadata is not None
@@ -816,6 +819,7 @@ def test_detached_start_retains_resolved_identity_for_later_inspection(
         FileInstanceStore(root),
         FileInstanceLogs(root),
         FileInstanceMetadataStore(root),
+        ManualClock(),
     ).inspect(INSTANCE)
     assert inspection.state.value == "ended"
     assert inspection.record is None

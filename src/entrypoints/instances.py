@@ -38,7 +38,7 @@ from server.registry import (
     instance_root,
     parse_instance_id,
 )
-from vs_sim.api import OsThreads, PidfdProcessSignaller, UnixNetwork
+from vs_sim.api import OsThreads, PidfdProcessSignaller, SystemClock, UnixNetwork
 
 
 def _instance_id(value: str) -> str:
@@ -194,14 +194,17 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"{exc}\n")
         return 1
     store = FileInstanceStore(root)
+    # Records carry epoch times, so they age on the epoch clock, not ``threads``' monotonic one.
+    epoch = SystemClock()
     try:
         code, output = run(
             sys.argv[1:] if argv is None else argv,
-            registry=LiveRegistry(store, threads),
+            registry=LiveRegistry(store, epoch),
             inspector=InstanceInspector(
                 store,
                 FileInstanceLogs(root),
                 FileInstanceMetadataStore(root),
+                epoch,
             ),
             effects=StopEffects(
                 requester=ControlSocketStopRequester(UnixNetwork()),

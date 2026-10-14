@@ -16,13 +16,18 @@ from server.host_api import (
     InstanceList,
     InstancesListReply,
     InstancesListRequest,
+    InstanceStatus,
+    LiveInstanceRecord,
     PathsCompleteReply,
     PathsCompleteRequest,
+    RunPhase,
+    RunStatus,
     RunStopReply,
     RunStopRequest,
     StopOutcome,
 )
 from server.host_helper_requests import answer
+from server.registry import FileInstanceStore, instance_root
 from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
@@ -55,3 +60,44 @@ def test_an_unsafe_registry_root_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(PermissionError):
         real_host({"XDG_RUNTIME_DIR": str(runtime)}, os.getuid(), SimThreads())
+
+
+# 2001-09-09, as an epoch time: days old on the epoch clock records are stamped
+# with, but far in the future of any monotonic clock (seconds since boot).
+_OLD_EPOCH = 1_000_000_000.0
+
+
+def test_the_real_host_ages_tombstones_on_the_epoch_clock(tmp_path: Path) -> None:
+    """A tombstone days old is pruned by the next listing.
+
+    The real host once aged records on its threads' monotonic clock. Records are
+    stamped with epoch times, so every tombstone looked younger than its
+    retention and stayed listed for ever, and a holder wedged after its
+    tombstone never outlived its exit grace.
+    """
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    store = FileInstanceStore(instance_root({"XDG_RUNTIME_DIR": str(runtime)}, os.getuid()))
+    hold = store.hold("0123456789ab")
+    hold.publish(
+        LiveInstanceRecord(
+            id="0123456789ab",
+            status=InstanceStatus.SERVING,
+            phase=RunPhase(status=RunStatus.STOPPED),
+            socket_path=str(runtime / "control.sock"),
+            log_path=str(runtime / "server.log"),
+            project_root=str(tmp_path),
+            run_id="run-1",
+            pid=4242,
+            hostname="node",
+            vibesys_version="0+test",
+            started_at=_OLD_EPOCH - 60,
+            ended_at=_OLD_EPOCH,
+        )
+    )
+    hold.release()
+    host = real_host({"XDG_RUNTIME_DIR": str(runtime)}, os.getuid(), SimThreads())
+
+    host.registry.list()
+
+    assert store.ids() == ()

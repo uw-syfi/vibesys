@@ -298,9 +298,9 @@ def test_inspection_loads_diagnostics_only_when_explicitly_requested() -> None:
             del instance_id
             raise AssertionError
 
-    inspection = InstanceInspector(store, RefusingLogs(), FakeInstanceMetadataStore()).inspect(
-        IDS[0]
-    )
+    inspection = InstanceInspector(
+        store, RefusingLogs(), FakeInstanceMetadataStore(), CLOCK
+    ).inspect(IDS[0])
 
     assert inspection.state is InspectionState.LIVE
     assert inspection.record == _record(IDS[0])
@@ -324,7 +324,7 @@ def test_inspection_observes_the_record_after_its_published_metadata() -> None:
     snapshots = PublishingMetadataStore()
     snapshots.publish(metadata)
 
-    inspection = InstanceInspector(store, FakeInstanceLogs(), snapshots).inspect(IDS[0])
+    inspection = InstanceInspector(store, FakeInstanceLogs(), snapshots, CLOCK).inspect(IDS[0])
 
     assert inspection.state is InspectionState.LIVE
     assert inspection.record == authoritative
@@ -343,7 +343,7 @@ def test_inspection_reports_ended_but_retains_metadata_when_the_run_ends_during_
             hold.release()
             return AvailableLogTail(text="last line\n", truncated=False)
 
-    inspection = InstanceInspector(store, EndingLogs(), FakeInstanceMetadataStore()).inspect(
+    inspection = InstanceInspector(store, EndingLogs(), FakeInstanceMetadataStore(), CLOCK).inspect(
         IDS[0], include_log=True
     )
 
@@ -358,9 +358,9 @@ def test_inspection_does_not_trust_a_record_when_its_lock_is_unverified() -> Non
     hold.publish(_record(IDS[0]))
     store.entries[IDS[0]].lock = LockState.UNKNOWN
 
-    inspection = InstanceInspector(store, FakeInstanceLogs(), FakeInstanceMetadataStore()).inspect(
-        IDS[0]
-    )
+    inspection = InstanceInspector(
+        store, FakeInstanceLogs(), FakeInstanceMetadataStore(), CLOCK
+    ).inspect(IDS[0])
 
     assert inspection.state is InspectionState.UNVERIFIED
     assert inspection.record is None
@@ -370,9 +370,9 @@ def test_ended_inspection_loads_the_retained_snapshot_without_a_live_record() ->
     metadata = FakeInstanceMetadataStore()
     metadata.publish(_inspection_metadata())
 
-    inspection = InstanceInspector(FakeInstanceStore(), FakeInstanceLogs(), metadata).inspect(
-        IDS[0]
-    )
+    inspection = InstanceInspector(
+        FakeInstanceStore(), FakeInstanceLogs(), metadata, CLOCK
+    ).inspect(IDS[0])
 
     assert inspection.state is InspectionState.ENDED
     assert inspection.record is None
@@ -931,7 +931,7 @@ def test_a_server_that_ends_between_the_lock_probe_and_the_record_read_is_not_li
             assert registry.find(IDS[0]) is None
         case _:
             inspection = InstanceInspector(
-                store, FakeInstanceLogs(), FakeInstanceMetadataStore()
+                store, FakeInstanceLogs(), FakeInstanceMetadataStore(), CLOCK
             ).inspect(IDS[0])
             assert inspection.state is InspectionState.ENDED
             assert inspection.record is None
@@ -1216,7 +1216,8 @@ def test_stop_signals_a_server_wedged_after_its_tombstone(
     """A holder that wrote its tombstone but never let go is still a process to stop.
 
     Its control socket no longer serves, so ``stop`` waits out the stop bound
-    for it to let go by itself, then signals it; ``force`` signals at once.
+    for it to let go by itself, then signals it; ``force``, or a tombstone past
+    the exit grace, signals at once.
     Treating it as not running left no way to end it through the tool.
     """
     store = FakeInstanceStore()
@@ -1233,7 +1234,8 @@ def test_stop_signals_a_server_wedged_after_its_tombstone(
     assert result.outcome is StopOutcome.STOPPED
     assert result.route is StopRoute.SIGNAL
     assert signaller.signalled == [4242]
-    if force:
+    if force or tombstone_age >= EXIT_GRACE_SECONDS:
+        # Forced, or past the exit grace: a wedged holder is signalled at once.
         assert clock.now() == 0.0
     else:
         assert clock.now() >= STOP_TIMEOUT_SECONDS
@@ -1273,3 +1275,42 @@ def test_a_holder_past_the_exit_grace_lists_as_live_again(*, age: float, listed_
 
     assert [record.id for record in listing.instances] == ([IDS[0]] if listed_live else [])
     assert [record.id for record in listing.ended] == ([] if listed_live else [IDS[0]])
+
+
+@pytest.mark.parametrize(
+    "age",
+    [0.0, EXIT_GRACE_SECONDS - 0.001, EXIT_GRACE_SECONDS, 3_600.0, TOMBSTONE_RETENTION_SECONDS * 2],
+)
+def test_every_reader_agrees_whether_a_holder_with_its_tombstone_is_running(age: float) -> None:
+    """A listing, ``find`` and an inspection agree, and ``stop`` waits only within the grace.
+
+    A holder still holding its lock ``EXIT_GRACE_SECONDS`` after its tombstone
+    is wedged in its exit and lists as running. ``find`` (what attach uses) and
+    the inspector once reported it not running at any age, and ``stop`` waited
+    out ``STOP_TIMEOUT_SECONDS`` for it to let go even when its tombstone was
+    hours old.
+    """
+    store = FakeInstanceStore()
+    hold = store.hold(IDS[0])
+    hold.publish(_ended(IDS[0], ended_at=0.0))
+    clock = ManualClock(age)
+    registry = LiveRegistry(store, clock)
+    running = age >= EXIT_GRACE_SECONDS
+
+    listed = [record.id for record in registry.list().instances]
+    found = registry.find(IDS[0])
+    inspection = InstanceInspector(
+        store, FakeInstanceLogs(), FakeInstanceMetadataStore(), clock
+    ).inspect(IDS[0])
+
+    assert (listed == [IDS[0]]) is running
+    assert (found is not None) is running
+    assert (inspection.state is InspectionState.LIVE) is running
+
+    signaller = _ExitingSignaller(hold.release)
+    waits = ManualClock()
+    result = registry.stop(
+        IDS[0], StopEffects(_UNANSWERED, signaller, waits, waits.advance), force=False
+    )
+    assert result.outcome is StopOutcome.STOPPED
+    assert (waits.now() >= STOP_TIMEOUT_SECONDS) is not running

@@ -160,6 +160,7 @@ def fake_host(
             instance_store,
             FakeInstanceLogs(),
             FakeInstanceMetadataStore(),
+            threads,
         ),
         stop_effects=StopEffects(
             requester=ControlSocketStopRequester(network),
