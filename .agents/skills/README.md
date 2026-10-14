@@ -19,6 +19,9 @@ Engineering judgment that holds in any well-run codebase.
 
 How to make one kind of change in this repository.
 
+- [change-container-images](change-container-images/SKILL.md): change the
+  agent container image or a Dev Container Feature (toolchains, container
+  runtime, pip extras) and the mechanism that builds it.
 - [change-module-graph](change-module-graph/SKILL.md): add, split or connect
   modules, libraries and packages, and add I/O interfaces and implementations.
 - [enforce-rules](enforce-rules/SKILL.md): enforce a rule with the strongest
