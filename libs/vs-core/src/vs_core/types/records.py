@@ -357,10 +357,11 @@ class RecoveryBarrier(Value):
 class RecordsState(Value):
     """Records state lifecycle contract."""
 
-    # The index from request identity to positions in ``records``, built on the first lookup.
-    # A state never changes, so neither does its index; a copy is a new state and builds its
-    # own. Like `Value`'s slots it stays out of equality, copies and serialization.
-    __slots__ = ("_positions",)
+    # The indexes from request identity, and from the resource a request names, to positions
+    # in ``records``, each built on its first lookup. A state never changes, so neither do its
+    # indexes; a copy is a new state and builds its own. Like `Value`'s slots they stay out of
+    # equality, copies and serialization.
+    __slots__ = ("_by_resource", "_positions")
 
     records: tuple[RequestRecord, ...] = ()
     children: tuple[ChildLease, ...] = ()
@@ -380,6 +381,22 @@ class RecordsState(Value):
                 index[record.request_id] = (*index.get(record.request_id, ()), position)
             object.__setattr__(self, "_positions", index)
         return () if request_id is None else index.get(request_id, ())
+
+    def about_resource(self, resource_id: ResourceId) -> tuple[RequestRecord, ...]:
+        """The records whose request names ``resource_id`` (a poll, inspection or cancel of it).
+
+        In ledger order. A lookup costs a dictionary read instead of a scan of every record.
+        """
+        try:
+            index: dict[ResourceId, tuple[int, ...]] = object.__getattribute__(self, "_by_resource")
+        except AttributeError:
+            index = {}
+            for position, record in enumerate(self.records):
+                named = getattr(record.request, "resource_id", None)
+                if named is not None:
+                    index[named] = (*index.get(named, ()), position)
+            object.__setattr__(self, "_by_resource", index)
+        return tuple(self.records[position] for position in index.get(resource_id, ()))
 
     def find(self, request_id: RequestId | None) -> tuple[RequestRecord, ...]:
         """The records of ``request_id``, in ledger order (see `positions`)."""

@@ -1697,8 +1697,7 @@ def _cancelling_scope(context: EvaluationContext) -> Scope | None:
 
 def _cancel_requested(context: EvaluationContext, resource: ResourceId) -> bool:
     return any(
-        isinstance(row.request, CancelOwnedJob) and row.request.resource_id == resource
-        for row in context.records.records
+        isinstance(row.request, CancelOwnedJob) for row in context.records.about_resource(resource)
     )
 
 
@@ -1713,17 +1712,18 @@ def _known(job: OwnedJob | RegisteredOwnedJob) -> bool:
 
 def _inspected(context: EvaluationContext, resource: ResourceId) -> bool:
     return any(
-        isinstance(row.request, InspectOwnedJob) and row.request.resource_id == resource
-        for row in context.records.records
+        isinstance(row.request, InspectOwnedJob) for row in context.records.about_resource(resource)
     )
 
 
 def _termination_inspected(context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob) -> bool:
     """Whether core already asked to end *job* and, finding it unconfirmed, inspected it."""
+    if job.resource_id is None:
+        return False
     prefix = f"{_step_prefix(job, _TERMINATION_INSPECT)}:"
     return any(
         isinstance(row.request, InspectOwnedJob) and row.request_id.root.startswith(prefix)
-        for row in context.records.records
+        for row in context.records.about_resource(job.resource_id)
     )
 
 
@@ -1754,17 +1754,14 @@ def _cancel_scope_jobs(
     answers it for a job that never began exactly as for one it ended. Waiting for a
     confirmation that may never come would hold the run closing until its budget ran out.
     """
+    closing = _closing_scopes(context)
     requests = tuple(
         request
         for job in (*state.jobs, *state.registered_jobs)
         if job.resource_id is not None
         and not job.terminal
         and not _cancel_requested(context, job.resource_id)
-        and (
-            job.scope == scope
-            or job.scope in _closing_scopes(context)
-            or _termination_inspected(context, job)
-        )
+        and (job.scope == scope or job.scope in closing or _termination_inspected(context, job))
         for request in _terminate(
             state, context, job.resource_id, cancel_unconfirmed=_inspected(context, job.resource_id)
         ).requests
