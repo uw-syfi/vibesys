@@ -73,6 +73,9 @@ from vs_sim.api.testing import HANG_GUARD_S, FakePipedProcessLauncher, SimNetwor
 
 from .skypilot_world import MemoryTransport
 
+# The scripted bridge runs on a thread: an exception there must fail the test, not warn.
+pytestmark = pytest.mark.filterwarnings("error::pytest.PytestUnhandledThreadExceptionWarning")
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 

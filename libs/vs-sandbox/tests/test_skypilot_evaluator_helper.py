@@ -46,6 +46,9 @@ from vs_sandbox.skypilot_evaluator import (  # test-isolation: the remote helper
 
 from .skypilot_world import MemoryTransport, ScriptedBridge
 
+# The scripted bridge runs on a thread: an exception there must fail the test, not warn.
+pytestmark = pytest.mark.filterwarnings("error::pytest.PytestUnhandledThreadExceptionWarning")
+
 if TYPE_CHECKING:
     from vs_sandbox.api.skypilot import ResponseFrame
 

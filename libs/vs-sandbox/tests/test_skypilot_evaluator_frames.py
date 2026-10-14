@@ -30,6 +30,9 @@ from vs_sandbox.skypilot_evaluator import (  # test-isolation: the remote helper
 
 from .skypilot_world import MemoryTransport, ScriptedBridge
 
+# The scripted bridge runs on a thread: an exception there must fail the test, not warn.
+pytestmark = pytest.mark.filterwarnings("error::pytest.PytestUnhandledThreadExceptionWarning")
+
 _MAX_FRAME_BYTES = 1024 * 1024
 _REMOTE_ARTIFACT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # lint-waiver: LW-010213 [S108]; the bridge protocol requires this fixed remote artifact path.
 
