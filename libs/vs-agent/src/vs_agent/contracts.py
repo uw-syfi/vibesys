@@ -440,6 +440,15 @@ def session_spec_fingerprint(spec: AgentSessionSpec) -> str:
     return hashlib.sha256(repr(spec).encode("utf-8")).hexdigest()
 
 
+DEFAULT_TURN_TIMEOUT_S = 6 * 60 * 60
+"""The bound on a turn when neither the turn nor its session names one.
+
+A hang guard, not a budget: no provider turn should run six hours, and a run
+with no ``cli_timeout`` and no ``max_run_seconds`` would otherwise wait for ever
+on a provider process that stopped answering.
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class AgentTurnRequest:
     """Context added to an existing conversation for one agent turn."""
@@ -448,6 +457,7 @@ class AgentTurnRequest:
     instructions: str = ""
     output_schema: type[BaseModel] | None = None
     timeout: timedelta | None = None
+    """This turn's bound; ``None`` takes the session's, then ``DEFAULT_TURN_TIMEOUT_S``."""
     invocation_id: str | None = None
     label: str | None = None
     expected_provider_session_id: str | None = None

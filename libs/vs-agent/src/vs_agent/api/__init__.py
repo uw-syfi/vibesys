@@ -30,6 +30,7 @@ from vs_agent.container_python import (
     containerize_server,
 )
 from vs_agent.contracts import (
+    DEFAULT_TURN_TIMEOUT_S,
     AgentCapabilities,
     AgentClientProtocol,
     AgentEvent,
@@ -160,6 +161,7 @@ __all__ = [
     "CONTAINER_PYTHON_VERSION",
     "CONTAINER_SERVER_PACKAGES",
     "DEFAULT_CLI_PROVIDER",
+    "DEFAULT_TURN_TIMEOUT_S",
     "DOCKER_PROVIDER_ENV",
     "MAX_REPLY_BYTES",
     "MAX_WHITESPACE_RUN",

@@ -32,6 +32,7 @@ from agentshim.testing import (
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent import session_launch as subject
 from vs_agent.api import (
+    DEFAULT_TURN_TIMEOUT_S,
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
@@ -42,7 +43,7 @@ from vs_agent.api import (
 )
 from vs_sandbox.api.testing import FakeDockerConfinement
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import start_thread, wait_until_started_sync
+from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_until_started_sync
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -278,3 +279,21 @@ def test_a_hung_turn_ends_in_the_typed_timeout_the_run_understands(
         session.run_turn(AgentTurnRequest(message="work", timeout=timedelta(seconds=5)))
 
     assert raised.value.timeout_seconds == 5.0
+
+
+@pytest.mark.parametrize("provider", STREAM_PROVIDERS)
+def test_a_hung_turn_with_no_bound_anywhere_still_ends_at_the_default(
+    tmp_path: Path, provider: str
+) -> None:
+    """Neither the turn nor the launcher names a timeout: the turn ends at the hang guard."""
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
+    executor = FakeExecutor([], peers=_hanging(provider))
+    session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
+
+    def turn() -> object:
+        return session.run_turn(AgentTurnRequest(message="work"))
+
+    with pytest.raises(AgentTurnTimeoutError) as raised:
+        start_thread(turn).result(timeout=HANG_GUARD_S)
+
+    assert raised.value.timeout_seconds == DEFAULT_TURN_TIMEOUT_S

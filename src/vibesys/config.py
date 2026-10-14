@@ -226,7 +226,8 @@ class AgentCfg(_Strict):
         default=None,
         gt=0,
         description=(
-            "Per-invocation timeout for the CLI agent, in seconds. None → the runner default."
+            "Per-invocation timeout for the CLI agent, in seconds. None → the agent "
+            "runner's hang guard, vs_agent's DEFAULT_TURN_TIMEOUT_S (six hours)."
         ),
     )
     env_passthrough: tuple[str, ...] = Field(

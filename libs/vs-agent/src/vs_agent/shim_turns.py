@@ -18,7 +18,12 @@ import agentshim
 
 from vs_agent import shim_translation
 from vs_agent.cli_common import build_schema_hint
-from vs_agent.contracts import AgentOutputSchemaError, AgentTurnResult, SteerOutcome
+from vs_agent.contracts import (
+    DEFAULT_TURN_TIMEOUT_S,
+    AgentOutputSchemaError,
+    AgentTurnResult,
+    SteerOutcome,
+)
 from vs_agent.reply_limits import ReplyGuard, reply_breach
 from vs_agent.session_errors import SessionResumeError
 from vs_sim.api import OsThreads
@@ -360,7 +365,7 @@ def _run(
 def _turn_request(live: LaunchedSession, request: AgentTurnRequest) -> agentshim.TurnRequest:
     """Translate one VibeSys turn into the library's request."""
     schema, schema_hint = _output_schema(live, request.output_schema)
-    timeout = live.timeout
+    timeout = DEFAULT_TURN_TIMEOUT_S if live.timeout is None else live.timeout
     if request.timeout is not None:
         timeout = max(1, int(request.timeout.total_seconds()))
     return agentshim.TurnRequest(
