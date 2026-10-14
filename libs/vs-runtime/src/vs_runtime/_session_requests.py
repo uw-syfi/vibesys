@@ -519,18 +519,23 @@ class RuntimeSessionRequests:
     def _result(
         self, request: RequestBase, context: ExecutionContext, facts: _Facts
     ) -> ExecutionResult:
-        observation = self._observations.observe(
-            ObservationSubject.of(request),
-            ObservationFacts(
+        released = facts.settles and isinstance(request, DispatchTurn) and facts.terminal
+        if released and not facts.accepted and facts.resource_id is None:
+            # A turn rejected without naming its session was refused while resolving it, before
+            # any dispatch record; the refusal is sealed, so the turn never dispatches.
+            observed = ObservationFacts.refused(facts.diagnostic)
+        else:
+            observed = ObservationFacts(
                 status=facts.status,
                 terminal=facts.terminal,
                 accepted=facts.accepted,
-                released=facts.settles and isinstance(request, DispatchTurn) and facts.terminal,
+                released=released,
                 children_complete=facts.settles and facts.terminal,
                 resource_id=facts.resource_id,
                 diagnostic=facts.diagnostic,
-            ),
-            observed_at=context.now_at,
+            )
+        observation = self._observations.observe(
+            ObservationSubject.of(request), observed, observed_at=context.now_at
         )
         events: tuple[OwnerEvent, ...] = ()
         if isinstance(request, EnsureSession):

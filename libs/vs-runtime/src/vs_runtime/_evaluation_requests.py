@@ -409,17 +409,12 @@ class MeasurementRequests:
         *,
         failure: MeasurementFailure | None = None,
     ) -> ExecutionResult:
-        """Definite non-acceptance: nothing is owned, so nothing is left to release."""
+        """A refusal decided before the request created anything: it holds nothing."""
         observed = RequestObserved(
-            observation=self._own(
-                request,
-                context,
-                ObservationStatus.REJECTED,
-                accepted=False,
-                terminal=True,
-                released=True,
-                manifest=True,
-                diagnostic=reason,
+            observation=self._observations.observe(
+                ObservationSubject.of(request),
+                ObservationFacts.refused(reason),
+                observed_at=context.now_at,
             ),
             measurement_failure=failure,
         )

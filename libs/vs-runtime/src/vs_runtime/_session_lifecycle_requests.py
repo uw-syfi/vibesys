@@ -560,14 +560,19 @@ class SessionLifecycleRequests:
             return self._result(request, context, _unknown(outcome.detail))
         seen = outcome.observation.observation
         event = next((e for e in outcome.owner_events if isinstance(e, TurnObserved)), None)
-        facts = ObservationFacts(
-            status=seen.status,
-            terminal=seen.terminal,
-            accepted=seen.accepted,
-            released=seen.released,
-            children_complete=seen.children_complete,
-            resource_id=seen.resource_id,
-            diagnostic=seen.diagnostic,
+        facts = (
+            # The nested dispatch refused itself, sealed under its identity: so does the resume.
+            ObservationFacts.refused(seen.diagnostic)
+            if seen.terminal and seen.released and not seen.accepted and seen.resource_id is None
+            else ObservationFacts(
+                status=seen.status,
+                terminal=seen.terminal,
+                accepted=seen.accepted,
+                released=seen.released,
+                children_complete=seen.children_complete,
+                resource_id=seen.resource_id,
+                diagnostic=seen.diagnostic,
+            )
         )
         return self._result(request, context, facts, turn=event)
 

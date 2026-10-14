@@ -128,6 +128,8 @@ class _Facts:
     revision: RevisionRef | None = None
     diagnostic: str = ""
     setup_failure: SetupFailureKind = SetupFailureKind.UNKNOWN
+    holding_nothing: ObservationFacts | None = None
+    """The facts as ``refused`` or ``never_held`` built them, when the answer holds nothing."""
 
 
 def _conflict() -> _Facts:
@@ -150,24 +152,22 @@ def _rejected(diagnostic: str) -> _Facts:
     Like ``ObservationFacts.never_held`` it names no resource, so core never reads it as the
     release of a workspace that the attempt (or another one) still holds.
     """
-    return _Facts(
-        ObservationStatus.REJECTED,
-        released=True,
-        children_complete=True,
-        diagnostic=diagnostic,
-        setup_failure=SetupFailureKind.PERMANENT,
-    )
+    return _holding_nothing(ObservationFacts.refused(diagnostic))
 
 
 def _never_held(proof: NothingHeld, diagnostic: str) -> _Facts:
     """The discard's answer that the attempt holds no workspace, now or later (a closed fence)."""
-    facts = ObservationFacts.never_held(proof, diagnostic)
+    return _holding_nothing(ObservationFacts.never_held(proof, diagnostic))
+
+
+def _holding_nothing(facts: ObservationFacts) -> _Facts:
     return _Facts(
         facts.status,
         released=facts.released,
         children_complete=facts.children_complete,
         diagnostic=facts.diagnostic,
         setup_failure=SetupFailureKind.PERMANENT,
+        holding_nothing=facts,
     )
 
 
@@ -279,19 +279,18 @@ class RuntimeWorkspaceRequests:
     ) -> ExecutionResult:
         request_id = request.request_id
         assert request_id is not None  # noqa: S101  # lint-waiver: LW-402301 [S101]; execute() rejects a missing identity before translation.
+        observed = facts.holding_nothing or ObservationFacts(
+            status=facts.status,
+            terminal=facts.terminal,
+            accepted=facts.accepted,
+            released=facts.released,
+            children_complete=facts.children_complete,
+            resource_id=facts.resource_id,
+            diagnostic=facts.diagnostic,
+            revision=facts.revision,
+        )
         observation = self._observations.observe(
-            ObservationSubject.of(request),
-            ObservationFacts(
-                status=facts.status,
-                terminal=facts.terminal,
-                accepted=facts.accepted,
-                released=facts.released,
-                children_complete=facts.children_complete,
-                resource_id=facts.resource_id,
-                diagnostic=facts.diagnostic,
-                revision=facts.revision,
-            ),
-            observed_at=context.now_at,
+            ObservationSubject.of(request), observed, observed_at=context.now_at
         )
         events: tuple[OwnerEvent, ...] = ()
         match request:

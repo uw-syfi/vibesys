@@ -23,7 +23,7 @@ sequence cannot be chosen without it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from vs_core.api import (
@@ -57,9 +57,20 @@ PAYLOAD_CONFLICT = "same request identity with another payload"
 """The diagnostic of every executor's refusal of a reused identity (``payload_conflict``)."""
 
 
+_VOUCHED = object()
+"""Marks facts built by a named constructor that states why the request holds nothing."""
+
+
 @dataclass(frozen=True)
 class ObservationFacts:
-    """What an executor learned about one request, without any identity fields."""
+    """What an executor learned about one request, without any identity fields.
+
+    Facts that hold nothing (a terminal release that accepts nothing and names no resource)
+    end core's owning record, so they come only from a constructor that states why the
+    request holds nothing: ``never_held`` (a closed effect fence proves it), ``refused`` (a
+    sealed self-refusal) or ``not_begun`` (an inspection; core resends the request). Built
+    any other way they raise ``TypeError``.
+    """
 
     status: ObservationStatus
     terminal: bool = True
@@ -71,6 +82,17 @@ class ObservationFacts:
     diagnostic: str = ""
     revision: RevisionRef | None = None
     """The revision a snapshot or retain produced; a derived event may carry only this one."""
+    _vouch: object = field(default=None, repr=False, compare=False, kw_only=True)
+
+    def __post_init__(self) -> None:
+        if self.holds_nothing and self._vouch is not _VOUCHED:
+            message = "facts that hold nothing come only from never_held, refused or not_begun"
+            raise TypeError(message)
+
+    @property
+    def holds_nothing(self) -> bool:
+        """A terminal answer that releases what it names while accepting and naming nothing."""
+        return self.terminal and self.released and not self.accepted and self.resource_id is None
 
     @classmethod
     def payload_conflict(cls) -> ObservationFacts:
@@ -121,6 +143,7 @@ class ObservationFacts:
             released=True,
             children_complete=True,
             diagnostic=diagnostic,
+            _vouch=_VOUCHED,
         )
 
 

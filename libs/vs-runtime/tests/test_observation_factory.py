@@ -19,6 +19,7 @@ from vs_core.api import (
     DiscardWorkspace,
     ObservationStatus,
     RequestId,
+    ResourceId,
     Scope,
 )
 from vs_core.api.proofs import Proven, fresh_observation
@@ -152,3 +153,38 @@ def test_an_unreadable_row_is_a_typed_error_not_a_reused_sequence(tmp_path: Path
     namespace.write_bytes(f"observations/{name}", b"not json")
     with pytest.raises(ObservationLedgerCorruptError):
         factory.observe(ObservationSubject.of(request), _FACTS[2], observed_at=2.0)
+
+
+@given(
+    status=st.sampled_from(ObservationStatus),
+    terminal=st.booleans(),
+    accepted=st.booleans(),
+    released=st.booleans(),
+    named=st.booleans(),
+)
+@settings(max_examples=examples(pr=40, nightly=200), deadline=None)
+def test_only_a_named_constructor_builds_facts_that_hold_nothing(
+    status: ObservationStatus, *, terminal: bool, accepted: bool, released: bool, named: bool
+) -> None:
+    """A terminal release that accepts and names nothing ends core's owning record.
+
+    So it is built only by a constructor that says why nothing is held; any other facts
+    construct as given.
+    """
+
+    def build() -> ObservationFacts:
+        return ObservationFacts(
+            status,
+            terminal=terminal,
+            accepted=accepted,
+            released=released,
+            resource_id=ResourceId(root="r1") if named else None,
+        )
+
+    if terminal and released and not accepted and not named:
+        with pytest.raises(TypeError, match="never_held, refused or not_begun"):
+            build()
+    else:
+        assert not build().holds_nothing
+    for vouched in (ObservationFacts.refused("x"), ObservationFacts.not_begun("x")):
+        assert vouched.holds_nothing

@@ -135,19 +135,21 @@ class RegisteredOperationRequests:
         """
         terminal = own_effect and status is not ObservationStatus.UNKNOWN
         accepted = terminal and status in (ObservationStatus.SUCCEEDED, ObservationStatus.FAILED)
-        never_held = terminal and status is ObservationStatus.REJECTED and resource_id is None
-        return self._observations.observe(
-            ObservationSubject.of(request, request_id=subject),
-            ObservationFacts(
+        if terminal and status is ObservationStatus.REJECTED and resource_id is None:
+            # Each of the three is sealed under the subject's own identity, so it never acts.
+            facts = ObservationFacts.refused(detail)
+        else:
+            facts = ObservationFacts(
                 status=status,
                 terminal=terminal,
                 accepted=accepted,
-                released=accepted or never_held,
-                children_complete=accepted or never_held,
+                released=accepted,
+                children_complete=accepted,
                 resource_id=resource_id,
                 diagnostic=detail,
-            ),
-            observed_at=context.now_at,
+            )
+        return self._observations.observe(
+            ObservationSubject.of(request, request_id=subject), facts, observed_at=context.now_at
         )
 
     def _result(
