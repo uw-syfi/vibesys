@@ -16,7 +16,7 @@ from vs_runtime._trusted_evaluation import (
     create_trusted_evaluation_executor,
 )
 from vs_runtime._workspace_files import file_fingerprint
-from vs_runtime._workspace_receipts import BaselineEntry, RootBaselineDrift
+from vs_runtime._workspace_receipts import BaselineEntry, BaselineEntryKind, RootBaselineDrift
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
 from vs_sandbox.api import HostResource, HostResourceAccess
 
@@ -355,23 +355,28 @@ class RuntimeWorkspaceResource:
     def baseline_drift(self, entries: tuple[BaselineEntry, ...]) -> RootBaselineDrift:
         """Compare the tree now to *entries*, a recorded pre-run baseline.
 
-        A directory entry is checked only for removal. A file entry is removed if it is no
-        longer a regular file, modified if its content fingerprint no longer matches. Any
-        drift is reported through this resource's event sink.
+        A directory entry is removed if no directory is there now; an unfingerprinted
+        entry (see ``BaselineEntryKind``) is removed if nothing is there now. A file entry
+        is removed if it is no longer a contained regular file, modified if its content
+        fingerprint no longer matches. Any drift is reported through this resource's
+        event sink.
         """
         modified: list[str] = []
         removed: list[str] = []
         for entry in entries:
             target = self.path / entry.path
-            if entry.fingerprint is None:
-                if not target.is_dir():
-                    removed.append(entry.path)
-                continue
-            fingerprint = file_fingerprint(self.path, entry.path)
-            if fingerprint is None:
+            match entry.kind:
+                case BaselineEntryKind.DIRECTORY:
+                    gone = not target.is_dir()
+                case BaselineEntryKind.UNFINGERPRINTED:
+                    gone = not target.exists(follow_symlinks=False)
+                case BaselineEntryKind.FILE:
+                    fingerprint = file_fingerprint(self.path, entry.path)
+                    gone = fingerprint is None
+                    if fingerprint is not None and fingerprint != entry.fingerprint:
+                        modified.append(entry.path)
+            if gone:
                 removed.append(entry.path)
-            elif fingerprint != entry.fingerprint:
-                modified.append(entry.path)
         drift = RootBaselineDrift(modified=tuple(modified), removed=tuple(removed))
         if not drift.is_empty:
             self._events(RootBaselineDrifted(modified=drift.modified, removed=drift.removed))

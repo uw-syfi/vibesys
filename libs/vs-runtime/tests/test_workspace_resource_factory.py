@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import closing
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -16,6 +17,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
 )
 from vs_project.api.testing import FakeGitRepositories, run_execution_record
+from vs_runtime.api.core import BaselineEntryKind
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     AgentPaths,
@@ -333,12 +335,20 @@ def test_a_baseline_never_fingerprints_a_file_outside_the_workspace(tmp_path: Pa
         events=lambda _event: None,
     )
 
-    entries = factory.root.baseline_entries(("weights.bin", "planted", "cache"))
+    os.mkfifo(root / "pipe")
+    entries = factory.root.baseline_entries(("weights.bin", "planted", "cache/", "pipe"))
 
-    fingerprints = {entry.path: entry.fingerprint for entry in entries}
-    assert fingerprints["weights.bin"] is not None
-    assert fingerprints["planted"] is None
-    assert fingerprints["cache"] is None
+    kinds = {entry.path: entry.kind for entry in entries}
+    assert kinds == {
+        "weights.bin": BaselineEntryKind.FILE,
+        "planted": BaselineEntryKind.UNFINGERPRINTED,
+        "cache/": BaselineEntryKind.DIRECTORY,
+        "pipe": BaselineEntryKind.UNFINGERPRINTED,
+    }
+    # Nothing changed yet: a path that could not be fingerprinted is not "removed".
+    assert factory.root.baseline_drift(entries).is_empty
+    (root / "pipe").unlink()
+    assert factory.root.baseline_drift(entries).removed == ("pipe",)
     (root / "weights.bin").unlink()
     (root / "weights.bin").symlink_to(outside)
     assert "weights.bin" in factory.root.baseline_drift(entries).removed

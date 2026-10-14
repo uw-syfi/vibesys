@@ -10,9 +10,9 @@ the store's ``run_once``, not this module's.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from vs_core.api import AttemptRef, RequestId, ResourceId, RevisionRef, WorkspaceMode
 
@@ -52,18 +52,47 @@ class RootRelease(StrEnum):
     """The generation never ended its hold and does not hold the root (a newer one took it)."""
 
 
+class BaselineEntryKind(StrEnum):
+    """What a baseline path held when it was recorded, and so how drift is checked."""
+
+    DIRECTORY = "directory"
+    """A path recorded with a trailing ``/``: checked only for removal."""
+    FILE = "file"
+    """A contained regular file with a content fingerprint: checked for removal and change."""
+    UNFINGERPRINTED = "unfingerprinted"
+    """Something that is not a contained regular file (a symlink, a FIFO, an unreadable
+    file): checked only for removal, as nothing at the path any more."""
+
+
 class BaselineEntry(BaseModel):
     """One path the exclusive root held before the run, with a file's content fingerprint.
 
-    ``fingerprint`` is a file's content hash, set when *path* names a file. It is ``None``
-    for a directory (a path recorded with a trailing ``/``): fingerprinting its contents
-    would need the walk PR #2011 chose not to pay for (a ``.venv`` can hold 100k files), so
-    a directory is only ever checked for removal, never for a change inside it.
+    ``fingerprint`` is a file's content hash, set when *path* names a contained regular
+    file. A directory (a path recorded with a trailing ``/``) has none: fingerprinting its
+    contents would need the walk PR #2011 chose not to pay for (a ``.venv`` can hold 100k
+    files), so a directory is only ever checked for removal, never for a change inside it.
+    Neither has anything else that could not be fingerprinted; ``kind`` tells them apart.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     path: str
     fingerprint: str | None = None
+
+    @model_validator(mode="after")
+    def _directory_has_no_fingerprint(self) -> Self:
+        if self.path.endswith("/") and self.fingerprint is not None:
+            message = f"directory baseline entry {self.path!r} must not carry a fingerprint"
+            raise ValueError(message)
+        return self
+
+    @property
+    def kind(self) -> BaselineEntryKind:
+        """What the path held when recorded."""
+        if self.path.endswith("/"):
+            return BaselineEntryKind.DIRECTORY
+        if self.fingerprint is not None:
+            return BaselineEntryKind.FILE
+        return BaselineEntryKind.UNFINGERPRINTED
 
 
 class RootBaseline(BaseModel):

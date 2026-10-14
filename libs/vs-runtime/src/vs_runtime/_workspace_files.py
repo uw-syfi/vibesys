@@ -24,7 +24,7 @@ from vs_decode.api import Unreadable, read_json
 from vs_project.api import atomic_write_bytes
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
 
 MAX_AGENT_DOCUMENT_BYTES = 1024 * 1024
@@ -150,12 +150,8 @@ def file_fingerprint(workspace: Path, relative: str) -> str | None:
     path = contained_path(workspace, relative)
     if path is None:
         return None
-    try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except OSError:
-        return None
-    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-        os.close(descriptor)
+    descriptor = _open_regular_file(path)
+    if descriptor is None:
         return None
     with os.fdopen(descriptor, "rb") as stream:
         digest = hashlib.sha256()
@@ -202,18 +198,61 @@ def hash_inputs(
                 message = f"validation input must not be a symlink: {relative}"
                 raise ValueError(message)
             total_files += 1
-            total_bytes += entry.stat().st_size
-            if total_files > max_files or total_bytes > max_bytes:
-                message = (
-                    f"validation inputs exceed the {max_files}-file/"
-                    f"{max_bytes // (1024 * 1024)}-MiB reuse-hash limit"
-                )
-                raise ValueError(message)
+            if total_files > max_files:
+                raise ValueError(_over_limit(max_files, max_bytes))
             digest.update(entry.relative_to(root).as_posix().encode())
             digest.update(b"\0")
-            digest.update(entry.read_bytes())
+            hashed = _hash_file(entry, digest.update, max_bytes - total_bytes)
+            if hashed is None:
+                raise ValueError(_over_limit(max_files, max_bytes))
+            total_bytes += hashed
             digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _open_regular_file(path: Path) -> int | None:
+    """A descriptor for the regular file at ``path``, or ``None`` if there is none.
+
+    Opened without following a last-component symlink and without blocking, and checked
+    on the descriptor, so a FIFO or symlink swapped in after a caller's check is refused.
+    """
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError:
+        return None
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        return None
+    return descriptor
+
+
+def _over_limit(max_files: int, max_bytes: int) -> str:
+    return (
+        f"validation inputs exceed the {max_files}-file/"
+        f"{max_bytes // (1024 * 1024)}-MiB reuse-hash limit"
+    )
+
+
+def _hash_file(path: Path, update: Callable[[bytes], None], budget: int) -> int | None:
+    """Feed the regular file at ``path`` to ``update``; its size, or ``None`` past ``budget``.
+
+    The size is counted from the bytes read off the open file, not from an earlier
+    ``stat``, so a file that grows after it is listed cannot pass the limit, and at most
+    ``budget + 1`` bytes are read. Raises ``ValueError`` when ``path`` cannot be opened or
+    is not a regular file once opened (a FIFO would block the read).
+    """
+    descriptor = _open_regular_file(path)
+    if descriptor is None:
+        message = f"validation input is not a readable regular file: {path.name}"
+        raise ValueError(message)
+    with os.fdopen(descriptor, "rb", buffering=0) as stream:
+        read = 0
+        while chunk := stream.read(min(_FINGERPRINT_CHUNK_BYTES, budget - read + 1)):
+            read += len(chunk)
+            if read > budget:
+                return None
+            update(chunk)
+    return read
 
 
 __all__ = [

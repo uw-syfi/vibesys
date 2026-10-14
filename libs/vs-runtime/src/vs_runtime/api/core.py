@@ -229,6 +229,7 @@ from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
     BaselineEntry,
+    BaselineEntryKind,
     RootBaseline,
     RootBaselineDrift,
     RootGrant,
@@ -267,6 +268,7 @@ __all__ = [
     "Applied",
     "AttemptBinding",
     "BaselineEntry",
+    "BaselineEntryKind",
     "BegunUnsealed",
     "BlockDiagnostic",
     "BoardTexts",

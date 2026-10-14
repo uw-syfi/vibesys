@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 from pathlib import Path
 
@@ -275,3 +276,26 @@ def test_no_workspace_file_turns_a_failing_recipe_into_a_pass(
         commands, trusted = _validate_with_planted(root / "candidate", planted)
     assert len(commands.trusted_shell_calls) == 1
     assert not trusted
+
+
+def test_a_declared_input_that_is_a_fifo_fails_the_recipe_without_blocking(
+    tmp_path: Path,
+) -> None:
+    # Reading a FIFO blocks until a writer appears, and its stat size says nothing about
+    # what a read returns: hashing must decide on the opened file, not on an earlier stat.
+    _write_recipe(tmp_path)
+    (tmp_path / "queue.py").unlink()
+    os.mkfifo(tmp_path / "queue.py")
+
+    async def exercise() -> tuple[str, FakeCommands]:
+        commands = FakeCommands()
+        run = await LocalValidator(commands, MemoryValidationPasses()).run(
+            FakeWorkspace(path=tmp_path),
+            recipe_artifact="validation/recipes.json",
+            report_location="validation/report.json",
+        )
+        return run[0].error or "", commands
+
+    error, commands = asyncio.run(exercise())
+    assert "not a readable regular file" in error
+    assert commands.trusted_shell_calls == []
