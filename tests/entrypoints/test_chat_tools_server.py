@@ -1,7 +1,7 @@
 """Direct tests for the experiment-chat read-only MCP entrypoint.
 
-Build the tool list, register it on a bare `FastMCP` via
-`vs_agent.mcp_server.register_tool`, and call tools through
+Build the tool list, serve it from a `FastMCP` built by
+`vs_mcp.api.tool_server`, and call tools through
 `FastMCP.call_tool`. We do not test the stdio JSON-RPC framing or
 `main`/`serve_stdio`; those are `mcp`/`vs_agent`'s responsibility.
 """
@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import pytest
-from mcp.server.fastmcp import FastMCP
 from tests.support.multi_search import SearchRecord
 
 from entrypoints.chat_tools_server import build_parser, build_tools
@@ -24,7 +23,7 @@ from vibesys.api.hypothesis import RoundRecord
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vs_mcp.api import register_tool
+from vs_mcp.api import tool_server
 from vs_project.api import (
     AgentRoleExecutionRecord,
     OrchestrationDescriptor,
@@ -35,6 +34,8 @@ from vs_project.api import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from mcp.server.fastmcp import FastMCP
 
     from vibesys.api.store import RunStore
     from vs_mcp.api import ToolSpec
@@ -131,10 +132,7 @@ def _seed_agent_state(project: Project, run_id: str) -> None:
 
 
 def _server(tools: tuple[ToolSpec, ...]) -> FastMCP:
-    mcp = FastMCP("vibesys-run-test")
-    for spec in tools:
-        register_tool(mcp, spec)
-    return mcp
+    return tool_server(tools, server_name="vibesys-run-test")
 
 
 async def _call(server: FastMCP, name: str, **kwargs: object) -> str:

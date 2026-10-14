@@ -5,9 +5,9 @@ share. Import everything from `vs_mcp.api`.
 
 - `ToolSpec` declares one tool: name, description, a Pydantic input schema and a
   handler.
-- `serve_stdio` and `register_tool` run a FastMCP stdio server from a list of
+- `tool_server` builds, and `serve_stdio` runs, a FastMCP stdio server from a list of
   `ToolSpec` values. The server flattens each schema so the offered arguments
-  match the model's fields.
+  match the model's fields and refuses an argument the schema does not declare.
 - `ToolServerDescriptor`, `StdioServerDescriptor` and `expose_as_tools` describe
   how a host launches such a server as a subprocess, using primitives only.
 

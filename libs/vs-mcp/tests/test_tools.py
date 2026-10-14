@@ -1,7 +1,7 @@
 """Tests for the generic subprocess-hosted MCP tool bridge.
 
 We test registration and the flattened argument schema directly through
-``register_tool`` and ``FastMCP.call_tool``/``list_tools``, the same way
+``tool_server`` and ``FastMCP.call_tool``/``list_tools``, the same way
 ``vs_issue_tracker``'s tests exercise its hand-written server. We do not call
 ``serve_stdio`` (it blocks on the stdio JSON-RPC loop, which belongs to the
 ``mcp`` package's own test suite, not ours).
@@ -11,20 +11,24 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from typing import Any, cast
+import re
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import BaseModel
 
 from vs_mcp.api import (
     StdioServerDescriptor,
     ToolSpec,
     expose_as_tools,
-    register_tool,
+    tool_server,
 )
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 
 class _EchoArgs(BaseModel):
@@ -144,36 +148,36 @@ class TestValueSemantics:
 
 
 # ---------------------------------------------------------------------------
-# register_tool: flattened schema and handler round-trip via a real FastMCP
+# tool_server: flattened schema and handler round-trip via a real FastMCP
 # ---------------------------------------------------------------------------
 
 
-class TestRegisterTool:
+class TestToolServer:
     def test_registers_the_tool_by_name(self) -> None:
-        mcp = FastMCP("test")
-        register_tool(
-            mcp,
-            ToolSpec(
-                name="echo",
-                description="Echo back text.",
-                input_schema=_EchoArgs,
-                handler=_echo_handler,
-            ),
+        mcp = tool_server(
+            [
+                ToolSpec(
+                    name="echo",
+                    description="Echo back text.",
+                    input_schema=_EchoArgs,
+                    handler=_echo_handler,
+                ),
+            ]
         )
 
         names = asyncio.run(_list_tool_names(mcp))
         assert names == {"echo"}
 
     def test_input_schema_is_flattened_not_nested_under_a_single_field(self) -> None:
-        mcp = FastMCP("test")
-        register_tool(
-            mcp,
-            ToolSpec(
-                name="echo",
-                description="Echo back text.",
-                input_schema=_EchoArgs,
-                handler=_echo_handler,
-            ),
+        mcp = tool_server(
+            [
+                ToolSpec(
+                    name="echo",
+                    description="Echo back text.",
+                    input_schema=_EchoArgs,
+                    handler=_echo_handler,
+                ),
+            ]
         )
 
         tools = asyncio.run(mcp.list_tools())
@@ -182,58 +186,83 @@ class TestRegisterTool:
         assert tool.inputSchema["required"] == ["text"]
 
     def test_handler_round_trips_through_call_tool(self) -> None:
-        mcp = FastMCP("test")
-        register_tool(
-            mcp,
-            ToolSpec(
-                name="echo",
-                description="Echo back text.",
-                input_schema=_EchoArgs,
-                handler=_echo_handler,
-            ),
+        mcp = tool_server(
+            [
+                ToolSpec(
+                    name="echo",
+                    description="Echo back text.",
+                    input_schema=_EchoArgs,
+                    handler=_echo_handler,
+                ),
+            ]
         )
 
         out = asyncio.run(_call_tool(mcp, "echo", text="hi", shout=True))
         assert out == "HI"
 
     def test_handler_receives_the_input_schema_default(self) -> None:
-        mcp = FastMCP("test")
-        register_tool(
-            mcp,
-            ToolSpec(
-                name="echo",
-                description="Echo back text.",
-                input_schema=_EchoArgs,
-                handler=_echo_handler,
-            ),
+        mcp = tool_server(
+            [
+                ToolSpec(
+                    name="echo",
+                    description="Echo back text.",
+                    input_schema=_EchoArgs,
+                    handler=_echo_handler,
+                ),
+            ]
         )
 
         out = asyncio.run(_call_tool(mcp, "echo", text="hi"))
         assert out == "hi"
 
     def test_multiple_tools_register_independently(self) -> None:
-        mcp = FastMCP("test")
-        register_tool(
-            mcp,
-            ToolSpec(
-                name="echo",
-                description="Echo back text.",
-                input_schema=_EchoArgs,
-                handler=_echo_handler,
-            ),
-        )
-        register_tool(
-            mcp,
-            ToolSpec(
-                name="shout",
-                description="Always shout.",
-                input_schema=_EchoArgs,
-                handler=_shout_handler,
-            ),
+        mcp = tool_server(
+            [
+                ToolSpec(
+                    name="echo",
+                    description="Echo back text.",
+                    input_schema=_EchoArgs,
+                    handler=_echo_handler,
+                ),
+                ToolSpec(
+                    name="shout",
+                    description="Always shout.",
+                    input_schema=_EchoArgs,
+                    handler=_shout_handler,
+                ),
+            ]
         )
 
         names = asyncio.run(_list_tool_names(mcp))
         assert names == {"echo", "shout"}
+
+
+_FIELDS = frozenset(_EchoArgs.model_fields)
+
+
+@given(
+    key=st.text(min_size=1, max_size=12).filter(lambda key: key not in _FIELDS),
+    value=st.none() | st.booleans() | st.integers() | st.text(max_size=8),
+)
+def test_an_argument_the_schema_does_not_declare_is_refused_by_name(
+    key: str, value: object
+) -> None:
+    """A misspelled optional argument must not run the tool with its default instead."""
+    calls: list[BaseModel] = []
+
+    def record(args: BaseModel) -> str:
+        calls.append(args)
+        return "ran"
+
+    mcp = tool_server(
+        [ToolSpec(name="echo", description="d", input_schema=_EchoArgs, handler=record)]
+    )
+
+    with pytest.raises(ToolError, match=re.escape(key)):
+        asyncio.run(_call_tool(mcp, "echo", text="hi", **{key: value}))
+    assert calls == []
+    (tool,) = asyncio.run(mcp.list_tools())
+    assert tool.inputSchema["additionalProperties"] is False
 
 
 @given(st.text(), st.text())
