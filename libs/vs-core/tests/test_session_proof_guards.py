@@ -6,6 +6,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
 from .test_session_inputs import occurrence
@@ -19,7 +20,7 @@ from .test_session_turns import (
 )
 
 
-@settings(max_examples=3)
+@settings(max_examples=examples(pr=3, nightly=3))
 @given(sequence=st.integers(min_value=1, max_value=10))
 def test_input_delivery_optional_authority_guard_matrix(sequence: int) -> None:
     spec = turn()
@@ -77,7 +78,7 @@ def test_input_delivery_optional_authority_guard_matrix(sequence: int) -> None:
         )
 
 
-@settings(max_examples=3)
+@settings(max_examples=examples(pr=3, nightly=3))
 @given(generation=st.integers(min_value=0, max_value=3))
 def test_deferred_suspension_optional_authority_guard_matrix(generation: int) -> None:
     state, event = profiler_yield()

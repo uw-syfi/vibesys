@@ -1,10 +1,11 @@
 """Occurrence ordering, acceptance and retirement through the public kernel."""
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_session_turns import (
     invocation,
@@ -31,6 +32,7 @@ def occurrence(
     )
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     sequences=st.lists(st.integers(min_value=0, max_value=5), min_size=1, max_size=12),
     data=st.data(),
@@ -94,6 +96,7 @@ def test_reservation_never_silently_retargets_an_occurrence(target: str, generat
     assert bool(result.requests[0].inputs) == eligible
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     status=st.sampled_from(list(core.ObservationStatus)),
     accepted=st.booleans(),
@@ -146,6 +149,7 @@ def test_delivery_and_nonacceptance_are_separate_receipt_guards(
     assert replay.events == ()
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(orders=st.lists(st.integers(min_value=0, max_value=3), min_size=1, max_size=15))
 def test_duplicate_reordered_stale_acceptance_never_redelivers(orders: list[int]) -> None:
     spec = turn()

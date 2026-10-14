@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.composition import resolve_agent_specs
@@ -21,6 +21,7 @@ from vibesys.config import Config
 from vibesys.errors import ConfigurationError
 from vibesys.orchestration.multi.plugin import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.multi.search.api import multi
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vs_runtime.api import OrchestrationPlugin
@@ -43,6 +44,7 @@ def test_each_preset_declares_the_prefixed_role_ids(plugin: OrchestrationPlugin)
     assert tuple(role.id for role in plugin.agents) == MULTI_ROLES
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     overrides=st.dictionaries(
         st.sampled_from(MULTI_ROLES),
@@ -64,6 +66,7 @@ def test_a_legacy_role_id_is_refused_naming_the_key(legacy: str) -> None:
         resolve_agent_specs(config, PLUGIN.agents)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(model=st.text(alphabet="abcdefghij-", min_size=1, max_size=12))
 def test_the_orchestrators_model_is_the_routers_too(model: str) -> None:
     chosen = multi.with_models({"orchestrator": model})

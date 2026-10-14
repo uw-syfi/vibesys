@@ -8,10 +8,11 @@ core closes it and reports ``InterruptFailed``. These tests drive the public ``s
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_session_interruptions import interrupt_state
 from .test_session_turns import reload_step, turn_observation
@@ -49,6 +50,7 @@ def _open_interrupt_waits(state: core.CoreState) -> list[core.OpenWait]:
     return [wait for wait in core.orphan_waits(state) if wait.waiter == core.WaitKind.INTERRUPT]
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     status=st.sampled_from(
         [

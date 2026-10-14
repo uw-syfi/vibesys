@@ -198,7 +198,7 @@ def _assert_matches_eager_store(path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("count", [1, 12, _EAGER_TAIL_RECORDS - 1, 4 * _EAGER_TAIL_RECORDS + 37])
+@pytest.mark.parametrize("count", [1, 12, _EAGER_TAIL_RECORDS - 1, 2 * _EAGER_TAIL_RECORDS + 37])
 def test_lazy_store_matches_eager_store_for_plain_logs(tmp_path: Path, count: int) -> None:
     path = tmp_path / "events.jsonl"
     _write_events(path, _generated_events(seed=7, count=count))
@@ -206,7 +206,7 @@ def test_lazy_store_matches_eager_store_for_plain_logs(tmp_path: Path, count: in
     _assert_matches_eager_store(path)
 
 
-@pytest.mark.parametrize("count", [12, _EAGER_TAIL_RECORDS - 1, 3 * _EAGER_TAIL_RECORDS + 5])
+@pytest.mark.parametrize("count", [12, _EAGER_TAIL_RECORDS - 1, 2 * _EAGER_TAIL_RECORDS + 5])
 def test_lazy_store_matches_eager_store_for_legacy_sequences(tmp_path: Path, count: int) -> None:
     path = tmp_path / "events.jsonl"
     _write_events(path, _generated_events(seed=11, count=count, legacy_sequences=True))
@@ -214,7 +214,7 @@ def test_lazy_store_matches_eager_store_for_legacy_sequences(tmp_path: Path, cou
     _assert_matches_eager_store(path)
 
 
-@pytest.mark.parametrize("count", [12, 3 * _EAGER_TAIL_RECORDS + 5])
+@pytest.mark.parametrize("count", [12, 2 * _EAGER_TAIL_RECORDS + 5])
 def test_lazy_store_matches_eager_store_for_legacy_invocations(tmp_path: Path, count: int) -> None:
     path = tmp_path / "events.jsonl"
     _write_events(

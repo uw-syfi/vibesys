@@ -41,7 +41,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.executor_contexts import RevocableLease, context_for
 from vs_runtime.api.observation_contracts import assert_core_accepts
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api.testing import examples, wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -421,7 +421,9 @@ async def test_another_payload_under_one_request_identity_is_rejected(kind: str)
 
 
 @settings(
-    max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=5, nightly=12),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(repeats=st.integers(min_value=1, max_value=4), close_first=st.booleans())
 @pytest.mark.asyncio
@@ -450,7 +452,8 @@ async def test_a_turn_queued_behind_an_interrupted_one_proceeds_only_after_cance
         )
         w.host.faults.down = False
         blocked = await w.execute(dispatch_request("req-2", "inv-2"))
-        assert status(blocked) is ObservationStatus.UNKNOWN
+        assert status(blocked) is ObservationStatus.FAILED  # not run, so core asks again
+        assert blocked.observation.observation.retryable
         turns = len(w.host.turns)
         assert status(await w.execute(cancel_request())) is ObservationStatus.CANCELLED
         released = await w.execute(dispatch_request("req-2", "inv-2"))

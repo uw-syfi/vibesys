@@ -4,12 +4,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.orchestration.skill_selection import resolve_agent_resource_paths
+from vs_sim.api.testing import examples
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(st.lists(st.from_regex(r"[a-z][a-z0-9_-]{0,12}", fullmatch=True), min_size=1, max_size=4))
 def test_source_skill_paths_resolve_without_changing_objective_text(parts: list[str]) -> None:
     with TemporaryDirectory() as scratch:

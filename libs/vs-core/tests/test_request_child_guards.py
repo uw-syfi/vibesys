@@ -5,7 +5,7 @@ from hashlib import sha256
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
@@ -66,6 +66,9 @@ from vs_core.api import (
     initial_state,
     step,
 )
+from vs_sim.api.testing import examples
+
+from .restart import restarts
 
 
 class JobOutcome(Value):
@@ -229,6 +232,8 @@ def with_registered_origins(state: CoreState) -> CoreState:
 
 def reload(state: CoreState) -> CoreState:
     """Roundtrip retained facts through the public registered envelope codec."""
+    if not restarts():
+        return state
     codec = OperationRegistry(
         tuple(
             OperationRegistration(
@@ -544,6 +549,7 @@ def test_incomplete_independent_source_history_cannot_transfer_to_a_typed_owner(
 @pytest.mark.parametrize("typed_first", [True, False])
 @example(flags=(False, False, True, ObservationStatus.PENDING))
 @example(flags=(True, True, True, ObservationStatus.SUCCEEDED))
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     flags=st.tuples(
         st.booleans(), st.booleans(), st.booleans(), st.sampled_from(tuple(ObservationStatus))

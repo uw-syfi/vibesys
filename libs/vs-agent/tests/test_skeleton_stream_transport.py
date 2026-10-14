@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
-from tests.composition.test_skeleton import _assert_adopted, _started
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.skeleton_world import (
     IMPLEMENTATION,
@@ -27,6 +26,7 @@ from tests.support.skeleton_world import (
     open_skeleton_world,
 )
 from tests.support.stream_session_world import StreamHost, open_stream_host
+from tests.system.skeleton.test_skeleton import _assert_adopted, _started
 
 from vs_agent.api import AgentExecutionPolicy, AgentSessionSpec
 from vs_agent.api.testing import answering_with
@@ -98,10 +98,10 @@ async def _run(tmp_path: Path, provider: str, plan: FaultPlan | None) -> StreamH
         return opened[0]
 
 
-@pytest.mark.parametrize("provider", PROVIDERS)
-async def test_the_skeleton_run_adopts_through_a_stream_transport(
-    tmp_path: Path, provider: str
-) -> None:
+async def test_the_skeleton_run_adopts_through_a_stream_transport(tmp_path: Path) -> None:
+    """One whole run: the transports differ by provider, which `test_stream_transport_faults` covers
+    turn by turn for each of them."""
+    provider = PROVIDERS[0]
     opened: list[StreamHost] = []
 
     def agents(root: Path) -> SessionHost:
@@ -116,8 +116,12 @@ async def test_the_skeleton_run_adopts_through_a_stream_transport(
     assert len(opened[0].peers.prompts()) >= 1
 
 
-@pytest.mark.parametrize("provider", PROVIDERS)
-@pytest.mark.parametrize("fault", list(ProcessFault))
+@pytest.mark.parametrize(
+    ("provider", "fault"),
+    # Every fault, with the providers taking turns: a fault does not depend on which provider
+    # carries the turn, and each provider's transport meets each fault in test_stream_transport_faults.
+    [(PROVIDERS[index % len(PROVIDERS)], fault) for index, fault in enumerate(ProcessFault)],
+)
 async def test_a_fault_in_the_implementer_turn_ends_the_run_typed_without_a_replay(
     tmp_path: Path, provider: str, fault: ProcessFault
 ) -> None:

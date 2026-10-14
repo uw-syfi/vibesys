@@ -14,9 +14,12 @@ What it does:
   nothing raises ``VirtualDeadlockError`` at once. A test marked ``asyncio`` stays with
   pytest-asyncio (the two never share a test; marking a test that also asks for ``sim`` is an
   error). Pytest cannot run an unmarked async test at all, so no existing test changes.
-* **``--crash-points``** (``sampled``, the default, or ``all``) is the session's one sweep
-  breadth (`vs_sim.api.testing.swept`): every crash sweep tries a sample of its points on a
-  pull request and every point in the nightly job.
+* **``--depth``** (``pr``, the default, or ``nightly``) is the session's one search depth
+  (`vs_sim.api.testing.depth`). A pull request samples: crash sweeps try a sample of their
+  points (`swept`), property tests draw ``examples(pr=..., nightly=...)``, and tests marked
+  ``slow`` are deselected. The nightly job explores: every crash point, the larger example
+  counts, and the ``slow`` tests. An explicit ``-m`` expression naming ``slow`` keeps them at
+  either depth. The repository's root ``conftest.py`` picks the Hypothesis profile from it.
 * **The ``sim`` fixture** is the test's :class:`vs_sim.api.testing.Sim`.
 * **Seeds.** Every sim test has a seed (a pure function of its node id unless
   ``--sim-seed=N`` overrides it). A failure prints the seed and the option that replays it.
@@ -50,20 +53,20 @@ pytest.register_assert_rewrite("vs_sim.contracts")
 from vs_sim.api.testing import (  # noqa: E402  # LW-163810 [E402]; the assert-rewrite registration must run before vs_sim.contracts is first imported, which this import does.
     SCHEDULE_SEED_OPTION,
     SEED_OPTION,
+    Depth,
     EventTrace,
     Sim,
-    SweepBreadth,
     explore_seed,
     replay_hint,
     seed_for_test,
-    set_sweep_breadth,
+    set_depth,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Generator
 
 SIM_ATTRIBUTE = "_vs_sim"
-CRASH_POINTS_OPTION = "--crash-points"
+DEPTH_OPTION = "--depth"
 _ORIGINAL_INNER = "_vs_sim_inner_test"
 DEFAULT_REAL_TIERS = ["tests/e2e", "tests/slurm_cluster", "tests/minimal_container"]
 _RUN = pytest.StashKey[int]()
@@ -95,10 +98,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="run every sim test under exactly this seed (a failure prints the one to use)",
     )
     group.addoption(
-        CRASH_POINTS_OPTION,
-        choices=[breadth.value for breadth in SweepBreadth],
-        default=SweepBreadth.SAMPLED.value,
-        help="crash points a sweep tries: a sample (pull requests) or every one (nightly)",
+        DEPTH_OPTION,
+        choices=[chosen.value for chosen in Depth],
+        default=Depth.PR.value,
+        help="how deep the session searches: sample (pr) or explore (nightly)",
     )
     group.addoption(
         "--sim-determinism-check",
@@ -142,8 +145,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Declare the marker and make the chosen sweep breadth the session's one setting."""
-    set_sweep_breadth(SweepBreadth(config.getoption("crash_points")))
+    """Declare the marker and make the chosen depth the session's one setting."""
+    set_depth(Depth(config.getoption("depth")))
     config.addinivalue_line(
         "markers", "sim: run this test as a simulation even when it is not an async test"
     )
@@ -154,7 +157,7 @@ def pytest_report_header(config: pytest.Config) -> str:
     seed = config.getoption("sim_seed")
     policy = "per-test seeds" if seed is None else f"seed {seed} for every sim test"
     check = ", determinism check on" if config.getoption("sim_determinism_check") else ""
-    return f"vs-sim: {policy}{check}, crash points {config.getoption('crash_points')}"
+    return f"vs-sim: {policy}{check}, depth {config.getoption('depth')}"
 
 
 def _in_real_tier(item: pytest.Item) -> bool:
@@ -193,6 +196,12 @@ def _is_sim_test(item: pytest.Item) -> bool:
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Reject a test that asks for two schedulers; when exploring, keep only what can be repeated."""
+    if Depth(config.getoption("depth")) is Depth.PR and "slow" not in (
+        config.option.markexpr or ""
+    ):
+        slow = [item for item in items if item.get_closest_marker("slow") is not None]
+        config.hook.pytest_deselected(items=slow)
+        items[:] = [item for item in items if item not in slow]
     if config.getoption("sim_explore") > 0:
         repeatable = [item for item in items if _is_explorable(item)]
         config.hook.pytest_deselected(items=[item for item in items if item not in repeatable])

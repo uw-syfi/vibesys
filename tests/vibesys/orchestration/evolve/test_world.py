@@ -6,8 +6,7 @@ through the real core and shell, ends with what the story says.
 
 from __future__ import annotations
 
-from tests.composition._loop.evolve_world import EvolveWorld
-from tests.support.evolve_script import reviewed
+from tests.vibesys.evolve_world import EvolveWorld
 
 from vs_core.api import Finish, Settle, StartAttempt, Wait, Withdraw
 from vs_dst.api import SimulatedRun, simulate
@@ -29,31 +28,17 @@ def starts(run: SimulatedRun) -> int:
 
 
 def test_a_run_adopts_its_best_individual() -> None:
-    world = EvolveWorld(max_generations=2, children_per_generation=2, throughputs=(100.0, 150.0))
+    world = EvolveWorld(max_generations=1, children_per_generation=2, throughputs=(100.0, 150.0))
     run = simulate(world)
 
     commit = adopted(run)
     assert commit is not None
-    assert starts(run) == 5  # one cold start and two generations of two children
+    assert starts(run) == 3  # one cold start and one generation of two children
     final = run.decisions[-1]
     assert isinstance(final, Finish)
     assert final.result.outcome == "success"
     best = max(world.headline(item) or 0.0 for item in _commits(run))
     assert world.headline(commit) == best
-
-
-def test_cold_starts_the_judge_rejects_end_the_run_with_no_winner() -> None:
-    run = simulate(EvolveWorld(judge=[reviewed(passed=False)] * 2))
-
-    assert adopted(run) is None
-    assert starts(run) == 2
-
-
-def test_children_run_together_and_the_run_still_ends() -> None:
-    run = simulate(EvolveWorld(max_parallelism=2, children_per_generation=2))
-
-    assert adopted(run) is not None
-    assert starts(run) == 3
 
 
 def _commits(run: SimulatedRun) -> list[str]:

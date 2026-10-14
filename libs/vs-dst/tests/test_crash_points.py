@@ -16,7 +16,7 @@ from vs_dst.api import (
     crash_point_policy,
     simulate,
 )
-from vs_sim.api.testing import SweepBreadth, using_sweep_breadth
+from vs_sim.api.testing import Depth, using_depth
 
 from ._tiny import TinyWorld, decision_key
 
@@ -49,11 +49,13 @@ def test_a_run_offers_a_sample_by_default_and_every_point_when_the_setting_says_
     normal = simulate(TinyWorld(2))
     assert normal.commits > SAMPLE_SIZE
 
-    assert crash_point_policy() == SAMPLED
-    assert len(normal.crash_points()) == 2 * SAMPLE_SIZE
-    with using_sweep_breadth(SweepBreadth.ALL):
+    with using_depth(Depth.PR):
+        assert crash_point_policy() == SAMPLED
+        assert len(normal.crash_points()) == 2 * SAMPLE_SIZE
+    with using_depth(Depth.NIGHTLY):
         assert len(normal.crash_points()) == 2 * normal.commits
-    assert len(normal.crash_points()) == 2 * SAMPLE_SIZE
+    with using_depth(Depth.PR):
+        assert len(normal.crash_points()) == 2 * SAMPLE_SIZE
 
 
 def test_a_run_offers_the_crash_points_of_one_kind_when_asked() -> None:

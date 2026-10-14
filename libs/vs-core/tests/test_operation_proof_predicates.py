@@ -1,7 +1,7 @@
 """Generated operation declarations, accepted origins and invocation facts."""
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -15,6 +15,7 @@ from vs_core.api.proofs import (
     invocation_for,
     operation_for,
 )
+from vs_sim.api.testing import examples
 
 from .test_recovery_proof_regressions import Cleanup, Outcome, _digest, _registered_turn
 
@@ -48,6 +49,7 @@ def operation_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.RequestRecord
         "codec",
     ],
 )
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(facts=operation_facts())
 def test_operation_proof_checks_every_origin_field(
     field: str,

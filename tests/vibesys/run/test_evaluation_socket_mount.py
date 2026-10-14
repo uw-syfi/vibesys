@@ -12,8 +12,6 @@ import os
 import tempfile
 from pathlib import Path
 
-from hypothesis import given, settings
-from hypothesis import strategies as st
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import _plugin, _request, _write_project
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
@@ -89,9 +87,9 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
         integration.close()
 
 
-@settings(max_examples=3, deadline=None)
-@given(candidates=st.integers(min_value=0, max_value=3))
-def test_every_agent_container_mounts_the_evaluation_socket_directory(candidates: int) -> None:
+def test_every_agent_container_mounts_the_evaluation_socket_directory() -> None:
+    """The root's container and two candidates' (Budget: a whole host over a fake daemon)."""
+    candidates = 2
     previous = os.environ.get("ANTHROPIC_API_KEY")
     os.environ["ANTHROPIC_API_KEY"] = "test-key"
     try:

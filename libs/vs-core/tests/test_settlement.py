@@ -3,11 +3,12 @@
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
 
@@ -1044,6 +1045,7 @@ def test_cancelled_result_discards_before_revision_retention_validation(
     assert result.requests == ()
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     count=st.integers(min_value=2, max_value=4),
     events=st.lists(

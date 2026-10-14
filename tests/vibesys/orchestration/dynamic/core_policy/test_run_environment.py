@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
     candidate_environment,
@@ -16,8 +16,10 @@ from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
 )
 
 from vibesys.errors import ConfigurationError
+from vs_sim.api.testing import examples
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     kind=st.sampled_from(["skypilot", "metal", "custom-env"]),
     cli_sandboxed=st.booleans(),

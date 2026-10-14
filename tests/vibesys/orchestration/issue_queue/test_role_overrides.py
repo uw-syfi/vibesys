@@ -8,13 +8,14 @@ keyed by a role id the plugin declares (`plain-implementer`, `plain-judge`,
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import Config
 from vibesys.errors import ConfigurationError
 from vibesys.orchestration.issue_queue.plugin import PLUGIN
+from vs_sim.api.testing import examples
 
 PLAIN_ROLES = ("plain-implementer", "plain-judge", "plain-perf-evaluator")
 LEGACY_ROLES = ("implementer", "judge", "perf_eval")
@@ -28,6 +29,7 @@ def test_the_plugin_declares_the_prefixed_role_ids() -> None:
     assert tuple(role.id for role in PLUGIN.agents) == PLAIN_ROLES
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     overrides=st.dictionaries(
         st.sampled_from(PLAIN_ROLES),

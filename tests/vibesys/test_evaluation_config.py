@@ -1,17 +1,20 @@
 """Strict suspension-bound configuration through the public config schema."""
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vibesys.config import Config
+from vs_core.api import MeasurementFailure
+from vs_sim.api.testing import examples
 
 
 def test_queue_allowance_defaults_to_fifteen_minutes() -> None:
     assert Config(model={"name": "test"}).evaluation.queue_allowance_seconds == 900
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(st.integers(min_value=1))
 def test_queue_allowance_preserves_positive_integer(seconds: int) -> None:
     config = Config.model_validate(
@@ -39,6 +42,7 @@ def _evaluation(**settings: object) -> Config:
     return Config.model_validate({"model": {"name": "test"}, "evaluation": settings})
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     infrastructure=st.integers(min_value=1, max_value=5),
     ambiguous=st.integers(min_value=1, max_value=5),
@@ -75,3 +79,20 @@ def test_a_retry_bound_beyond_what_core_allows_is_refused_at_load(
 ) -> None:
     with pytest.raises(ValidationError):
         _evaluation(**{setting: value})
+
+
+def test_a_default_run_measures_an_ambiguous_failure_twice_and_a_lost_job_three_times() -> None:
+    """An evaluator killed with no result record is measured once more, then it is final.
+
+    The classification of a failure (libs/vs-runtime) only says it is ambiguous; how often an
+    ambiguous or an infrastructure failure is measured is this declaration, so the bounds an
+    operator gets without configuring anything are pinned here.
+    """
+    retries = Config(model={"name": "test"}).evaluation.evaluation_retries()
+
+    assert (retries.infrastructure_attempts, retries.ambiguous_attempts) == (3, 2)
+    assert retries.allows_another(MeasurementFailure.AMBIGUOUS, tries=1)
+    assert not retries.allows_another(MeasurementFailure.AMBIGUOUS, tries=2)
+    assert retries.allows_another(MeasurementFailure.INFRASTRUCTURE, tries=2)
+    assert not retries.allows_another(MeasurementFailure.INFRASTRUCTURE, tries=3)
+    assert not retries.allows_another(MeasurementFailure.WORKLOAD, tries=1)

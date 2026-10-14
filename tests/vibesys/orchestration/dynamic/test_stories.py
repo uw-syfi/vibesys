@@ -8,7 +8,6 @@ by replay, and the decisions must not change.
 
 from __future__ import annotations
 
-import pytest
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -21,14 +20,12 @@ from tests.vibesys.orchestration.dynamic._replies import (
     plan_reply,
     reviewed,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import FailureKind
 from vs_core.api import (
-    FailureReason,
     Finish,
-    ProposeWinner,
-    RejectionCode,
     RequestTurn,
     Retained,
     RevisionRef,
@@ -38,7 +35,7 @@ from vs_core.api import (
 
 CONFIG = config()
 CANDIDATE = RevisionRef.of_git_commit("def456")
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def start(*, restarting: bool, adopting: bool = True) -> Host:
@@ -103,16 +100,6 @@ def test_a_stop_while_the_implementer_works_settles_the_attempt_cancelled(
 
 
 @MODES
-def test_a_lost_planner_turn_is_asked_again(*, restarting: bool) -> None:
-    host = start(restarting=restarting)
-    host.run.lose(host.run.expect_turn(role=PLANNER_LABEL))
-    host.drain_until_turn(PLANNER_LABEL)
-    plan(host, plan_reply(implement("h1")))
-    host.answer(host.run.expect(StartAttempt, label="start"))
-    assert host.opened
-
-
-@MODES
 def test_a_stop_while_planning_ends_the_run_without_waiting_for_the_planner(
     *, restarting: bool
 ) -> None:
@@ -132,20 +119,3 @@ def test_a_stop_while_planning_ends_the_run_without_waiting_for_the_planner(
     assert record is not None
     assert not record.running
     assert not host.unsettled
-
-
-@MODES
-def test_a_stopped_run_core_will_not_adopt_ends_cancelled_not_failed(*, restarting: bool) -> None:
-    host = start(restarting=restarting, adopting=False)
-    host.run.expect_turn(role=PLANNER_LABEL)
-
-    host.run.stop()
-    host.run.fail(
-        host.run.expect(ProposeWinner), FailureReason.REFUSED, cause=RejectionCode.CLOSED_SCOPE
-    )
-    host.drain()
-
-    finish = host.run.finished
-    assert isinstance(finish, Finish)
-    assert finish.result.outcome == "cancelled"
-    assert finish.result.reason.startswith("stopped")

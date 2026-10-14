@@ -209,7 +209,13 @@ class GitTracker:
         return self._git.has_ref_containing(sha, f"refs/vibesys/{self.run_id}/candidates/")
 
     def has_revision(self, revision: str) -> bool:
-        """Whether *revision* names a commit present in this repository."""
+        """Whether *revision* names a commit present in this repository.
+
+        Only an object name can: anything else (a branch, ``HEAD~1``, an option, a string
+        with a NUL byte) is not a commit this run holds, so Git is never asked about it.
+        """
+        if self._OBJECT_NAME.fullmatch(revision) is None:
+            return False
         return self._git.resolve_commit(revision) is not None
 
     def has_staged_changes(self) -> bool:

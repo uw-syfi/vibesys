@@ -27,6 +27,8 @@ from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     AdoptionObserved,
     AdoptRevision,
+    BlockRequest,
+    CancelOwnedResource,
     Capabilities,
     ClockAdvanced,
     CloseSession,
@@ -48,6 +50,8 @@ from vs_core.api import (
     HostFence,
     HostId,
     Inbox,
+    InspectRequest,
+    InspectTurn,
     InvocationRef,
     JobObserved,
     LifecycleCapability,
@@ -59,6 +63,8 @@ from vs_core.api import (
     ObserveOwnedJob,
     OperationRegistry,
     OwnedJob,
+    RecoveryStarted,
+    ReissueProof,
     ReplyError,
     Request,
     RequestObserved,
@@ -76,6 +82,7 @@ from vs_core.api import (
     StrategyState,
     Submission,
     SubmitMeasurement,
+    TargetObservation,
     TimeReached,
     TurnObserved,
     VerifyAdoption,
@@ -95,7 +102,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import EvaluationTerminalFacts, SchemaRef
+    from vs_core.api import EvaluationTerminalFacts, RequestId, SchemaRef
     from vs_core.types.evaluation import Continuation, EvidenceRef
 
 
@@ -184,6 +191,14 @@ class Faults:
     twice. ``reorder`` delivers the observations of one dispatch round newest
     first. ``reload`` round-trips the whole envelope through the registered codec
     after every step, as a restart would.
+
+    ``crash_after`` lists commit numbers (counted from the first, over the whole drive:
+    every authorization, every delivery of a request's observations and its owner events, every
+    clock move, and the recovery's own) after which the host dies and a new one takes over. The
+    new host reloads the envelope, starts recovery under the next epoch and answers core's
+    inspections from what the executors did (see ``_Executed``): a crash number that falls inside
+    a recovery is a crash during recovery. A request that was executed but whose result was not
+    delivered died before sealing it when ``unsealed`` says so, else its result is sealed.
     """
 
     unknown_first: Callable[[Request], bool] = lambda _request: False
@@ -191,6 +206,30 @@ class Faults:
     duplicate: bool = False
     reorder: bool = False
     reload: bool = False
+    crash_after: frozenset[int] = frozenset()
+    unsealed: Callable[[Request], bool] = lambda _request: False
+
+
+class _CrashError(Exception):
+    """The host died; the drive resumes in a new host."""
+
+
+@dataclass
+class _Executed:
+    """What the executors did for one request: the ground truth recovery inspects.
+
+    ``answers`` are what the effect reported (the effect happened once, whatever is delivered).
+    ``events`` are the observations and owner events built from them; they exist once the result
+    is sealed. A request begun whose result was never sealed has ``sealed`` False: inspecting it
+    says only that it may have run, and sending it again builds its events from ``answers``
+    without repeating the effect.
+    """
+
+    request: Request
+    answers: list[Answer]
+    events: list[CoreEvent]
+    sealed: bool = True
+    delivered: bool = False
 
 
 @dataclass
@@ -209,6 +248,11 @@ class Trace[S: StrategyState]:
     log: list[Request | RequestObserved] = field(default_factory=list)
     finished: bool = False
     steps: int = 0
+    effects: list[str] = field(default_factory=list)
+    """The id of every request whose effect happened, once per time it happened."""
+    crashes: int = 0
+    commits: int = 0
+    """How many commit points the drive passed (the numbers ``Faults.crash_after`` names)."""
 
     @property
     def view(self) -> CoreView:
@@ -236,6 +280,12 @@ class _Driver[S: StrategyState]:
         self.held: tuple[Decision, ...] = ()
         self.clock = 1.0
         self.calls: dict[str, int] = {}
+        self.ledger: dict[str, _Executed] = {}
+        self.commits = 0
+        self.epoch = 1
+        self.recovering = False
+        self.ticked: CoreState | None = None
+        self.in_turn = 0
         self.envelope_type = harness.envelope_type
         self.during_turn = harness.during_turn
         self.shell_events = harness.shell_events
@@ -245,11 +295,44 @@ class _Driver[S: StrategyState]:
 
     def run(self, max_steps: int) -> None:
         while self.trace.steps < max_steps and not self.trace.finished:
-            progressed = self.dispatch_all()
-            if not progressed:
-                progressed = self.tick()
-            if not progressed:
-                return
+            try:
+                if self.recovering:
+                    self.recover()
+                progressed = self.dispatch_all()
+                if not progressed:
+                    progressed = self.tick()
+                if not progressed:
+                    return
+            except _CrashError:
+                self.crash()
+
+    def commit(self) -> None:
+        """A commit point: the host dies here when the drive says so."""
+        if self.in_turn:
+            return  # the turn is running: a host that dies now leaves it begun, which is not modelled
+        self.commits += 1
+        self.trace.commits = self.commits
+        if self.commits in self.faults.crash_after:
+            raise _CrashError
+
+    def crash(self) -> None:
+        """The host died: results in flight are lost, and executors that had begun may not have sealed."""
+        self.trace.crashes += 1
+        for entry in self.ledger.values():
+            if not entry.delivered and entry.sealed:
+                entry.sealed = not self.faults.unsealed(entry.request)
+                if not entry.sealed:
+                    entry.events = []
+        self.recovering = True
+
+    def recover(self) -> None:
+        """A new host: reload what was persisted, then start recovery under the next epoch."""
+        self.reload()
+        self.epoch += 1
+        self.recovering = False
+        now_at = max(self.clock, self.trace.core.run.now_at)
+        self.consume(RecoveryStarted(epoch=self.epoch, now_at=now_at))
+        self.commit()
 
     def start(self, config: object, events: tuple[CoreEvent, ...]) -> None:
         """Deliver the clock and the harness events, then begin the search's run."""
@@ -302,13 +385,18 @@ class _Driver[S: StrategyState]:
         asked = project(trace.core).next_observe_at
         if asked is not None:
             due.append(asked)
-        if not due:
+        if not due and trace.core == self.ticked:
             return False
-        moment = max(min(due), trace.core.run.now_at)
+        # The shell's loop delivers the clock after every pass that changed state, even with
+        # nothing due: a closing run whose last cleanup was a late observation drains on that
+        # tick (``scheduling._fill`` re-checks the drain there), not on the observation.
+        moment = max(min(due, default=0.0), trace.core.run.now_at)
         before = trace.core
         reached = tuple(TimeReached(time=wake) for wake in sorted(self.wakes) if wake <= moment)
         self.wakes = [wake for wake in self.wakes if wake > moment]
         self.consume(ClockAdvanced(now_at=moment), extra=reached)
+        self.ticked = trace.core
+        self.commit()
         return trace.core != before or bool(reached)
 
     def dispatch_all(self) -> bool:
@@ -318,13 +406,17 @@ class _Driver[S: StrategyState]:
             if not batch:
                 return any_dispatched
             any_dispatched = True
-            deliveries = [self.observe(request) for request in batch]
+            deliveries = [(request, self.observe(request)) for request in batch]
             if self.faults.reorder:
                 deliveries.reverse()
-            for delivery in deliveries:
+            for request, delivery in deliveries:
                 for event in delivery:
                     for _ in range(2 if self.faults.duplicate else 1):
                         self.consume(event)
+                executed = self.ledger.get(self.key_of(request))
+                if executed is not None:
+                    executed.delivered = True
+                self.commit()
 
     def authorize_round(self) -> list[Request]:
         """Authorize every prepared request core lets go now, in ledger order."""
@@ -338,24 +430,48 @@ class _Driver[S: StrategyState]:
                 if error.path in (("dependency",), ("recovery",)):
                     continue
                 raise
+            self.commit()
             batch.append(record.request)
         return batch
 
     # -- executors --------------------------------------------------------
 
+    @staticmethod
+    def key_of(request: Request) -> str:
+        return request.request_id.root if request.request_id is not None else ""
+
     def observe(self, request: Request) -> list[CoreEvent]:
-        key = request.request_id.root if request.request_id is not None else ""
+        key = self.key_of(request)
         self.trace.requests.append(request)
         self.trace.log.append(request)
+        if isinstance(request, InspectRequest | InspectTurn):
+            return self.inspect(request)
+        held = self.ledger.get(key)
+        if held is not None:  # sent again after a crash: the executor resumes, it does not repeat
+            if not held.sealed:
+                held.events = self.build_events(request, held.answers)
+                held.sealed = True
+            held.delivered = False
+            return list(held.events)
+        self.in_turn += 1
         for event in self.during_turn(request, self.trace.core):
             self.consume(event)
             self.dispatch_all()
+        self.in_turn -= 1
         answer = self.script(request, self.trace.core)
         answers = list(answer) if isinstance(answer, tuple) else [answer]
         if self.faults.retry_first(request):
             answers.insert(0, Retryable())
         if self.faults.unknown_first(request):
             answers.insert(0, Unknown())
+        if not isinstance(request, BlockRequest | CancelOwnedResource):
+            self.trace.effects.append(key)
+        events = self.build_events(request, answers)
+        self.ledger[key] = _Executed(request, answers, events)
+        return list(events)
+
+    def build_events(self, request: Request, answers: list[Answer]) -> list[CoreEvent]:
+        key = self.key_of(request)
         events: list[CoreEvent] = []
         for item in answers:
             sequence = self.calls.get(key, 0)
@@ -365,6 +481,67 @@ class _Driver[S: StrategyState]:
             else:
                 events.append(self.observation(request, item, sequence))
         return events
+
+    # -- inspection after a crash ----------------------------------------------------
+
+    def inspect(self, request: InspectRequest | InspectTurn) -> list[CoreEvent]:
+        """Answer an inspection from what the executors did: sealed, begun, or never begun.
+
+        A turn's session journal knows how the turn ended whether or not the host sealed its
+        request, so an inspection of a turn that was dispatched always finds its reply.
+        """
+        turn = isinstance(request, InspectTurn)
+        target = request.dispatch if isinstance(request, InspectTurn) else request.target
+        if target is None:
+            message = "a turn inspection names the request that dispatched the turn"
+            raise ValueError(message)
+        held = self.ledger.get(target.root)
+        if turn and held is not None and not held.sealed:
+            held.events = self.build_events(held.request, held.answers)
+            held.sealed = True
+        sequence = self.calls.get(self.key_of(request), 0)
+        self.calls[self.key_of(request)] = sequence + 1
+        query = self.observation(request, Succeeded(), sequence)
+        owner: list[CoreEvent] = []
+        if held is not None and held.sealed:
+            seen = [event for event in held.events if isinstance(event, RequestObserved)]
+            facts = {
+                name: getattr(seen[-1], name)
+                for name in RequestObserved.model_fields
+                if name not in {"kind", "target"}
+            }
+            found = TargetObservation.model_validate(
+                facts, context={"operation_registry": self.registry}
+            )
+            owner = [event for event in held.events if not isinstance(event, RequestObserved)]
+        else:
+            began = held is not None
+            found = TargetObservation(
+                observation=self.unproven(request, target, terminal=not began),
+                reissue=ReissueProof.BEGUN_UNSEALED if began else ReissueProof.NEVER_BEGAN,
+            )
+        return [query.model_copy(update={"target": found}), *owner]
+
+    def unproven(
+        self, request: InspectRequest | InspectTurn, target: RequestId, *, terminal: bool
+    ) -> Observation:
+        """The target seen by an executor that has no sealed result for it."""
+        number = self.calls.get(target.root, 0)
+        self.calls[target.root] = number + 1
+        self.clock += 1.0
+        return Observation(
+            event_id=EventId(root=f"{target.root}:observation:{number}"),
+            request_id=target,
+            scope=request.scope,
+            admission_id=request.admission_id,
+            sequence=number,
+            observed_at=self.clock,
+            status=ObservationStatus.REJECTED if terminal else ObservationStatus.UNKNOWN,
+            accepted=False,
+            terminal=terminal,
+            released=False,
+            diagnostic="no sealed result for this request",
+        )
 
     # -- the production executors' owner events -----------------------------------------
 
@@ -631,9 +808,7 @@ class _Driver[S: StrategyState]:
             strategy=trace.state,
             event_cursor=EventCursor(sequence=0),
         )
-        loaded = self.registry.decode_envelope(
-            self.envelope_type, self.registry.encode_envelope(envelope)
-        )
+        loaded = self.registry.reload_envelope(self.envelope_type, envelope)
         trace.core = loaded.core
         trace.state = cast("S", loaded.strategy)
 

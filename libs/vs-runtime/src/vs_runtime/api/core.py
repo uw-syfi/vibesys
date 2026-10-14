@@ -157,7 +157,7 @@ from vs_runtime._operation_wiring import (
     operation_roles,
     production_owners,
 )
-from vs_runtime._owed_submissions import OwedSubmissions
+from vs_runtime._owed_submissions import OwedKey, OwedSubmission, OwedSubmissions
 from vs_runtime._receipt_store import (
     BegunUnsealed,
     Conflict,
@@ -314,6 +314,8 @@ __all__ = [
     "OperationReceipts",
     "OperationRole",
     "OrphanWaitError",
+    "OwedKey",
+    "OwedSubmission",
     "OwedSubmissions",
     "OwnerEvent",
     "OwnerEventRejectedError",

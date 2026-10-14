@@ -24,11 +24,12 @@ from tests.vibesys.orchestration.dynamic._replies import (
     plan_reply,
     reviewed,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vs_core.api import Finish, Measure, ProposeWinner, Retained, RevisionRef, StartAttempt, Wait
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 # A run asks core for a few dozen requests (workspaces, sessions, turns, measurements). Generous,
 # but far below a request loop that never ends.
 MAX_REQUESTS = 120

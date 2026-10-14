@@ -6,7 +6,7 @@ cover the search's binding of it: what is recorded for each way a child can end.
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.evolve._values import (
     CONFIG,
@@ -34,10 +34,12 @@ from vibesys.orchestration.evolve.search.api import (
     search_of,
 )
 from vs_core.api import EvidenceKind
+from vs_sim.api.testing import examples
 
 SPACE = MetricSpace()
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(done=finished_children())
 def test_a_child_earns_an_individual_exactly_when_it_was_measured_and_not_stopped(
     done: ChildDone,
@@ -52,6 +54,7 @@ def test_a_child_earns_an_individual_exactly_when_it_was_measured_and_not_stoppe
     assert (outcome_of(done) is not None) is expected
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(done=finished_children())
 def test_an_individual_records_its_revision_only_when_it_passed_or_is_a_cold_starts_work(
     done: ChildDone,
@@ -71,6 +74,7 @@ def test_an_individual_records_its_revision_only_when_it_passed_or_is_a_cold_sta
         assert (outcome.perf_metric, outcome.metrics, outcome.code) == (None, (), None)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(done=finished_children())
 def test_a_passed_individual_needs_the_candidate_to_pass_everything_and_core_to_accept_it(
     done: ChildDone,
@@ -110,6 +114,7 @@ def test_a_stopped_child_earns_nothing() -> None:
     assert outcome_of(done) is None
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     benchmark=st.floats(1, 1e6),
     perf=st.floats(1, 1e6),
@@ -133,6 +138,7 @@ def test_a_benchmark_without_a_headline_leaves_the_profilers_self_report() -> No
     assert fitness(profile, reading(EvidenceKind.BENCHMARK)) == (3.0, "x", ())
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     values=st.lists(st.floats(1, 1000), min_size=1, max_size=4),
     children=st.integers(1, 5),
@@ -159,6 +165,7 @@ def test_a_population_without_a_passing_parent_proposes_nothing() -> None:
     assert revision("a") != revision("b")
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(unit=st.none() | st.sampled_from(("tokens/s", "calls/s")), value=st.floats(1, 1e6))
 def test_a_trusted_headline_is_labeled_by_its_unit_or_else_by_its_metric_name(
     unit: str | None, value: float

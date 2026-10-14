@@ -26,7 +26,9 @@ class CheckpointDecline(StrEnum):
 
     WRITER_ACTIVE = "writer_active"
     """Another writer of the attempt's workspace has not ended, so a snapshot would
-    be torn. The later writer's own terminal turn requests the checkpoint."""
+    be torn. The later writer's own terminal turn requests the checkpoint; when that turn
+    ends without earning one (it failed or was cancelled), core asks again for the last
+    declined one, and a ``Retained`` then follows the ``Declined``."""
 
     UNAUTHORIZED = "unauthorized"
     """Neither an interruption claim nor a terminal write turn authorizes it."""
@@ -63,8 +65,11 @@ class Value(BaseModel):
     # keys its memoized checks (`lru_cache` on whole envelopes and requests) by these values, so
     # each lookup re-walked the entire unchanged history: the dominant cost of a step. A value
     # cannot change, so its hash is computed once. A slot keeps it out of `__dict__` and out of
-    # equality, copies and serialization; a copy is a new object and hashes afresh.
-    __slots__ = ("_hash",)
+    # equality, copies and serialization; a copy is a new object and hashes afresh. The other
+    # slots hold facts derived from the fields (immutability verdict, canonical text, JSON
+    # fragment; see `vs_core._values.recall`) under the same rule, and are why those facts cost
+    # an attribute read instead of a side-table lookup.
+    __slots__ = ("_canonical", "_hash", "_immutable", "_text")
 
     def __hash__(self) -> int:
         """Hash of the class's fields, computed once."""

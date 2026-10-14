@@ -24,6 +24,7 @@ from tests.vibesys.orchestration.dynamic.core_policy._inputs import plan_of, res
 from tests.vibesys.orchestration.dynamic.prompt_variables import context_variables
 
 from vibesys.orchestration.dynamic.search.api import PromptTemplate
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -63,7 +64,10 @@ def test_every_template_is_classified_as_a_fresh_turn_or_a_continuation() -> Non
 
 
 @pytest.mark.parametrize("template", FRESH_TURNS, ids=lambda item: item.value)
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=25)
+@settings(
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    max_examples=examples(pr=10, nightly=25),
+)
 @given(data=st.data())
 def test_a_fresh_turn_prompt_shows_the_environment_notes_exactly_once(
     template: PromptTemplate, data: st.DataObject, tmp_path: Path

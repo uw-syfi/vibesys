@@ -24,6 +24,7 @@ from tests.support.task_project import write_task
 from launch import LaunchSettings, create_session, validate_run_request
 from vibesys.api import Config, ConfigurationError, OrchestrationDescriptor, RunRequest
 from vibesys.api.request import RunEnvironmentSpec, load_task
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -104,7 +105,7 @@ def _request(root: Path, environment: str, loop: str, command: list[str]) -> Run
     )
 
 
-@settings(max_examples=25, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=25), deadline=None, derandomize=True, database=None)
 @given(
     command=_COMMANDS,
     environment=st.sampled_from(_ENVIRONMENTS),

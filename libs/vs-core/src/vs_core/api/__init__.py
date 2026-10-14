@@ -1,5 +1,8 @@
 """Published pure lifecycle API. Area implementations land in wave 1."""
 
+from importlib import import_module
+from typing import TYPE_CHECKING
+
 from vs_core._attempt_track import (
     AttemptTrack,
     Step,
@@ -167,19 +170,6 @@ from vs_core.scheduling import schedule
 from vs_core.sessions import advance_session
 from vs_core.settlement import advance_adoption, settle
 from vs_core.testing.builders import initial_state
-from vs_core.testing.operations import operation_trace
-from vs_core.testing.traces import (
-    AttemptsChange,
-    EvaluationChange,
-    RecordsChange,
-    ReducerTrace,
-    SchedulingChange,
-    SessionsChange,
-    SettlementChange,
-    TraceChange,
-    TraceFrame,
-    trace_step,
-)
 from vs_core.types.agents import (
     Backoff,
     Charge,
@@ -634,6 +624,55 @@ from vs_core.types.until import (
     WhileOpen,
     Within,
 )
+
+if TYPE_CHECKING:
+    from vs_core.testing.operations import operation_trace
+    from vs_core.testing.traces import (
+        AttemptsChange,
+        EvaluationChange,
+        RecordsChange,
+        ReducerTrace,
+        SchedulingChange,
+        SessionsChange,
+        SettlementChange,
+        TraceChange,
+        TraceFrame,
+        trace_step,
+    )
+
+# Declarative reducer traces are test data whose schema spans every signal and area state, so
+# building their models costs about a third of a second of every process that imports this
+# API. They load on first use; `from vs_core.api import ReducerTrace` still works.
+_LAZY_EXPORTS = {
+    "operation_trace": "vs_core.testing.operations",
+    **dict.fromkeys(
+        (
+            "AttemptsChange",
+            "EvaluationChange",
+            "RecordsChange",
+            "ReducerTrace",
+            "SchedulingChange",
+            "SessionsChange",
+            "SettlementChange",
+            "TraceChange",
+            "TraceFrame",
+            "trace_step",
+        ),
+        "vs_core.testing.traces",
+    ),
+}
+
+
+def __getattr__(name: str) -> object:
+    """Load a lazily exported name from its module on first use."""
+    module = _LAZY_EXPORTS.get(name)
+    if module is None:
+        message = f"module {__name__!r} has no attribute {name!r}"
+        raise AttributeError(message)
+    value = getattr(import_module(module), name)
+    globals()[name] = value
+    return value
+
 
 __all__ = [
     "CAPTURE_SUFFIX",

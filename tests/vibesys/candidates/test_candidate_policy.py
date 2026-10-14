@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.candidates.api import (
@@ -27,6 +27,7 @@ from vs_core.api import (
     RevisionRef,
     SettlementId,
 )
+from vs_sim.api.testing import examples
 
 SPACE = MetricSpace(objectives=(Objective(name="tps", direction="max"),))
 BOTH = Gates(accuracy=True, benchmark=True)
@@ -66,6 +67,7 @@ def _readings(*, accuracy: bool | None, benchmark: bool | None) -> tuple[Accepte
 _STATE = st.sampled_from([None, True, False])
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(accuracy=_STATE, benchmark=_STATE, review=_STATE, failed=st.booleans())
 def test_a_candidate_is_winner_eligible_only_when_every_configured_gate_passed(
     *, accuracy: bool | None, benchmark: bool | None, review: bool | None, failed: bool
@@ -83,6 +85,7 @@ def test_a_candidate_is_winner_eligible_only_when_every_configured_gate_passed(
     assert (settle.candidate is not None) is (accuracy is True)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(accuracy=_STATE, benchmark=_STATE)
 def test_a_gate_the_run_does_not_configure_is_not_required(
     *, accuracy: bool | None, benchmark: bool | None
@@ -99,6 +102,7 @@ def test_an_unmeasured_candidate_is_discarded() -> None:
     assert (settle.retention, settle.eligible, settle.candidate) == ("discard", False, None)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(baseline=st.integers(1, 100), candidate=st.integers(1, 100))
 def test_a_candidate_must_beat_a_measured_input_but_the_search_decides_for_an_unmeasured_one(
     baseline: int, candidate: int
@@ -135,6 +139,7 @@ def test_with_no_eligible_round_the_trusted_baseline_wins() -> None:
     assert (winner.settlement, winner.revision, winner.hypothesis_id) == (None, BASELINE, None)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(values=st.lists(st.integers(1, 1000), min_size=1, max_size=6, unique=True))
 def test_the_best_headline_wins(values: list[int]) -> None:
     rounds = tuple(_round(index + 1, float(value)) for index, value in enumerate(values))
@@ -142,6 +147,7 @@ def test_the_best_headline_wins(values: list[int]) -> None:
     assert winner.hypothesis_id == f"h{values.index(max(values)) + 1}"
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(count=st.integers(1, 6))
 def test_without_benchmark_readings_the_latest_eligible_round_wins(count: int) -> None:
     rounds = tuple(_round(index + 1, None) for index in range(count))
@@ -153,6 +159,7 @@ def test_without_benchmark_readings_the_latest_eligible_round_wins(count: int) -
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(count=st.integers(1, 6))
 def test_without_readings_the_search_decides_whether_anything_wins(count: int) -> None:
     rounds = tuple(_round(index + 1, None) for index in range(count))

@@ -349,6 +349,35 @@ def test_run_resolves_source_resource_citations_before_exposing_the_objective(
         assert ctx.environment_resources.request.objective_document == authored_document
 
 
+def test_run_exposes_the_rewritten_objective_and_leaves_the_operators_file_as_written(
+    tmp_path: Path,
+) -> None:
+    """The objective file the operator wrote cites source paths; the run's own copy cites installed ones.
+
+    Every reader of the objective (the agents' prompts, the baseline benchmark) is given the
+    run's copy at ``view.paths.objective``; the operator's file is never edited in place.
+    """
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    skill = tmp_path / "skills" / "objective-policy"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: objective-policy\ndescription: Preserve accuracy.\n---\n# Policy\n"
+    )
+    (skill / "floor.md").write_text("Preserve accuracy.\n")
+    written = "Raise queue throughput. Follow resources/skills/objective-policy/floor.md.\n"
+    operators_file = task_path(project) / "OBJECTIVE.md"
+    operators_file.write_text(written, encoding="utf-8")
+    with _create_context(
+        project, evaluator=evaluator, skills_dirs=[str(skill)], objective=written
+    ) as ctx:
+        copy = Path(ctx.environment_resources.view.paths.objective)
+        assert copy != operators_file
+        assert copy.read_text() == written.replace("resources/skills/", ".agents/skills/")
+
+    assert operators_file.read_text(encoding="utf-8") == written
+
+
 def test_driver_mcp_config_is_never_committed_with_a_candidate(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)

@@ -30,13 +30,13 @@ from vs_project.api import (
     NullGitTrackerEvents,
     StagingError,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-# Each example runs real Git processes. A pull request draws a sample; the nightly workflow
-# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# Each example runs real Git processes. A pull request draws a sample; the nightly depth
+# (`--depth=nightly`) searches deeper.
 
 _NAMES = st.text(alphabet="abcdefgh01", min_size=1, max_size=6)
 
@@ -134,7 +134,7 @@ def test_the_harness_forces_the_failure_for_a_scan_that_selects_the_state_direct
             repository.stage_all(["."])
 
 
-@settings(max_examples=15 if _FULL else 3, deadline=None)
+@settings(max_examples=examples(pr=3, nightly=15), deadline=None)
 @given(run_id=_NAMES, temps=st.integers(min_value=1, max_value=4))
 def test_snapshot_survives_a_store_write_in_flight_at_every_scan(run_id: str, temps: int) -> None:
     with tempfile.TemporaryDirectory() as scratch:
@@ -153,7 +153,7 @@ def test_snapshot_survives_a_store_write_in_flight_at_every_scan(run_id: str, te
         assert not [path for path in _committed_paths(root) if path.startswith(".vibesys/state")]
 
 
-@settings(max_examples=15 if _FULL else 3, deadline=None)
+@settings(max_examples=examples(pr=3, nightly=15), deadline=None)
 @given(run_id=_NAMES, temps=st.integers(min_value=1, max_value=4))
 def test_tree_comparison_survives_a_store_write_in_flight(run_id: str, temps: int) -> None:
     with tempfile.TemporaryDirectory() as scratch:

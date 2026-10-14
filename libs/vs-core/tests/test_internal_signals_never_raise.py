@@ -22,6 +22,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import sample_limits, sample_retries
+from vs_sim.api.testing import examples
 
 from .test_adoption import GOOD, RUN_SCOPE, STATUSES, reload, world
 from .test_measurements import plan
@@ -312,7 +313,7 @@ def seeded(mode: core.WorkspaceMode | None, parallel: int) -> core.CoreState:
     return state.model_copy(update={"run": state.run.model_copy(update={"limits": limits})})
 
 
-@settings(max_examples=200, deadline=None)
+@settings(max_examples=examples(pr=3, nightly=200), deadline=None)
 @given(
     plan=st.lists(actions, min_size=1, max_size=40),
     parallel=st.integers(1, 2),

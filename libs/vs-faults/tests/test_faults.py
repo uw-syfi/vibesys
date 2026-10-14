@@ -25,6 +25,7 @@ from vs_faults.api import (
     handle_cluster_request_with,
     injected_faults,
 )
+from vs_sim.api.testing import examples
 from vs_slurm.fake_connector import executing_cluster
 from vs_slurm.fake_connector import handle as fake_cluster_handle
 
@@ -127,7 +128,7 @@ def _connector(plan: FaultPlan, base: Path, request: dict[str, object]) -> dict[
     return handle_cluster_request(plan, base / "faults", inner, request)
 
 
-@settings(max_examples=10, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=10), deadline=None)
 @given(command=st.sampled_from(["echo hi", "squeue -h -j 5000 -o %T", "sacct -n -P -j 5000"]))
 def test_an_empty_plan_answers_every_cluster_call_like_the_inner_connector(
     tmp_path_factory: pytest.TempPathFactory, command: str
@@ -152,7 +153,7 @@ def test_an_empty_plan_answers_every_cluster_call_like_the_inner_connector(
 
 
 @given(command=st.sampled_from(["echo hi", "squeue -h -j 5000 -o %T", "sacct -n -P -j 5000"]))
-@settings(max_examples=10, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=10), deadline=None)
 def test_an_in_process_forward_is_asked_once_by_an_empty_plan_and_never_by_a_faulted_call(
     tmp_path_factory: pytest.TempPathFactory, command: str
 ) -> None:

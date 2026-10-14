@@ -11,9 +11,10 @@ deterministic.
 from __future__ import annotations
 
 import random
-from typing import cast
+from importlib import import_module
+from typing import TYPE_CHECKING, cast
 
-from vibesys.orchestration.evolve.population import openevolve_selector, vibesys_selector
+from vibesys.orchestration.evolve.population import vibesys_selector
 from vibesys.orchestration.evolve.population.models import (
     CandidateOutcome,
     Individual,
@@ -25,7 +26,20 @@ from vibesys.orchestration.evolve.population.models import (
     RandomState,
 )
 
+if TYPE_CHECKING:
+    from types import ModuleType
+
 __all__ = ["PopulationSearch"]
+
+
+def _openevolve_selector() -> ModuleType:
+    """The OpenEvolve selector, loaded when a run selects with it.
+
+    Importing it loads OpenEvolve, which loads its LLM clients and numpy: about a third of a
+    second of every process that imports this module, though only runs configured with
+    ``selector="openevolve"`` use it.
+    """
+    return import_module("vibesys.orchestration.evolve.population.openevolve_selector")
 
 
 class PopulationSearch:
@@ -43,7 +57,7 @@ class PopulationSearch:
             oe_rng = random.Random(self.config.seed)  # noqa: S311  # LW-040057 [S311]; the generator only seeds deterministic search sampling and is not used for security.
             selector_state = OpenEvolveSelectorState(
                 config=self.config.openevolve or OpenEvolveSelectorConfig(),
-                objective_signature=openevolve_selector.objective_signature(self.config.space),
+                objective_signature=_openevolve_selector().objective_signature(self.config.space),
                 rng_state=cast("RandomState", oe_rng.getstate()),
             )
         return PopulationState(
@@ -83,7 +97,7 @@ class PopulationSearch:
         if state.selector_state is None:
             message = "openevolve selector requires PopulationState.selector_state"
             raise ValueError(message)
-        proposal, selector_state = openevolve_selector.select(
+        proposal, selector_state = _openevolve_selector().select(
             state.selector_state,
             state.individuals,
             k_top_inspirations=self.config.k_top_inspirations,
@@ -122,7 +136,7 @@ class PopulationSearch:
             if selector_state is None:
                 message = "openevolve selector requires PopulationState.selector_state"
                 raise ValueError(message)
-            selector_state = openevolve_selector.admit(
+            selector_state = _openevolve_selector().admit(
                 selector_state,
                 individual,
                 code=outcome.code or "",

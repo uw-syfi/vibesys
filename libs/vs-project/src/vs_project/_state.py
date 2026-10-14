@@ -12,6 +12,7 @@ CLI arguments, agent providers, or evaluator implementations.
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import json
@@ -25,6 +26,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, Self
 
@@ -1420,7 +1422,10 @@ def _validate_namespace(namespace: str) -> str:
 _MAX_STATE_NAME_BYTES = 255
 
 
+@lru_cache(maxsize=4096)
 def _validate_state_relative_path(raw_path: str | PurePosixPath) -> PurePosixPath:
+    # A pure function of its argument and run on every state read and write with the same few
+    # paths, so its verdict is remembered. A rejected path raises and is checked again.
     if isinstance(raw_path, str):
         value = raw_path
         if not value or "\\" in value or any(not part for part in value.split("/")):
@@ -1585,22 +1590,54 @@ def _contained_without_symlinks(parent: Path, child: Path, *, kind: str) -> Path
     below ``parent`` can only name something below ``parent``, wherever ``parent``
     itself resolves. Only a rejected path is resolved, to say which rule it broke.
     """
-    try:
-        components = child.relative_to(parent).parts
-    except ValueError:
-        raise ProjectStateError.path_escapes_root(parent, child) from None
+    fast = _components_below(parent, child)
+    if fast is None:
+        try:
+            components = child.relative_to(parent).parts
+        except ValueError:
+            raise ProjectStateError.path_escapes_root(parent, child) from None
+    else:
+        components = fast
     if ".." in components:
         raise ProjectStateError.path_escapes_root(parent, child)
-    current = parent
+    current = os.fspath(parent)
     for component in components:
-        current /= component
+        current = f"{current}/{component}"
         try:
-            if current.is_symlink():
-                _raise_symlink_component(parent, child, current, kind=kind)
+            if stat.S_ISLNK(os.lstat(current).st_mode):
+                _raise_symlink_component(parent, child, Path(current), kind=kind)
+        except (FileNotFoundError, NotADirectoryError):
+            break  # nothing below a missing component exists, so no later component is a link
         except OSError as exc:
+            if exc.errno in _ABSENT_ERRNOS:
+                break
             message = f"Could not validate VibeSys {kind} path {current}: {exc}"
             raise ProjectStateError(message) from exc
     return child
+
+
+# What ``Path.is_symlink`` reads as "no link here": the component or a directory above it is absent.
+_ABSENT_ERRNOS = frozenset({errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP})
+
+
+def _components_below(parent: Path, child: Path) -> tuple[str, ...] | None:
+    """The components of ``child`` below ``parent`` by string prefix, or None if not plainly below.
+
+    Both paths are normalized by ``Path``, so a prefix that ends at a separator is the same
+    containment ``relative_to`` proves. None sends the caller to ``relative_to``.
+    """
+    base = os.fspath(parent)
+    full = os.fspath(child)
+    if not parent.is_absolute() or not full.startswith(base):
+        return None
+    if full == base:
+        return ()
+    rest = full[len(base) :]
+    if base.endswith("/"):
+        return tuple(rest.split("/"))
+    if rest.startswith("/"):
+        return tuple(rest[1:].split("/"))
+    return None
 
 
 def _raise_symlink_component(parent: Path, child: Path, link: Path, *, kind: str) -> NoReturn:

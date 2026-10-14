@@ -12,6 +12,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import ProjectStateError, atomic_write_bytes
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Buffer, Iterator
@@ -86,7 +87,7 @@ class _FakeAtomicFilesystem:
 
 
 @given(old=st.binary(max_size=64), new=st.binary(min_size=1, max_size=64))
-@settings(max_examples=15)
+@settings(max_examples=examples(pr=5, nightly=15))
 def test_interruption_at_every_operation_preserves_complete_content(old: bytes, new: bytes) -> None:
     uninterrupted = _FakeAtomicFilesystem(old, interrupt=None, chunk_size=len(new))
     atomic_write_bytes(Path("state.json"), new, effects=uninterrupted)
@@ -103,7 +104,7 @@ def test_interruption_at_every_operation_preserves_complete_content(old: bytes, 
 @given(
     contents=st.binary(min_size=1, max_size=64), chunk_size=st.integers(min_value=1, max_value=64)
 )
-@settings(max_examples=15)
+@settings(max_examples=examples(pr=5, nightly=15))
 def test_short_writes_publish_every_byte(contents: bytes, chunk_size: int) -> None:
     filesystem = _FakeAtomicFilesystem(b"old", interrupt=None, chunk_size=chunk_size)
     atomic_write_bytes(Path("state.json"), contents, effects=filesystem)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from tests.vibesys.orchestration.evolve._host import TERMS
 from tests.vibesys.orchestration.evolve._values import (
     closings,
@@ -12,8 +12,10 @@ from tests.vibesys.orchestration.evolve._values import (
 )
 
 from vibesys.orchestration.evolve.search.api import STOPPED, Closing, FailureKind, assertion
+from vs_sim.api.testing import examples
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(closing=closings())
 def test_only_a_child_that_passed_everything_is_eligible(closing: Closing) -> None:
     for cold in (True, False):
@@ -21,6 +23,7 @@ def test_only_a_child_that_passed_everything_is_eligible(closing: Closing) -> No
         assert not settle.eligible or closing.passed
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(closing=closings())
 def test_a_cold_start_that_failed_after_leaving_work_keeps_it_as_work_in_progress(
     closing: Closing,

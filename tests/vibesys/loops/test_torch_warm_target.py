@@ -1,30 +1,29 @@
-"""Tests for warm-target (reusable running process) profiling.
+"""Warm-target profiling: ``capture_runtime`` targets and ``capture_ops.profile_ops(target=...)``.
 
-Covers ``capture_runtime.start_target``/``stop_target``/``list_targets``/
-``signal_target``/``stop_all_targets`` (``resources/profilers/_common/
-capture_runtime.py``) and the torch plugin's ``capture_ops.start_target`` +
-``profile_ops(target=...)`` (``resources/profilers/torch/capture_ops.py``),
-which together let an agent take more than one op-level torch.profiler
-window against the same already-running process instead of relaunching it
-per capture (on a ROCm build without rocprofiler-sdk default-attachment
-support, rocprofv3 --attach cannot do this at all, but the torch plugin's
-own signal-window injection can, once armed for repeated windows).
+Guarantees under test:
 
-Exercised end to end via real subprocesses using the fake ``torch`` package
-from ``torch_inject_fixtures.py`` (this dev environment has no real torch
-installed). The state-machine regression this whole feature depends on
-(a second SIGUSR1 must not be silently ignored) has its own dedicated
-regression test in ``test_torch_inject.py``
-(``test_signal_mode_repeated_windows_produce_two_traces``), verified to
-fail against the pre-fix ``sitecustomize.py``; this file assumes that fix
-and tests one layer up: the target registry, the control-file wiring, and
-``profile_ops(target=...)``.
+* ``start_target`` returns only once the target reports ready, registers it, does not hold the
+  capture slot, and leaves it running; ``stop_target`` / ``stop_all_targets`` leave no process
+  of any target running and an empty registry (the latter idempotent); an unknown id is a
+  ``KeyError``.
+* Each ``profile_ops(target=...)`` window yields exactly one trace for that window (windows are
+  numbered 1, 2, ...), leaves the target running and reusable, and reports the primary trace.
+* The load starts only after the target acknowledged that recording began, never before.
+* A target that can never take a window (no GPU) is reported as such, with its reason.
+* A window is refused with ``CaptureBusyError`` while another capture holds the slot, and
+  succeeds once the slot is free.
+* Misuse is a clear error: no ``load_command``, an unknown target, neither command nor target.
+* Over any sequence of target lifetimes with any number of windows each, traces equal windows
+  and nothing is left running.
+
+The target is a scripted process speaking the injection's file protocol on a virtual clock
+(``tests/vibesys/loops/profiler_process_world.py``); that the real injection speaks the same protocol
+is checked against real processes in ``tests/e2e/test_profiler_capture_processes_e2e.py``.
 """
 
 from __future__ import annotations
 
 import importlib.util
-import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -32,293 +31,212 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.vibesys.loops.torch_inject_fixtures import parse_call_log, write_fake_torch
+from tests.vibesys.loops.profiler_process_world import (
+    ScriptedHost,
+    exits,
+    torch_target,
+)
+
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from types import ModuleType
+
+    from tests.vibesys.loops.profiler_process_world import FakeProcess
 
 _REPO = Path(__file__).resolve().parents[3]
 _TORCH_DIR = _REPO / "resources" / "profilers" / "torch"
+_TRACE_JSON = (
+    Path(__file__).parent / "fixtures" / "torch" / "eager_trimmed.pt.trace.json"
+).read_bytes()
 
-# Real subprocesses + signal round-trips: keep example counts small, same
-# rationale as test_torch_inject.py's PROC_SETTINGS.
-PROC_SETTINGS = settings(
-    max_examples=5, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
-)
+SERVER = "serve-model"
+LOAD = "drive-load"
 
 
-def _load_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, str(path))
+def _load_capture_ops(name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, str(_TORCH_DIR / "capture_ops.py"))
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
-    parent = str(path.parent)
-    inserted = parent not in sys.path
+    inserted = str(_TORCH_DIR) not in sys.path
     if inserted:
-        sys.path.insert(0, parent)
+        sys.path.insert(0, str(_TORCH_DIR))
     try:
         assert spec.loader is not None
         spec.loader.exec_module(module)
     finally:
         if inserted:
-            sys.path.remove(parent)
+            sys.path.remove(str(_TORCH_DIR))
     return module
 
 
+@pytest.fixture(scope="module")
+def capture_ops() -> ModuleType:
+    return _load_capture_ops("_capture_ops_warm_target")
+
+
 @pytest.fixture
-def capture_ops(tmp_path: Path) -> ModuleType:
-    """A fresh ``capture_ops`` module per test, with its own capture store.
-
-    Not module-scoped (unlike ``test_torch_capture_ops.py``'s fixture):
-    each test needs an isolated ``$VIBESYS_PROFILE_DIR`` so target ids and
-    live-target registry state from one test can never leak into another,
-    and the target registry lives on the shared ``capture_runtime`` module
-    this ``capture_ops`` instance imports (see ``test_capture_runtime.py``'s
-    comment on why that module's identity is process-global by design).
-    """
-    os.environ["VIBESYS_PROFILE_DIR"] = str(tmp_path / ".profiles")
-    return _load_module("_capture_ops_warm_target", _TORCH_DIR / "capture_ops.py")
-
-
-def _is_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
+def world(
+    capture_ops: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[ScriptedHost]:
+    """A scripted host with an isolated capture store, installed for the test."""
+    monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
+    host = ScriptedHost(file_checks=True)
+    host.scripts[LOAD] = exits(0.2)
+    runtime = capture_ops.capture_runtime
+    with runtime.use_host(host):
+        yield host
+        runtime.stop_all_targets()
 
 
-def _target_command(fake_torch: Path, *, sleep_s: float = 30.0) -> tuple[str, dict[str, str]]:
-    command = f'{sys.executable} -c "import torch, time; time.sleep({sleep_s})"'
-    return command, {"PYTHONPATH": str(fake_torch)}
+def _traces(capture_ops: ModuleType) -> list[Path]:
+    return sorted(capture_ops.capture_runtime.profiles_root().glob("**/*.pt.trace.json.gz"))
 
 
-def _all_trace_files(root: Path) -> list[Path]:
-    return sorted(root.glob("**/*.pt.trace.json.gz"))
-
-
-# ---------------------------------------------------------------------------
-# start_target / stop_target lifecycle
-# ---------------------------------------------------------------------------
-
-
-def test_start_target_keeps_process_running_until_stopped(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001  # LW-910371; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    command, env = _target_command(fake_torch)
-    target_id = capture_ops.start_target(command, env=env)
-
+def _start(
+    capture_ops: ModuleType, host: ScriptedHost, **target: object
+) -> tuple[str, FakeProcess]:
+    host.scripts[SERVER] = torch_target(_TRACE_JSON, **target)  # ty: ignore[invalid-argument-type]
+    target_id = capture_ops.start_target(SERVER)
     info = capture_ops.capture_runtime.get_target(target_id)
-    assert info.alive
-    assert _is_alive(info.pid)
-
-    capture_ops.capture_runtime.stop_target(target_id)
-    assert not _is_alive(info.pid)
-    assert capture_ops.capture_runtime.list_targets() == []
+    return target_id, host.processes[info.pid]
 
 
-def test_stop_target_unknown_id_raises_key_error(capture_ops) -> None:  # noqa: ANN001  # LW-910372; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    with pytest.raises(KeyError):
-        capture_ops.capture_runtime.stop_target("does-not-exist")
-
-
-def test_stop_all_targets_stops_every_live_target(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001  # LW-910373; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    """Mirrors what each server.py registers via ``atexit`` on process exit."""
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    pids = []
-    for _ in range(2):
-        command, env = _target_command(fake_torch)
-        target_id = capture_ops.start_target(command, env=env)
-        pids.append(capture_ops.capture_runtime.get_target(target_id).pid)
-
-    assert all(_is_alive(pid) for pid in pids)
-    capture_ops.capture_runtime.stop_all_targets()
-    assert not any(_is_alive(pid) for pid in pids)
-    assert capture_ops.capture_runtime.list_targets() == []
-    # Idempotent: nothing left to stop, must not raise.
-    capture_ops.capture_runtime.stop_all_targets()
-
-
-# ---------------------------------------------------------------------------
-# profile_ops(target=...): repeated windows on the same warm target
-# ---------------------------------------------------------------------------
-
-
-def test_two_consecutive_windows_produce_two_traces_and_target_stays_up(  # noqa: ANN201  # LW-910374; this function's return type is intentionally left loose; annotating it now is separate cleanup work
-    capture_ops,  # noqa: ANN001  # LW-910375; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    tmp_path: Path,
-):
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    command, env = _target_command(fake_torch)
-    target_id = capture_ops.start_target(command, env=env)
-    pid = capture_ops.capture_runtime.get_target(target_id).pid
-
-    out1 = capture_ops.profile_ops(target=target_id, load_command="sleep 0.2", duration_s=10)
-    assert "primary trace" in out1, out1
-    assert _is_alive(pid), "target must still be running after window 1"
-
-    out2 = capture_ops.profile_ops(target=target_id, load_command="sleep 0.2", duration_s=10)
-    assert "primary trace" in out2, out2
-    assert _is_alive(pid), "target must still be running after window 2"
-
-    traces = _all_trace_files(capture_ops.capture_runtime.profiles_root())
-    assert len(traces) == 2, f"expected 2 trace files, got {[p.name for p in traces]}"
-    windows = sorted(int(p.name.split("-")[1].split(".")[0]) for p in traces)
-    assert windows == [1, 2]
-
-    capture_ops.capture_runtime.stop_target(target_id)
-    assert not _is_alive(pid)
-
-
-def test_target_load_runs_only_after_recording_started(
-    capture_ops: ModuleType, tmp_path: Path
+def test_a_started_target_is_registered_ready_and_running_until_stopped(
+    capture_ops: ModuleType, world: ScriptedHost
 ) -> None:
-    """Regression test: the load must not start before the window is recording.
+    runtime = capture_ops.capture_runtime
+    target_id, proc = _start(capture_ops, world)
 
-    Pre-fix, ``profile_ops(target=...)`` sent SIGUSR1 and started the load
-    immediately; ``profiler.start()`` takes ~2s on ROCm, so the first part
-    of the load went unrecorded. The load now waits for the target's
-    ``window.started`` acknowledgement. The call log is append-only across
-    processes, so line order is event order.
-    """
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    call_log = tmp_path / "calls.log"
-    command, env = _target_command(fake_torch)
-    env["FAKE_TORCH_CALL_LOG"] = str(call_log)
-    env["FAKE_TORCH_START_DELAY_S"] = "1.0"  # a slow start, as on ROCm
-    target_id = capture_ops.start_target(command, env=env)
-    load = f"echo '0\tload.begin' >> '{call_log}'"
+    info = runtime.get_target(target_id)
+    assert info.alive
+    assert info.ready_achieved
+    assert runtime.active_capture() is None  # starting is not a capture
+    assert [t.target_id for t in runtime.list_targets()] == [target_id]
 
-    out = capture_ops.profile_ops(target=target_id, load_command=load, duration_s=10)
-    capture_ops.capture_runtime.stop_target(target_id)
+    runtime.stop_target(target_id)
+    assert not proc.alive
+    assert runtime.list_targets() == []
+    with pytest.raises(KeyError):
+        runtime.stop_target(target_id)
+    with pytest.raises(KeyError):
+        runtime.stop_target("does-not-exist")
+
+
+def test_stop_all_targets_stops_every_target_and_is_idempotent(
+    capture_ops: ModuleType, world: ScriptedHost
+) -> None:
+    runtime = capture_ops.capture_runtime
+    procs = [_start(capture_ops, world)[1] for _ in range(2)]
+    assert all(p.alive for p in procs)
+
+    runtime.stop_all_targets()
+    assert not world.alive_pids()
+    assert runtime.list_targets() == []
+    runtime.stop_all_targets()
+
+
+def test_consecutive_windows_each_yield_their_own_trace_and_keep_the_target_up(
+    capture_ops: ModuleType, world: ScriptedHost
+) -> None:
+    target_id, proc = _start(capture_ops, world)
+
+    for _ in range(2):
+        out = capture_ops.profile_ops(target=target_id, load_command=LOAD, duration_s=10)
+        assert "primary trace" in out, out
+        assert proc.alive
+
+    traces = _traces(capture_ops)
+    assert sorted(int(p.name.split("-")[1].split(".")[0]) for p in traces) == [1, 2]
+
+
+def test_the_load_starts_only_after_recording_started(
+    capture_ops: ModuleType, world: ScriptedHost
+) -> None:
+    """A slow profiler start (seconds on ROCm) must not leave the first of the load unrecorded."""
+    events: list[str] = []
+    load_script = exits(0.2)
+
+    def load(proc: FakeProcess) -> None:
+        events.append("load.begin")
+        load_script(proc)
+
+    world.scripts[LOAD] = load
+    target_id, _ = _start(capture_ops, world, start_delay_s=1.0, events=events)
+
+    out = capture_ops.profile_ops(target=target_id, load_command=LOAD, duration_s=10)
 
     assert "primary trace" in out, out
-    events = [name for _ts, name in parse_call_log(call_log)]
     assert events.index("profile.start") < events.index("load.begin")
 
 
-def test_gpu_less_target_is_reported_unavailable(capture_ops: ModuleType, tmp_path: Path) -> None:
-    """start_target returns once the target reports it can never take a window."""
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    command, env = _target_command(fake_torch)
-    env["FAKE_TORCH_GPU"] = "0"
-    target_id = capture_ops.start_target(command, env=env)
+def test_a_target_with_no_gpu_reports_why_no_window_can_be_taken(
+    capture_ops: ModuleType, world: ScriptedHost
+) -> None:
+    target_id, _ = _start(capture_ops, world, gpu=False)
 
     with pytest.raises(RuntimeError) as failed:
-        capture_ops.profile_ops(target=target_id, load_command="true", duration_s=10)
-    capture_ops.capture_runtime.stop_target(target_id)
+        capture_ops.profile_ops(target=target_id, load_command=LOAD, duration_s=10)
+
     assert type(failed.value).__name__ == "CaptureFailedError"
-    out = str(failed.value)
-
-    assert "cannot take a torch.profiler window" in out
-    assert "no GPU" in out
+    assert "cannot take a torch.profiler window" in str(failed.value)
+    assert "no GPU" in str(failed.value)
 
 
-def test_profile_ops_target_requires_load_command(capture_ops) -> None:  # noqa: ANN001  # LW-910376; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    with pytest.raises(RuntimeError, match="requires load_command") as failed:
-        capture_ops.profile_ops(target="whatever")
-    out = str(failed.value)
-    assert "requires load_command" in out
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"target": "whatever"}, "requires load_command"),
+        ({"target": "does-not-exist", "load_command": LOAD}, "does-not-exist"),
+        ({}, "requires either command="),
+    ],
+)
+@pytest.mark.usefixtures("world")
+def test_misuse_is_a_clear_error(
+    capture_ops: ModuleType, kwargs: dict[str, str], message: str
+) -> None:
+    with pytest.raises(RuntimeError, match=message):
+        capture_ops.profile_ops(**kwargs)
 
 
-def test_profile_ops_unknown_target_returns_clear_error(capture_ops) -> None:  # noqa: ANN001  # LW-910377; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    with pytest.raises(RuntimeError, match="does-not-exist") as failed:
-        capture_ops.profile_ops(target="does-not-exist", load_command="true")
-    out = str(failed.value)
-    assert "error" in out
-    assert "does-not-exist" in out
-
-
-def test_profile_ops_requires_command_or_target(capture_ops) -> None:  # noqa: ANN001  # LW-910378; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    with pytest.raises(RuntimeError, match="requires either command=") as failed:
-        capture_ops.profile_ops()
-    out = str(failed.value)
-    assert "requires either command=" in out
-
-
-# ---------------------------------------------------------------------------
-# busy/exclusive interplay between captures and targets
-# ---------------------------------------------------------------------------
-
-
-def test_target_window_is_busy_while_another_capture_holds_the_slot(  # noqa: ANN201  # LW-910379; this function's return type is intentionally left loose; annotating it now is separate cleanup work
-    capture_ops,  # noqa: ANN001  # LW-910380; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    tmp_path: Path,
-):
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    command, env = _target_command(fake_torch)
-    target_id = capture_ops.start_target(command, env=env)
+def test_a_window_is_busy_while_another_capture_holds_the_slot_and_works_after(
+    capture_ops: ModuleType, world: ScriptedHost
+) -> None:
+    runtime = capture_ops.capture_runtime
+    target_id, _ = _start(capture_ops, world)
 
     with (
-        capture_ops.capture_runtime.exclusive_capture("ops", "some-other-capture"),
-        pytest.raises(capture_ops.capture_runtime.CaptureBusyError),
+        runtime.exclusive_capture("ops", "some-other-capture"),
+        pytest.raises(runtime.CaptureBusyError),
     ):
-        capture_ops.profile_ops(target=target_id, load_command="sleep 0.1", duration_s=5)
+        capture_ops.profile_ops(target=target_id, load_command=LOAD, duration_s=5)
 
-    # The slot is free again: a window now succeeds normally.
-    out = capture_ops.profile_ops(target=target_id, load_command="sleep 0.1", duration_s=5)
-    assert "primary trace" in out, out
-
-    capture_ops.capture_runtime.stop_target(target_id)
-
-
-def test_starting_a_target_does_not_hold_the_capture_slot(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001  # LW-910381; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    """start_target itself is not a capture: it must not block a concurrent one."""
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    command, env = _target_command(fake_torch)
-    target_id = capture_ops.start_target(command, env=env)
-    assert capture_ops.capture_runtime.active_capture() is None
-    capture_ops.capture_runtime.stop_target(target_id)
-
-
-# ---------------------------------------------------------------------------
-# Property test: random window counts never leak processes; window count ==
-# trace count.
-# ---------------------------------------------------------------------------
-
-
-@PROC_SETTINGS
-@given(window_counts=st.lists(st.integers(min_value=0, max_value=3), min_size=1, max_size=3))
-def test_random_start_window_stop_sequences_leak_nothing(  # noqa: ANN201  # LW-910382; this function's return type is intentionally left loose; annotating it now is separate cleanup work
-    tmp_path_factory,  # noqa: ANN001  # LW-910383; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    window_counts: list[int],
-):
-    """Several target lifetimes, each with a random number of windows.
-
-    For each count in *window_counts*: start a fresh target, take that many
-    profile_ops(target=...) windows against it, then stop it. Regardless of
-    how many windows a lifetime takes (including zero), stopping it must
-    leave no live process, and the total trace count across every lifetime
-    must equal the total window count -- the property the repeated-window
-    state-machine fix (see test_torch_inject.py's regression test) exists
-    to guarantee.
-    """
-    case_dir = tmp_path_factory.mktemp("warm_target_case")
-    os.environ["VIBESYS_PROFILE_DIR"] = str(case_dir / ".profiles")
-    capture_ops_mod = _load_module("_capture_ops_warm_target_prop", _TORCH_DIR / "capture_ops.py")
-    fake_torch = write_fake_torch(case_dir / "fake_torch")
-
-    total_windows = 0
-    pids: list[int] = []
-    for count in window_counts:
-        command, env = _target_command(fake_torch, sleep_s=30.0)
-        target_id = capture_ops_mod.start_target(command, env=env)
-        pid = capture_ops_mod.capture_runtime.get_target(target_id).pid
-        pids.append(pid)
-        for _ in range(count):
-            out = capture_ops_mod.profile_ops(
-                target=target_id, load_command="sleep 0.1", duration_s=5
-            )
-            assert "primary trace" in out, out
-            total_windows += 1
-        capture_ops_mod.capture_runtime.stop_target(target_id)
-        assert not _is_alive(pid), f"target pid {pid} leaked after stop_target"
-
-    assert capture_ops_mod.capture_runtime.list_targets() == []
-    traces = _all_trace_files(capture_ops_mod.capture_runtime.profiles_root())
-    assert len(traces) == total_windows, (
-        f"window count ({total_windows}) != trace count ({len(traces)}): {[p.name for p in traces]}"
+    assert "primary trace" in capture_ops.profile_ops(
+        target=target_id, load_command=LOAD, duration_s=5
     )
-    assert not any(_is_alive(pid) for pid in pids)
 
 
-if __name__ == "__main__":
-    sys.exit(pytest.main([__file__, "-q"]))
+@settings(
+    max_examples=examples(pr=4, nightly=60),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(window_counts=st.lists(st.integers(min_value=0, max_value=3), min_size=1, max_size=3))
+def test_traces_equal_windows_and_nothing_leaks_over_any_target_lifetimes(
+    capture_ops: ModuleType, world: ScriptedHost, window_counts: list[int]
+) -> None:
+    runtime = capture_ops.capture_runtime
+    before = len(_traces(capture_ops))
+    for count in window_counts:
+        target_id, proc = _start(capture_ops, world)
+        for _ in range(count):
+            assert "primary trace" in capture_ops.profile_ops(
+                target=target_id, load_command=LOAD, duration_s=5
+            )
+        runtime.stop_target(target_id)
+        assert not proc.alive
+
+    assert runtime.list_targets() == []
+    assert len(_traces(capture_ops)) - before == sum(window_counts)
+    assert not world.alive_pids()

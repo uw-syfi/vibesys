@@ -432,16 +432,28 @@ def test_portable_run_export_inspection_failure_is_reported(
         store.state.portable_run_export(run.run_id)
 
 
-@pytest.mark.parametrize("method", ["exists", "is_symlink"])
 def test_state_directory_validation_failure_is_reported(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = _store(tmp_path)
     run = _run(store)
-    _fail_for(monkeypatch, method, "probe-namespace", PermissionError("denied"))
+    _fail_for(monkeypatch, "exists", "probe-namespace", PermissionError("denied"))
 
     with pytest.raises(ProjectStateError, match=r"Could not validate VibeSys .*denied"):
         store.state.portable_namespace(run.run_id, "probe-namespace")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads every directory")
+def test_state_path_that_cannot_be_inspected_is_reported(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    run = _run(store)
+    run_dir = next(tmp_path.rglob(str(run.run_id)))
+    run_dir.chmod(0o000)
+    try:
+        with pytest.raises(ProjectStateError, match=r"Could not (validate|read) VibeSys .*denied"):
+            store.state.portable_namespace(run.run_id, "probe-namespace")
+    finally:
+        run_dir.chmod(0o700)
 
 
 def test_replacement_snapshot_must_select_a_dedicated_run_namespace(tmp_path: Path) -> None:

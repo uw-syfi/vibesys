@@ -1,16 +1,18 @@
 """The pytest plugin runs async tests deterministically, prints seeds and checks determinism.
 
-Each case writes a small test suite and runs it in a fresh pytest process with the plugin.
+Each case writes a small test suite and runs it with the plugin inside this process
+(``runpytest_inprocess``): a fresh interpreter per run would cost seconds of start-up each,
+and the plugin's one global, the session depth, is put back after every case.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import signal
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given
@@ -23,9 +25,14 @@ from vs_sim.api.testing import (
     VirtualClock,
     VirtualDeadlockError,
     WorldRegistry,
+    depth,
     run_in_child,
     run_virtual,
+    using_depth,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 pytest_plugins = ["pytester"]
 
@@ -33,13 +40,12 @@ PLUGIN_DIR = Path(__file__).resolve().parents[1] / "pytest_plugin"
 
 
 @pytest.fixture
-def suite(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> pytest.Pytester:
+def suite(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> Generator[pytest.Pytester]:
     """A scratch project that loads the plugin, as the repository's root conftest does."""
-    monkeypatch.setenv(
-        "PYTHONPATH", os.pathsep.join(filter(None, [str(PLUGIN_DIR), os.environ.get("PYTHONPATH")]))
-    )
-    pytester.makeini("[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider\n")
-    return pytester
+    monkeypatch.syspath_prepend(str(PLUGIN_DIR))
+    pytester.makeini("[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider -p no:tach\n")
+    with using_depth(depth()):  # each inner run's configure sets the depth; this session's survives
+        yield pytester
 
 
 def test_async_tests_run_on_the_virtual_loop_without_waiting(suite: pytest.Pytester) -> None:
@@ -61,7 +67,7 @@ def test_async_tests_run_on_the_virtual_loop_without_waiting(suite: pytest.Pytes
             assert sim.run(main()) == 6.0
         """
     )
-    suite.runpytest_subprocess().assert_outcomes(passed=3)
+    suite.runpytest_inprocess().assert_outcomes(passed=3)
 
 
 def test_hypothesis_examples_of_an_async_test_each_run_virtually(suite: pytest.Pytester) -> None:
@@ -79,8 +85,8 @@ def test_hypothesis_examples_of_an_async_test_each_run_virtually(suite: pytest.P
             assert clock.now() - before == __import__("pytest").approx(seconds)
         """
     )
-    suite.runpytest_subprocess().assert_outcomes(passed=1)
-    suite.runpytest_subprocess("--sim-determinism-check").assert_outcomes(passed=1)
+    suite.runpytest_inprocess().assert_outcomes(passed=1)
+    suite.runpytest_inprocess("--sim-determinism-check").assert_outcomes(passed=1)
 
 
 def test_a_test_that_waits_on_nothing_fails_at_once(suite: pytest.Pytester) -> None:
@@ -92,7 +98,7 @@ def test_a_test_that_waits_on_nothing_fails_at_once(suite: pytest.Pytester) -> N
             await asyncio.Event().wait()
         """
     )
-    result = suite.runpytest_subprocess()
+    result = suite.runpytest_inprocess()
     result.assert_outcomes(failed=1)
     result.stdout.fnmatch_lines(["*VirtualDeadlockError*no timer is scheduled*"])
 
@@ -101,7 +107,7 @@ def test_real_system_tiers_are_left_alone(suite: pytest.Pytester) -> None:
     suite.mkdir("tests")
     tier = suite.mkdir("tests/e2e")
     (tier / "test_real.py").write_text("async def test_real():\n    pass\n", encoding="utf-8")
-    result = suite.runpytest_subprocess("tests/e2e")
+    result = suite.runpytest_inprocess("tests/e2e")
     assert result.parseoutcomes().get("passed", 0) == 0
 
 
@@ -115,7 +121,7 @@ def test_a_test_cannot_use_both_pytest_asyncio_and_the_sim_fixture(suite: pytest
             pass
         """
     )
-    result = suite.runpytest_subprocess("-rs")
+    result = suite.runpytest_inprocess("-rs")
     result.assert_outcomes(skipped=1)
     result.stdout.fnmatch_lines(["*drop the asyncio marker*"])
 
@@ -127,15 +133,15 @@ def test_a_failure_prints_its_seed_and_the_option_that_replays_it(suite: pytest.
             assert sim.seed < 0, "sim.seed=%d" % sim.seed
         """
     )
-    first = suite.runpytest_subprocess()
+    first = suite.runpytest_inprocess()
     first.assert_outcomes(failed=1)
     printed = re.search(r"replay with --sim-seed=(\d+)", first.stdout.str())
     assert printed is not None
     seed = int(printed.group(1))
     assert f"sim.seed={seed}" in first.stdout.str()
-    replay = suite.runpytest_subprocess(f"--sim-seed={seed}")
+    replay = suite.runpytest_inprocess(f"--sim-seed={seed}")
     assert f"sim.seed={seed}" in replay.stdout.str()
-    other = suite.runpytest_subprocess("--sim-seed=7")
+    other = suite.runpytest_inprocess("--sim-seed=7")
     assert "sim.seed=7" in other.stdout.str()
     assert "replay with --sim-seed=7" in other.stdout.str()
 
@@ -147,7 +153,7 @@ def test_without_an_override_a_tests_seed_is_the_same_every_run(suite: pytest.Py
             print("SEED", sim.seed, sim.random("x").randint(0, 10**9))
         """
     )
-    seen = {_seed_line(suite.runpytest_subprocess("-s").stdout.str()) for _ in range(2)}
+    seen = {_seed_line(suite.runpytest_inprocess("-s").stdout.str()) for _ in range(2)}
     assert len(seen) == 1
 
 
@@ -168,7 +174,7 @@ def test_the_determinism_check_passes_a_deterministic_test(suite: pytest.Pyteste
             await asyncio.gather(*(worker(sim.random("w").randint(1, 9)) for _ in range(3)))
         """
     )
-    suite.runpytest_subprocess("--sim-determinism-check").assert_outcomes(passed=1)
+    suite.runpytest_inprocess("--sim-determinism-check").assert_outcomes(passed=1)
 
 
 def test_the_determinism_check_catches_a_test_that_depends_on_something_outside_the_clock(
@@ -184,10 +190,10 @@ def test_the_determinism_check_catches_a_test_that_depends_on_something_outside_
             await sim.clock.sleep(next(outside))
         """
     )
-    result = suite.runpytest_subprocess("--sim-determinism-check")
+    result = suite.runpytest_inprocess("--sim-determinism-check")
     result.assert_outcomes(failed=1)
     result.stdout.fnmatch_lines(["*not deterministic*advance*"])
-    suite.runpytest_subprocess().assert_outcomes(passed=1)
+    suite.runpytest_inprocess().assert_outcomes(passed=1)
 
 
 def test_the_determinism_check_does_not_hide_an_ordinary_failure(suite: pytest.Pytester) -> None:
@@ -197,7 +203,7 @@ def test_the_determinism_check_does_not_hide_an_ordinary_failure(suite: pytest.P
             assert False, "plain failure"
         """
     )
-    result = suite.runpytest_subprocess("--sim-determinism-check")
+    result = suite.runpytest_inprocess("--sim-determinism-check")
     result.assert_outcomes(failed=1)
     result.stdout.fnmatch_lines(["*plain failure*"])
 
@@ -229,13 +235,13 @@ def test_worlds_registered_by_a_project_are_built_once_per_test(suite: pytest.Py
                 sim.world("nothing")
         """
     )
-    suite.runpytest_subprocess().assert_outcomes(passed=2)
+    suite.runpytest_inprocess().assert_outcomes(passed=2)
 
 
 def test_the_header_names_the_seed_policy(suite: pytest.Pytester) -> None:
     suite.makepyfile("def test_x():\n    pass\n")
-    assert "vs-sim: per-test seeds" in suite.runpytest_subprocess().stdout.str()
-    header = suite.runpytest_subprocess("--sim-seed=3", "--sim-determinism-check").stdout.str()
+    assert "vs-sim: per-test seeds" in suite.runpytest_inprocess().stdout.str()
+    header = suite.runpytest_inprocess("--sim-seed=3", "--sim-determinism-check").stdout.str()
     assert "vs-sim: seed 3 for every sim test, determinism check on" in header
 
 
@@ -335,15 +341,15 @@ def test_explore_fails_an_order_dependent_test_and_prints_the_replay_options(
     suite: pytest.Pytester,
 ) -> None:
     suite.makepyfile(ORDER_DEPENDENT_SUITE)
-    suite.runpytest_subprocess().assert_outcomes(passed=1)  # the default order hides the bug
-    result = suite.runpytest_subprocess("--sim-explore=24")
+    suite.runpytest_inprocess().assert_outcomes(passed=1)  # the default order hides the bug
+    result = suite.runpytest_inprocess("--sim-explore=24")
     result.assert_outcomes(failed=1)
     match = re.search(
         r"replay with --sim-seed=(\d+) --sim-schedule-seed=(\d+)", result.stdout.str()
     )
     assert match is not None
     assert match.group(1) == match.group(2)
-    replay = suite.runpytest_subprocess(
+    replay = suite.runpytest_inprocess(
         f"--sim-seed={match.group(1)}", f"--sim-schedule-seed={match.group(2)}"
     )
     replay.assert_outcomes(failed=1)
@@ -365,7 +371,7 @@ def test_explore_runs_each_test_the_requested_number_of_times(suite: pytest.Pyte
                 out.write("x")
         """
     )
-    result = suite.runpytest_subprocess("--sim-explore=5", "--sim-repeat=3")
+    result = suite.runpytest_inprocess("--sim-explore=5", "--sim-repeat=3")
     result.assert_outcomes(passed=2)
     assert (suite.path / "sim_runs").read_text() == "x" * 5
     assert (suite.path / "plain_runs").read_text() == "x" * 3
@@ -376,40 +382,90 @@ def test_explore_deselects_real_tiers_and_other_tests_unless_repeated(
     suite: pytest.Pytester,
 ) -> None:
     suite.makeini(
-        "[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider\nsim_real_tiers =\n    real\n"
+        "[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider -p no:tach\nsim_real_tiers =\n    real\n"
     )
     suite.makepyfile(test_top="def test_plain():\n    pass\n\nasync def test_sim():\n    pass\n")
     (suite.path / "real").mkdir()
     (suite.path / "real" / "test_real.py").write_text("def test_real():\n    pass\n")
-    suite.runpytest_subprocess("--sim-explore=2").assert_outcomes(passed=1, deselected=2)
-    suite.runpytest_subprocess("--sim-explore=2", "--sim-repeat=2").assert_outcomes(
+    suite.runpytest_inprocess("--sim-explore=2").assert_outcomes(passed=1, deselected=2)
+    suite.runpytest_inprocess("--sim-explore=2", "--sim-repeat=2").assert_outcomes(
         passed=2, deselected=1
     )
 
 
 def test_explore_budget_stops_extra_runs_but_never_the_first(suite: pytest.Pytester) -> None:
     suite.makepyfile("async def test_sim():\n    pass\n")
-    result = suite.runpytest_subprocess("--sim-explore=50", "--sim-explore-budget=0")
+    result = suite.runpytest_inprocess("--sim-explore=50", "--sim-explore-budget=0")
     result.assert_outcomes(passed=1)
     result.stdout.fnmatch_lines(["vs-sim exploration: 1 of 50 planned runs in *"])
 
 
 @pytest.mark.parametrize(
-    ("arguments", "chosen"), [([], "sampled"), (["--crash-points=all"], "all")]
+    ("arguments", "chosen"), [([], "pr"), (["--depth=pr"], "pr"), (["--depth=nightly"], "nightly")]
 )
-def test_the_crash_points_option_sets_the_one_sweep_breadth_of_the_session(
+def test_the_depth_option_sets_the_one_depth_of_the_session(
     suite: pytest.Pytester, arguments: list[str], chosen: str
 ) -> None:
     suite.makepyfile(
         """
-        from vs_sim.api.testing import sweep_breadth, swept
+        from vs_sim.api.testing import depth, examples, swept
 
-        def test_breadth():
-            print("BREADTH", sweep_breadth().value, *swept(10, 3))
+        def test_depth():
+            print("DEPTH", depth().value, examples(pr=3, nightly=12), *swept(10, 3))
         """
     )
-    result = suite.runpytest_subprocess("-s", *arguments)
+    result = suite.runpytest_inprocess("-s", *arguments)
 
     result.assert_outcomes(passed=1)
-    swept_points = "0 1 2 3 4 5 6 7 8 9" if chosen == "all" else "0 4 9"
-    result.stdout.fnmatch_lines([f"*BREADTH {chosen} {swept_points}*"])
+    deep = chosen == "nightly"
+    swept_points = "0 1 2 3 4 5 6 7 8 9" if deep else "0 4 9"
+    result.stdout.fnmatch_lines([f"*DEPTH {chosen} {12 if deep else 3} {swept_points}*"])
+
+
+@pytest.mark.parametrize("value", ["", "all", "sampled", "NIGHTLY", "deep"])
+def test_an_unknown_depth_is_rejected_naming_the_option(suite: pytest.Pytester, value: str) -> None:
+    suite.makepyfile("def test_one():\n    pass\n")
+    result = suite.runpytest_inprocess(f"--depth={value}")
+
+    assert result.ret != 0
+    result.stderr.fnmatch_lines(["*argument --depth: invalid choice: *"])
+
+
+def test_the_removed_crash_points_option_is_rejected(suite: pytest.Pytester) -> None:
+    suite.makepyfile("def test_one():\n    pass\n")
+    result = suite.runpytest_inprocess("--crash-points=all")
+
+    assert result.ret != 0
+    result.stderr.fnmatch_lines(["*unrecognized arguments: --crash-points=all*"])
+
+
+@pytest.mark.parametrize(
+    ("arguments", "outcomes"),
+    [
+        ([], {"passed": 1, "deselected": 1}),
+        (["--depth=nightly"], {"passed": 2}),
+        (["-m", "slow"], {"passed": 1, "deselected": 1}),
+        (["--depth=nightly", "-m", "not slow"], {"passed": 1, "deselected": 1}),
+    ],
+)
+def test_slow_tests_run_at_nightly_depth_and_when_selected_by_marker(
+    suite: pytest.Pytester, arguments: list[str], outcomes: dict[str, int]
+) -> None:
+    suite.makeini(
+        "[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider -p no:tach\nmarkers = slow: s\n"
+    )
+    suite.makepyfile(
+        """
+        import pytest
+
+        def test_fast():
+            pass
+
+        @pytest.mark.slow
+        def test_slow():
+            pass
+        """
+    )
+    result = suite.runpytest_inprocess(*arguments)
+
+    result.assert_outcomes(**outcomes)

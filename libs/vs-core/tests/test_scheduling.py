@@ -18,6 +18,7 @@ from vs_core.api.testing import sample_limits
 
 from .proof_digest import value_digest
 from .reopen_facts import with_reopening_continuation
+from .restart import restarts
 
 
 def _request(
@@ -111,6 +112,8 @@ def _step(
     state: core.CoreState, event: core.CoreEvent, codec: core.OperationRegistry | None = None
 ) -> core.Transition:
     """Every boundary survives reload and leaves the input untouched."""
+    if not restarts():
+        return core.step(state, event)
     before = state.model_dump_json()
     context = {"operation_registry": codec} if codec is not None else None
     loaded = core.CoreState.model_validate_json(before, context=context)

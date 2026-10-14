@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.constants import DomainName
@@ -12,6 +12,7 @@ from vibesys.domains.base import DOMAIN_ROLES
 from vibesys.domains.registry import resolve_domain
 from vibesys.errors import ConfigurationError
 from vs_runtime.api import RunFacts
+from vs_sim.api.testing import examples
 
 _SERVING = resolve_domain(DomainName("llm-serving"))
 _MODALITIES = st.sampled_from(_SERVING.modalities)
@@ -26,6 +27,7 @@ def test_serving_pack_declares_text_generation_as_default() -> None:
     assert "kv_store" not in _SERVING.modalities
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(modality=_MODALITIES)
 def test_every_serving_modality_changes_the_implementer_section(modality: str) -> None:
     facts = _facts("llm-serving")
@@ -45,6 +47,7 @@ def test_omitted_modality_renders_the_default() -> None:
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(modality=_MODALITIES)
 def test_modality_text_never_reaches_a_generic_run(modality: str) -> None:
     sections = domain_prompt_sections(_facts("generic"))

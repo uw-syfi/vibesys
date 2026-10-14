@@ -11,9 +11,10 @@ own tests; what is asserted here is only what the search decided.
 from __future__ import annotations
 
 import pytest
-from hypothesis import assume, given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import (
+    INPUT_THROUGHPUT,
     PLANNER_LABEL,
     Host,
     assert_flow_closed,
@@ -27,6 +28,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     profile,
     reviewed,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ProfilerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import (
@@ -46,8 +48,9 @@ from vs_core.api import (
     StartAttempt,
 )
 from vs_core.api.testing import Asked, FakeView
+from vs_sim.api.testing import examples
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def revision(name: str) -> RevisionRef:
@@ -132,33 +135,54 @@ def planner_context(host: Host) -> PlannerPrompt | PlannerCorrection:
 
 
 @MODES
-@settings(max_examples=25, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=25), deadline=None, derandomize=True, database=None)
+@example(throughputs=[30], judged=[True, True, True], finishing=[0, 1, 2])
+@example(throughputs=[90, 60, 120], judged=[True, True, False], finishing=[2, 0, 1])
+@example(throughputs=[40, 30], judged=[True, True, True], finishing=[0, 1, 2])
 @given(
-    throughputs=st.tuples(st.integers(20, 200), st.integers(20, 200)),
-    first=st.sampled_from(["h1", "h2"]),
+    throughputs=st.lists(st.integers(20, 100), min_size=1, max_size=3, unique=True),
+    judged=st.lists(st.booleans(), min_size=3, max_size=3),
+    finishing=st.lists(st.integers(0, 2), min_size=3, max_size=3),
 )
-def test_the_best_candidate_that_beats_the_input_wins_whichever_workstream_ends_first(
-    *, restarting: bool, throughputs: tuple[int, int], first: str
+def test_the_adopted_candidate_is_the_best_eligible_one_or_the_input_stands(
+    *, restarting: bool, throughputs: list[int], judged: list[bool], finishing: list[int]
 ) -> None:
-    assume(throughputs[0] != throughputs[1])
+    """Whatever the candidates measure, the judge rules and the order the workstreams end in.
+
+    A candidate is eligible when the judge passed it and it beats the input. A rejected
+    workstream spends both its turns, each on a candidate as fast as the generated throughput,
+    so a search that ignored the verdict would adopt it.
+    """
+    names = [f"h{n}" for n in range(1, len(throughputs) + 1)]
+    order = sorted(names, key=lambda name: finishing[int(name[1:]) - 1])
+    speeds = {f"c{n}": float(speed) for n, speed in enumerate(throughputs, start=1)}
+    speeds |= {f"{key}-again": speed for key, speed in speeds.items()}
     host = start(
-        config(max_rounds=1, max_in_flight=2),
+        config(max_rounds=1, max_in_flight=len(names)),
         restarting=restarting,
-        throughputs={"c1": float(throughputs[0]), "c2": float(throughputs[1])},
+        throughputs=speeds,
     )
-    plan(host, implement("h1"), implement("h2"))
-    for name in ("h1", "h2"):
+    plan(host, *(implement(name) for name in names))
+    for name in names:
         open_slot(host, name)
-    order = [first, "h2" if first == "h1" else "h1"]
     for name in order:
-        implement_turn(host, name, "c1" if name == "h1" else "c2")
-        judge_turn(host, name, passed=True)
+        candidate = f"c{name[1:]}"
+        passed = judged[int(name[1:]) - 1]
+        implement_turn(host, name, candidate)
+        judge_turn(host, name, passed=passed)
+        if not passed:  # the default bound is two turns without an accepted candidate
+            implement_turn(host, name, f"{candidate}-again")
+            judge_turn(host, name, passed=False)
     host.drain()
 
-    best = max(throughputs)
-    if best > 50:
-        winner = "c1" if throughputs[0] == best else "c2"
-        assert selection_of(host) == ("retained_candidate", winner)
+    eligible = {
+        f"c{n}": speed
+        for n, speed in enumerate(throughputs, start=1)
+        if judged[n - 1] and speed > INPUT_THROUGHPUT
+    }
+    if eligible:
+        best = max(eligible, key=eligible.__getitem__)
+        assert selection_of(host) == ("retained_candidate", best)
     else:
         assert selection_of(host) == ("trusted_baseline", None)
     assert_flow_closed(host)

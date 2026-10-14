@@ -37,6 +37,7 @@ from vibesys.orchestration.issue_queue.search.api import (
 )
 from vs_core.api import InvocationId, InvocationRef, RevisionRef, SessionId
 from vs_issue_tracker.api import IssueRow, IssueStatus, IssueType
+from vs_sim.api.testing import examples
 
 BASE = RevisionRef.of_git_commit("abc")
 RULES = config()
@@ -60,7 +61,9 @@ queues = st.builds(
     assessed=st.booleans(),
     filed=st.booleans(),
 )
-SETTINGS = settings(max_examples=80, deadline=None, derandomize=True, database=None)
+SETTINGS = settings(
+    max_examples=examples(pr=10, nightly=80), deadline=None, derandomize=True, database=None
+)
 
 
 @SETTINGS

@@ -21,6 +21,8 @@ from pathlib import Path
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vs_sim.api.testing import examples
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "smoke_dynamic_loop.sh"
 
@@ -95,7 +97,7 @@ def test_two_default_runs_do_not_share_a_basetemp(tmp_path: Path) -> None:
     assert first != second
 
 
-@settings(max_examples=8, deadline=None)
+@settings(max_examples=examples(pr=8, nightly=8), deadline=None)
 @given(
     parts=st.lists(st.from_regex(r"[a-z][a-z0-9_-]{0,8}", fullmatch=True), min_size=0, max_size=3)
 )

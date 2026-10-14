@@ -217,6 +217,10 @@ async def _workspace(
     except Stopped:
         await _settle(kit, workspace, workspace.keeping or _plain("cancelled"))
         raise
+    except GeneratorExit:
+        # The flow is being discarded (its run restarted elsewhere): nothing can serve a
+        # settlement now, and the restarted run settles the workspaces its flow no longer holds.
+        raise
     except BaseException:
         await _settle(kit, workspace, workspace.keeping or _plain("failed"))
         raise

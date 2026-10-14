@@ -527,3 +527,32 @@ async def test_a_resume_judges_the_turn_a_crash_left_unsettled_before_its_own_ba
     assert world.probe.seen[-1] == before  # the resumed turn started from the judged tree
     assert tree(world.root.path) == before
     assert world.probe.restores == 1
+
+
+@pytest.mark.asyncio
+async def test_a_turn_refused_for_a_lost_writer_is_retried_after_that_writer_is_cancelled(
+    world: AccessWorld,
+) -> None:
+    """A second writer asked while the first one's fate is unknown ran no provider call.
+
+    The refusal is a failure core retries, not an Unknown: core would inspect and cancel a turn
+    that was never dispatched, and the executor rejects that cancellation, so the turn would stay
+    unresolved for ever. Once the lost writer is cancelled, the same request runs.
+    """
+    await world.route(ensure_request())
+    world.host.faults.down = True
+    lost = await world.route(dispatch_request("req-0", "inv-0"))
+    assert status(lost) is ObservationStatus.UNKNOWN
+    world.host.faults.down = False
+    calls = world.probe.calls
+
+    refused = await world.route(dispatch_request("req-1", "inv-1"))
+
+    assert status(refused) is ObservationStatus.FAILED
+    assert not refused.observation.observation.terminal
+    assert refused.observation.observation.retryable
+    assert world.probe.calls == calls
+    cancelled = await world.route(cancel_request("req-c0", invocation="inv-0"))
+    assert status(cancelled) is ObservationStatus.CANCELLED
+    retried = await world.route(dispatch_request("req-1", "inv-1"))
+    assert status(retried) is ObservationStatus.SUCCEEDED

@@ -43,7 +43,7 @@ from vs_agent.contracts import (
 )
 from vs_mcp.api import StdioServerDescriptor
 from vs_sim.api import Event, OsThreads
-from vs_sim.api.testing import wait_or_fail, wait_until_started_sync
+from vs_sim.api.testing import examples, wait_or_fail, wait_until_started_sync
 
 
 class _Response(BaseModel):
@@ -836,7 +836,10 @@ def _invoke_plan(reply: str, workspace: Path) -> _Plan:
     )
 
 
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=8, nightly=100),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(title=st.text(min_size=9, max_size=40), count=st.integers())
 def test_invoke_names_each_invalid_field_in_the_schema_error(
     tmp_path: Path, title: str, count: int
@@ -850,7 +853,10 @@ def test_invoke_names_each_invalid_field_in_the_schema_error(
     assert "8 characters" in raised.value.detail
 
 
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=8, nightly=100),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(title=st.text(max_size=8), count=st.integers())
 def test_invoke_returns_a_valid_reply_unchanged(tmp_path: Path, title: str, count: int) -> None:
     payload = {"title": title, "count": count}

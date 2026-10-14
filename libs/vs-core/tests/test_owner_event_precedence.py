@@ -8,10 +8,11 @@ interleaving of the two, including duplicates and a restart between them.
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_measurements import observation as observation_of
 from .test_measurements import requested
@@ -157,6 +158,7 @@ conclusive = st.sampled_from(
 )
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(running=st.integers(0, 4), ending=conclusive, replays=st.integers(0, 2))
 def test_a_submit_record_completes_exactly_when_its_job_is_terminal(
     running: int, ending: core.ObservationStatus, replays: int

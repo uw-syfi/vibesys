@@ -13,12 +13,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .types.records import Outbound, within
-from .types.until import Until
+from .types.until import FromDispatch, Until, Within
 
 if TYPE_CHECKING:
     from .types.kernel import RunState
     from .types.records import Request
-    from .types.until import Within
+    from .types.until import Watch
 
 
 def resolve_until(run: RunState, within: Within) -> Until:
@@ -34,6 +34,27 @@ def resolve_until(run: RunState, within: Within) -> Until:
     if run.deadline_at > run.now_at:
         at = min(at, run.deadline_at)
     return Until(at=at, watches=within.watches)
+
+
+def queued_until(run: RunState, unstarted: FromDispatch) -> Until:
+    """What a request that has not been dispatched yet is held to: the run, not its limit.
+
+    The limit starts when the shell dispatches the request (``started_until``), so a request
+    waiting for a free slot spends none of it. Until then only the run deadline ends it.
+    """
+    if run.deadline_at > run.now_at:
+        return Until(at=run.deadline_at, watches=unstarted.watches)
+    return Until(at=run.now_at + max(unstarted.limit, 0.0), watches=unstarted.watches)
+
+
+def from_dispatch(run: RunState, until: Until) -> FromDispatch:
+    """``until`` as the duration a request accepted now may take once it is dispatched."""
+    return FromDispatch(limit=max(until.at - run.now_at, 0.0), watches=until.watches)
+
+
+def started_until(run: RunState, limit: float, watches: tuple[Watch, ...]) -> Until:
+    """The ``Until`` of a request dispatched at the run clock: its limit counted from now."""
+    return resolve_until(run, Within(limit=limit, watches=watches))
 
 
 def limit_to(run: RunState, at: float) -> float:

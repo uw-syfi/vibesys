@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from tests.vibesys.vibesys_grid import diagonal
 
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_evaluation.api import (
@@ -352,24 +353,22 @@ async def _terminal(
         await executor.wait_for_change(handle_id, timeout_s=float("inf"))
 
 
+_FAULTS = [
+    (0, None, 0, None),
+    (0, None, 7, None),
+    (1, None, 0, None),
+    (70, None, 0, None),
+    (255, None, 0, None),
+    (0, "metadata unavailable", 0, None),
+    (0, None, None, None),
+    (0, None, 0, "stdout unavailable"),
+    (0, None, 7, "stderr unavailable"),
+]
+_KINDS = [EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK, EvidenceKind.PROFILE]
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "fault",
-    [
-        (0, None, 0, None),
-        (0, None, 7, None),
-        (1, None, 0, None),
-        (70, None, 0, None),
-        (255, None, 0, None),
-        (0, "metadata unavailable", 0, None),
-        (0, None, None, None),
-        (0, None, 0, "stdout unavailable"),
-        (0, None, 7, "stderr unavailable"),
-    ],
-)
-@pytest.mark.parametrize(
-    "kind", [EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK, EvidenceKind.PROFILE]
-)
+@pytest.mark.parametrize(("fault", "kind"), diagonal(_FAULTS, _KINDS, stride=3))
 async def test_semantic_executor_preserves_infrastructure_failure_provenance(
     tmp_path: Path,
     fault: tuple[int, str | None, int | None, str | None],
@@ -987,18 +986,18 @@ async def test_read_only_restart_inspection_does_not_recreate_candidate_workspac
     await first.close()
 
 
+_PRESENCE = [(True, True), (True, False), (False, True), (False, False)]
+_AGGREGATES = [
+    (SlurmJobStatus.COMPLETED, 0, None),
+    (SlurmJobStatus.FAILED, 0, None),
+    (SlurmJobStatus.FAILED, 1, None),
+    (SlurmJobStatus.COMPLETED, None, None),
+    (SlurmJobStatus.COMPLETED, 0, "allocation metadata unavailable"),
+]
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("presence", [(True, True), (True, False), (False, True), (False, False)])
-@pytest.mark.parametrize(
-    "aggregate",
-    [
-        (SlurmJobStatus.COMPLETED, 0, None),
-        (SlurmJobStatus.FAILED, 0, None),
-        (SlurmJobStatus.FAILED, 1, None),
-        (SlurmJobStatus.COMPLETED, None, None),
-        (SlurmJobStatus.COMPLETED, 0, "allocation metadata unavailable"),
-    ],
-)
+@pytest.mark.parametrize(("aggregate", "presence"), diagonal(_AGGREGATES, _PRESENCE, stride=4))
 async def test_aggregate_ambiguity_cannot_promote_completed_stage_evidence(
     tmp_path: Path,
     presence: tuple[bool, bool],

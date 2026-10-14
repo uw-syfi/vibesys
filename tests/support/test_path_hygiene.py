@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 import pytest
+from tests.support.child_pytest import BARE_PYTEST
 
 pytest_plugins = ["pytester"]
 
@@ -39,7 +40,7 @@ def _run(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, *, hygiene:
     )
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     args = ["-p", "tests.support.path_hygiene"] if hygiene == "with" else []
-    return int(pytester.runpytest_subprocess("-p", "no:cacheprovider", *args).ret)
+    return int(pytester.runpytest(*BARE_PYTEST, *args).ret)
 
 
 @pytest.mark.parametrize("hygiene", ["with", "without"])

@@ -93,7 +93,8 @@ def _clear_obstructions(root: Path, path: Path) -> None:
 def remove_file(root: Path, relative: str) -> None:
     """Delete ``relative`` and any directories it leaves empty (never the root itself)."""
     path = root / relative
-    with contextlib.suppress(FileNotFoundError):
+    # ``NotADirectoryError``: a file replaced the directory that held ``relative``.
+    with contextlib.suppress(FileNotFoundError, NotADirectoryError):
         path.unlink()
     for parent in Path(relative).parents:
         if str(parent) == ".":

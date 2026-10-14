@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.support.reply_variables import context_variables, profiler_reply
+from tests.vibesys.reply_variables import context_variables, profiler_reply
 
 from vibesys.orchestration.dynamic.search.api import dynamic
 from vibesys.orchestration.evolve.search.api import evolve

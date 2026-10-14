@@ -6,6 +6,12 @@ repeated windows, per-window acknowledgements) against a reference model,
 over arbitrary interleavings of the three events a controller and the
 readiness watcher can produce. Signal handlers are replaced by direct calls,
 which is exactly what the handlers do.
+
+Guarantees under test:
+
+* Over any interleaving of ready, start and stop events the injection's capture state machine
+  matches a reference model (queued starts, repeated windows, per-window acknowledgements).
+* The automatic window starts and stops after exactly the configured delay and duration.
 """
 
 from __future__ import annotations
@@ -21,7 +27,9 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.vibesys.loops.torch_inject_fixtures import INJECT_DIR
+from tests.vibesys.loops.profiler_torch_fixtures import INJECT_DIR
+
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     import signal
@@ -97,7 +105,7 @@ class _Harness:
             out_dir=root / "default",
             record_shapes=False,
             control_dir=self.control,
-            import_module=import_module,
+            process=inject_module._CaptureProcess(import_module=import_module),  # noqa: SLF001  # LW-920407; the standalone injected script's process seam is private by design
         )
         self.model = _Model()
         self.named = 0  # window dirs named via next_window so far
@@ -133,7 +141,7 @@ class _Harness:
             self.model.exported += 1
 
 
-@settings(max_examples=200, deadline=None)
+@settings(max_examples=examples(pr=20, nightly=300), deadline=None)
 @given(ops=st.lists(st.sampled_from(_OPS), max_size=25))
 # A stop that lands before ready cancels the queued start, so a later explicit
 # window starts (pinned from the real-signal test, which orders its signals).
@@ -171,7 +179,7 @@ def test_capture_matches_reference_model(inject_module: types.ModuleType, ops: l
         assert not (root / "default").exists(), "a named window fell back to the default dir"
 
 
-@settings(max_examples=200, deadline=None)
+@settings(max_examples=examples(pr=20, nightly=300), deadline=None)
 @given(
     delay_s=st.floats(0.0, 10.0, allow_nan=False, allow_infinity=False),
     duration_s=st.one_of(st.none(), st.floats(0.0, 10.0, allow_nan=False, allow_infinity=False)),

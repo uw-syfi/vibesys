@@ -12,13 +12,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import Config
 from vibesys.errors import ConfigurationError
 from vibesys.orchestration.single.plugin import PLUGIN, PROFILE_GUIDED_PLUGIN
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vs_runtime.api import OrchestrationPlugin
@@ -36,6 +37,7 @@ def test_each_preset_declares_the_prefixed_role_ids(plugin: OrchestrationPlugin)
     assert tuple(role.id for role in plugin.agents) == SINGLE_ROLES
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     overrides=st.dictionaries(
         st.sampled_from(SINGLE_ROLES),

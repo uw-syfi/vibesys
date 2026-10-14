@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.support.reply_variables import context_variables as variables_of
+from tests.vibesys.reply_variables import context_variables as variables_of
 
 from vibesys.orchestration.dynamic.search.api import dynamic
 

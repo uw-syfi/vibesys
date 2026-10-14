@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 import pytest
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._values import (
     revision,
@@ -28,6 +28,7 @@ from vibesys.orchestration.dynamic.search.api import (
     resolve,
 )
 from vs_core.api import ObservationStatus
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from random import Random
@@ -48,6 +49,7 @@ def distinct(rows: list[ParentSnapshot]) -> list[ParentSnapshot]:
     return list({(row.hypothesis_id, row.revision): row for row in rows}.values())
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     rows=st.lists(snapshots(), min_size=1, max_size=8).map(distinct),
     order=st.randoms(use_true_random=False),
@@ -64,6 +66,7 @@ def test_the_catalog_and_its_options_do_not_depend_on_arrival_order_or_replay(
     assert len(build(*rows)) == len(rows)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(rows=st.lists(snapshots(), min_size=1, max_size=8).map(distinct))
 def test_each_hypothesis_has_one_latest_verified_revision_the_highest_submission(
     rows: list[ParentSnapshot],
@@ -79,6 +82,7 @@ def test_each_hypothesis_has_one_latest_verified_revision_the_highest_submission
         assert resolve(build(*rows), hypothesis) == latest[0].snapshot
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     values=st.lists(VALUES, min_size=1, max_size=10),
     direction=st.sampled_from(["max", "min"]),
@@ -109,6 +113,7 @@ def test_a_regression_keeps_the_best_and_the_latest_revision_as_different_parent
     assert resolve(catalog, "source") == second
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(hypothesis=st.sampled_from("abc"), revision_id=st.text("xyz", min_size=1, max_size=3))
 def test_a_selector_the_catalog_does_not_hold_resolves_to_nothing_never_to_the_input(
     hypothesis: str, revision_id: str
@@ -138,6 +143,7 @@ def _unproven(row: ParentSnapshot, flaw: str) -> ParentSnapshot:
     return row.model_copy(update={"proof": (bad, *(r for r in row.proof if r != accuracy))})
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     flaw=st.sampled_from(
         ["no proof", "other revision", "untrusted", "failed observation", "accuracy failed"]
@@ -153,6 +159,7 @@ def test_a_snapshot_the_recorded_evidence_does_not_prove_gives_no_authority(
     assert resolve((unproven,), row.hypothesis_id, row.revision.revision_id.root) is None
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(row=snapshots())
 def test_a_snapshot_of_unknown_chronology_is_buildable_but_never_the_latest(
     row: ParentSnapshot,
@@ -191,6 +198,7 @@ def _with_partial_context(row: ParentSnapshot, changed: str) -> ParentSnapshot:
     return row.model_copy(update={"benchmark": benchmark.model_copy(update={"partial": partial})})
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     changed=st.sampled_from(
         [
@@ -237,6 +245,7 @@ def test_a_partial_without_a_unit_is_buildable_but_has_no_comparison_authority()
     assert resolve(build(unitless), "a", row.revision.revision_id.root) == unitless
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(row=snapshots())
 def test_a_later_benchmark_extends_the_accuracy_receipt_and_replaying_the_bare_one_never_downgrades(
     row: ParentSnapshot,
@@ -247,6 +256,7 @@ def test_a_later_benchmark_extends_the_accuracy_receipt_and_replaying_the_bare_o
     assert ingest(catalog, bare) == catalog
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(row=snapshots(), other=VALUES)
 def test_a_second_benchmark_for_one_receipt_is_a_conflict_not_an_overwrite(
     row: ParentSnapshot, other: float
@@ -266,6 +276,7 @@ def test_equal_partials_prefer_further_progress_then_the_stable_receipt() -> Non
         assert best == near  # ordinal 1 completed 71 of 72 rounds, ordinal 2 only 65
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     row=snapshots(),
     changed=st.sampled_from(["evaluator_digest", "workload_digest", "environment_digest"]),

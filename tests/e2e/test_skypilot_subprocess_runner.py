@@ -1,6 +1,6 @@
 """``SubprocessCommandRunner`` against a real child process.
 
-The unit tests in ``tests/vibesys/skypilot/test_runner.py`` drive ``SkyPilotJobRunner`` through
+The unit tests in ``libs/vs-sandbox/tests/test_skypilot_runner.py`` drive ``SkyPilotJobRunner`` through
 a scripted command runner. What only a real process shows is here: both output pipes are
 drained while a sink fails, and timeout cleanup kills descendants that inherited those pipes.
 """

@@ -75,7 +75,7 @@ stop), `RunEnded`.
 | Exclusive-root executor fixes (B16, section 3.1) | built (`test_exclusive_root_attempts.py`); prerequisite of every port that runs without candidate sandboxes | 2 |
 | Shared building blocks B1 to B15 (section 3) | built, with `dynamic` moved onto each (section 3.6); B9 and B13 were built with the `single` port | 2, 3 |
 | Promoted runtime shell test kit (T1) and plugin-keyed loop harness (T2) | T1 built (`vs_runtime.api.testing`); T2 is a seam (3.6) | 2 |
-| Strategy conformance suite C1 to C9 (9.2) | built (`tests/composition/_loop`); `dynamic` and `single` are its subjects | 3 |
+| Strategy conformance suite C1 to C9 (9.2) | built (`tests/system`, on the skeleton search); `dynamic` and `single` are its subjects | 3 |
 | `CaptureCommand` operation (profile-guided attribution, B14) | contract and owner built; no strategy uses it yet | 3 |
 | Immutable hypothesis state, or the JSON-field bridge (8.4) | JSON-field bridge built (`vibesys.hypothesis.rounds`); immutable state is phase 6 | 3 |
 | `single` and `profile-guided single` strategy | built (section 9.3 records the outcome) | 3 |
@@ -196,7 +196,7 @@ code sits in `dynamic`.
 | B15 | Stateless tool admission: a role may name a tool server that holds no run state (profiler diagnostics) | none; `_refuse_unbridged_tools` rejects all but `evaluation` | `vs_runtime.api.core` (`AgentTool` declares its class), `vibesys.run.core_services` | multi, evolve, issue_queue | none |
 | B16 | Exclusive-root executor: ending an exclusive-root attempt releases the root, and granting the root restores the plan's base while preserving the configured artifact directories (A2, A4) | none; `RuntimeWorkspaceRequests` rejects the discard of a root attempt and `_ensure_root` binds without restoring | `vs_runtime` workspace executor (`_workspace_requests.py`, `_workspace_receipts.py`) | single, multi, issue_queue (the serial strategies on a host without candidate sandboxes) | none (`dynamic` always uses isolated children) |
 | T1 | Runtime shell test kit: `ScriptedExecutors`, `run_shell`, restart-at-boundary | `tests/vibesys/orchestration/dynamic/search/_shell.py`, `_executors.py`, `_run.py` (about 1,000 lines) | `vs_runtime.api.testing` | all five | import it |
-| T2 | Whole-loop harness and invariants: `_harness.py`, `_chaos.py`, `loop_invariants.py`, smoke e2e | `tests/composition/dynamic/`, `tests/support/loop_invariants.py`, `tests/e2e/test_dynamic_loop_smoke_e2e.py` | `tests/composition/_loop/` and `tests/support/` parametrized by plugin id | all five | become one parametrization |
+| T2 | Whole-loop harness and invariants: `_harness.py`, `_chaos.py`, `loop_invariants.py`, smoke e2e | `tests/composition/dynamic/`, `tests/support/loop_invariants.py`, `tests/e2e/test_dynamic_loop_smoke_e2e.py` | `tests/system/` and `tests/support/` parametrized by plugin id | all five | become one parametrization |
 
 ### 3.2 Contracts of the blocks that carry new rules
 
@@ -285,7 +285,7 @@ transcript golden (3.4) at the commit that introduced it.
 | B15 | built | `AgentTool.stateless`; `StatelessToolServers`, `CombinedToolServers`; `CoreResources.stateless_tool_servers`; admission in `vibesys.run.core_services` | #1992 |
 | B16 | built | by the workspace executor change that preceded this list | n/a |
 | T1 | built | `vs_runtime.api.testing`: `ScriptedExecutors`, `drive_shell`, `Run`, `HostOptions`, `Script`, `request_executors`, on `vs_core.api.testing` | #1993 |
-| T2 | seam | `tests/composition/_loop/spec.py`: `LoopSpec` keyed by plugin id (CLI selection and envelope codec). The harness and chaos driver stay under `tests/composition/dynamic` until a second strategy draws the split | #1993 |
+| T2 | seam | `tests/support/loop_spec.py`: `LoopSpec` keyed by plugin id (CLI selection and envelope codec). The harness and chaos driver stay under `tests/composition/dynamic` until a second strategy draws the split | #1993 |
 
 Why B7 and B10 are in `vs-core`, not `vs-runtime` as the table in 3.1 first said: the pure strategy
 package may not import `vs-runtime` (the purity ratchet admits no new `io-import`), and these are
@@ -1070,7 +1070,7 @@ of the committed strategy state. Deviations from the mapping above, each deliber
   its recorded options.
 - Properties: E1 and E3 are the trajectory tests (`strategy/test_trajectory.py`, serial and with
   drawn completion orders, both selectors); E2 is the conformance crash sweep over the serial and the
-  concurrent subjects (`tests/composition/_loop`); E4 to E6 are `strategy/test_properties.py`.
+  concurrent subjects (`tests/system`); E4 to E6 are `strategy/test_properties.py`.
 
 ### 9.7 Phase 2 acceptance
 

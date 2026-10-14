@@ -10,33 +10,34 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
 
 from vs_core.api import EnsureWorkspace
 from vs_core.api.testing import Unknown
 from vs_dst.api import NondeterministicWorldError, simulate
-from vs_sim.api.testing import SweepBreadth, using_sweep_breadth
+from vs_sim.api.testing import Depth, depth
 
 from ._scratch import run_with_crash
-from ._tiny import TinyWorld
+from ._tiny import TinyWorld, spread
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request
     from vs_core.api.testing import Answer
 
 
-@settings(deadline=None, max_examples=3)
-@given(items=st.integers(min_value=1, max_value=2), concurrent=st.sampled_from([1, 2]))
+@pytest.mark.parametrize(("items", "concurrent"), [(1, 1), (2, 2)])
 def test_a_cheap_crash_equals_rerunning_from_the_start_at_every_crash_point(
     items: int, concurrent: int
 ) -> None:
-    normal = simulate(TinyWorld(items, concurrent))
-    with using_sweep_breadth(SweepBreadth.ALL):
-        points = normal.crash_points()
-    assert len(points) == 2 * normal.commits
+    """Both sizes of run, serial and concurrent, at a few places along each.
 
-    for crash in points:
+    The library's own sample of crash points is `test_crash_points.py`'s subject; the nightly
+    depth tries every boundary here.
+    """
+    normal = simulate(TinyWorld(items, concurrent))
+    points = normal.crash_points()
+    assert points
+
+    for crash in points if depth() is Depth.NIGHTLY else spread(points, 3):
         cheap = normal.rerun_with_crash(crash)
         slow = run_with_crash(lambda: TinyWorld(items), crash)
         assert cheap.finished, crash

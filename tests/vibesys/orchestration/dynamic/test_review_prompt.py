@@ -10,12 +10,12 @@ implementer linked it).
 
 from __future__ import annotations
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, begin, config
 from tests.vibesys.orchestration.dynamic._replies import implement, implemented, plan_reply
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import CONTEXTS, render
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult
 from vibesys.orchestration.dynamic.search.api import PromptTemplate as Template
@@ -35,8 +35,9 @@ from vs_core.api import (
     Scope,
     StartAttempt,
 )
+from vs_sim.api.testing import examples
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 CANDIDATE = RevisionRef.of_git_commit("c1")
 THROUGHPUT = 123.0
 STATUSES = st.sampled_from([ObservationStatus.SUCCEEDED, ObservationStatus.FAILED])
@@ -61,7 +62,7 @@ def taken(name: str, sequence: int, status: ObservationStatus, scope: Scope) -> 
 
 
 @MODES
-@settings(max_examples=12, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=12), deadline=None, derandomize=True, database=None)
 @given(statuses=st.lists(STATUSES, max_size=4))
 def test_the_judge_is_given_the_id_and_verdict_of_every_evaluation_the_author_took(
     *, restarting: bool, statuses: list[ObservationStatus]
@@ -107,6 +108,7 @@ def fence_lines(text: str) -> list[int]:
     return [i for i, line in enumerate(lines) if line and set(line) == {"`"} and len(line) >= 3]
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(tail=st.text(alphabet="`ab\n ", max_size=60), data=st.data())
 def test_a_failure_text_cannot_close_its_fence(tail: str, data: st.DataObject) -> None:
     base = data.draw(CONTEXTS[Template.REVIEW])
@@ -130,6 +132,7 @@ def test_a_failure_text_cannot_close_its_fence(tail: str, data: st.DataObject) -
     assert "".join("".join(body).split()) == "".join(feedback.replace("`", "'").split())
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data())
 def test_the_judge_may_not_fail_a_claim_it_has_no_measurement_for(data: st.DataObject) -> None:
     """The rubric requires trusted evidence before a performance verdict (LIVE-2 finding 4)."""

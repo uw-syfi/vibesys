@@ -109,6 +109,8 @@ class SkeletonConfig(core.Value):
     """Ask for nothing until this run-clock time, then end with no winner."""
     baseline_only: bool = False
     """Measure the baseline, then end with no winner: no attempt is run."""
+    abandons: bool = False
+    """Open the one attempt, then end with no winner: the attempt budget is spent, nothing kept."""
     turns: int = 1
     """How many implementer turns the attempt asks in one session, one after another."""
     peers: int = 0
@@ -148,7 +150,7 @@ def _origin(ctx: Flow, config: SkeletonConfig) -> float:
     return ctx.clock.now() if config.probe else 0.0
 
 
-async def _measure(
+async def measure(
     ctx: Flow,
     config: SkeletonConfig,
     revision: core.RevisionRef,
@@ -162,13 +164,18 @@ async def _measure(
             return NoWinner(reason=f"measurement {failed.reason}")
         case core.MeasurementResult(failure=failure) if failure is not None:
             return NoWinner(reason=f"measurement {failure.value}")
+        case core.MeasurementResult(status=status) if (
+            status is not core.ObservationStatus.SUCCEEDED
+        ):
+            # A rejected or cancelled result may carry no typed failure; it is still no evidence.
+            return NoWinner(reason=f"measurement {status.value}")
     return None
 
 
 async def _probe(ctx: Flow, config: SkeletonConfig) -> None:
     """Submit the input-baseline measurement, then wait for the run to be ended."""
     async with ctx.group(limit=1) as group:
-        group.start("baseline", _measure, config, ctx.facts.baseline, "baseline")
+        group.start("baseline", measure, config, ctx.facts.baseline, "baseline")
         await ctx.first(ctx.stopped)
 
 
@@ -217,6 +224,8 @@ async def _attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
     ) as workspace:
         if isinstance(workspace, NotOpened):
             return NoWinner(reason="the attempt workspace did not open")
+        if config.abandons:
+            return NoWinner(reason="the attempt was abandoned")
         if config.cancels_after_start:
             # Wait for the stop; the timer is what keeps the shell from calling the wait a stall.
             await ctx.first(ctx.stopped, ctx.timer(_RUN_DEADLINE))
@@ -226,7 +235,7 @@ async def _attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
             return NoWinner(reason="the implementer turn produced no commit")
         candidate = core.RevisionRef.of_git_commit(commit)
         if config.measured and (
-            refused := await _measure(ctx, config, candidate, "official", workspace)
+            refused := await measure(ctx, config, candidate, "official", workspace)
         ):
             return refused
         if config.keeps_candidate:
@@ -253,7 +262,7 @@ async def _bare(ctx: Flow, config: SkeletonConfig) -> _Ended | None:
         await ctx.first(ctx.timer(config.wake_at))
         return _Ended(NoWinner(reason="woken"))
     if config.baseline_only:
-        refused = await _measure(ctx, config, ctx.facts.baseline, "baseline")
+        refused = await measure(ctx, config, ctx.facts.baseline, "baseline")
         return _Ended(refused or NoWinner(reason="the baseline is all there is"))
     return None
 
@@ -274,7 +283,7 @@ async def skeleton(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
         if config.measured:
             await _probe(ctx, config)
         return None
-    if config.measured and (refused := await _measure(ctx, config, ctx.facts.baseline, "baseline")):
+    if config.measured and (refused := await measure(ctx, config, ctx.facts.baseline, "baseline")):
         return refused
     if (refused := await _attempt(ctx, config)) is not None:
         return refused
@@ -340,6 +349,11 @@ class SkeletonStrategy(core.Value):
         signal, an operator stop) and what the host then cancels.
         """
         return cls(config=SkeletonConfig(probe=True))
+
+    @classmethod
+    def abandoning(cls) -> SkeletonStrategy:
+        """Open the one attempt the budget allows, then end with no winner and nothing kept."""
+        return cls(config=SkeletonConfig(measured=False, abandons=True))
 
     @classmethod
     def idle(cls) -> SkeletonStrategy:

@@ -7,6 +7,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
 from .test_session_inputs import occurrence
@@ -40,7 +41,7 @@ def completed_events(*results: core.Transition) -> list[core.InterruptCompleted]
 
 
 # P1: interrupting an invocation whose checkpoint already committed must complete.
-@settings(deadline=None, max_examples=15)
+@settings(deadline=None, max_examples=examples(pr=4, nightly=15))
 @given(before=st.integers(0, 2), after=st.integers(0, 2))
 def test_interrupt_after_committed_checkpoint_completes_exactly_once(
     before: int, after: int
@@ -163,7 +164,7 @@ def counting_reducers() -> tuple[core.CoreReducers, list[core.AttemptChargeRefun
 
 
 # P2: the refund request is idempotent per claim, however often the event repeats.
-@settings(deadline=None, max_examples=15)
+@settings(deadline=None, max_examples=examples(pr=5, nightly=15))
 @given(repeats=st.integers(1, 5), charged=st.integers(1, 4))
 def test_repeated_checkpoint_event_emits_one_refund_request(repeats: int, charged: int) -> None:
     state, event = refund_state(charged, refund_limit=5)

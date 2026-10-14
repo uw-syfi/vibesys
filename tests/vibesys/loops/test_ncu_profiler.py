@@ -1,4 +1,10 @@
-"""NCU profiler tools read reports without running candidate code."""
+"""NCU profiler tools read reports without running candidate code.
+
+Guarantees under test:
+
+* The NCU server registers its discovery and report tools, reports a missing executable and a
+  missing report as errors, reads an existing report and filters a large raw report.
+"""
 
 from __future__ import annotations
 

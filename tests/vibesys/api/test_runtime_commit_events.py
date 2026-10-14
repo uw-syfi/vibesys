@@ -16,6 +16,7 @@ from vibesys.api import IterationKind, IterationStatus, IterationSummary, Iterat
 from vibesys.events import CoreEvent, CoreEventType, IterationsChangedData
 from vibesys.run.contracts import RoundSummary, RunStatus, RunView
 from vibesys.run.integration import LocalRunIntegration
+from vs_sim.api.testing import examples
 
 
 class _FakeAgentState(BaseModel):
@@ -116,7 +117,7 @@ def test_commit_projection_preserves_semantics_and_publication_order() -> None:
     ),
     resume_at=st.integers(min_value=0, max_value=12),
 )
-@settings(max_examples=100)
+@settings(max_examples=examples(pr=10, nightly=100))
 def test_commit_events_property_no_double_emission_and_semantic_changes(
     steps: list[tuple[int, int]], resume_at: int
 ) -> None:

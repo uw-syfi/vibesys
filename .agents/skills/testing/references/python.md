@@ -108,9 +108,13 @@ underestimates. Every green run on main caches its measured seconds and later
 runs balance on that cache (`$VIBESYS_SHARD_DURATIONS`), so the record
 maintains itself; the checked-in file is only the cold start, refreshed with
 `python -m scripts.refresh_shard_durations` on a run's `shard-durations-*`
-artifacts. A stale file only unbalances the shards. Slow generated checks (Hypothesis examples, chaos seeds)
-run reduced in pull requests and at full strength in
-`.github/workflows/nightly.yml`.
+artifacts. A stale file only unbalances the shards. Slow generated checks (Hypothesis examples, crash
+points, `slow` tests) follow one setting, `--depth=pr|nightly`, owned by the
+vs-sim pytest plugin: pull requests sample and
+`.github/workflows/nightly.yml` explores. State a count as
+`vs_sim.api.testing.examples(pr=3, nightly=12)` and a crash sweep as
+`swept(count, sample)`; never read an environment variable or define a
+per-file depth constant.
 
 A timeout verdict is a timeout or clock reading that decides the outcome rather
 than only failing a hung test: `assert not ev.wait(timeout=T)`,

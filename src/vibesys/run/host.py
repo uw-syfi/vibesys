@@ -483,7 +483,7 @@ class _ProductHostFactory:
         Every core measurement, an agent's included, is a job of the run's evaluation
         executor. Core refuses new submissions once the stop is committed, and the executor
         cancels the jobs still on the cluster when ``close_core_services`` closes it as the
-        run exits (``tests/composition/test_agent_evaluation_stops_on_stop.py``). The legacy
+        run exits (``tests/system/agent_evaluation/test_stops_on_stop.py``). The legacy
         evaluation service this hook once cancelled was never installed on a core run.
         """
 

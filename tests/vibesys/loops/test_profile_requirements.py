@@ -1,4 +1,11 @@
-"""Trusted timeline descriptors select HIP APIs and verify measured rows on the host."""
+"""Trusted timeline descriptors select HIP APIs and verify measured rows on the host.
+
+Guarantees under test:
+
+* A requested timeline field is never silently dropped; a requested HIP API field requires
+  measured rows with a valid interval, and a promised field without such rows is a capture
+  failure, never a profile.
+"""
 
 from __future__ import annotations
 

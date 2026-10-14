@@ -27,9 +27,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -62,7 +65,9 @@ class _Module:
 
     @cached_property
     def parents(self) -> dict[ast.AST, ast.AST]:
-        return {child: node for node in ast.walk(self.tree) for child in ast.iter_child_nodes(node)}
+        return {
+            child: node for node in walk_nodes(self.tree) for child in ast.iter_child_nodes(node)
+        }
 
     def enclosing(
         self, node: ast.AST, kind: type[ast.AST] | tuple[type[ast.AST], ...]
@@ -107,7 +112,7 @@ class _Scanner:
 
     def load(self, path: Path) -> _Module:
         if path not in self._modules:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            tree = parse_source(path.read_text(encoding="utf-8"), filename=str(path))
             relpath = path.relative_to(self.report_base).as_posix()
             self._modules[path] = _Module(path, relpath, tree)
         return self._modules[path]
@@ -159,7 +164,7 @@ class _Scanner:
                 pass
 
     def trace_returns(self, module: _Module, function: _Function) -> None:
-        for node in ast.walk(function):
+        for node in walk_nodes(function):
             if isinstance(node, ast.Return) and node.value is not None:
                 self.trace(module, node.value)
 
@@ -200,7 +205,7 @@ class _Scanner:
         cls = module.enclosing(expr, ast.ClassDef)
         if not isinstance(cls, ast.ClassDef):
             return
-        for node in ast.walk(cls):
+        for node in walk_nodes(cls):
             targets = node.targets if isinstance(node, ast.Assign) else []
             for target in targets:
                 if (
@@ -254,7 +259,7 @@ def _assignment_index(
     Built once per scope: a lookup per ``Name`` node would otherwise re-walk the scope.
     """
     index: dict[str, tuple[list[ast.expr], list[ast.AugAssign]]] = {}
-    nodes = ast.walk(scope) if not isinstance(scope, ast.Module) else iter(scope.body)
+    nodes = walk_nodes(scope) if not isinstance(scope, ast.Module) else iter(scope.body)
     for node in nodes:
         match node:
             case ast.Assign(targets=targets, value=value):
@@ -283,7 +288,7 @@ def _typed_sinks(modules: Iterable[_Module]) -> _TypedSinks:
     """Functions whose parameters are annotated ``RenderedPrompt``: agent-visible text sinks."""
     sinks: _TypedSinks = {}
     for module in modules:
-        for node in ast.walk(module.tree):
+        for node in walk_nodes(module.tree):
             if not isinstance(node, _Function):
                 continue
             positional = [*node.args.posonlyargs, *node.args.args]
@@ -320,12 +325,12 @@ def _prompt_sinks(
     tree: ast.Module, typed: _TypedSinks | None = None, relpath: str = ""
 ) -> list[ast.expr]:
     sinks: list[ast.expr] = []
-    for node in ast.walk(tree):
+    for node in walk_nodes(tree):
         if isinstance(node, _Function) and any(_is_tool_decorator(d) for d in node.decorator_list):
             # An agent tool's return value is text the agent reads.
             sinks.extend(
                 ret.value
-                for ret in ast.walk(node)
+                for ret in walk_nodes(node)
                 if isinstance(ret, ast.Return) and ret.value is not None
             )
         if not isinstance(node, ast.Call):
@@ -378,7 +383,7 @@ def _edits_operand(parent: ast.AST | None, grandparent: ast.AST | None) -> bool:
 def _rendered_output_edits(module: _Module) -> set[_Violation]:
     """String-building operations applied to a ``render*`` result."""
     found: set[_Violation] = set()
-    for node in ast.walk(module.tree):
+    for node in walk_nodes(module.tree):
         if not isinstance(node, ast.expr):
             continue
         rendered = _is_render_call(node)
@@ -407,7 +412,7 @@ def _formatted_constants(module: _Module) -> set[_Violation]:
     }
     return {
         _Violation(module.relpath, node.lineno, "string constant formatted in Python")
-        for node in ast.walk(module.tree)
+        for node in walk_nodes(module.tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "format"
@@ -447,7 +452,7 @@ def _minting_sites(path: Path, *, calls: bool) -> list[int]:
     # so a file without those words has none; skip parsing it.
     if not any(word in source for word in (*_MINTING_NAMES, "vs_prompts")):
         return lines
-    for node in ast.walk(ast.parse(source, filename=str(path))):
+    for node in walk_nodes(parse_source(source, filename=str(path))):
         match node:
             case ast.Call(
                 func=ast.Name(id="RenderedPrompt") | ast.Attribute(attr="RenderedPrompt")

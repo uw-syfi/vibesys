@@ -24,6 +24,7 @@ from vs_issue_tracker.api import (
     IssueTracker,
     IssueType,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -149,7 +150,7 @@ def _apply(tracker: IssueTracker, model: Model, steps: list[Operation]) -> None:
 @given(steps=st.lists(operations, max_size=12))
 # The fixture is a factory: every example builds its own tracker in a fresh directory.
 @settings(
-    max_examples=40,
+    max_examples=examples(pr=5, nightly=40),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )

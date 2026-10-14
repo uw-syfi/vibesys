@@ -24,14 +24,14 @@ from vs_project.api import (
     atomic_write_bytes,
 )
 from vs_project.api.testing import run_execution_record
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
-# Each example runs real Git processes. A pull request draws a sample; the nightly workflow
-# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# Each example runs real Git processes. A pull request draws a sample; the nightly depth
+# (`--depth=nightly`) searches deeper.
 
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "test",
@@ -417,7 +417,8 @@ def _turn(draw: st.DrawFn) -> list[tuple[str, str, bytes | None]]:
 
 
 @settings(
-    max_examples=40 if _FULL else 6, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=5, nightly=40),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(turn=_turn())
 def test_isolation_reports_exactly_what_the_agent_wrote_including_below_vibesys(

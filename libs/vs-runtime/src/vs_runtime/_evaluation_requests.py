@@ -46,8 +46,10 @@ from vs_core.api import (
 )
 from vs_evaluation.api import (
     EvaluationRequest,
+    EvaluationState,
     ExecutorCancellationUnconfirmedError,
     ExecutorCancellationUnknownError,
+    ExecutorObservation,
     ExecutorPoll,
     ExecutorRejectedError,
     PollPhase,
@@ -209,6 +211,22 @@ class MeasurementRequests:
             _SCOPES, "scope", _scope_key(scope, admission_id), ScopeJobs, decide
         )
 
+    def _forget(self, scope: Scope, admission_id: DecisionId | None, handle: str) -> None:
+        """Drop *handle* from its scope's index: its submission was refused, so it never was a job.
+
+        A close lists every indexed handle as a resource core may own, and core would look
+        for one it never heard of. An episode that already closed has listed the handle, so
+        its index is left as the close read it.
+        """
+
+        def decide(stored: ScopeJobs | None) -> tuple[ScopeJobs | None, None]:
+            if stored is None or stored.closed or handle not in stored.handles:
+                return None, None
+            kept = tuple(item for item in stored.handles if item != handle)
+            return stored.model_copy(update={"handles": kept}), None
+
+        self._store.modify(_SCOPES, "scope", _scope_key(scope, admission_id), ScopeJobs, decide)
+
     def _fence(self, scope: Scope, admission_id: DecisionId | None) -> ScopeJobs:
         """Close the scope episode to new registrations and return the jobs it holds."""
 
@@ -265,12 +283,25 @@ class MeasurementRequests:
             update={"terminal": terminal.model_copy(update={"stage_results": tuple(steps)})}
         )
 
-    async def _view(self, record: JobRecord, context: ExecutionContext) -> tuple[JobView, bool]:
-        """Poll the job as the next numbered observation. True when the job ended."""
+    async def _view(
+        self, record: JobRecord, context: ExecutionContext, *, cancelled: bool = False
+    ) -> tuple[JobView, bool]:
+        """Poll the job as the next numbered observation. True when the job ended.
+
+        *cancelled*: the executor has just accepted this job's cancellation. A job it then
+        holds no record of did not begin (a submission is answered only once it is made), so
+        the cancellation ended it; leaving it unknown would hold its owner open for good.
+        """
         subject = ObservationSubject(
             core_named(RequestId(root=record.request_id)), record.scope, record.admission_id
         )
-        polled = self._with_ledgered_evidence(await self._poll(record.handle_id), record, subject)
+        polled = await self._poll(record.handle_id)
+        if cancelled and polled.phase is PollPhase.UNSUBMITTED:
+            polled = ExecutorPoll(
+                phase=PollPhase.ENDED,
+                terminal=ExecutorObservation(state=EvaluationState.CANCELED),
+            )
+        polled = self._with_ledgered_evidence(polled, record, subject)
         self._progress.report(record.handle_id, record.plan.purpose, polled)
         # The job's observations carry the submission's request id, so they share one
         # sequence with the submission's own (possibly Unknown) observations.
@@ -480,6 +511,7 @@ class MeasurementRequests:
             try:
                 await self._jobs.submit(eval_request, handle_id=handle)
             except ExecutorRejectedError as error:
+                self._forget(request.scope, request.admission_id, handle)
                 return self._rejected(request, context, str(error))
             except Exception as error:  # noqa: BLE001  # lint-waiver: LW-940008 [BLE001]; a failed submission may or may not have reached the executor, so it is reported as an unproven outcome that the next request inspects.
                 return self._unknown(
@@ -566,7 +598,7 @@ class MeasurementRequests:
             return self._unknown(request, context, f"cancellation outcome unknown: {error}")
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-940009 [BLE001]; a failed cancel leaves the job owned and running, so it is reported unproven and retried rather than halting the run.
             return self._unknown(request, context, f"cancel raised {type(error).__name__}: {error}")
-        view, ended = await self._view(record, context)
+        view, ended = await self._view(record, context, cancelled=True)
         own = self._own(
             request,
             context,
@@ -580,6 +612,13 @@ class MeasurementRequests:
         return ExecutionResult(
             observation=RequestObserved(observation=own), owner_events=self._events(view)
         )
+
+    async def _cancel_for_close(self, handle: str) -> None:
+        """Ask the executor to cancel *handle*; nothing the cancel does decides the handle's fate."""
+        try:
+            await self._jobs.cancel(handle)
+        except Exception:  # noqa: BLE001  # lint-waiver: LW-940010 [BLE001]; one job that cannot be cancelled, for any reason, must not hide the others from the manifest. Whether it ended is not the failed cancel's to say: the close polls the executor's state next, so a handle that never launched is released and a live one stays unreleased.
+            return
 
     # close
 
@@ -596,13 +635,7 @@ class MeasurementRequests:
             if self._authority_problem(request, context) is not None:
                 ended.append(False)
                 continue
-            try:
-                await self._jobs.cancel(handle)
-            except (ExecutorCancellationUnknownError, ExecutorCancellationUnconfirmedError):
-                pass
-            except Exception:  # noqa: BLE001  # lint-waiver: LW-940010 [BLE001]; one job that cannot be cancelled must not hide the others from the manifest, and it stays unreleased.
-                ended.append(False)
-                continue
+            await self._cancel_for_close(handle)
             # The scope is fenced closed above, so a handle whose submission never
             # reached the executor can never be submitted: it is as good as ended.
             ended.append(

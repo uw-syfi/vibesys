@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_core.api import (
@@ -22,6 +22,7 @@ from vs_core.api import (
     orphan_waits,
     step,
 )
+from vs_sim.api.testing import examples
 
 from .test_attempt_acquisition import acquiring_state, owner_ref
 
@@ -91,6 +92,7 @@ def _retire() -> RetireRequested:
     )
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     status=st.sampled_from(_VACANT),
     order=st.permutations(("rejection", "retirement")),

@@ -100,6 +100,8 @@ class DecisionReceipt(Value):
     decision: Command | None = None
     until: Until | None = None
     """What core stored for the decision's ``Within``; None for a ``Finish``, which has none."""
+    limit: Seconds | None = None
+    """The decision's ``Within`` as a duration, which its requests count from their dispatch."""
     payload_digest: str
     feedback: DecisionFeedback
     request_ids: tuple[RequestId, ...] = ()

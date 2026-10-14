@@ -6,6 +6,17 @@ from tests.support import run_test_command
 IMAGE = Path("examples/model-serving/images/rocm-mi30x-engine-free")
 BASE_TAG = "lmsysorg/sglang:v0.5.18-rocm700-mi30x"
 ENGINE_PACKAGES = ("sglang", "sgl-kernel", "sglang-router", "sgl-router", "vllm", "tensorrt_llm")
+KEPT_PACKAGES = (
+    "torch",
+    "triton",
+    "aiter",
+    "transformers",
+    "safetensors",
+    "aiohttp",
+    "fastapi",
+    "uvicorn",
+    "numpy",
+)
 SITE_STRINGS = ("cscs", "beverin", "capstor", "viclsh")
 
 
@@ -36,11 +47,15 @@ def test_readme_documents_placeholders() -> None:
 
 
 def test_verify_script_fails_closed_outside_the_image() -> None:
+    # Isolated and without site-packages, so no kept package can import: the host's own
+    # packages (a torch install costs seconds to import) cannot change the outcome.
     proc = run_test_command(  # fixed argv, no untrusted input
-        [sys.executable, str(IMAGE / "verify_image.py")],
+        [sys.executable, "-I", "-S", str(IMAGE / "verify_image.py")],
         capture_output=True,
         text=True,
         check=False,
     )
-    assert proc.returncode in (0, 1)
-    assert proc.returncode == 0 or "FAIL:" in proc.stderr
+    assert proc.returncode == 1
+    for package in KEPT_PACKAGES:
+        assert f"kept package failed to import: {package}" in proc.stderr
+    assert "engine still importable" not in proc.stderr

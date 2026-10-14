@@ -21,6 +21,7 @@ from vs_runtime.api.infrastructure import (
     build_trusted_benchmark_command,
     decode_trusted_benchmark_run,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -70,7 +71,7 @@ def _run(command: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-@settings(deadline=None, max_examples=10)
+@settings(deadline=None, max_examples=examples(pr=5, nightly=10))
 @given(exit_code=st.integers(min_value=1, max_value=120))
 def test_a_failed_benchmark_keeps_its_exit_status_and_frames_its_error_record(
     tmp_path_factory: pytest.TempPathFactory, exit_code: int

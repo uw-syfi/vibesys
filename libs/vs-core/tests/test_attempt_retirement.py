@@ -1,15 +1,18 @@
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ValidationError
 
 import vs_core.api as core
 from vs_core.api import ObservationStatus, SessionPhase
+from vs_sim.api.testing import examples
 
+from .guard_rows import by_pairs, guard_rows
 from .proof_digest import value_digest
 from .reopen_facts import released_job
+from .restart import restarts
 
 
 def changed[T: BaseModel](value: T, **fields: object) -> T:
@@ -19,6 +22,8 @@ def changed[T: BaseModel](value: T, **fields: object) -> T:
 def reload_state(
     state: core.CoreState, codec: core.OperationRegistry | None = None
 ) -> core.CoreState:
+    if codec is None and not restarts():
+        return state
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
         fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
@@ -100,14 +105,17 @@ def recorded_proof(state: core.CoreState, proof: core.Observation) -> core.CoreS
 def checked_step(
     state: core.CoreState, event: core.CoreEvent, *, codec: core.OperationRegistry | None = None
 ) -> core.Transition:
+    if codec is None and not restarts():
+        return core.step(state, event, reducers=REDUCERS)
     before = state.model_dump_json()
     result = core.step(state, event, reducers=REDUCERS)
     assert core.step(reload_state(state, codec), event, reducers=REDUCERS) == result
     assert state.model_dump_json() == before
     assert result.state.scheduling == state.scheduling
     assert result.state.settlement == state.settlement
-    assert reload_state(result.state, codec) == result.state
-    assert core.project(result.state) == core.project(reload_state(result.state, codec))
+    reloaded = reload_state(result.state, codec)
+    assert reloaded == result.state
+    assert core.project(result.state) == core.project(reloaded)
     return result
 
 
@@ -311,8 +319,12 @@ def test_f8_reordered_withdrawal_and_unknown_release_preserve_cleanup_and_capaci
             state,
             core.ReleaseDependencyObserved(attempt=ref, dependency=dependency, observation=proof),
         )
-        assert all(isinstance(request, core.InspectRequest) for request in result.requests)
         assert result.state.attempts.attempts[0].charges == charges
+        if status in (ObservationStatus.REJECTED, ObservationStatus.FAILED):
+            # The owner refused the discard: nothing is left to wait for, so the attempt ends.
+            assert dependency not in result.state.attempts.attempts[0].release_dependencies
+            return
+        assert all(isinstance(request, core.InspectRequest) for request in result.requests)
         assert dependency in result.state.attempts.attempts[0].release_dependencies
         state = result.state
 
@@ -385,6 +397,7 @@ def test_withdrawal_requires_exact_accepted_receipt_for_every_admission_variant(
 
 
 @pytest.mark.parametrize("signal", ["settle", "retention", "park", "cancel"])
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     pending=st.sampled_from([None, "matching", "foreign", "duplicate", "final"]),
     authority=st.booleans(),
@@ -564,10 +577,13 @@ def writer_invocation(
     )
 
 
-@pytest.mark.parametrize("charge", ["paid", "correction", "resume", "free"])
-@pytest.mark.parametrize("predecessor", [False, True])
-@pytest.mark.parametrize("reuse", [False, True])
-@pytest.mark.parametrize("registered", [False, True])
+@by_pairs(
+    ("charge", ["paid", "correction", "resume", "free"]),
+    ("predecessor", [False, True]),
+    ("reuse", [False, True]),
+    ("registered", [False, True]),
+)
+@settings(max_examples=examples(pr=1, nightly=100))
 @given(
     proof=st.tuples(
         st.sampled_from(list(ObservationStatus)),
@@ -579,6 +595,18 @@ def writer_invocation(
     )
 )
 @example(proof=(ObservationStatus.SUCCEEDED, True, True, True, "admission", "accepted"))
+# The release is positive only when every part of the proof is: each of these fails exactly one,
+# in every kind of writer, so a pull request needs few drawn proofs beside them.
+@example(proof=(ObservationStatus.UNKNOWN, True, True, True, "admission", "accepted"))
+@example(proof=(ObservationStatus.PENDING, True, True, True, "admission", "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, False, True, True, "admission", "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, False, True, "admission", "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, False, "admission", "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, None, "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, "stale", "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, "admission", "rejected"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, "admission", "wrong-id"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, "admission", "mutated"))
 def test_every_writer_variant_requires_exact_complete_lease_release_before_disposal(
     charge: Literal["paid", "correction", "resume", "free"],
     proof: tuple[ObservationStatus, bool, bool, bool, str | None, str],
@@ -772,6 +800,25 @@ def test_typed_job_manifest_always_fences_unreleased_descendants(
     assert core.ReleaseDependency(kind="job", identity=child) in (
         result.state.attempts.attempts[0].release_dependencies
     )
+    assert not any(isinstance(request, core.DiscardWorkspace) for request in result.requests)
+
+
+def test_an_outstanding_job_edge_blocks_disposal_after_a_positive_scope_fence() -> None:
+    state, ref = undisposed_fixture()
+    owner = state.attempts.attempts[0]
+    job_edge = core.ReleaseDependency(kind="job", identity=core.ResourceId(root="leftover"))
+    state = with_owner(
+        state, changed(owner, release_dependencies=(*owner.release_dependencies, job_edge))
+    )
+    proof = observation(ref, core.RequestId(root="withdraw"))
+    state = recorded_proof(state, proof)
+    result = checked_step(
+        state,
+        core.ReleaseDependencyObserved(
+            attempt=ref, dependency=owner.release_dependencies[0], observation=proof
+        ),
+    )
+    assert job_edge in result.state.attempts.attempts[0].release_dependencies
     assert not any(isinstance(request, core.DiscardWorkspace) for request in result.requests)
 
 
@@ -1062,7 +1109,8 @@ def test_retention_crash_ack_requires_exact_checkpoint_history(
             observation=proof,
         ),
     )
-    if checkpoint == "exact" and status == ObservationStatus.SUCCEEDED and terminal:
+    refused = status in (ObservationStatus.REJECTED, ObservationStatus.FAILED) and terminal
+    if (checkpoint == "exact" and status == ObservationStatus.SUCCEEDED and terminal) or refused:
         assert edge not in result.state.attempts.attempts[0].release_dependencies
     else:
         assert edge in result.state.attempts.attempts[0].release_dependencies
@@ -1265,14 +1313,16 @@ def test_reopen_dispatch_waits_for_exact_workspace_and_physical_session_reacquis
     assert result.state.attempts.attempts[0].closure == state.attempts.attempts[0].closure
 
 
-@pytest.mark.parametrize("canonical", [False, True])
 @pytest.mark.parametrize(
-    "checkpoint_source", ["exact", "foreign", "duplicate", "latest", "wrong-retention"]
+    ("phase", "pending", "canonical", "checkpoint_source"),
+    guard_rows(
+        list(SessionPhase),
+        [False, True],
+        [False, True],
+        ["exact", "foreign", "duplicate", "latest", "wrong-retention"],
+        positive=(SessionPhase.IDLE, False, True, "exact"),
+    ),
 )
-@given(phase=st.sampled_from(list(SessionPhase)), pending=st.booleans())
-@example(phase=SessionPhase.EXECUTING, pending=False)
-@example(phase=SessionPhase.IDLE, pending=True)
-@example(phase=SessionPhase.IDLE, pending=False)
 def test_reopen_dispatch_requires_quiescent_reacquired_session(
     phase: SessionPhase, *, pending: bool, canonical: bool, checkpoint_source: str
 ) -> None:
@@ -1326,6 +1376,38 @@ def test_reopen_dispatch_requires_quiescent_reacquired_session(
     assert bool(result.requests) == positive
     assert all(isinstance(request, core.ExecuteRegisteredOperation) for request in result.requests)
     assert result.state.attempts == state.attempts
+
+
+def _assert_refusal_resolves(
+    state: core.CoreState,
+    event: core.ReleaseDependencyObserved,
+    edge: core.ReleaseDependency,
+    *,
+    discard: bool,
+) -> None:
+    if discard:
+        result = core.step(state, event, reducers=REDUCERS)
+        assert result.state.attempts.attempts[0].phase != core.AttemptPhase.CLOSING
+        return
+    result = checked_step(state, event)
+    assert edge not in result.state.attempts.attempts[0].release_dependencies
+    assert all(isinstance(request, core.DiscardWorkspace) for request in result.requests)
+
+
+def _refused(
+    status: ObservationStatus, *, terminal: bool, supplied: str, expected: str, disposition: str
+) -> bool:
+    """Whether the owner answered the disposal "no", so nothing is left to wait for.
+
+    A refused discard ends the attempt and a refused settle retention fails it and discards;
+    a park cannot give its state up.
+    """
+    return (
+        status in (ObservationStatus.REJECTED, ObservationStatus.FAILED)
+        and terminal
+        and supplied == expected
+        and (supplied == "discard" or disposition == "settle")
+    )
 
 
 @given(
@@ -1430,7 +1512,12 @@ def test_f4_disposal_requires_exact_disposition_and_positive_root_proof(
     state = recorded_proof(state, proof)
     event = core.ReleaseDependencyObserved(attempt=ref, dependency=edge, observation=proof)
     expected = {"park": "wip", "cancel": "discard", "settle": "candidate"}[disposition]
-    if supplied == expected and not durable:
+    refused = _refused(
+        status, terminal=terminal, supplied=supplied, expected=expected, disposition=disposition
+    )
+    if refused:
+        _assert_refusal_resolves(state, event, edge, discard=supplied == "discard")
+    elif supplied == expected and not durable:
         result = checked_step(state, event)
         assert all(isinstance(request, core.InspectRequest) for request in result.requests)
     elif supplied == expected and supplied == "discard":
@@ -1466,10 +1553,12 @@ def test_f4_disposal_requires_exact_disposition_and_positive_root_proof(
 
 @pytest.mark.parametrize("historical", [False, True])
 @pytest.mark.parametrize("aggregate", [False, True])
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     prefix=st.text(alphabet="abc", min_size=1, max_size=8),
     suffix=st.text(alphabet="xyz", min_size=1, max_size=8),
 )
+@example(prefix="a", suffix="x")
 def test_opaque_inspection_identities_are_injective_across_sources_and_children(
     prefix: str, suffix: str, *, historical: bool, aggregate: bool
 ) -> None:
@@ -1690,6 +1779,7 @@ def test_child_release_requires_complete_positive_history_from_every_source(
 @pytest.mark.parametrize(
     "completion", [None, core.CompletionStatus.FAILED, core.CompletionStatus.CANCELLED]
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(canonical=st.booleans(), accepted=st.booleans(), terminal=st.booleans())
 def test_unknown_scope_reopen_inspects_before_reacquisition_or_typed_outcome(
     *, canonical: bool, accepted: bool, terminal: bool, completion: core.CompletionStatus | None
@@ -1862,6 +1952,7 @@ def test_queued_reopen_withdrawal_targets_the_new_queue_episode(admission: str) 
 @pytest.mark.parametrize(
     "completion", [None, core.CompletionStatus.FAILED, core.CompletionStatus.CANCELLED]
 )
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     proof=st.tuples(
         st.sampled_from(

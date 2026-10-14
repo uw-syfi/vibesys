@@ -31,6 +31,7 @@ from vs_runtime.api.core import (
     ObservationSubject,
     ReceiptStore,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vs_core.api import Observation
@@ -81,7 +82,10 @@ def isolated_project_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 
 
 @given(steps=st.lists(st.tuples(st.sampled_from(_FACTS), st.booleans()), min_size=1, max_size=12))
-@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=5, nightly=40),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 def test_every_issued_observation_is_fresh_for_core_across_restarts(
     steps: list[tuple[ObservationFacts, bool]],
 ) -> None:

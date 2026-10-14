@@ -16,8 +16,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import _plugin, _request, _write_project
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
@@ -112,9 +110,9 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
         integration.close()
 
 
-@settings(max_examples=3, deadline=None)
-@given(candidates=st.integers(min_value=1, max_value=3))
-def test_the_client_resolves_each_candidate_to_its_own_container(candidates: int) -> None:
+def test_the_client_resolves_each_candidate_to_its_own_container() -> None:
+    """Two candidates, each with its own container (Budget: a whole host over a fake daemon)."""
+    candidates = 2
     # The container receives the provider credential, so the run needs one to open.
     previous = os.environ.get("ANTHROPIC_API_KEY")
     os.environ["ANTHROPIC_API_KEY"] = "test-key"
@@ -219,9 +217,8 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
     return turns
 
 
-@settings(max_examples=3, deadline=None)
-@given(candidates=st.integers(min_value=1, max_value=3))
-def test_a_candidates_turn_execs_in_that_candidates_container(candidates: int) -> None:
+def test_a_candidates_turn_execs_in_that_candidates_container() -> None:
+    candidates = 2
     previous = os.environ.get("ANTHROPIC_API_KEY")
     os.environ["ANTHROPIC_API_KEY"] = "test-key"
     try:

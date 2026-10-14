@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
 
@@ -134,6 +135,7 @@ def _assert_attempts_signal(state: core.CoreState, event: core.CoreEvent, event_
     assert state.model_dump_json() == before
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     count=st.integers(1, 6),
     charge=st.integers(1, 5),
@@ -255,6 +257,7 @@ def test_expired_accepted_fifo_requests_retirement_and_can_drain(
     assert state.scheduling.queue == state.scheduling.slots == ()
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     count=st.integers(1, 6),
     charge=st.integers(1, 5),

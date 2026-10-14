@@ -30,6 +30,7 @@ from vs_sandbox.api.slurm import (
     HipApiTime,
     ProfileStats,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -101,7 +102,7 @@ async def _profile(tmp_path: Path, stdout: str) -> TrustedEvidence:
     return TrustedEvidence.model_validate(step.result)
 
 
-@settings(max_examples=15, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=15), deadline=None)
 @given(stats=_stats(), log=st.text(alphabet="abc \n", max_size=300))
 async def test_printed_statistics_become_evidence_metrics_and_leave_the_summary(
     stats: ProfileStats, log: str, tmp_path_factory: pytest.TempPathFactory

@@ -1,9 +1,10 @@
 """The tach wrapper enforces edges and interfaces whether or not a library is packaged.
 
-Each case builds a throwaway repository with two libraries and drives
-`scripts/check_tach.py` through its CLI. A library may carry its own
+One throwaway repository holds a pair of libraries per case, and one run of
+`scripts/check_tach.py` through its CLI reports on all of them. A library may carry its own
 `pyproject.toml` (a uv workspace member) or not; a planted import across an
-undeclared edge, or around a library's `api`, must fail in every combination.
+undeclared edge, or around a library's `api`, must be reported in every combination, and a
+declared import through the `api` must not be.
 """
 
 from __future__ import annotations
@@ -11,107 +12,100 @@ from __future__ import annotations
 import itertools
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
 
-if TYPE_CHECKING:
-    import subprocess
-
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_tach.py"
 
-TACH_CONFIG = r"""source_roots = ["libs/lib-a/src", "libs/lib-b/src"]
-exclude = ["**/tests", "**/__pycache__"]
-
-[[modules]]
-path = "pkg_a"
-depends_on = {a_depends_on}
-
-[[modules]]
-path = "pkg_b"
-depends_on = []
-
-[[interfaces]]
-expose = ["api", "api\\..*"]
-from = ["pkg_b"]
-"""
+# One importer/exporter pair per (behaviour, packaging of the importer, packaging of the exporter).
+PACKAGING = list(itertools.product((False, True), repeat=2))
+BEHAVIOURS = {
+    # name: (what the importer imports from its exporter, what its module declares)
+    "declared": ("from {b}.api import VALUE\n", '["{b}"]'),
+    "undeclared": ("from {b}.api import VALUE\n", "[]"),
+    "around": ("from {b}.internal import VALUE\n", '["{b}"]'),
+}
+CASES = [(behaviour, packaged) for behaviour in BEHAVIOURS for packaged in PACKAGING]
 
 
-def build_repository(
-    root: Path, *, a_imports: str, a_depends_on: str, packaged: tuple[bool, bool]
-) -> None:
-    """Write a two-library repository where pkg_a's code is ``a_imports``."""
-    for name, is_packaged in zip(("a", "b"), packaged, strict=True):
-        package = root / "libs" / f"lib-{name}" / "src" / f"pkg_{name}"
-        package.mkdir(parents=True)
-        (package / "__init__.py").write_text("", encoding="utf-8")
-        if is_packaged:
-            (root / "libs" / f"lib-{name}" / "pyproject.toml").write_text(
-                f'[project]\nname = "lib-{name}"\nversion = "0.1.0"\n', encoding="utf-8"
-            )
-    (root / "libs/lib-b/src/pkg_b/api.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (root / "libs/lib-b/src/pkg_b/internal.py").write_text("VALUE = 2\n", encoding="utf-8")
-    (root / "libs/lib-a/src/pkg_a/use.py").write_text(a_imports, encoding="utf-8")
-    (root / "tach.toml").write_text(TACH_CONFIG.format(a_depends_on=a_depends_on), encoding="utf-8")
+def _names(behaviour: str, packaged: tuple[bool, bool]) -> tuple[str, str]:
+    suffix = f"{behaviour}_{int(packaged[0])}{int(packaged[1])}"
+    return f"imp_{suffix}", f"exp_{suffix}"
 
 
-def run_check(root: Path) -> subprocess.CompletedProcess[str]:
-    """Run the wrapper against the fixture repository at ``root``."""
-    return run_test_command(
+def build_repository(root: Path) -> None:
+    """Write one repository holding a pair of libraries for every case.
+
+    ``tach`` reports every violation of a repository in one run, so all cases share one run
+    and each is read from its own library's lines of the report.
+    """
+    config = 'exclude = ["**/tests", "**/__pycache__"]\nsource_roots = [\n'
+    modules = ""
+    for behaviour, packaged in CASES:
+        importer, exporter = _names(behaviour, packaged)
+        imports, depends_on = BEHAVIOURS[behaviour]
+        for name, is_packaged in zip((importer, exporter), packaged, strict=True):
+            library = root / "libs" / name
+            package = library / "src" / name
+            package.mkdir(parents=True)
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            if is_packaged:
+                (library / "pyproject.toml").write_text(
+                    f'[project]\nname = "{name}"\nversion = "0.1.0"\n', encoding="utf-8"
+                )
+            config += f'    "libs/{name}/src",\n'
+        (root / "libs" / exporter / "src" / exporter / "api.py").write_text(
+            "VALUE = 1\n", encoding="utf-8"
+        )
+        (root / "libs" / exporter / "src" / exporter / "internal.py").write_text(
+            "VALUE = 2\n", encoding="utf-8"
+        )
+        (root / "libs" / importer / "src" / importer / "use.py").write_text(
+            imports.format(b=exporter), encoding="utf-8"
+        )
+        modules += (
+            f'[[modules]]\npath = "{importer}"\ndepends_on = {depends_on.format(b=exporter)}\n\n'
+            f'[[modules]]\npath = "{exporter}"\ndepends_on = []\n\n'
+            f'[[interfaces]]\nexpose = ["api", "api\\\\..*"]\nfrom = ["{exporter}"]\n\n'
+        )
+    (root / "tach.toml").write_text(config + "]\n\n" + modules, encoding="utf-8")
+
+
+@pytest.fixture
+def report(tmp_path_factory: pytest.TempPathFactory) -> tuple[int, str]:
+    """The wrapper's one run over every case: its exit code and its output."""
+    root = tmp_path_factory.mktemp("tach-cases")
+    build_repository(root)
+    result = run_test_command(
         [sys.executable, str(SCRIPT), "--root", str(root)],
         capture_output=True,
         text=True,
         check=False,
     )
+    return result.returncode, result.stdout + result.stderr
 
 
-PACKAGING = list(itertools.product((False, True), repeat=2))
+def _lines_of(output: str, library: str) -> list[str]:
+    return [line for line in output.splitlines() if library in line]
 
 
-@pytest.mark.parametrize("packaged", PACKAGING)
-def test_a_declared_import_through_the_api_passes(
-    tmp_path: Path, packaged: tuple[bool, bool]
+def test_the_wrapper_enforces_edges_and_interfaces_whether_or_not_a_library_is_packaged(
+    report: tuple[int, str],
 ) -> None:
-    build_repository(
-        tmp_path,
-        a_imports="from pkg_b.api import VALUE\n",
-        a_depends_on='["pkg_b"]',
-        packaged=packaged,
-    )
+    returncode, output = report
+    wrong: list[str] = []
+    for behaviour, packaged in CASES:
+        importer, exporter = _names(behaviour, packaged)
+        lines = _lines_of(output, f"/{importer}/")
+        if behaviour == "declared":
+            reported = bool(lines)
+        elif behaviour == "undeclared":
+            reported = any(importer in line and exporter in line for line in lines)
+        else:
+            reported = any(f"{exporter}.internal" in line for line in lines)
+        if reported != (behaviour != "declared"):
+            wrong.append(f"{behaviour} {importer}: {lines}")
 
-    result = run_check(tmp_path)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.parametrize("packaged", PACKAGING)
-def test_an_undeclared_import_fails(tmp_path: Path, packaged: tuple[bool, bool]) -> None:
-    build_repository(
-        tmp_path,
-        a_imports="from pkg_b.api import VALUE\n",
-        a_depends_on="[]",
-        packaged=packaged,
-    )
-
-    result = run_check(tmp_path)
-
-    assert result.returncode != 0
-    output = result.stdout + result.stderr
-    assert "pkg_a" in output
-    assert "pkg_b" in output
-
-
-@pytest.mark.parametrize("packaged", PACKAGING)
-def test_an_import_around_the_api_fails(tmp_path: Path, packaged: tuple[bool, bool]) -> None:
-    build_repository(
-        tmp_path,
-        a_imports="from pkg_b.internal import VALUE\n",
-        a_depends_on='["pkg_b"]',
-        packaged=packaged,
-    )
-
-    result = run_check(tmp_path)
-
-    assert result.returncode != 0
-    assert "pkg_b.internal" in result.stdout + result.stderr
+    assert returncode != 0
+    assert not wrong, "\n".join(wrong)

@@ -24,7 +24,7 @@ from server.events import (
     ToolCallData,
     make_event,
 )
-from vs_sim.api.testing import SimThreads, wait_or_fail
+from vs_sim.api.testing import SimThreads, examples, wait_or_fail
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -85,7 +85,10 @@ class TestEventStore:
         assert appended.run_id == "active-run"
         assert [event.sequence for event in store.read(after_sequence=1)] == [2, 3]
 
-    @settings(max_examples=12, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(
+        max_examples=examples(pr=10, nightly=12),
+        suppress_health_check=[HealthCheck.function_scoped_fixture],
+    )
     @given(
         delta=st.integers(min_value=-2048, max_value=2048),
         unit=st.sampled_from(("x", "é", "🧪")),

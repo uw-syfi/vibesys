@@ -24,6 +24,7 @@ from vibesys.api import (
 from vibesys.api.request import RunEnvironmentSpec, load_task
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
+from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
@@ -60,7 +61,8 @@ def _request(root: Path) -> RunRequest:
     )
 
 
-def _runs(clients: list[FakeAgentClient] | None = None) -> Runs:
+def _runs(clients: list[FakeAgentClient] | None = None, *, real_git: bool = False) -> Runs:
+    """The launch wiring over Fakes; ``real_git`` leaves the default Git CLI in place."""
     registry = OrchestrationRegistry()
     registry.register_plugin(failing_plugin("launch-test"))
 
@@ -77,6 +79,7 @@ def _runs(clients: list[FakeAgentClient] | None = None) -> Runs:
             registry=registry,
             agent_client_factory=agent_factory,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            git_repository=None if real_git else FakeGitRepositories().repository,
         )
     )
 
@@ -84,7 +87,8 @@ def _runs(clients: list[FakeAgentClient] | None = None) -> Runs:
 def test_headless_entry_starts_and_renders_launch_run(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    runs = _runs()
+    # The one launch run over the real Git CLI: the default wiring of the repository.
+    runs = _runs(real_git=True)
     result = run_headless(_request(tmp_path / "project"), runs)
 
     assert result.run_id.endswith("launch-test")
@@ -116,6 +120,7 @@ def test_headless_entry_prints_one_run_failed_line_with_the_typed_reason(
             registry=registry,
             agent_client_factory=_fake_agent,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            git_repository=FakeGitRepositories().repository,
         )
     )
     with pytest.raises(Exception, match="core rejected"):

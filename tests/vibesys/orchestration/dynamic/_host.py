@@ -17,6 +17,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     plan_reply,
     reviewed,
 )
+from tests.vibesys.vibesys_flows import start_flow
 
 from vibesys.metrics import EvidenceReading
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
@@ -64,7 +65,6 @@ from vs_core.api import (
     Withdraw,
 )
 from vs_core.api.search import TaskStage, TaskTerms
-from vs_core.api.testing import Asked, FakeView, FlowRun
 from vs_core.testing.builders import initial_state
 
 if TYPE_CHECKING:
@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import OperationRequest, Scope
+    from vs_core.api.testing import Asked, FakeView, FlowRun
 
 TERMS = TaskTerms(
     recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
@@ -97,7 +98,7 @@ _KINDS = {
 }
 _REGISTRY = OPERATIONS.registry()
 PLANNER_LABEL = "orchestrator"
-_INPUT_THROUGHPUT = 50.0
+INPUT_THROUGHPUT = 50.0
 _CANDIDATE_THROUGHPUT = 100.0
 
 
@@ -115,9 +116,7 @@ def begin(
     **world: Unpack[World],
 ) -> Host:
     """Start the dynamic search of ``cfg`` under a host; ``world`` sets how the far side behaves."""
-    run = FlowRun.start(
-        dynamic, cfg, facts=FACTS, restarting=restarting, view=view, adopting=adopting
-    )
+    run = start_flow(dynamic, cfg, facts=FACTS, restarting=restarting, view=view, adopting=adopting)
     return Host(run, cfg, **world)
 
 
@@ -380,7 +379,7 @@ class Host:
         passed = ref.status is ObservationStatus.SUCCEEDED
         if ref.kind is EvidenceKind.BENCHMARK and passed:
             value = (
-                _INPUT_THROUGHPUT
+                INPUT_THROUGHPUT
                 if ref.purpose == "baseline"
                 else self.throughputs.get(ref.candidate.revision_id.root, _CANDIDATE_THROUGHPUT)
             )

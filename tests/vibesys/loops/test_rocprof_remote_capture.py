@@ -1,3 +1,11 @@
+"""Remote capture evidence rules.
+
+Guarantees under test:
+
+* A trace is profile evidence only when every workload ran, and a capture without a manifest is
+  not evidence.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

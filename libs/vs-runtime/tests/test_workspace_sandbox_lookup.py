@@ -20,6 +20,7 @@ from tests.support.workspace_world import open_workspace_env
 
 from vs_runtime.api import AgentWorkspaceRouteError
 from vs_sandbox.api.testing import FakeCommandRunner
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
@@ -31,7 +32,7 @@ def isolated_project_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 
 
 @settings(
-    max_examples=8,
+    max_examples=examples(pr=5, nightly=8),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )

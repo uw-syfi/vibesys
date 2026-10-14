@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -16,6 +16,7 @@ from vibesys.hypothesis import (
     serialize_round_record,
 )
 from vibesys.metrics import MetricComparison
+from vs_sim.api.testing import examples
 
 
 def _record(
@@ -498,6 +499,7 @@ def test_record_persisted_with_the_retired_implementer_driver_still_loads() -> N
     assert "implementer_driver" not in serialize_round_record(restored)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     driver=st.one_of(st.none(), st.text()),
     unknown=st.text(min_size=1).filter(lambda k: k not in _KNOWN_KEYS),
@@ -509,6 +511,7 @@ def test_only_the_retired_driver_key_is_tolerated_on_load(driver: str | None, un
         parse_round_record({**base, unknown: 1})
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     record=st.builds(
         RoundRecord,
@@ -563,6 +566,7 @@ def _rollback_cases(draw: st.DrawFn) -> tuple[int, RoundRecord, set[str], str]:
     return parent_round, child, failures, mode
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(case=_rollback_cases())
 def test_rollback_base_changes_only_for_latest_failed_child(
     case: tuple[int, RoundRecord, set[str], str],

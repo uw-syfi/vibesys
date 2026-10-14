@@ -13,7 +13,8 @@ events a story names::
     assert run.finished is not None            # the framework adopted and finished
 
 ``FlowRun.start(..., restarting=True)`` round-trips the state through JSON into a new driver
-after every step, so any story can be repeated as a crash-at-every-step test. ``FakeView`` is
+after every step, so any story can be repeated as a crash-at-every-step test; a
+``RestartPolicy`` instead restarts after the steps it names. ``FakeView`` is
 the ``RunView`` the search reads: set the clock, attempts and settlements on it.
 
 ``FAKE_OPERATIONS`` and ``fake_search`` are the namespace and the decorator a test search uses;
@@ -83,6 +84,7 @@ from vs_core.api import (
     Work,
     WorkspaceClosed,
     WorkspaceOpened,
+    encode_json,
     run_view,
 )
 from vs_core.flows import search
@@ -154,11 +156,28 @@ class FakeView:
         return base.model_copy(update={"now_at": self.now_at, **self.changes})
 
 
+@dataclass(frozen=True)
+class RestartPolicy:
+    """After which steps a run restarts: every step, or only those in ``steps``.
+
+    A step is one event the search handled, counted from 0 at the first.
+    """
+
+    steps: frozenset[int] = frozenset()
+    every: bool = False
+    after_stop: bool = False
+    """Also restart after every step once the run was told to stop."""
+
+    def after(self, step: int, *, stopped: bool) -> bool:
+        """Whether the run restarts after its ``step``-th event, once told to stop or not."""
+        return self.every or step in self.steps or (self.after_stop and stopped)
+
+
 class StartOptions(TypedDict, total=False):
     """What a story may set when it starts a run."""
 
     view: FakeView | None
-    restarting: bool
+    restarting: bool | RestartPolicy
     adopting: bool
     facts: RunFacts
 
@@ -202,7 +221,7 @@ class FlowRun[C]:
         config: C,
         *,
         view: FakeView | None = None,
-        restarting: bool = False,
+        restarting: bool | RestartPolicy = False,
         adopting: bool = True,
     ) -> None:
         """Build a run that has not started; ``start`` is the way in."""
@@ -213,6 +232,8 @@ class FlowRun[C]:
         self.driver = search.driver(config, self.registry)
         self.view = view or FakeView()
         self.restarting = restarting
+        self._steps = 0
+        self._stopped = False
         self.adopting = adopting
         """Whether the host adopts any proposed winner at once, as the real one does."""
         self.state: FlowState
@@ -485,7 +506,7 @@ class FlowRun[C]:
     def restart(self) -> None:
         """Round-trip the state through JSON and continue with a new driver."""
         self.restarts += 1
-        self.state = FlowState.model_validate_json(self.state.model_dump_json())
+        self.state = FlowState.model_validate_json(encode_json(self.state))
         self.driver = self.driver.fresh()
 
     def swap(self, search: SearchDef[C]) -> None:
@@ -501,8 +522,11 @@ class FlowRun[C]:
             event = self._queue.pop(0)
             self.state, issued = self.driver.update(self.state, event, self.view.current())
             self._take(issued)
-            if self.restarting:
+            self._stopped = self._stopped or isinstance(event, StopRequested)
+            policy = RestartPolicy(every=True) if self.restarting is True else self.restarting
+            if policy and policy.after(self._steps, stopped=self._stopped):
                 self.restart()
+            self._steps += 1
 
     def _take(self, issued: list[Decision]) -> None:
         self.decisions.extend(issued)

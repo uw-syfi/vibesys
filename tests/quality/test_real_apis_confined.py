@@ -58,6 +58,9 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 REPO = Path(__file__).resolve().parents[2]
 BASELINE = Path(__file__).with_name("real_api_baseline.jsonl")
@@ -360,7 +363,7 @@ def violations(source: str, rules: Iterable[str]) -> Counter[str]:
     """Count, per rule in *rules*, the uses of a real API in *source*."""
     if not _MAYBE.search(source):
         return Counter()
-    nodes = list(ast.walk(ast.parse(source)))
+    nodes = list(walk_nodes(parse_source(source)))
     wanted = set(rules)
     aliases = _aliases(nodes)
     safe = _parked_calls(nodes) if "bare_wait" in wanted else set()

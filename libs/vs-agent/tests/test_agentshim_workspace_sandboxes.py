@@ -22,6 +22,7 @@ from hypothesis import strategies as st
 from vs_agent.api import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
 from vs_agent.api.testing import fake_stream_launcher
 from vs_sandbox.api.testing import FakeDockerConfinement
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vs_sandbox.api import DockerSandbox
@@ -37,7 +38,7 @@ def _spec(workspace: Path) -> AgentSessionSpec:
     )
 
 
-@settings(max_examples=20, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=20), deadline=None)
 @given(candidates=st.integers(min_value=1, max_value=4))
 def test_each_turn_execs_in_the_container_of_its_workspace(candidates: int) -> None:
     root = FakeDockerConfinement(workspace=Path("/srv/project"), container_id="root-container")

@@ -17,6 +17,7 @@ from vs_sim.api.testing import (
     SimThreads,
     VirtualClock,
     VirtualDeadlockError,
+    examples,
     run_virtual,
 )
 
@@ -73,7 +74,7 @@ def _play(
     return log, most[0], trace
 
 
-@settings(deadline=None, max_examples=60)
+@settings(deadline=None, max_examples=examples(pr=5, nightly=60))
 @given(PROGRAMS, SEEDS)
 def test_one_seed_gives_one_interleaving(program: list[list[Step]], seed: int) -> None:
     first_log, _, first_trace = _play(program, seed)
@@ -82,7 +83,7 @@ def test_one_seed_gives_one_interleaving(program: list[list[Step]], seed: int) -
     assert first_trace.first_difference(second_trace) is None
 
 
-@settings(deadline=None, max_examples=60)
+@settings(deadline=None, max_examples=examples(pr=5, nightly=60))
 @given(PROGRAMS, st.one_of(st.none(), SEEDS))
 def test_every_program_finishes_with_ordered_time_and_exclusive_locks(
     program: list[list[Step]], seed: int | None
@@ -230,7 +231,7 @@ def test_daemon_threads_are_unwound_when_main_returns() -> None:
     assert unwound == ["cleanup"]
 
 
-@settings(deadline=None, max_examples=30)
+@settings(deadline=None, max_examples=examples(pr=5, nightly=30))
 @given(SEEDS, st.integers(1, 4))
 def test_blocking_calls_from_a_coroutine_share_the_loops_timeline(seed: int, calls: int) -> None:
     clock = VirtualClock(0.0)
@@ -275,7 +276,7 @@ def test_a_loop_waiting_on_a_thread_that_never_ends_reports_it() -> None:
         run_virtual(clock, main(), driver=sim)
 
 
-@settings(deadline=None, max_examples=30)
+@settings(deadline=None, max_examples=examples(pr=5, nightly=30))
 @given(SEEDS, st.integers(1, 4))
 def test_a_simulated_server_and_its_clients_replay_from_the_seed(seed: int, clients: int) -> None:
     def transcript() -> list[str]:
@@ -359,7 +360,7 @@ def _run_tree(
     return {name: (started, finished) for name, (started, finished) in counts.items()}, trace
 
 
-@settings(deadline=None, max_examples=60)
+@settings(deadline=None, max_examples=examples(pr=5, nightly=60))
 @given(tree=TREES, seed=st.one_of(st.none(), SEEDS), join=st.booleans())
 def test_every_spawned_thread_runs_to_completion_exactly_once(
     *, tree: Tree, seed: int | None, join: bool
@@ -369,7 +370,7 @@ def test_every_spawned_thread_runs_to_completion_exactly_once(
     assert all(pair == (1, 1) for pair in counts.values())
 
 
-@settings(deadline=None, max_examples=60)
+@settings(deadline=None, max_examples=examples(pr=5, nightly=60))
 @given(tree=TREES, seed=SEEDS, join=st.booleans())
 def test_one_seed_gives_the_same_trace_for_any_thread_tree(
     *, tree: Tree, seed: int, join: bool

@@ -252,7 +252,7 @@ language = "python"
 directory = "."
 timeout_seconds = 1800
 commands = [
-  # One invocation per shard. The crash sweeps (tests/composition/crash) used to run
+  # One invocation per shard. The crash sweeps (tests/system/crash) used to run
   # in a second `pytest --no-cov` process because a simulation per crash point is
   # slower under coverage, but that process paid a full startup (~30 s of imports
   # and collection) for ~6 s of tests, which costs more than measuring them.

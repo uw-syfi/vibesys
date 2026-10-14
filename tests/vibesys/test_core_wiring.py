@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.core_roles import (
@@ -28,6 +28,7 @@ from vs_core.api import (
 )
 from vs_runtime.api import AgentCapability, WorkspaceAccess
 from vs_runtime.api.infrastructure import ParallelCandidateObstacle
+from vs_sim.api.testing import examples
 
 CANDIDATE = RevisionRef(revision_id=RevisionId(root="c"), digest="d")
 
@@ -49,6 +50,7 @@ def _recipe() -> MeasurementRecipe:
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(accuracy=st.booleans(), benchmark=st.booleans())
 def test_an_agent_measures_exactly_the_configured_gates(*, accuracy: bool, benchmark: bool) -> None:
     policy = agent_evaluation_policy(_recipe(), accuracy=accuracy, benchmark=benchmark)
@@ -86,6 +88,7 @@ def test_an_environment_that_cannot_is_refused_naming_the_loop_and_the_obstacle(
     assert "its agent does not run in a container of its own" in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(st.sampled_from(ParallelCandidateObstacle), st.sampled_from(ParallelCandidateObstacle))
 def test_every_declared_obstacle_has_its_own_stated_reason(
     left: ParallelCandidateObstacle, right: ParallelCandidateObstacle

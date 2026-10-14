@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
-from tests.composition.dynamic._harness import LoopInput
+from tests.e2e.dynamic_loop_harness import LoopInput
 from tests.support import run_test_command
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import (

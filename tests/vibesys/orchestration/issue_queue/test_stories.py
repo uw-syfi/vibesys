@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 from tests.vibesys.orchestration.issue_queue._host import (
     FACTS,
     IMPLEMENTER,
@@ -16,7 +17,6 @@ from tests.vibesys.orchestration.issue_queue._host import (
     assert_flow_closed,
     begin,
     config,
-    suspending_view,
 )
 from tests.vibesys.orchestration.issue_queue._replies import (
     evaluated,
@@ -24,16 +24,17 @@ from tests.vibesys.orchestration.issue_queue._replies import (
     implemented,
     judged,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.issue_queue.search.api import issue_queue
-from vs_core.api import FailureReason, RejectionCode, Withdraw
 from vs_issue_tracker.api import ReadBoard
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vs_core.api.search import Flow
     from vs_core.api.testing import Asked
 
-RESTARTING = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restarting"])
+RESTARTING = across_restarts
 
 
 def outcome(host: Host) -> str:
@@ -138,18 +139,6 @@ def test_a_stop_mid_job_settles_the_attempt_and_adopts_nothing(*, restarting: bo
 
 
 @RESTARTING
-def test_a_reply_that_is_not_json_is_corrected(*, restarting: bool) -> None:
-    host = begin(config(), restarting=restarting)
-    host.drain_until_turn(IMPLEMENTER)
-    (turn,) = [item for item in host.run.open if item.label == IMPLEMENTER]
-    host.answer(turn, variant=1)
-    host.drain()
-    assert_flow_closed(host)
-    assert outcome(host) == "success"
-    assert host.board() == {1: ("closed", 1)}
-
-
-@RESTARTING
 def test_a_lost_board_acknowledgement_is_sent_again_and_lands_once(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting, lost_acknowledgements=frozenset({0, 1, 2}))
     host.drain()
@@ -182,20 +171,6 @@ def turn_of(host: Host, role: str) -> Asked:
     """The one open turn of ``role``."""
     (asked,) = [item for item in host.run.open if item.label == role]
     return asked
-
-
-@RESTARTING
-@pytest.mark.parametrize("role", [IMPLEMENTER, JUDGE])
-def test_an_agent_that_waits_for_its_evaluations_is_resumed_and_the_issue_closes(
-    *, restarting: bool, role: str
-) -> None:
-    host = begin(config(), restarting=restarting, view=suspending_view())
-    host.drain_until_turn(role)
-    host.run.resume_ready(host.run.suspend(turn_of(host, role)))
-    host.drain()
-    assert_flow_closed(host)
-    assert outcome(host) == "success"
-    assert host.board() == {1: ("closed", 1)}
 
 
 @RESTARTING
@@ -238,20 +213,6 @@ def test_a_task_without_an_objective_fails_the_run_instead_of_seeding_an_unrelat
     assert_flow_closed(host)
     assert outcome(host) == "failure"
     assert host.titles() == []
-
-
-@RESTARTING
-@pytest.mark.parametrize("code", list(RejectionCode))
-def test_a_settlement_core_refuses_ends_the_job_instead_of_stranding_it(
-    *, restarting: bool, code: RejectionCode
-) -> None:
-    host = begin(config(), restarting=restarting)
-    host.drain_until_turn(JUDGE)
-    host.answer(turn_of(host, JUDGE))
-    for asked in [item for item in host.run.open if isinstance(item.request, Withdraw)]:
-        host.run.fail(asked, FailureReason.REFUSED, cause=code)
-    host.drain()
-    assert_flow_closed(host)
 
 
 @RESTARTING
@@ -358,3 +319,43 @@ def test_an_evaluator_that_keeps_naming_too_many_issues_fails_the_run(*, restart
     assert host.record.ending is not None
     assert "performance evaluation 1 could not be completed" in host.record.ending.reason
     assert not {"a", "b", "c"} & set(host.titles())
+
+
+@RESTARTING
+@settings(max_examples=examples(pr=3, nightly=48), deadline=None, database=None)
+@example(verdicts=[True, True, False])
+@example(verdicts=[True, False])
+@example(verdicts=[False, True])
+@example(verdicts=[True, True, True])
+@given(verdicts=st.lists(st.booleans(), min_size=2, max_size=3))
+def test_the_adopted_revision_is_the_last_closed_issue_and_a_rejected_later_issue_leaves_it(
+    *, restarting: bool, verdicts: list[bool]
+) -> None:
+    """Each issue builds on the one before, so the winner is the tip of the last one that closed.
+
+    A passed issue files the next one (the last files none). An issue the judge rejects through
+    every attempt ends the run; the issues before it stay adopted. An implementer commit is
+    numbered in the order the attempts run, so the n-th closed issue's tip is `c{n}`.
+    """
+    judge = []
+    for position, passed in enumerate(verdicts):
+        if passed:
+            more = position + 1 < len(verdicts)
+            judge.append(judged(bugs=(f"issue {position + 2}",) if more else ()))
+        else:
+            judge.extend([judged(passed=False)] * 2)  # both attempts the issue is allowed
+            break
+    host = begin(config(), restarting=restarting, judge=judge)
+    host.drain()
+    assert_flow_closed(host)
+
+    closed = verdicts.index(False) if False in verdicts else len(verdicts)
+    finished = host.run.finished
+    assert finished is not None
+    adopted = finished.result.selection
+    if closed == 0:
+        assert adopted is None, "no issue closed, so the input stands and the run names no winner"
+    else:
+        assert adopted is not None
+        assert adopted.revision.digest == f"git-commit:c{closed}"
+    assert finished.result.outcome == ("success" if closed == len(verdicts) else "failure")

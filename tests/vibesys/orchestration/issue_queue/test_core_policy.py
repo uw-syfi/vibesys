@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -20,6 +20,7 @@ from vibesys.orchestration.issue_queue.search.api import (
 )
 from vibesys.run.contracts import IterationTree
 from vs_core.api import AssessmentKind, Capabilities, validate_startup
+from vs_sim.api.testing import examples
 
 OPTIONS = st.builds(
     IssueQueueConfig,
@@ -31,6 +32,7 @@ OPTIONS = st.builds(
 MINIMAL = {"max_rounds": 1, "max_attempts_per_issue": 1, "max_issues_per_perf_eval": 1}
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(options=OPTIONS)
 def test_the_attempt_bound_is_the_rounds_times_the_issues_per_round_and_an_evaluation(
     options: IssueQueueConfig,
@@ -42,6 +44,7 @@ def test_the_attempt_bound_is_the_rounds_times_the_issues_per_round_and_an_evalu
     assert spent.turns >= spent.attempts
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(options=OPTIONS)
 def test_the_default_round_cap_is_twice_the_evaluators_cap_plus_two(
     options: IssueQueueConfig,
@@ -137,6 +140,7 @@ PROJECTED_KEYS = {
 }
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     round_idx=st.integers(0, 4),
     cursor=st.sampled_from(["drain", "assess", "finished"]),

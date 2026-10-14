@@ -59,7 +59,14 @@ from server.transport.websocket import (
     _connection_closed,
     _content_type,
 )
-from vs_sim.api.testing import HANG_GUARD_S, Gate, join_or_fail, start_thread, wait_or_fail
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    Gate,
+    examples,
+    join_or_fail,
+    start_thread,
+    wait_or_fail,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Sequence
@@ -357,7 +364,10 @@ _DECLARED_ORIGINS = st.builds(
 )
 
 
-@settings(max_examples=15, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=10, nightly=15),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 # The documented development origins, pinned so the normal case is always drawn.
 @example(
     origins=[
@@ -428,7 +438,10 @@ _REJECTED_ORIGINS = st.one_of(
 )
 
 
-@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=10, nightly=30),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(origin=_REJECTED_ORIGINS)
 def test_gateway_rejects_a_declared_origin_no_browser_can_send(tmp_path: Path, origin: str) -> None:
     parts = build_server_parts(tmp_path / "logs")
@@ -651,7 +664,10 @@ _PROBE_TARGETS = st.one_of(
 )
 
 
-@settings(max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=10, nightly=20),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @example(targets=["/favicon.ico"])
 @given(targets=st.lists(_PROBE_TARGETS, min_size=1, max_size=6))
 def test_gateway_spends_403_only_on_a_target_a_token_could_unlock(
@@ -742,7 +758,10 @@ _TRAVERSAL_ATTEMPTS = st.builds(
 )
 
 
-@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=10, nightly=40),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(attempts=st.lists(_TRAVERSAL_ATTEMPTS, min_size=1, max_size=6))
 def test_gateway_serves_no_token_free_body_from_outside_the_bundle_directory(
     tmp_path: Path, attempts: list[str]
@@ -779,7 +798,10 @@ _RAW_TARGETS = st.builds(
 )
 
 
-@settings(max_examples=25, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=10, nightly=25),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(targets=st.lists(_RAW_TARGETS, min_size=1, max_size=6))
 def test_gateway_answers_every_token_spelling_through_its_own_response_builder(
     tmp_path: Path, targets: list[bytes]
@@ -2044,7 +2066,10 @@ _EVENT_TEXTS = st.lists(
 )
 
 
-@settings(max_examples=15, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=10, nightly=15),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(texts=_EVENT_TEXTS)
 @example(texts=[])
 @example(texts=["\U0001d11e" * 400] * 8)

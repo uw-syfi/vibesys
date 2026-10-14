@@ -319,6 +319,9 @@ class Workspaces(Protocol):
         working directory. At most one live candidate exists per member ID;
         creating a second while the first is live raises
         :class:`RuntimeContractError`.
+
+        A ``from_revision`` the run's repository does not hold (unknown, malformed, or not a
+        commit) raises :class:`WorkspaceRestoreError`; nothing is created.
         """
         ...
 

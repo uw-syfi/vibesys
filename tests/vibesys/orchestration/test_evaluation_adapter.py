@@ -17,6 +17,7 @@ from tests.support.task_project import write_task
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.events import (
+    CoreEvent,
     CoreEventType,
     EventStatus,
     GateFinishedData,
@@ -34,9 +35,9 @@ from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkFailureKind,
     BenchmarkObjective,
-    LocalValidationEvaluation,
     MetricDirection,
     RuntimeContractError,
+    Workspace,
 )
 from vs_runtime.api.testing import FakeWorkspace
 from vs_sandbox.api import CommandResult, SandboxKind
@@ -190,59 +191,6 @@ def _run_project(
     return asyncio.run(exercise()), integration
 
 
-def test_adapter_returns_semantic_results_and_events(tmp_path: Path) -> None:
-    async def body(ctx: CoreHost) -> tuple[AccuracyEvaluation, BenchmarkEvaluation]:
-        accuracy = await ctx.evaluation.accuracy(ctx.workspaces.root)
-        benchmark = await ctx.evaluation.benchmark(
-            ctx.workspaces.root,
-            objectives=(BenchmarkObjective(name="throughput", direction=MetricDirection.MAXIMIZE),),
-        )
-        return accuracy, benchmark
-
-    (accuracy, benchmark), integration = _run(tmp_path, body)
-    try:
-        assert accuracy.passed
-        assert accuracy.receipt is not None
-        assert benchmark.passed
-        assert benchmark.metric_name == "throughput"
-        assert benchmark.metric_value == 42.0
-        assert benchmark.metric_direction is MetricDirection.MAXIMIZE
-        gate_events = [
-            event
-            for event in integration.events.read()
-            if event.type in {CoreEventType.GATE_STARTED, CoreEventType.GATE_FINISHED}
-        ]
-        assert [type(event.data) for event in gate_events] == [
-            GateStartedData,
-            GateFinishedData,
-            GateStartedData,
-            GateFinishedData,
-        ]
-    finally:
-        integration.close()
-
-
-def test_accuracy_receipt_round_trips_across_framework_snapshot(tmp_path: Path) -> None:
-    async def body(ctx: CoreHost) -> tuple[AccuracyEvaluation, AccuracyEvaluation]:
-        first = await ctx.evaluation.accuracy(ctx.workspaces.root)
-        assert first.receipt is not None
-        restored = AccuracyReceipt.model_validate_json(first.receipt.model_dump_json())
-        note = ctx.workspaces.root.path / ".vibesys" / "receipt-test.json"
-        note.parent.mkdir(parents=True, exist_ok=True)
-        note.write_text("{}\n")
-        await ctx.workspaces.root.snapshot("incidental framework metadata")
-        reused = await ctx.evaluation.accuracy(ctx.workspaces.root, reuse=restored)
-        return first, reused
-
-    (first, reused), integration = _run(tmp_path, body)
-    try:
-        assert first.executed
-        assert not reused.executed
-        assert reused.receipt == first.receipt
-    finally:
-        integration.close()
-
-
 def test_adapter_preserves_failure_feedback(tmp_path: Path) -> None:
     async def body(ctx: CoreHost) -> AccuracyEvaluation:
         return await ctx.evaluation.accuracy(ctx.workspaces.root)
@@ -252,20 +200,6 @@ def test_adapter_preserves_failure_feedback(tmp_path: Path) -> None:
         assert not result.passed
         assert result.feedback is not None
         assert result.feedback.startswith("Framework accuracy gate failed.")
-    finally:
-        integration.close()
-
-
-def test_single_metric_without_objectives_uses_scalar_contract_direction(tmp_path: Path) -> None:
-    async def body(ctx: CoreHost) -> BenchmarkEvaluation:
-        return await ctx.evaluation.benchmark(ctx.workspaces.root)
-
-    result, integration = _run(tmp_path, body)
-    try:
-        assert result.passed
-        assert result.metric_name == "throughput"
-        assert result.metric_value == 42.0
-        assert result.metric_direction is MetricDirection.MAXIMIZE
     finally:
         integration.close()
 
@@ -306,60 +240,167 @@ def test_executed_benchmark_failure_has_policy_feedback(tmp_path: Path) -> None:
         integration.close()
 
 
-def test_local_validation_maps_runtime_result_and_gate_events(tmp_path: Path) -> None:
-    async def body(ctx: CoreHost) -> LocalValidationEvaluation:
-        return await ctx.evaluation.validate_local(
-            ctx.workspaces.root,
-            recipe_artifact="validation/recipes.json",
-            report_location="validation/report.json",
-        )
-
-    result, integration = _run(tmp_path, body)
-    try:
-        assert result.passed
-        assert result.report_location == "validation/report.json"
-        events = [
-            event
-            for event in integration.events.read()
-            if event.type in {CoreEventType.GATE_STARTED, CoreEventType.GATE_FINISHED}
-        ]
-        assert [type(event.data) for event in events] == [GateStartedData, GateFinishedData]
-        started = events[0].data
-        finished = events[1].data
-        assert isinstance(started, GateStartedData)
-        assert started.recipe == "queue-contract"
-        assert isinstance(finished, GateFinishedData)
-        assert finished.recipe == "queue-contract"
-        assert events[1].status is EventStatus.COMPLETED
-    finally:
-        integration.close()
-
-
-@pytest.mark.parametrize(
-    "artifact",
-    [
-        "Accuracy checker: expects cached_tokens > 0 on a repeated prompt",
-        "validation/missing.json",
-        "validation/recipes.txt",
-    ],
+_UNUSABLE_RECIPES = (
+    "Accuracy checker: expects cached_tokens > 0 on a repeated prompt",
+    "validation/missing.json",
+    "validation/recipes.txt",
 )
-def test_unusable_recipe_reference_is_an_agent_input_error_not_a_framework_failure(
-    tmp_path: Path, artifact: str
-) -> None:
-    async def body(ctx: CoreHost) -> LocalValidationEvaluation:
-        return await ctx.evaluation.validate_local(
-            ctx.workspaces.root,
-            recipe_artifact=artifact,
-            report_location="validation/report.json",
-        )
 
-    result, integration = _run(tmp_path, body)
+
+def _gate_events(integration: LocalRunIntegration) -> list[CoreEvent]:
+    return [
+        event
+        for event in integration.events.read()
+        if event.type in {CoreEventType.GATE_STARTED, CoreEventType.GATE_FINISHED}
+    ]
+
+
+class _Gates:
+    """The gate events a run has emitted since they were last taken."""
+
+    def __init__(self, integration: LocalRunIntegration) -> None:
+        self._integration = integration
+        self._seen: list[CoreEvent] = []
+
+    def new(self) -> list[CoreEvent]:
+        events = _gate_events(self._integration)
+        fresh, self._seen = events[len(self._seen) :], events
+        return fresh
+
+
+async def _accuracy_and_benchmark(
+    ctx: CoreHost, root: Workspace, gates: _Gates
+) -> AccuracyEvaluation:
+    # Accuracy and a benchmark with a declared objective: results and a started/finished pair each.
+    accuracy = await ctx.evaluation.accuracy(root)
+    benchmark = await ctx.evaluation.benchmark(
+        root,
+        objectives=(BenchmarkObjective(name="throughput", direction=MetricDirection.MAXIMIZE),),
+    )
+    assert accuracy.passed
+    assert accuracy.receipt is not None
+    assert benchmark.passed
+    assert (benchmark.metric_name, benchmark.metric_value) == ("throughput", 42.0)
+    assert benchmark.metric_direction is MetricDirection.MAXIMIZE
+    assert [type(event.data) for event in gates.new()] == [
+        GateStartedData,
+        GateFinishedData,
+        GateStartedData,
+        GateFinishedData,
+    ]
+    return accuracy
+
+
+async def _receipt_reuse(
+    ctx: CoreHost, root: Workspace, gates: _Gates, accuracy: AccuracyEvaluation
+) -> None:
+    # A receipt survives a JSON round trip and an incidental framework snapshot.
+    restored = AccuracyReceipt.model_validate_json(accuracy.receipt.model_dump_json())
+    note = root.path / ".vibesys" / "receipt-test.json"
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text("{}\n")
+    await root.snapshot("incidental framework metadata")
+    reused = await ctx.evaluation.accuracy(root, reuse=restored)
+    assert accuracy.executed
+    assert not reused.executed
+    assert reused.receipt == accuracy.receipt
+    gates.new()
+
+
+async def _scalar_benchmark(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
+    # A single metric without objectives takes the scalar contract's direction.
+    scalar = await ctx.evaluation.benchmark(root)
+    assert scalar.passed
+    assert (scalar.metric_name, scalar.metric_value) == ("throughput", 42.0)
+    assert scalar.metric_direction is MetricDirection.MAXIMIZE
+    gates.new()
+
+
+async def _local_validation(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
+    # Local validation maps the runtime result and reports one gate.
+    validated = await ctx.evaluation.validate_local(
+        root,
+        recipe_artifact="validation/recipes.json",
+        report_location="validation/report.json",
+    )
+    assert validated.passed
+    assert validated.report_location == "validation/report.json"
+    started, finished = gates.new()
+    assert isinstance(started.data, GateStartedData)
+    assert isinstance(finished.data, GateFinishedData)
+    assert started.data.recipe == finished.data.recipe == "queue-contract"
+    assert finished.status is EventStatus.COMPLETED
+
+
+async def _unusable_recipes(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
+    # A recipe reference that is no recipe is the agent's input error, never the framework's.
+    for artifact in _UNUSABLE_RECIPES:
+        unusable = await ctx.evaluation.validate_local(
+            root, recipe_artifact=artifact, report_location="validation/report.json"
+        )
+        assert not unusable.passed
+        assert unusable.recipe_unusable
+        assert unusable.feedback is not None
+        assert "input error in your reply" in unusable.feedback
+        assert "Framework local validation" not in unusable.feedback
+    gates.new()
+
+
+async def _duplicate_objectives(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
+    # Two objectives of one name are refused before anything runs.
+    objective = BenchmarkObjective(name="latency", direction=MetricDirection.MINIMIZE)
+    with pytest.raises(ValueError, match="objective names must be unique"):
+        await ctx.evaluation.benchmark(root, objectives=(objective, objective))
+    assert gates.new() == []
+
+
+async def _refused_requests(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
+    # A foreign handle is refused before a gate opens; a foreign receipt opens one and fails it.
+    with pytest.raises(TypeError, match="live handle"):
+        await ctx.evaluation.accuracy(FakeWorkspace(path=root.path))
+    with pytest.raises(RuntimeContractError, match="another run"):
+        await ctx.evaluation.accuracy(
+            root,
+            reuse=AccuracyReceipt(run_id="foreign", workspace_id=None, revision="revision"),
+        )
+    refused_start, refused_end = gates.new()
+    assert isinstance(refused_start.data, GateStartedData)
+    assert refused_start.status is EventStatus.ACTIVE
+    assert refused_end.status is EventStatus.FAILED
+    assert isinstance(refused_end.data, GateFinishedData)
+    assert refused_end.data.output_tail is not None
+    assert "RuntimeContractError" in refused_end.data.output_tail
+    assert "another run" in refused_end.data.output_tail
+
+
+def test_the_adapter_evaluates_a_task_and_reports_each_gate_as_events(tmp_path: Path) -> None:
+    """One host, every operation of the adapter over a passing task, each checked as it ends.
+
+    Budget: one product host over a real Git project (the adapter needs the whole run).
+    """
+
+    async def body(ctx: CoreHost, integration: LocalRunIntegration) -> None:
+        root, gates = ctx.workspaces.root, _Gates(integration)
+        accuracy = await _accuracy_and_benchmark(ctx, root, gates)
+        await _receipt_reuse(ctx, root, gates, accuracy)
+        await _scalar_benchmark(ctx, root, gates)
+        await _local_validation(ctx, root, gates)
+        await _unusable_recipes(ctx, root, gates)
+        await _duplicate_objectives(ctx, root, gates)
+        await _refused_requests(ctx, root, gates)
+
+    integration = LocalRunIntegration()
+
+    async def exercise() -> None:
+        project_root = tmp_path / "project"
+        _write_project(project_root)
+        async with open_core_host(
+            _request(project_root), integration, backend_factory=host_container_backend
+        ) as ctx:
+            await body(ctx, integration)
+
     try:
-        assert not result.passed
-        assert result.recipe_unusable
-        assert result.feedback is not None
-        assert "input error in your reply" in result.feedback
-        assert "Framework local validation" not in result.feedback
+        asyncio.run(exercise())
     finally:
         integration.close()
 
@@ -375,55 +416,6 @@ def test_stub_backend_skips_trusted_execution(tmp_path: Path) -> None:
     try:
         assert not accuracy.executed
         assert not benchmark.executed
-    finally:
-        integration.close()
-
-
-def test_adapter_rejects_duplicate_objectives_before_execution(tmp_path: Path) -> None:
-    async def body(ctx: CoreHost) -> None:
-        objective = BenchmarkObjective(name="latency", direction=MetricDirection.MINIMIZE)
-        with pytest.raises(ValueError, match="objective names must be unique"):
-            await ctx.evaluation.benchmark(
-                ctx.workspaces.root,
-                objectives=(objective, objective),
-            )
-
-    _, integration = _run(tmp_path, body)
-    integration.close()
-
-
-def test_adapter_pairs_foreign_receipt_exception_with_terminal_gate(tmp_path: Path) -> None:
-    async def body(ctx: CoreHost) -> None:
-        with pytest.raises(TypeError, match="live handle"):
-            await ctx.evaluation.accuracy(FakeWorkspace(path=ctx.workspaces.root.path))
-        with pytest.raises(RuntimeContractError, match="another run"):
-            await ctx.evaluation.accuracy(
-                ctx.workspaces.root,
-                reuse=AccuracyReceipt(
-                    run_id="foreign",
-                    workspace_id=None,
-                    revision="revision",
-                ),
-            )
-
-    _, integration = _run(tmp_path, body)
-    try:
-        gate_events = [
-            event
-            for event in integration.events.read()
-            if event.type in {CoreEventType.GATE_STARTED, CoreEventType.GATE_FINISHED}
-        ]
-        assert [type(event.data) for event in gate_events] == [
-            GateStartedData,
-            GateFinishedData,
-        ]
-        assert gate_events[0].status is EventStatus.ACTIVE
-        assert gate_events[1].status is EventStatus.FAILED
-        finished = gate_events[1].data
-        assert isinstance(finished, GateFinishedData)
-        assert finished.output_tail is not None
-        assert "RuntimeContractError" in finished.output_tail
-        assert "another run" in finished.output_tail
     finally:
         integration.close()
 

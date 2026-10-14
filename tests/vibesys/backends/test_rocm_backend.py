@@ -25,6 +25,7 @@ from vs_sandbox.api import (
     create_compute_backend,
 )
 from vs_sandbox.api.testing import FakeAcceleratorDiscovery
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -152,7 +153,9 @@ class TestRocmSandbox:
 
     @given(devices=st.lists(_DEVICE_NODES, unique=True, max_size=3), attach=st.booleans())
     @settings(
-        max_examples=30, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+        max_examples=examples(pr=10, nightly=30),
+        deadline=None,
+        suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
     def test_docker_names_device_groups_only_when_forwarding_devices(
         self, tmp_path: Path, *, devices: list[str], attach: bool

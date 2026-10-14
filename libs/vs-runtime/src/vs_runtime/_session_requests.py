@@ -301,6 +301,13 @@ def _rejected(diagnostic: str, resource_id: ResourceId | None = None) -> _Facts:
     )
 
 
+def _retryable(diagnostic: str, resource_id: ResourceId | None = None) -> _Facts:
+    """The executor did not run the request, and a later identical one may: never stored."""
+    return _Facts(
+        ObservationStatus.FAILED, terminal=False, resource_id=resource_id, diagnostic=diagnostic
+    )
+
+
 def _violated(violation: AccessViolation, resource_id: ResourceId) -> _Facts:
     """An accepted turn that wrote outside its access: its output is withheld."""
     return _Facts(
@@ -680,7 +687,7 @@ class RuntimeSessionRequests:
                 await self._settle_ended_peers(dispatch.workspace.path, access_key)
                 self.settlement.require_clear(dispatch.workspace.path, access_key)
             except AccessSettlementError as error:
-                return _unknown(str(error), binding.resource_id)
+                return _retryable(str(error), binding.resource_id)
         ended = await self._admit(request, call, bkey, binding, dispatch)
         if ended is not None:
             return ended
@@ -738,9 +745,11 @@ class RuntimeSessionRequests:
             await self.settlement.begin(
                 access_key, turn.workspace, dispatch.workspace, dispatch.grant
             )
-            outcome = await self._outcome(bkey, binding, dispatch)
         except AccessSettlementError as error:
-            return _unknown(str(error), binding.resource_id)
+            # The baseline was refused, so no provider call began: ask again, do not inspect.
+            return _retryable(str(error), binding.resource_id)
+        try:
+            outcome = await self._outcome(bkey, binding, dispatch)
         except InvocationConflictError as error:
             self.settlement.fence(access_key)
             return _rejected(f"invocation conflicts with its journal: {error}", binding.resource_id)

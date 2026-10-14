@@ -10,7 +10,6 @@ worktree status are.
 
 from __future__ import annotations
 
-import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,15 +19,15 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import GitCommandError, GitRepository
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_project.api.testing import RepositoryFactory
 
-# Each example runs real Git processes. A pull request draws a sample; the nightly workflow
-# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# Each example runs real Git processes. A pull request draws a sample; the nightly depth
+# (`--depth=nightly`) searches deeper.
 
 _PATHS = ("a.txt", "b.txt", "dir/c.txt")
 _TEXTS = ("one\n", "two\n", "three\n")
@@ -161,7 +160,7 @@ def _assert_each_path_once(repo: GitRepository) -> None:
 
 # Each step spawns Git processes in the CLI implementation, so the example count is
 # fixed small instead of following the Hypothesis profile.
-@settings(max_examples=8 if _FULL else 2)
+@settings(max_examples=examples(pr=2, nightly=8))
 @example(
     # Regression: a staged deletion of a tracked path plus the same path recreated
     # untracked is two status lines but one path.

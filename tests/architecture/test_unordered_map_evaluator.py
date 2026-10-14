@@ -248,6 +248,7 @@ def test_starter_make_honors_cargo_target_dir(compiled_unordered_map_candidate: 
     assert not (build_dir / "target").exists()
 
 
+@pytest.mark.native_build
 def test_unordered_map_benchmark_pins_linux_workers(tmp_path):  # noqa: ANN001, ANN201  # lint-waiver: LW-994665 [ANN001, ANN201]; Pytest fixture argument and unused test return are left unannotated.
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted unordered-map evaluator")

@@ -18,8 +18,14 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
+
 REPO = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = (REPO / "tests", *sorted((REPO / "libs").glob("*/tests")))
+_MAY_WAIT = re.compile(r"\.\s*(?:join|communicate|wait|accept)\s*\(\s*(?:#[^\n]*\n\s*)*\)|socket")
 SOCKET_NAME = re.compile(r"(server|listener|sock|socket)\w*", re.IGNORECASE)
 
 # Files whose subject is this check, or that hold none of it as test code.
@@ -72,7 +78,7 @@ def _bound_names(function: ast.AST) -> tuple[set[str], set[str], dict[str, int]]
     popens: set[str] = set()
     timed: set[str] = set()
     sockets: dict[str, int] = {}
-    for node in ast.walk(function):
+    for node in walk_nodes(function):
         for name, value, line in _bindings(node):
             if _is_popen(value):
                 popens.add(name)
@@ -90,7 +96,7 @@ def _unbounded(function: ast.AST) -> list[tuple[int, str]]:
         for name, line in sockets.items()
         if name not in timed
     ]
-    for node in ast.walk(function):
+    for node in walk_nodes(function):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
         if node.args or node.keywords:
@@ -108,9 +114,14 @@ def _unbounded(function: ast.AST) -> list[tuple[int, str]]:
 
 def unbounded_waits(source: str) -> list[tuple[int, str]]:
     """``(line, what)`` for each unbounded blocking wait in *source*."""
-    tree = ast.parse(source)
+    # A wait is a zero-argument call of one of four methods, and a socket is spelled by name.
+    if not _MAY_WAIT.search(source):
+        return []
+    tree = parse_source(source)
     functions = [
-        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        node
+        for node in walk_nodes(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
     ]
     # Module-level statements count as one scope; nested functions are scanned in
     # their own scope and again inside their parent, so deduplicate by line.

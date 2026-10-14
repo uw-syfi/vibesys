@@ -15,7 +15,7 @@ from vs_sandbox.api.slurm import (
     GpuJobRequest,
 )
 from vs_sim.api import ProbeResult
-from vs_sim.api.testing import FakeMergedOutputProcessLauncher, SimThreads
+from vs_sim.api.testing import FakeMergedOutputProcessLauncher, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -90,7 +90,7 @@ def _cancel_on_ready(cancel: Event, output: bytearray, chunk: bytes) -> None:
         cancel.set()
 
 
-@settings(max_examples=10)
+@settings(max_examples=examples(pr=5, nightly=10))
 @example(term_survivors=0)
 @example(term_survivors=1)
 @given(term_survivors=st.integers(min_value=0, max_value=8))

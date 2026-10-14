@@ -5,8 +5,6 @@ from hashlib import sha256
 from typing import Literal
 
 import pytest
-from hypothesis import given
-from hypothesis import strategies as st
 
 from vs_core.api import (
     Access,
@@ -56,6 +54,8 @@ from vs_core.api import (
     initial_state,
     step,
 )
+
+from .guard_rows import guard_rows
 
 SourceVariant = Literal[
     "absent",
@@ -258,33 +258,33 @@ def test_empty_initial_manifest_cannot_restore_without_dynamic_source() -> None:
     assert result.state.sessions.acquisition_groups == ()
 
 
-@pytest.mark.parametrize("admission", ["absent", "stale", "current"])
-@pytest.mark.parametrize("initial_manifest", [False, True])
 @pytest.mark.parametrize(
-    "source_variant",
-    [
-        "absent",
-        "generation",
-        "scope",
-        "resource",
-        "invocation",
-        "exact",
-        "run",
-        "foreign-run",
-        "stale-run",
-        "foreign-attempt",
-    ],
+    ("admission", "initial_manifest", "source_variant", "lease"),
+    guard_rows(
+        ["absent", "stale", "current"],
+        [False, True],
+        [
+            "absent",
+            "generation",
+            "scope",
+            "resource",
+            "invocation",
+            "exact",
+            "run",
+            "foreign-run",
+            "stale-run",
+            "foreign-attempt",
+        ],
+        [(terminal, current) for terminal in (False, True) for current in (False, True)],
+        positive=("current", False, "exact", (False, False)),
+        joint=(0, 2),
+    ),
 )
-@pytest.mark.parametrize(
-    "lease", [(terminal, current) for terminal in (False, True) for current in (False, True)]
-)
-@given(replays=st.integers(min_value=1, max_value=3))
 def test_retained_reopen_authority_matrix(
     *,
     initial_manifest: bool,
     source_variant: SourceVariant,
     lease: tuple[bool, bool],
-    replays: int,
     admission: Literal["absent", "stale", "current"],
 ) -> None:
     terminal_session, current_closure = lease
@@ -308,7 +308,7 @@ def test_retained_reopen_authority_matrix(
     group = prepared.state.sessions.acquisition_groups[0]
     assert group.session_ids == (state.evaluation.continuations[0].invocation.session_id,)
     restored = complete_restore(prepared.state, event)
-    for _ in range(replays):
+    for _ in range(2):
         repeated = step(CoreState.model_validate(restored.model_dump()), event)
         assert repeated.requests == ()
         assert repeated.state.sessions.acquisition_groups == restored.sessions.acquisition_groups

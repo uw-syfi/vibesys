@@ -11,14 +11,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_core.api import EnsureWorkspace, FailureReason
 from vs_core.api.testing import Unknown
-from vs_dst.api import EVERY_POINT, simulate, using_crash_point_policy
+from vs_dst.api import simulate
+from vs_sim.api.testing import Depth, depth, examples
 
-from ._tiny import TinyWorld
+from ._tiny import TinyWorld, spread
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request, RequestRecord
@@ -27,6 +28,9 @@ if TYPE_CHECKING:
 
 LIMITS = st.floats(min_value=20.0, max_value=3000.0, allow_nan=False)
 """Shorter and longer than the time a restart takes (a lease and a little more)."""
+
+SHORTER_THAN_A_RESTART, LONGER_THAN_A_RESTART = 20.0, 3000.0
+"""The two ends of `LIMITS`: the cases a restart treats differently, pinned at every depth."""
 
 
 class SilentWorkspaces(TinyWorld):
@@ -42,14 +46,15 @@ def _workspaces(run: SimulatedRun) -> list[RequestRecord]:
     return [r for r in run.core.records.records if isinstance(r.request, EnsureWorkspace)]
 
 
-@settings(deadline=None, max_examples=6, derandomize=True, database=None)
+@settings(deadline=None, max_examples=examples(pr=1, nightly=8), derandomize=True, database=None)
+@example(patience=SHORTER_THAN_A_RESTART)
+@example(patience=LONGER_THAN_A_RESTART)
 @given(patience=LIMITS)
 def test_a_request_the_far_side_finished_is_not_timed_out_by_the_restart(patience: float) -> None:
     normal = simulate(TinyWorld(1, patience=patience))
-    with using_crash_point_policy(EVERY_POINT):
-        points = normal.crash_points()
+    points = normal.crash_points()
 
-    for crash in points:
+    for crash in points if depth() is Depth.NIGHTLY else spread(points, 3):
         recovered = normal.rerun_with_crash(crash)
         assert recovered.finished, crash
         assert recovered.result == normal.result, crash
@@ -58,7 +63,9 @@ def test_a_request_the_far_side_finished_is_not_timed_out_by_the_restart(patienc
         assert recovered.no_effect_ran_twice(), crash
 
 
-@settings(deadline=None, max_examples=3, derandomize=True, database=None)
+@settings(deadline=None, max_examples=examples(pr=1, nightly=4), derandomize=True, database=None)
+@example(patience=SHORTER_THAN_A_RESTART)
+@example(patience=LONGER_THAN_A_RESTART)
 @given(patience=LIMITS)
 def test_a_request_the_far_side_never_answers_ends_at_its_limit_after_a_restart(
     patience: float,
@@ -66,7 +73,9 @@ def test_a_request_the_far_side_never_answers_ends_at_its_limit_after_a_restart(
     normal = simulate(SilentWorkspaces(1, patience=patience))
     points = normal.crash_points()
 
-    for crash in points[:: max(1, len(points) // 6)]:
+    for crash in (
+        points[:: max(1, len(points) // 6)] if depth() is Depth.NIGHTLY else spread(points, 3)
+    ):
         recovered = normal.rerun_with_crash(crash)
         for record in _workspaces(recovered):
             assert record.failure is not None, crash

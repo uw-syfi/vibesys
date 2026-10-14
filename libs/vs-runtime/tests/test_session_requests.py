@@ -33,7 +33,7 @@ from vs_project.api import Project
 from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, ReceiptStore
 from vs_runtime.api.executor_contexts import RevocableLease
 from vs_runtime.api.observation_contracts import assert_core_accepts
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api.testing import examples, wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -375,7 +375,7 @@ async def test_stale_host_dispatches_nothing() -> None:
         assert w.host.turns == []
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=25), deadline=None)
 @given(
     steps=st.lists(
         st.tuples(st.sampled_from(["dispatch", "inspect", "restart-down"]), st.integers(0, 2)),

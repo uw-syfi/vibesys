@@ -33,7 +33,7 @@ from vs_sandbox.api.slurm import (
     SlurmStagePayload,
     SlurmTargetLifecycle,
 )
-from vs_sim.api.testing import Gate, ManualClock, wait_until_started
+from vs_sim.api.testing import Gate, ManualClock, examples, wait_until_started
 from vs_slurm.api import (
     ClusterCancelOutcome,
     ClusterCancelRequested,
@@ -587,7 +587,7 @@ async def test_executor_maps_missing_stage_evidence_to_failed_collection(tmp_pat
 
 
 @pytest.mark.asyncio
-@settings(max_examples=12)
+@settings(max_examples=examples(pr=2, nightly=12))
 @example(exit_code=None)
 @example(exit_code=0)
 @example(exit_code=255)
@@ -635,10 +635,11 @@ async def test_executor_never_invents_a_successful_exit_code(exit_code: int | No
 
 
 @pytest.mark.asyncio
-@settings(max_examples=12)
+@settings(max_examples=examples(pr=2, nightly=12))
 @example(completed=False, exit_code=0)
 @example(completed=False, exit_code=255)
 @example(completed=True, exit_code=255)
+@example(completed=True, exit_code=0)
 @given(completed=st.booleans(), exit_code=st.integers(min_value=0, max_value=255))
 async def test_executor_preserves_steps_but_rejects_failed_batch(
     *, completed: bool, exit_code: int

@@ -14,6 +14,11 @@ can only shrink: converting a site means lowering its count.
 import ast
 from pathlib import Path
 
+import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
+
 REPO = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = (REPO / "tests", *sorted((REPO / "libs").glob("*/tests")))
 WAITING_METHODS = {"wait", "get"}
@@ -24,9 +29,12 @@ ALLOWED: dict[str, tuple[int, str]] = {}
 
 def bare_thread_waits(source: str) -> list[int]:
     """Line numbers of ``to_thread(<name>.wait)`` and ``to_thread(<name>.get)`` calls."""
+    # A rule names what it looks for, so a source that never spells it cannot violate it.
+    if "to_thread" not in source:
+        return []
     return [
         node.lineno
-        for node in ast.walk(ast.parse(source))
+        for node in walk_nodes(parse_source(source))
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "to_thread"

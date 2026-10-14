@@ -7,7 +7,7 @@ from hypothesis import strategies as st
 from tests.server.support import wait_for_worker
 
 from server.transport.subscriptions import SubscriptionTracker, ThreadingSettleWindow
-from vs_sim.api.testing import SimThreads, wait_or_fail
+from vs_sim.api.testing import SimThreads, examples, wait_or_fail
 
 SETTLE_SECONDS = 1.0
 SEEDS = st.one_of(st.none(), st.integers(0, 2**32))
@@ -61,7 +61,7 @@ def _expected_wait_seconds(first: float, redials: list[tuple[float, float]]) -> 
     return first + sum(gap + duration for gap, duration in redials) + SETTLE_SECONDS
 
 
-@settings(deadline=None, max_examples=60)
+@settings(deadline=None, max_examples=examples(pr=10, nightly=60))
 @given(
     seed=SEEDS,
     first=STREAM_SECONDS,
@@ -118,7 +118,7 @@ STREAM_ENDINGS = st.tuples(
 )
 
 
-@settings(deadline=None, max_examples=60)
+@settings(deadline=None, max_examples=examples(pr=10, nightly=60))
 @given(seed=SEEDS, endings=st.lists(STREAM_ENDINGS, max_size=4))
 def test_a_drain_waits_exactly_until_every_open_stream_has_the_last_event(
     seed: int | None, endings: list[tuple[str, float]]

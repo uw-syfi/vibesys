@@ -9,7 +9,7 @@ review passed it, where dynamic reads a missing review as a pass.
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.multi._host import config, implemented, reviewed
 from tests.vibesys.serial_search._host import TERMS
@@ -37,6 +37,7 @@ from vs_core.api import (
     RevisionRef,
     SessionId,
 )
+from vs_sim.api.testing import examples
 
 BASE = RevisionRef.of_git_commit("base")
 CANDIDATE = RevisionRef.of_git_commit("candidate")
@@ -110,6 +111,7 @@ def test_a_reply_with_a_candidate_is_reviewed() -> None:
     assert taken.candidate == CANDIDATE
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(outcome=st.sampled_from(["nominated", "supported"]))
 def test_a_reply_that_claims_a_ready_candidate_it_did_not_retain_asks_again(outcome: str) -> None:
     taken = attempt()
@@ -118,6 +120,7 @@ def test_a_reply_that_claims_a_ready_candidate_it_did_not_retain_asks_again(outc
     assert not taken.passed
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(feedback=st.text(min_size=1, max_size=8))
 def test_a_review_that_fails_asks_again_with_its_feedback_and_never_passes(feedback: str) -> None:
     taken = reviewed_attempt()
@@ -145,6 +148,7 @@ def test_a_recipe_is_not_validated_when_the_run_does_not_offer_validation() -> N
     assert taken.judged(reviewed(), JUDGE_TURN) is Next.GATES
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(error=st.text(min_size=1, max_size=8), unusable=st.booleans())
 def test_a_recipe_that_fails_is_told_to_the_implementer_and_asks_again(
     *, error: str, unusable: bool
@@ -160,6 +164,7 @@ def test_a_recipe_that_fails_is_told_to_the_implementer_and_asks_again(
     assert taken.validation_failure.recipe_unusable is unusable
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     report=st.none() | st.just(LocalValidationReport(status="failed", detail="the runner broke"))
 )
@@ -188,6 +193,7 @@ def test_a_gate_that_rejects_asks_again_and_demands_a_review_of_the_repair() -> 
     assert not taken.passed
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(feedback=st.text(min_size=1, max_size=8))
 def test_a_candidate_the_machinery_could_not_measure_is_not_charged_against_the_agent(
     feedback: str,
@@ -199,6 +205,7 @@ def test_a_candidate_the_machinery_could_not_measure_is_not_charged_against_the_
     assert taken.failure is None
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(reason=st.text(min_size=1, max_size=8))
 def test_gates_that_cannot_be_read_fail_the_attempt_with_the_reason(reason: str) -> None:
     taken = reviewed_attempt()
@@ -227,6 +234,7 @@ def test_a_candidate_whose_review_was_lost_is_kept_but_never_eligible() -> None:
     assert not assessment.eligible
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(gates=st.booleans())
 def test_without_a_passing_review_no_gate_result_makes_a_candidate_eligible(*, gates: bool) -> None:
     """Whatever the gates read, a round the review did not pass is not a winner."""

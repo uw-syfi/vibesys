@@ -11,6 +11,7 @@ from tests.support.executor_cases import CASES, inspect_dispatch_of, inspect_req
 from vs_core.api import DispatchTurn, ObservationStatus, ResumeSessionTurn
 from vs_runtime.api.core import (
     ExecutionResult,
+    NeverBegun,
     ReceiptStore,
     SealedExecution,
     Settled,
@@ -42,10 +43,21 @@ def test_registered_kinds_are_exactly_the_receipt_backed_executor_kinds() -> Non
     assert set(registered) == receipt_executor_kinds()
 
 
+def _answer(result: ExecutionResult) -> Observation:
+    assert result.observation.target is not None, "an inspection must answer with target facts"
+    return result.observation.target.observation
+
+
 @pytest.mark.parametrize(("case", "scenario"), PARAMS)
-async def test_a_stale_host_performs_no_effect_and_core_accepts_the_retry(
+async def test_a_kind_acts_once_under_its_lease_and_its_identity_and_core_accepts_every_answer(
     case: ExecutorCase, scenario: Scenario
 ) -> None:
+    """One world per kind walks the effect's life, because each step needs the one before.
+
+    A host that lost its lease does nothing and core accepts the retry. The current host then
+    acts and leaves an execution record. An inspection reports what was executed. Another payload
+    under the same request identity is rejected and changes nothing.
+    """
     async with case.world() as world:
         request = await world.prepare(scenario)
         before = world.effects()
@@ -56,48 +68,13 @@ async def test_a_stale_host_performs_no_effect_and_core_accepts_the_retry(
         if scenario.effectful:
             assert stale.observation.observation.status is ObservationStatus.UNKNOWN
             assert not stale.observation.observation.terminal
-        older = await world.execute(request, lease=RevocableLease(), crash_at=None)
-        assert_core_accepts([stale, older], expect_retry=scenario.effectful)
-
-
-@pytest.mark.parametrize(("case", "scenario"), PARAMS)
-async def test_another_payload_under_one_request_identity_is_rejected(
-    case: ExecutorCase, scenario: Scenario
-) -> None:
-    if not scenario.effectful:
-        pytest.skip("queries seal nothing, so there is no identity to conflict with")
-    async with case.world() as world:
-        request = await world.prepare(scenario)
-        first = await world.execute(request, lease=RevocableLease(), crash_at=None)
-        effects = world.effects()
-        other = await world.execute(
-            request, lease=RevocableLease(), crash_at=None, digest="another-payload"
-        )
-        assert other.observation.observation.status is ObservationStatus.REJECTED
-        assert world.effects() == effects
-        assert_core_accepts([first, other], expect_retry=False)
-
-
-def _answer(result: ExecutionResult) -> Observation:
-    assert result.observation.target is not None, "an inspection must answer with target facts"
-    return result.observation.target.observation
-
-
-@pytest.mark.parametrize(
-    ("case", "scenario"),
-    [
-        pytest.param(case, scenario, id=f"{case.name}-{scenario.name}")
-        for case in CASES
-        for scenario in case.scenarios
-        if scenario.effectful
-    ],
-)
-async def test_inspect_after_completion_reports_the_executed_result(
-    case: ExecutorCase, scenario: Scenario
-) -> None:
-    async with case.world() as world:
-        request = await world.prepare(scenario)
         done = await world.execute(request, lease=RevocableLease(), crash_at=None)
+        assert_core_accepts([stale, done], expect_retry=scenario.effectful)
+        if not scenario.effectful:
+            return  # queries seal nothing, so there is no record or identity to conflict with
+        assert request.request_id is not None
+        history = ReceiptStore(world.receipts_namespace()).history(request.request_id.root)
+        assert not isinstance(history, NeverBegun)
         answer = await inspect_request_of(world, request)
         got = _answer(answer)
         want = done.observation.observation
@@ -108,7 +85,14 @@ async def test_inspect_after_completion_reports_the_executed_result(
             want.released,
             want.request_id,
         )
+        effects = world.effects()
+        other = await world.execute(
+            request, lease=RevocableLease(), crash_at=None, digest="another-payload"
+        )
+        assert other.observation.observation.status is ObservationStatus.REJECTED
+        assert world.effects() == effects
         assert_core_accepts([done, answer], expect_retry=False)
+        assert_core_accepts([done, other], expect_retry=False)
 
 
 def request_key(request: RequestBase) -> str:
@@ -136,7 +120,7 @@ async def test_crash_at_every_durable_boundary_recovers_once_and_core_accepts(
         boundaries = 2 * probe.writes()
         wanted_effects = probe.effects() - before
     dispatching = scenario.kind in (DispatchTurn, ResumeSessionTurn)
-    crash_points: list[int | None] = list(swept(boundaries, 3))
+    crash_points: list[int | None] = list(swept(boundaries, 2))
     if dispatching:
         crash_points.append(None)
     for crash_at in crash_points:

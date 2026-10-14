@@ -16,9 +16,10 @@ from typing import TYPE_CHECKING
 
 from vs_core.api import DiscardWorkspace, FailureReason, RequestPhase
 from vs_core.api.testing import Unknown
-from vs_dst.api import EVERY_POINT, CrashKind, simulate, using_crash_point_policy
+from vs_dst.api import CrashKind, simulate
+from vs_sim.api.testing import Depth, depth
 
-from ._tiny import TinyWorld
+from ._tiny import TinyWorld, spread
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request, RequestRecord
@@ -60,8 +61,11 @@ def test_a_committed_request_keeps_its_limit_through_a_crash_and_restart() -> No
     assert reference.failure.reason is FailureReason.TIMED_OUT
     assert reference.failure.limit_at == reference.until.at
 
-    with using_crash_point_policy(EVERY_POINT):
-        points = sorted(normal.crash_points(), key=_in_time_order)
+    # A sample on a pull request (the property below is monotone along the run, so a sample
+    # shows it as an every-point sweep does), every boundary at nightly depth.
+    points = sorted(normal.crash_points(), key=_in_time_order)
+    if depth() is not Depth.NIGHTLY:
+        points = spread(points, 6)
     kept = []
     for crash in points:
         recovered = normal.rerun_with_crash(crash)

@@ -9,9 +9,12 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 from launch import built_in_orchestrations
 from vibesys.plugin_registration import OrchestrationRegistration
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _SOURCE_ROOT = _REPOSITORY_ROOT / "src"
@@ -42,7 +45,7 @@ def test_every_direct_orchestration_folder_registers_a_strategy() -> None:
 
 def _orchestration_imports(source: str, package: str) -> list[str]:
     imports: list[str] = []
-    for node in ast.walk(ast.parse(source)):
+    for node in walk_nodes(parse_source(source)):
         if isinstance(node, ast.Import):
             names = [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom):

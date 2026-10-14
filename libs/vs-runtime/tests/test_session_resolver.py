@@ -52,6 +52,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.infrastructure import AgentExecutionConfiguration
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -170,7 +171,9 @@ async def test_a_turn_runs_with_the_role_instructions_timeout_and_rendered_artif
 
 
 @settings(
-    max_examples=15, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=5, nightly=15),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(
     prompts=st.lists(st.text(alphabet="abcdef", min_size=1, max_size=12), min_size=1, max_size=3),

@@ -5,7 +5,7 @@ from hashlib import sha256
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
@@ -113,6 +113,9 @@ from vs_core.api import (
     step,
 )
 from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
+
+from .restart import restarts
 
 
 class RegisteredOutcome(Value):
@@ -260,6 +263,8 @@ def with_registered_origins(state: CoreState) -> CoreState:
 
 def reload(state: CoreState) -> CoreState:
     """Reload an atomic envelope through the public registered persistence codec."""
+    if not restarts():
+        return state
     codec = OperationRegistry(
         tuple(
             OperationRegistration(
@@ -426,6 +431,22 @@ def test_reconciliation_before_deadline_never_authorizes_cleanup(now_at: int) ->
     assert result.events == ()
     assert result.state.records == started.state.records
     assert result.state.run.status == RunStatus.PAUSED
+
+
+def test_an_observation_that_resolves_nothing_leaves_a_blocked_recovery_blocked() -> None:
+    original = pending_record()
+    started = step(recovering_state(original), RecoveryStarted(epoch=1, now_at=0.0))
+    blocked = step(
+        reload(started.state),
+        ReconciliationDeadline(request_id=original.request_id, now_at=1000.0),
+    )
+    assert blocked.state.records.recovery.phase == RecoveryPhase.BLOCKED
+    later = step(
+        reload(blocked.state),
+        RequestObserved(observation=observed(blocked.state.records.records[0], sequence=2)),
+    )
+    assert later.state.records.recovery.phase == RecoveryPhase.BLOCKED
+    assert later.state.records.recovery.checks[0].resolution == "blocked"
 
 
 @pytest.mark.parametrize("now_at", [100.0, 101.0, 1000.0])
@@ -1137,6 +1158,7 @@ def with_sibling_history(state: CoreState, amounts: tuple[int, int]) -> CoreStat
     )
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     amounts=st.integers(1, 100).flatmap(
         lambda charged: st.tuples(st.just(charged), st.integers(0, charged))

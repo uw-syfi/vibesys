@@ -8,17 +8,18 @@ ends on its own, which a held cluster job never does.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
-from hypothesis import given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
-from .test_measurements import committed, observation, requested
+from .test_measurements import committed, observation, plan, requested
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
 _JOB = core.ResourceId(root="job")
 
@@ -51,16 +52,25 @@ def _answer(request: core.Request, now_at: float) -> core.Observation:
     )
 
 
+class _Executor(NamedTuple):
+    """The far side: the jobs it holds, and whether it claims to hold no record of them."""
+
+    jobs: Mapping[core.ResourceId, core.SubmitMeasurement]
+    no_record: bool = False
+
+
 def _settle(
     state: core.CoreState,
     requests: Iterable[core.Request],
     now_at: float,
     sent: list[core.Request],
-    job: core.SubmitMeasurement,
+    executor: _Executor,
 ) -> core.CoreState:
     """Authorize and answer every request core sends, until it sends no more.
 
-    A cancel's answer also reports the job itself ended, as the runtime's does.
+    A cancel's answer also reports the job itself ended, as the runtime's does. With
+    ``executor.no_record`` the executor answers every poll and inspection of a job with "I hold no
+    record of it" (unknown, unaccepted), as it does for a job it lost or never began.
     """
     pending = list(requests)
     for _ in range(50):
@@ -71,19 +81,40 @@ def _settle(
         if request.request_id is None:
             continue
         state = core.step(state, core.DispatchAuthorized(request_id=request.request_id)).state
+        if executor.no_record and isinstance(request, core.InspectOwnedJob | core.ObserveOwnedJob):
+            result = core.step(state, core.RequestObserved(observation=_answer(request, now_at)))
+            pending.extend(result.requests)
+            unknown = observation(
+                executor.jobs[request.resource_id],
+                resource_id=request.resource_id,
+                sequence=len(sent) + 100,
+                status=core.ObservationStatus.UNKNOWN,
+                accepted=False,
+                diagnostic="executor holds no record of the job",
+                observed_at=now_at,
+            )
+            result = core.step(
+                result.state, core.JobObserved(resource_id=request.resource_id, observation=unknown)
+            )
+            pending.extend(result.requests)
+            state = result.state
+            continue
         result = core.step(state, core.RequestObserved(observation=_answer(request, now_at)))
         pending.extend(result.requests)
-        if isinstance(request, core.CancelOwnedJob):
+        if isinstance(request, core.CancelOwnedJob) and request.resource_id in executor.jobs:
             ended = observation(
-                job,
-                sequence=len(sent) + 10,
+                executor.jobs[request.resource_id],
+                resource_id=request.resource_id,
+                sequence=len(sent) + 1000,
                 status=core.ObservationStatus.CANCELLED,
                 terminal=True,
                 released=True,
                 children_complete=True,
                 observed_at=now_at,
             )
-            result = core.step(result.state, core.JobObserved(resource_id=_JOB, observation=ended))
+            result = core.step(
+                result.state, core.JobObserved(resource_id=request.resource_id, observation=ended)
+            )
             pending.extend(result.requests)
         state = result.state
     return state
@@ -117,13 +148,13 @@ def _stopped(
     if accepted_before_stop:
         state, _ = _accept(state, job)
     result = core.step(state, _stop(mode, 2.0))
-    state = _settle(result.state, result.requests, 2.0, sent, job)
+    state = _settle(result.state, result.requests, 2.0, sent, _Executor({_JOB: job}))
     if not accepted_before_stop:
         state, requests = _accept(state, job)
-        state = _settle(state, requests, 2.5, sent, job)
+        state = _settle(state, requests, 2.5, sent, _Executor({_JOB: job}))
     for tick in ticks:
         result = core.step(state, core.ClockAdvanced(now_at=tick))
-        state = _settle(result.state, result.requests, tick, sent, job)
+        state = _settle(result.state, result.requests, tick, sent, _Executor({_JOB: job}))
     return state, sent
 
 
@@ -137,6 +168,7 @@ def test_a_cancel_stop_cancels_the_runs_queued_measurement_and_closes() -> None:
     assert state.run.status == core.RunStatus.TERMINAL
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     accepted_before_stop=st.booleans(),
     ticks=st.lists(st.floats(min_value=3.0, max_value=50.0), max_size=3).map(
@@ -160,3 +192,275 @@ def test_a_drain_stop_lets_the_runs_own_job_finish(*, accepted_before_stop: bool
     )
     assert _cancels(sent) == 0
     assert state.run.status == core.RunStatus.CLOSING
+
+
+def _reload(state: core.CoreState) -> core.CoreState:
+    """A host restart: the whole state through the envelope codec."""
+    envelope = core.RunEnvelope[core.StrategyState](
+        schema_version=core.ENVELOPE_SCHEMA_VERSION,
+        fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
+        strategy_id=state.run.declaration.strategy_id,
+        state_schema=state.run.declaration.state_schema,
+        core=state,
+        strategy=core.StrategyState(schema_version=1),
+        event_cursor=core.EventCursor(sequence=0),
+    )
+    codec = core.OperationRegistry()
+    return codec.decode_envelope(
+        core.RunEnvelope[core.StrategyState], codec.encode_envelope(envelope)
+    ).core
+
+
+def test_a_late_observation_of_an_unconfirmed_job_cancels_it_after_the_stops_inspection() -> None:
+    """A stop that finds the job unconfirmed inspects it; if its next observation still does
+    not confirm it, the stop cancels it, once, instead of asking for the inspection again.
+
+    The inspection's id names the job's step. The stop stamped it with its own decision and
+    the observation then asked for the same id under the measurement's decision, which the
+    request ledger rejects as an identity conflict and halts the shell. And a stop that only
+    inspected, whatever the executor answered ("no record" included), left the run closing
+    until the host gave up.
+    """
+    asked = requested()
+    job = asked.requests[0]
+    assert isinstance(job, core.SubmitMeasurement)
+    assert job.request_id is not None
+    state = core.step(asked.state, core.DispatchAuthorized(request_id=job.request_id)).state
+    unconfirmed = observation(
+        job, status=core.ObservationStatus.UNKNOWN, diagnostic="executor holds no record"
+    )
+    state = committed(state, unconfirmed)
+    state = core.step(state, core.MeasurementSubmissionObserved(observation=unconfirmed)).state
+    state = core.step(state, core.JobObserved(resource_id=_JOB, observation=unconfirmed)).state
+    stopped = core.step(state, _stop(core.StopMode.CANCEL, 2.0))
+    assert [type(r) for r in stopped.requests] == [core.InspectOwnedJob]
+    late = core.step(stopped.state, core.JobObserved(resource_id=_JOB, observation=unconfirmed))
+    assert [type(r) for r in late.requests] == [core.CancelOwnedJob]
+    again = core.step(late.state, core.JobObserved(resource_id=_JOB, observation=unconfirmed))
+    assert again.requests == ()
+
+
+_QUEUE_WAIT_LIMIT = 8.0
+
+_STATUSES = (
+    ("unknown", core.ObservationStatus.UNKNOWN, False),
+    ("unknown-accepted", core.ObservationStatus.UNKNOWN, True),
+    ("pending", core.ObservationStatus.PENDING, True),
+)
+
+_OPS = st.one_of(
+    st.tuples(st.just("tick"), st.sampled_from((0.0, 0.0, 1.0, 3.0))),
+    st.tuples(st.just("observe"), st.integers(0, 2), st.sampled_from(_STATUSES)),
+    st.tuples(st.just("stop"), st.sampled_from((core.StopMode.CANCEL, core.StopMode.DRAIN))),
+    st.tuples(st.just("replay"), st.integers(0, 2)),
+    st.tuples(st.just("restart")),
+)
+
+
+class _Run:
+    """The run's own measurement jobs, driven by hand: the events the shell would feed core.
+
+    Core refuses a second measurement of a plan the scope already measures, so each job
+    measures a plan of its own (a distinct evaluator).
+    """
+
+    def __init__(self, count: int, *, no_record: bool = False) -> None:
+        self.no_record = no_record
+        self.state = core.initial_state()
+        self.jobs: dict[core.ResourceId, core.SubmitMeasurement] = {}
+        for index in range(count):
+            asked = requested(
+                self.state,
+                identity=f"measure-{index}",
+                measurement=plan(evaluator_digest=f"evaluator-{index}"),
+            )
+            job = asked.requests[0]
+            assert isinstance(job, core.SubmitMeasurement)
+            assert job.request_id is not None
+            self.state = core.step(
+                asked.state, core.DispatchAuthorized(request_id=job.request_id)
+            ).state
+            self.jobs[core.ResourceId(root=f"job-{index}")] = job
+        self.resources = list(self.jobs)
+        self.sent: list[core.Request] = []
+        self.now = 1.0
+        self.mode: core.StopMode | None = None
+        self.sequences = dict.fromkeys(self.jobs, 0)
+        self.submitted: set[core.ResourceId] = set()
+        self.last: dict[core.ResourceId, tuple[core.Observation, bool]] = {}
+        if no_record:
+            # The executor took each job, and will later claim to hold no record of it.
+            for index in range(count):
+                self.observe(index, core.ObservationStatus.PENDING, accepted=True)
+
+    @property
+    def executor(self) -> _Executor:
+        return _Executor(self.jobs, self.no_record)
+
+    def _step(self, event: core.CoreEvent) -> None:
+        result = core.step(self.state, event)
+        self.state = result.state
+        self.sent.extend(result.requests)
+
+    def tick(self, seconds: float) -> None:
+        """Let time pass, but not past the queue allowance (10 s): an unconfirmed job that
+        outlives it is cancelled by core itself, which is not the stop under test."""
+        if self.now + seconds > _QUEUE_WAIT_LIMIT:
+            return
+        self.now += seconds
+        self._step(core.ClockAdvanced(now_at=self.now))
+
+    def observe(
+        self,
+        index: int,
+        status: core.ObservationStatus,
+        *,
+        accepted: bool,
+        **updates: object,
+    ) -> None:
+        resource = self.resources[index % len(self.resources)]
+        self.sequences[resource] += 1
+        seen = observation(
+            self.jobs[resource],
+            sequence=self.sequences[resource],
+            resource_id=resource,
+            status=status,
+            accepted=accepted,
+            observed_at=self.now,
+            **updates,
+        )
+        self.deliver(resource, seen, accepted=accepted)
+
+    def deliver(self, resource: core.ResourceId, seen: core.Observation, *, accepted: bool) -> None:
+        self.last[resource] = (seen, accepted)
+        self.state = committed(self.state, seen)
+        if accepted and resource not in self.submitted:
+            self.submitted.add(resource)
+            self._step(core.MeasurementSubmissionObserved(observation=seen))
+        self._step(core.JobObserved(resource_id=resource, observation=seen))
+
+    def replay(self, index: int) -> None:
+        """The last observation again: a poll answered twice, or replayed after a restart."""
+        resource = self.resources[index % len(self.resources)]
+        if resource in self.last:
+            seen, accepted = self.last[resource]
+            self.deliver(resource, seen, accepted=accepted)
+
+    def stop(self, mode: core.StopMode) -> None:
+        if self.mode is None:
+            self.mode = mode
+            self._step(_stop(mode, self.now))
+
+    def apply(self, op: tuple[object, ...]) -> None:
+        match op:
+            case ("tick", float(seconds)):
+                self.tick(seconds)
+            case ("observe", int(index), (_, core.ObservationStatus() as status, bool(accepted))):
+                self.observe(index, status, accepted=accepted)
+            case ("stop", core.StopMode() as mode):
+                self.stop(mode)
+            case ("replay", int(index)):
+                self.replay(index)
+            case ("restart",):
+                self.state = _reload(self.state)
+
+    def settle_out(self) -> None:
+        """Answer whatever core asked. The executor confirms every job at last, or, when it
+        holds no record, never does and cancellation is all that can end a job.
+        """
+        if not self.no_record:
+            for index in range(len(self.resources)):
+                self.observe(index, core.ObservationStatus.PENDING, accepted=True)
+        asked: list[core.Request] = []
+        self.state = _settle(self.state, self._unanswered(), self.now, asked, self.executor)
+        self.sent.extend(asked)
+        self.settle_over((1.0,) * 6 if self.no_record else (5.0, 10.0, 70.0))
+
+    def end_jobs(self) -> None:
+        """Every job finishes by itself."""
+        for resource, job in self.jobs.items():
+            self.sequences[resource] = max(self.sequences[resource], 2000) + 1
+            ended = observation(
+                job,
+                sequence=self.sequences[resource],
+                resource_id=resource,
+                status=core.ObservationStatus.SUCCEEDED,
+                terminal=True,
+                released=True,
+                children_complete=True,
+                observed_at=self.now,
+            )
+            self._step(core.RequestObserved(observation=ended))
+            self._step(core.JobObserved(resource_id=resource, observation=ended))
+        self.state = _settle(self.state, self._unanswered(), self.now, [], _Executor(self.jobs))
+        self.settle_over((5.0, 10.0))
+
+    def settle_over(self, laters: tuple[float, ...]) -> None:
+        """Let the clock run on, answering what core asks at each tick."""
+        for later in laters:
+            self.now += later
+            result = core.step(self.state, core.ClockAdvanced(now_at=self.now))
+            self.state = _settle(
+                result.state,
+                result.requests,
+                self.now,
+                self.sent,
+                self.executor,
+            )
+
+    def _unanswered(self) -> list[core.Request]:
+        """Each request core sent so far, once: the ones the shell has yet to answer."""
+        once = {r.request_id: r for r in self.sent if r.request_id is not None}
+        return [
+            r
+            for r in once.values()
+            if any(
+                row.request_id == r.request_id and row.phase == core.RequestPhase.PREPARED
+                for row in self.state.records.records
+            )
+        ]
+
+    def cancels(self, resource: core.ResourceId) -> int:
+        return len(
+            {
+                r.request_id
+                for r in self.sent
+                if isinstance(r, core.CancelOwnedJob) and r.resource_id == resource
+            }
+        )
+
+
+@settings(max_examples=examples(pr=3, nightly=500), deadline=None, database=None)
+@example(count=1, ops=[("stop", core.StopMode.CANCEL)], no_record=True)
+@example(
+    count=2,
+    ops=[("observe", 0, _STATUSES[0]), ("tick", 0.0), ("stop", core.StopMode.CANCEL)],
+    no_record=True,
+)
+@given(count=st.integers(1, 3), ops=st.lists(_OPS, max_size=16), no_record=st.booleans())
+def test_polls_stops_and_observations_at_shared_instants_never_conflict(
+    count: int, ops: list[tuple[object, ...]], *, no_record: bool
+) -> None:
+    """Whatever order polls, stops, observations, replays and restarts come in, at the same
+    instant or not, on one to three run-owned jobs, core never issues one request id with two
+    payloads and cancels each job at most once. A cancel stop closes the run with every job
+    ended; a drain stop cancels nothing, keeps the run CLOSING while a job lives, and closes
+    it once every job finishes.
+    """
+    run = _Run(count, no_record=no_record)
+    for op in ops:
+        if run.state.run.status == core.RunStatus.TERMINAL:
+            break
+        run.apply(op)
+    run.settle_out()
+    assert all(run.cancels(resource) <= 1 for resource in run.resources)
+    match run.mode:
+        case core.StopMode.CANCEL:
+            assert run.state.run.status == core.RunStatus.TERMINAL
+            assert all(run.cancels(resource) == 1 for resource in run.resources)
+        case core.StopMode.DRAIN:
+            assert all(run.cancels(resource) == 0 for resource in run.resources)
+            assert run.state.run.status == core.RunStatus.CLOSING
+            run.no_record = False
+            run.end_jobs()
+            assert run.state.run.status == core.RunStatus.TERMINAL

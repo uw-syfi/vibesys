@@ -10,6 +10,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import Project, ProjectStateError
+from vs_sim.api.testing import examples
 
 _NAME = st.text(alphabet="abcdefgh", min_size=1, max_size=4)
 _PARTS = st.lists(_NAME, min_size=1, max_size=3, unique=True)
@@ -20,7 +21,7 @@ def _listing(root: Path) -> list[str]:
 
 
 @given(parts=_PARTS, data=st.data(), points_outside=st.booleans())
-@settings(max_examples=60)
+@settings(max_examples=examples(pr=5, nightly=60))
 def test_a_symlink_planted_at_any_depth_is_never_followed(
     parts: list[str], data: st.DataObject, *, points_outside: bool
 ) -> None:
@@ -60,7 +61,7 @@ def test_a_symlink_planted_at_any_depth_is_never_followed(
 
 
 @given(parts=_PARTS, data=st.data())
-@settings(max_examples=40)
+@settings(max_examples=examples(pr=5, nightly=40))
 def test_parent_components_are_rejected_at_any_position(
     parts: list[str], data: st.DataObject
 ) -> None:
@@ -74,3 +75,25 @@ def test_parent_components_are_rejected_at_any_position(
             namespace.write_bytes(hostile, b"x")
         with pytest.raises(ProjectStateError):
             namespace.external_directory(hostile)
+
+
+@given(parts=_PARTS, data=st.data())
+@settings(max_examples=40)
+def test_a_dangling_symlink_at_any_depth_is_refused_and_a_missing_path_is_not(
+    parts: list[str], data: st.DataObject
+) -> None:
+    """A link to nothing is still a link; a path that simply is not there yet is a plain miss."""
+    with TemporaryDirectory() as scratch:
+        namespace = Project.open(Path(scratch)).state.state_store_namespace("run-1")
+        relative = "/".join(parts)
+        directory = namespace.external_directory()
+        depth = data.draw(st.integers(min_value=0, max_value=len(parts) - 1))
+        for part in parts[:depth]:
+            directory = directory / part
+            directory.mkdir()
+        (directory / parts[depth]).symlink_to(Path(scratch) / "nowhere")
+
+        with pytest.raises(ProjectStateError):
+            namespace.write_bytes(relative, b"planted")
+        with pytest.raises(ProjectStateError):
+            namespace.read_bytes(relative)

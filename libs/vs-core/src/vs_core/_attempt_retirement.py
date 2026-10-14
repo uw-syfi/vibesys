@@ -534,11 +534,16 @@ def _retention_request(
     if owner.closure is None:
         raise ContractValidationError("closure", "retirement authority is required")
     pending = _pending(owner, context)
-    if event is not None and pending is None and owner.closure.disposition == "settle":
+    if (
+        event is not None
+        and pending is None
+        and owner.closure.disposition == "settle"
+        and not owner.closure.retention_refused
+    ):
         raise ContractValidationError(
             "retention", "retention requires the pending accepted settlement"
         )
-    if owner.closure.disposition == "cancel":
+    if owner.closure.disposition == "cancel" or owner.closure.retention_refused:
         retention, revision = "discard", None
     elif owner.closure.disposition == "park":
         retention, revision = "wip", None
@@ -603,6 +608,8 @@ def _disposal_done(owner: AttemptView, context: AttemptsContext) -> bool:
     ):
         return False
     observation = record.observation
+    if owner.closure is not None and owner.closure.discard_refused:
+        return _refused_by_owner(owner, record)
     return (
         observation.request_id == record.request_id
         and observation.scope == expected.scope
@@ -634,6 +641,61 @@ def _request_payload_matches(expected: Request, recorded: Request) -> bool:
     return expected.model_copy(update={"decision_id": recorded.decision_id}) == recorded
 
 
+_REFUSALS = (ObservationStatus.REJECTED, ObservationStatus.FAILED)
+
+
+def _refused_by_owner(owner: AttemptView, record: RequestRecord) -> bool:
+    """Whether the workspace owner conclusively answered this closure request "no"."""
+    observation = record.observation
+    return (
+        owner.closure is not None
+        and observation is not None
+        and observation.terminal
+        and observation.status in _REFUSALS
+        and observation.scope == _scope(owner)
+        and observation.admission_id == owner.closure.admission_id
+    )
+
+
+def _refusal(
+    owner: AttemptView, context: AttemptsContext, event: ReleaseDependencyObserved
+) -> AttemptClosure | None:
+    """The closure after the owner refused the retention or discard it asked for, if it did.
+
+    A request answered "no" holds nothing, so it cannot be waited on for ever. A refused
+    retention means the candidate cannot be kept: the attempt settles failed and the workspace
+    is discarded. A refused discard leaves nothing more to ask, so the attempt ends with it.
+    """
+    closure = owner.closure
+    record = _record(context, event.observation.request_id)
+    if (
+        closure is None
+        or record is None
+        or event.dependency.identity != record.request_id
+        or record.observation != event.observation
+        or not _refused_by_owner(owner, record)
+    ):
+        return None
+    request = record.request
+    if event.dependency.kind != "workspace":
+        return None
+    if (
+        isinstance(request, RetainRevision | SnapshotAndRetain)
+        and getattr(request, "invocation", None) is None
+        and request.request_id == _identity(owner, "retention")
+        and closure.disposition == "settle"
+        and not closure.retention_refused
+    ):
+        return closure.model_copy(update={"retention_refused": True})
+    if (
+        isinstance(request, DiscardWorkspace)
+        and request.request_id == _identity(owner, "discard")
+        and not closure.discard_refused
+    ):
+        return closure.model_copy(update={"discard_refused": True})
+    return None
+
+
 def _retention_done(owner: AttemptView, context: AttemptsContext) -> bool:
     if owner.closure is None:
         return False
@@ -661,7 +723,11 @@ def _retention_observed(owner: AttemptView, record: RequestRecord) -> bool:
     ):
         return False
     if isinstance(record.request, DiscardWorkspace):
-        return observation.status == ObservationStatus.SUCCEEDED and _released(observation)
+        return (
+            _refused_by_owner(owner, record)
+            if owner.closure.discard_refused
+            else observation.status == ObservationStatus.SUCCEEDED and _released(observation)
+        )
     if (
         observation.status != ObservationStatus.SUCCEEDED
         or not observation.terminal
@@ -1789,9 +1855,19 @@ def _closure_event(
         owner = _discover(owner, context)
         if event.observation.status == ObservationStatus.UNKNOWN:
             return owner, (), _inspect_unknown(owner, context, event)
+        if (refused := _refusal(owner, context, event)) is not None:
+            owner = owner.model_copy(
+                update={
+                    "closure": refused,
+                    "release_dependencies": tuple(
+                        edge for edge in owner.release_dependencies if edge != event.dependency
+                    ),
+                }
+            )
+            owner, signals, requests = _progress(owner, context)
         # Discovery lists only unreleased edges, so a release that Sessions or Evaluation
         # already recorded is absent here; the proof, not the list, authorizes progress.
-        if _proof_matches(owner, context, event):
+        elif _proof_matches(owner, context, event):
             owner = owner.model_copy(
                 update={
                     "release_dependencies": tuple(

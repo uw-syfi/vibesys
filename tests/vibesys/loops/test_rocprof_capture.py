@@ -13,6 +13,16 @@ directly via ``$VIBESYS_ROCPROF_COMPUTE_BIN``) that mimics the real tool's
 argv contract closely enough for ``capture.py`` to drive it end to end,
 including SIGINT-based graceful stop (mirroring
 ``test_capture_runtime.py``'s own fake-profiler harness).
+
+Guarantees under test:
+
+* ``profiling_capabilities`` reports what is installed (rocprofv3 and ATT gated on the ROCm
+  version, rocprof-compute, torch) and what is missing.
+* Each ``profile_*`` tool runs the shared capture lifecycle, records its options in the
+  manifest, summarizes a successful capture, withholds analysis of a failed one yet still
+  analyzes a trace flushed before a forced kill, and returns an error string for unusable hosts.
+* ``captures``, ``summary`` and ``compare`` resolve saved captures, refuse unknown ids and
+  mismatched kinds, and compare per kernel over the load window.
 """
 
 from __future__ import annotations
@@ -25,18 +35,22 @@ import socket
 import sys
 import tempfile
 import textwrap
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.vibesys.loops.profiler_process_world import ScriptedHost, always, exits, prints, serves
 
-from vs_sim.api.testing import HANG_GUARD_S
+from vs_sim.api.testing import HANG_GUARD_S, examples
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from types import ModuleType
+
+    from tests.vibesys.loops.profiler_process_world import FakeProcess
 
 _REPO = Path(__file__).resolve().parents[3]
 _ROCPROF_DIR = _REPO / "resources" / "profilers" / "rocprof"
@@ -46,8 +60,8 @@ _ROCPROF_FIXTURES = Path(__file__).parent / "fixtures" / "rocprof"
 # Real subprocesses (some with signal round-trips): keep example counts small
 # so the property-test slice stays fast, per test_capture_runtime.py's
 # PROC_SETTINGS precedent.
-PROC_SETTINGS = settings(max_examples=10, deadline=None)
-PURE_SETTINGS = settings(max_examples=20, deadline=None)
+PROC_SETTINGS = settings(max_examples=examples(pr=4, nightly=50), deadline=None)
+PURE_SETTINGS = settings(max_examples=examples(pr=6, nightly=100), deadline=None)
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -421,9 +435,29 @@ def _free_port() -> int:
 # ---------------------------------------------------------------------------
 
 
+def _version_text(version: str, rocm_version: str | None) -> str:
+    """What ``rocprofv3 --version`` prints (multi-line on ROCm 7.x, one line before)."""
+    if rocm_version is None:
+        return f"rocprofv3 (ROCm Profiler v3) version {version}\n"
+    return (
+        f"             version: {version}\n"
+        "        git_revision: deadbeef\n"
+        f"        rocm_version: {rocm_version}\n"
+    )
+
+
+def _capabilities(*, version: str | None = None, rocm_version: str | None = None) -> str:
+    """``profiling_capabilities()`` on a scripted host where ``rocprofv3`` reports *version*."""
+    probes = {}
+    if version is not None:
+        probes["rocprofv3"] = prints(_version_text(version, rocm_version))
+    with cr.use_host(ScriptedHost(probes=probes)):
+        return capture.profiling_capabilities()
+
+
 def test_profiling_capabilities_nothing_installed(profiles_dir: Path) -> None:
     del profiles_dir
-    out = capture.profiling_capabilities()
+    out = _capabilities()
 
     assert "rocprofv3" in out
     assert "GPU agent" in out
@@ -440,7 +474,7 @@ def test_profiling_capabilities_reports_rocprofv3_and_att_when_available(
     _install_fake_rocprofv3(bin_dir, version="7.2.0")
     _install_fake_att_decoder(tmp_path, monkeypatch)
 
-    out = capture.profiling_capabilities()
+    out = _capabilities(version="7.2.0")
 
     assert "rocprofv3:" in out
     assert "version 7.2.0" in out
@@ -462,7 +496,7 @@ def test_profiling_capabilities_att_available_when_tool_version_lags_rocm_versio
     _install_fake_rocprofv3(bin_dir, version="1.3.2", rocm_version="7.2.3")
     _install_fake_att_decoder(tmp_path, monkeypatch)
 
-    out = capture.profiling_capabilities()
+    out = _capabilities(version="1.3.2", rocm_version="7.2.3")
 
     assert "ATT (instruction-level trace): available" in out
 
@@ -475,7 +509,7 @@ def test_profiling_capabilities_att_unavailable_when_rocm_version_genuinely_old(
     _install_fake_rocprofv3(bin_dir, version="1.3.2", rocm_version="6.4.1")
     _install_fake_att_decoder(tmp_path, monkeypatch)
 
-    out = capture.profiling_capabilities()
+    out = _capabilities(version="1.3.2", rocm_version="6.4.1")
 
     assert "ATT (instruction-level trace): NOT AVAILABLE" in out
     assert "rocprofv3 >= 7.1 required" in out
@@ -520,7 +554,7 @@ def test_profiling_capabilities_reports_rocprof_compute_binary_when_available(
     compute_bin = tmp_path / "fake_rocprof_compute.py"
     _install_fake_rocprof_compute(compute_bin, monkeypatch)
 
-    out = capture.profiling_capabilities()
+    out = _capabilities()
 
     assert "rocprof-compute binary: not found" not in out
 
@@ -668,113 +702,57 @@ def test_profile_timeline_setup_command_avoids_the_unsuppressible_rocprofv3_bann
     assert Path(f"{marker}.echoed").read_text() == "54321"
 
 
-def _install_fake_rocprofv3_flushes_on_sigint_then_hangs(bin_dir: Path) -> Path:
-    """A ``rocprofv3`` fake modeling real rocprofiler-sdk's in-process instrumentation.
-
-    Unlike ``_install_fake_rocprofv3`` (an external parent that waits on its
-    wrapped child before writing anything), real rocprofv3 instruments the
-    target process itself: SIGINT delivery flushes its trace synchronously,
-    independent of whether the process it's instrumenting goes on to exit
-    promptly afterward. Reproduces the real capture observed on a live
-    MI210 run: `rocprofv3 --kernel-trace ... -- vllm serve ...` under
-    VLLM_ENABLE_V1_MULTIPROCESSING=0, sent SIGINT, wrote a complete
-    non-empty kernel_trace.csv within ~3s (confirmed by mtime) while the
-    overall process group did not exit until forcibly killed ~5 minutes
-    later once capture_runtime's grace_s elapsed.
-    """
-    path = bin_dir / "rocprofv3"
-    _write_script(
-        path,
-        textwrap.dedent(
-            """
-            import signal
-            import subprocess
-            import sys
-            import time
-            from pathlib import Path
-
-            argv = sys.argv[1:]
-            out_dir = None
-            for i, tok in enumerate(argv):
-                if tok == "-d" and i + 1 < len(argv):
-                    out_dir = argv[i + 1]
-                    break
-
-            def _on_sigint(signum, frame):
-                # Stamp the flushed kernels at the time the load command
-                # recorded (CLOCK_MONOTONIC, rocprofv3's clock), i.e. inside
-                # this capture's load window, as a real trace would be. A
-                # static fixture's timestamps only look aligned on a host
-                # booted under _ALIGNMENT_SLACK_S ago, which made the default
-                # load-window slice keep zero kernels on fresh CI runners.
-                if out_dir:
-                    out_path = Path(out_dir)
-                    out_path.mkdir(parents=True, exist_ok=True)
-                    t = int(Path(__file__).with_name("load.ts").read_text())
-                    (out_path / "out_kernel_trace.csv").write_text(
-                        "Kernel_Name,Dispatch_Id,Start_Timestamp,End_Timestamp\\n"
-                        f"flash_attn_decode_kernel,1,{t},{t + 1}\\n"
-                        f"flash_attn_decode_kernel,2,{t + 2},{t + 3}\\n"
-                    )
-
-            signal.signal(signal.SIGINT, _on_sigint)
-            # Handler live and out_dir known: announce readiness so the test's
-            # ready_command gates stop_signal on this, not on a sleep.
-            Path(__file__).with_name("rocprofv3.ready").write_text("1")
-
-            wrapped = argv[argv.index("--") + 1:] if "--" in argv else []
-            if wrapped:
-                subprocess.Popen(wrapped)
-
-            # Outlives its own trace flush well past a short grace_s,
-            # mirroring the real hang: this process only ever exits via
-            # capture_runtime's escalation (SIGTERM/SIGKILL), never on its
-            # own -- the trace above is already safely on disk by then.
-            time.sleep(60)
-            """
-        ),
-    )
-    return path
-
-
 def test_profile_timeline_killed_after_grace_still_analyzes_a_real_flushed_trace(
     profiles_dir: Path, bin_dir: Path
 ) -> None:
+    """Regression: rocprofv3 instruments the target itself, so SIGINT flushes its trace
+    synchronously whether or not the process then exits. One that flushes a complete trace and
+    then hangs is killed after the grace, and the flushed trace must still be analyzed rather
+    than withheld because the capture was not ``ok``."""
     del profiles_dir
-    _install_fake_rocprofv3_flushes_on_sigint_then_hangs(bin_dir)
-    # A load_command lifecycle (mirrors a real server capture: ready, then
-    # load, then a graceful stop_signal) is what actually sends stop_signal
-    # -- the no-load path escalates straight past its hard timeout without
-    # ever trying a graceful stop first.
+    _install_fake_rocprofv3(bin_dir)
+    host = ScriptedHost()
+    load_instant: list[int] = []
+
+    def flush_kernels_inside_the_load_window(proc: FakeProcess) -> None:
+        out_dir = Path(proc.argv[proc.argv.index("-d") + 1])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        t = load_instant[0]
+        (out_dir / "out_kernel_trace.csv").write_text(
+            "Kernel_Name,Dispatch_Id,Start_Timestamp,End_Timestamp\n"
+            f"flash_attn_decode_kernel,1,{t},{t + 1}\n"
+            f"flash_attn_decode_kernel,2,{t + 2},{t + 3}\n"
+        )
+
+    def load(proc: FakeProcess) -> None:
+        # A CLOCK_MONOTONIC instant inside the load window, which the flushed kernels carry.
+        load_instant.append(time.clock_gettime_ns(time.CLOCK_MONOTONIC))
+        exits(0.1)(proc)
+
+    host.scripts["serve"] = serves(
+        on_stop=flush_kernels_inside_the_load_window, exits_on_stop=False
+    )
+    host.scripts["load"] = load
+    host.checks["ready"] = always(0)
     lifecycle = cr.Lifecycle(
-        command="sleep 60",
-        # The fake writes this once its SIGINT handler is live, so
-        # stop_signal can never race its startup.
-        ready_command=f"test -f '{bin_dir / 'rocprofv3.ready'}'",
+        command="serve",
+        ready_command="ready",
         ready_interval_s=0.05,
-        # Records a CLOCK_MONOTONIC instant inside the load window; the fake
-        # stamps its flushed kernels with it.
-        load_command=(
-            f"{sys.executable} -c \"import time; open('{bin_dir / 'load.ts'}', 'w')"
-            f'.write(str(time.clock_gettime_ns(time.CLOCK_MONOTONIC)))"'
-        ),
+        load_command="load",
         stop_signal="SIGINT",
         grace_s=0.2,
         timeout_s=10.0,
     )
 
-    out = capture.profile_timeline(lifecycle)
+    with cr.use_host(host):
+        out = capture.profile_timeline(lifecycle)
 
     assert "killed_after_grace" in out
     assert "Capture did not complete cleanly" in out
-    # The regression: rocprofv3 flushed a real, non-empty trace before the
-    # eventual forced kill, so the auto-summary must still surface it
-    # instead of unconditionally withholding analysis of a non-OK capture.
     assert "no kernel data found" not in out
     assert "Top Kernels" in out
-    # Sliced by the real load window, on any host (no uptime-dependent
-    # fallback to the whole run).
     assert "window: load phase, 2 of 2 dispatches" in out
+    assert not host.alive_pids()
 
 
 @given(status=st.sampled_from(list(cr.CaptureStatus)))
@@ -829,80 +807,44 @@ def test_profile_timeline_target_failed_has_no_kernel_data(
     assert "flash_attn_decode_kernel" not in str(failed.value)
 
 
+def _flush_kernel_trace(proc: FakeProcess) -> None:
+    """What rocprofv3 does on a graceful stop: write its kernel trace into ``-d <dir>``."""
+    out_dir = Path(proc.argv[proc.argv.index("-d") + 1])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(
+        _ROCPROF_FIXTURES / "kernel_trace" / "out_kernel_trace.csv",
+        out_dir / "out_kernel_trace.csv",
+    )
+
+
 def test_profile_timeline_with_load_command_ready_poll_and_graceful_stop(
-    profiles_dir: Path, bin_dir: Path, tmp_path: Path
+    profiles_dir: Path, bin_dir: Path
 ) -> None:
+    """A server is waited on until ready, loaded, stopped with SIGINT, and leaves nothing behind."""
     del profiles_dir
     _install_fake_rocprofv3(bin_dir)
-    port = _free_port()
-
-    server_script = tmp_path / "fake_server.py"
-    server_script.write_text(
-        textwrap.dedent(
-            f"""
-            import http.server
-
-
-            class Handler(http.server.BaseHTTPRequestHandler):
-                def do_GET(self):
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(b"ok")
-
-                def log_message(self, *args):
-                    pass
-
-
-            httpd = http.server.HTTPServer(("127.0.0.1", {port}), Handler)
-            try:
-                httpd.serve_forever(poll_interval=0.05)
-            except KeyboardInterrupt:
-                pass
-            """
-        )
-    )
-    ready_script = tmp_path / "ready_check.py"
-    ready_script.write_text(
-        textwrap.dedent(
-            f"""
-            import urllib.request
-
-            urllib.request.urlopen("http://127.0.0.1:{port}/", timeout=1)
-            """
-        )
-    )
-    load_script = tmp_path / "load_client.py"
-    load_script.write_text(
-        textwrap.dedent(
-            f"""
-            import urllib.request
-
-            for _ in range(2):
-                urllib.request.urlopen("http://127.0.0.1:{port}/", timeout=1)
-            """
-        )
-    )
-
+    host = ScriptedHost()
+    host.scripts["serve"] = serves(stop_after_s=0.1, on_stop=_flush_kernel_trace)
+    host.scripts["load"] = exits(0.2)
+    host.checks["ready"] = always(0)
     lifecycle = cr.Lifecycle(
-        command=f"{shlex.quote(sys.executable)} {shlex.quote(str(server_script))}",
-        ready_command=f"{shlex.quote(sys.executable)} {shlex.quote(str(ready_script))}",
+        command="serve",
+        ready_command="ready",
         ready_timeout_s=5.0,
         ready_interval_s=0.05,
-        load_command=f"{shlex.quote(sys.executable)} {shlex.quote(str(load_script))}",
+        load_command="load",
         stop_signal="SIGINT",
         grace_s=3.0,
         timeout_s=10.0,
     )
 
-    out = capture.profile_timeline(lifecycle)
+    with cr.use_host(host):
+        out = capture.profile_timeline(lifecycle)
 
     assert "): ok" in out
     (summary,) = cr.list_captures(limit=1)
-    manifest = cr.load_manifest(summary.dir)
-    assert manifest["ready_achieved"] is True
-
-    with pytest.raises(ConnectionRefusedError):
-        socket.create_connection(("127.0.0.1", port), timeout=1).close()
+    assert cr.load_manifest(summary.dir)["ready_achieved"] is True
+    assert not host.alive_pids()
 
 
 # ---------------------------------------------------------------------------

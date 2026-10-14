@@ -12,10 +12,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_measurements import submitted
 from .test_silent_executor_deadline import BOUND, _silent
@@ -244,6 +245,7 @@ def _settle_blocks(
     return state
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(down_for=st.floats(min_value=0.0, max_value=10_000.0))
 def test_a_job_whose_poll_blocked_while_the_host_was_down_is_polled_again(down_for: float) -> None:
     """Downtime past any reconciliation bound leaves the job a producer, never an orphan."""

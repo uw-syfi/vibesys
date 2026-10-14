@@ -1,17 +1,25 @@
-"""Tests for the shared capture-lifecycle runtime.
+"""The shared capture lifecycle (``resources/profilers/_common/capture_runtime.py``).
 
-``resources/profilers/_common/capture_runtime.py`` is a standalone script
-(stdlib only, no ``vibesys`` imports — it is staged alongside every profiler
-plugin), so it is loaded by file path here rather than imported as a package, mirroring
-``tests/vibesys/loops/test_profiler_mcp.py`` and
-``tests/vibesys/loops/test_torch_profile_analyzer.py``.
+Guarantees under test:
 
-Process-lifecycle behavior is exercised against real subprocesses (a tiny
-configurable "fake profiler" script, see ``_FAKE_PROFILER_SOURCE`` below)
-rather than mocks, since the whole point of this module is correct signal
-delivery, process-group management, and /proc descendant walking. Every
-test keeps its timeouts small (well under a second in the common case) to
-keep the whole suite fast.
+* Outcome mapping. A bounded target is ``ok`` or ``target_failed`` by its exit status and
+  ``timed_out`` (killed) when it outlives the budget. A server capture is ``not_ready`` when
+  its readiness check never passes, ``load_failed`` or ``timed_out`` by the load's fate,
+  ``ok`` when the target flushes within the stop grace and ``killed_after_grace`` (escalated)
+  when it ignores the stop signal.
+* Cleanliness. Whatever the outcome, no process of the capture is left running, descendants
+  included, and a manifest recording the status is written.
+* ``setup_command`` runs first, to completion, and never under the profiler prefix; a failed
+  or timed-out setup starts no target.
+* ``cancel_event`` interrupts a bounded target or a load and yields ``cancelled``.
+* The capture slot admits one capture at a time and always names its holder.
+* Scripts are written verbatim and executable, and recorded in the manifest; env values are
+  redacted; capture and load windows are stamped in order.
+* The capture store resolves absolute roots, unique ids, ids and paths, newest first.
+
+The lifecycle runs on a scripted ``ProcessHost`` (``tests/vibesys/loops/profiler_process_world.py``)
+and a virtual clock, so no test spawns a process, signals one or sleeps. That the real host
+behaves the same is checked once in ``tests/e2e/test_profiler_capture_processes_e2e.py``.
 """
 
 from __future__ import annotations
@@ -20,31 +28,38 @@ import importlib.util
 import json
 import os
 import shutil
-import subprocess
 import sys
-import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import HealthCheck, assume, given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.vibesys.loops.profiler_process_world import (
+    ScriptedHost,
+    always,
+    exits,
+    serves,
+)
 
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import HANG_GUARD_S, start_thread
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from types import ModuleType
+    from types import ModuleType, SimpleNamespace
+
+    from tests.vibesys.loops.profiler_process_world import FakeProcess, Script
 
 _REPO = Path(__file__).resolve().parents[3]
 _MODULE_PATH = _REPO / "resources" / "profilers" / "_common" / "capture_runtime.py"
 
-# Real subprocesses + signal round-trips: keep example counts tiny so the
-# whole property-test slice stays well under the ~20s budget.
-PROC_SETTINGS = settings(max_examples=5, deadline=None)
-# Pure in-process logic (no subprocesses): can afford more examples.
-FAST = settings(max_examples=20, deadline=None)
+FAST = settings(max_examples=examples(pr=6, nightly=100), deadline=None)
+SCENARIO = settings(
+    max_examples=examples(pr=5, nightly=60),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -60,19 +75,358 @@ def _load_module(name: str, path: Path) -> ModuleType:
     return module
 
 
-# NOT registered under the bare "capture_runtime" name: that name is
-# deliberately pre-claimed by test_rocprof_capture.py's own module-level
-# load (see its comment) so that capture.py's internal `import
-# capture_runtime` resolves to the *same* object that test file's own
-# tests use. sys.modules is process-global and collection order across
-# test files is not something either file controls; clobbering that name
-# here would silently split module identity for every test that relies on
-# it (server.py's `import capture_runtime`, lazily resolved by
-# test_profiler_mcp.py's server fixtures, ends up with whichever module
-# last won the shared slot) -- this file only needs its own private
-# capture_runtime.py instance to test in isolation, so it gets one under a
-# name nothing else claims.
+# NOT registered under the bare "capture_runtime" name: that name is claimed by
+# test_rocprof_capture.py so capture.py's own `import capture_runtime` resolves to the object
+# its tests use. This file needs only a private instance under a name nothing else claims.
 cr = _load_module("_test_capture_runtime_standalone", _MODULE_PATH)
+
+_THREADS = OsThreads()
+
+TARGET = "serve-forever"
+READY = "check-ready"
+LOAD = "drive-load"
+SETUP = "prepare"
+
+
+@pytest.fixture
+def profiles_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    directory = tmp_path / ".profiles"
+    monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(directory))
+    return directory
+
+
+@pytest.fixture
+def host() -> Iterator[ScriptedHost]:
+    """A scripted host installed for the test; leaves nothing running when it ends."""
+    scripted = ScriptedHost()
+    with cr.use_host(scripted):
+        yield scripted
+
+
+def _capture(
+    tmp_path: Path,
+    lifecycle: SimpleNamespace,
+    *,
+    prefix: list[str] | None = None,
+    meta: dict[str, str] | None = None,
+    cancel_event: object | None = None,
+) -> SimpleNamespace:
+    return cr.run_capture(
+        prefix or [],
+        lifecycle,
+        kind="unit",
+        out_dir=tmp_path / "c",
+        meta=meta or {},
+        cancel_event=cancel_event,
+    )
+
+
+def _server(**overrides: object) -> SimpleNamespace:
+    """A server lifecycle: TARGET serves until stopped, READY gates LOAD."""
+    fields: dict[str, object] = {
+        "command": TARGET,
+        "ready_command": READY,
+        "ready_timeout_s": 5.0,
+        "ready_interval_s": 0.05,
+        "load_command": LOAD,
+        "grace_s": 1.0,
+        "timeout_s": 60.0,
+    }
+    fields.update(overrides)
+    return cr.Lifecycle(**fields)
+
+
+def _assert_clean(host: ScriptedHost, result: SimpleNamespace) -> None:
+    assert not host.alive_pids(), "a capture left processes running"
+    manifest = json.loads(result.manifest_path.read_text())
+    assert manifest["status"] == result.status.value
+
+
+# -- outcomes: a bounded target (no load_command) ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("script", "expected"),
+    [
+        (exits(0.1, 0), ("OK", 0, False)),
+        (exits(0.1, 7), ("TARGET_FAILED", 7, False)),
+        (serves(), ("TIMED_OUT", None, True)),
+    ],
+    ids=["ok", "target_failed", "timed_out"],
+)
+def test_a_bounded_target_is_judged_by_its_exit_and_never_outlives_its_budget(
+    host: ScriptedHost, tmp_path: Path, script: Script, expected: tuple[str, int | None, bool]
+) -> None:
+    status, returncode, escalated = expected
+    host.scripts[TARGET] = script
+    result = _capture(tmp_path, cr.Lifecycle(command=TARGET, timeout_s=5.0))
+
+    assert result.status is cr.CaptureStatus[status]
+    if returncode is not None:
+        assert result.target_returncode == returncode
+    assert result.escalated is escalated
+    _assert_clean(host, result)
+    assert result.manifest_path.is_file()
+
+
+@given(timeout_s=st.floats(min_value=0.1, max_value=50.0))
+@SCENARIO
+def test_a_target_outliving_any_budget_is_killed_when_the_budget_ends(
+    tmp_path_factory: pytest.TempPathFactory, timeout_s: float
+) -> None:
+    host = ScriptedHost()
+    host.scripts[TARGET] = serves()
+    with cr.use_host(host):
+        result = _capture(
+            tmp_path_factory.mktemp("cr"), cr.Lifecycle(command=TARGET, timeout_s=timeout_s)
+        )
+
+    assert result.status is cr.CaptureStatus.TIMED_OUT
+    assert host.clock.now == pytest.approx(timeout_s, abs=0.5)
+    _assert_clean(host, result)
+
+
+def test_a_timed_out_target_takes_its_detached_descendants_with_it(
+    host: ScriptedHost, tmp_path: Path
+) -> None:
+    """Escalation owns the whole tree, since a child may start its own session."""
+    grandchildren: list[FakeProcess] = []
+
+    def target(proc: FakeProcess) -> None:
+        grandchildren.append(proc.spawn_child(serves()))
+
+    host.scripts[TARGET] = target
+    result = _capture(tmp_path, cr.Lifecycle(command=TARGET, timeout_s=1.0))
+
+    assert result.status is cr.CaptureStatus.TIMED_OUT
+    assert grandchildren
+    _assert_clean(host, result)
+
+
+# -- outcomes: a server capture (load_command) ------------------------------------------
+
+
+def test_a_target_that_never_becomes_ready_is_not_ready_and_is_stopped(
+    host: ScriptedHost, tmp_path: Path
+) -> None:
+    host.scripts[TARGET] = serves()
+    host.checks[READY] = always(1)
+    result = _capture(tmp_path, _server(ready_timeout_s=0.5))
+
+    assert result.status is cr.CaptureStatus.NOT_READY
+    assert result.ready_achieved is False
+    assert result.load_returncode is None
+    assert LOAD not in {s.script_text for s in host.spawned}
+    _assert_clean(host, result)
+
+
+def test_a_failing_load_is_reported_with_its_status_and_the_target_is_stopped(
+    host: ScriptedHost, tmp_path: Path
+) -> None:
+    host.scripts[TARGET] = serves()
+    host.checks[READY] = always(0)
+    host.scripts[LOAD] = exits(0.1, 3)
+    result = _capture(tmp_path, _server())
+
+    assert result.status is cr.CaptureStatus.LOAD_FAILED
+    assert result.ready_achieved is True
+    assert result.load_returncode == 3
+    _assert_clean(host, result)
+
+
+def test_a_load_outliving_the_budget_times_out_the_capture(
+    host: ScriptedHost, tmp_path: Path
+) -> None:
+    host.scripts[TARGET] = serves()
+    host.checks[READY] = always(0)
+    host.scripts[LOAD] = serves()
+    result = _capture(tmp_path, _server(timeout_s=0.5))
+
+    assert result.status is cr.CaptureStatus.TIMED_OUT
+    assert result.ready_achieved is True
+    assert result.load_returncode is None
+    _assert_clean(host, result)
+
+
+def test_a_target_that_flushes_within_the_grace_is_ok_and_not_escalated(
+    host: ScriptedHost, tmp_path: Path
+) -> None:
+    flushed: list[str] = []
+    host.scripts[TARGET] = serves(
+        stop_after_s=0.3, on_stop=lambda proc: flushed.append(proc.env.get("TRACE", "trace"))
+    )
+    host.checks[READY] = always(0)
+    host.scripts[LOAD] = exits(0.1)
+    result = _capture(tmp_path, _server(grace_s=5.0))
+
+    assert result.status is cr.CaptureStatus.OK
+    assert result.escalated is False
+    assert flushed == ["trace"]
+    _assert_clean(host, result)
+
+
+def test_a_target_ignoring_the_stop_signal_is_killed_after_the_grace(
+    host: ScriptedHost, tmp_path: Path
+) -> None:
+    host.scripts[TARGET] = serves(ignores=("SIGINT",))
+    host.checks[READY] = always(0)
+    host.scripts[LOAD] = exits(0.1)
+    result = _capture(tmp_path, _server(grace_s=0.3))
+
+    assert result.status is cr.CaptureStatus.KILLED_AFTER_GRACE
+    assert result.escalated is True
+    _assert_clean(host, result)
+
+
+@given(
+    grace_s=st.floats(min_value=0.1, max_value=20.0),
+    ignore_stop=st.booleans(),
+    slack_s=st.floats(min_value=0.01, max_value=0.05),
+)
+@SCENARIO
+def test_the_grace_decides_ok_against_killed_and_is_never_overspent(
+    tmp_path_factory: pytest.TempPathFactory, grace_s: float, slack_s: float, *, ignore_stop: bool
+) -> None:
+    """A target exiting strictly inside the grace is ok; one ignoring the stop is killed.
+
+    Time is virtual, so host load cannot flip the verdict, and the time spent waiting after
+    the stop signal never exceeds the grace.
+    """
+    host = ScriptedHost()
+    load_ended: list[float] = []
+    host.scripts[TARGET] = (
+        serves(ignores=("SIGINT",)) if ignore_stop else serves(stop_after_s=grace_s - slack_s)
+    )
+    host.checks[READY] = always(0)
+
+    def load(proc: FakeProcess) -> None:
+        proc.on_exit(lambda: load_ended.append(host.clock.now))
+        exits(0.1)(proc)
+
+    host.scripts[LOAD] = load
+    with cr.use_host(host):
+        result = _capture(tmp_path_factory.mktemp("cr"), _server(grace_s=grace_s))
+
+    expected = cr.CaptureStatus.KILLED_AFTER_GRACE if ignore_stop else cr.CaptureStatus.OK
+    assert result.status is expected
+    assert result.escalated is ignore_stop
+    assert host.clock.now - load_ended[0] <= grace_s + 1e-9
+    _assert_clean(host, result)
+
+
+# -- setup_command: an unprofiled step before the target ---------------------------------
+
+
+def test_setup_runs_to_completion_before_the_target_and_outside_the_profiler(
+    host: ScriptedHost, tmp_path: Path
+) -> None:
+    order: list[str] = []
+
+    def record(name: str, script: Script) -> Script:
+        def run(proc: FakeProcess) -> None:
+            order.append(name)
+            script(proc)
+
+        return run
+
+    host.scripts[SETUP] = record("setup", exits(0.5, output="setup-output-marker\n"))
+    host.scripts[TARGET] = record("target", exits(0.1))
+    lifecycle = cr.Lifecycle(command=TARGET, setup_command=SETUP, timeout_s=5.0)
+
+    result = _capture(tmp_path, lifecycle, prefix=["profiler", "--flag"])
+
+    assert result.status is cr.CaptureStatus.OK
+    assert order == ["setup", "target"]
+    assert result.setup_returncode == 0
+    by_text = {s.script_text: s for s in host.spawned}
+    assert by_text[SETUP].profiler_prefix == []
+    assert by_text[TARGET].profiler_prefix == ["profiler", "--flag"]
+    assert "setup-output-marker" in (result.setup_log_tail or "")
+    assert "setup log tail" in cr.format_result(result)
+
+
+@given(
+    prefix=st.lists(
+        st.text(alphabet="abcdefgh-_./", min_size=1, max_size=12), min_size=1, max_size=4
+    )
+)
+@SCENARIO
+def test_setup_never_runs_inside_any_profiler_prefix(
+    tmp_path_factory: pytest.TempPathFactory, prefix: list[str]
+) -> None:
+    """A profiler injects its environment into everything it wraps; setup must stay outside it."""
+    host = ScriptedHost()
+    host.scripts[SETUP] = exits(0.1)
+    host.scripts[TARGET] = exits(0.1)
+    with cr.use_host(host):
+        result = _capture(
+            tmp_path_factory.mktemp("cr"),
+            cr.Lifecycle(command=TARGET, setup_command=SETUP, timeout_s=5.0),
+            prefix=prefix,
+        )
+
+    assert result.status is cr.CaptureStatus.OK
+    by_text = {s.script_text: s for s in host.spawned}
+    assert by_text[SETUP].argv[:-1] == ["bash"]
+    assert by_text[TARGET].argv[: len(prefix)] == prefix
+
+
+@pytest.mark.parametrize(
+    ("setup", "status", "setup_rc"),
+    [(exits(0.1, 9), "SETUP_FAILED", 9), (serves(), "TIMED_OUT", None)],
+    ids=["failed", "timed_out"],
+)
+def test_a_setup_that_fails_or_hangs_starts_no_target(
+    host: ScriptedHost, tmp_path: Path, setup: Script, status: str, setup_rc: int | None
+) -> None:
+    host.scripts[SETUP] = setup
+    host.scripts[TARGET] = exits(0.1)
+    result = _capture(tmp_path, cr.Lifecycle(command=TARGET, setup_command=SETUP, timeout_s=1.0))
+
+    assert result.status is cr.CaptureStatus[status]
+    assert result.target_returncode is None
+    assert TARGET not in {s.script_text for s in host.spawned}
+    if setup_rc is not None:
+        assert result.setup_returncode == setup_rc
+    manifest = json.loads(result.manifest_path.read_text())
+    assert manifest["status"] == result.status.value
+    assert manifest["target_returncode"] is None
+    assert not host.alive_pids()
+
+
+# -- cancellation -------------------------------------------------------------------------
+
+
+def test_cancelling_a_bounded_capture_stops_the_target_and_reports_cancelled(
+    host: ScriptedHost, tmp_path: Path
+) -> None:
+    """``cancelled``, not ``timed_out``, proves the cancel interrupted the wait before the bound."""
+    cancel = _THREADS.event()
+    host.scripts[TARGET] = serves()
+    host.clock.at(2.0, cancel.set)
+
+    result = _capture(tmp_path, cr.Lifecycle(command=TARGET, timeout_s=30.0), cancel_event=cancel)
+
+    assert result.status is cr.CaptureStatus.CANCELLED
+    assert result.escalated is True
+    assert host.clock.now < 30.0
+    _assert_clean(host, result)
+
+
+def test_cancelling_during_the_load_stops_the_load_and_the_target(
+    host: ScriptedHost, tmp_path: Path
+) -> None:
+    cancel = _THREADS.event()
+    host.scripts[TARGET] = serves()
+    host.checks[READY] = always(0)
+    host.scripts[LOAD] = serves()
+    host.clock.at(3.0, cancel.set)
+
+    result = _capture(tmp_path, _server(grace_s=5.0, timeout_s=30.0), cancel_event=cancel)
+
+    assert result.status is cr.CaptureStatus.CANCELLED
+    assert host.clock.now < 30.0
+    _assert_clean(host, result)
 
 
 @FAST
@@ -94,546 +448,163 @@ def test_invalid_load_timeout_names_the_key(load_timeout_s: float) -> None:
         cr.Lifecycle(command="server", load_timeout_s=load_timeout_s)
 
 
-def _is_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+# -- scripts, manifest, windows ---------------------------------------------------------
 
 
-_THREADS = OsThreads()
-
-
-def _wait_until(predicate, *, timeout: float = 3.0, interval: float = 0.05) -> bool:  # noqa: ANN001  # LW-910179; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    deadline = _THREADS.now() + timeout
-    while _THREADS.now() < deadline:
-        if predicate():
-            return True
-        _THREADS.sleep(interval)
-    return predicate()
-
-
-def _read_pid(path: Path) -> int:
-    assert _wait_until(path.is_file, timeout=2.0)
-    return int(path.read_text().strip())
-
-
-# -- fake profiler harness -----------------------------------------------------
-#
-# Configurable via env vars so one script covers every escalation scenario:
-#   FAKE_PROFILER_OUT_DIR       where to write profiler.pid / trace.txt / grandchild.pid
-#   FAKE_PROFILER_IGNORE_SIGINT "1" -> the wrapper process itself ignores SIGINT
-#   FAKE_PROFILER_GRANDCHILD    "1" -> also spawns a setsid'd grandchild (sleep)
-#
-# Forwards its own liveness through profiler.pid always; writes trace.txt only
-# once its (non-setsid) child has exited *and* it received SIGINT first —
-# mirroring a real profiler that flushes its trace on a clean, signaled exit.
-_FAKE_PROFILER_SOURCE = textwrap.dedent(
-    """
-    import signal
-
-    # Register the handler before anything else (importing subprocess pulls
-    # in locale and can take a nontrivial moment): otherwise a SIGINT that
-    # arrives during our own startup hits Python's default handler and
-    # raises KeyboardInterrupt instead of the intended no-op/forward below.
-    state = {"got_sigint": False, "ignore_sigint": False}
-
-    def _on_sigint(signum, frame):
-        if state["ignore_sigint"]:
-            return
-        state["got_sigint"] = True
-
-    signal.signal(signal.SIGINT, _on_sigint)
-
-    import os
-    import subprocess
-    import sys
-    import time
-
-    out_dir = os.environ.get("FAKE_PROFILER_OUT_DIR")
-    state["ignore_sigint"] = os.environ.get("FAKE_PROFILER_IGNORE_SIGINT") == "1"
-    spawn_grandchild = os.environ.get("FAKE_PROFILER_GRANDCHILD") == "1"
-
-    if spawn_grandchild:
-        grandchild = subprocess.Popen(["sleep", "60"], start_new_session=True)
-        if out_dir:
-            with open(os.path.join(out_dir, "grandchild.pid"), "w") as handle:
-                handle.write(str(grandchild.pid))
-
-    child = subprocess.Popen(sys.argv[1:])
-
-    # Written last, once the handler is armed and the child is running, so a
-    # readiness check keyed on this file only fires after both are true.
-    if out_dir:
-        with open(os.path.join(out_dir, "profiler.pid"), "w") as handle:
-            handle.write(str(os.getpid()))
-
-    rc = None
-    while rc is None:
-        rc = child.poll()
-        if rc is None:
-            time.sleep(0.02)
-
-    if state["got_sigint"] and out_dir:
-        time.sleep(0.05)
-        with open(os.path.join(out_dir, "trace.txt"), "w") as handle:
-            handle.write("trace\\n")
-
-    sys.exit(rc)
-    """
-)
-
-
-@pytest.fixture
-def fake_profiler(tmp_path: Path) -> Path:
-    path = tmp_path / "fake_profiler.py"
-    path.write_text(_FAKE_PROFILER_SOURCE)
-    return path
-
-
-@pytest.fixture
-def profiles_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    directory = tmp_path / ".profiles"
-    monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(directory))
-    return directory
-
-
-# -- explicit scenarios: no load_command ---------------------------------------
-
-
-def test_no_load_ok(tmp_path: Path) -> None:
-    lifecycle = cr.Lifecycle(command="exit 0", timeout_s=5.0)
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=tmp_path / "c", meta={})
-
-    assert result.status is cr.CaptureStatus.OK
-    assert result.target_returncode == 0
-    assert result.escalated is False
-    assert result.manifest_path.is_file()
-
-
-def test_no_load_target_failed(tmp_path: Path) -> None:
-    lifecycle = cr.Lifecycle(command="exit 7", timeout_s=5.0)
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=tmp_path / "c", meta={})
-
-    assert result.status is cr.CaptureStatus.TARGET_FAILED
-    assert result.target_returncode == 7
-    assert result.escalated is False
-
-
-def test_no_load_timed_out_kills_target(tmp_path: Path) -> None:
-    out_dir = tmp_path / "c"
-    pidfile = tmp_path / "target.pid"
-    lifecycle = cr.Lifecycle(command=f"echo $$ > {pidfile}; sleep 100", timeout_s=0.3)
-
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    assert result.status is cr.CaptureStatus.TIMED_OUT
-    assert result.escalated is True
-    pid = _read_pid(pidfile)
-    assert _wait_until(lambda: not _is_alive(pid))
-
-
-# -- explicit scenarios: with load_command -------------------------------------
-
-
-def test_load_not_ready(tmp_path: Path) -> None:
-    out_dir = tmp_path / "c"
-    pidfile = tmp_path / "target.pid"
-    lifecycle = cr.Lifecycle(
-        command=f"echo $$ > {pidfile}; sleep 100",
-        ready_command="false",
-        ready_timeout_s=0.2,
-        ready_interval_s=0.05,
-        load_command="true",
-        grace_s=1.0,
-        timeout_s=5.0,
-    )
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    assert result.status is cr.CaptureStatus.NOT_READY
-    assert result.ready_achieved is False
-    assert result.load_returncode is None
-    pid = _read_pid(pidfile)
-    assert _wait_until(lambda: not _is_alive(pid))
-
-
-def test_load_failed(tmp_path: Path) -> None:
-    out_dir = tmp_path / "c"
-    pidfile = tmp_path / "target.pid"
-    lifecycle = cr.Lifecycle(
-        command=f"echo $$ > {pidfile}; sleep 100",
-        ready_command="true",
-        load_command="exit 3",
-        grace_s=1.0,
-        timeout_s=5.0,
-    )
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    assert result.status is cr.CaptureStatus.LOAD_FAILED
-    assert result.ready_achieved is True
-    assert result.load_returncode == 3
-    pid = _read_pid(pidfile)
-    assert _wait_until(lambda: not _is_alive(pid))
-
-
-def test_load_timed_out(tmp_path: Path) -> None:
-    out_dir = tmp_path / "c"
-    pidfile = tmp_path / "target.pid"
-    lifecycle = cr.Lifecycle(
-        command=f"echo $$ > {pidfile}; sleep 100",
-        ready_command="true",
-        load_command="sleep 100",
-        grace_s=0.5,
-        timeout_s=0.3,
-    )
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    assert result.status is cr.CaptureStatus.TIMED_OUT
-    assert result.ready_achieved is True
-    assert result.load_returncode is None
-    pid = _read_pid(pidfile)
-    assert _wait_until(lambda: not _is_alive(pid))
-
-
-def test_load_ok_writes_trace_after_clean_sigint(fake_profiler: Path, tmp_path: Path) -> None:
-    out_dir = tmp_path / "c"
-    out_dir.mkdir()
-    lifecycle = cr.Lifecycle(
-        command="sleep 100",
-        env={"FAKE_PROFILER_OUT_DIR": str(out_dir)},
-        # Only "ready" once the fake profiler has armed its SIGINT handler
-        # and started its child (it writes profiler.pid last); a plain
-        # "true" would race the wrapper's own interpreter startup.
-        ready_command=f"test -f {out_dir}/profiler.pid",
-        ready_timeout_s=60.0,
-        ready_interval_s=0.02,
-        load_command="true",
-        # The wrapper exits as soon as it flushes, so a generous grace costs
-        # nothing on success and keeps host load from deciding OK vs killed.
-        grace_s=30.0,
-        timeout_s=120.0,
-    )
-    result = cr.run_capture(
-        [sys.executable, str(fake_profiler)], lifecycle, kind="unit", out_dir=out_dir, meta={}
-    )
-
-    assert result.status is cr.CaptureStatus.OK
-    assert result.escalated is False
-    assert (out_dir / "trace.txt").is_file()
-    pid = int((out_dir / "profiler.pid").read_text().strip())
-    assert _wait_until(lambda: not _is_alive(pid))
-
-
-def test_load_killed_after_grace_when_profiler_ignores_sigint(
-    fake_profiler: Path, tmp_path: Path
+def test_scripts_are_written_executable_and_recorded_in_the_manifest(
+    host: ScriptedHost, tmp_path: Path
 ) -> None:
-    out_dir = tmp_path / "c"
-    out_dir.mkdir()
-    lifecycle = cr.Lifecycle(
-        command="trap '' INT; sleep 100",
-        env={"FAKE_PROFILER_OUT_DIR": str(out_dir), "FAKE_PROFILER_IGNORE_SIGINT": "1"},
-        ready_command=f"test -f {out_dir}/profiler.pid",
-        ready_timeout_s=5.0,
-        ready_interval_s=0.02,
-        load_command="true",
-        grace_s=0.3,
-        timeout_s=5.0,
-    )
-    result = cr.run_capture(
-        [sys.executable, str(fake_profiler)], lifecycle, kind="unit", out_dir=out_dir, meta={}
-    )
+    host.scripts[TARGET] = serves()
+    host.checks[READY] = always(0)
+    host.scripts[LOAD] = exits(0.1)
+    result = _capture(tmp_path, _server())
 
-    assert result.status is cr.CaptureStatus.KILLED_AFTER_GRACE
-    assert result.escalated is True
-    assert not (out_dir / "trace.txt").exists()
-    pid = int((out_dir / "profiler.pid").read_text().strip())
-    assert _wait_until(lambda: not _is_alive(pid))
-
-
-def test_timeout_kills_setsid_grandchild_via_proc_walk(fake_profiler: Path, tmp_path: Path) -> None:
-    """Escalation must walk /proc descendants, since a child may setsid away."""
-    out_dir = tmp_path / "c"
-    out_dir.mkdir()
-    lifecycle = cr.Lifecycle(
-        command="sleep 100",
-        env={"FAKE_PROFILER_OUT_DIR": str(out_dir), "FAKE_PROFILER_GRANDCHILD": "1"},
-        timeout_s=0.3,
-    )
-    result = cr.run_capture(
-        [sys.executable, str(fake_profiler)], lifecycle, kind="unit", out_dir=out_dir, meta={}
-    )
-
-    assert result.status is cr.CaptureStatus.TIMED_OUT
-    assert result.escalated is True
-    grandchild_pid = int((out_dir / "grandchild.pid").read_text().strip())
-    assert _wait_until(lambda: not _is_alive(grandchild_pid))
-
-
-# -- setup_command: an unprofiled step that runs before the target --------------
-#
-# rocprofv3 LD_PRELOADs its SDK into the entire environment handed to the
-# profiled process tree, and nothing suppresses the resulting init/banner
-# print (confirmed on real MI210 hardware). setup_command exists so a step
-# whose own output must stay clean (e.g. picking a free port) can run
-# entirely outside that tree. _FAKE_INJECTING_PROFILER_SOURCE below models
-# the real mechanism generically: an env var standing in for LD_PRELOAD,
-# propagated to every descendant of the *wrapped* command via ordinary env
-# inheritance, with no "quiet" setting that turns it off.
-
-
-def test_setup_command_runs_before_target_and_both_succeed(tmp_path: Path) -> None:
-    out_dir = tmp_path / "c"
-    setup_marker = tmp_path / "setup.marker"
-    target_marker = tmp_path / "target.marker"
-    lifecycle = cr.Lifecycle(
-        command=f"touch {target_marker}",
-        setup_command=f"touch {setup_marker}",
-        timeout_s=5.0,
-    )
-
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    assert result.status is cr.CaptureStatus.OK
-    assert result.setup_returncode == 0
-    assert result.target_returncode == 0
-    assert setup_marker.is_file()
-    assert target_marker.is_file()
-
-
-def test_setup_command_failure_stops_capture_before_target_starts(tmp_path: Path) -> None:
-    """Regression: a nonzero setup_command must never let the target start.
-
-    Fails on code with no setup-gating at all (setup_command ignored, or the
-    target runs regardless of setup's outcome): verified by temporarily
-    making the setup-failure branch in ``run_capture`` a no-op (always fall
-    through to starting the target) and re-running this test, per the
-    repo's regression-test policy -- the target marker then exists and the
-    status reads ``ok``, not ``setup_failed``.
-    """
-    out_dir = tmp_path / "c"
-    target_marker = tmp_path / "target.marker"
-    lifecycle = cr.Lifecycle(
-        command=f"touch {target_marker}",
-        setup_command="exit 9",
-        timeout_s=5.0,
-    )
-
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    assert result.status is cr.CaptureStatus.SETUP_FAILED
-    assert result.setup_returncode == 9
-    assert result.target_returncode is None
-    assert not target_marker.exists()
     manifest = json.loads(result.manifest_path.read_text())
-    assert manifest["status"] == "setup_failed"
-    assert manifest["setup_returncode"] == 9
-    assert manifest["target_returncode"] is None
+    assert manifest["scripts"] == {"target": "target.sh", "ready": "ready.sh", "load": "load.sh"}
+    for name in ("target.sh", "ready.sh", "load.sh"):
+        script = result.out_dir / name
+        assert os.access(script, os.X_OK)
+        assert script.read_text().startswith("#!/usr/bin/env bash\n")
 
 
-def test_setup_command_timeout_stops_capture_before_target_starts(tmp_path: Path) -> None:
-    out_dir = tmp_path / "c"
-    target_marker = tmp_path / "target.marker"
-    lifecycle = cr.Lifecycle(
-        command=f"touch {target_marker}",
-        setup_command="sleep 100",
-        timeout_s=0.3,
-    )
-
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    assert result.status is cr.CaptureStatus.TIMED_OUT
-    assert result.target_returncode is None
-    assert not target_marker.exists()
-
-
-def test_setup_command_output_is_reported_in_format_result(tmp_path: Path) -> None:
-    out_dir = tmp_path / "c"
-    lifecycle = cr.Lifecycle(
-        command="true", setup_command="echo setup-output-marker", timeout_s=5.0
-    )
-
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    assert "setup-output-marker" in (result.setup_log_tail or "")
-    assert "setup log tail" in cr.format_result(result)
-
-
-_FAKE_INJECTING_PROFILER_SOURCE = textwrap.dedent(
-    """
-    import os
-    import subprocess
-    import sys
-
-    env = dict(os.environ)
-    env[os.environ["FAKE_MARKER_NAME"]] = "1"
-    rc = subprocess.Popen(sys.argv[1:], env=env).wait()
-    sys.exit(rc)
-    """
-)
-
-_FAKE_BANNERING_HELPER_SOURCE = textwrap.dedent(
-    """
-    import os
-    import sys
-
-    if os.environ.get(os.environ["FAKE_MARKER_NAME"]) == "1":
-        sys.stdout.write("UNSUPPRESSIBLE BANNER\\n")
-    sys.stdout.write("VALUE\\n")
-    """
-)
-
-
-def _write_executable(path: Path, source: str) -> Path:
-    path.write_text(f"#!{sys.executable}\n{source}")
-    path.chmod(path.stat().st_mode | 0o111)
-    return path
-
-
-def test_setup_command_output_never_leaks_the_profilers_injected_banner(tmp_path: Path) -> None:
-    """Regression, models the real mechanism directly (see the section docstring above).
-
-    ``profiler_prefix`` here stands in for rocprofv3: it injects a marker
-    env var into everything it launches, and a helper that sees that marker
-    always prints a banner ahead of the real value -- there is no quiet
-    setting to check, matching the confirmed-on-hardware finding. Reading
-    the value via ``setup_command`` (never wrapped in ``profiler_prefix``)
-    must come back clean. Fails on any change that runs ``setup_command``
-    through ``profiler_prefix`` instead of plain ``bash``: verified by
-    temporarily changing ``_run_setup``'s ``subprocess.Popen`` call to
-    prepend ``profiler_prefix`` and re-running this test -- the marker then
-    shows up in the setup output.
-    """
-    profiler = _write_executable(
-        tmp_path / "fake_injecting_profiler.py", _FAKE_INJECTING_PROFILER_SOURCE
-    )
-    helper = _write_executable(tmp_path / "helper.py", _FAKE_BANNERING_HELPER_SOURCE)
-    out_dir = tmp_path / "c"
-    marker_env = {"FAKE_MARKER_NAME": "FAKE_ROCPROFV3_INJECTED"}
-    setup_out = tmp_path / "setup_output.txt"
-    lifecycle = cr.Lifecycle(
-        command="true",
-        setup_command=f"{helper} > {setup_out}",
-        env=marker_env,
-        timeout_s=5.0,
-    )
-
-    result = cr.run_capture(
-        [sys.executable, str(profiler)], lifecycle, kind="unit", out_dir=out_dir, meta={}
-    )
-
-    assert result.status is cr.CaptureStatus.OK
-    assert setup_out.read_text() == "VALUE\n"
-    assert "UNSUPPRESSIBLE BANNER" not in setup_out.read_text()
-
-
-@given(
-    marker_name=st.text(
-        alphabet=st.characters(whitelist_categories=("Lu",)), min_size=3, max_size=16
-    ).map(lambda s: "FAKE_MARKER_" + s)
-)
-@PROC_SETTINGS
-def test_property_setup_command_never_observes_whatever_env_var_the_profiler_injects(
-    tmp_path_factory: pytest.TempPathFactory, marker_name: str
+def test_a_bounded_capture_writes_only_the_target_script(
+    host: ScriptedHost, tmp_path: Path
 ) -> None:
-    """Generalizes the fix over any injected-env-var name, not just one hardcoded name.
+    host.scripts[TARGET] = exits(0.1)
+    result = _capture(tmp_path, cr.Lifecycle(command=TARGET, timeout_s=5.0))
 
-    A real profiler's injection channel (LD_PRELOAD-set env, in rocprofv3's
-    case) is an implementation detail this module must not assume a
-    specific name for; the property that must hold is structural --
-    setup_command never runs inside profiler_prefix's process tree at all,
-    so it can never observe *any* var the profiler injects into that tree.
-    """
-    tmp_path = tmp_path_factory.mktemp("cr")
-    profiler = _write_executable(tmp_path / "profiler.py", _FAKE_INJECTING_PROFILER_SOURCE)
-    helper = _write_executable(tmp_path / "helper.py", _FAKE_BANNERING_HELPER_SOURCE)
-    out_dir = tmp_path / "c"
-    setup_out = tmp_path / "setup_output.txt"
-    lifecycle = cr.Lifecycle(
-        command="true",
-        setup_command=f"{helper} > {setup_out}",
-        env={"FAKE_MARKER_NAME": marker_name},
-        timeout_s=5.0,
-    )
-
-    result = cr.run_capture(
-        [sys.executable, str(profiler)], lifecycle, kind="unit", out_dir=out_dir, meta={}
-    )
-
-    assert result.status is cr.CaptureStatus.OK
-    assert setup_out.read_text() == "VALUE\n"
+    manifest = json.loads(result.manifest_path.read_text())
+    assert manifest["scripts"] == {"target": "target.sh"}
+    assert not (result.out_dir / "ready.sh").exists()
+    assert not (result.out_dir / "load.sh").exists()
+    assert manifest["load_window"] is None
 
 
-# -- cancellation: cancel_event stops an in-flight capture -----------------------
+_PRINTABLE_ASCII = st.text(
+    alphabet=st.characters(min_codepoint=32, max_codepoint=126), max_size=200
+)
 
 
-def test_no_load_cancel_event_stops_target_and_returns_cancelled(tmp_path: Path) -> None:
-    out_dir = tmp_path / "c"
-    pidfile = tmp_path / "target.pid"
-    lifecycle = cr.Lifecycle(command=f"echo $$ > {pidfile}; sleep 100", timeout_s=30.0)
-    cancel_event = _THREADS.event()
-
-    def _cancel_soon() -> None:
-        assert _wait_until(pidfile.is_file, timeout=3.0)
-        cancel_event.set()
-
-    canceller = start_thread(_cancel_soon)
-    result = cr.run_capture(
-        [], lifecycle, kind="unit", out_dir=out_dir, meta={}, cancel_event=cancel_event
-    )
-    canceller.result(HANG_GUARD_S)
-
-    assert result.status is cr.CaptureStatus.CANCELLED
-    assert result.escalated is True
-    # CANCELLED (not TIMED_OUT) proves the cancel interrupted the wait before the
-    # target's own (never reached) sleep or the 30 s bound ended it.
-    pid = _read_pid(pidfile)
-    assert _wait_until(lambda: not _is_alive(pid))
-
-
-def test_load_cancel_event_during_load_command_stops_both_and_returns_cancelled(
-    fake_profiler: Path, tmp_path: Path
+@given(content=_PRINTABLE_ASCII)
+@SCENARIO
+def test_command_text_reaches_the_profiler_wrapper_as_one_script_path_verbatim(
+    tmp_path_factory: pytest.TempPathFactory, content: str
 ) -> None:
-    out_dir = tmp_path / "c"
-    out_dir.mkdir()
-    load_pidfile = tmp_path / "load.pid"
-    lifecycle = cr.Lifecycle(
-        command="sleep 100",
-        env={"FAKE_PROFILER_OUT_DIR": str(out_dir)},
-        ready_command=f"test -f {out_dir}/profiler.pid",
-        ready_timeout_s=5.0,
-        ready_interval_s=0.02,
-        load_command=f"echo $$ > {load_pidfile}; sleep 100",
-        grace_s=5.0,
-        timeout_s=30.0,
+    """A wrapper that re-joins and re-splits its trailing argv cannot corrupt the command.
+
+    The command is written byte for byte after the shebang, and the wrapper is handed only
+    ``bash <script>``: nothing in the wrapped argv for it to mangle.
+    """
+    text = f"cat <<'VIBESYS_EOF'\n{content}\nVIBESYS_EOF\n"
+    host = ScriptedHost()
+    host.scripts[text] = exits(0.1)
+    with cr.use_host(host):
+        result = _capture(
+            tmp_path_factory.mktemp("cr"),
+            cr.Lifecycle(command=text, timeout_s=5.0),
+            prefix=["wrapper", "--opt"],
+        )
+
+    assert (result.out_dir / "target.sh").read_text() == "#!/usr/bin/env bash\n" + text
+    (spawn,) = host.spawned
+    assert spawn.argv == ["wrapper", "--opt", "bash", str(result.out_dir / "target.sh")]
+
+
+def test_the_manifest_records_status_identity_and_meta(host: ScriptedHost, tmp_path: Path) -> None:
+    host.scripts[TARGET] = exits(0.1, output="hello\n")
+    result = _capture(
+        tmp_path,
+        cr.Lifecycle(command=TARGET, timeout_s=5.0),
+        meta={"tool_version": "1.2.3"},
     )
-    cancel_event = _THREADS.event()
 
-    def _cancel_soon() -> None:
-        assert _wait_until(load_pidfile.is_file, timeout=5.0)
-        cancel_event.set()
+    data = json.loads(result.manifest_path.read_text())
+    assert data["status"] == "ok"
+    assert data["capture_id"] == result.capture_id
+    assert data["kind"] == "unit"
+    assert data["meta"] == {"tool_version": "1.2.3"}
+    assert "manifest.json" not in data["output_files"]
+    assert "target.log" in data["output_files"]
+    text = cr.format_result(result)
+    assert "ok" in text
+    assert result.capture_id in text
+    assert "hello" in text
 
-    canceller = start_thread(_cancel_soon)
+
+def test_the_manifest_redacts_env_values_but_not_keys(host: ScriptedHost, tmp_path: Path) -> None:
+    secret = "super-secret-token-xyz"  # noqa: S105  # LW-910180; this is a placeholder/test credential, not a real secret
+    host.scripts[TARGET] = exits(0.1)
+    result = _capture(
+        tmp_path, cr.Lifecycle(command=TARGET, env={"MY_TOKEN": secret}, timeout_s=5.0)
+    )
+
+    raw = result.manifest_path.read_text()
+    assert secret not in raw
+    data = json.loads(raw)
+    assert data["lifecycle"]["env_keys"] == ["MY_TOKEN"]
+    assert "env" not in data["lifecycle"]
+
+
+_STAMP_KEYS = ("monotonic_ns", "clock_monotonic_ns", "realtime_ns")
+
+
+@given(load_s=st.floats(min_value=0.01, max_value=5.0))
+@SCENARIO
+def test_capture_ready_load_and_end_are_stamped_in_order_for_any_load_duration(
+    tmp_path_factory: pytest.TempPathFactory, load_s: float
+) -> None:
+    """capture_start <= ready <= load start <= load end <= capture end."""
+    host = ScriptedHost()
+    host.scripts[TARGET] = serves()
+    host.checks[READY] = always(0)
+    host.scripts[LOAD] = exits(load_s)
+    with cr.use_host(host):
+        result = _capture(tmp_path_factory.mktemp("cr"), _server())
+
+    manifest = json.loads(result.manifest_path.read_text())
+    window = manifest["load_window"]
+    for stamp in (manifest["capture_start"], manifest["capture_end"], *window.values()):
+        assert all(stamp[key] > 0 for key in _STAMP_KEYS)
+    order = [
+        manifest["capture_start"]["clock_monotonic_ns"],
+        window["ready"]["clock_monotonic_ns"],
+        window["start"]["clock_monotonic_ns"],
+        window["end"]["clock_monotonic_ns"],
+        manifest["capture_end"]["clock_monotonic_ns"],
+    ]
+    assert order == sorted(order)
+
+
+def test_a_capture_runs_in_the_directory_it_was_given_whatever_the_servers_cwd(
+    host: ScriptedHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The capture directory is absolute, so a target started elsewhere writes where we read."""
+    server_cwd = tmp_path / "server_launch_dir"
+    server_cwd.mkdir()
+    target_cwd = tmp_path / "target_cwd"
+    target_cwd.mkdir()
+    monkeypatch.chdir(server_cwd)
+    monkeypatch.setenv("VIBESYS_PROFILE_DIR", "./.profiles")
+    _capture_id, out_dir = cr.new_capture("timeline")
+    host.scripts[TARGET] = exits(0.1)
+
     result = cr.run_capture(
-        [sys.executable, str(fake_profiler)],
-        lifecycle,
-        kind="unit",
+        ["profiler", "-d", str(out_dir)],
+        cr.Lifecycle(command=TARGET, cwd=str(target_cwd), timeout_s=5.0),
+        kind="timeline",
         out_dir=out_dir,
         meta={},
-        cancel_event=cancel_event,
     )
-    canceller.result(HANG_GUARD_S)
 
-    assert result.status is cr.CaptureStatus.CANCELLED
-    load_pid = _read_pid(load_pidfile)
-    assert _wait_until(lambda: not _is_alive(load_pid))
-    profiler_pid = int((out_dir / "profiler.pid").read_text().strip())
-    assert _wait_until(lambda: not _is_alive(profiler_pid))
+    assert out_dir.is_absolute()
+    assert result.out_dir == out_dir
+    (spawn,) = host.spawned
+    assert spawn.launch.cwd == str(target_cwd)
+    assert "-d" in spawn.argv
+    assert Path(spawn.argv[spawn.argv.index("-d") + 1]).is_absolute()
 
 
-# -- exclusive_capture / CaptureBusyError: one capture at a time per process -----
+# -- exclusive_capture / CaptureBusyError: one capture at a time per process ------------
 
 
 @pytest.fixture(autouse=True)
@@ -718,267 +689,6 @@ def test_property_capture_busy_error_always_names_the_holder(kind: str, capture_
         cr.release_capture_slot()
 
 
-# -- manifest / secrets ---------------------------------------------------------
-
-
-def test_manifest_written_and_parseable(tmp_path: Path) -> None:
-    out_dir = tmp_path / "c"
-    lifecycle = cr.Lifecycle(command="exit 0", timeout_s=5.0)
-    result = cr.run_capture(
-        [], lifecycle, kind="unit", out_dir=out_dir, meta={"tool_version": "1.2.3"}
-    )
-
-    data = json.loads(result.manifest_path.read_text())
-    assert data["status"] == "ok"
-    assert data["capture_id"] == result.capture_id
-    assert data["kind"] == "unit"
-    assert data["meta"] == {"tool_version": "1.2.3"}
-    assert "manifest.json" not in data["output_files"]
-    assert "target.log" in data["output_files"]
-
-
-def test_manifest_redacts_env_values_not_keys(tmp_path: Path) -> None:
-    out_dir = tmp_path / "c"
-    secret = "super-secret-token-xyz"  # noqa: S105  # LW-910180; this is a placeholder/test credential, not a real secret
-    lifecycle = cr.Lifecycle(command="exit 0", env={"MY_TOKEN": secret}, timeout_s=5.0)
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    raw = result.manifest_path.read_text()
-    assert secret not in raw
-    data = json.loads(raw)
-    assert data["lifecycle"]["env_keys"] == ["MY_TOKEN"]
-    assert "env" not in data["lifecycle"]
-
-
-def test_format_result_is_compact_and_mentions_status(tmp_path: Path) -> None:
-    lifecycle = cr.Lifecycle(command="echo hello; exit 0", timeout_s=5.0)
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=tmp_path / "c", meta={})
-
-    text = cr.format_result(result)
-    assert "ok" in text
-    assert result.capture_id in text
-    assert "hello" in text
-
-
-# -- command scripts (issue: profiler wrappers must not re-tokenize `command`) --
-
-_MANGLING_PROFILER_SOURCE = textwrap.dedent(
-    """
-    import shlex
-    import subprocess
-    import sys
-
-    # Mimics a profiler wrapper that re-joins its trailing argv with spaces
-    # and re-splits it (e.g. to log or re-parse the command about to run)
-    # instead of exec'ing the received argv list untouched.
-    joined = " ".join(sys.argv[1:])
-    mangled = shlex.split(joined)
-    sys.exit(subprocess.run(mangled).returncode)
-    """
-)
-
-
-@pytest.fixture
-def mangling_profiler(tmp_path: Path) -> Path:
-    path = tmp_path / "mangling_profiler.py"
-    path.write_text(_MANGLING_PROFILER_SOURCE)
-    return path
-
-
-def test_command_survives_a_profiler_that_rejoins_and_resplits_argv(
-    mangling_profiler: Path, tmp_path: Path
-) -> None:
-    """Regression: a profiler wrapper that re-joins/re-splits its trailing argv
-
-    must not corrupt a multi-line ``command`` with embedded quotes. Writing
-    ``command`` to a script file and handing the wrapper a single, simple
-    path argument (``run_capture``'s fix) keeps the wrapper's re-join/
-    re-split a no-op, since there is nothing left in the wrapped argv for it
-    to mangle -- unlike the old ``bash -lc "<command>"`` argv, whose own
-    quotes and newlines a naive re-join+``shlex.split`` destroys.
-    """
-    marker = tmp_path / "out.txt"
-    command = textwrap.dedent(
-        f"""\
-        python3 -c "
-        import pathlib
-        pathlib.Path({str(marker)!r}).write_text('multi\\nline \\'quoted\\' \\$HOME text\\n')
-        "
-        """
-    )
-    lifecycle = cr.Lifecycle(command=command, timeout_s=10.0)
-    result = cr.run_capture(
-        [sys.executable, str(mangling_profiler)],
-        lifecycle,
-        kind="unit",
-        out_dir=tmp_path / "c",
-        meta={},
-    )
-
-    assert result.status is cr.CaptureStatus.OK, result.target_log_tail
-    assert marker.read_text() == "multi\nline 'quoted' $HOME text\n"
-
-
-def test_run_capture_writes_executable_scripts_and_records_them_in_manifest(
-    tmp_path: Path,
-) -> None:
-    lifecycle = cr.Lifecycle(
-        command="true", ready_command="true", load_command="true", grace_s=1.0, timeout_s=5.0
-    )
-    out_dir = tmp_path / "c"
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    manifest = json.loads(result.manifest_path.read_text())
-    assert manifest["scripts"] == {"target": "target.sh", "ready": "ready.sh", "load": "load.sh"}
-    for name in ("target.sh", "ready.sh", "load.sh"):
-        script = out_dir / name
-        assert script.is_file()
-        assert os.access(script, os.X_OK)
-        assert script.read_text().startswith("#!/usr/bin/env bash\n")
-
-
-def test_run_capture_no_load_command_writes_only_target_script(tmp_path: Path) -> None:
-    lifecycle = cr.Lifecycle(command="true", timeout_s=5.0)
-    out_dir = tmp_path / "c"
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    manifest = json.loads(result.manifest_path.read_text())
-    assert manifest["scripts"] == {"target": "target.sh"}
-    assert not (out_dir / "ready.sh").exists()
-    assert not (out_dir / "load.sh").exists()
-
-
-_PRINTABLE_ASCII = st.text(
-    alphabet=st.characters(min_codepoint=32, max_codepoint=126), max_size=200
-)
-
-
-@given(content=_PRINTABLE_ASCII)
-@PROC_SETTINGS
-def test_property_script_text_is_byte_for_byte_and_matches_bash_c(
-    tmp_path_factory: pytest.TempPathFactory, content: str
-) -> None:
-    """For arbitrary bounded printable command text, the executed script's
-
-    text equals the input byte-for-byte (after the shebang line), and the
-    command runs with the same result as ``bash -c <text>`` directly.
-    Wrapped in a quoted heredoc so *content* (which may contain quotes,
-    ``$vars``, or heredoc-ish substrings itself) is never shell-expanded --
-    the property under test is about this module's own script-writing/exec
-    path, not about generating syntactically valid-vs-invalid shell text.
-    """
-    assume("VIBESYS_EOF" not in content)
-    tmp_path = tmp_path_factory.mktemp("cr")
-    text = f"cat <<'VIBESYS_EOF'\n{content}\nVIBESYS_EOF\n"
-
-    direct = subprocess.run(  # noqa: S603  # LW-910181; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
-        ["bash", "-c", text],  # noqa: S607  # LW-910182; the executable is resolved from the fixed rocprof/torch toolchain name, not a user-controlled path
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-
-    lifecycle = cr.Lifecycle(command=text, timeout_s=10.0)
-    out_dir = tmp_path / "c"
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    assert (out_dir / "target.sh").read_text() == "#!/usr/bin/env bash\n" + text
-    assert result.target_returncode == direct.returncode
-    assert result.target_log_tail.rstrip("\n") == direct.stdout.rstrip("\n")
-
-
-# -- load window (issue: server captures polluted by startup) -------------------
-
-
-def test_run_capture_records_load_window_bracketing_the_load_phase(tmp_path: Path) -> None:
-    lifecycle = cr.Lifecycle(
-        command="sleep 100",
-        ready_command="true",
-        load_command="sleep 0.05",
-        grace_s=2.0,
-        timeout_s=5.0,
-    )
-    out_dir = tmp_path / "c"
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-
-    manifest = json.loads(result.manifest_path.read_text())
-    window = manifest["load_window"]
-    assert window is not None
-    for phase in ("ready", "start", "end"):
-        stamp = window[phase]
-        assert stamp["monotonic_ns"] > 0
-        assert stamp["clock_monotonic_ns"] > 0
-        assert stamp["realtime_ns"] > 0
-    assert window["ready"]["clock_monotonic_ns"] <= window["start"]["clock_monotonic_ns"]
-    assert window["start"]["clock_monotonic_ns"] <= window["end"]["clock_monotonic_ns"]
-
-
-def test_run_capture_load_window_is_none_without_load_command(tmp_path: Path) -> None:
-    lifecycle = cr.Lifecycle(command="true", timeout_s=5.0)
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=tmp_path / "c", meta={})
-
-    manifest = json.loads(result.manifest_path.read_text())
-    assert manifest["load_window"] is None
-
-
-def test_run_capture_records_capture_start_and_end_regardless_of_load_command(
-    tmp_path: Path,
-) -> None:
-    """``capture_start``/``capture_end`` bracket the *whole* capture, not just the load phase.
-
-    A downstream analyzer (``analyze_rocprof.py``'s window resolution) needs
-    these two anchors for two things a load-phase-only window can't give it:
-    the 'startup' window (``capture_start`` .. the load phase's own start)
-    and a clock-alignment sanity check (do a trace's own timestamps
-    plausibly fall inside this capture's real span at all, before trusting
-    any window slice of it). Recorded even for a bounded no-load-command
-    capture, which still has a real start/end even though it has no
-    separate "startup" vs. "load" phase to distinguish.
-    """
-    lifecycle = cr.Lifecycle(command="true", timeout_s=5.0)
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=tmp_path / "c", meta={})
-
-    manifest = json.loads(result.manifest_path.read_text())
-    for key in ("capture_start", "capture_end"):
-        stamp = manifest[key]
-        assert stamp["monotonic_ns"] > 0
-        assert stamp["clock_monotonic_ns"] > 0
-        assert stamp["realtime_ns"] > 0
-    assert (
-        manifest["capture_start"]["clock_monotonic_ns"]
-        <= manifest["capture_end"]["clock_monotonic_ns"]
-    )
-
-
-@given(load_sleep_s=st.floats(min_value=0.01, max_value=0.15))
-@PROC_SETTINGS
-def test_property_capture_start_ready_load_end_are_monotonically_ordered(
-    tmp_path_factory: pytest.TempPathFactory, load_sleep_s: float
-) -> None:
-    """capture_start <= ready <= load-start <= load-end <= capture_end, for any load duration."""
-    tmp_path = tmp_path_factory.mktemp("cr")
-    lifecycle = cr.Lifecycle(
-        command="sleep 100",
-        ready_command="true",
-        load_command=f"sleep {load_sleep_s:.3f}",
-        grace_s=2.0,
-        timeout_s=5.0,
-    )
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=tmp_path / "c", meta={})
-
-    manifest = json.loads(result.manifest_path.read_text())
-    window = manifest["load_window"]
-    order = [
-        manifest["capture_start"]["clock_monotonic_ns"],
-        window["ready"]["clock_monotonic_ns"],
-        window["start"]["clock_monotonic_ns"],
-        window["end"]["clock_monotonic_ns"],
-        manifest["capture_end"]["clock_monotonic_ns"],
-    ]
-    assert order == sorted(order)
-
-
 # -- capture store ---------------------------------------------------------------
 
 
@@ -1012,7 +722,9 @@ def test_profiles_root_absolute_with_relative_env_default(
     relative_env=st.sampled_from(["./.profiles", ".profiles", "out/profiles", "./a/b/.profiles"])
 )
 @settings(
-    max_examples=5, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=4, nightly=50),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 def test_profiles_root_absolute_for_any_relative_env_value(
     relative_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1031,57 +743,6 @@ def test_profiles_root_absolute_for_any_relative_env_value(
 
     assert root.is_absolute()
     assert root == (tmp_path / relative_env).resolve()
-
-
-def test_new_capture_out_dir_matches_what_a_subprocess_with_different_cwd_writes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """End-to-end regression: a profiler subprocess launched with a *different*
-
-    ``lifecycle.cwd`` than this process's own cwd, given ``new_capture``'s
-    directory as its output argument (exactly how every ``profile_*`` tool
-    in ``capture.py`` calls it), must write into the same directory this
-    process reads back from -- not a directory relative to its own cwd
-    instead. Mirrors the real symptom: a real ``profile_timeline`` capture
-    with a different ``cwd`` completed with ``target_rc=0`` and rocprofv3's
-    own log confirming files were written, but the analyzer discovered zero
-    CSVs because it looked in a different (wrongly relative) directory.
-    """
-    server_cwd = tmp_path / "server_launch_dir"
-    server_cwd.mkdir()
-    target_cwd = tmp_path / "target_cwd"
-    target_cwd.mkdir()
-    monkeypatch.chdir(server_cwd)
-    monkeypatch.setenv("VIBESYS_PROFILE_DIR", "./.profiles")
-
-    _capture_id, out_dir = cr.new_capture("timeline")
-
-    # A profiler that receives out_dir as a *relative* argument the way a
-    # real rocprofv3 invocation's "-d <out_dir>" would if the bug were
-    # still present would resolve it against its own cwd (lifecycle.cwd).
-    # out_dir is passed here exactly as capture.py's profile_* tools pass
-    # it to their profiler_prefix, i.e. an absolute Path once resolved.
-    fake_profiler = tmp_path / "fake_profiler.py"
-    fake_profiler.write_text(
-        "import sys\n"
-        "from pathlib import Path\n"
-        "d = Path(sys.argv[sys.argv.index('-d') + 1])\n"
-        "d.mkdir(parents=True, exist_ok=True)\n"
-        "(d / 'marker.csv').write_text('ok\\n')\n"
-    )
-    lifecycle = cr.Lifecycle(command="true", cwd=str(target_cwd), timeout_s=10.0)
-
-    result = cr.run_capture(
-        [sys.executable, str(fake_profiler), "-d", str(out_dir)],
-        lifecycle,
-        kind="timeline",
-        out_dir=out_dir,
-        meta={},
-    )
-
-    assert result.status is cr.CaptureStatus.OK
-    assert (result.out_dir / "marker.csv").is_file()
-    assert out_dir.is_absolute()
 
 
 def test_new_capture_id_format_and_directory(profiles_dir: Path) -> None:
@@ -1169,155 +830,3 @@ def test_capture_runtime_importable_via_documented_shim(
     module = _load_module(f"capture_runtime_{common_name}", found / "capture_runtime.py")
     assert module.CaptureStatus.OK.value == "ok"
     assert module.Lifecycle(command="true").timeout_s == 300.0
-
-
-# -- hypothesis: lifecycle invariants --------------------------------------------
-
-
-@given(timeout_s=st.floats(min_value=0.1, max_value=0.5))
-@PROC_SETTINGS
-def test_property_no_load_timeout_bound_and_no_leaks(
-    tmp_path_factory: pytest.TempPathFactory, timeout_s: float
-) -> None:
-    tmp_path = tmp_path_factory.mktemp("cr")
-    pidfile = tmp_path / "target.pid"
-    lifecycle = cr.Lifecycle(command=f"echo $$ > {pidfile}; sleep 100", timeout_s=timeout_s)
-
-    result = cr.run_capture([], lifecycle, kind="unit", out_dir=tmp_path / "c", meta={})
-
-    # Consistency: the runtime only reports TIMED_OUT here (the target never
-    # exits on its own within any of the fuzzed timeouts).
-    assert result.status is cr.CaptureStatus.TIMED_OUT
-    assert result.escalated is True
-    assert result.manifest_path.is_file()
-    manifest = json.loads(result.manifest_path.read_text())
-    assert manifest["status"] == result.status.value
-
-    pid = _read_pid(pidfile)
-    assert _wait_until(lambda: not _is_alive(pid))
-
-
-class _GraceClock:
-    """Virtual monotonic clock: only the scripted group's waits advance it."""
-
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def monotonic(self) -> float:
-        return self.now
-
-
-class _ScriptedGraceGroup:
-    """Owned group whose stop outcome is scripted on a virtual clock.
-
-    The real target runs (so cleanup has a real process to reap), but whether
-    it "exits within grace" is decided by the virtual clock alone: after
-    ``stop`` it exits once ``exit_after_s`` of virtual time has been waited.
-    ``exit_after_s=None`` models a target that ignores the stop signal.
-    """
-
-    def __init__(
-        self,
-        proc: subprocess.Popen[bytes],
-        clock: _GraceClock,
-        exit_after_s: float | None,
-    ) -> None:
-        self.proc = proc
-        self.clock = clock
-        self.exit_after_s = exit_after_s
-        self.stopped_at: float | None = None
-        self.cleaned = False
-        self._real = cr.SubprocessCaptureProcessGroup(proc)
-
-    def members(self) -> set[int]:
-        return set()
-
-    def poll(self) -> int | None:
-        return 0 if self.cleaned else None
-
-    def wait(self, timeout_s: float) -> int | None:
-        assert self.stopped_at is not None
-        self.clock.now += timeout_s
-        if self.exit_after_s is not None and self.clock.now - self.stopped_at >= self.exit_after_s:
-            self.cleaned = True
-            self._real.cleanup()
-            return 0
-        return None
-
-    def stop(self, signal_name: str) -> None:
-        assert signal_name
-        self.stopped_at = self.clock.now
-
-    def history_complete(self) -> bool:
-        return False
-
-    def quiesce(self) -> set[int] | None:
-        return None
-
-    def resume(self) -> None:
-        return None
-
-    def cleanup(self) -> None:
-        self.cleaned = True
-        self._real.cleanup()
-
-
-@given(
-    grace_s=st.floats(min_value=0.1, max_value=0.4),
-    ignore_stop=st.booleans(),
-    slack_s=st.floats(min_value=0.0, max_value=0.05),
-)
-@PROC_SETTINGS
-def test_property_load_grace_bound_status_consistent_no_leaks(
-    tmp_path_factory: pytest.TempPathFactory,
-    grace_s: float,
-    slack_s: float,
-    *,
-    ignore_stop: bool,
-) -> None:
-    # A target that exits strictly inside the grace is OK; one that ignores
-    # the stop signal is KILLED_AFTER_GRACE, and the virtual time spent
-    # waiting never exceeds the grace. Time is
-    # virtual, so host load cannot flip the verdict.
-    tmp_path = tmp_path_factory.mktemp("cr")
-    out_dir = tmp_path / "c"
-    clock = _GraceClock()
-    groups: list[_ScriptedGraceGroup] = []
-
-    def make_group(proc: subprocess.Popen[bytes]) -> _ScriptedGraceGroup:
-        group = _ScriptedGraceGroup(proc, clock, None if ignore_stop else grace_s - slack_s * 0.5)
-        groups.append(group)
-        return group
-
-    lifecycle = cr.Lifecycle(
-        command="sleep 100",
-        ready_command="true",
-        ready_timeout_s=60.0,
-        ready_interval_s=0.02,
-        load_command="true",
-        grace_s=grace_s,
-        timeout_s=120.0,
-    )
-
-    result = cr.run_capture(
-        [],
-        lifecycle,
-        kind="unit",
-        out_dir=out_dir,
-        meta={},
-        group_factory=make_group,
-        monotonic=clock.monotonic,
-    )
-
-    expected_status = cr.CaptureStatus.KILLED_AFTER_GRACE if ignore_stop else cr.CaptureStatus.OK
-    assert result.status is expected_status
-    assert result.escalated is ignore_stop
-    (group,) = groups
-    assert group.stopped_at == 0.0
-    # Waits are clipped to the remaining grace, so there is no overshoot.
-    assert clock.now <= grace_s + 1e-9
-    assert result.manifest_path.is_file()
-    manifest = json.loads(result.manifest_path.read_text())
-    assert manifest["status"] == result.status.value
-    assert group.cleaned
-    assert group.proc.poll() is not None

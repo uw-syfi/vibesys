@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.metrics import AcceptedReading, EvidenceReading, accept_readings
@@ -25,6 +25,7 @@ from vs_core.api import (
     RunId,
     Scope,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from random import Random
@@ -53,6 +54,7 @@ def _reading(ref: EvidenceRef) -> EvidenceReading:
     return EvidenceReading(evidence_id=ref.evidence_id, kind=ref.kind, passed=True, stage="s")
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(sources=st.lists(st.sampled_from("abcdef"), unique=True, min_size=2, max_size=4))
 def test_a_reading_that_two_requested_records_share_is_ambiguous_and_refused(
     sources: list[str],
@@ -62,6 +64,7 @@ def test_a_reading_that_two_requested_records_share_is_ambiguous_and_refused(
     assert isinstance(accept_readings((_reading(refs[0]),), refs), str)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(names=st.lists(st.sampled_from("abcdef"), unique=True, min_size=1), random=st.randoms())
 def test_readings_in_any_order_bind_each_to_its_own_requested_record(
     names: list[str], random: Random

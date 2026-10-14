@@ -234,6 +234,11 @@ def _eligible(settlement: Settlement, owner: AttemptView, context: SettlementCon
 
 def _normalize_choice(settlement: Settlement, owner: AttemptView | None) -> Settlement:
     """Preserve requested eligibility until finalization, except cancellation."""
+    if owner is not None and owner.closure is not None and owner.closure.retention_refused:
+        # The owner refused to keep the candidate: nothing was retained, so nothing can win.
+        return settlement.model_copy(
+            update={"outcome": "failed", "eligible": False, "retention": "discard"}
+        )
     if settlement.outcome == "cancelled" or (
         owner is not None and owner.closure is not None and owner.closure.disposition == "cancel"
     ):

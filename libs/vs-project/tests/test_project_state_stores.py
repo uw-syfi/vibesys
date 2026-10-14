@@ -16,6 +16,7 @@ from vs_project.api import (
     StateStoreFactory,
     StoredEnvelope,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,7 +62,7 @@ def test_a_committed_record_is_read_back_by_a_project_opened_again(
     assert Project.open(tmp_path, state_stores=stores).stored_record("run-1") == _ENVELOPE
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=25), deadline=None)
 @given(first=_RUN_IDS, second=_RUN_IDS)
 def test_runs_of_one_project_never_share_a_store(first: str, second: str) -> None:
     stores = FakeStateStores()

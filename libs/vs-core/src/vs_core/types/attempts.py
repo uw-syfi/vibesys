@@ -85,6 +85,11 @@ class AttemptClosure(Value):
     requested_at: Seconds
     authority: RequestId
     admission_id: DecisionId
+    retention_refused: bool = False
+    """The owner conclusively refused the closure's retention: the attempt settles failed and
+    the workspace is discarded instead."""
+    discard_refused: bool = False
+    """The owner conclusively refused the closure's discard: there is nothing left to ask."""
 
 
 class AttemptCheckpoint(Value):

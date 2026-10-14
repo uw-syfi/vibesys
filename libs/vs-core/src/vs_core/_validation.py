@@ -32,6 +32,7 @@ from .types.strategy import (
     ProposeWinner,
     Rejected,
     RequestTurn,
+    Settle,
     StartAttempt,
     Submission,
     Wait,
@@ -40,6 +41,7 @@ from .types.strategy import (
 from .types.until import WhileAlive, WhileOpen, Within
 
 if TYPE_CHECKING:
+    from .types.attempts import AttemptView
     from .types.kernel import CoreState, DecisionSubmitted
 
 
@@ -132,6 +134,58 @@ def _validate_stop_result(state: CoreState, decision: Finish) -> Rejected | None
     return None
 
 
+def _validate_withdraw(state: CoreState, decision: Withdraw) -> Rejected | None:
+    """The target a disposition acts on, and the revision a settlement keeps."""
+    target_valid = (
+        isinstance(decision.target, InvocationRef)
+        if isinstance(decision.disposition, Interrupt)
+        else isinstance(decision.target, AttemptRef | OperationRef)
+        if isinstance(decision.disposition, Cancel)
+        else isinstance(decision.target, AttemptRef)
+    )
+    if not target_valid:
+        return _reject(
+            decision, RejectionCode.OWNERSHIP, ("target",), "target/disposition mismatch"
+        )
+    return _unheld_candidate(state, decision)
+
+
+def _unheld_candidate(state: CoreState, decision: Withdraw) -> Rejected | None:
+    """A settlement may keep only a revision its attempt holds: a checkpoint or its base.
+
+    The workspace owner retains a revision only if it took or was given it. A settlement
+    that named any other revision would be accepted here and rejected at closure, and a
+    rejected retention is never released, so the attempt would stay closing forever. The
+    search is told at once instead, and its workspace settles plainly.
+    """
+    proposal = decision.disposition
+    if (
+        not isinstance(proposal, Settle)
+        or proposal.retention == "discard"
+        or proposal.candidate is None
+    ):
+        return None
+    owner = next((row for row in state.attempts.attempts if _is_target(row, decision)), None)
+    if owner is None or proposal.candidate == owner.workspace.base:
+        return None
+    if any(row.revision == proposal.candidate for row in owner.checkpoints):
+        return None
+    return _reject(
+        decision,
+        RejectionCode.EVIDENCE,
+        ("disposition", "candidate"),
+        "the candidate is neither a checkpoint of the attempt nor its base revision",
+    )
+
+
+def _is_target(owner: AttemptView, decision: Withdraw) -> bool:
+    return (
+        isinstance(decision.target, AttemptRef)
+        and owner.attempt_id == decision.target.attempt_id
+        and owner.generation == decision.target.generation
+    )
+
+
 def _required_capability(decision: Command) -> LifecycleCapability | None:
     """The host capability a decision depends on, if any."""
     if isinstance(decision, Withdraw):
@@ -172,18 +226,8 @@ def validate_offer(state: CoreState, decision: Command) -> Rejected | None:
             ("turn", "charge_class"),
             "run-owned turns cannot consume attempt charges",
         )
-    if isinstance(decision, Withdraw):
-        target_valid = (
-            isinstance(decision.target, InvocationRef)
-            if isinstance(decision.disposition, Interrupt)
-            else isinstance(decision.target, AttemptRef | OperationRef)
-            if isinstance(decision.disposition, Cancel)
-            else isinstance(decision.target, AttemptRef)
-        )
-        if not target_valid:
-            return _reject(
-                decision, RejectionCode.OWNERSHIP, ("target",), "target/disposition mismatch"
-            )
+    if isinstance(decision, Withdraw) and (refused := _validate_withdraw(state, decision)):
+        return refused
     capability = _required_capability(decision)
     if capability is not None and capability not in state.run.capabilities.lifecycle:
         return _reject(

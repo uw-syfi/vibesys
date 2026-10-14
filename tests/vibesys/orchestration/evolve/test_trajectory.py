@@ -31,6 +31,7 @@ from vibesys.orchestration.evolve.search.api import ExportPatch, PatchExport
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict
 from vs_core.api import EvidenceKind, EvidenceRef, Retained, RevisionRef
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vs_core.api.testing import Asked
@@ -225,7 +226,7 @@ def test_the_serial_run_builds_the_population_the_policy_builds_by_hand(
 
 
 @settings(
-    max_examples=12,
+    max_examples=examples(pr=10, nightly=12),
     deadline=None,
     derandomize=True,
     database=None,

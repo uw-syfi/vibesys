@@ -15,6 +15,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import sample_retries
+from vs_sim.api.testing import examples
 
 from .test_agent_turn_runs import assert_ended_closed
 from .toy_agent_search import (
@@ -30,7 +31,9 @@ from .toy_agent_search import (
 if TYPE_CHECKING:
     from vs_core.api.testing import Trace
 
-_SETTINGS = settings(max_examples=12, deadline=None, derandomize=True, database=None)
+_SETTINGS = settings(
+    max_examples=examples(pr=3, nightly=12), deadline=None, derandomize=True, database=None
+)
 
 
 def implementer_turns(trace: Trace) -> list[core.DispatchTurn]:

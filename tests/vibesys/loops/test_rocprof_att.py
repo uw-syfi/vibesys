@@ -20,6 +20,13 @@ trimmed, path-sanitized copy of a **real** rocprofv3 ATT decoder output: MI210
 shape and its self-documented ``header`` field, not just the docs-derived
 hand-built fixture above. Only the `Source` column's cluster-local build path
 was rewritten to a portable `/src/...` path; every other field is verbatim.
+
+Guarantees under test:
+
+* ISA mnemonics classify into the declared stall categories; instruction rows parse by header
+  name under any column permutation and fail clearly when a required column is missing.
+* ``code.json`` is found directly or one dispatch level down, with clear errors when absent or
+  ambiguous; hotspots rank the real dominant stall; a plan prints a working rocprofv3 command.
 """
 
 from __future__ import annotations
@@ -53,7 +60,7 @@ from resources.profilers.rocprof.att import (
 from resources.profilers.rocprof.att import (
     main as att_main,
 )
-from tests.vibesys.loops.rocprof_strategies import FAST, FEWER, buffer_size_input
+from tests.vibesys.loops.profiler_strategies import FAST, FEWER, buffer_size_input
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "rocprof"
 

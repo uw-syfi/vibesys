@@ -34,6 +34,8 @@
 {"path": "libs/vs-sandbox/tests/test_project_path_policy.py", "rule": "private_import", "count": 3}
 {"path": "libs/vs-sandbox/tests/test_sandbox_conformance.py", "rule": "patch", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_sandbox_conformance.py", "rule": "private_import", "count": 4}
+{"path": "libs/vs-sandbox/tests/test_skypilot_bridge.py", "rule": "patch", "count": 1}
+{"path": "libs/vs-sandbox/tests/test_skypilot_evaluator_helper.py", "rule": "patch", "count": 1}
 {"path": "sdk/vs-bench/tests/test_runner.py", "rule": "private_import", "count": 2}
 {"path": "sdk/vs-bench/tests/test_runner.py", "rule": "sleep", "count": 4}
 {"path": "sdk/vs-bench/tests/test_schedule.py", "rule": "private_import", "count": 1}
@@ -41,6 +43,7 @@
 {"path": "sdk/vs-bench/tests/test_stats.py", "rule": "private_import", "count": 1}
 {"path": "sdk/vs-bench/tests/test_transport.py", "rule": "private_import", "count": 1}
 {"path": "tests/architecture/test_delegated_merge.py", "rule": "patch", "count": 12}
+{"path": "tests/e2e/test_torch_inject_processes_e2e.py", "rule": "timeout_verdict", "count": 2}
 {"path": "tests/entrypoints/test_headless.py", "rule": "mock", "count": 19}
 {"path": "tests/entrypoints/test_headless.py", "rule": "patch", "count": 8}
 {"path": "tests/entrypoints/test_launcher.py", "rule": "mock", "count": 4}
@@ -66,14 +69,10 @@
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "patch", "count": 5}
 {"path": "tests/vibesys/inputs/test_synthesis.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/loops/test_rocprof_compute.py", "rule": "timeout_verdict", "count": 1}
-{"path": "tests/vibesys/loops/test_torch_inject.py", "rule": "timeout_verdict", "count": 2}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "mock", "count": 55}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "patch", "count": 83}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "mock", "count": 7}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "patch", "count": 10}
-{"path": "tests/vibesys/skypilot/test_bridge.py", "rule": "patch", "count": 2}
-{"path": "tests/vibesys/skypilot/test_evaluator_helper.py", "rule": "patch", "count": 1}
-{"path": "tests/vibesys/skypilot/test_evaluator_helper_frames.py", "rule": "mock", "count": 2}
 {"path": "tests/vibesys/test_config.py", "rule": "mock", "count": 6}
 {"path": "tests/vibesys/test_context.py", "rule": "mock", "count": 5}
 {"path": "tests/vibesys/test_git_snapshot_resilience.py", "rule": "patch", "count": 2}

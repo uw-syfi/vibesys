@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_agent.api import (
@@ -26,6 +26,7 @@ from vs_agent.api.testing import (
 )
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
+from vs_sim.api.testing import examples
 
 TOKEN_FIELDS = (
     "input_tokens",
@@ -98,6 +99,7 @@ def test_resumed_unknown_increment_is_unknown_in_run_records(tmp_path: Path) -> 
     assert records[2]["output_tokens"] == 30
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(cumulative=st.integers(min_value=0, max_value=1_000_000), increment=st.integers(0, 100_000))
 def test_unknown_resume_never_contributes_a_measured_increment(
     cumulative: int, increment: int

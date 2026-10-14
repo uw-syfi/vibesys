@@ -20,7 +20,7 @@ from server.host_api import (
     StartupStage,
 )
 from server.registry import FakeInstanceMetadataStore, FakeInstanceStore, InstanceHold, LiveRegistry
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import ManualClock, SimThreads, examples
 
 INSTANCE = "0123456789ab"
 _STARTING = RunPhase(status=RunStatus.STARTING, stage=StartupStage.RESOLVING)
@@ -146,7 +146,7 @@ _FACTS = st.one_of(
 )
 
 
-@settings(max_examples=40, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=40), deadline=None)
 # A progress write that lands as the flush worker wakes restarts the interval;
 # the worker must not then write the next held phase at the same instant.
 @example(steps=[(0.0, _building(0)), (0.0, _building(1)), (1.0, _building(0)), (0.0, _building(1))])

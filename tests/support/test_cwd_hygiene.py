@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 import pytest
+from tests.support.child_pytest import BARE_PYTEST
 
 pytest_plugins = ["pytester"]
 
@@ -34,6 +35,6 @@ def test_a_directory_change_does_not_outlive_its_test(
     pytester.makepyfile(test_leak=_LEAKY_TESTS.format(directory=directory))
     args = ["-p", "tests.support.cwd_hygiene"] if hygiene == "with" else []
 
-    outcome = int(pytester.runpytest_subprocess("-p", "no:cacheprovider", *args).ret)
+    outcome = int(pytester.runpytest(*BARE_PYTEST, *args).ret)
 
     assert (outcome == 0) is (hygiene == "with")

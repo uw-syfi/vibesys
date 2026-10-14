@@ -389,7 +389,7 @@ class RuntimeWorkspaces:
                     message = f"member {member_id!r} already has a live candidate workspace"
                     raise RuntimeContractError(message)
                 task = asyncio.create_task(
-                    self._runner.run(self._resources.create_candidate, workspace_id, revision)
+                    self._runner.run(self._open_candidate, workspace_id, revision)
                 )
                 try:
                     resource = await asyncio.shield(task)
@@ -401,6 +401,16 @@ class RuntimeWorkspaces:
                         await run_sync(self._runner, task.result().close)
                     raise
                 return self._register(workspace_id, resource)
+
+    def _open_candidate(self, workspace_id: str, revision: str) -> WorkspaceResource:
+        """Open the candidate, refusing a revision the run's repository does not hold.
+
+        A revision an agent or a search named is untrusted: it fails as the contract's typed
+        error every caller handles, not as the Git failure of the worktree add.
+        """
+        if not self.resource_for(self.root).has_revision(revision):
+            raise WorkspaceRestoreError(revision)
+        return self._resources.create_candidate(workspace_id, revision)
 
     def _register(
         self, workspace_id: str, resource: WorkspaceResource

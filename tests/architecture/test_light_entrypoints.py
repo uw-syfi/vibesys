@@ -26,6 +26,9 @@ from pathlib import Path
 
 import pytest
 from tests.support.light_imports import is_heavy
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOTS = (REPO_ROOT / "src", *sorted((REPO_ROOT / "libs").glob("*/src")))
@@ -72,10 +75,10 @@ ALLOWED_FIRST_PARTY = (
 host commands are built on, and their own boundaries are tach's job."""
 
 
-def _module_file(name: str) -> Path | None:
+def _module_file(name: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> Path | None:
     """Return the first-party source file for ``name``, or None if it is not first-party."""
     parts = name.split(".")
-    for root in SOURCE_ROOTS:
+    for root in roots:
         package = root.joinpath(*parts) / "__init__.py"
         if package.is_file():
             return package
@@ -119,14 +122,14 @@ def _with_parents(name: str) -> list[str]:
 
 
 @cache
-def direct_imports(name: str) -> tuple[str, ...]:
+def direct_imports(name: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> tuple[str, ...]:
     """Modules ``name``'s module level imports, with the packages each initializes."""
-    path = _module_file(name)
+    path = _module_file(name, roots)
     if path is None:
         return ()
     package = name if path.name == "__init__.py" else name.rpartition(".")[0]
     found: list[str] = []
-    for statement in _executed_statements(ast.parse(path.read_text(encoding="utf-8")).body):
+    for statement in _executed_statements(parse_source(path.read_text(encoding="utf-8")).body):
         if isinstance(statement, ast.Import):
             for alias in statement.names:
                 found.extend(_with_parents(alias.name))
@@ -140,12 +143,12 @@ def direct_imports(name: str) -> tuple[str, ...]:
             found.extend(
                 f"{base}.{alias.name}"
                 for alias in statement.names
-                if _module_file(f"{base}.{alias.name}") is not None
+                if _module_file(f"{base}.{alias.name}", roots) is not None
             )
     return tuple(dict.fromkeys(found))
 
 
-def import_closure(root: str) -> dict[str, tuple[str, ...]]:
+def import_closure(root: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> dict[str, tuple[str, ...]]:
     """Every module ``root`` loads at import, mapped to the chain that first reached it."""
     chains: dict[str, tuple[str, ...]] = {root: (root,)}
     pending = [root, *_with_parents(root)[:-1]]
@@ -153,11 +156,11 @@ def import_closure(root: str) -> dict[str, tuple[str, ...]]:
         chains.setdefault(parent, (root, parent))
     while pending:
         current = pending.pop()
-        for imported in direct_imports(current):
+        for imported in direct_imports(current, roots):
             if imported in chains:
                 continue
             chains[imported] = (*chains[current], imported)
-            if _module_file(imported) is not None:
+            if _module_file(imported, roots) is not None:
                 pending.append(imported)
     return chains
 
@@ -166,8 +169,8 @@ def _within(name: str, prefixes: tuple[str, ...]) -> bool:
     return any(name == prefix or name.startswith(f"{prefix}.") for prefix in prefixes)
 
 
-def _allowed(name: str) -> bool:
-    if _module_file(name) is not None:
+def _allowed(name: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> bool:
+    if _module_file(name, roots) is not None:
         exact = name in ALLOWED_FIRST_PARTY
         whole_package = _within(name, ("vs_sim", "vs_project"))
         return (exact or whole_package) and not is_heavy(name)
@@ -175,12 +178,12 @@ def _allowed(name: str) -> bool:
     return (top in sys.stdlib_module_names or top in ALLOWED_THIRD_PARTY) and not is_heavy(name)
 
 
-def violations(root: str) -> list[str]:
+def violations(root: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> list[str]:
     """Each module outside the allowlist, with the import chain that loaded it."""
     return [
         f"{name}: {' -> '.join(chain)}"
-        for name, chain in sorted(import_closure(root).items())
-        if not _allowed(name)
+        for name, chain in sorted(import_closure(root, roots).items())
+        if not _allowed(name, roots)
     ]
 
 
@@ -206,11 +209,19 @@ def test_the_closure_follows_packages_and_submodules_but_not_deferred_imports() 
     )
 
 
-def test_a_heavy_module_is_reported_with_the_chain_that_loaded_it() -> None:
-    # The full run protocol builds on the control envelope and loads the engine.
-    found = violations("server.api.protocol")
+def test_a_heavy_module_is_reported_with_the_chain_that_loaded_it(tmp_path: Path) -> None:
+    # A protocol module that builds on the control envelope and loads the engine: a small
+    # tree with the same shape, so the closure walk does not cross the whole product.
+    package = tmp_path / "server"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "protocol.py").write_text("from server import api\nfrom server import envelope\n")
+    (package / "envelope.py").write_text("import json\n")
+    (package / "api.py").write_text("import vibesys.api\n")
 
-    assert any(line.startswith("server.api: server.api.protocol -> server.api") for line in found)
+    found = violations("server.protocol", (tmp_path,))
+
+    assert any(line.startswith("server.api: server.protocol -> server.api") for line in found)
     assert any(line.startswith("vibesys") for line in found)
 
 
@@ -231,7 +242,7 @@ try:
 except ImportError:
     import fallback
 """
-    executed = _executed_statements(ast.parse(source).body)
+    executed = _executed_statements(parse_source(source).body)
     names = {
         alias.name
         for statement in executed

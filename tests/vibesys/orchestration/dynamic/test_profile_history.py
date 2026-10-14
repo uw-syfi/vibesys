@@ -13,7 +13,7 @@ import string
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._values import (
     BASE,
@@ -40,6 +40,7 @@ from vibesys.orchestration.dynamic.search.api import (
     WorkPlan,
 )
 from vs_core.api import ArtifactId, ArtifactRef, EvidenceKind, ObservationStatus
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.search.api import PlannerPrompt
@@ -118,6 +119,7 @@ def finished(left: Left) -> RunRecord:
     return run
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     metrics=METRICS,
     output=st.text(OUTPUT, max_size=6000),
@@ -148,6 +150,7 @@ def test_a_passed_profile_is_observed_evidence_whatever_its_output_length(
     assert len(row.diagnosis) <= CUT_AT + len("[cut] ")
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(output=st.text(OUTPUT, min_size=1, max_size=3000), metrics=METRICS)
 def test_a_failed_profile_states_its_failure_and_offers_no_success_evidence(
     output: str, metrics: tuple[MetricRow, ...]
@@ -165,6 +168,7 @@ def test_a_failed_profile_states_its_failure_and_offers_no_success_evidence(
     assert row.failure_output.endswith(output[-CUT_AT:])
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(output=st.text(OUTPUT, max_size=200))
 def test_a_finished_profile_with_no_reading_is_a_failure_that_shows_its_own_output(
     output: str,
@@ -190,6 +194,7 @@ def test_a_running_profile_carries_neither_failure_nor_success_evidence() -> Non
     assert row.revision == BASE  # it looks at the revision it was scheduled on
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(count=st.integers(0, 30))
 def test_the_planner_is_shown_the_latest_rows_in_schedule_order_and_told_the_ids_it_is_not_shown(
     count: int,

@@ -1,4 +1,14 @@
-"""Tests for the metric space shared by the optimization loops."""
+"""Tests for the metric space shared by the optimization loops.
+
+Guarantees under test:
+
+* A metric space is frozen with unique axes and a validated relative noise.
+* Comparison is direction-aware and decided only outside the noise tolerance (exactly at the
+  tolerance is noise; a zero baseline or zero noise compares strictly); missing or mismatched
+  evidence is incomparable.
+* Dominance needs every axis and one material win; the frontier keeps every tradeoff and drops
+  dominated points; completeness needs a value on every configured axis.
+"""
 
 from __future__ import annotations
 

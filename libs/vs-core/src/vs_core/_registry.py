@@ -12,6 +12,7 @@ from ._values import (
     InstanceMemo,
     canonical_json,
     deeply_immutable,
+    encode_json,
     validate_immutable_schema,
 )
 from .types.common import (
@@ -320,6 +321,18 @@ class OperationRegistry:
         """Write the whole atomic envelope with registered operation subtypes."""
         self.validate_envelope(envelope)
         return canonical_json(envelope)
+
+    def reload_envelope[S: StrategyState](
+        self, model: type[RunEnvelope[S]], envelope: RunEnvelope[S]
+    ) -> RunEnvelope[S]:
+        """The envelope as a later process reads it: validated, written, and decoded again.
+
+        It is written the way the runtime persists it (`encode_json`, which reuses the text of
+        every unchanged part), not in the sorted canonical form of `encode_envelope`, which
+        walks and serializes the whole envelope again each time.
+        """
+        self.validate_envelope(envelope)
+        return self.decode_envelope(model, encode_json(envelope).decode())
 
     def decode_envelope[S: StrategyState](
         self, model: type[RunEnvelope[S]], source: str

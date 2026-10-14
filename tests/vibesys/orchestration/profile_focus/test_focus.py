@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.profile_focus import (
@@ -15,6 +15,7 @@ from vibesys.profile_focus import (
     ProfileFocusConfig,
     parse_attribution,
 )
+from vs_sim.api.testing import examples
 
 _NAMES = st.sampled_from(["attn", "mlp", "kv_cache", "norm"])
 _BEGIN = "__VIBESYS_ATTRIBUTION_BEGIN__"
@@ -60,6 +61,7 @@ def _sorted_round_of_attribution(draw):  # noqa: ANN001, ANN202  # LW-040085 [AN
     return _sorted_bottleneck_tuple(names)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     rounds=st.lists(_round_of_attribution(), min_size=0, max_size=6),
     plateau_min_rounds=st.integers(min_value=1, max_value=3),
@@ -137,6 +139,7 @@ _events_strategy = st.lists(
 )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     events=_events_strategy,
     plateau_min_rounds=st.integers(min_value=1, max_value=3),

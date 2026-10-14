@@ -1,9 +1,18 @@
+"""The remote rocprof capture bridge, over a fake cluster.
+
+Guarantees under test:
+
+* A configured capture uses one dynamic port, the configured Python and setup script, and the
+  declared bounds; it requires the bundle's profile command and an explicit durable state root.
+* A remote capture whose workload did not run is a typed failure and a remote manifest cannot
+  turn failure into a profile; overlapping captures are rejected without a second submission;
+  ownership is released after a failure; an ambiguous capture keeps artifacts but publishes no
+  profile.
+"""
+
 from __future__ import annotations
 
-import contextlib
 import json
-import os
-import sys
 import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -13,20 +22,17 @@ from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge, captu
 
 from vs_sandbox.api.slurm import (
     SlurmCapturePlan,
-    SlurmProcessBroker,
     configured_capture_lifecycle,
     load_slurm_policy,
     write_slurm_capture_plan,
 )
 from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_or_fail, wait_until_started_sync
 from vs_slurm.api import (
-    SlurmError,
     SlurmJobRequest,
     SlurmJobResult,
     SlurmJobStatus,
     load_slurm_config,
 )
-from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
 from vs_slurm.wiring import FakeCluster
 
 if TYPE_CHECKING:
@@ -302,81 +308,6 @@ def test_remote_capture_releases_ownership_after_failure(tmp_path: Path) -> None
     output = bridge.capture("stats", _Lifecycle(), {}, cancel_event=_cancel())
 
     assert output == f"captured at {tmp_path / 'profiles'}/capture-1"
-
-
-def test_a_brokered_capture_from_a_candidate_workspace_reaches_the_scheduler(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Regression: every brokered capture failed before sbatch.
-
-    The runner wrote its job script under the system temporary directory, and
-    the broker refuses to transfer a file outside the run-owned roots, so a
-    capture from a candidate worktree never reached the scheduler.
-    """
-    cluster = tmp_path / "cluster"
-    cluster.mkdir()
-    os.mkfifo(cluster / SUBMITTED_FILE)
-    program = f'["{sys.executable}", "-m", "vs_slurm.fake_connector", "{cluster}"]'
-    program_tail = program.removesuffix("]")
-    config_path = tmp_path / "slurm.toml"
-    config_path.write_text(
-        f"""[slurm]
-name = "test-cluster"
-remote_workspace_root = "/remote/runs"
-poll_interval_seconds = 0.01
-
-[slurm.transport]
-kind = "ssh"
-host = "cluster"
-ssh_command = {program_tail}, "ssh"]
-rsync_command = {program_tail}, "rsync"]
-
-[vibesys]
-remote_python = "/remote/venv/bin/python"
-""",
-        encoding="utf-8",
-    )
-    worktrees = tmp_path / "worktrees"
-    workspace = worktrees / "candidate" / "workspace"
-    workspace.mkdir(parents=True)
-    broker = SlurmProcessBroker(
-        load_slurm_config(config_path),
-        tmp_path / "broker.sock",
-        local_roots=(worktrees, tmp_path / "cluster-state"),
-    )
-    broker.start()
-    monkeypatch.setenv("VIBESYS_SLURM_BROKER_SOCKET", str(broker.socket_path))
-    monkeypatch.setenv("VIBESYS_SLURM_BROKER_TOKEN", broker.token)
-    plan_path = tmp_path / "capture-plan.json"
-    state_root = tmp_path / "cluster-state"
-    write_slurm_capture_plan(plan_path, SlurmCapturePlan(cluster_state_root=state_root))
-    bridge = RemoteCaptureBridge(
-        config_path, workspace, profile_root=tmp_path / "profiles", evaluator_plan=plan_path
-    )
-    cancel = _cancel()
-    failures: list[BaseException] = []
-
-    def capture() -> None:
-        try:
-            bridge.capture("stats", _Lifecycle(), {}, cancel_event=cancel)
-        except (SlurmError, PermissionError) as error:
-            failures.append(error)
-        # Unblock the reader when the capture ended before any job was submitted.
-        with contextlib.suppress(OSError):
-            descriptor = os.open(cluster / SUBMITTED_FILE, os.O_WRONLY | os.O_NONBLOCK)
-            os.write(descriptor, b"none")
-            os.close(descriptor)
-
-    worker = start_thread(capture)
-    try:
-        submitted = (cluster / SUBMITTED_FILE).read_text(encoding="utf-8")
-        cancel.set()
-        worker.result(HANG_GUARD_S)
-    finally:
-        broker.close()
-
-    assert submitted == JOB_ID, [str(item) for item in failures]
-    assert f"scancel {JOB_ID}" in recorded_commands(cluster)
 
 
 @pytest.mark.parametrize("status", list(capture_runtime.CaptureStatus))

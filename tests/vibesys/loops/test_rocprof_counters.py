@@ -11,6 +11,16 @@ Fixtures under ``fixtures/rocprof/`` are small, hand-built rocprofv3
 documented column schema (real MI210 captures were still in progress while
 this toolkit was written; see the module docstring's verified/unverified
 counter-name notes).
+
+Guarantees under test:
+
+* Architecture names normalize to catalogued families; every counter set has at most four
+  counters and each family exposes the same set names.
+* Counter CSV/JSON rows load and aggregate per kernel; occupancy is bounded by the binding
+  resource; derived metrics (L2 hit rate, bandwidth, busy, MFMA, LDS conflicts) are computed
+  only from the counters present.
+* ``plan`` prints one pass per set with its own output directory; ``report`` merges passes and
+  bounds line width.
 """
 
 from __future__ import annotations
@@ -75,7 +85,7 @@ from resources.profilers.rocprof.counters import (
     plan_passes,
     resource_occupancy,
 )
-from tests.vibesys.loops.rocprof_strategies import (
+from tests.vibesys.loops.profiler_strategies import (
     FAST,
     FEWER,
     arch_name,

@@ -153,7 +153,11 @@ class AccessSettlement:
         self._in_flight.add(key)
         if self.receipt(key) is not None:
             return  # a replay keeps the first baseline, never the tree the turn left
-        self.require_clear(workspace.path, key)
+        try:
+            self.require_clear(workspace.path, key)
+        except AccessSettlementError:
+            self._in_flight.discard(key)
+            raise
         try:
             baseline = await await_session_operation(
                 asyncio.create_task(workspace.snapshot(f"{key.text}-input"))

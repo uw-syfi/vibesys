@@ -26,6 +26,7 @@ from vs_project.api import (
     NullGitTrackerEvents,
     StagingError,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -58,7 +59,7 @@ def _selected_untracked(root: Path, pathspecs: Sequence[str]) -> list[str]:
     return result.stdout.splitlines()
 
 
-@settings(max_examples=20, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=20), deadline=None)
 @given(
     run_id=_NAMES,
     store_files=st.lists(_NAMES, min_size=1, max_size=4, unique=True),

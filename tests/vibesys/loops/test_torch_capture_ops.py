@@ -1,13 +1,24 @@
-"""Tests for ``resources/profilers/torch/capture_ops.py`` (``profile_ops``).
+"""``capture_ops`` (``resources/profilers/torch/capture_ops.py``): ``profile_ops`` and its helpers.
 
-``capture_ops.py`` is a standalone script (loaded by file path, mirroring
-``tests/vibesys/loops/test_profiler_mcp.py``/``test_capture_runtime.py``),
-not imported as a package. Trace discovery and primary-trace selection are
-exercised as pure unit/property tests against small synthetic Kineto-shaped
-trace files (fast, no subprocess). ``profile_ops`` itself is exercised end to
-end via real subprocesses using the fake ``torch`` package from
-``torch_inject_fixtures.py``, including a server+load+SIGINT lifecycle with
-a small stdlib HTTP server that imports torch per request.
+Guarantees under test:
+
+* Trace discovery finds exactly the ``*.pt.trace.json.gz`` files under a capture; the primary
+  trace is the one with the most GPU kernels, unreadable files are skipped, and none is
+  ``None``.
+* A window is unfinished exactly while its process is alive and has neither exported nor
+  failed; ``wait_for_started_windows`` returns once every window is resolved and otherwise
+  names what is missing; a zero grace is a no-op.
+* The capture environment arms the injection if and only if ``inject`` is set, always keeps
+  the caller's ``PYTHONPATH`` and lets the caller's env win on conflicts.
+* ``profile_ops`` on a bounded script or a server under load yields a certified summary and
+  a manifest naming the primary trace and the load window; with a sibling process still
+  exporting after the launched one exits it waits for the export; with ``inject=False`` it
+  arms nothing and still finds a trace the command wrote; with no GPU it fails with a typed
+  ``no_trace`` error.
+
+Processes are scripted on a virtual clock (``tests/vibesys/loops/profiler_process_world.py``); the
+real injection's behaviour in real processes is checked in
+``tests/e2e/test_torch_inject_processes_e2e.py``.
 """
 
 from __future__ import annotations
@@ -16,35 +27,38 @@ import gzip
 import importlib.util
 import json
 import os
-import socket
 import sys
 import tempfile
-import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.vibesys.loops.torch_inject_fixtures import write_fake_torch
+from tests.vibesys.loops.profiler_process_world import (
+    ScriptedHost,
+    always,
+    exits,
+    injected_process,
+)
 
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_or_fail
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from types import ModuleType
+
+    from tests.vibesys.loops.profiler_process_world import FakeProcess
 
 _REPO = Path(__file__).resolve().parents[3]
 _TORCH_DIR = _REPO / "resources" / "profilers" / "torch"
 
 FAST = settings(
-    max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=6, nightly=100),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
-# For property tests whose body sleeps real wall-clock time (bounded waits):
-# fewer examples keeps the suite fast without weakening the property itself.
-FAST_SHORT = settings(
-    max_examples=8, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
-)
+FAST_SHORT = FAST
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -67,6 +81,35 @@ def _load_module(name: str, path: Path) -> ModuleType:
 @pytest.fixture(scope="module")
 def capture_ops() -> ModuleType:
     return _load_module("_capture_ops", _TORCH_DIR / "capture_ops.py")
+
+
+WORKLOAD = "run-workload"
+SERVER = "serve-model"
+LOAD = "drive-load"
+READY = "check-ready"
+_TRACE_JSON = (
+    Path(__file__).parent / "fixtures" / "torch" / "eager_trimmed.pt.trace.json"
+).read_bytes()
+
+
+@pytest.fixture
+def world(
+    capture_ops: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[ScriptedHost]:
+    """A scripted host with an isolated capture store, installed for the test."""
+    monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / "profiles"))
+    host = ScriptedHost()
+    with capture_ops.capture_runtime.use_host(host):
+        yield host
+
+
+def _captures(world: ScriptedHost) -> list[Path]:
+    del world
+    return sorted(Path(os.environ["VIBESYS_PROFILE_DIR"]).iterdir())
+
+
+def _manifest(capture: Path) -> dict:
+    return json.loads((capture / "manifest.json").read_text())
 
 
 def _write_trace(path: Path, *, n_kernels: int, readable: bool = True) -> None:
@@ -191,36 +234,30 @@ def test_unfinished_windows_are_exactly_the_live_unresolved_ones(
 
 
 def test_wait_for_started_windows_returns_once_the_last_window_exports(
-    capture_ops: ModuleType, tmp_path: Path
+    capture_ops: ModuleType, world: ScriptedHost, tmp_path: Path
 ) -> None:
     """The wait ends on the export itself; grace_s is only a failure bound."""
     _write_window(tmp_path, 4242, 1, "pending")
-    polling = OsThreads().event()
+    world.clock.at(3.0, lambda: _write_trace(tmp_path / "4242-1.pt.trace.json.gz", n_kernels=2))
 
-    def pid_alive(_pid: int) -> bool:
-        polling.set()  # the wait has observed the window as pending
-        return True
+    pending = capture_ops.wait_for_started_windows(tmp_path, grace_s=60, pid_alive=lambda _: True)
 
-    def export_later() -> None:
-        wait_or_fail(polling, "the wait to observe the pending window")
-        _write_trace(tmp_path / "4242-1.pt.trace.json.gz", n_kernels=2)
-
-    writer = start_thread(export_later)
-    try:
-        assert capture_ops.wait_for_started_windows(tmp_path, grace_s=60, pid_alive=pid_alive) == []
-    finally:
-        writer.result(HANG_GUARD_S)
+    assert pending == []
+    assert 3.0 <= world.clock.now < 4.0
     assert capture_ops.discover_traces(tmp_path) == [tmp_path / "4242-1.pt.trace.json.gz"]
 
 
-def test_wait_for_started_windows_reports_what_is_still_missing(
-    capture_ops: ModuleType, tmp_path: Path
+def test_wait_for_started_windows_reports_what_is_still_missing_after_the_grace(
+    capture_ops: ModuleType, world: ScriptedHost, tmp_path: Path
 ) -> None:
     _write_window(tmp_path, 4242, 3, "pending")
+
     unfinished = capture_ops.wait_for_started_windows(
-        tmp_path, grace_s=0, pid_alive=lambda _pid: True
+        tmp_path, grace_s=5, pid_alive=lambda _pid: True
     )
+
     assert unfinished == ["pid 4242 window 3"]
+    assert world.clock.now >= 5
 
 
 def test_wait_for_additional_traces_zero_grace_is_a_no_op(
@@ -231,68 +268,23 @@ def test_wait_for_additional_traces_zero_grace_is_a_no_op(
 
 
 def test_profile_ops_waits_for_a_sibling_whose_export_outlasts_the_launched_process(
-    capture_ops: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    capture_ops: ModuleType, world: ScriptedHost
 ) -> None:
-    """End-to-end regression with real armed processes.
+    """The launched process (like a serving API server) exits first; its sibling (like an engine
+    core) exports only afterwards, slower than any "unchanged for one poll" heuristic tolerates.
+    The capture waits on the sibling's window marker, not on a guessed delay."""
 
-    The launched process (like the vllm-serve API server) exits first; its
-    sibling (like EngineCore) is still recording and exports only after
-    that, slowly (the fake export takes 2.5s, longer than the old
-    "unchanged for one 1s poll" heuristic tolerated). Ordering comes from
-    state, not sleeps: the parent exits only once both window markers
-    exist, and the sibling exits only once the parent is gone.
-    """
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    profiles_dir = tmp_path / "profiles"
-    monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(profiles_dir))
+    def workload(proc: FakeProcess) -> None:
+        proc.spawn_child(injected_process(_TRACE_JSON, export_delay_s=2.5, run_s=1.0))
+        injected_process(_TRACE_JSON, run_s=0.5)(proc)
 
-    sibling_script = tmp_path / "sibling.py"
-    sibling_script.write_text(
-        textwrap.dedent(
-            """
-            import os, sys, time
-            import torch  # noqa: F401  (arms this process's injection)
-
-            parent = int(sys.argv[1])
-            while True:  # exit (and so export) only after the parent is gone
-                try:
-                    os.kill(parent, 0)
-                except ProcessLookupError:
-                    break
-                time.sleep(0.01)
-            """
-        )
-    )
-    script = tmp_path / "workload.py"
-    script.write_text(
-        textwrap.dedent(
-            f"""
-            import glob, os, subprocess, sys, time
-            import torch  # noqa: F401  (arms this process's own injection too)
-
-            env = dict(os.environ, FAKE_TORCH_EXPORT_DELAY_S="2.5")
-            subprocess.Popen([sys.executable, {str(sibling_script)!r}, str(os.getpid())], env=env)
-            out_dir = os.environ["VIBESYS_TORCH_PROFILE_OUT_DIR"]
-            while len(glob.glob(os.path.join(out_dir, ".window-*.started"))) < 2:
-                time.sleep(0.01)
-            """
-        )
-    )
-
-    output = capture_ops.profile_ops(
-        command=f"{sys.executable} {script}",
-        env={"PYTHONPATH": str(fake_torch)},
-        delay_s=0.0,
-        timeout_s=60,
-        grace_s=60,
-    )
+    world.scripts[WORKLOAD] = workload
+    output = capture_ops.profile_ops(command=WORKLOAD, delay_s=0.0, timeout_s=60, grace_s=60)
 
     assert ": ok" in output, output
     assert "had not exported" not in output, output
-    captures = list(profiles_dir.iterdir())
-    assert len(captures) == 1
-    manifest = json.loads((captures[0] / "manifest.json").read_text())
-    assert len(manifest["trace_files"]) == 2, manifest
+    (capture,) = _captures(world)
+    assert len(_manifest(capture)["trace_files"]) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -440,32 +432,17 @@ def test_build_capture_env_injection_keys_gated_exactly_by_inject(  # noqa: PLR0
 
 
 # ---------------------------------------------------------------------------
-# profile_ops end to end (bounded script)
+# profile_ops end to end (scripted processes)
 # ---------------------------------------------------------------------------
 
 
 def test_profile_ops_bounded_script_produces_certified_summary(
-    capture_ops: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    capture_ops: ModuleType, world: ScriptedHost
 ) -> None:
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    profiles_dir = tmp_path / "profiles"
-    monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(profiles_dir))
-
-    script = tmp_path / "workload.py"
-    # Exits once its window is exported, not after a guessed sleep.
-    script.write_text(
-        "import torch\nfrom torch._log import wait_for_event\n"
-        "wait_for_event('profile.export_chrome_trace')\n"
-    )
+    world.scripts[WORKLOAD] = injected_process(_TRACE_JSON, run_s=0.2)
 
     output = capture_ops.profile_ops(
-        command=f"{sys.executable} {script}",
-        env={"PYTHONPATH": str(fake_torch), "FAKE_TORCH_CALL_LOG": str(tmp_path / "calls.log")},
-        delay_s=0.0,
-        duration_s=0.2,
-        record_shapes=True,
-        timeout_s=20,
-        grace_s=5,
+        command=WORKLOAD, delay_s=0.0, duration_s=0.2, record_shapes=True, timeout_s=20, grace_s=5
     )
 
     assert "capture ops-" in output
@@ -474,202 +451,83 @@ def test_profile_ops_bounded_script_produces_certified_summary(
     assert "--- certify ---" in output
     assert "--- top kernels ---" in output
     assert "--- gemm shapes ---" in output
-
-    captures = list(profiles_dir.iterdir())
-    assert len(captures) == 1
-    manifest = json.loads((captures[0] / "manifest.json").read_text())
+    (capture,) = _captures(world)
+    manifest = _manifest(capture)
     assert manifest["primary_trace"] is not None
     assert manifest["trace_files"] == [manifest["primary_trace"]]
-    assert (captures[0] / manifest["primary_trace"]).is_file()
+    assert (capture / manifest["primary_trace"]).is_file()
 
 
-def test_profile_ops_inject_false_finds_a_trace_the_command_writes_itself(
-    capture_ops: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_profile_ops_inject_false_arms_nothing_and_still_finds_a_trace_the_command_wrote(
+    capture_ops: ModuleType, world: ScriptedHost
 ) -> None:
-    """Regression test for the real MI210 SIGSEGV: with inject=False,
-    sitecustomize.py must never be armed (no VIBESYS_TORCH_PROFILE=1, no
-    PYTHONPATH prepend of the inject dir) even though profile_ops still
-    finds and certifies a trace -- one the command wrote itself, simulating
-    a serving engine's own profiler_config + start_profile()/stop_profile()
-    path (see resources/skills/serving-systems/references/engines/
-    vllm-profiling.md). Uses the fake torch package directly from within
-    the workload script (not via sitecustomize's injection) to write a
-    real, readable *.pt.trace.json.gz that this module's own discovery
-    then picks up."""
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    profiles_dir = tmp_path / "profiles"
-    monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(profiles_dir))
-    call_log = tmp_path / "calls.log"
+    """Regression for the real MI210 SIGSEGV: with ``inject=False`` the injection is never armed
+    (no ``VIBESYS_TORCH_PROFILE=1``, no inject dir on ``PYTHONPATH``), so a command with its own
+    profiler session (a serving engine's native profiler) is not given a second, competing one,
+    yet a trace it wrote itself is discovered and certified."""
 
-    script = tmp_path / "native_profile_workload.py"
-    script.write_text(
-        textwrap.dedent(
-            """
-            import gzip
-            import os
-            import shutil
+    def native_profiler(proc: FakeProcess) -> None:
+        out_dir = Path(proc.env["VIBESYS_TORCH_PROFILE_OUT_DIR"])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / f"{proc.pid}-native.pt.trace.json.gz").write_bytes(gzip.compress(_TRACE_JSON))
+        proc.after(0.1, lambda: proc.exit(0))
 
-            import torch
+    world.scripts[WORKLOAD] = native_profiler
 
-            out_dir = os.environ["VIBESYS_TORCH_PROFILE_OUT_DIR"]
-            os.makedirs(out_dir, exist_ok=True)
-
-            prof = torch.profiler.profile(
-                activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-                record_shapes=True,
-            )
-            prof.start()
-            prof.stop()
-            raw_path = os.path.join(out_dir, f"{os.getpid()}-native.pt.trace.json")
-            gz_path = raw_path + ".gz"
-            prof.export_chrome_trace(raw_path)
-            with open(raw_path, "rb") as src, gzip.open(gz_path, "wb") as dst:
-                shutil.copyfileobj(src, dst)
-            """
-        )
-    )
-
-    output = capture_ops.profile_ops(
-        command=f"{sys.executable} {script}",
-        env={"PYTHONPATH": str(fake_torch), "FAKE_TORCH_CALL_LOG": str(call_log)},
-        inject=False,
-        timeout_s=20,
-        grace_s=5,
-    )
+    output = capture_ops.profile_ops(command=WORKLOAD, inject=False, timeout_s=20, grace_s=5)
 
     assert ": ok" in output
     assert "primary trace:" in output
     assert "--- certify ---" in output
+    (spawn,) = world.spawned
+    assert "VIBESYS_TORCH_PROFILE" not in spawn.env
+    assert str(_TORCH_DIR / "inject") not in spawn.env.get("PYTHONPATH", "")
+    (capture,) = _captures(world)
+    manifest = _manifest(capture)
+    assert manifest["meta"]["inject"] is False
+    assert (capture / manifest["primary_trace"]).is_file()
 
-    # sitecustomize.py was never armed: exactly one profile.start (the
-    # script's own explicit call), not two -- proving inject=False did not
-    # layer a second, competing torch.profiler session on top of the
-    # command's own.
-    events = call_log.read_text().splitlines() if call_log.exists() else []
-    starts = [line for line in events if line.endswith("\tprofile.start")]
-    assert len(starts) == 1
 
-    captures2 = list(profiles_dir.iterdir())
-    assert len(captures2) == 1
-    manifest2 = json.loads((captures2[0] / "manifest.json").read_text())
-    assert manifest2["meta"]["inject"] is False
-    assert manifest2["primary_trace"] is not None
-    assert (captures2[0] / manifest2["primary_trace"]).is_file()
+def test_profile_ops_with_injection_arms_exactly_the_documented_environment(
+    capture_ops: ModuleType, world: ScriptedHost
+) -> None:
+    world.scripts[WORKLOAD] = injected_process(_TRACE_JSON, run_s=0.1)
+
+    capture_ops.profile_ops(command=WORKLOAD, delay_s=0.0, timeout_s=20, grace_s=5)
+
+    (spawn,) = world.spawned
+    assert spawn.env["VIBESYS_TORCH_PROFILE"] == "1"
+    assert spawn.env["PYTHONPATH"].split(os.pathsep)[0] == str(_TORCH_DIR / "inject")
 
 
 def test_profile_ops_reports_no_traces_when_no_gpu(
-    capture_ops: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    capture_ops: ModuleType, world: ScriptedHost
 ) -> None:
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    profiles_dir = tmp_path / "profiles"
-    monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(profiles_dir))
-
-    script = tmp_path / "workload.py"
-    script.write_text(
-        "import torch\nfrom torch._log import wait_for_event\nwait_for_event('cuda.is_available')\n"
-    )
+    world.scripts[WORKLOAD] = injected_process(_TRACE_JSON, gpu=False, run_s=0.1)
 
     # A capture without a trace is a typed failure, not a normal result.
     with pytest.raises(RuntimeError, match="no_trace") as failed:
         capture_ops.profile_ops(
-            command=f"{sys.executable} {script}",
-            env={
-                "PYTHONPATH": str(fake_torch),
-                "FAKE_TORCH_GPU": "0",
-                "FAKE_TORCH_CALL_LOG": str(tmp_path / "calls.log"),
-            },
-            delay_s=0.0,
-            duration_s=0.1,
-            timeout_s=20,
-            grace_s=5,
+            command=WORKLOAD, delay_s=0.0, duration_s=0.1, timeout_s=20, grace_s=5
         )
+
     assert type(failed.value).__name__ == "CaptureFailedError"
     assert "no *.pt.trace.json.gz trace files were produced" in str(failed.value)
 
 
-# ---------------------------------------------------------------------------
-# profile_ops: server + load + SIGINT lifecycle
-# ---------------------------------------------------------------------------
-
-_SERVER_SOURCE = textwrap.dedent(
-    """
-    import sys
-    from http.server import BaseHTTPRequestHandler, HTTPServer
-
-    port = int(sys.argv[1])
-
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            import torch  # noqa: F401  (arms the injection for this process)
-
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"ok")
-
-        def log_message(self, *args):
-            pass
-
-
-    HTTPServer(("127.0.0.1", port), Handler).serve_forever()
-    """
-)
-
-
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(HANG_GUARD_S)
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
 def test_profile_ops_server_load_sigint_lifecycle(
-    capture_ops: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    capture_ops: ModuleType, world: ScriptedHost
 ) -> None:
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    profiles_dir = tmp_path / "profiles"
-    monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(profiles_dir))
-
-    server_script = tmp_path / "server.py"
-    server_script.write_text(_SERVER_SOURCE)
-    port = _free_port()
-    call_log = tmp_path / "calls.log"
-    # The first request makes the server import torch (arming the
-    # injection); the load then waits for recording to start before the
-    # rest, so the stop signal can never beat the window's start.
-    load_script = tmp_path / "load.py"
-    load_script.write_text(
-        textwrap.dedent(
-            f"""
-            import time
-            import urllib.request as u
-
-            url = "http://127.0.0.1:{port}/"
-            u.urlopen(url, timeout=10)
-            log = {str(call_log)!r}
-            while True:
-                try:
-                    with open(log, encoding="utf-8") as handle:
-                        if any(line.rstrip().endswith("profile.start") for line in handle):
-                            break
-                except FileNotFoundError:
-                    pass
-                time.sleep(0.01)
-            for _ in range(2):
-                u.urlopen(url, timeout=10)
-            """
-        )
-    )
+    """A server armed on its first request is loaded, then stopped with SIGINT, which exports."""
+    world.scripts[SERVER] = injected_process(_TRACE_JSON, export_delay_s=0.3, run_s=None)
+    world.scripts[LOAD] = exits(0.5)
+    world.checks[READY] = always(0)
 
     output = capture_ops.profile_ops(
-        command=f"{sys.executable} {server_script} {port}",
-        env={"PYTHONPATH": str(fake_torch), "FAKE_TORCH_CALL_LOG": str(call_log)},
-        ready_command=(
-            f'{sys.executable} -c "import urllib.request as u; '
-            f'u.urlopen(\\"http://127.0.0.1:{port}/\\", timeout=2)"'
-        ),
+        command=SERVER,
+        ready_command=READY,
         ready_timeout_s=10,
-        load_command=f"{sys.executable} {load_script}",
+        load_command=LOAD,
         stop_signal="SIGINT",
         grace_s=10,
         timeout_s=30,
@@ -679,28 +537,11 @@ def test_profile_ops_server_load_sigint_lifecycle(
     assert ": ok" in output, output
     assert "primary trace:" in output
     assert "--- certify ---" in output
-
-    captures = list(profiles_dir.iterdir())
-    assert len(captures) == 1
-    manifest = json.loads((captures[0] / "manifest.json").read_text())
+    (capture,) = _captures(world)
+    manifest = _manifest(capture)
     assert manifest["primary_trace"] is not None
     assert manifest["status"] == "ok"
-    # capture_runtime.run_capture records these generically for every
-    # profile_* tool, not just rocprof's -- profile_ops inherits them "for
-    # free" through the same lifecycle, even though its own op-level
-    # analyses don't slice by them yet (see capture_ops.py's profile_ops
-    # docstring).
-    assert manifest["capture_start"]["clock_monotonic_ns"] > 0
-    assert (
-        manifest["capture_end"]["clock_monotonic_ns"]
-        >= manifest["capture_start"]["clock_monotonic_ns"]
-    )
-    assert manifest["load_window"]["start"]["clock_monotonic_ns"] > 0
-    assert (
-        manifest["load_window"]["end"]["clock_monotonic_ns"]
-        >= manifest["load_window"]["start"]["clock_monotonic_ns"]
-    )
-
-
-if __name__ == "__main__":
-    sys.exit(pytest.main([__file__, "-q"]))
+    start, end = manifest["capture_start"], manifest["capture_end"]
+    window = manifest["load_window"]
+    assert 0 < start["clock_monotonic_ns"] <= end["clock_monotonic_ns"]
+    assert 0 < window["start"]["clock_monotonic_ns"] <= window["end"]["clock_monotonic_ns"]

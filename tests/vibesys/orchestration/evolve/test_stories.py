@@ -10,8 +10,8 @@ decided.
 
 from __future__ import annotations
 
-import pytest
 from tests.vibesys.orchestration.evolve._host import Host, begin, config
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.evolve.search.api import (
     ExportPatch,
@@ -21,7 +21,6 @@ from vibesys.orchestration.evolve.search.api import (
     Stage,
 )
 from vs_core.api import (
-    Capabilities,
     Finish,
     Measure,
     Operation,
@@ -32,9 +31,8 @@ from vs_core.api import (
     WorkspaceMode,
     WorkspaceRef,
 )
-from vs_core.api.testing import FakeView
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def adopted(host: Host) -> str | None:
@@ -331,29 +329,6 @@ def _operations(host: Host) -> list[Operation]:
     """Every operation the flow asked for, in order."""
     waits = (item for item in host.run.decisions if isinstance(item, Wait))
     return [item.request for item in waits if isinstance(item.request, Operation)]
-
-
-@MODES
-def test_a_mutator_that_waits_for_its_own_evaluation_is_resumed_and_its_final_checkpoint_counts(
-    *, restarting: bool
-) -> None:
-    waiting = FakeView(
-        changes={"capabilities": Capabilities(lifecycle=frozenset({"suspend"}), operations=())}
-    )
-    host = begin(
-        config(bootstrap_max_attempts=1),
-        restarting=restarting,
-        view=waiting,
-        throughputs={"c2": 50.0},
-    )
-    host.drain_until_turn("mutator")
-    host.run.advance_to(0.0)
-    host.run.resume_ready(host.run.suspend(host.run.expect_turn(role="mutator")))
-    host.mutated(host.run.expect_turn(role="mutator"), revision="resumed")
-    host.drain()
-
-    assert individuals(host)[0].commit == "resumed"
-    assert adopted(host) == "resumed"
 
 
 @MODES

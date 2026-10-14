@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import os
 import shutil
 import threading
 import weakref
@@ -91,7 +90,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import wait_or_fail, wait_until_started
+from vs_sim.api.testing import examples, wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
@@ -107,9 +106,8 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration, WorkspaceResourceProvider
     from vs_sandbox.api import CommandRunner
 
-# Each example builds real workspaces. A pull request draws a sample; the nightly workflow
-# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# Each example builds real workspaces. A pull request draws a sample; the nightly depth
+# (`--depth=nightly`) searches deeper.
 
 
 @dataclass
@@ -881,7 +879,7 @@ _COMMIT = st.text(alphabet="0123456789abcdef", min_size=40, max_size=40)
 # Each example opens one workspace and tries several forgeries against it, because opening
 # the workspace costs far more than a rejected request.
 @settings(
-    max_examples=6 if _FULL else 2,
+    max_examples=examples(pr=2, nightly=6),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -1028,7 +1026,7 @@ _TREE = st.dictionaries(
 
 
 @settings(
-    max_examples=8 if _FULL else 2,
+    max_examples=examples(pr=2, nightly=8),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )

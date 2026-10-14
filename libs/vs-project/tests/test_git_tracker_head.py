@@ -17,6 +17,7 @@ from hypothesis import strategies as st
 from tests.support import run_test_command
 
 from vs_project.api import GIT_BACKEND_ENV, GitTracker, NullGitTrackerEvents
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     import subprocess
@@ -43,9 +44,8 @@ _OPERATIONS = st.sampled_from(
 )
 
 
-# Each example runs real Git processes. A pull request draws a sample; the nightly workflow
-# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# Each example runs real Git processes. A pull request draws a sample; the nightly depth
+# (`--depth=nightly`) searches deeper.
 
 
 @pytest.fixture(autouse=True, params=["cli", "pygit2"])
@@ -76,7 +76,7 @@ def _fresh_tracker(root: Path, *, existing: bool) -> GitTracker:
 
 
 @settings(
-    max_examples=25 if _FULL else 4,
+    max_examples=examples(pr=4, nightly=25),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -130,7 +130,7 @@ def test_current_sha_follows_a_commit_made_by_another_process(tmp_path: Path) ->
 
 
 @settings(
-    max_examples=15 if _FULL else 3,
+    max_examples=examples(pr=3, nightly=15),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )

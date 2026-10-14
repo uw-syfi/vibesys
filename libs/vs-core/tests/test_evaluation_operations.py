@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import (
     BaseModel,  # noqa: TC002  # LW-641209 [TC002]; pydantic evaluates the ClassVar annotation at runtime, so the import cannot move under TYPE_CHECKING.
@@ -19,6 +19,7 @@ from pydantic import (
 import vs_core.api as core
 from vs_core.api.search import search
 from vs_core.api.testing import FAKE_OPERATIONS, FlowRun, Interpret, Render, Verify
+from vs_sim.api.testing import examples
 
 from .flow_support import Config, open_workspace
 
@@ -120,6 +121,7 @@ def start(
 
 
 @pytest.mark.parametrize("restarting", [False, True])
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(output=st.text(max_size=20), code=st.integers(0, 3))
 def test_the_attribution_command_is_run_with_the_argv_and_bounds_the_flow_stated(
     *, restarting: bool, output: str, code: int

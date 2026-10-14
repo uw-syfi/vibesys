@@ -125,9 +125,12 @@ def test_a_workspace_kept_without_a_revision_settles_with_the_assessment_and_no_
 
 
 @pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+@pytest.mark.parametrize("code", list(core.RejectionCode))
+@pytest.mark.parametrize("refusals", [1, 2], ids=["assertion-refused", "every-close-refused"])
 def test_a_workspace_core_refuses_to_settle_as_asked_settles_plainly_and_says_why(
-    *, restarting: bool
+    *, restarting: bool, code: core.RejectionCode, refusals: int
 ) -> None:
+    """Whatever code core refuses with, and even if it refuses the plain close too, the flow ends."""
     seen: list[core.Failed | None] = []
 
     @fake_search("flows", Config, ROLES)
@@ -139,14 +142,18 @@ def test_a_workspace_core_refuses_to_settle_as_asked_settles_plainly_and_says_wh
 
     run = FlowRun.start(refused, Config(), restarting=restarting)
     run.open_workspace(run.expect(core.StartAttempt))
-    run.fail(run.expect(core.Withdraw), core.FailureReason.REFUSED)
+    run.fail(run.expect(core.Withdraw), core.FailureReason.REFUSED, cause=code)
     plain = run.expect(core.Withdraw)
     assert isinstance(plain.request, core.Withdraw)
     assert isinstance(plain.request.disposition, core.Settle)
     assert plain.request.disposition.outcome == "failed"
-    run.close_workspace(plain)
+    if refusals == 1:
+        run.close_workspace(plain)
+    else:
+        run.fail(plain, core.FailureReason.REFUSED, cause=code)
     assert seen
     failure = seen[-1]
     assert failure is not None
     assert failure.reason is core.FailureReason.REFUSED
-    assert failure.cause is not None
+    assert failure.cause == code
+    assert not [item for item in run.open if isinstance(item.request, core.Withdraw)]

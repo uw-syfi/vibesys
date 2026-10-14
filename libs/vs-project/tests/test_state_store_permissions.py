@@ -11,13 +11,14 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import Committed, Project, StoredEnvelope
+from vs_sim.api.testing import examples
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="directory permissions require an unprivileged user")
 @pytest.mark.parametrize("restrict_before_write", [False, True], ids=["reload", "first-use"])
 @given(depth=st.integers(min_value=1, max_value=4), payload=st.binary(max_size=64))
 @example(depth=1, payload=b"already-durable")
-@settings(max_examples=12)
+@settings(max_examples=examples(pr=5, nightly=12))
 def test_store_operations_below_a_traverse_only_ancestor(
     *, restrict_before_write: bool, depth: int, payload: bytes
 ) -> None:

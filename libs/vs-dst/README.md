@@ -11,7 +11,7 @@ def test_a_restart_after_any_crash_finishes_the_same_run():
     world = SomeStrategyWorld(...)
     normal = simulate(world)
 
-    for crash in normal.crash_points():           # sampled by default; all with --dst-crash-points=all
+    for crash in normal.crash_points():           # sampled by default; all with --depth=nightly
         recovered = normal.rerun_with_crash(crash)  # starts from normal's saved state, no prefix rerun
         assert recovered.result == normal.result, crash
         assert recovered.no_effect_ran_twice(), crash
@@ -43,7 +43,7 @@ def test_a_restart_after_any_crash_finishes_the_same_run():
   `rerun_with_crash(point)`.
 - `CrashPoint` (`CrashKind.BEFORE_COMMIT` or `AFTER_COMMIT` of commit k; it prints as
   `before commit 17`) and the one setting that chooses which of them a suite tries
-  (`CrashPointPolicy`, `SAMPLED`, `EVERY_POINT`, `set_crash_point_policy`).
+  (`CrashPointPolicy`, `SAMPLED`, `EVERY_POINT`, `crash_point_policy()`, which follows `vs_sim`'s `--depth`).
 
 ## Cheap crashes
 
@@ -69,6 +69,6 @@ recovery).
 
 `SimulatedRun.crash_points()` follows one setting, not a choice per test: a sample of 12
 commits per crash kind, evenly spaced and always including the first and the last, or every
-commit. It is the session's one crash-sweep breadth (`vs_sim.api.testing.sweep_breadth`), which
-the vs-sim pytest plugin sets from `--crash-points=sampled|all`, so every crash sweep of the
-repository follows it. Pull requests sample; the nightly job passes `all`.
+commit. It is the session's one search depth (`vs_sim.api.testing.depth`), which the vs-sim pytest
+plugin sets from `--depth=pr|nightly`, so every crash sweep of the repository follows it. Pull
+requests sample; the nightly job passes `--depth=nightly`.

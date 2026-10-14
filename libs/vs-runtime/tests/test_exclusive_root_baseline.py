@@ -14,7 +14,6 @@ The host dies at any durable write or restore step, exactly as in
 from __future__ import annotations
 
 import asyncio
-import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -25,6 +24,7 @@ from tests.support.workspace_world import WorkspaceEnv, open_workspace_env
 
 from vs_core.api import DiscardWorkspace, ObservationStatus, WorkspaceMode, WorkspacePlan
 from vs_runtime.api.core import revision_ref
+from vs_sim.api.testing import examples, swept
 
 from .test_exclusive_root_attempts import (
     _ARTIFACT_DIR,
@@ -45,9 +45,8 @@ if TYPE_CHECKING:
 
     from vs_project.api import GitRepository
 
-# Each example builds real workspaces. A pull request draws a sample; the nightly workflow
-# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# Each example builds real workspaces. A pull request draws a sample; the nightly depth
+# (`--depth=nightly`) searches deeper.
 
 _ROOT = WorkspaceMode.EXCLUSIVE_ROOT
 _IGNORE_RULES = "*.cache\nbuild/\n.venv/\ndata/\n"
@@ -170,7 +169,7 @@ def _play(
 
 
 @settings(
-    max_examples=40 if _FULL else 8,
+    max_examples=examples(pr=3, nightly=40),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -194,7 +193,7 @@ def test_a_venv_present_before_the_run_survives_two_root_attempts(
     _play(tmp_path_factory, monkeypatch, _PRE_IGNORED, [step, step])
 
 
-@pytest.mark.parametrize("dies_at", range(_WRITES_PER_REQUEST))
+@pytest.mark.parametrize("dies_at", swept(_WRITES_PER_REQUEST, 3))
 def test_a_host_that_dies_at_any_write_of_the_first_grant_loses_no_pre_run_file(
     tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, dies_at: int
 ) -> None:
@@ -203,7 +202,7 @@ def test_a_host_that_dies_at_any_write_of_the_first_grant_loses_no_pre_run_file(
     _play(tmp_path_factory, monkeypatch, _PRE_RUN, [first, later])
 
 
-@pytest.mark.parametrize("restore_dies_at", range(_RESTORE_POINTS))
+@pytest.mark.parametrize("restore_dies_at", swept(_RESTORE_POINTS, 2))
 def test_a_host_that_dies_in_the_first_restore_loses_no_pre_run_file(
     tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,

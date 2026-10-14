@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._deadlines import from_dispatch
 from ._evaluation_history import produce_history
 from ._proofs import (
     Proven,
@@ -73,6 +74,7 @@ from .types.sessions import (
     TurnRequested,
 )
 from .types.strategy import Accepted, Operation, Rejected, RequestTurn
+from .types.until import FromDispatch, Until
 
 if TYPE_CHECKING:
     from .types.evaluation_history import EvaluationHistoryCursor
@@ -451,6 +453,7 @@ def _turn_requested(
         phase=SessionPhase.ACQUIRING,
         evaluation_prefix=_evaluation_prefix(state, context, scope, turn),
         until=event.until,
+        limit=from_dispatch(context.run, event.until).limit,
     )
     state = _replace_invocation(state, invocation)
     signals: list[Signal] = []
@@ -474,7 +477,7 @@ def _turn_requested(
         )
         ensure = _ensure(session, context)
         session = session.model_copy(update={"pending_records": (ensure.request_id,)})
-        requests = (Outbound(request=ensure, until=event.until),)
+        requests = (Outbound(request=ensure, until=_from_dispatch(invocation)),)
     else:
         session = session.model_copy(
             update={
@@ -489,6 +492,13 @@ def _turn_requested(
     return AreaChange(
         state=_replace_session(state, session), signals=tuple(signals), requests=requests
     )
+
+
+def _from_dispatch(invocation: Invocation) -> FromDispatch | Until:
+    """The turn's limit as its requests carry it: counted from each one's dispatch."""
+    if invocation.limit is None:
+        return invocation.until
+    return FromDispatch(limit=invocation.limit, watches=invocation.until.watches)
 
 
 def _charges_authorized(
@@ -631,7 +641,9 @@ def _dispatch_reserved(
         }
     )
     state = _replace_session(_replace_invocation(state, invocation), session)
-    return AreaChange(state=state, requests=(Outbound(request=request, until=invocation.until),))
+    return AreaChange(
+        state=state, requests=(Outbound(request=request, until=_from_dispatch(invocation)),)
+    )
 
 
 def _turn_failure(

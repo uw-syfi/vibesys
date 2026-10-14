@@ -11,17 +11,8 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-import pytest
-from tests.support.executor_cases import CASES
 
 from vs_runtime.api import core
-from vs_runtime.api.core import HAND_ROLLED_ROLES, REQUEST_DISPATCH, NeverBegun, ReceiptStore
-from vs_runtime.api.executor_contexts import RevocableLease
-
-if TYPE_CHECKING:
-    from vs_runtime.api.executor_contracts import ExecutorCase, Scenario
 
 SOURCE = Path(core.__file__).parents[1]  # the package's own source, scanned below
 
@@ -69,33 +60,3 @@ def test_only_the_store_and_the_factory_write_execution_records_and_observations
         for problem in _violations(path)
     ]
     assert problems == []
-
-
-PARAMS = [
-    pytest.param(
-        case,
-        scenario,
-        id=f"{case.name}-{scenario.name}",
-        marks=pytest.mark.xfail(
-            REQUEST_DISPATCH[scenario.kind] in HAND_ROLLED_ROLES,
-            reason="this role keeps its own receipts until it moves onto run_once (S4)",
-            strict=True,
-        ),
-    )
-    for case in CASES
-    for scenario in case.scenarios
-    if scenario.effectful
-]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("case", "scenario"), PARAMS)
-async def test_every_effectful_kind_leaves_an_execution_record(
-    case: ExecutorCase, scenario: Scenario
-) -> None:
-    async with case.world() as world:
-        request = await world.prepare(scenario)
-        await world.execute(request, lease=RevocableLease(), crash_at=None)
-        store = ReceiptStore(world.receipts_namespace())
-        assert request.request_id is not None
-        assert not isinstance(store.history(request.request_id.root), NeverBegun)

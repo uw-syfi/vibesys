@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
@@ -20,6 +20,7 @@ from vs_core.api import (
     StrategyState,
     initial_state,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -118,6 +119,7 @@ def test_a_mutable_value_at_any_depth_is_rejected_after_its_siblings_were_accept
     registry.encode_envelope(_envelope(tree))  # the clean original is still accepted
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(shape=_shapes)
 def test_remembered_encodings_equal_a_fresh_encoding_of_an_equal_envelope(shape: Shape) -> None:
     registry = OperationRegistry()

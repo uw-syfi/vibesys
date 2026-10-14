@@ -6,7 +6,7 @@ from itertools import product
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
@@ -117,10 +117,15 @@ from vs_core.api import (
     step,
 )
 from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
+
+from .restart import restarts
 
 
 def reload_state(state: CoreState, codec: OperationRegistry | None = None) -> CoreState:
     """Crash/reload through the public envelope codec, including strict nested state."""
+    if not restarts():
+        return state
     envelope = RunEnvelope[StrategyState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="host"), epoch=1),
@@ -1366,6 +1371,7 @@ def test_stale_initial_session_readiness_cannot_activate_a_new_episode(
 
 
 @pytest.mark.parametrize("failure", tuple(SetupFailureKind))
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(order=st.lists(st.integers(min_value=1, max_value=4), min_size=1, max_size=12))
 def test_setup_failure_charges_one_cycle_not_each_failed_member(
     failure: SetupFailureKind, order: list[int]
@@ -1489,6 +1495,7 @@ def test_a_candidate_cannot_be_requested_as_an_invocation_checkpoint() -> None:
         (False, True),
     ),
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(amount=st.integers(min_value=0, max_value=4))
 def test_refund_never_uses_amount_or_optional_identifiers_as_proof(
     proof: tuple[ChargeKind, Literal["interrupted", "unsupported"], bool, bool, bool],

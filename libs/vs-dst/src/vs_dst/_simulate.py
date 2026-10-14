@@ -166,7 +166,7 @@ class SimulatedRun:
     def crash_points(self, kind: CrashKind | None = None) -> tuple[CrashPoint, ...]:
         """The places a host of this run can die that the suite's policy tries.
 
-        A sample on pull requests, every boundary under ``--dst-crash-points=all``. ``kind``
+        A sample on pull requests, every boundary under ``--depth=nightly``. ``kind``
         keeps one kind of point (a suite splits a long sweep that way). A run that started from a
         crash offers the commits its own hosts made, so it can be crashed again. Choosing costs
         nothing: the run only counted its commits.

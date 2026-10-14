@@ -8,7 +8,6 @@ about the same directory.
 
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -19,6 +18,7 @@ from hypothesis import strategies as st
 
 from vs_project.api import GitCommandError
 from vs_project.api.testing import ContractProject, twin
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -40,9 +40,8 @@ _FILES = (
     "sp ace.txt",
     "é.txt",
 )
-# Each example runs real Git processes. A pull request draws a sample; the nightly workflow
-# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# Each example runs real Git processes. A pull request draws a sample; the nightly depth
+# (`--depth=nightly`) searches deeper.
 
 _NEW_FILES = ("other/new.txt", "dir/sub/new.py")
 
@@ -139,7 +138,8 @@ def _outcome(call: Callable[[], object]) -> object:
 
 
 @settings(
-    suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=40 if _FULL else 6
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    max_examples=examples(pr=5, nightly=40),
 )
 @given(specs=_SPEC_LISTS)
 def test_pathspec_reads_agree_with_the_oracle(
@@ -168,7 +168,7 @@ def _staged_state(repo: GitRepository) -> object:
     return tuple(repo.read_blob("HEAD", path) for path in (*_FILES, *_NEW_FILES))
 
 
-@settings(max_examples=12 if _FULL else 3)
+@settings(max_examples=examples(pr=3, nightly=12))
 @given(specs=_SPEC_LISTS)
 def test_unstage_agrees_with_the_oracle(
     factory: RepositoryFactory, oracle_factory: RepositoryFactory, specs: list[str]
@@ -221,7 +221,8 @@ def _fragments() -> st.SearchStrategy[str]:
 
 
 @settings(
-    suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=200 if _FULL else 25
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    max_examples=examples(pr=5, nightly=200),
 )
 @given(name=_fragments())
 def test_name_rules_agree_with_the_oracle_on_assembled_names(
@@ -273,7 +274,8 @@ def test_non_ascii_paths_are_reported_as_they_are_named(sandbox: ContractProject
 
 
 @settings(
-    suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=40 if _FULL else 6
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    max_examples=examples(pr=5, nightly=40),
 )
 @given(length=st.integers(min_value=1, max_value=40), unknown=st.booleans())
 def test_revisions_resolve_like_the_oracle(
@@ -304,7 +306,8 @@ _LINES = st.sampled_from(["fix", "part two", "  indented", "trail  ", "\t", "", 
 
 
 @settings(
-    suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=30 if _FULL else 5
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    max_examples=examples(pr=5, nightly=30),
 )
 @given(
     lines=st.lists(_LINES, min_size=1, max_size=5),

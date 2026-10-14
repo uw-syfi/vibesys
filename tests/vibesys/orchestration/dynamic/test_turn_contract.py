@@ -1,10 +1,9 @@
 """What dynamic asks of core and answers back, in ways the flow stories do not already pin.
 
-Core owns the rules of a turn (how often a reply is corrected, what an unrecorded wait is, how an
-adoption is retried). These tests pin the dynamic half: which role may be corrected and in which
-session, that every turn it asks carries a template of its own role and a typed context, that a
-reply waiting for something nothing recorded ends the turn and not the run, and that a winner core
-gives up adopting ends the run as a failure with no selection.
+Core owns the rules of a turn (how often a reply is corrected and in which session, what an
+unrecorded wait is, how an adoption is retried or given up). These tests pin the dynamic half:
+that every turn it asks carries a template of its own role and a typed context, and that a reply
+waiting for something nothing recorded ends the turn and not the run.
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import (
-    FACTS,
     PLANNER_LABEL,
     Host,
     assert_flow_closed,
@@ -28,6 +26,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     plan_reply,
     reviewed,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import (
@@ -39,12 +38,9 @@ from vibesys.orchestration.dynamic.search.api import (
     PlannerPrompt,
     ProfilePrompt,
     ReviewPrompt,
-    dynamic,
 )
 from vs_core.api import (
-    AdoptionFailureReason,
     Finish,
-    ProposeWinner,
     RequestTurn,
     Retained,
     RevisionRef,
@@ -52,9 +48,9 @@ from vs_core.api import (
     Wait,
 )
 from vs_core.api.search import ReplyCorrection, WaitUnrecorded
-from vs_core.api.testing import FlowRun
+from vs_sim.api.testing import examples
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 CANDIDATE = RevisionRef.of_git_commit("c1")
 NOT_JSON = "not json"
 
@@ -71,39 +67,6 @@ def to_the_turn_of(host: Host, role: str) -> None:
             result,
             checkpoint=Retained(revision=CANDIDATE),
         )
-
-
-# -- a winner core gives up adopting ---------------------------------------------------------------
-
-
-@MODES
-@given(reason=st.sampled_from(list(AdoptionFailureReason)))
-@settings(max_examples=len(AdoptionFailureReason), deadline=None, derandomize=True, database=None)
-def test_an_adoption_core_gives_up_on_ends_the_run_in_failure_without_a_selection(
-    *, restarting: bool, reason: AdoptionFailureReason
-) -> None:
-    """Regression: `AdoptionFailed` was ignored, so the run once waited in ADOPTING for ever."""
-    cfg = config()
-    run = FlowRun.start(dynamic, cfg, facts=FACTS, restarting=restarting, adopting=False)
-    host = Host(run, cfg)
-    to_the_turn_of(host, "judge")
-    verdict = ReviewResult.model_validate_json(reviewed())
-    run.reply(run.expect_turn(role="judge"), verdict)
-    while not host.open(ProposeWinner):
-        assert host.step(0), run.timeline()
-    proposal = run.expect(ProposeWinner)
-    assert isinstance(proposal.request, ProposeWinner)
-    assert proposal.request.selection.kind == "retained_candidate"
-
-    run.refuse_adoption(proposal, reason)
-    host.drain()
-
-    finish = run.finished
-    assert isinstance(finish, Finish)
-    assert finish.result.outcome == "failure"
-    assert finish.result.selection is None
-    assert finish.result.reason == f"adoption-failed: {reason.value}"
-    assert_flow_closed(host)
 
 
 # -- a reply that waits for something nothing recorded ----------------------------------------------
@@ -183,7 +146,7 @@ def check_asked_turns(host: Host) -> None:
 
 
 @MODES
-@settings(max_examples=40, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=40), deadline=None, derandomize=True, database=None)
 @given(steps=STEPS, in_flight=st.integers(1, 2))
 def test_every_turn_is_asked_with_its_roles_template_or_an_exchange_and_a_session_that_never_changes(
     *, restarting: bool, steps: list[tuple[int, int]], in_flight: int
@@ -206,24 +169,3 @@ def test_every_turn_is_asked_with_its_roles_template_or_an_exchange_and_a_sessio
             if turn.charge_class == "correction":
                 assert turn.predecessor is not None
                 assert turn.predecessor.session_id == turn.session.session_id
-
-
-@MODES
-@pytest.mark.parametrize("role", [PLANNER_LABEL, "implementer", "judge"])
-def test_an_invalid_reply_is_corrected_in_the_session_of_the_turn_it_corrects(
-    *, restarting: bool, role: str
-) -> None:
-    host = begin(config(), restarting=restarting)
-    if role == PLANNER_LABEL:
-        host.drain_until_turn(PLANNER_LABEL)
-    else:
-        to_the_turn_of(host, role)
-    asked = host.run.expect_turn(role=role)
-    host.run.reply_raw(asked, NOT_JSON)
-
-    follow = host.run.expect_turn(role=role)
-    original, corrected = asked.request.turn, follow.request.turn  # ty: ignore[unresolved-attribute]
-    assert corrected.charge_class == "correction"
-    assert corrected.session == original.session
-    assert corrected.predecessor is not None
-    assert corrected.predecessor.invocation_id == original.invocation_id

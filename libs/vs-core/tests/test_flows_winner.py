@@ -165,6 +165,7 @@ def test_a_failed_adoption_is_a_failed_run_with_the_typed_reason(
     run.refuse_adoption(run.expect(core.ProposeWinner), reason)
     result = result_of(run)
     assert result.outcome == "failure"
+    assert result.selection is None
     assert result.reason == f"adoption-failed: {reason.value}"
 
 

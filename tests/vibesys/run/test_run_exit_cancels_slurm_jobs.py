@@ -88,17 +88,18 @@ def _request(project_root: Path, config_path: Path) -> RunRequest:
     )
 
 
-@pytest.mark.parametrize("transport", ["connector", "ssh"])
 def test_a_stopped_run_cancels_a_pending_benchmark_job(
-    tmp_path: Path, transport: str, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Budget: a whole run over a fake cluster in a child process, reached by the production
+    transport (ssh); the connector transport differs only in how the broker spawns the cluster."""
     # The agent container needs the credential its CLI would start with.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-anthropic-key")
     state = executing_cluster(tmp_path / "cluster")
     (state / HOLD_FILE).touch()
     os.mkfifo(state / SUBMITTED_FILE)
     config_path = tmp_path / "slurm.toml"
-    _write_slurm_config(config_path, state, transport)
+    _write_slurm_config(config_path, state, "ssh")
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration()

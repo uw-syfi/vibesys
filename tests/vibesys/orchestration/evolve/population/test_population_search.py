@@ -21,6 +21,7 @@ from vibesys.orchestration.evolve.population import (
     PopulationConfig,
     PopulationSearch,
 )
+from vs_sim.api.testing import examples
 
 
 def _outcome(
@@ -158,7 +159,7 @@ def test_crash_after_admit_but_before_checkpoint_state_is_immutable() -> None:
     passes=st.lists(st.booleans(), min_size=1, max_size=8),
     seed=st.integers(min_value=0, max_value=1000),
 )
-@settings(max_examples=100)
+@settings(max_examples=examples(pr=10, nightly=100))
 def test_every_crash_boundary_resumes_to_the_uninterrupted_population(
     passes: list[bool], seed: int
 ) -> None:
@@ -321,7 +322,7 @@ _outcome_strategy = st.builds(
 
 
 @given(outcomes=st.lists(_outcome_strategy, min_size=0, max_size=12))
-@settings(max_examples=50)
+@settings(max_examples=examples(pr=10, nightly=50))
 def test_admitted_ids_unique_and_increasing(outcomes: list[CandidateOutcome]) -> None:
     search = PopulationSearch(PopulationConfig(seed=1))
     state = search.initial()
@@ -340,7 +341,7 @@ def test_admitted_ids_unique_and_increasing(outcomes: list[CandidateOutcome]) ->
         max_size=10,
     )
 )
-@settings(max_examples=50)
+@settings(max_examples=examples(pr=10, nightly=50))
 def test_frontier_never_dominated(perf_metrics: list[float]) -> None:
     """Every member of the returned frontier is Pareto-non-dominated by any
     other passed individual (single-axis space: this reduces to "the
@@ -372,7 +373,7 @@ def test_frontier_never_dominated(perf_metrics: list[float]) -> None:
 
 
 @given(admit_count=st.integers(min_value=6, max_value=30))
-@settings(max_examples=15, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=15), deadline=None)
 def test_openevolve_state_size_bounded_across_many_admits(admit_count: int) -> None:
     """R4 regression: the OpenEvolve selector state must not grow without
     bound as more candidates are admitted. On the old (pre-refactor)

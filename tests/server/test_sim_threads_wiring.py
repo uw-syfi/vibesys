@@ -13,7 +13,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from server.events import EventType
-from vs_sim.api.testing import SimThreads
+from vs_sim.api.testing import SimThreads, examples
 
 from .support import build_server_parts
 
@@ -26,7 +26,7 @@ WRITER_DELAYS = st.sampled_from([0.5, 3.0, 40.0])
 WAIT_TIMEOUTS = st.sampled_from([1.0, 10.0, 100.0])
 
 
-@settings(deadline=None, max_examples=40)
+@settings(deadline=None, max_examples=examples(pr=10, nightly=40))
 @given(seed=SEEDS, delay=WRITER_DELAYS, timeout=WAIT_TIMEOUTS)
 def test_a_journal_wait_sees_a_record_exactly_when_it_lands_inside_the_timeout(
     seed: int | None, delay: float, timeout: float, tmp_path_factory: pytest.TempPathFactory

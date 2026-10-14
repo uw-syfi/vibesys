@@ -23,6 +23,7 @@ from vs_core.api import (
     SchemaRef,
     Value,
 )
+from vs_sim.api.testing import examples
 
 
 class Outcome(Value):
@@ -125,7 +126,7 @@ def hash_seed_workers() -> Iterator[list[subprocess.Popen[str]]]:
             worker.stdout.close()
 
 
-@settings(max_examples=12)
+@settings(max_examples=examples(pr=5, nightly=12))
 @given(
     st.lists(
         st.sets(st.text(alphabet="abcdef", min_size=1, max_size=8), min_size=2, max_size=8),

@@ -170,6 +170,12 @@ class SemanticSlurmEvaluationExecutor:
             message = f"semantic Slurm handle {handle_id!r} has different work"
             raise ExecutorRejectedError(message)
         if existing is None:
+            # The revision to measure is named by a search, often from an agent's reply. A
+            # revision the repository does not hold can never run, so refuse it before a
+            # durable record exists that nothing could ever launch or cancel.
+            if not await self._workspaces.root.has_revision(record.snapshot):
+                message = f"candidate revision {record.snapshot!r} is not a commit of this run"
+                raise ExecutorRejectedError(message)
             self._namespace.save(self._path(handle_id), record)
         execution = await self._execution(handle_id, record)
         await execution.executor.submit(provider_request, handle_id=handle_id)

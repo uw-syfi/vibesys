@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict
 
 from vs_runtime.api.testing import FakeRuns
 from vs_runtime.api.wiring import InProcessRuns, TaskRunHandle
-from vs_sim.api.testing import arrival
+from vs_sim.api.testing import arrival, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -745,4 +745,6 @@ class RunsContractMachine(RuleBasedStateMachine):
 
 
 TestRunsContract = RunsContractMachine.TestCase
-TestRunsContract.settings = settings(max_examples=35, stateful_step_count=30)
+TestRunsContract.settings = settings(
+    max_examples=examples(pr=5, nightly=35), stateful_step_count=30
+)

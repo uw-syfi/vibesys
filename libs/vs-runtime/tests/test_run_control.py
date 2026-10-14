@@ -7,7 +7,18 @@ import threading
 import pytest
 from pydantic import ValidationError
 
-from vs_core.api import StopMode
+from vs_core.api import (
+    ArtifactId,
+    ArtifactRef,
+    ControlId,
+    ControlInput,
+    RunControlEvent,
+    SessionInputReceived,
+    StopMode,
+    initial_state,
+    step,
+)
+from vs_runtime.api.core import RunControlBridge
 from vs_runtime.api.infrastructure import (
     RunControlTransition,
     RunControlTransitionKind,
@@ -258,3 +269,28 @@ def test_a_boundary_reached_while_a_request_is_published_does_not_land_it(
     assert observed in ([None], [False])
     assert seen == [requested]
     assert landed not in seen
+
+
+class _DiscardingSteerArtifacts:
+    def put(self, ref: ArtifactRef, text: str) -> None:
+        del ref, text
+
+
+def test_a_steer_control_without_its_input_gets_the_input_on_the_next_poll() -> None:
+    """A crash between a steer control and its input is repaired: the poll supplies the input."""
+    control = ControlInput(
+        control_id=ControlId(root="control-0"),
+        action="steer",
+        artifact=ArtifactRef(artifact_id=ArtifactId(root="steer-text"), digest="d"),
+    )
+    held = step(initial_state(), RunControlEvent(control=control, now_at=1.0)).state
+    assert held.sessions.inputs == ()
+    bridge = RunControlBridge(
+        create_run_control_channel(FakeRunControlEventSink()), _DiscardingSteerArtifacts()
+    )
+    repaired = bridge.poll(held, 2.0)
+    assert [
+        event.input.input_id.root for event in repaired if isinstance(event, SessionInputReceived)
+    ] == ["steer-control-0"]
+    recorded = step(held, repaired[0]).state
+    assert bridge.poll(recorded, 3.0) == ()

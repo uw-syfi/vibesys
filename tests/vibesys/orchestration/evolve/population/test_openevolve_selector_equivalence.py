@@ -31,6 +31,7 @@ from vibesys.orchestration.evolve.population.models import (
     PopulationConfig,
 )
 from vibesys.orchestration.evolve.population.search import PopulationSearch
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -139,7 +140,7 @@ _openevolve_configs = st.builds(
         max_size=8,
     ),
 )
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=25), deadline=None)
 def test_in_memory_backend_matches_old_file_backend(
     seed: int,
     openevolve_config: OpenEvolveSelectorConfig,
@@ -290,7 +291,7 @@ _tie_prone_perf_metrics = st.lists(
     openevolve_config=_openevolve_configs,
     perf_metrics=_tie_prone_perf_metrics,
 )
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=25), deadline=None)
 def test_selection_deterministic_under_metric_ties(
     seed: int,
     openevolve_config: OpenEvolveSelectorConfig,

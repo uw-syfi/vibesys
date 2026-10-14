@@ -8,7 +8,7 @@ Design question Q6 of `docs/design/strategies-on-core.md`. `evolve` declares `ev
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.composition import resolve_agent_specs
@@ -18,6 +18,7 @@ from vibesys.evolve_roles import JUDGE, MUTATOR
 from vibesys.orchestration.evolve.plugin import PLUGIN
 from vibesys.orchestration.evolve.search.api import ROLES, evolve
 from vs_core.api import UnknownRoleError
+from vs_sim.api.testing import examples
 
 EVOLVE_ROLES = ("evolve-mutator", "evolve-judge", "evolve-profiler")
 LEGACY_ROLES = ("implementer", "judge", "profiler")
@@ -36,6 +37,7 @@ def test_the_profiler_names_a_stateless_tool() -> None:
     assert [(tool.id, tool.stateless) for tool in profiler.extra_tools] == [("profiler", True)]
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     overrides=st.dictionaries(
         st.sampled_from(EVOLVE_ROLES),
@@ -65,6 +67,7 @@ def test_the_judge_has_the_evaluation_tool_the_mutator_has() -> None:
 ROLE_NAMES = tuple(role.name for role in ROLES)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     unknown=st.lists(
         st.text(alphabet="abcdefghij-", min_size=1, max_size=12).filter(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING
@@ -21,7 +22,9 @@ from vs_agent.api import (
     AgentSessionKey,
     AgentSessionSpec,
     AgentSessionState,
+    AgentSpawnError,
     AgentTurnRequest,
+    AgentTurnTimeoutError,
     ClientAgentSessions,
     Completed,
     DurableSessionStore,
@@ -257,17 +260,36 @@ def test_missing_and_recovered_unfinished_invocation_is_unknown(
     assert isinstance(outcome[0], Completed)
 
 
-def test_unexpected_boundary_failure_is_unknown_and_never_replayed(harness: _Harness) -> None:
+class _ExitStatusError(Exception):
+    """Stands for a provider CLI's own error type (a subprocess exit status)."""
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        LookupError("lost acknowledgement"),
+        AgentSpawnError("claude", "exit status 1"),
+        AgentTurnTimeoutError(30),
+        OSError("pipe"),
+        _ExitStatusError("claude exited with status 1"),
+        RuntimeError("claude exited with code 1"),
+    ],
+    ids=lambda error: type(error).__name__,
+)
+def test_unexpected_boundary_failure_is_unknown_and_never_replayed(
+    harness: _Harness, error: Exception
+) -> None:
+    """Whatever a provider CLI raises, the turn's fate is unknown and it is asked once."""
+
     def fail() -> None:
-        detail = "lost acknowledgement"
-        raise LookupError(detail)
+        raise error
 
     harness.boundary.effect = fail
     result = harness.sessions.resume(KEY, harness.message, "resume-1")
     assert isinstance(result, Unknown)
-    assert "LookupError" in result.detail
+    assert str(error) in result.detail
     assert harness.reconstruct().resume(KEY, harness.message, "resume-1") == result
-    with pytest.raises(SessionResumeError, match="LookupError: lost acknowledgement"):
+    with pytest.raises(SessionResumeError, match=re.escape(str(error))):
         harness.reconstruct().resume(KEY, harness.message, "resume-2")
     assert harness.boundary.calls == 2
 

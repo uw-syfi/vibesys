@@ -30,6 +30,7 @@ from tests.support.light_imports import BUDGET_MS, is_heavy, loaded_modules
 from server.host_api import InstanceStatus, LiveInstanceRecord, RunPhase, RunStatus
 from server.registry import FileInstanceStore, instance_root
 from server.transport.unix_jsonl import UnixJsonlServer
+from vs_sim.api.testing import swept
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -38,9 +39,14 @@ if TYPE_CHECKING:
     RecordProperty = Callable[[str, object], None]
 
 _RUNNER = "host-helper"
+# The corpus is replayed in process by `tests/conformance/test_host_helper.py`; a pull request
+# replays one scenario of each group through a real process (its wiring), the nightly all.
 _SCENARIOS = tuple(
     itertools.chain.from_iterable(
-        runner_group(_RUNNER, group) for group in ("handshake", "registry", "host-paths")
+        [group[i] for i in swept(len(group), 1)]
+        for group in (
+            runner_group(_RUNNER, name) for name in ("handshake", "registry", "host-paths")
+        )
     )
 )
 _MODULE_CEILING = 340

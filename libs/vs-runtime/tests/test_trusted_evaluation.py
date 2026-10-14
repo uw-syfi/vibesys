@@ -530,6 +530,48 @@ def test_cancellation_drains_owned_accuracy_execution(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+class _CancellableSandbox(_BlockingSandbox):
+    """A command that runs until its cancel event stops it, as a real runner's does."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stopped_by_cancel = False
+
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: Event | None = None,
+    ) -> CommandResult:
+        del timeout
+        assert cancel is not None
+        self.calls.append(command)
+        self.started.set()
+        wait_or_fail(cancel, "the cancel event of the cancelled evaluation")
+        self.stopped_by_cancel = True
+        self.completed.set()
+        return CommandResult(output="", exit_code=130)
+
+
+def test_cancelling_an_evaluation_stops_its_running_command(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        sandbox = _CancellableSandbox()
+        executor = _executor(
+            tmp_path,
+            TrustedEvaluationPlan(accuracy_command="check"),
+            sandbox,
+        )
+        operation = asyncio.create_task(executor.accuracy())
+        await wait_until_started(sandbox.started, operation)
+        operation.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+        assert sandbox.stopped_by_cancel
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("model", [TrustedAccuracyResult, TrustedBenchmarkResult])
 def test_a_trusted_result_names_whose_fault_a_failure_is_exactly_when_it_failed(
     model: type[TrustedAccuracyResult] | type[TrustedBenchmarkResult],

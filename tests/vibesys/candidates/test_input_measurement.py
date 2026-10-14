@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.candidates.api import (
@@ -27,6 +27,7 @@ from vs_core.api import (
     RunId,
     Scope,
 )
+from vs_sim.api.testing import examples
 
 _INPUT = RevisionRef(revision_id=RevisionId(root="input"), digest="d")
 _KINDS = (EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK)
@@ -79,6 +80,7 @@ def _asked(
     return refs, readings
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(verdicts=_VERDICTS, feedback=st.text(max_size=20))
 def test_the_input_is_measured_unless_a_gate_it_was_measured_by_failed(
     verdicts: dict[EvidenceKind, bool | None], feedback: str
@@ -102,6 +104,7 @@ def test_the_input_is_measured_unless_a_gate_it_was_measured_by_failed(
         assert trusted(found) is (verdicts[EvidenceKind.CORRECTNESS] is not False)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(verdicts=_VERDICTS, status=st.sampled_from(["failed", "cancelled", "unknown"]))
 def test_a_measurement_that_did_not_succeed_leaves_the_input_undecoded(
     verdicts: dict[EvidenceKind, bool | None], status: str
@@ -115,6 +118,7 @@ def test_a_measurement_that_did_not_succeed_leaves_the_input_undecoded(
     assert not trusted(found)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(verdicts=_VERDICTS)
 def test_readings_that_name_a_record_nobody_asked_about_are_refused(
     verdicts: dict[EvidenceKind, bool | None],

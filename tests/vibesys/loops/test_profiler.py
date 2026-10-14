@@ -8,6 +8,12 @@ The ``resources.profilers.nsys.analyze_nsys`` imports below resolve at
 runtime because pytest's ``pythonpath = ["."]`` setting (pyproject.toml)
 puts the repo root on ``sys.path``, and statically because the repo root is
 listed in ``[tool.ty.environment] root``.
+
+Guarantees under test:
+
+* Profiler responses round-trip through their dict form; the nsys toolkit's kernel, CPU
+  overhead, GPU idle gap and memory analyses and kernel-name shortening give the documented
+  results on a small database.
 """
 
 import argparse

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -32,6 +32,7 @@ from vibesys.orchestration.issue_queue.core_policy.api import (
 )
 from vibesys.orchestration.issue_queue.search.api import IssueBrief, QueueSnapshot
 from vs_core.api import AttemptId, RevisionRef
+from vs_sim.api.testing import examples
 
 
 def _node(identifier: str, ordinal: int) -> IterationSummary:
@@ -44,6 +45,7 @@ def _node(identifier: str, ordinal: int) -> IterationSummary:
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(st.lists(st.text(min_size=1), min_size=1, max_size=20, unique=True))
 def test_revision_is_stable_for_identical_nodes(identifiers: list[str]) -> None:
     nodes = tuple(_node(identifier, ordinal) for ordinal, identifier in enumerate(identifiers))

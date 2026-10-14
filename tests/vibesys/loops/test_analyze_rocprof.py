@@ -9,6 +9,20 @@ Fixtures are small synthetic rocprofv3 CSV files written per test, following
 the documented rocprofv3 column names (``Kernel_Name``, ``Start_Timestamp``,
 ``Correlation_Id``, ...), laid out under a ``<hostname>/<pid>/`` subdirectory
 the way rocprofv3 itself writes output.
+
+Guarantees under test:
+
+* Discovery buckets rocprofv3 output files (per-pid layout, single file, any nesting depth) and
+  rejects a missing path; names are shortened and kernels classified into families without being
+  fooled by namespaces, templates, mangling or interior substrings.
+* Every report command (files, kernels, families, idle-gaps, cpu-overhead, memory, graphs,
+  host-idle, query, summary) reports "no data" cleanly, bounds its line width and stays
+  prompt-sized.
+* Busy time is the union of overlapping intervals and never exceeds the window; idle gaps plus
+  busy time equal the window.
+* The default window is the load phase when the manifest has one and the trace is aligned with
+  it, and falls back to the whole run (with a note) otherwise; an explicit window slices
+  relative to trace start and keeps exactly the events starting inside it.
 """
 
 from __future__ import annotations
@@ -55,7 +69,7 @@ from resources.profilers.rocprof.analyze_rocprof import (
     discover,
     resolve_window,
 )
-from tests.vibesys.loops.rocprof_strategies import (
+from tests.vibesys.loops.profiler_strategies import (
     FAST,
     FEWER,
     case_variant,

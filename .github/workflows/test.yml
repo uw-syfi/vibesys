@@ -50,18 +50,17 @@ jobs:
       durations: ${{ steps.durations.outputs.durations }}
 
     steps:
+      # Full history (repoctl plan and diff-cover need the merge base) without the blobs
+      # of every old revision: they are fetched only for the few files a diff reads.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          filter: blob:none
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: support/repoctl/go.mod
-          # setup-go looks for go.sum at the repository root, finds none, and
-          # restores nothing, so every job compiled repoctl (and fetched its
-          # one dependency) from scratch, ~10 s on the critical path.
-          cache-dependency-path: support/repoctl/go.sum
+      # A prebuilt repoctl: no Go toolchain restore and no compile-and-link per call
+      # (this job runs repoctl three times).
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
       - name: Select affected CI jobs
         id: filter
@@ -529,9 +528,10 @@ jobs:
       fail-fast: false
       matrix:
         # Each shard pays ~50 s of setup and pytest startup before its first test, so
-        # the shard count trades summed runner time against wall time: 8 keeps the
-        # slowest shard near three minutes (#1724).
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        # the shard count trades summed runner time against wall time. After the test
+        # rewrite the suite is about 1,100 CPU-seconds of tests, and 3 shards keep the
+        # slowest near three minutes (see docs/contributing/testing-map.md).
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -553,11 +553,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev --python 3.14
 
-      - name: Set up Go for repoctl
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: support/repoctl/go.mod
-          cache-dependency-path: support/repoctl/go.sum
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
       # Written from the `changes` job's output, not restored per shard, so all
       # shards of a run balance on the same record and still partition the suite.
@@ -646,9 +643,12 @@ jobs:
       needs.changes.outputs.tui == 'true'
     runs-on: ubuntu-latest
     steps:
+      # Full history (repoctl plan and diff-cover need the merge base) without the blobs
+      # of every old revision: they are fetched only for the few files a diff reads.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          filter: blob:none
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -662,11 +662,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Set up Go for repoctl
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: support/repoctl/go.mod
-          cache-dependency-path: support/repoctl/go.sum
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
       - name: Download coverage data
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -1096,7 +1093,12 @@ jobs:
       contents: read
 
     steps:
+      # Last job of the run, so its own duration is added to the critical path. It
+      # needs one stdlib-only script, so it checks out only that file instead of the tree.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci_wall_time.py
+          sparse-checkout-cone-mode: false
 
       - name: Report execution time against the budget
         env:

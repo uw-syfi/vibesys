@@ -8,10 +8,11 @@ toy flow here and not once per search.
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .flow_support import Config, Plan, ask, open_workspace, start
 
@@ -35,6 +36,7 @@ def persisted_after(children: int) -> list[int]:
     return sizes
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(children=st.integers(min_value=8, max_value=24))
 def test_what_a_flow_persists_grows_linearly_in_the_children_it_ran(children: int) -> None:
     sizes = persisted_after(children)

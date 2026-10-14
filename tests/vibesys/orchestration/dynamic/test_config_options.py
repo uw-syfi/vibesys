@@ -8,10 +8,11 @@ is configured, never later. The operations are the persisted kind names the exec
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vibesys.orchestration.dynamic.search.api import (
     INTERPRET_KIND,
     OPERATIONS,
@@ -19,8 +20,10 @@ from vibesys.orchestration.dynamic.search.api import (
     VERIFY_KIND,
     DynamicConfig,
 )
+from vs_sim.api.testing import examples
 
 VALID = {"max_rounds": 3}
+LAUNCH = {**VALID, "interface": "an HTTP endpoint"}
 BOUNDS = {
     "max_rounds": (1, 1000),
     "max_in_flight": (1, 32),
@@ -30,6 +33,7 @@ BOUNDS = {
 }
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     key=st.text("abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=24).filter(
         lambda name: name not in DynamicConfig.model_fields
@@ -41,6 +45,7 @@ def test_an_unknown_option_is_rejected_by_name(key: str) -> None:
 
 
 @pytest.mark.parametrize("name", sorted(BOUNDS))
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data())
 def test_a_value_outside_its_bounds_is_rejected_naming_the_option_and_one_inside_is_kept(
     name: str, data: st.DataObject
@@ -53,6 +58,7 @@ def test_a_value_outside_its_bounds_is_rejected_naming_the_option_and_one_inside
     assert getattr(DynamicConfig.model_validate({**VALID, name: inside}), name) == inside
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     values=st.fixed_dictionaries(
         {name: st.integers(low, high) for name, (low, high) in BOUNDS.items()}
@@ -75,3 +81,16 @@ def test_the_search_declares_exactly_the_operations_its_executors_serve() -> Non
         "dynamic.verify_parent_revision",
         "dynamic.interpret_evidence",
     }
+
+
+@settings(max_examples=examples(pr=4, nightly=20))
+@given(profiling=st.booleans(), allowed=st.booleans())
+def test_profiling_is_never_a_launch_option_but_follows_the_plan(
+    *, profiling: bool, allowed: bool
+) -> None:
+    with pytest.raises(ValidationError, match="profiling"):
+        DynamicLaunch.model_validate({**LAUNCH, "profiling": profiling})
+
+    launch = DynamicLaunch.model_validate(LAUNCH)
+
+    assert launch.search_config(profiling=allowed).profiling is allowed

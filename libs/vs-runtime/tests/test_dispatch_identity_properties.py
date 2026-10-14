@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -16,6 +15,7 @@ from vs_core.api import DispatchTurn, ResumeSessionTurn
 from vs_runtime.api.executor_contexts import RevocableLease
 from vs_runtime.api.executor_contracts import ProcessKilledError
 from vs_runtime.api.observation_contracts import assert_core_accepts
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vs_runtime.api.core import ExecutionResult
@@ -36,7 +36,7 @@ async def _boundaries(case: ExecutorCase, scenario: Scenario) -> int:
         return 2 * probe.writes()
 
 
-_STEPS = 20 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 4
+_STEPS = examples(pr=4, nightly=20)
 
 
 @pytest.mark.parametrize(("case", "scenario"), _DISPATCHING)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.dynamic_core import dynamic_core_registration
@@ -11,6 +11,7 @@ from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vibesys.orchestration.dynamic.search.api import IMPLEMENTER, JUDGE, ROLES, dynamic
 from vs_runtime.api import AgentCapability, AgentTool
 from vs_runtime.api.core import EVALUATION_TOOL_ID
+from vs_sim.api.testing import examples
 
 
 def test_every_search_role_is_declared_once_and_the_plugin_serves_them() -> None:
@@ -40,6 +41,7 @@ def test_the_roles_that_wait_for_evaluations_are_the_roles_that_carry_the_tool()
     assert waiting == carrying
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(max_rounds=st.integers(1, 50), max_in_flight=st.integers(1, 32))
 def test_run_started_reports_the_max_rounds_the_operator_passed(
     max_rounds: int, max_in_flight: int

@@ -16,6 +16,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_attempt_retirement import fixture, retirement
 from .test_measurements import observation, plan
@@ -178,7 +179,7 @@ def run_out(cluster: Cluster) -> None:
             return
 
 
-@settings(max_examples=300, deadline=None)
+@settings(max_examples=examples(pr=3, nightly=300), deadline=None)
 @example(plan=[("answer", 0)], running_polls=1, ending=core.ObservationStatus.FAILED)
 @given(
     plan=st.lists(actions, max_size=12),

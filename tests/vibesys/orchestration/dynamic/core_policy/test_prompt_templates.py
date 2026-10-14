@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import (
     CONTEXTS,
@@ -37,6 +37,7 @@ from vibesys.orchestration.dynamic.search.api import (
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate
 from vs_core.api.search import ReplyCorrection, ResumeFacts, WaitUnrecorded
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -53,6 +54,7 @@ def test_every_requestable_template_has_a_context_generator_and_a_template_file(
 
 
 @pytest.mark.parametrize("template", ALL_TEMPLATES, ids=lambda item: item.value)
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data())
 def test_a_template_renders_for_every_context_of_its_kind(
     template: PromptTemplate | CoreTemplate, data: st.DataObject
@@ -67,6 +69,7 @@ def test_a_template_renders_for_every_context_of_its_kind(
 
 
 @pytest.mark.parametrize("template", [PromptTemplate.IMPLEMENT, PromptTemplate.REVIEW])
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data(), offered=st.booleans())
 def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
     template: PromptTemplate, data: st.DataObject, *, offered: bool
@@ -82,6 +85,7 @@ def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
 # -- the planner ------------------------------------------------------------------------------
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=PLANNER_PROMPTS)
 def test_the_planner_prompt_states_the_run_it_plans_for(context: PlannerPrompt) -> None:
     text = render(PromptTemplate.PORTFOLIO, context)
@@ -107,6 +111,7 @@ def test_the_planner_prompt_states_the_run_it_plans_for(context: PlannerPrompt) 
     assert "Correction required" not in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=PLANNER_PROMPTS)
 def test_the_planner_prompt_shows_a_reply_its_own_schema_accepts(context: PlannerPrompt) -> None:
     # live-1: Haiku put the plan inside a `findings` field, then left a workstream without
@@ -118,6 +123,7 @@ def test_the_planner_prompt_shows_a_reply_its_own_schema_accepts(context: Planne
         reply_type.model_validate_json(example)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=PLANNER_PROMPTS)
 def test_a_workstream_of_the_reply_is_never_offered_a_sibling_as_parent(
     context: PlannerPrompt,
@@ -129,6 +135,7 @@ def test_a_workstream_of_the_reply_is_never_offered_a_sibling_as_parent(
     assert ("leave `parent_hypothesis_id` null" in text) is not bool(context.buildable)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=CONTEXTS[PromptTemplate.PORTFOLIO_CORRECTION])
 def test_a_planner_correction_repeats_the_request_and_says_what_was_wrong(
     context: BaseModel,
@@ -157,6 +164,7 @@ def test_a_planner_correction_repeats_the_request_and_says_what_was_wrong(
 # -- the implementer --------------------------------------------------------------------------
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=CONTEXTS[PromptTemplate.IMPLEMENT])
 def test_the_implementer_is_given_its_hypothesis_and_what_the_last_turn_left(
     context: BaseModel,
@@ -179,6 +187,7 @@ def test_the_implementer_is_given_its_hypothesis_and_what_the_last_turn_left(
     assert ("ended without a candidate" in text) is (context.last_blocker is not None)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data(), offered=st.booleans())
 def test_the_implementer_is_told_to_submit_early_and_not_to_repeat_a_passed_check(
     data: st.DataObject, *, offered: bool
@@ -194,6 +203,7 @@ def test_the_implementer_is_told_to_submit_early_and_not_to_repeat_a_passed_chec
     assert ("nominate it" in text.split("stop checking and")[1][:60]) is not offered
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data(), summary=tokens("blk"), step=st.just("") | tokens("nxt"))
 def test_a_retried_implementer_is_shown_its_own_blocker_and_narrowed_step(
     data: st.DataObject, summary: str, step: str
@@ -219,6 +229,7 @@ def test_a_retried_implementer_is_shown_its_own_blocker_and_narrowed_step(
     assert (step in text) if step else ("The narrower step you named" not in text)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data())
 def test_a_first_attempt_is_not_shown_a_blocker(data: st.DataObject) -> None:
     context = data.draw(CONTEXTS[PromptTemplate.IMPLEMENT])
@@ -228,6 +239,7 @@ def test_a_first_attempt_is_not_shown_a_blocker(data: st.DataObject) -> None:
     assert "The blocker you stated:" not in render(PromptTemplate.IMPLEMENT, first)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data())
 def test_planner_and_implementer_share_one_first_measurable_step(data: st.DataObject) -> None:
     # live-2: the planner chose architecture-scale hypotheses that no single turn could finish.
@@ -241,6 +253,7 @@ def test_planner_and_implementer_share_one_first_measurable_step(data: st.DataOb
 # -- the judge and the profiler ------------------------------------------------------------------
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=CONTEXTS[PromptTemplate.REVIEW])
 def test_the_judge_is_given_the_candidate_and_every_trusted_evaluation_of_it(
     context: BaseModel,
@@ -266,6 +279,7 @@ def test_the_judge_is_given_the_candidate_and_every_trusted_evaluation_of_it(
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data(), offered=st.booleans())
 def test_the_judge_reads_evidence_and_the_diff_before_running_anything(
     data: st.DataObject, *, offered: bool
@@ -279,6 +293,7 @@ def test_the_judge_reads_evidence_and_the_diff_before_running_anything(
     assert "do not run local checks, benchmarks" in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=CONTEXTS[PromptTemplate.PROFILE_REQUEST])
 def test_the_profiler_is_asked_the_question_of_the_revision_with_the_fields_it_must_answer(
     context: BaseModel,
@@ -297,6 +312,7 @@ def test_the_profiler_is_asked_the_question_of_the_revision_with_the_fields_it_m
 # -- the exchanges core starts ------------------------------------------------------------------
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=CONTEXTS[CoreProtocolTemplate.RESUME])
 def test_a_resumed_turn_says_whether_its_wait_timed_out_and_what_was_retained(
     context: BaseModel,
@@ -312,6 +328,7 @@ def test_a_resumed_turn_says_whether_its_wait_timed_out_and_what_was_retained(
         assert context.retained.revision_id.root in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=CONTEXTS[CoreProtocolTemplate.REPLY_CORRECTION])
 def test_a_reply_correction_names_the_role_and_every_problem(context: BaseModel) -> None:
     assert isinstance(context, ReplyCorrection)
@@ -323,6 +340,7 @@ def test_a_reply_correction_names_the_role_and_every_problem(context: BaseModel)
         assert f"({error.code.value})" in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=CONTEXTS[CoreProtocolTemplate.WAIT_UNRECORDED])
 def test_an_unrecorded_wait_names_the_role_that_asked(context: BaseModel) -> None:
     assert isinstance(context, WaitUnrecorded)

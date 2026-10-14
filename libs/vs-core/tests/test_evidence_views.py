@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_core.api import (
@@ -21,6 +21,7 @@ from vs_core.api import (
     project,
     trusted_keys,
 )
+from vs_sim.api.testing import examples
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 CANDIDATE = RevisionRef(revision_id=RevisionId(root="c"), digest="digest-c")
@@ -79,6 +80,7 @@ def test_only_unflawed_records_of_the_measurement_are_kept(
     assert kept == expected
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(held=st.integers(0, 4), asked=st.integers(0, 4))
 def test_the_ledger_must_hold_every_requested_record_in_order(held: int, asked: int) -> None:
     refs = tuple(_ref(f"e{i}") for i in range(max(held, asked)))

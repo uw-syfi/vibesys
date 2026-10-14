@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import TERMS
 from tests.vibesys.orchestration.dynamic._values import (
@@ -63,6 +63,7 @@ from vs_core.api import (
     WhileAlive,
     WhileOpen,
 )
+from vs_sim.api.testing import examples
 
 AGENT_REASONS = frozenset(
     {
@@ -127,6 +128,7 @@ def test_every_reason_a_wait_can_fail_is_generated() -> None:
     assert set(FAILED_FACTS) == set(FailureReason)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(ending=wait_endings())
 def test_every_wait_that_ends_without_a_result_is_one_typed_failure_keeping_its_facts(
     ending: tuple[Failed, AgentName | None],
@@ -150,6 +152,7 @@ def test_every_wait_that_ends_without_a_result_is_one_typed_failure_keeping_its_
             assert (found.kind, found.ended) == (FailureKind.ENDED, event.reason)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(ending=wait_endings(), profiling=st.booleans())
 def test_a_turn_that_could_not_suspend_for_lack_of_resume_also_records_the_missing_capability(
     ending: tuple[Failed, AgentName | None], *, profiling: bool
@@ -164,6 +167,7 @@ def test_a_turn_that_could_not_suspend_for_lack_of_resume_also_records_the_missi
     assert ended_by(event, role).unreachable is None
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     blocker=st.builds(
         Blocker,
@@ -218,6 +222,7 @@ CANDIDACIES = st.builds(
 )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(case=CANDIDACIES)
 def test_a_candidate_is_eligible_exactly_when_the_task_the_review_and_the_input_all_say_so(
     case: Candidacy,
@@ -253,6 +258,7 @@ def test_a_candidate_is_eligible_exactly_when_the_task_the_review_and_the_input_
         assert settle.retention == "candidate"
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(failed_workstream=st.booleans(), accuracy=st.none() | st.booleans())
 def test_a_profile_workstream_settles_ineligible_and_discarded_whatever_it_measured(
     *, failed_workstream: bool, accuracy: bool | None
@@ -271,6 +277,7 @@ def test_a_profile_workstream_settles_ineligible_and_discarded_whatever_it_measu
 # -- what a finished workstream leaves behind ------------------------------------------------------
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     accuracy=st.none() | st.booleans(),
     retention=st.sampled_from(["discard", "wip", "candidate"]),
@@ -296,6 +303,7 @@ def test_a_parent_is_offered_only_for_a_retained_accuracy_proven_candidate_of_an
         assert {ref.key for ref in parent.proof} >= {parent.accuracy.key}
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     accuracy=st.booleans(), eligible=st.booleans(), retention=st.sampled_from(["candidate", "wip"])
 )
@@ -314,6 +322,7 @@ def test_the_round_a_workstream_adds_records_what_core_settled_not_what_the_agen
     assert record.review_passed is True
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(tail=st.text(max_size=30), benchmark_failed=st.booleans(), accuracy_failed=st.booleans())
 def test_the_failure_text_of_a_round_is_the_failed_trusted_checks_own_output(
     tail: str, *, benchmark_failed: bool, accuracy_failed: bool

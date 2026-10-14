@@ -34,8 +34,11 @@ from vs_core.api.testing import Harness, Succeeded, sample_limits, sample_retrie
 from vs_core.flows import search
 from vs_dst.api import RunSetup
 from vs_runtime.api.testing import Launch
+from vs_sim.api.testing import evenly_spaced
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from vs_core.api import CoreState, Decision, Request
     from vs_core.api.testing import Answer
 
@@ -112,6 +115,15 @@ class TinyWorld:
                 resource_id=ResourceId(root=f"workspace:{number}"), revision=request.plan.base
             )
         return Succeeded()
+
+
+def spread[T](points: Sequence[T], count: int) -> list[T]:
+    """``count`` points spread evenly along ``points``, including the first and the last.
+
+    A test of what a crash does asks for a few places along the run, not the library's whole
+    sample of them: each one is another recovered run.
+    """
+    return [points[index] for index in evenly_spaced(len(points), count)]
 
 
 def decision_key(decision: Decision) -> object:

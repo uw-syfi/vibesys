@@ -65,7 +65,7 @@ from .sessions import (
     TurnSpec,
 )
 from .settlement import AdoptionRequest, AdoptRevision, VerifyAdoption
-from .until import Failed, FailureReason, Inherited, ReplyError, Until, Watch, Within
+from .until import Failed, FailureReason, FromDispatch, Inherited, ReplyError, Until, Watch, Within
 
 
 class InspectRequest(RequestBase):
@@ -116,7 +116,7 @@ class Outbound(Value):
     """
 
     request: Request
-    until: Within | Inherited | Until
+    until: Within | Inherited | Until | FromDispatch
 
 
 def within(request: Request, limit: float, *watches: Watch) -> Outbound:
@@ -134,6 +134,8 @@ class Scheduled(Value):
 
     request: Request
     until: Until
+    limit_from_dispatch: Seconds | None = None
+    """The seconds the work may take once dispatched, when ``until`` is only a placeholder."""
 
 
 class RequestPhase(StrEnum):
@@ -176,6 +178,15 @@ class RequestRecord(OutcomeValue):
     """When core ends this record if it is still open, and the watches that end it sooner."""
     failure: Failed | None = None
     """Why core ended it without a result (limit passed, watch fired), else None."""
+    limit_from_dispatch: Seconds | None = None
+    """The seconds the work may take from its dispatch, or None for a limit already absolute.
+
+    Until the request is dispatched ``until.at`` is the run deadline (a queued request spends
+    nothing); ``DispatchAuthorized`` then replaces ``until`` with the dispatch time plus this
+    limit, once, and records ``dispatched_at``.
+    """
+    dispatched_at: Seconds | None = None
+    """When the shell first dispatched a request whose limit counts from then, else None."""
 
     @property
     def retry_wait_until(self) -> float | None:
@@ -390,6 +401,11 @@ class DispatchAuthorized(Value):
 
     kind: Literal["dispatch_authorized"] = "dispatch_authorized"
     request_id: RequestId
+    now_at: Seconds | None = None
+    """The shell's time at the dispatch, which starts the limit of a ``FromDispatch`` request.
+
+    None leaves core's time as it is.
+    """
 
 
 class ReissueProof(StrEnum):

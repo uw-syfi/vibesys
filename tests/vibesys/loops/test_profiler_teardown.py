@@ -1,4 +1,13 @@
-"""Host capture teardown contracts driven by process events and a logical clock."""
+"""Host capture teardown contracts driven by process events and a logical clock.
+
+Guarantees under test:
+
+* A capture's grace ends early only when every observed trace writer has finalized its own
+  complete records; any unproven writer (unreadable inventory, born after the stop, reused pid,
+  vanished before its maps were read) retains the full grace.
+* Cleanup owns only processes with the same birth identity, rediscovers detached descendants
+  and resumes fenced processes whatever happens.
+"""
 
 from __future__ import annotations
 
@@ -9,11 +18,17 @@ from signal import Signals
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from resources.profilers.rocprof import capture
 
+from vs_sim.api.testing import examples
+
 runtime = capture.capture_runtime
+
+# The grace period is virtual time that the scripted clock steps through one poll at a time,
+# so a short grace exercises the same expiry logic as the production default for a tenth of the cost.
+GRACE_S = 5
 
 
 def write_birth(directory: Path, pid: int, birth: int) -> None:
@@ -106,7 +121,8 @@ class ScriptedCaptureProcessGroup:
         self.parent_alive = self.child_alive = False
 
 
-@given(flush_at=st.integers(min_value=1, max_value=20), writers=st.integers(1, 4))
+@settings(max_examples=examples(pr=4, nightly=100))
+@given(flush_at=st.integers(min_value=1, max_value=GRACE_S - 1), writers=st.integers(1, 4))
 def test_finalized_trace_ends_grace_while_child_survives(flush_at: int, writers: int) -> None:
     with TemporaryDirectory() as temporary:
         directory = Path(temporary)
@@ -114,7 +130,7 @@ def test_finalized_trace_ends_grace_while_child_survives(flush_at: int, writers:
         group = ScriptedCaptureProcessGroup(directory, clock, flush_at=flush_at, writers=writers)
         result = runtime.stop_capture(
             group,
-            runtime.Lifecycle(command="server", grace_s=120),
+            runtime.Lifecycle(command="server", grace_s=GRACE_S),
             completion=capture.RocprofTraceCompletion(directory, process_root=group.process_root),
             monotonic=clock.monotonic,
         )
@@ -137,12 +153,12 @@ def test_unproven_trace_retains_full_grace(tmp_path: Path, fault: str) -> None:
     group = ScriptedCaptureProcessGroup(tmp_path, clock, flush_at=4, writers=1, fault=fault)
     result = runtime.stop_capture(
         group,
-        runtime.Lifecycle(command="server", grace_s=120),
+        runtime.Lifecycle(command="server", grace_s=GRACE_S),
         completion=capture.RocprofTraceCompletion(tmp_path, process_root=group.process_root),
         monotonic=clock.monotonic,
     )
     assert not result.trace_complete
-    assert clock.now == 120
+    assert clock.now == GRACE_S
     assert not group.child_alive
 
 
@@ -201,7 +217,7 @@ class ScriptedWrapperProcess:
         self.group.wait(timeout)
         # The wrapper eventually exits, but the complete trace was available
         # much earlier. A successful late exit still incurs the bug's cost.
-        if self.group.clock.now >= 120:
+        if self.group.clock.now >= GRACE_S:
             self.returncode = 0
             return 0
         raise subprocess.TimeoutExpired("scripted-wrapper", timeout)
@@ -211,7 +227,7 @@ def test_complete_capture_does_not_wait_for_wrapper_exit(tmp_path: Path) -> None
     """Base-compatible regression: observe the old grace through timed waits."""
     clock = FakeClock()
     group = ScriptedCaptureProcessGroup(tmp_path, clock, flush_at=5, writers=1)
-    lifecycle = runtime.Lifecycle(command="server", grace_s=120)
+    lifecycle = runtime.Lifecycle(command="server", grace_s=GRACE_S)
     if hasattr(runtime, "stop_capture"):
         runtime.stop_capture(
             group,
@@ -236,7 +252,7 @@ def test_finalized_trace_cleans_child_after_parent_exits(tmp_path: Path) -> None
     group.parent_alive = False
     result = runtime.stop_capture(
         group,
-        runtime.Lifecycle(command="server", grace_s=120),
+        runtime.Lifecycle(command="server", grace_s=GRACE_S),
         completion=capture.RocprofTraceCompletion(tmp_path, process_root=group.process_root),
         monotonic=clock.monotonic,
     )
@@ -305,14 +321,15 @@ def test_unreadable_writer_inventory_keeps_full_grace(tmp_path: Path, fault: str
         maps.write_bytes(b"\xff librocprofiler-sdk-tool.so")
     result = runtime.stop_capture(
         group,
-        runtime.Lifecycle(command="server", grace_s=120),
+        runtime.Lifecycle(command="server", grace_s=GRACE_S),
         completion=capture.RocprofTraceCompletion(tmp_path, process_root=group.process_root),
         monotonic=clock.monotonic,
     )
     assert not result.trace_complete
-    assert clock.now == 120
+    assert clock.now == GRACE_S
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     pid=st.integers(min_value=1, max_value=1_000_000),
     original_birth=st.integers(min_value=0, max_value=1_000_000),
@@ -367,6 +384,7 @@ class LateWriterGroup(ScriptedCaptureProcessGroup):
         self.fenced = False
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(birth_phase=st.integers(0, 1), finalize=st.booleans())
 def test_writer_born_between_inventory_and_cleanup_retains_grace(
     birth_phase: int, *, finalize: bool
@@ -377,17 +395,18 @@ def test_writer_born_between_inventory_and_cleanup_retains_grace(
         group = LateWriterGroup(directory, clock, birth_phase=birth_phase, finalize=finalize)
         result = runtime.stop_capture(
             group,
-            runtime.Lifecycle(command="server", grace_s=120),
+            runtime.Lifecycle(command="server", grace_s=GRACE_S),
             completion=capture.RocprofTraceCompletion(directory, process_root=group.process_root),
             monotonic=clock.monotonic,
         )
         assert group.birth_seen
         assert not result.trace_complete or group.finalize
         if not group.finalize:
-            assert clock.now == 120
+            assert clock.now == GRACE_S
         assert not group.fenced
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(pid=st.integers(100, 1_000_000), birth=st.integers(0, 1_000_000), delta=st.integers(1, 1000))
 def test_reused_writer_pid_cannot_reuse_finalization(pid: int, birth: int, delta: int) -> None:
     with TemporaryDirectory() as temporary:
@@ -500,6 +519,7 @@ def process_trees(draw: st.DrawFn) -> list[int]:
     return [draw(st.integers(0, index - 1)) for index in range(1, count + 1)]
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(parents=process_trees(), parent_index=st.integers(0, 8))
 def test_cleanup_rediscovers_detached_descendants_after_term(
     parents: list[int], parent_index: int
@@ -522,6 +542,7 @@ def test_cleanup_rediscovers_detached_descendants_after_term(
     assert (runtime.ProcessIdentity(1000, 10000), signal.SIGKILL) in table.signals
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(parents=process_trees(), stop_delay=st.integers(0, 8))
 def test_process_fence_requires_acknowledged_stops_and_resumes(
     parents: list[int], stop_delay: int
@@ -609,6 +630,7 @@ class ReusingWriterTable(FakeProcessTable):
         super().signal(identity, sig)
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(during_fence=st.booleans(), birth=st.integers(0, 1_000_000))
 def test_stop_capture_inventories_owned_pid_reuse(*, during_fence: bool, birth: int) -> None:
     with TemporaryDirectory() as temporary:
@@ -620,16 +642,17 @@ def test_stop_capture_inventories_owned_pid_reuse(*, during_fence: bool, birth: 
         )
         result = runtime.stop_capture(
             group,
-            runtime.Lifecycle(command="server", grace_s=120),
+            runtime.Lifecycle(command="server", grace_s=GRACE_S),
             completion=capture.RocprofTraceCompletion(directory, process_root=directory / "proc"),
             monotonic=clock.monotonic,
         )
         assert not result.trace_complete
-        assert clock.now >= 120
+        assert clock.now >= GRACE_S
         assert not table.live
         assert not table.pending_stops
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(writers=st.integers(2, 5), missing_index=st.integers(0, 4))
 def test_finalized_writer_requires_its_own_complete_records(
     writers: int, missing_index: int
@@ -649,7 +672,7 @@ class InterleavedWriterGroup(ScriptedCaptureProcessGroup):
     """Writers can be born, finalize, or exit without finalization at each tick."""
 
     def __init__(self, directory: Path, clock: FakeClock, events: list[tuple[str, int]]) -> None:
-        super().__init__(directory, clock, flush_at=120, writers=1)
+        super().__init__(directory, clock, flush_at=GRACE_S, writers=1)
         self.events = list(events)
         self.live_writers = {100}
         self.ever_writers = {100}
@@ -686,9 +709,10 @@ class InterleavedWriterGroup(ScriptedCaptureProcessGroup):
         return self.poll()
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     events=st.lists(
-        st.tuples(st.sampled_from(["birth", "finalize", "exit"]), st.integers(0, 4)), max_size=20
+        st.tuples(st.sampled_from(["birth", "finalize", "exit"]), st.integers(0, 4)), max_size=8
     )
 )
 def test_completion_implies_every_observed_writer_finalized(events: list[tuple[str, int]]) -> None:
@@ -698,7 +722,7 @@ def test_completion_implies_every_observed_writer_finalized(events: list[tuple[s
         group = InterleavedWriterGroup(directory, clock, events)
         result = runtime.stop_capture(
             group,
-            runtime.Lifecycle(command="server", grace_s=30),
+            runtime.Lifecycle(command="server", grace_s=GRACE_S),
             completion=capture.RocprofTraceCompletion(directory, process_root=group.process_root),
             monotonic=clock.monotonic,
         )
@@ -733,7 +757,7 @@ def test_completion_exception_resumes_fenced_processes() -> None:
     with pytest.raises(ProofReadError):
         runtime.stop_capture(
             group,
-            runtime.Lifecycle(command="server", grace_s=120),
+            runtime.Lifecycle(command="server", grace_s=GRACE_S),
             completion=FailingFenceProof(),
             monotonic=clock.monotonic,
         )
@@ -768,6 +792,7 @@ class TransientWriterTable(ReusingWriterTable):
         super().signal(identity, sig)
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(during_fence=st.booleans(), pid=st.integers(100, 1_000_000), birth=st.integers(0, 1_000_000))
 def test_transient_unfinalized_writer_prevents_completion(
     *, during_fence: bool, pid: int, birth: int
@@ -781,12 +806,12 @@ def test_transient_unfinalized_writer_prevents_completion(
         )
         result = runtime.stop_capture(
             group,
-            runtime.Lifecycle(command="server", grace_s=120),
+            runtime.Lifecycle(command="server", grace_s=GRACE_S),
             completion=capture.RocprofTraceCompletion(directory, process_root=directory / "proc"),
             monotonic=clock.monotonic,
         )
         assert not result.trace_complete
-        assert clock.now >= 120
+        assert clock.now >= GRACE_S
 
 
 def test_polling_process_table_cannot_prove_writer_history() -> None:
@@ -798,7 +823,7 @@ class MissingWriterHistoryGroup(ScriptedCaptureProcessGroup):
     """A writer exits without artifacts before the next members observation."""
 
     def __init__(self, directory: Path, clock: FakeClock, *, hidden_pid: int) -> None:
-        super().__init__(directory, clock, flush_at=120, writers=1)
+        super().__init__(directory, clock, flush_at=GRACE_S, writers=1)
         self.history = {100}
         self.observed: set[int] = set()
         self.hidden_pid = hidden_pid
@@ -819,6 +844,7 @@ class MissingWriterHistoryGroup(ScriptedCaptureProcessGroup):
         return self.history <= self.observed
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(hidden_pid=st.integers(101, 1_000_000))
 def test_unobserved_exited_writer_retains_grace(hidden_pid: int) -> None:
     with TemporaryDirectory() as temporary:
@@ -827,14 +853,15 @@ def test_unobserved_exited_writer_retains_grace(hidden_pid: int) -> None:
         group = MissingWriterHistoryGroup(directory, clock, hidden_pid=hidden_pid)
         result = runtime.stop_capture(
             group,
-            runtime.Lifecycle(command="server", grace_s=120),
+            runtime.Lifecycle(command="server", grace_s=GRACE_S),
             completion=capture.RocprofTraceCompletion(directory, process_root=group.process_root),
             monotonic=clock.monotonic,
         )
         assert not result.trace_complete
-        assert clock.now == 120
+        assert clock.now == GRACE_S
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(pid=st.integers(100, 1_000_000), birth=st.integers(0, 1_000_000))
 def test_new_writer_marker_cannot_reuse_pre_stop_csv(pid: int, birth: int) -> None:
     with TemporaryDirectory() as temporary:
@@ -860,6 +887,7 @@ def test_new_writer_marker_cannot_reuse_pre_stop_csv(pid: int, birth: int) -> No
         assert completion.complete({pid})
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(pid=st.integers(101, 1_000_000))
 def test_new_writer_disappearing_before_maps_read_keeps_proof_unproven(pid: int) -> None:
     with TemporaryDirectory() as temporary:

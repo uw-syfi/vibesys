@@ -15,6 +15,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     plan_reply,
     reviewed,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import FailureKind
@@ -30,7 +31,7 @@ from vs_core.api import (
     Withdraw,
 )
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def started(*, restarting: bool) -> Host:

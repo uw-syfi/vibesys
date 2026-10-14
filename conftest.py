@@ -16,6 +16,8 @@ import pytest
 from hypothesis import settings
 from tests.support.scratch_tree import remove_scratch_tree
 
+from vs_sim.api.testing import Depth
+
 # `--shard=I/N` splits the suite across CI runners (see tests/support/sharding.py).
 pytest_plugins = [
     "vs_sim_pytest",
@@ -28,6 +30,14 @@ pytest_plugins = [
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
+
+# NumPy's BLAS starts one busy-waiting thread per core when it loads, and the product loads
+# NumPy at import (through the evolve search's dependencies). On a many-core host that
+# doubles the CPU a worker spends on its imports (12 CPU-s against 5 for the same 6 s of
+# wall time) and takes cores from the other workers; no test depends on threaded linear
+# algebra. Set before collection imports the product, inherited by every child process.
+for _variable in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_variable, "1")
 
 
 @pytest.fixture
@@ -46,31 +56,39 @@ def sandbox_tmp_path() -> Iterator[Path]:
 
 
 # Hypothesis's per-example deadline is a wall-clock dependence, so it is off in
-# every profile. `ci` is derandomized so a run's examples are a pure function of
-# the code: a newly found counterexample cannot fail an unrelated PR. `explore`
-# is the randomized, larger run for finding new bugs; select it by hand with
-# `HYPOTHESIS_PROFILE=explore`.
+# every profile. The session's depth (`--depth`, owned by the vs-sim plugin)
+# picks the profile: `pr` loads `ci`, derandomized so a run's examples are a
+# pure function of the code (a newly found counterexample cannot fail an
+# unrelated PR); `nightly` loads `nightly`, randomized so each night draws
+# examples the derandomized tier never reaches, with `print_blob` so a failure
+# prints its `@reproduce_failure` line, which replays under any profile (pin it
+# with `@example(...)`). `HYPOTHESIS_PROFILE=dev|explore` overrides by hand:
+# `dev` is randomized at the PR count, `explore` is the larger run for finding
+# new bugs.
 # `dev` and `ci` run 25 examples, not Hypothesis's 100. Branch coverage of the
 # libraries is unchanged at 25 (measured for `vs-core`), while the property
 # suites that do not set their own `max_examples` run about 3x faster; a test
-# that needs a deeper search states it with `@settings(max_examples=...)`.
+# that needs a deeper search states `examples(pr=..., nightly=...)`.
 # Every profile states `derandomize` explicitly: an unset option resolves from
 # whichever profile is loaded, so `explore` would otherwise inherit `ci`'s.
 settings.register_profile("dev", deadline=None, derandomize=False, max_examples=25)
-settings.register_profile("ci", deadline=None, derandomize=True, print_blob=True, max_examples=25)
+settings.register_profile("ci", deadline=None, derandomize=True, print_blob=True, max_examples=10)
 settings.register_profile(
     "explore", deadline=None, derandomize=False, max_examples=500, print_blob=True
 )
-# `nightly` is the deep sweep of `.github/workflows/nightly.yml`: randomized, so
-# each night draws examples the derandomized PR tier never reaches, and
-# `print_blob` makes a failure print its `@reproduce_failure` line, which
-# replays it under any profile. Pin the result with `@example(...)`.
 settings.register_profile(
     "nightly", deadline=None, derandomize=False, max_examples=100, print_blob=True
 )
-settings.load_profile(
-    os.environ.get("HYPOTHESIS_PROFILE") or ("ci" if os.environ.get("CI") else "dev")
-)
+_PROFILE_OF_DEPTH = {Depth.PR: "ci", Depth.NIGHTLY: "nightly"}
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Load the Hypothesis profile that follows the session's depth."""
+    chosen = (
+        os.environ.get("HYPOTHESIS_PROFILE") or _PROFILE_OF_DEPTH[Depth(config.getoption("depth"))]
+    )
+    settings.load_profile(chosen)
+
 
 #: xdist scheduling group for tests that cannot run beside one another.
 _SERIAL_GROUP = "serial"

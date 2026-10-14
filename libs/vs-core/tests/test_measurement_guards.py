@@ -3,10 +3,11 @@
 from dataclasses import dataclass
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
 from .test_measurements import (
@@ -215,6 +216,7 @@ def profile_completed() -> tuple[core.CoreState, core.SubmitMeasurement, core.Ev
     return result.state, request, result.state.evaluation.evidence[0]
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     field=st.sampled_from(
         (
@@ -318,6 +320,7 @@ def test_capture_without_final_trusted_source_never_grants_reuse(
     assert result.requests == ()
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     failed_partial=st.booleans(),
     accuracy_passed=st.booleans(),
@@ -408,6 +411,7 @@ def test_ingress_requires_independent_canonical_submission_proof(fault: str) -> 
     assert result.requests == ()
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     status=st.sampled_from((core.ObservationStatus.UNKNOWN, core.ObservationStatus.PENDING)),
     terminal=st.booleans(),
@@ -742,6 +746,7 @@ def test_registered_request_conflicts_are_rejected_without_ownership(fault: str)
     assert rejected.status == core.ObservationStatus.REJECTED
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     root_released=st.booleans(),
     manifest=st.sampled_from(["absent", "children", "descendant-manifest"]),

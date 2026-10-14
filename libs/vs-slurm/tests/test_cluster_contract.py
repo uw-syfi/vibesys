@@ -17,7 +17,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, initialize, precondition, rule
 
-from vs_sim.api.testing import wait_until_started_sync
+from vs_sim.api.testing import examples, wait_until_started_sync
 from vs_slurm.api import (
     INITIAL_LIFE,
     AccountingRow,
@@ -538,7 +538,7 @@ def test_invalid_request_is_rejected_by_every_implementation(case: _Case) -> Non
 
 
 @pytest.mark.parametrize("implementation", ["fake", "slurm"])
-@settings(max_examples=20)
+@settings(max_examples=examples(pr=5, nightly=20))
 @given(
     payload=st.text(
         alphabet=st.characters(blacklist_categories=("Cs",), blacklist_characters="\x00"),
@@ -1355,7 +1355,7 @@ class ClusterContractMachine(RuleBasedStateMachine):
 
 TestClusterContractMachine = ClusterContractMachine.TestCase
 TestClusterContractMachine.settings = settings(
-    max_examples=30,
+    max_examples=examples(pr=5, nightly=30),
     stateful_step_count=20,
     report_multiple_bugs=False,
 )
@@ -1524,7 +1524,7 @@ def test_malformed_identity_is_a_typed_unknown_for_non_submit_calls(
 
 @pytest.mark.parametrize("implementation", ["fake", "slurm"])
 @pytest.mark.parametrize("action", ["inspect", "cancel", "collect"])
-@settings(max_examples=20)
+@settings(max_examples=examples(pr=5, nightly=20))
 @given(
     operation_id=st.one_of(
         st.just(""),

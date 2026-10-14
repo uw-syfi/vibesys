@@ -172,7 +172,11 @@ def test_direct_build_guard_recognizes_tuple_and_prebound_commands(
 
 
 def _direct_uv_builds(path: Path) -> list[str]:
-    tree = ast.parse(path.read_text(), filename=str(path))
+    text = path.read_text()
+    # A build command spells both words; most files spell neither, and the visitor is slow.
+    if "uv" not in text or "build" not in text:
+        return []
+    tree = ast.parse(text, filename=str(path))
     finder = _DirectUvBuildFinder(path)
     finder.visit(tree)
     return finder.offenders

@@ -381,6 +381,9 @@ class CoreRuntime[S: StrategyState]:
         # The (run, registry) values `_check_identity` last accepted. Both are frozen, so
         # the same objects always give the same verdict.
         self._identity_verified: tuple[object, object] | None = None
+        # The record and host a start last validated, so a start retried while a lease is
+        # held does not validate the same record again.
+        self._start_checked: tuple[RuntimeRecord[S], str] | None = None
 
     @classmethod
     def resume(
@@ -463,9 +466,28 @@ class CoreRuntime[S: StrategyState]:
             return None
         if not isinstance(stored, StoredEnvelope):
             raise ContractError(("runtime",), "quarantined record cannot run")
-        self._record = self._decode(stored)
-        self._storage_revision = stored.revision
+        # A store revision names one write, so the record decoded from it (or committed as
+        # it) still stands; a start waiting out a lease reloads every poll without decoding.
+        if self._record is None or stored.revision != self._storage_revision:
+            self._record = self._decode(stored)
+            self._storage_revision = stored.revision
         return stored
+
+    def _start_validated(self, host_id: str) -> bool:
+        """Whether a start already validated this very record for this host."""
+        checked = self._start_checked
+        return (
+            self._record is not None
+            and checked is not None
+            and checked[0] is self._record
+            and checked[1] == host_id
+        )
+
+    def _validate_provisional(self, provisional: RunEnvelope[S], host_id: str) -> None:
+        """The envelope a start would commit round-trips through the registry."""
+        self._registry.reload_envelope(self._envelope_model, provisional)
+        if self._record is not None:
+            self._start_checked = (self._record, host_id)
 
     def start(self, host_id: str, *, now_at: float, lease_duration: float) -> None:
         """Validate before lease acquisition, then commit new-epoch recovery.
@@ -483,7 +505,9 @@ class CoreRuntime[S: StrategyState]:
         selected = validate_startup(self._search.declaration, core.run.capabilities)
         if selected.operations != core.registry:
             raise ContractError(("registry",), "selected operations differ from durable registry")
-        self._registry.validate_core(core)
+        recheck = not self._start_validated(host_id)
+        if recheck:
+            self._registry.validate_core(core)
         decisions: tuple[Decision, ...] = ()
         if self._record is None:
             with _search_generators():
@@ -504,9 +528,8 @@ class CoreRuntime[S: StrategyState]:
             if self._record is None
             else self.record.envelope.event_cursor,
         )
-        self._registry.decode_envelope(
-            self._envelope_model, self._registry.encode_envelope(provisional)
-        )
+        if recheck:
+            self._validate_provisional(provisional, host_id)
         fence = self._store.acquire(host_id, now=now_at, duration=lease_duration)
         if fence is None:
             message = "runtime lease unavailable"
@@ -887,7 +910,9 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime inactive, busy or commit unconfirmed"
             raise RuntimeCommitError(message)
 
-    def _authorized(self, *, exempt_only: bool = False) -> tuple[RequestRecord, Transition] | None:
+    def _authorized(
+        self, *, now_at: float, exempt_only: bool = False
+    ) -> tuple[RequestRecord, Transition] | None:
         """Ask core for dispatch authority; blocked prerequisites remain pending.
 
         ``exempt_only`` considers only requests that never wait for a free slot.
@@ -900,7 +925,7 @@ class CoreRuntime[S: StrategyState]:
                 continue
             try:
                 transition = self._transitions.step(
-                    core, DispatchAuthorized(request_id=record.request_id)
+                    core, DispatchAuthorized(request_id=record.request_id, now_at=now_at)
                 )
             except ContractError as error:
                 if error.path not in (("dependency",), ("recovery",)):
@@ -946,7 +971,7 @@ class CoreRuntime[S: StrategyState]:
         if self._queue:
             message = "consume queued inputs before dispatch"
             raise RuntimeError(message)
-        authorized = self._authorized(exempt_only=exempt_only)
+        authorized = self._authorized(now_at=now_at, exempt_only=exempt_only)
         if authorized is None:
             return None
         record, transition = authorized
@@ -954,7 +979,9 @@ class CoreRuntime[S: StrategyState]:
         if unbound is not None:
             return unbound
         self._consume(
-            _Input[S](event=DispatchAuthorized(request_id=record.request_id), now_at=now_at),
+            _Input[S](
+                event=DispatchAuthorized(request_id=record.request_id, now_at=now_at), now_at=now_at
+            ),
             transition,
         )
         if self._fence is None or not self._store.verify(
@@ -984,13 +1011,13 @@ class CoreRuntime[S: StrategyState]:
             fence=self.record.envelope.fence,
             now_at=now_at,
             payload_digest=record.payload_digest,
-            until=record.until,
+            until=authorized_record.until,
             lease=_ShellLease(self),
         )
         self._authorizations += 1
         return _Flight(
             order=self._authorizations,
-            record=record,
+            record=authorized_record,
             now_at=now_at,
             task=asyncio.create_task(
                 self._executors.dispatch(record.request, context),

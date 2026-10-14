@@ -97,7 +97,7 @@ from server.host_helper_requests import (
 )
 from server.registry import FakeInstanceStore, LiveRegistry, StopEffects
 from server.relay import EXIT_STATUS
-from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller, SimNetwork, SimThreads
+from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller, SimNetwork, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -275,7 +275,7 @@ def _drive(actions: Sequence[tuple[str, Any]]) -> _Driver:
     return driver
 
 
-@settings(max_examples=300)
+@settings(max_examples=examples(pr=20, nightly=300))
 @given(_actions())
 def test_every_line_gets_exactly_one_reply_naming_its_request(
     actions: list[tuple[str, Any]],
@@ -292,7 +292,7 @@ def test_every_line_gets_exactly_one_reply_naming_its_request(
     assert not driver.state.pending
 
 
-@settings(max_examples=300)
+@settings(max_examples=examples(pr=20, nightly=300))
 @given(_actions())
 def test_a_run_channel_is_handed_over_at_most_once_and_then_does_nothing(
     actions: list[tuple[str, Any]],
@@ -310,7 +310,7 @@ def test_a_run_channel_is_handed_over_at_most_once_and_then_does_nothing(
         assert step(driver.state, Received(_line(_hello()), 0.0), VIBESYS_VERSION)[1] == ()
 
 
-@settings(max_examples=300)
+@settings(max_examples=examples(pr=20, nightly=300))
 @given(_actions())
 def test_a_watch_pushes_only_what_changed_and_only_while_open(
     actions: list[tuple[str, Any]],
@@ -1198,7 +1198,7 @@ _FRAMES = st.lists(
 ).map(b"".join)
 
 
-@settings(max_examples=30, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=30), deadline=None)
 @given(upstream=_FRAMES, downstream=_FRAMES, seed=st.integers(0, 2**16), early=st.booleans())
 def test_run_connect_relays_bytes_both_ways_including_ones_sent_early(
     upstream: bytes, downstream: bytes, seed: int, *, early: bool

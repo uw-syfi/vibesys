@@ -11,7 +11,7 @@ from hypothesis import strategies as st
 from entrypoints import launcher
 from entrypoints.tasks import run
 from server.host_api import TaskList, TaskSummary
-from vs_sim.api.testing import FakeForegroundLauncher, ForegroundScript
+from vs_sim.api.testing import FakeForegroundLauncher, ForegroundScript, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,7 +30,10 @@ def _task(project: Path, name: str) -> None:
     (task / "vibesys.input.toml").write_text("", encoding="utf-8")
 
 
-@settings(max_examples=25, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=10, nightly=25),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(names=st.sets(_TASK_NAMES, min_size=1, max_size=5))
 def test_json_lists_every_task_by_name_in_order(
     tmp_path_factory: pytest.TempPathFactory, names: set[str]

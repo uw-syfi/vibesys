@@ -14,6 +14,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vs_sim.api.testing import examples
 from vs_slurm.api import SlurmConfig, SlurmConnectorTransport
 
 # test-isolation: the interpreter is the Fake under test and is not part of the library API.
@@ -107,7 +108,7 @@ def _drive(root: Path, shell: _Shell, script: list[tuple[str, str, str]]) -> lis
     return [*outcomes, *transport.replies]
 
 
-@settings(max_examples=12, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=12), deadline=None)
 @given(script=_OPERATIONS)
 def test_remote_operations_leave_the_same_state_and_answers_under_either_shell(
     script: list[tuple[str, str, str]],

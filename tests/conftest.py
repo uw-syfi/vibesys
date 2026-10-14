@@ -7,12 +7,21 @@ coverage) for nothing. A fixture that needs the product lives in the test module
 uses it.
 """
 
+import os
 import shutil
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from filelock import FileLock
+from tests.support.distribution_build import (
+    BuiltDistributions,
+    BuiltWheel,
+    build_distribution,
+    copy_private_packaging_source,
+    reissue_private_packaging_source,
+)
 
 
 @pytest.fixture
@@ -56,3 +65,41 @@ def socket_dir() -> Iterator[Path]:
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return Path(__file__).parents[1]
+
+
+@pytest.fixture(scope="session")
+def built_distributions(
+    tmp_path_factory: pytest.TempPathFactory, repo_root: Path
+) -> BuiltDistributions:
+    """One sdist and one wheel of the current checkout, built once per run in private scratch.
+
+    A build takes tens of seconds of CPU, and every packaging check only inspects the result,
+    so they all share this one. Under xdist the workers share it too: the first to ask builds
+    it while holding a file lock in the run's common temp directory, and the others reuse it,
+    whichever ``--dist`` mode scheduled their tests.
+    """
+    base = tmp_path_factory.getbasetemp()
+    scratch = (base.parent if os.environ.get("PYTEST_XDIST_WORKER") else base) / "built"
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    dist = scratch / "dist"
+    with FileLock(str(scratch.parent / "built.lock")):
+        if not dist.is_dir():
+            staging = scratch.parent / "built-staging"
+            staging.mkdir()
+            source = copy_private_packaging_source(repo_root, staging / "checkout")
+            build_distribution(source, staging / "dist", artifact="all")
+            staging.rename(scratch)
+    # The snapshot's capability is process-local, so each worker re-issues it over the
+    # finished copy instead of sharing the first builder's object.
+    source = reissue_private_packaging_source(scratch / "checkout")
+    return BuiltDistributions(
+        source=source,
+        sdist=next(dist.glob("vibesys-*.tar.gz")),
+        wheel=next(dist.glob("vibesys-*.whl")),
+    )
+
+
+@pytest.fixture(scope="session")
+def built_wheel(built_distributions: BuiltDistributions) -> BuiltWheel:
+    """The shared build's wheel, with the snapshot it came from."""
+    return BuiltWheel(source=built_distributions.source, wheel=built_distributions.wheel)

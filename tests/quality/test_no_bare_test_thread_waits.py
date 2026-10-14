@@ -13,6 +13,11 @@ run on a worker).
 import ast
 from pathlib import Path
 
+import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
+
 REPO = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = (REPO / "tests", *sorted((REPO / "libs").glob("*/tests")))
 NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
@@ -60,9 +65,12 @@ def _own_calls(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Cal
 
 def bare_test_thread_waits(source: str) -> list[int]:
     """Line numbers of zero-argument ``.wait()`` calls made directly by a test function."""
+    # A rule names what it looks for, so a source that never spells it cannot violate it.
+    if "wait" not in source:
+        return []
     return sorted(
         call.lineno
-        for node in ast.walk(ast.parse(source))
+        for node in walk_nodes(parse_source(source))
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         and node.name.startswith("test_")
         for call in _own_calls(node)

@@ -19,6 +19,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_adoption import RUN_SCOPE, reload
 
@@ -239,7 +240,7 @@ def _settle(executor: Executor) -> None:
     executor.tick(1)
 
 
-@settings(max_examples=300, deadline=None)
+@settings(max_examples=examples(pr=3, nightly=300), deadline=None)
 @example(plan=[("turn", 0, 0)], final_stop=0)  # stop while the session is still being created
 @given(plan=st.lists(actions, min_size=1, max_size=30), final_stop=st.integers(0, 2))
 def test_every_run_owned_session_is_closed_and_the_run_ends_after_any_control_sequence(

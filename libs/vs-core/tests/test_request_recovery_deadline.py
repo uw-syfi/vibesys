@@ -1,6 +1,6 @@
 """Obsolete setup deadlines cannot retire a positively reattached session."""
 
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_core.api import (
@@ -42,6 +42,9 @@ from vs_core.api import (
     initial_state,
     step,
 )
+from vs_sim.api.testing import examples
+
+from .restart import restarts
 
 OWED = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
 
@@ -100,6 +103,8 @@ def recovering_state(*records: RequestRecord) -> CoreState:
 
 def reload(state: CoreState) -> CoreState:
     """Exercise public validation of each persisted state before stepping."""
+    if not restarts():
+        return state
     return CoreState.model_validate_json(state.model_dump_json())
 
 
@@ -117,6 +122,7 @@ def reload(state: CoreState) -> CoreState:
     child_pending=False,
     elapsed=0,
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     phase=st.sampled_from([RequestPhase.DISPATCHED, RequestPhase.COMPLETED]),
     ready=st.booleans(),
@@ -275,6 +281,7 @@ def test_a_passed_limit_ends_an_owed_root_even_when_reattached_and_cleans_its_ch
 
 
 @example(missing=False, elapsed=0)
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     missing=st.booleans(),
     elapsed=st.integers(min_value=0, max_value=10_000),

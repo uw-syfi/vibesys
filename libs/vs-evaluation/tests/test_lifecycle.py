@@ -36,7 +36,7 @@ from vs_evaluation.api.testing import (
     FakeEvaluationExecutor,
     InMemoryEvaluationStore,
 )
-from vs_sim.api.testing import ManualClock, arrival
+from vs_sim.api.testing import ManualClock, arrival, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -595,7 +595,7 @@ _FINISHED: dict[EvaluationState, tuple[str | None, tuple[EvaluationStepResult, .
 }
 
 
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=60), deadline=None)
 @given(
     timeout_s=st.floats(min_value=0.001, max_value=20),
     latency_s=st.floats(min_value=0, max_value=100),

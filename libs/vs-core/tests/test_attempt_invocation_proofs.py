@@ -11,6 +11,7 @@ from vs_core.api import (
     AttemptBudget,
     AttemptChargeRefundRequested,
     AttemptCheckpoint,
+    AttemptExhausted,
     AttemptId,
     AttemptPhase,
     AttemptRef,
@@ -59,6 +60,30 @@ from vs_core.api import (
     initial_state,
 )
 from vs_core.api.testing import sample_limits
+
+from .guard_rows import guard_rows
+
+STATUSES = [ObservationStatus.SUCCEEDED, ObservationStatus.REJECTED]
+CORRELATIONS = ["exact", "unrelated", "unregistered"]
+EPISODES = ["absent", "old", "current"]
+RECEIPTS = [
+    "absent",
+    "rejected",
+    "mismatched",
+    "exact",
+    "foreign-request-decision",
+    "missing-request-membership",
+    "foreign-session-scope",
+]
+LIFECYCLES = [
+    (phase, status)
+    for phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN, SessionPhase.TERMINAL)
+    for status in (
+        ObservationStatus.PENDING,
+        ObservationStatus.UNKNOWN,
+        ObservationStatus.SUCCEEDED,
+    )
+]
 
 
 def invocation_fixture(
@@ -253,21 +278,16 @@ def checkpoint_event(state: CoreState) -> InvocationCheckpointRequested:
 
 
 @pytest.mark.parametrize(
-    "receipt_kind",
-    [
-        "absent",
-        "rejected",
-        "mismatched",
-        "exact",
-        "foreign-request-decision",
-        "missing-request-membership",
-        "foreign-session-scope",
-    ],
+    ("status", "correlation", "admission", "observed_episode", "receipt_kind"),
+    guard_rows(
+        STATUSES,
+        CORRELATIONS,
+        ["absent", "current"],
+        EPISODES,
+        RECEIPTS,
+        positive=(ObservationStatus.SUCCEEDED, "exact", "current", "current", "exact"),
+    ),
 )
-@pytest.mark.parametrize("status", [ObservationStatus.SUCCEEDED, ObservationStatus.REJECTED])
-@pytest.mark.parametrize("correlation", ["exact", "unrelated", "unregistered"])
-@pytest.mark.parametrize("admission", ["absent", "current"])
-@pytest.mark.parametrize("observed_episode", ["absent", "old", "current"])
 def test_checkpoint_requires_exact_current_terminal_invocation_proof(
     status: ObservationStatus,
     correlation: str,
@@ -310,20 +330,15 @@ def test_checkpoint_requires_exact_current_terminal_invocation_proof(
 
 
 @pytest.mark.parametrize(
-    "receipt_kind",
-    [
-        "absent",
-        "rejected",
-        "mismatched",
-        "exact",
-        "foreign-request-decision",
-        "missing-request-membership",
-        "foreign-session-scope",
-    ],
+    ("status", "correlation", "observed_episode", "receipt_kind"),
+    guard_rows(
+        STATUSES,
+        CORRELATIONS,
+        EPISODES,
+        RECEIPTS,
+        positive=(ObservationStatus.SUCCEEDED, "exact", "current", "exact"),
+    ),
 )
-@pytest.mark.parametrize("status", [ObservationStatus.SUCCEEDED, ObservationStatus.REJECTED])
-@pytest.mark.parametrize("correlation", ["exact", "unrelated", "unregistered"])
-@pytest.mark.parametrize("observed_episode", ["absent", "old", "current"])
 def test_refund_requires_exact_current_terminal_invocation_proof(
     status: ObservationStatus,
     correlation: str,
@@ -382,31 +397,23 @@ def test_refund_requires_exact_current_terminal_invocation_proof(
 
 
 @pytest.mark.parametrize(
-    "receipt_kind",
-    [
-        "absent",
-        "rejected",
-        "mismatched",
-        "exact",
-        "foreign-request-decision",
-        "missing-request-membership",
-        "foreign-session-scope",
-    ],
-)
-@pytest.mark.parametrize("admission", ["absent", "current"])
-@pytest.mark.parametrize("observed_episode", ["absent", "old", "current"])
-@pytest.mark.parametrize("correlation", ["exact", "unrelated", "unregistered"])
-@pytest.mark.parametrize(
-    "lifecycle",
-    [
-        (phase, status)
-        for phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN, SessionPhase.TERMINAL)
-        for status in (
-            ObservationStatus.PENDING,
-            ObservationStatus.UNKNOWN,
-            ObservationStatus.SUCCEEDED,
-        )
-    ],
+    ("receipt_kind", "admission", "observed_episode", "correlation", "lifecycle"),
+    # The rule reads the episode, the correlation and the status together.
+    guard_rows(
+        RECEIPTS,
+        ["absent", "current"],
+        EPISODES,
+        CORRELATIONS,
+        LIFECYCLES,
+        positive=(
+            "exact",
+            "current",
+            "current",
+            "exact",
+            (SessionPhase.EXECUTING, ObservationStatus.SUCCEEDED),
+        ),
+        joint=(2, 3, 4),
+    ),
 )
 def test_billing_requires_current_unambiguous_invocation_evidence(
     admission: str,
@@ -499,3 +506,55 @@ def test_ambiguous_charge_identity_never_refunds_multiple_receipts(copies: int) 
     assert result.state == state.attempts
     assert result.signals == ()
     assert result.events == ()
+
+
+@pytest.mark.parametrize("limit", [0, 1, 2, 3])
+@pytest.mark.parametrize("spent", [0, 1, 2, 3, 4])
+def test_a_paid_invocation_is_charged_exactly_while_the_attempt_has_paid_invocations_left(
+    limit: int, spent: int
+) -> None:
+    """The limit is the number of paid invocations an attempt may spend: no more, no fewer."""
+    state = invocation_fixture()
+    owner = state.attempts.attempts[0]
+    earlier = tuple(
+        ChargeReceipt(
+            charge_id=ChargeId(root=f"earlier-{index}"),
+            kind=ChargeKind.ATTEMPT,
+            charged=1,
+            invocation_id=InvocationId(root=f"earlier-{index}"),
+        )
+        for index in range(spent)
+    )
+    state = state.model_copy(
+        update={
+            "attempts": AttemptsState(
+                attempts=(
+                    owner.model_copy(
+                        update={
+                            "charges": earlier,
+                            "budget": owner.budget.model_copy(
+                                update={"paid_invocation_limit": limit}
+                            ),
+                        }
+                    ),
+                )
+            )
+        }
+    )
+    event = InvocationChargeRequested(
+        attempt=AttemptRef(attempt_id=owner.attempt_id, generation=0),
+        invocation=state.sessions.invocations[0].invocation,
+    )
+
+    result = advance_attempt(state.attempts, context(state), event)
+
+    paid = sum(
+        row.charged for row in result.state.attempts[0].charges if row.kind == ChargeKind.ATTEMPT
+    )
+    exhausted = [e for e in result.events if isinstance(e, AttemptExhausted)]
+    if spent < limit:
+        assert paid == spent + 1
+        assert exhausted == []
+    else:
+        assert paid == spent
+        assert [e.reason for e in exhausted] == ["paid-limit"]

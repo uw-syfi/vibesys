@@ -213,6 +213,7 @@ def test_repository_make_honors_cargo_target_dir(tmp_path: Path) -> None:
     assert not (build_dir / "target").exists()
 
 
+@pytest.mark.native_build
 def test_queue_benchmark_pins_linux_workers(tmp_path: Path) -> None:
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted queue evaluator")

@@ -1,4 +1,11 @@
-"""Malformed reports and failed analyzer commands never become normal tool replies."""
+"""Malformed reports and failed analyzer commands never become normal tool replies.
+
+Guarantees under test:
+
+* A missing or malformed report, an invalid timestamp or counter value, a non-zero analyzer exit
+  or an analysis that ends without a valid profile is always a tool error or typed capture
+  failure, never a normal reply or a zero-filled report; a busy capture is a tool error.
+"""
 
 from __future__ import annotations
 
@@ -24,6 +31,8 @@ from resources.profilers.rocprof import analyze_rocprof, capture, counters
 from resources.profilers.rocprof.server import build_server as rocprof_server
 from resources.profilers.torch import capture_ops
 
+from vs_sim.api.testing import examples
+
 
 @pytest.mark.parametrize(
     "tool", ["tables", "kernels", "cpu_overhead", "idle_gaps", "memory", "graph_replays"]
@@ -43,7 +52,7 @@ def test_missing_nsys_export_is_a_tool_error(tmp_path: Path, suffix: str) -> Non
         )
 
 
-@settings(max_examples=32)
+@settings(max_examples=examples(pr=6, nightly=100))
 @given(code=st.integers(min_value=1, max_value=255))
 def test_every_nonzero_ncu_counter_set_exit_is_a_tool_error(code: int) -> None:
     with tempfile.TemporaryDirectory(dir="/dev/shm") as directory:
@@ -61,7 +70,7 @@ def test_every_nonzero_ncu_counter_set_exit_is_a_tool_error(code: int) -> None:
                 asyncio.run(ncu_server().call_tool("list_sections_and_sets", {}))
 
 
-@settings(max_examples=32)
+@settings(max_examples=examples(pr=6, nightly=100))
 @given(code=st.integers(min_value=1, max_value=255))
 def test_every_nonzero_neuron_analysis_exit_is_a_tool_error(code: int) -> None:
     with tempfile.TemporaryDirectory(dir="/dev/shm") as directory:

@@ -16,6 +16,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import FakeView, FlowRun, Prompt, fake_search
+from vs_sim.api.testing import examples
 
 from .flow_support import Config, Plan, open_workspace
 
@@ -26,7 +27,9 @@ if TYPE_CHECKING:
 
     from vs_core.api.testing import Asked
 
-_SETTINGS = settings(max_examples=25, deadline=None, derandomize=True, database=None)
+_SETTINGS = settings(
+    max_examples=examples(pr=5, nightly=25), deadline=None, derandomize=True, database=None
+)
 _RESTARTING = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart"])
 
 EXCHANGES = core.Exchanges(correction="c.j2", resume="r.j2", wait_unrecorded="w.j2")
@@ -198,6 +201,9 @@ def test_an_invalid_reply_is_corrected_as_often_as_the_role_says_then_reported(
         assert follow.context.role == "worker"
         assert spec_of(follow).charge_class == "correction"
         assert spec_of(follow).predecessor == invocation_of(asked)
+        assert spec_of(follow).session == spec_of(asked).session, (
+            "a correction continues the session"
+        )
         asked = follow
 
     if after is not None and after < corrections:
@@ -379,6 +385,56 @@ def test_a_reply_that_claims_no_work_is_delivered_at_once(*, restarting: bool) -
     run.reply(turn(run), Idle(n=1))
 
     assert published(run) == Outcome(ended="TurnFinished", checkpoint=False)
+
+
+class Held(core.Value):
+    """The checkpoint a write turn finished with."""
+
+    checkpoint: core.Retained | core.Declined | None
+
+
+@_SETTINGS
+@given(known=st.sampled_from(["retained", "declined"]))
+@_RESTARTING
+def test_a_write_turn_that_waited_is_held_until_core_knows_the_checkpoint_of_its_resume(
+    *, restarting: bool, known: str
+) -> None:
+    """The turn that waited is suspended with its work; the resumed turn ends with the checkpoint.
+
+    Core records the checkpoint of the suspended turn (kept or declined). The resumed turn only
+    reads the verdict, but its reply claims the work again, so it is held like any write turn's
+    until core knows the checkpoint, and then ends with exactly that checkpoint.
+    """
+    role = _write_role(Change).model_copy(update={"may_wait_for_evaluations": True})
+    checkpoint: core.Retained | core.Declined = (
+        core.Retained(revision=core.RevisionRef.of_git_commit("abc"))
+        if known == "retained"
+        else core.Declined(reason=next(iter(core.CheckpointDecline)))
+    )
+
+    async def root(ctx: core.Flow, config: Config) -> None:
+        del config
+        async with open_workspace(ctx, "w") as workspace:
+            if isinstance(workspace, core.NotOpened):
+                return
+            session = ctx.agents.session(role, workspace=workspace, revision=ctx.facts.baseline)
+            result = await session.turn(Prompt(text="go"))
+            assert isinstance(result, core.TurnFinished)
+            ctx.publish(Held(checkpoint=result.checkpoint))
+
+    run = start(role, restarting=restarting, view=SUSPENDING, definition=root)
+    run.open_workspace(run.expect(core.StartAttempt))
+    asked = turn(run)
+    waiting = run.suspend(asked)
+    run.send(core.CheckpointKnown(invocation=invocation_of(asked), checkpoint=checkpoint))
+    run.resume_ready(waiting)
+    resumed = turn(run)
+    assert spec_of(resumed).charge_class == "resume"
+    run.reply(resumed, Change(n=1))
+    assert run.driver.published(run.state, Held) is None
+    run.send(core.CheckpointKnown(invocation=invocation_of(resumed), checkpoint=checkpoint))
+
+    assert run.driver.published(run.state, Held) == Held(checkpoint=checkpoint)
 
 
 # -- the roles a search may ask ----------------------------------------------------------------------------

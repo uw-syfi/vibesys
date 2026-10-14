@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vs_sim.api.testing import examples
 from vs_slurm.api import (
     SlurmConfig,
     SlurmConnectorTransport,
@@ -144,7 +145,7 @@ def _exec_request(command: str) -> str:
     return json.dumps({"version": 1, "operation": "exec", "command": command})
 
 
-@settings(max_examples=6, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=6), deadline=None)
 @given(text=st.text(alphabet="abcxyz012", min_size=1, max_size=8))
 def test_an_interceptor_answers_or_forwards_every_request_and_none_restores_the_cluster(
     tmp_path_factory: pytest.TempPathFactory, text: str

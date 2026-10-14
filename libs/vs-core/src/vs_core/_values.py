@@ -8,7 +8,7 @@ import weakref
 from enum import Enum
 from functools import cache
 from hashlib import sha256
-from types import UnionType
+from types import MemberDescriptorType, UnionType
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -158,14 +158,50 @@ class InstanceMemo[Fact]:
         entries[key] = (weakref.ref(model, evict), fact)
 
 
-_IMMUTABILITY_VERDICTS: InstanceMemo[bool] = InstanceMemo()
+_read_slot = object.__getattribute__
+_write_slot = object.__setattr__
+_MEMO_SLOTS = frozenset({"_text", "_immutable", "_canonical"})
+
+
+def recall[Fact](model: BaseModel, slot: str) -> Fact | None:
+    """The fact kept in ``slot`` of this very instance, or None.
+
+    A value model owns slots for the facts derived from its fields (see `Value`), so a lookup is
+    an attribute read: no side table, no weak reference. A slot is empty on a fresh object,
+    and `object.__getattribute__` reports that without pydantic's slower `__getattr__`. A model
+    that has no such slot (any other pydantic model) simply remembers nothing.
+    """
+    try:
+        return _read_slot(model, slot)
+    except AttributeError:
+        return None
+
+
+@cache
+def _memoizes(model_type: type[BaseModel]) -> bool:
+    """Whether instances of this class have the slots that hold remembered facts."""
+    return all(
+        isinstance(getattr(model_type, slot, None), MemberDescriptorType) for slot in _MEMO_SLOTS
+    )
+
+
+def keep(model: BaseModel, slot: str, fact: object) -> None:
+    """Remember ``fact`` in ``slot`` of this instance, if its class has the slot."""
+    if _memoizes(type(model)):
+        _write_slot(model, slot, fact)
 
 
 def _frozen_model_is_deeply_immutable(model: BaseModel) -> bool:
-    known = _IMMUTABILITY_VERDICTS.get(model)
+    known = recall(model, "_immutable")
     if known is None:
-        known = _walk_immutable(getattr(model, name) for name in _field_names(type(model)))
-        _IMMUTABILITY_VERDICTS.put(model, known)
+        known = _judge_immutable(model)
+    return known
+
+
+def _judge_immutable(model: BaseModel) -> bool:
+    """Walk a frozen model whose verdict is not yet kept, and keep the verdict."""
+    known = _walk_immutable(model.__dict__.values())
+    keep(model, "_immutable", known)
     return known
 
 
@@ -180,27 +216,27 @@ def _walk_immutable(values: Iterable[object]) -> bool:
     # match a model, tuple, frozenset or Enum, so it only skips checks that
     # would fail.
     pending = list(values)
-    recall = _IMMUTABILITY_VERDICTS.get
     while pending:
         node = pending.pop()
         if type(node) in _IMMUTABLE_LEAF_TYPES:
             continue
+        try:
+            # A verdict is only ever kept for a frozen model, so a kept one settles this node.
+            verdict = _read_slot(node, "_immutable")  # inlined: the hottest loop of a write
+        except AttributeError:
+            pass
+        else:
+            if verdict:
+                continue
+            return False
         if isinstance(node, BaseModel):
-            if not node.model_config.get("frozen"):
-                return False
-            known = recall(node)  # inlined: this is the hottest loop of every durable write
-            if known is None:
-                known = _frozen_model_is_deeply_immutable(node)
-            if not known:
+            if not node.model_config.get("frozen") or not _judge_immutable(node):
                 return False
         elif isinstance(node, tuple | frozenset):
             pending.extend(node)
         elif not isinstance(node, Enum) or type(node.value) not in _IMMUTABLE_LEAF_TYPES:
             return False
     return True
-
-
-_CANONICAL_TEXTS: InstanceMemo[str] = InstanceMemo()
 
 
 def canonical_json(value: BaseModel) -> str:
@@ -211,10 +247,10 @@ def canonical_json(value: BaseModel) -> str:
     """
     if not value.model_config.get("frozen"):
         return _canonical_json(value)
-    text = _CANONICAL_TEXTS.get(value)
+    text: str | None = recall(value, "_canonical")
     if text is None:
         text = _canonical_json(value)
-        _CANONICAL_TEXTS.put(value, text)
+        keep(value, "_canonical", text)
     return text
 
 
@@ -257,7 +293,6 @@ def digest(value: BaseModel) -> str:
     return sha256(canonical_json(value).encode()).hexdigest()
 
 
-_FRAGMENT_TEXTS: InstanceMemo[str] = InstanceMemo()
 _FRAGMENT_TOKEN = re.compile(r'"\\u0000F([0-9]+)\\u0000"')
 _FRAGMENT_DATA: TypeAdapter[object] = TypeAdapter(
     object, config=ConfigDict(ser_json_inf_nan="null")
@@ -280,13 +315,14 @@ class _Fragments:
         self.pending: list[tuple[int, BaseModel, object]] = []
         self.used = 0
 
-    def emit(self, model: BaseModel, handler: Callable[[BaseModel], object]) -> str:
+    def emit_new(self, model: BaseModel, handler: Callable[[BaseModel], object]) -> object:
+        """A value whose text is not remembered: plain data in this call's tokens, or as it is."""
+        if not (model.model_config.get("frozen") and _text_is_position_independent(type(model))):
+            return handler(model)
         self.seen.append(model)
-        text = _FRAGMENT_TEXTS.get(model)
-        if text is None:
-            data = handler(model)  # children are tokens, so they were all emitted before this
-            self.pending.append((len(self.texts), model, data))
-        self.texts.append(text or "")
+        data = handler(model)  # children are tokens, so they were all emitted before this
+        self.pending.append((len(self.texts), model, data))
+        self.texts.append("")
         return f"\x00F{len(self.texts) - 1}\x00"
 
     def expand(self, template: str) -> str:
@@ -319,7 +355,7 @@ class _Fragments:
         """Keep the text of every value this call serialized, for the next call."""
         for index, model, _ in self.pending:
             if _frozen_model_is_deeply_immutable(model):
-                _FRAGMENT_TEXTS.put(model, self.texts[index])
+                keep(model, "_text", self.texts[index])
 
 
 @cache
@@ -344,13 +380,15 @@ def emit_fragment(
     model: BaseModel, handler: Callable[[BaseModel], object], context: object
 ) -> object:
     """Serializer hook of every frozen value: a token inside `encode_json`, else plain data."""
-    if (
-        type(context) is _Fragments
-        and model.model_config.get("frozen")
-        and _text_is_position_independent(type(model))
-    ):
-        return context.emit(model, handler)
-    return handler(model)
+    if type(context) is not _Fragments:
+        return handler(model)
+    try:
+        text = _read_slot(model, "_text")  # inlined: one call per value of every durable write
+    except AttributeError:
+        return context.emit_new(model, handler)
+    context.seen.append(model)
+    context.texts.append(text)
+    return f"\x00F{len(context.texts) - 1}\x00"
 
 
 class EncodingMismatchError(ValueError):
@@ -384,7 +422,7 @@ def _mismatch(fragments: _Fragments, model: BaseModel) -> EncodingMismatchError:
     culprits = {
         type(seen).__name__
         for seen in fragments.seen
-        if (text := _FRAGMENT_TEXTS.get(seen)) is not None and text != seen.model_dump_json()
+        if (text := recall(seen, "_text")) is not None and text != seen.model_dump_json()
     }
     return EncodingMismatchError(tuple(sorted(culprits)) or (type(model).__name__,))
 
@@ -431,11 +469,24 @@ def _share(old: object, new: object) -> object:
 
 
 def _share_model(old: BaseModel, new: BaseModel) -> BaseModel:
-    names = _field_names(type(new))
-    shared = {name: _share(getattr(old, name), getattr(new, name)) for name in names}
-    if all(shared[name] is getattr(old, name) for name in names):
+    before_fields = old.__dict__
+    after_fields = new.__dict__
+    every_part_is_old = True
+    changed: dict[str, object] | None = None
+    for name in _field_names(type(new)):
+        before = before_fields[name]
+        after = after_fields[name]
+        if before is after:
+            continue
+        part = _share(before, after)
+        if part is not before:
+            every_part_is_old = False
+        if part is not after:
+            if changed is None:
+                changed = {}
+            changed[name] = part
+    if every_part_is_old:
         return old
-    changed = {name: part for name, part in shared.items() if part is not getattr(new, name)}
     return new.model_copy(update=changed) if changed else new
 
 

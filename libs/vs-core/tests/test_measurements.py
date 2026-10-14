@@ -3,10 +3,13 @@
 import json
 from hashlib import sha256
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
+
+from .restart import restarts
 
 
 def plan(**updates: object) -> core.MeasurementPlan:
@@ -44,6 +47,8 @@ def plan(**updates: object) -> core.MeasurementPlan:
 def roundtrip(
     state: core.CoreState, *, codec: core.OperationRegistry | None = None
 ) -> core.CoreState:
+    if not restarts():
+        return state
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
         fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
@@ -66,6 +71,8 @@ def transition(
     codec: core.OperationRegistry | None = None,
     reducers: core.CoreReducers | None = None,
 ) -> core.Transition:
+    if not restarts():
+        return core.step(state, event, reducers=reducers)
     before = state.model_dump_json()
     result = core.step(state, event, reducers=reducers)
     assert result == core.step(roundtrip(state, codec=codec), event, reducers=reducers)
@@ -214,6 +221,7 @@ def test_submission_receipt_and_request_are_allocated_atomically() -> None:
     assert replay.state.evaluation == result.state.evaluation
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(order=st.lists(st.integers(min_value=1, max_value=8), min_size=1, max_size=20))
 def test_duplicate_reordered_observations_and_reload_never_regress(order: list[int]) -> None:
     state, request = submitted()
@@ -332,6 +340,7 @@ def test_a_failure_after_the_run_stopped_is_never_resubmitted(
     assert len(retried.state.evaluation.submission_budgets[0].receipts) == 1
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(count=st.integers(min_value=core.MAX_SUBMISSIONS_PER_MEASUREMENT + 1, max_value=10))
 def test_preacceptance_failures_are_bounded_and_timing_never_resets_identity(count: int) -> None:
     state = core.initial_state()
@@ -640,6 +649,7 @@ def _step_job_polls(statuses: list[core.ObservationStatus]) -> core.CoreState:
     return state
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(polls=st.integers(min_value=1, max_value=5))
 def test_a_submitted_job_is_polled_until_it_ends(polls: int) -> None:
     pending = [core.ObservationStatus.PENDING] * (polls - 1)
