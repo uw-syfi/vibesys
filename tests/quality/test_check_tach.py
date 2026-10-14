@@ -12,9 +12,13 @@ from __future__ import annotations
 import itertools
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_tach.py"
 
@@ -29,7 +33,7 @@ BEHAVIOURS = {
 CASES = [(behaviour, packaged) for behaviour in BEHAVIOURS for packaged in PACKAGING]
 
 
-def _names(behaviour: str, packaged: tuple[bool, bool]) -> tuple[str, str]:
+def _names(behaviour: str, packaged: Sequence[bool]) -> tuple[str, str]:
     suffix = f"{behaviour}_{int(packaged[0])}{int(packaged[1])}"
     return f"imp_{suffix}", f"exp_{suffix}"
 

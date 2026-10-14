@@ -295,6 +295,7 @@ async def _receipt_reuse(
     ctx: CoreHost, root: Workspace, gates: _Gates, accuracy: AccuracyEvaluation
 ) -> None:
     # A receipt survives a JSON round trip and an incidental framework snapshot.
+    assert accuracy.receipt is not None
     restored = AccuracyReceipt.model_validate_json(accuracy.receipt.model_dump_json())
     note = root.path / ".vibesys" / "receipt-test.json"
     note.parent.mkdir(parents=True, exist_ok=True)

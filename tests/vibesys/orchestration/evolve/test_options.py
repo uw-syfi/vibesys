@@ -41,7 +41,7 @@ _GIVEN = st.fixed_dictionaries(
 def test_a_given_knob_is_kept_as_given_and_a_missing_one_takes_the_default(
     given: dict[str, int | float], policy: str | None
 ) -> None:
-    overrides: OpenEvolveOverrides = {**given}  # ty: ignore[invalid-assignment]
+    overrides: OpenEvolveOverrides = {**given}
 
     chosen_policy, resolved = resolve_openevolve_options(policy, overrides)
 

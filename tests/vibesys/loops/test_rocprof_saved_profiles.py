@@ -67,6 +67,13 @@ def _saved_timeline(root: Path, name: str, status: object) -> Path:
     return directory
 
 
+def _tool_result(server: FastMCP, tool: str, arguments: dict[str, str]) -> str:
+    """The text a tool returns as its structured ``result``."""
+    _, structured = asyncio.run(server.call_tool(tool, arguments))
+    assert isinstance(structured, dict)
+    return str(structured["result"])
+
+
 @pytest.mark.parametrize("status", ["ok", "killed_after_grace"])
 def test_saved_success_remains_readable(server: FastMCP, tmp_path: Path, status: str) -> None:
     capture = _saved_timeline(tmp_path, "successful", status)
@@ -75,8 +82,7 @@ def test_saved_success_remains_readable(server: FastMCP, tmp_path: Path, status:
         ("compare", {"a": str(capture), "b": str(capture)}),
         ("kernels", {"report": str(capture)}),
     ):
-        _, result = asyncio.run(server.call_tool(tool, arguments))
-        assert "saved_workload_kernel" in result["result"]
+        assert "saved_workload_kernel" in _tool_result(server, tool, arguments)
 
 
 @given(
@@ -185,8 +191,7 @@ def test_raw_report_with_unrelated_parent_manifest_remains_readable(
     (raw / "out_kernel_trace.csv").write_text(
         "Kernel_Name,Dispatch_Id,Start_Timestamp,End_Timestamp\nraw_workload_kernel,1,10000,20000\n"
     )
-    _, result = asyncio.run(server.call_tool("kernels", {"report": str(raw)}))
-    assert "raw_workload_kernel" in result["result"]
+    assert "raw_workload_kernel" in _tool_result(server, "kernels", {"report": str(raw)})
 
 
 @pytest.mark.parametrize("direction", ["inside_to_raw", "outside_to_failed"])

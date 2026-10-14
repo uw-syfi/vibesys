@@ -21,6 +21,7 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.e2e._signalled_run import main as signalled_run
@@ -28,6 +29,9 @@ from tests.support.task_project import write_task
 
 from vs_sim.api.testing import HANG_GUARD_S, Depth, depth
 from vs_slurm.fake_connector import JOB_ID, POLLED_FILE, SUBMITTED_FILE, recorded_commands
+
+if TYPE_CHECKING:
+    from multiprocessing.process import BaseProcess
 
 pytestmark = pytest.mark.usefixtures("isolated_github_auth")
 
@@ -72,7 +76,7 @@ def _write_input(base: Path, transport: str) -> tuple[Path, Path, Path]:
     return cluster, config, project
 
 
-def _forked_run(project: Path, config: Path, stdout: int) -> multiprocessing.Process:
+def _forked_run(project: Path, config: Path, stdout: int) -> BaseProcess:
     """Start the run in a forked child: a session of its own, its output on ``stdout``."""
 
     def child() -> None:

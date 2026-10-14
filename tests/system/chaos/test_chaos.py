@@ -42,6 +42,7 @@ from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_sim.api.testing import Depth, depth, swept
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 
@@ -88,7 +89,7 @@ async def test_a_run_without_faults_completes(tmp_path: Path) -> None:
     assert chaos.violations == [], chaos.report()
 
 
-def _sampled[F](faults: dict[F, object], sample: int) -> list[F]:
+def _sampled[F](faults: Mapping[F, object], sample: int) -> list[F]:
     """The fault classes a pull request injects (spread over the table); the nightly job all."""
     found = list(faults)
     return [found[i] for i in swept(len(found), sample)]

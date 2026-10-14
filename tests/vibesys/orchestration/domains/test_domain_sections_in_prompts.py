@@ -108,7 +108,7 @@ class _Strategy:
 
     @property
     def prompts(self) -> _RolePrompts:
-        return self.role_prompts() if callable(self.role_prompts) else self.role_prompts
+        return self.role_prompts if isinstance(self.role_prompts, tuple) else self.role_prompts()
 
     @property
     def plugin(self) -> OrchestrationPlugin:

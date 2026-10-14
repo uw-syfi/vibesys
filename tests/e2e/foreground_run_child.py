@@ -55,7 +55,9 @@ class BlockedRuntime:
         async def serve_forever() -> None:
             # The threads the run owns (this one, the transports, the signal relay), by
             # kernel id: SIGTERM is aimed at these and at no library thread.
-            owned = [thread.native_id for thread in threading.enumerate()]
+            owned = [
+                thread.native_id for thread in threading.enumerate() if thread.native_id is not None
+            ]
             print("driving", *owned, flush=True)  # noqa: T201  # lint-waiver: LW-155506 [T201]; the parent test reads the child's observations from stdout
             if self.self_target is not None:
                 send_to_thread(os.getpid(), owned[self.self_target % len(owned)], signal.SIGTERM)
