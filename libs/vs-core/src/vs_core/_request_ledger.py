@@ -32,7 +32,7 @@ from ._proofs import (
     observation_for,
     released_owner,
 )
-from ._registry import ContractError
+from ._registry import ClosedRecordContradictionError, ContractError
 from ._request_forward import declaration, owner_signals, records_own, success_without_reply
 from ._session_scope import lost_turn_cancellation
 from ._values import digest
@@ -483,23 +483,92 @@ def _apply(
 def _refine(
     state: RecordsState, record: RequestRecord, observation: Observation
 ) -> AreaChange[RecordsState]:
-    """A closed record only gains release facts; it never changes disposition."""
+    """A closed record only gains evidence: release facts and children. Its disposition stands.
+
+    A later answer that agrees with the disposition (see `_agrees`) adds what it proves: a
+    request core failed when the run closed around it may later be inspected, and the executor's
+    "never started" proves it released. A record's release facts never go back. An answer that
+    contradicts the disposition is a typed `ClosedRecordContradictionError`.
+    """
     previous = record.observation
-    if (
-        previous is None
-        or not observation.terminal
-        or observation.status != previous.status
-        or observation.accepted != previous.accepted
-        or observation.resource_id != previous.resource_id
-        or (previous.released and not observation.released)
-        or (previous.children_complete and not observation.children_complete)
-        or not set(previous.children) <= set(observation.children)
-    ):
-        raise ContractError(("observation",), "terminal request cannot change its disposition")
-    updated = record.model_copy(
-        update={"observation": observation, "sequence": observation.sequence}
+    if previous is None or not _agrees(previous, observation):
+        raise ClosedRecordContradictionError(record.request_id, previous, observation)
+    added = tuple(child for child in observation.children if child not in previous.children)
+    released = observation.released and not previous.released
+    complete = observation.children_complete and not previous.children_complete
+    if not (added or released or complete):
+        # Owners hold the record's observation as their proof; an answer that proves
+        # nothing new leaves it, and them, as they are.
+        return AreaChange(state=state)
+    proven = previous.model_copy(
+        update={
+            "event_id": observation.event_id,
+            "sequence": observation.sequence,
+            "observed_at": observation.observed_at,
+            "released": previous.released or released,
+            "children": (*previous.children, *added),
+            "children_complete": previous.children_complete or complete,
+        }
     )
+    updated = record.model_copy(update={"observation": proven, "sequence": proven.sequence})
     return AreaChange(state=_replace(state, updated))
+
+
+def canonical(state: RecordsState, event: RequestObserved) -> RequestObserved:
+    """The answer as the ledger recorded it, for the owners that read it after the ledger.
+
+    A closed record keeps its disposition and records only what an answer proves
+    (`_refine`), so its recorded observation, not the executor's raw status, is the
+    canonical fact at that sequence.
+    """
+    target = event.target
+    if target is None:
+        recorded = _recorded(state, event.observation)
+        return event if recorded is None else event.model_copy(update={"observation": recorded})
+    recorded = None if target.target_resource is not None else _recorded(state, target.observation)
+    if recorded is None:
+        return event
+    return event.model_copy(update={"target": target.model_copy(update={"observation": recorded})})
+
+
+def _recorded(state: RecordsState, observation: Observation) -> Observation | None:
+    """The closed record's refined form of *observation*, when the ledger refined it."""
+    record = _unique(state, observation.request_id)
+    stored = None if record is None else record.observation
+    if (
+        record is None
+        or stored is None
+        or record.phase != RequestPhase.COMPLETED
+        or stored.event_id != observation.event_id
+        or stored == observation
+    ):
+        return None
+    return stored
+
+
+_DID_NOT_SUCCEED = frozenset(
+    {ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED}
+)
+
+
+def _agrees(closed: Observation, later: Observation) -> bool:
+    """Whether a later answer is consistent with the one that closed a record.
+
+    It must claim the same acceptance and resource. An unknown status claims no outcome, so
+    it agrees with any: a later host may know less than the one that closed the record. A
+    success agrees only with a success; an answer that says the request did not succeed
+    (failed, rejected, cancelled) agrees with any other such answer, since each only says
+    how it did not succeed. A pending answer says the request is still running, which no
+    closed record allows.
+    """
+    return (
+        later.accepted == closed.accepted
+        and later.resource_id == closed.resource_id
+        and (
+            later.status in {ObservationStatus.UNKNOWN, closed.status}
+            or {later.status, closed.status} <= _DID_NOT_SUCCEED
+        )
+    )
 
 
 def retry_delay(context: RecordsContext, retries: int) -> float:

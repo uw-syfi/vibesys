@@ -40,6 +40,7 @@ from vs_core._projection import (
 )
 from vs_core._registry import (
     ENVELOPE_SCHEMA_VERSION,
+    ClosedRecordContradictionError,
     ContractError,
     EnvelopeMigration,
     OperationMigration,
@@ -801,6 +802,7 @@ __all__ = [
     "CloseAdmission",
     "CloseAttemptScope",
     "CloseSession",
+    "ClosedRecordContradictionError",
     "CollectEvidence",
     "Command",
     "CommandCapture",

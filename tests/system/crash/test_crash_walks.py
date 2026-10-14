@@ -22,7 +22,6 @@ commit); the nightly job (`--depth=nightly`) walks many runs of each kind throug
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
@@ -35,11 +34,10 @@ from tests.vibesys.evolve_world import EvolveWorld
 from vs_core.api import RunStatus
 from vs_dst.api import CrashKind, CrashPoint, simulate
 from vs_faults.api import FaultPlan
-from vs_runtime.api.core import ObservationRejectedError
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Sequence
 
     from vs_dst.api import SimulatedRun, World
     from vs_faults.api import Crossing, FaultRule
@@ -49,27 +47,6 @@ _RECOVERY = 4
 
 # Shrinking re-runs a walk of several whole runs per step; a failure prints its walk instead.
 _WALK = settings(deadline=None, database=None, phases=(Phase.explicit, Phase.generate))
-
-
-_KNOWN_GAP = "terminal request cannot change its disposition"
-
-
-@contextmanager
-def _known_gap() -> Iterator[None]:
-    """Mark a walk that reaches the one reported, unfixed gap as an expected failure.
-
-    A record core ended when the run closed around it (failed, nothing proven released) is
-    inspected by a later host; the executor answers "never started" (rejected, released). Core
-    refuses any later change of a closed record's status, so the host halts on the answer. Only
-    this rejection is tolerated, so every other failure of a walk still fails it. Remove this
-    once core accepts the release facts of such an answer.
-    """
-    try:
-        yield
-    except ObservationRejectedError as error:
-        if error.rejection != _KNOWN_GAP:
-            raise
-        pytest.xfail(f"known gap, reported: {error}")
 
 
 def _death[T](draw: st.DataObject, offered: Sequence[T], *, restarted: bool) -> T:
@@ -85,8 +62,7 @@ def _death[T](draw: st.DataObject, offered: Sequence[T], *, restarted: bool) -> 
 def test_a_skeleton_run_that_dies_several_times_ends_and_runs_each_effect_once(
     draw: st.DataObject, deaths: int
 ) -> None:
-    with _known_gap():
-        _skeleton_walk(draw, deaths)
+    _skeleton_walk(draw, deaths)
 
 
 def _skeleton_walk(draw: st.DataObject, deaths: int) -> None:
@@ -156,8 +132,7 @@ _WORLDS: dict[str, Callable[[], World]] = {
 def test_a_flow_run_that_dies_several_times_ends_and_owes_nothing(
     world: str, draw: st.DataObject, deaths: int
 ) -> None:
-    with _known_gap():
-        _flow_walk(world, draw, deaths)
+    _flow_walk(world, draw, deaths)
 
 
 def _flow_walk(world: str, draw: st.DataObject, deaths: int) -> None:
@@ -168,3 +143,21 @@ def _flow_walk(world: str, draw: st.DataObject, deaths: int) -> None:
     again = walked.rerun_with_crash(path[-1])
     _ends_and_owes_nothing(again, path)
     assert again.result == walked.result
+
+
+@pytest.mark.slow
+def test_a_record_the_close_failed_is_proven_released_by_a_later_inspection() -> None:
+    """The walk that found it: the run closes around a blocked render, failing it with nothing
+    proven released; the next host inspects it and the executor answers "never started".
+
+    Core keeps the failure and records the release the answer proves, so the run ends.
+    """
+    path = [
+        CrashPoint(CrashKind.BEFORE_COMMIT, 201),
+        CrashPoint(CrashKind.AFTER_COMMIT, 227),
+        CrashPoint(CrashKind.BEFORE_COMMIT, 256),
+    ]
+    walked = simulate(DynamicWorld(max_in_flight=2))
+    for point in path:
+        walked = walked.rerun_with_crash(point)
+    _ends_and_owes_nothing(walked, path)

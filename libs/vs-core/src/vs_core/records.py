@@ -41,6 +41,8 @@ def _observation(
     if isinstance(event, RequestObserved) and _request_ledger.is_late(state, event):
         return AreaChange(state=state)
     ledger = _request_ledger.advance(state, context, event)
+    if isinstance(event, RequestObserved):
+        event = _request_ledger.canonical(ledger.state, event)
     recovery = _request_recovery.advance(ledger.state, context, event)
     return recovery.model_copy(
         update={

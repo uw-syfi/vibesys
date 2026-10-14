@@ -298,3 +298,72 @@ def test_a_host_that_restarts_while_a_blocked_job_poll_is_inspected_still_has_a_
     assert [
         wait for wait in core.orphan_waits(restarted) if wait.waiter == core.WaitKind.OWNED_JOB
     ] == []
+
+
+_DID_NOT_SUCCEED = {
+    core.ObservationStatus.FAILED,
+    core.ObservationStatus.REJECTED,
+    core.ObservationStatus.CANCELLED,
+}
+
+
+class _Later(NamedTuple):
+    """What a later host's executor says about a record the close already ended."""
+
+    status: core.ObservationStatus
+    accepted: bool
+    released: bool
+    children_complete: bool
+    terminal: bool
+
+
+@settings(max_examples=examples(pr=20, nightly=300))
+@given(
+    later=st.builds(
+        _Later,
+        status=st.sampled_from(list(core.ObservationStatus)),
+        accepted=st.booleans(),
+        released=st.booleans(),
+        children_complete=st.booleans(),
+        terminal=st.booleans(),
+    )
+)
+def test_a_later_answer_for_a_record_the_close_ended_proves_its_release_or_is_typed(
+    later: _Later,
+) -> None:
+    """A later host inspects a record core failed while closing; the executor answers.
+
+    An answer that does not contradict the failure (it did not succeed, or the executor cannot
+    tell, with the same acceptance) adds the release facts it proves and leaves the failure as
+    it was. Any other answer raises the typed contradiction, never a bare contract error.
+    """
+    state = _record(
+        core.LifecycleClass.IDEMPOTENT_WRITE, _SILENT_ANSWERS[0], accepted=True, named=False
+    )
+    run = _close_after(state, restart=False, late_by=1.0, stop_first=True)
+    closed = _original(run)
+    ended = closed.observation
+    assert closed.phase == core.RequestPhase.COMPLETED
+    assert ended is not None
+    assert not ended.released
+    assert not ended.children_complete
+    answer = ended.model_copy(
+        update={
+            "event_id": core.EventId(root="later-host:inspection"),
+            "sequence": ended.sequence + 1,
+            "diagnostic": "",
+            **later._asdict(),
+        }
+    )
+    agrees = later.accepted and later.status in {*_DID_NOT_SUCCEED, core.ObservationStatus.UNKNOWN}
+    if not agrees:
+        with pytest.raises(core.ClosedRecordContradictionError):
+            core.step(run, core.RequestObserved(observation=answer))
+        return
+    record = _original(core.step(run, core.RequestObserved(observation=answer)).state)
+    assert record.phase == core.RequestPhase.COMPLETED
+    assert record.observation is not None
+    assert record.observation.status == ended.status
+    assert record.observation.diagnostic == ended.diagnostic
+    assert record.observation.released == later.released
+    assert record.observation.children_complete == later.children_complete

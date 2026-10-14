@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from .types.common import Observation, RequestId
     from .types.kernel import CoreState, RunEnvelope
     from .types.strategy import OperationRequest, SearchDeclaration, Submission
 
@@ -49,6 +50,28 @@ class ContractError(ValueError):
         self.path = path
         self.detail = detail
         super().__init__(f"{'.'.join(map(str, path))}: {detail}")
+
+
+class ClosedRecordContradictionError(ContractError):
+    """An executor's answer for a closed request contradicts the disposition core recorded.
+
+    A closed record's status, acceptance and resource never change: its owner has already
+    acted on them. An answer that only adds release facts or children is accepted; this one
+    claims a different outcome, which is a defect in the executor or in core.
+    """
+
+    def __init__(
+        self, request_id: RequestId, closed: Observation | None, answer: Observation
+    ) -> None:
+        self.request_id = request_id
+        self.closed = closed
+        self.answer = answer
+        recorded = "no observation" if closed is None else closed.status.value
+        super().__init__(
+            ("observation",),
+            f"request {request_id.root} closed as {recorded}; "
+            f"a later answer of {answer.status.value} contradicts it",
+        )
 
 
 class UnexpectedEvent(ContractError):  # noqa: N818  # LW-220423 [N818]; the name states the situation it reports, as the search API reads `raise UnexpectedEvent(phase, event)`.
