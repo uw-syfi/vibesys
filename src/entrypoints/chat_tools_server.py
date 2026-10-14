@@ -36,7 +36,7 @@ from __future__ import annotations
 import argparse
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from launch import open_run_store
 from vibesys.api.hypothesis import agent_projection
@@ -50,15 +50,21 @@ if TYPE_CHECKING:
 class _NoArgs(BaseModel):
     """Argument schema for tools that take no input."""
 
+    model_config = ConfigDict(extra="forbid")
+
 
 class _HypothesisArgs(BaseModel):
     """Argument schema for `get_hypothesis`."""
+
+    model_config = ConfigDict(extra="forbid")
 
     hypothesis_id: str = Field(description="Hypothesis id, as returned by list_hypotheses.")
 
 
 class _StateFileArgs(BaseModel):
     """Argument schema for `read_state_file`."""
+
+    model_config = ConfigDict(extra="forbid")
 
     relative_path: str = Field(
         description="Portable state file path, as returned by list_state_files."

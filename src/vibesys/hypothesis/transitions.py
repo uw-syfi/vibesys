@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
+from pydantic import ConfigDict
+
 from vibesys.hypothesis.history import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -570,9 +572,11 @@ def _measurement(
 class CarryOver:
     """Record-derived guidance passed to the next planning turn.
 
-    Rebuilt from round records on resume (:meth:`HypothesisSearch.initial_carry`),
-    never persisted.
+    Built from round records on resume (:meth:`HypothesisSearch.initial_carry`) and
+    persisted between turns in the strategy state's ledger, which decodes it strictly.
     """
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
 
     regression: RegressionNotice | None = None
     exhaustion: ExhaustionNotice | None = None

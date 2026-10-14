@@ -15,10 +15,8 @@ class MutatorResponse(RevisionReply):
     """Mutation rationale recorded on the resulting population member.
 
     Every mutation claims work, so core checkpoints the turn's workspace and hands the checkpoint
-    to the search with this reply. Unknown keys are ignored: an agent may add notes.
+    to the search with this reply.
     """
-
-    model_config = ConfigDict(extra="ignore")
 
     summary: str = Field(
         description=(
@@ -34,6 +32,8 @@ class MutatorResponse(RevisionReply):
 
 class JudgeResponse(BaseModel):
     """Review decision for one evolve candidate."""
+
+    model_config = ConfigDict(extra="forbid")
 
     analysis: str = Field(description="Detailed analysis of the candidate implementation.")
     feedback: str = Field(

@@ -47,6 +47,10 @@ new library needs its `source_roots` entry.
 
 - **Boundary types.** Pydantic models for external contracts, with
   `model_config = ConfigDict(extra="forbid")` so unknown keys are rejected.
+  `tests/quality/test_models_reject_unknown_keys.py` holds every product
+  model, and every dataclass or TypedDict Pydantic decodes, to that; a model
+  that must accept unknown keys sets `extra` explicitly and declares
+  `unknown_keys_reason: ClassVar[str]`.
 - **Closed sets.** `StrEnum` or `Literal`, never raw strings. Look up
   implementations in a registry keyed by the enum. Match exhaustively.
 - **Errors.** Typed errors that name the offending key or path

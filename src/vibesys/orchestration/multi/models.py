@@ -2,7 +2,7 @@
 
 from typing import override
 
-from pydantic import BaseModel, Field, FiniteFloat
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vibesys.hypothesis import (
     CandidateDisposition,
@@ -92,6 +92,8 @@ class ImplementerResponse(RevisionReply):
 class JudgeResponse(BaseModel):
     """Structured response from a multi-policy judge."""
 
+    model_config = ConfigDict(extra="forbid")
+
     analysis: str = Field(
         description=(
             "Detailed analysis covering correctness, completeness, dependencies, "
@@ -117,6 +119,8 @@ class JudgeResponse(BaseModel):
 
 class PreRoundDecision(BaseModel):
     """Whether a specialist profile should precede planning."""
+
+    model_config = ConfigDict(extra="forbid")
 
     need_profile: bool = Field(
         description="True when a profiler run should happen before planning."

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, ClassVar, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, NonNegativeInt
 
@@ -124,7 +124,8 @@ class EventPayload(BaseModel):
     itself rejects unknown keys.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
+    unknown_keys_reason: ClassVar[str] = "Recorded events replay after a payload field is removed."
 
 
 class InvocationStartedData(EventPayload):

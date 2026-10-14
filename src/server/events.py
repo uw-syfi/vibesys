@@ -9,7 +9,16 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAliasType, get_args, get_origin
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    ClassVar,
+    Literal,
+    TypeAliasType,
+    get_args,
+    get_origin,
+)
 
 from pydantic import (
     AfterValidator,
@@ -217,7 +226,8 @@ class EventPayload(BaseModel):
     unknown keys.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
+    unknown_keys_reason: ClassVar[str] = "Recorded events replay after a payload field is removed."
 
 
 class ChatData(EventPayload):

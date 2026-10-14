@@ -580,7 +580,7 @@ def _required_manifest_text(value: str | None, field_name: str) -> str:
 class InputBundle(BaseModel):
     """Resolved input bundle with manifest commands and conventional files."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     root: Path
     task_root: Path

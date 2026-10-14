@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field, FiniteFloat
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.constants import ComputeBackend, DomainName
@@ -496,6 +496,8 @@ def preflight_profiler_kind(
 
 class ProfilerSummary(BaseModel):
     """Structured summary from the profiler agent, shared with the orchestrator."""
+
+    model_config = ConfigDict(extra="forbid")
 
     analysis: str = Field(description="Detailed interpretation of the profile data.")
     bottlenecks: str = Field(description="Ranked bottlenecks with concrete numbers.")

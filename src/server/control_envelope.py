@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -84,3 +84,6 @@ class ResponseEnvelopeReader(ResponseEnvelope):
     """
 
     model_config = ConfigDict(extra="ignore")
+    unknown_keys_reason: ClassVar[str] = (
+        "Reads the envelope of a full Response and leaves its payload fields unread."
+    )
