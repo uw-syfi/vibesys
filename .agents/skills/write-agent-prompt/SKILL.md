@@ -91,7 +91,8 @@ explains how the pieces are assembled.
 
 - Run the prompt architecture tests, the domain prompt tests and the
   vs-prompts tests with `uv run pytest`, then the goldens covering what you
-  changed. `./scripts/check_ci.sh` fails if any of them breaks.
+  changed. CI fails if any of them breaks; `./support/repoctl/repoctl test`
+  runs the groups a change selects.
 - Regenerate a golden only for an intended change and read its diff as the
   prompt diff; [references/goldens.md](references/goldens.md) explains the
   workflow. Unenforced: only a reviewer can tell an intended change from a
