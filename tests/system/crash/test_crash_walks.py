@@ -11,7 +11,7 @@ ran once. A request's limit counts only time a host was alive (each restart move
 downtime), but the run's own deadline does not move, so several deaths can keep the run down past
 it and its outcome may differ from the straight run's; when it does not, the run adopted the same
 tree.
-The flow walks run real searches (dynamic and evolve) through `vs_dst`, whose crash cases start
+The flow walks run real searches (dynamic, evolve, single and multi) through `vs_dst`, whose crash cases start
 from a copy of the world instead of running the prefix again. For them a death may change the
 result, so a walk holds what no death may change: the run ends, it owes nothing
 (`liveness_violations`), no effect ran twice, and one more host started after its last commit
@@ -31,6 +31,7 @@ from hypothesis import strategies as st
 from tests.support.crash_harness import after_crash, all_crossings, rule, run, straight_run
 from tests.vibesys.dynamic_world import DynamicWorld
 from tests.vibesys.evolve_world import EvolveWorld
+from tests.vibesys.serial_world import SerialWorld
 
 from vs_core.api import RunStatus
 from vs_dst.api import CrashKind, CrashPoint, simulate
@@ -114,6 +115,8 @@ _WORLDS: dict[str, Callable[[], World]] = {
     "dynamic": DynamicWorld,
     "dynamic-parallel": lambda: DynamicWorld(max_in_flight=2),
     "evolve": EvolveWorld,
+    "single": lambda: SerialWorld("single", max_rounds=2),
+    "multi": lambda: SerialWorld("multi", max_rounds=2),
 }
 
 
@@ -128,6 +131,8 @@ _WORLDS: dict[str, Callable[[], World]] = {
         "dynamic",
         pytest.param("dynamic-parallel", marks=pytest.mark.slow),
         pytest.param("evolve", marks=pytest.mark.slow),
+        pytest.param("single", marks=pytest.mark.slow),
+        pytest.param("multi", marks=pytest.mark.slow),
     ],
 )
 def test_a_flow_run_that_dies_several_times_ends_and_owes_nothing(
