@@ -11,11 +11,11 @@ import logging
 
 import pytest
 from tests.support.crash_harness import (
-    BLOCKED_ENDINGS,
     all_crossings,
     assert_converges,
     converges_after,
     ends_as_it_must,
+    ends_blocked,
     following,
     name,
     rule,
@@ -79,10 +79,29 @@ def test_a_crash_recovery_cannot_tell_ends_the_run_blocked() -> None:
     recovery never opens. With nothing in flight, the run ends with a typed ``blocked`` result
     instead of sitting running until its deadline.
     """
-    assert {"durable_write:receipt_begun#4"} == BLOCKED_ENDINGS
-    for crossing in all_crossings():
-        if name(crossing) in BLOCKED_ENDINGS:
-            ends_as_it_must(crossing)
+    crossings = all_crossings()
+    blocked = [crossing for crossing in crossings if ends_blocked(crossings, crossing)]
+    assert [name(crossing) for crossing in blocked] == ["durable_write:receipt_begun#4"]
+    for crossing in blocked:
+        ends_as_it_must(crossing)
+
+
+@pytest.mark.slow
+def test_a_run_that_dies_again_after_a_blocked_ending_still_ends_blocked() -> None:
+    """A second death anywhere in the host that ends a blocked run leaves it ending blocked.
+
+    The walks draw such paths only rarely; this enumerates every second death after the one
+    blocked point of the straight run.
+    """
+    crossings = all_crossings()
+    (blocked,) = (crossing for crossing in crossings if ends_blocked(crossings, crossing))
+    first = rule(blocked)
+    for second in following(blocked, depth=len(crossings))[:-1]:
+        plan = FaultPlan(seed=2, rules=(first, rule(second)))
+        summary = run(plan).summary
+        replay = f"replay with {plan.model_dump_json()}"
+        assert summary.stalled is None, f"{summary.stalled}; {replay}"
+        assert summary.outcome == "blocked", replay
 
 
 # Second deaths in the host that ends a blocked run: one while it inspects again after the

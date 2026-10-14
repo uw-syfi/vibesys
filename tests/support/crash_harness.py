@@ -2,16 +2,22 @@
 
 Which points a session tries is `tests/system/crash/_catalog.py`'s business."""
 
+from __future__ import annotations
+
 import tempfile
 from functools import cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests.support.skeleton_faults import COMMIT, RECEIPT_BEGUN, RECEIPT_PREFIX
 from tests.support.skeleton_sim import Simulation, Summary, simulate
 
-from vs_core.api import RunStatus
+from vs_core.api import ExecuteRegisteredOperation, RunStatus
 from vs_faults.api import Boundary, Crossing, FaultPlan, FaultRule, HostFault
 from vs_sim.api.testing import VirtualClock, run_virtual
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _RUNS: dict[str, Simulation] = {}
 
@@ -61,7 +67,7 @@ def crash_points() -> tuple[Crossing, ...]:
     return tuple(c for i, c in enumerate(crossings) if not before_an_effect(crossings, i))
 
 
-def after_crash(calls: list[Crossing], crash: Crossing) -> tuple[Crossing, ...]:
+def after_crash(calls: Sequence[Crossing], crash: Crossing) -> tuple[Crossing, ...]:
     """The crossings of the restarted host: those recorded after the crash point.
 
     An executor request is recorded when it is entered, so the receipt writes it makes (begun
@@ -75,16 +81,28 @@ def after_crash(calls: list[Crossing], crash: Crossing) -> tuple[Crossing, ...]:
     return tuple(rest[skipped:])
 
 
-# Crash points that end the run blocked instead of as the straight run: a registered operation
-# that began and never sealed reaches its limit while recovery still inspects it, and the owner
-# cannot tell whether the effect ran. Recovery stays blocked, so the run loop ends the run with a
-# typed ``blocked`` result (``recovery blocked: outcome unknown``) instead of sitting running.
-BLOCKED_ENDINGS = frozenset({"durable_write:receipt_begun#4"})
+_REGISTERED_OPERATION = ExecuteRegisteredOperation.model_fields["kind"].default
+
+
+def ends_blocked(calls: Sequence[Crossing], crossing: Crossing) -> bool:
+    """Whether a host death at ``crossing`` of the run that made ``calls`` ends the run blocked.
+
+    That is a death right after a registered operation's begun marker: the operation began and
+    never sealed, and no inspection can tell whether its effect ran. Recovery stays blocked, so
+    the run loop ends the run with a typed ``blocked`` result (``recovery blocked: outcome
+    unknown``) instead of guessing. This is the intended answer, not a gap to close: the point is
+    named by what it is, so a change in the order of writes cannot exclude a different one.
+    """
+    if crossing.target != RECEIPT_BEGUN:
+        return False
+    before = calls[: calls.index(crossing)]
+    request = next(c for c in reversed(before) if c.boundary == Boundary.EXECUTOR_REQUEST)
+    return request.target == _REGISTERED_OPERATION
 
 
 def ends_as_it_must(crossing: Crossing) -> None:
     """Crash once at ``crossing``: the run converges, or ends blocked where recovery cannot tell."""
-    if name(crossing) not in BLOCKED_ENDINGS:
+    if not ends_blocked(all_crossings(), crossing):
         converges_after_one(crossing)
         return
     plan = crash_plan(crossing)
