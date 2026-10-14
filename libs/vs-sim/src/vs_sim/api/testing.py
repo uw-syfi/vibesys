@@ -72,7 +72,7 @@ from vs_sim.seeds import (
 from vs_sim.sim import WORLDS, Sim, UnknownWorldError, WorldFactory, WorldRegistry
 from vs_sim.sim_network import SimNetwork
 from vs_sim.sim_threads import SimBlockingRunner, SimDeadlockError, SimThreads
-from vs_sim.states import Changes, wait_for_async_state, wait_for_state
+from vs_sim.states import Changes, wait_for_async_state, wait_for_state, yield_until
 from vs_sim.threads import TGKILL_SUPPORTED, non_main_thread_ids, send_to_thread
 from vs_sim.trace import EventTrace, TraceEvent
 from vs_sim.virtual import (
@@ -200,4 +200,5 @@ __all__ = [
     "wait_or_fail",
     "wait_until_started",
     "wait_until_started_sync",
+    "yield_until",
 ]

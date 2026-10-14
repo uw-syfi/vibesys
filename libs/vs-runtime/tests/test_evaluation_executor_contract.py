@@ -8,7 +8,6 @@ reach a terminal state, render a failed stage's text, and cancel the same way.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -43,6 +42,7 @@ from vs_runtime.api import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
+from vs_sim.api.testing import yield_until
 from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
@@ -149,11 +149,13 @@ def _request(snapshot: str) -> EvaluationRequest:
 
 
 async def _terminal(executor: _Executor) -> ExecutorObservation:
-    while True:
-        observed = await executor.inspect(_HANDLE)
-        if observed is not None and observed.state in _TERMINAL:
-            return observed
-        await asyncio.sleep(0)
+    observed = await yield_until(
+        lambda: executor.inspect(_HANDLE),
+        lambda seen: seen is not None and seen.state in _TERMINAL,
+        "a terminal observation",
+    )
+    assert observed is not None
+    return observed
 
 
 @pytest.mark.parametrize("build", BUILDERS)
@@ -236,11 +238,12 @@ async def test_poll_reports_each_phase_without_submitting_or_cancelling(
 
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
     await world.submission_visible(_HANDLE)
-    polled: ExecutorPoll = await world.executor.poll(_HANDLE)
-    while polled.phase is not PollPhase.ENDED:
-        assert polled.phase in (PollPhase.QUEUED, PollPhase.RUNNING)
-        await asyncio.sleep(0)
-        polled = await world.executor.poll(_HANDLE)
+
+    def ended(polled: ExecutorPoll) -> bool:
+        assert polled.phase in (PollPhase.QUEUED, PollPhase.RUNNING, PollPhase.ENDED)
+        return polled.phase is PollPhase.ENDED
+
+    polled = await yield_until(lambda: world.executor.poll(_HANDLE), ended, "the poll's end")
 
     assert polled.terminal is not None
     assert polled.terminal.state is EvaluationState.SUCCEEDED

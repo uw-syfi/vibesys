@@ -36,7 +36,7 @@ from vs_runtime.api import ProfileField, RunCleanupError
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
 from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, yield_now
 from vs_sim.api.testing import ManualClock, arrival, wait_or_fail
 from vs_slurm.api import (
     FakeCluster,
@@ -880,7 +880,7 @@ async def test_close_retains_execution_until_cleanup_settles(tmp_path: Path) -> 
     closing = asyncio.create_task(executor.close())
     await arrival(workspaces.candidates[0].discard_started.wait(), closing)
     inspecting = asyncio.create_task(executor.inspect("retained-during-close"))
-    await asyncio.sleep(0)
+    await yield_now()
 
     assert len(workspaces.candidates) == 1
     workspaces.release.set()

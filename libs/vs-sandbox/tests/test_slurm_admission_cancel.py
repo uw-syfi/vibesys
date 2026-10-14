@@ -9,7 +9,6 @@ nothing ever submits it.
 
 from __future__ import annotations
 
-import asyncio
 import threading
 from typing import TYPE_CHECKING
 
@@ -28,7 +27,7 @@ from vs_sandbox.api.slurm import (
     SlurmEvaluationExecutor,
     SlurmStagePayload,
 )
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, yield_until
 from vs_slurm.api import (
     ClusterSubmitOutcome,
     FakeCluster,
@@ -109,6 +108,15 @@ def _executor(root: Path, cluster: _QueuedCluster) -> SlurmEvaluationExecutor:
     )
 
 
+async def _one_queued(executor: SlurmEvaluationExecutor) -> None:
+    """Wait until one evaluation waits in the admission queue."""
+    await yield_until(
+        lambda: executor.availability(ResourceRequirements()),
+        lambda availability: availability.queue_depth == 1,
+        "one evaluation queued for admission",
+    )
+
+
 async def _cancel_while_waiting_for_admission(
     executor: SlurmEvaluationExecutor, cluster: _QueuedCluster
 ) -> None:
@@ -117,11 +125,7 @@ async def _cancel_while_waiting_for_admission(
     await wait_until_executor_started(cluster.holder_accepted, executor, _HOLDER)
     await executor.submit(_request("waiter"), handle_id=_WAITER)
     # The waiter's task reaches the admission queue within a few loop turns.
-    for _ in range(100):
-        if (await executor.availability(ResourceRequirements())).queue_depth == 1:
-            break
-        await asyncio.sleep(0)
-    assert (await executor.availability(ResourceRequirements())).queue_depth == 1
+    await _one_queued(executor)
 
     await executor.cancel(_WAITER)
 
@@ -179,10 +183,7 @@ async def test_closing_the_executor_ends_an_evaluation_still_awaiting_admission(
     await executor.submit(_request("holder"), handle_id=_HOLDER)
     await wait_until_executor_started(cluster.holder_accepted, executor, _HOLDER)
     await executor.submit(_request("waiter"), handle_id=_WAITER)
-    for _ in range(100):
-        if (await executor.availability(ResourceRequirements())).queue_depth == 1:
-            break
-        await asyncio.sleep(0)
+    await _one_queued(executor)
 
     await executor.close()
 

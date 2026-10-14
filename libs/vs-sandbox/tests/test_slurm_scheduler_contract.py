@@ -34,6 +34,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
+from vs_sim.api import yield_now
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     CANCEL_REACTIONS,
@@ -350,7 +351,7 @@ async def _publishes_monotonically(spec: _WorldSpec, operations: list[str]) -> N
                     if polled.phase in _PHASE_RANK:
                         phases.append((polled.attempt, _PHASE_RANK[polled.phase]))
                 case _:
-                    await asyncio.sleep(0)
+                    await yield_now()
             return await coordinator.recorded_status(handle.id)
 
         for operation in operations:

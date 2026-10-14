@@ -28,6 +28,7 @@ from vs_async_ops.api.testing import (
     InMemoryOperationStore,
     ObservingWaiter,
 )
+from vs_sim.api import yield_now
 from vs_sim.api.testing import arrival, examples
 
 if TYPE_CHECKING:
@@ -587,7 +588,7 @@ class _SlowUnwindRunner(FakeOperationRunner):
             return await super().run(request)
         finally:
             for _ in range(5):
-                await asyncio.sleep(0)
+                await yield_now()
 
 
 @pytest.mark.asyncio
@@ -603,12 +604,12 @@ async def test_cancelling_the_canceller_never_strands_a_running_record(
     await runner.wait_started("op")
     stopping = asyncio.create_task(coordinator.close() if closing else coordinator.cancel("op"))
     for _ in range(turns_before_caller_cancelled):
-        await asyncio.sleep(0)
+        await yield_now()
     stopping.cancel()
     await asyncio.gather(stopping, return_exceptions=True)
 
     for _ in range(50):
-        await asyncio.sleep(0)
+        await yield_now()
 
     # Either the stop never began (the runner is still live) or it ran to the end: a RUNNING
     # record with no work behind it would hang every waiter forever.

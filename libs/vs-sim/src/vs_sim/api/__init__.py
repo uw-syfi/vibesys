@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     )
     from vs_sim.streaming import StreamingCommand, SubprocessStreamingCommand
     from vs_sim.sync import sync_descriptor
+    from vs_sim.yields import yield_now
 
 _MODULES: dict[str, str] = {
     "BlockingRunner": "vs_sim.blocking",
@@ -103,6 +104,7 @@ _MODULES: dict[str, str] = {
     "StreamingCommand": "vs_sim.streaming",
     "SubprocessStreamingCommand": "vs_sim.streaming",
     "sync_descriptor": "vs_sim.sync",
+    "yield_now": "vs_sim.yields",
 }
 """The module that defines each public name."""
 
@@ -174,4 +176,5 @@ __all__ = [
     "derive_seed",
     "run_foreground",
     "sync_descriptor",
+    "yield_now",
 ]

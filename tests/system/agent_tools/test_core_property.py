@@ -84,6 +84,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.executor_contracts import FaultingNamespace, ProcessKilledError
 from vs_runtime.api.testing import FakePublicationDelivery, ScriptedExecutors
 from vs_runtime.contracts import AgentRole, AgentTool
+from vs_sim.api import yield_now
 from vs_sim.api.testing import VirtualClock, examples, run_virtual
 
 if TYPE_CHECKING:
@@ -408,7 +409,7 @@ class Agent:
         arrived = asyncio.create_task(slow.arrived.wait())
         await asyncio.wait({first, arrived}, return_when=asyncio.FIRST_COMPLETED)
         retry = asyncio.create_task(self.bridge.answer(frame))
-        await asyncio.sleep(0)
+        await yield_now()
         slow.hold.set()
         arrived.cancel()
         _, answered = await asyncio.gather(first, retry, return_exceptions=True)

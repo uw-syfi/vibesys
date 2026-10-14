@@ -6,7 +6,6 @@ strategy proposes nothing: the run stays open until a control or the deadline en
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import itertools
 import math
@@ -59,6 +58,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.testing import ProbedRunClock
+from vs_sim.api import yield_now
 from vs_sim.api.testing import clock_from, examples
 
 if TYPE_CHECKING:
@@ -299,7 +299,7 @@ async def test_a_stop_during_a_submission_waits_for_it_and_closes_the_run(
             await clock.pass_time(LEASE / 4)
         channel.request_stop(StopMode.DRAIN)
         for _ in range(_TURN_BOUND):
-            await asyncio.sleep(0)
+            await yield_now()
         stop_seen_in_flight.append(True)
 
     with open_skeleton_world(tmp_path, BASELINE_ONLY, timed=(clock, 0.0)) as world:

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, cast
 # run host reaches it only through its private factory.
 from vibesys.run.host import _ProductHostFactory
 from vs_runtime.api import RunCleanupError
+from vs_sim.api import yield_now
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -28,7 +29,7 @@ class _Services:
 
     async def close(self) -> None:
         self._interrupt()
-        await asyncio.sleep(0)
+        await yield_now()
         self._closed.append("services")
 
 

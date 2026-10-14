@@ -25,7 +25,7 @@ from vs_sandbox.api.slurm import (
     SlurmEvaluationExecutor,
     SlurmStagePayload,
 )
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, yield_now
 from vs_sim.api.testing import ManualClock, wait_until_started
 from vs_slurm.api import (
     ClusterInspectOutcome,
@@ -142,6 +142,6 @@ async def test_close_returns_when_an_abandoned_cluster_call_ends_as_it_begins(
     # already queued when the loop next runs; then land close on the chosen turn.
     cluster.returned.wait(timeout=_BOUND_S)
     for _ in range(turns):
-        await asyncio.sleep(0)
+        await yield_now()
 
     await restarted.close()

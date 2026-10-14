@@ -33,6 +33,7 @@ from vs_sandbox.api.slurm import (
     SlurmStagePayload,
     SlurmTargetLifecycle,
 )
+from vs_sim.api import yield_now
 from vs_sim.api.testing import Gate, ManualClock, examples, wait_until_started
 from vs_slurm.api import (
     ClusterCancelOutcome,
@@ -947,7 +948,7 @@ async def test_recovered_evaluation_never_reports_starting_after_running(tmp_pat
     assert recovered is not None
     assert recovered.state is EvaluationState.RUNNING
     # Let the recovery task take its admission lease before the next poll.
-    await asyncio.sleep(0)
+    await yield_now()
     polled = await resumed.inspect("eval-monotonic")
     assert polled is not None
     assert polled.state is not EvaluationState.STARTING
@@ -1143,7 +1144,7 @@ async def test_a_cancelled_cancel_still_finishes_the_scancel_before_it_returns(
         # must not abandon the scancel worker thread mid-flight.
         canceller.cancel()
         for _ in range(50):
-            await asyncio.sleep(0)
+            await yield_now()
         assert not canceller.done()
 
         runner.scancel_gate.set()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+from vs_sim.api import yield_now
 
 
 class VirtualTime:
@@ -28,7 +28,7 @@ class VirtualTime:
         """Wait ``delay`` virtual seconds."""
         self.sleeps.append(delay)
         wake = self.seconds + delay
-        await asyncio.sleep(0)
+        await yield_now()
         self.seconds = max(self.seconds, wake)
 
 

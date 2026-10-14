@@ -25,6 +25,7 @@ from vs_runtime.api.testing import (
     FakeStopTimer,
     FakeWorkspace,
 )
+from vs_sim.api import yield_now
 from vs_sim.api.testing import arrival
 
 _GRACE_S = 60.0
@@ -64,7 +65,7 @@ async def test_a_stop_that_outlives_the_grace_cancels_the_block_as_a_landed_stop
                 raise
 
     task = asyncio.create_task(run())
-    await asyncio.sleep(0)
+    await yield_now()
     channel.request_stop(StopMode.DRAIN)
     await _until_armed(timer)
     assert on_stop.calls == 1
@@ -90,7 +91,7 @@ async def test_a_block_that_ends_within_the_grace_is_not_cancelled() -> None:
         return "drained"
 
     task = asyncio.create_task(run())
-    await asyncio.sleep(0)
+    await yield_now()
     channel.request_stop(StopMode.DRAIN)
     await _until_armed(timer)
     finish.set()
@@ -110,13 +111,13 @@ async def test_a_resume_within_the_grace_disarms_the_cancellation() -> None:
         return "resumed"
 
     task = asyncio.create_task(run())
-    await asyncio.sleep(0)
+    await yield_now()
     channel.request_stop(StopMode.DRAIN)
     await _until_armed(timer)
     channel.resume()
     timer.expire()
     for _ in range(5):
-        await asyncio.sleep(0)
+        await yield_now()
     assert not task.done()
     finish.set()
 
@@ -174,7 +175,7 @@ async def test_an_outside_cancellation_stays_a_cancellation() -> None:
             await asyncio.Event().wait()
 
     task = asyncio.create_task(run())
-    await asyncio.sleep(0)
+    await yield_now()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -311,7 +312,7 @@ async def test_a_block_that_ends_during_on_stop_does_not_abort_the_stop_cleanup(
                 external_work_settled.set()
 
     task = asyncio.create_task(run())
-    await asyncio.sleep(0)
+    await yield_now()
     channel.request_stop(StopMode.DRAIN)
     await task
 
@@ -336,7 +337,7 @@ async def test_a_stop_cleanup_that_fails_after_the_block_ended_is_still_raised()
             block_ended.set()
 
     task = asyncio.create_task(run())
-    await asyncio.sleep(0)
+    await yield_now()
     channel.request_stop(StopMode.DRAIN)
     with pytest.raises(RuntimeError, match="cancel failed"):
         await task

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import TYPE_CHECKING
 
@@ -30,7 +29,7 @@ from vs_sandbox.api.slurm import (
     HipApiTime,
     ProfileStats,
 )
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import examples, yield_until
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -91,11 +90,12 @@ async def _profile(tmp_path: Path, stdout: str) -> TrustedEvidence:
     )
     await stack.executor.submit(request, handle_id=_HANDLE)
     await wait_until_executor_started(cluster.accepted, stack.executor, _HANDLE)
-    while True:
-        observed = await stack.executor.inspect(_HANDLE)
-        if observed is not None and observed.state in _TERMINAL:
-            break
-        await asyncio.sleep(0)
+    observed = await yield_until(
+        lambda: stack.executor.inspect(_HANDLE),
+        lambda seen: seen is not None and seen.state in _TERMINAL,
+        "a terminal observation",
+    )
+    assert observed is not None
     (step,) = observed.stage_results
     assert step.result is not None
     await stack.executor.close()
