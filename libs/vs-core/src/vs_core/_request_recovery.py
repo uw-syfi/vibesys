@@ -1231,6 +1231,19 @@ def _observe(
             if (matches or handed_over) and record is not None
             else check.resolution
         )
+        # A record core already ended as blocked (its owner heard so) has no deadline left to
+        # end its check: an answer that only repeats its unknown result settles the check as
+        # the block did, keeping the record blocked and its ownership as it was.
+        if (
+            matches
+            and resolution == "pending"
+            and check.resolution == "pending"
+            and record is not None
+            and record.phase == RequestPhase.BLOCKED
+            and child_resource is None
+            and not _sourced(updated, check.target)
+        ):
+            resolution = "terminal"
         checks.append(_with_resolution(check, resolution))
     change = _finish(updated, barrier.model_copy(update={"checks": tuple(checks)}))
     return change.model_copy(

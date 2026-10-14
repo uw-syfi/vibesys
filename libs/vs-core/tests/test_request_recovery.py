@@ -2325,6 +2325,50 @@ def test_a_crash_loop_credits_a_limit_the_time_no_host_was_alive(
         assert moved >= downtime
 
 
+@pytest.mark.parametrize("status", [ObservationStatus.UNKNOWN, ObservationStatus.PENDING])
+def test_an_inconclusive_answer_about_a_blocked_record_lets_recovery_finish(
+    status: ObservationStatus,
+) -> None:
+    """A record core already blocked has no deadline left to end its recovery check.
+
+    The restarted host inspects it, and the executor's answer only repeats the inconclusive
+    result the record ended with. The check settles: the record stays blocked as it was, and recovery is ready, so
+    the run goes on as it did before the restart. (#2419: a lost board-write acknowledgement
+    blocked a record, a host died, and the run halted on the pending check.)
+    """
+    blocked = pending_record(phase=RequestPhase.BLOCKED)
+    inconclusive = observed(blocked, status=status)
+    original = blocked.model_copy(update={"observation": inconclusive})
+    started = step(reload(recovering_state(original)), RecoveryStarted(epoch=1, now_at=11.0))
+    assert started.state.records.recovery.phase == RecoveryPhase.RECOVERING
+    inspection = next(r for r in started.requests if isinstance(r, InspectRequest))
+    assert inspection.request_id is not None
+    asked = step(started.state, DispatchAuthorized(request_id=inspection.request_id)).state
+    answer = Observation.model_validate(
+        {
+            "event_id": EventId(root="restart-answer"),
+            "request_id": inspection.request_id,
+            "scope": inspection.scope,
+            "sequence": 1,
+            "observed_at": 11.0,
+            "status": ObservationStatus.SUCCEEDED,
+            "accepted": True,
+            "terminal": True,
+            "released": True,
+            "children_complete": True,
+        }
+    )
+
+    result = step(
+        reload(asked),
+        RequestObserved(observation=answer, target=TargetObservation(observation=inconclusive)),
+    )
+
+    assert result.state.records.recovery.phase == RecoveryPhase.READY
+    assert result.state.records.records[0].phase == RequestPhase.BLOCKED
+    assert result.state.records.records[0].failure == original.failure
+
+
 def test_a_limit_that_passed_while_the_host_was_down_waits_for_the_executors_report() -> None:
     """The far side may have finished in time: the restarted host asks before it times out.
 
