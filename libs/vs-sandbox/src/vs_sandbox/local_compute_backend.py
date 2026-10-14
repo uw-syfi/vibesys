@@ -139,6 +139,10 @@ class LocalBackend:
         message = f"Unknown sandbox kind: {kind!r}"
         raise ValueError(message)
 
+    def ensure_accelerator_available(self) -> None:
+        """No host prerequisite to probe: Metal has no passthrough, CPU needs no device."""
+        return
+
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         """Return no monitor because host-only backends have no device contention."""
         del log_dir

@@ -115,3 +115,18 @@ def test_make_sandbox_promises_nothing_an_implementation_would_drop(
 
     assert "extra_init_commands" not in parameters
     assert set(parameters) == set(protocol)
+
+
+@pytest.mark.parametrize(
+    "backend_class", [CudaBackend, RocmBackend, TrainiumBackend, LocalBackend, FakeComputeBackend]
+)
+def test_every_backend_declares_ensure_accelerator_available(
+    backend_class: type[ComputeBackendImpl],
+) -> None:
+    """Every backend accepts the pre-image-build host-capability check (#2093).
+
+    Not called here: the real ``CudaBackend`` would shell out to ``nvidia-smi``,
+    which this deterministic suite never does. ``test_cuda_backend.py`` exercises
+    the raising behavior itself with a fake telemetry.
+    """
+    assert callable(backend_class.ensure_accelerator_available)

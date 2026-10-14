@@ -38,6 +38,24 @@ if TYPE_CHECKING:
 _DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
 
 
+class CudaAcceleratorUnavailableError(RuntimeError):
+    """No NVIDIA GPU is usable on this host for the ``cuda`` backend.
+
+    Raised before any image build or container start: nothing falls back to
+    running the container without its accelerator.
+    """
+
+    @classmethod
+    def no_gpu_detected(cls) -> CudaAcceleratorUnavailableError:
+        """Describe a host where ``nvidia-smi`` reports no GPU, or is not installed."""
+        return cls(
+            "The 'cuda' backend (the CLI default) needs an NVIDIA GPU and the NVIDIA "
+            "Container Toolkit's Docker runtime, but `nvidia-smi` reports no GPU on this "
+            "host. Select a backend this host can run: --backend cpu, --backend metal, "
+            "--backend rocm, or --backend trainium."
+        )
+
+
 class CudaBackend:
     """CUDA / NVIDIA backend.
 
@@ -148,6 +166,20 @@ class CudaBackend:
         if not ephemeral:
             self._sandboxes.append((kind, sandbox))
         return sandbox
+
+    def ensure_accelerator_available(self) -> None:
+        """Raise :class:`CudaAcceleratorUnavailableError` when no GPU is usable here.
+
+        A pinned ``CUDA_VISIBLE_DEVICES`` is trusted, matching :meth:`_pick_device`'s own
+        "user pinned GPU" exception; otherwise this reads the same ``nvidia-smi``
+        telemetry :meth:`_pick_device` later selects a device from, so a host with no
+        GPU fails here -- before any image build -- instead of at the first
+        ``docker run --gpus`` call.
+        """
+        if os.environ.get("CUDA_VISIBLE_DEVICES"):
+            return
+        if not self._telemetry.gpus():
+            raise CudaAcceleratorUnavailableError.no_gpu_detected()
 
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         """Create a contention monitor when a CUDA device is selected."""

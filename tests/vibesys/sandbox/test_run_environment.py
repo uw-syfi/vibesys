@@ -212,6 +212,9 @@ class FakeBackend:
             )
         return self.sandbox
 
+    def ensure_accelerator_available(self) -> None:
+        return
+
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         del log_dir
         return None

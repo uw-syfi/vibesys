@@ -34,7 +34,7 @@ if TYPE_CHECKING:
         require_sysbox_runtime,
         workspace_container_root,
     )
-    from vs_sandbox.cuda_backend import CudaBackend
+    from vs_sandbox.cuda_backend import CudaAcceleratorUnavailableError, CudaBackend
     from vs_sandbox.device_lease import DeviceLease
     from vs_sandbox.docker_cli import DockerCli, SubprocessDockerCli
     from vs_sandbox.docker_sandbox import AGENT_HOME, RUN_ID_LABEL, DockerSandbox
@@ -164,6 +164,7 @@ __all__ = [
     "ContainerRuntimeUnavailableError",
     "ContainerUnknown",
     "ContentionMonitor",
+    "CudaAcceleratorUnavailableError",
     "CudaBackend",
     "Device",
     "DeviceLease",
@@ -289,6 +290,7 @@ _LAZY_EXPORTS = {
     "NestedDaemonError": ("container_runtime", "NestedDaemonError"),
     "require_sysbox_runtime": ("container_runtime", "require_sysbox_runtime"),
     "workspace_container_root": ("container_runtime", "workspace_container_root"),
+    "CudaAcceleratorUnavailableError": ("cuda_backend", "CudaAcceleratorUnavailableError"),
     "CudaBackend": ("cuda_backend", "CudaBackend"),
     "DeviceLease": ("device_lease", "DeviceLease"),
     "GpuContentionMonitor": ("gpu_monitor", "GpuContentionMonitor"),

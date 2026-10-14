@@ -147,6 +147,16 @@ class ComputeBackendImpl(Protocol):
         """
         ...
 
+    def ensure_accelerator_available(self) -> None:
+        """Raise when this host cannot provide the backend's accelerator right now.
+
+        Called once per run, before any image build or sandbox is created, so a
+        host that cannot honor ``make_sandbox(attach_accelerator=True)`` fails here,
+        naming what is missing, instead of at the first container start. A backend
+        whose accelerator has no host-side prerequisite to probe is a no-op.
+        """
+        ...
+
 
 def make_local_shell_sandbox(
     *,

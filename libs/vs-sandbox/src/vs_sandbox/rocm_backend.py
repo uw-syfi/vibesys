@@ -190,6 +190,14 @@ class RocmBackend:
         message = f"Unknown sandbox kind: {kind!r}"
         raise ValueError(message)
 
+    def ensure_accelerator_available(self) -> None:
+        """No-op: a missing ``/dev/kfd`` is already logged at construction, not raised.
+
+        Unlike CUDA's late ``docker run --gpus`` failure, a ROCm sandbox without
+        device nodes still starts (CPU-only); see the constructor's warning.
+        """
+        return
+
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         """Return no monitor until ROCm contention handling is available."""
         del log_dir

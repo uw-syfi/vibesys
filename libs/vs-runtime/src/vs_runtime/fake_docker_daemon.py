@@ -61,6 +61,10 @@ class DaemonBackend:
             env=extra_env,
         )
 
+    def ensure_accelerator_available(self) -> None:
+        """The fake daemon always has its accelerator."""
+        return
+
     def make_monitor(self, log_dir: Path) -> None:
         """The fake runs no device monitor."""
         del log_dir

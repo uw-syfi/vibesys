@@ -59,6 +59,9 @@ class _FakeBackend:
     def make_sandbox(self, kind: SandboxKind, **kwargs: object) -> CommandRunner:
         raise NotImplementedError
 
+    def ensure_accelerator_available(self) -> None:
+        return
+
     def make_monitor(self, log_dir: Path) -> _RecordingMonitor | None:
         del log_dir
         return self._monitor

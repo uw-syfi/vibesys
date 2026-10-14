@@ -920,6 +920,13 @@ class DockerEnvironment:
         requirements = request.evaluator_requirements
         log: Callable[[str], None] = request.log or (lambda _: None)
         toolchains: set[str] = set(evaluator_agent_toolchains(requirements))
+        attach_accelerator = extras.attach_accelerator and attaches_accelerator(
+            docker_in_docker=request.docker_in_docker
+        )
+        if attach_accelerator:
+            # Fail before the image build when the backend's accelerator is not
+            # usable on this host; nothing falls back to running without it.
+            request.backend.ensure_accelerator_available()
         if request.docker_in_docker:
             # Fail before the image build when the host has no Sysbox; nothing
             # falls back to the host socket.
@@ -989,8 +996,7 @@ class DockerEnvironment:
             container_image=container_image,
             docker_in_docker=request.docker_in_docker,
             same_path_workspace=extras.same_path_workspace,
-            attach_accelerator=extras.attach_accelerator
-            and attaches_accelerator(docker_in_docker=request.docker_in_docker),
+            attach_accelerator=attach_accelerator,
             run_id=request.run_id,
         )
         _report_startup(request, EnvironmentStartupStage.STARTING_CONTAINER)

@@ -29,11 +29,14 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api import (
     CONTAINER_RUNTIME_TOOLCHAIN,
+    ComputeBackendImpl,
     ContainerRuntimeUnavailableError,
+    CudaAcceleratorUnavailableError,
+    CudaBackend,
     DockerSandbox,
     SandboxKind,
 )
-from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sandbox.api.testing import FakeDockerEngine, FakeGpuTelemetry
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -109,6 +112,9 @@ class _DaemonBackend:
             docker_in_docker=docker_in_docker,
         )
 
+    def ensure_accelerator_available(self) -> None:
+        return
+
     def make_monitor(self, log_dir: Path) -> None:
         del log_dir
 
@@ -118,7 +124,7 @@ class _DaemonBackend:
 
 def _request(
     tmp_path: Path,
-    backend: _DaemonBackend,
+    backend: ComputeBackendImpl,
     *,
     docker_in_docker: bool = False,
     benchmark_command: str | None = None,
@@ -210,6 +216,25 @@ def test_a_host_without_sysbox_fails_before_any_image_is_built(tmp_path: Path) -
 
     assert runner.argvs == []
     assert backend.creations == []
+
+
+def test_a_host_without_a_gpu_fails_before_any_image_is_built(tmp_path: Path) -> None:
+    """The default 'cuda' backend refuses a GPU-less host before any docker build.
+
+    Regression for #2093: on a host with no NVIDIA GPU, ``vibesys`` used to accept
+    the default ``--backend cuda``, build the agent image, and fail only once
+    ``docker run --gpus all`` ran for the first container. The real
+    ``CudaBackend`` (not a stand-in) is driven through ``open_run_environment``
+    so the check under test is exactly the one the CLI's run path takes.
+    """
+    engine = _engine(tmp_path, ("runc",))
+    runner = _RecordingBuildRunner()
+    backend = CudaBackend(tmp_path, gpu_telemetry=FakeGpuTelemetry(gpus=[]), clock=ManualClock())
+
+    with pytest.raises(CudaAcceleratorUnavailableError, match="NVIDIA GPU"):
+        open_run_environment(_environment(engine, runner), _request(tmp_path, backend))
+
+    assert runner.argvs == []
 
 
 @pytest.mark.parametrize("name", ["modal", "skypilot", "local"])
