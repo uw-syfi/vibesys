@@ -48,6 +48,7 @@ _MAX_FRAME_BYTES = 16 * 1024 * 1024
 _STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 _CONNECTION_CLOSED = "the command broker closed the connection"
 _PROTOCOL_ERROR_STATUS = 1
+_MAX_EXIT_STATUS = 255
 
 
 class BrokerProtocolError(ValueError):
@@ -149,8 +150,16 @@ def _output(value: object) -> bytes:
 
 
 def _exit_status(value: object) -> int:
+    """Return the job's status, which the client exits with.
+
+    A process exit status is 0..255 (a signalled job is ``128 + N``), so any
+    other number would wrap modulo 256 on exit and report a different result.
+    """
     if not isinstance(value, int) or isinstance(value, bool):
         message = "an exit frame whose status is not an integer"
+        raise BrokerProtocolError(message)
+    if not 0 <= value <= _MAX_EXIT_STATUS:
+        message = f"an exit frame whose status {value} is outside 0..{_MAX_EXIT_STATUS}"
         raise BrokerProtocolError(message)
     return value
 

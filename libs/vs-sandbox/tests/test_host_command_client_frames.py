@@ -3,7 +3,9 @@
 The client trusts nothing the broker sends. Run against a scripted broker on a
 ``SimNetwork``, it answers every frame of the shared hostile corpus, and every
 well-formed JSON object whose fields have the wrong type, with a typed protocol error:
-a non-zero status and one line on stderr, never an uncaught exception. A broker that
+a non-zero status and one line on stderr, never an uncaught exception. An exit
+status outside the process range 0..255 is such an error, since the client would
+otherwise exit with it wrapped modulo 256 (300 as 44, 256 as success). A broker that
 streams a line without ever ending it is cut off at the frame bound, not buffered
 without limit.
 """
@@ -38,6 +40,10 @@ _WRONG_TYPES = (
     ("exit-is-a-string", json.dumps({"exit": "0"}).encode()),
     ("exit-is-a-bool", json.dumps({"exit": True}).encode()),
     ("exit-is-null", json.dumps({"exit": None}).encode()),
+    ("exit-wraps-to-a-success", json.dumps({"exit": 256}).encode()),
+    ("exit-wraps-to-another-status", json.dumps({"exit": 300}).encode()),
+    ("exit-is-negative", json.dumps({"exit": -1}).encode()),
+    ("exit-is-huge", json.dumps({"exit": 10**30}).encode()),
     ("output-is-a-number", json.dumps({"output": 5}).encode()),
     ("output-is-not-base64", json.dumps({"output": "not base64!"}).encode()),
     ("a-string-naming-a-key", b'"output"'),
@@ -141,3 +147,16 @@ def test_a_line_that_never_ends_is_cut_off_at_the_frame_bound(
     assert status == 1
     assert "longer than" in capsys.readouterr().err
     assert sent[0] < _FRAME_BOUND + 4 * (1 << 20), "the client stopped reading at the bound"
+
+
+@pytest.mark.parametrize("exit_status", [0, 1, 2, 42, 128 + 9, 255])
+def test_an_exit_status_in_the_process_range_is_the_clients_own(
+    exit_status: int, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def broker(connection: Connection) -> None:
+        connection.send(json.dumps({"exit": exit_status}).encode() + b"\n", HANG_GUARD_S)
+
+    status = _client_against(broker, monkeypatch, seed=exit_status, buffer=None)
+
+    assert status == exit_status
+    assert capsys.readouterr().err == ""
