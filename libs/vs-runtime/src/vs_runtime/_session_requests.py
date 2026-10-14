@@ -121,6 +121,7 @@ if TYPE_CHECKING:
 
 _BINDINGS = "session-bindings"
 _DISPATCHES = "session-dispatches"
+_WITHDRAWN = "session-withdrawn"
 
 
 def session_binding_key(request: RequestBase, session_id: SessionId) -> str:
@@ -147,6 +148,41 @@ def load_dispatch_record(
 ) -> DispatchRecord | None:
     """Read the dispatch record for one invocation of a bound session."""
     return store.load(_DISPATCHES, "dispatch", f"{bkey}/{invocation_id.root}", DispatchRecord)
+
+
+class WithdrawnInvocation(BaseModel):
+    """Written when an invocation is cancelled before it was dispatched: it never will be."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    request_id: CoreRequestId
+
+
+def withdraw_undispatched(
+    store: ReceiptStore, bkey: str, invocation_id: InvocationId, request_id: CoreRequestId
+) -> bool:
+    """Fence an invocation that was never dispatched so it never is; False if it was.
+
+    The dispatch record is written before any provider call and only when no withdrawal is
+    recorded (`_claim_dispatch`), both under the store's lock, so a True answer proves
+    the invocation holds nothing now and never will.
+    """
+    key = f"{bkey}/{invocation_id.root}"
+    with store.exclusive():
+        if store.load(_DISPATCHES, "dispatch", key, DispatchRecord) is not None:
+            return False
+        store.record_once(_WITHDRAWN, "withdrawn", key, WithdrawnInvocation(request_id=request_id))
+        return True
+
+
+def _claim_dispatch(store: ReceiptStore, key: str, link: DispatchRecord) -> bool:
+    """Record the dispatch unless the invocation was withdrawn first; False if it was."""
+    with store.exclusive():
+        if store.load(_DISPATCHES, "dispatch", key, DispatchRecord) is None and store.load(
+            _WITHDRAWN, "withdrawn", key, WithdrawnInvocation
+        ):
+            return False
+        store.record_once(_DISPATCHES, "dispatch", key, link)
+        return True
 
 
 class SessionResolver(Protocol):
@@ -853,7 +889,9 @@ class RuntimeSessionRequests:
             # A recorded dispatch may have started: replay what the journal proves, never reject.
             return await self._after_deadline(bkey, binding, dispatch, turn.output_schema)
         # Written before any provider call: its absence later proves no dispatch began.
-        self._store.record_once(_DISPATCHES, "dispatch", record_key, link)
+        if not _claim_dispatch(self._store, record_key, link):
+            # Cancelled before it was dispatched: no provider call began, and none will.
+            return _rejected("the invocation was withdrawn before dispatch", binding.resource_id)
         self._note_dispatch(bkey, dispatch.invocation)
         return None
 
@@ -952,10 +990,14 @@ class RuntimeSessionRequests:
         invocation = request.invocation
         bkey = self._binding_key(request, invocation.session_id)
         binding = load_session_binding(self._store, bkey)
-        if binding is None:
-            raise _RefusalError(_rejected("no ensured session for this invocation"))
-        link = load_dispatch_record(self._store, bkey, invocation.invocation_id)
-        if link is None:
+        # A dispatch is recorded only under an ensured session, so without a binding no
+        # dispatch record exists either: the same proof that no provider call began.
+        link = (
+            None
+            if binding is None
+            else load_dispatch_record(self._store, bkey, invocation.invocation_id)
+        )
+        if binding is None or link is None:
             return self._never_dispatched(request, context)
         schema = self._resolver.output_schema(link.output_schema)
         if schema is None:
@@ -1003,13 +1045,7 @@ class RuntimeSessionRequests:
         seen = self._observations.observe(
             ObservationSubject.of(request, request_id=core_named(request.dispatch)),
             # A turn that never reached the provider holds nothing: nothing is left to release.
-            ObservationFacts(
-                status=ObservationStatus.REJECTED,
-                terminal=True,
-                released=True,
-                children_complete=True,
-                diagnostic="no dispatch record: the turn never reached the provider",
-            ),
+            ObservationFacts.never_held("no dispatch record: the turn never reached the provider"),
             observed_at=context.now_at,
         )
         return ExecutionResult(

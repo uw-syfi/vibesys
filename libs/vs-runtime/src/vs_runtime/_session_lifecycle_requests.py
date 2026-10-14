@@ -36,6 +36,7 @@ observation. Only terminal observations are stored.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol, assert_never
 
 from pydantic import BaseModel, ConfigDict
@@ -92,6 +93,7 @@ from vs_runtime._session_requests import (
     load_dispatch_record,
     load_session_binding,
     session_binding_key,
+    withdraw_undispatched,
 )
 
 if TYPE_CHECKING:
@@ -138,18 +140,11 @@ def _rejected(diagnostic: str, binding: SessionBinding | None = None) -> Observa
     )
 
 
-def _nothing_held(diagnostic: str) -> ObservationFacts:
-    """No session was ever ensured under the identity, so the request leaves nothing held.
-
-    Core ends a closing session only on a proven release; a bare rejection is no proof, and
-    nothing would ever answer again, so the session would wait forever.
-    """
-    return ObservationFacts(
-        status=ObservationStatus.REJECTED,
-        released=True,
-        children_complete=True,
-        diagnostic=diagnostic,
-    )
+def _refused_before_dispatch(facts: ObservationFacts) -> ObservationFacts:
+    """Facts of a resume that ended before its dispatch: a terminal refusal holds nothing."""
+    if facts.terminal and facts.status is ObservationStatus.REJECTED:
+        return replace(facts, released=True, children_complete=True)
+    return facts
 
 
 def _unknown(diagnostic: str, binding: SessionBinding | None = None) -> ObservationFacts:
@@ -422,16 +417,20 @@ class SessionLifecycleRequests:
 
     def _cancel(self, request: CancelTurn) -> ObservationFacts:
         invocation = request.invocation
+        bkey = session_binding_key(request, invocation.session_id)
         binding = self._binding(request, invocation.session_id)
-        if binding is None:
-            return _nothing_held("no ensured session for this invocation")
-        link = load_dispatch_record(
-            self._store,
-            session_binding_key(request, invocation.session_id),
-            invocation.invocation_id,
-        )
-        if link is None:
-            return _rejected("the invocation was never dispatched", binding)
+        if (
+            binding is None
+            or load_dispatch_record(self._store, bkey, invocation.invocation_id) is None
+        ):
+            # Never dispatched: fence it so a dispatch still in flight can never begin, and
+            # the answer proves nothing is held now or later.
+            if withdraw_undispatched(
+                self._store, bkey, invocation.invocation_id, core_identity(request)
+            ):
+                return ObservationFacts.never_held("the invocation was never dispatched")
+            if binding is None:
+                return _unknown("the invocation was dispatched without a session binding", None)
         key = AgentSessionKey.parse(binding.session_key)
         invocation_id = invocation.invocation_id.root
         try:
@@ -464,7 +463,7 @@ class SessionLifecycleRequests:
     def _close(self, request: CloseSession) -> ObservationFacts:
         binding = self._binding(request, request.session_id)
         if binding is None:
-            return _nothing_held("no ensured session to close")
+            return ObservationFacts.never_held("no ensured session to close")
         try:
             self._sessions.release(AgentSessionKey.parse(binding.session_key))
         except InvocationConflictError as error:
@@ -483,15 +482,19 @@ class SessionLifecycleRequests:
         turn = request.turn
         if turn.charge_class != "resume":
             return self._result(
-                request, context, _rejected("a resume turn needs charge class resume")
+                request,
+                context,
+                ObservationFacts.never_held("a resume turn needs charge class resume"),
             )
         if turn.continuation_id != request.continuation_id:
             return self._result(
-                request, context, _rejected("the turn names another continuation than the request")
+                request,
+                context,
+                ObservationFacts.never_held("the turn names another continuation than the request"),
             )
         problem = await asyncio.to_thread(self._bind_continuation, request)
         if problem is not None:
-            return self._result(request, context, problem)
+            return self._result(request, context, _refused_before_dispatch(problem))
         superseded = await self._settle_superseded(request)
         if superseded is not None:
             return self._result(request, context, superseded)

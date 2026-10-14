@@ -193,7 +193,10 @@ async def test_a_turn_refused_before_the_provider_call_is_cancelled_and_frees_th
 
 
 @pytest.mark.asyncio
-async def test_cancel_of_an_undispatched_invocation_or_unknown_session_is_rejected() -> None:
+async def test_cancel_of_an_undispatched_invocation_or_unknown_session_proves_nothing_held() -> (
+    None
+):
+    """Core ends a cancelling turn only on a proven release; a bare rejection strands it."""
     async with world() as w:
         never_ensured = await w.execute(cancel_request("req-a"))
         assert status(never_ensured) is ObservationStatus.REJECTED
@@ -202,7 +205,48 @@ async def test_cancel_of_an_undispatched_invocation_or_unknown_session_is_reject
         undispatched = await w.execute(cancel_request("req-b", invocation="inv-9"))
         assert status(undispatched) is ObservationStatus.REJECTED
         assert undispatched.observation.observation.terminal
+        assert holds_nothing(undispatched)
         assert cancelled_keys(w.host) == 0
+
+
+_STEPS = ("ensure", "cancel", "dispatch")
+
+
+@pytest.mark.asyncio
+@settings(max_examples=12, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(order=st.permutations(_STEPS), repeat_dispatch=st.booleans())
+async def test_a_cancel_answered_as_nothing_held_is_never_followed_by_a_provider_call(
+    order: list[str], *, repeat_dispatch: bool
+) -> None:
+    """In any order of ensure, cancel and dispatch, each a fresh host over the same disk.
+
+    A cancellation that proves nothing is held fences the invocation: a dispatch that arrives
+    later is refused before any provider call, so the answer stays true. A cancellation that
+    comes after the dispatch reports the turn it stopped instead.
+    """
+    async with world() as w:
+        answers: dict[str, ExecutionResult] = {}
+        for step in order:
+            match step:
+                case "ensure":
+                    answers[step] = await w.execute(ensure_request())
+                case "cancel":
+                    answers[step] = await w.execute(cancel_request("req-c", invocation="inv-1"))
+                case _:
+                    answers[step] = await w.execute(dispatch_request("req-d", "inv-1"))
+        if repeat_dispatch:
+            again = await w.execute(dispatch_request("req-d", "inv-1"))
+            assert again.observation.observation == answers["dispatch"].observation.observation
+        cancel = answers["cancel"]
+        if holds_nothing(cancel):
+            assert status(cancel) is ObservationStatus.REJECTED
+            assert w.host.turns == []
+            assert status(answers["dispatch"]) is ObservationStatus.REJECTED
+            assert answers["dispatch"].observation.observation.released
+        else:
+            assert order.index("dispatch") < order.index("cancel")
+            assert cancel.observation.observation.released
+            assert len(w.host.turns) == 1
 
 
 # CloseSession

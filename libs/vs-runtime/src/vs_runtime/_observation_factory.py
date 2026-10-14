@@ -67,6 +67,22 @@ class ObservationFacts:
     revision: RevisionRef | None = None
     """The revision a snapshot or retain produced; a derived event may carry only this one."""
 
+    @classmethod
+    def never_held(cls, diagnostic: str) -> ObservationFacts:
+        """A terminal refusal of a request proven to hold nothing, now or later.
+
+        Every executor answers this way when it can prove the effect never began and never
+        will (no binding, no begun marker, no dispatch record under a fence). Core ends an
+        owning record only on a proven release, so a bare rejection there would leave it
+        waiting for an answer that never comes.
+        """
+        return cls(
+            status=ObservationStatus.REJECTED,
+            released=True,
+            children_complete=True,
+            diagnostic=diagnostic,
+        )
+
 
 @dataclass(frozen=True)
 class ObservationSubject:

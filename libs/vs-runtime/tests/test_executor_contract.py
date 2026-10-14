@@ -100,6 +100,46 @@ async def test_a_kind_acts_once_under_its_lease_and_its_identity_and_core_accept
         assert_core_accepts([done, other], expect_retry=False)
 
 
+# The workspace executor rejects a request on a never-ensured workspace without proving
+# release. Claiming it needs a fence first: an EnsureWorkspace still in flight could bind the
+# workspace after the answer (the session lifecycle fences CancelTurn this way). Strict, so
+# fixing one fails here until its entry is removed.
+_HOLDING_UNPROVEN = frozenset(
+    {"ensure", "restore", "snapshot", "retain", "discard", "adopt", "verify"}
+)
+NEVER_SEEDED = [
+    pytest.param(
+        case,
+        scenario,
+        id=f"{case.name}-{scenario.name}",
+        marks=pytest.mark.xfail(strict=True, reason="workspace rejections prove no release")
+        if case.name == "workspaces" and scenario.name in _HOLDING_UNPROVEN
+        else (),
+    )
+    for case in CASES
+    for scenario in case.scenarios
+]
+
+
+@pytest.mark.parametrize(("case", "scenario"), NEVER_SEEDED)
+async def test_a_terminal_rejection_of_a_request_whose_referent_never_existed_holds_nothing(
+    case: ExecutorCase, scenario: Scenario
+) -> None:
+    """A request whose session, job or resource was never made in this world holds nothing.
+
+    The request is built in one world and run in a fresh one, so whatever it refers to was
+    never seeded. Core ends an owning record only on a proven release, so a terminal rejection
+    there must prove release; a bare one strands the record for ever.
+    """
+    async with case.world() as seeded:
+        request = await seeded.prepare(scenario)
+    async with case.world() as empty:
+        answer = (await empty.execute(request, lease=RevocableLease(), crash_at=None)).observation
+        observed = answer.observation
+        if observed.status is ObservationStatus.REJECTED and observed.terminal:
+            assert _holds_nothing(observed), observed.diagnostic
+
+
 def request_key(request: RequestBase) -> str:
     assert request.request_id is not None
     return request.request_id.root
