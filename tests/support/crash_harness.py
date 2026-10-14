@@ -3,15 +3,13 @@
 Which points a session tries is `tests/system/crash/_catalog.py`'s business."""
 
 import tempfile
-from collections.abc import Iterator
-from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
 
-import pytest
 from tests.support.skeleton_faults import COMMIT, RECEIPT_BEGUN, RECEIPT_PREFIX
 from tests.support.skeleton_sim import Simulation, Summary, simulate
 
+from vs_core.api import RunStatus
 from vs_faults.api import Boundary, Crossing, FaultPlan, FaultRule, HostFault
 from vs_sim.api.testing import VirtualClock, run_virtual
 
@@ -77,22 +75,24 @@ def after_crash(calls: list[Crossing], crash: Crossing) -> tuple[Crossing, ...]:
     return tuple(rest[skipped:])
 
 
-# Crash points that hit a known core gap: `vs_core._waits` lists RECOVERY_CHECK as
-# HALTS_THE_RUN. Here a registered operation that began and never sealed reaches its limit while
-# recovery still inspects it; the owner cannot tell whether the effect ran, so the check stays
-# blocked and recovery never opens. The run sits running with nothing in flight. `core_gap`
-# expects exactly that stall, so the entry fails the day core fixes it and must then be removed.
-CORE_GAPS = frozenset({"durable_write:receipt_begun#4"})
+# Crash points that end the run blocked instead of as the straight run: a registered operation
+# that began and never sealed reaches its limit while recovery still inspects it, and the owner
+# cannot tell whether the effect ran. Recovery stays blocked, so the run loop ends the run with a
+# typed ``blocked`` result (``recovery blocked: outcome unknown``) instead of sitting running.
+BLOCKED_ENDINGS = frozenset({"durable_write:receipt_begun#4"})
 
 
-@contextmanager
-def core_gap(first: Crossing) -> Iterator[None]:
-    """Expect the known core stall at ``first`` (and nothing at any other crash point)."""
-    if name(first) not in CORE_GAPS:
-        yield
+def ends_as_it_must(crossing: Crossing) -> None:
+    """Crash once at ``crossing``: the run converges, or ends blocked where recovery cannot tell."""
+    if name(crossing) not in BLOCKED_ENDINGS:
+        converges_after_one(crossing)
         return
-    with pytest.raises(AssertionError, match="stalled at core revision"):
-        yield
+    plan = crash_plan(crossing)
+    summary = run(plan).summary
+    replay = f"replay with {plan.model_dump_json()}"
+    assert summary.stalled is None, f"{summary.stalled}; {replay}"
+    assert summary.status == RunStatus.TERMINAL, replay
+    assert summary.outcome == "blocked", replay
 
 
 def name(crossing: Crossing) -> str:

@@ -11,11 +11,10 @@ import logging
 
 import pytest
 from tests.support.crash_harness import (
-    CORE_GAPS,
+    BLOCKED_ENDINGS,
     all_crossings,
     converges_after,
-    converges_after_one,
-    core_gap,
+    ends_as_it_must,
     following,
     name,
 )
@@ -69,15 +68,14 @@ def test_the_pairs_the_review_reproduced_converge(first: Crossing, second: Cross
     converges_after(first, second)
 
 
-def test_the_known_core_gap_still_stalls_the_run() -> None:
+def test_a_crash_recovery_cannot_tell_ends_the_run_blocked() -> None:
     """A request that began and never sealed reaches its limit while recovery still inspects it.
 
-    ``vs_core._waits`` lists RECOVERY_CHECK as HALTS_THE_RUN: the deadline's extra inspection
-    answers "unknown" again; the check stays blocked (it used to fall back to pending, an orphan
-    wait that halted the shell) and the run sits running with recovery closed. The entry of ``CORE_GAPS`` fails the day core fixes this, and must then be removed, so every
-    other crash point is held to convergence.
+    The deadline's extra inspection answers "unknown" again, so the check stays blocked and
+    recovery never opens. With nothing in flight, the run ends with a typed ``blocked`` result
+    instead of sitting running until its deadline.
     """
-    assert {"durable_write:receipt_begun#4"} == CORE_GAPS
-    gap = next(c for c in all_crossings() if name(c) in CORE_GAPS)
-    with core_gap(gap):
-        converges_after_one(gap)
+    assert {"durable_write:receipt_begun#4"} == BLOCKED_ENDINGS
+    for crossing in all_crossings():
+        if name(crossing) in BLOCKED_ENDINGS:
+            ends_as_it_must(crossing)
