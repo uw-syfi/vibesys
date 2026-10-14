@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 import vs_core.api as core
-from vs_core.api.testing import FlowRun, fake_search
+from vs_core.api.testing import FlowRun, RestartPolicy, fake_search
 
 from .flow_support import ROLES, Config, Plan, ask, open_workspace, start
 
@@ -287,3 +287,18 @@ def test_a_checkpoint_must_be_the_registered_snapshot_type() -> None:
 
     with pytest.raises(core.ContractError, match="snapshots are"):
         start(wrong)
+
+
+def _answered(policy: RestartPolicy) -> int:
+    run = _run_v1()
+    run.restarting = policy
+    run.reply(run.expect_turn("one"), Plan(n=1))
+    return run.restarts
+
+
+def test_a_restart_policy_restarts_only_after_the_steps_it_names() -> None:
+    every = _answered(RestartPolicy(every=True))
+    assert every >= 1
+    assert _answered(RestartPolicy()) == 0
+    assert _answered(RestartPolicy(steps=frozenset(range(1000)))) == every
+    assert _answered(RestartPolicy(after_stop=True)) == 0

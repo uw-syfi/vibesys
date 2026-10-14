@@ -10,7 +10,7 @@ the planner's prompt must state every one of them.
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import (
     planner_fields,
@@ -21,6 +21,7 @@ from tests.vibesys.orchestration.dynamic.core_policy._contexts import (
 
 from vibesys.metrics import PartialRow
 from vibesys.orchestration.dynamic.search.api import PlannerPrompt, PromptTemplate
+from vs_sim.api.testing import examples
 
 _MINIMAL_PLAN: dict[str, object] = {
     "capacity": 1,
@@ -71,6 +72,7 @@ def _rendered(partial: PartialRow, fields: dict[str, object]) -> str:
     return render(PromptTemplate.PORTFOLIO, context)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(partial=_PARTIALS, data=st.data())
 def test_the_planner_is_told_what_a_stopped_benchmark_achieved_and_what_it_had_to_reach(
     partial: PartialRow, data: st.DataObject

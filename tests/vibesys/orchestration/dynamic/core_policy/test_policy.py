@@ -45,6 +45,7 @@ from vs_sandbox.api.slurm import (
     load_slurm_operator_settings,
     trusted_profile_command,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -53,7 +54,9 @@ if TYPE_CHECKING:
     from vs_runtime.api import CorePlan
 
 _SETTINGS = settings(
-    max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=10, nightly=25),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 _SEARCH_KEYS = {
     "max_rounds": st.integers(1, 6),
@@ -116,6 +119,7 @@ def test_the_limits_admit_exactly_the_attempts_the_config_schedules(
     _started(plan, root, run)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(accuracy=st.booleans(), benchmark=st.booleans())
 def test_the_judge_may_vouch_and_each_measured_gate_is_required(
     *, accuracy: bool, benchmark: bool
@@ -364,6 +368,7 @@ def test_the_limits_carry_the_observe_pacing_the_run_declared(
     assert (limits.observe_interval, limits.observe_backoff_cap) == (interval, interval + extra)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(key=st.text("abcdefghijklmnopqrstuvwxyz_", min_size=3, max_size=14))
 def test_an_unknown_launch_option_is_rejected_naming_the_key(key: str) -> None:
     known = set(DynamicLaunch.model_fields)
@@ -390,6 +395,7 @@ def test_the_search_config_keeps_the_search_keys_and_takes_profiling_from_the_ru
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(accuracy=st.booleans(), benchmark=st.booleans(), needs_accuracy=st.booleans())
 def test_a_benchmark_awaits_accuracy_only_where_the_task_requires_it(
     *, accuracy: bool, benchmark: bool, needs_accuracy: bool

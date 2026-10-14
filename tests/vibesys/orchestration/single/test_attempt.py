@@ -7,7 +7,7 @@ generated replies and gate results; the flow that awaits is told by the stories.
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.single._host import config, implemented
 from tests.vibesys.serial_search._host import TERMS
@@ -19,6 +19,7 @@ from vibesys.metrics import AcceptedReading
 from vibesys.orchestration.single.search.api import Next, SingleAttempt
 from vibesys.serial_search.api import Gated, NotMeasured, Unreadable
 from vs_core.api import EvidenceId, EvidenceKind, RequestId, RevisionRef
+from vs_sim.api.testing import examples
 
 BASE = RevisionRef.of_git_commit("base")
 CANDIDATE = RevisionRef.of_git_commit("candidate")
@@ -60,6 +61,7 @@ def reading(kind: EvidenceKind, *, passed: bool) -> AcceptedReading:
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(feedback=st.text(min_size=1, max_size=8))
 def test_a_self_review_that_fails_asks_again_with_its_feedback_and_never_passes(
     feedback: str,
@@ -71,6 +73,7 @@ def test_a_self_review_that_fails_asks_again_with_its_feedback_and_never_passes(
     assert not taken.passed
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(revision=st.sampled_from([None, BASE]))
 def test_a_passing_self_review_without_a_changed_candidate_asks_again(
     revision: RevisionRef | None,
@@ -119,6 +122,7 @@ def test_gates_that_pass_settle_the_attempt_as_passed() -> None:
     assert not taken.gate_failed
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(feedback=st.text(min_size=1, max_size=8))
 def test_a_candidate_the_machinery_could_not_measure_is_not_charged_against_the_agent(
     feedback: str,
@@ -131,6 +135,7 @@ def test_a_candidate_the_machinery_could_not_measure_is_not_charged_against_the_
     assert taken.failure is None
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(reason=st.text(min_size=1, max_size=8))
 def test_gates_that_cannot_be_read_fail_the_attempt_with_the_reason(reason: str) -> None:
     taken = attempt()
@@ -139,6 +144,7 @@ def test_gates_that_cannot_be_read_fail_the_attempt_with_the_reason(reason: str)
     assert taken.failure == reason
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(first=st.text(min_size=1, max_size=5), second=st.text(min_size=1, max_size=5))
 def test_the_first_failure_of_an_attempt_is_the_one_it_keeps(first: str, second: str) -> None:
     taken = attempt()

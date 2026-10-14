@@ -52,6 +52,7 @@ from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import ArtifactStore, RunFacts
 from vs_runtime.api.core import ExecutionContext, RenderArtifactsOwner
 from vs_runtime.api.testing import FakeEvidenceLedger
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -180,7 +181,9 @@ def _cases() -> dict[str, Callable[..., str]]:
 
 @pytest.mark.parametrize("name", sorted(_cases()))
 @settings(
-    max_examples=15, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=10, nightly=15),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(
     value=st.floats(0.1, 1e6, allow_nan=False).map(lambda x: round(x, 1)),
@@ -199,7 +202,7 @@ def test_a_prompt_citing_trusted_evidence_states_value_unit_direction_and_verdic
     assert ("PASS" if passed else "FAIL") in text
 
 
-@settings(max_examples=30, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=30), deadline=None)
 @given(
     value=st.floats(0.1, 1e6, allow_nan=False).map(lambda x: round(x, 1)),
     unit=st.sampled_from(["calls/s", "tokens/s", "ms"]),

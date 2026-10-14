@@ -8,11 +8,12 @@ output not seen before), never the agent's wording, and `max_unmeasured_turns` i
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._values import config, revision
 
 from vibesys.orchestration.dynamic.search.api import Blocker, BlockerKind, FailureKind, refusal
+from vs_sim.api.testing import examples
 
 PARENT = revision("parent")
 BLOCKERS = st.builds(
@@ -38,6 +39,7 @@ def asked_until_refused(turns: list[Blocker], bound: int) -> tuple[int, FailureK
     return len(taken), None
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(turns=st.lists(BLOCKERS, min_size=1, max_size=12), bound=BOUNDS)
 def test_a_workstream_takes_at_most_the_bound_in_turns_and_at_least_two_when_it_may(
     turns: list[Blocker], bound: int
@@ -52,6 +54,7 @@ def test_a_workstream_takes_at_most_the_bound_in_turns_and_at_least_two_when_it_
         assert why in {None, FailureKind.REPEATED_TURN}
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(history=st.lists(BLOCKERS, min_size=1, max_size=8), bound=BOUNDS)
 def test_a_refusal_names_the_turn_that_ended_and_the_bound_it_reached(
     history: list[Blocker], bound: int
@@ -67,6 +70,7 @@ def test_a_refusal_names_the_turn_that_ended_and_the_bound_it_reached(
         assert len(history) > 1
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(first=BLOCKERS, words=st.lists(st.text(max_size=6), min_size=1, max_size=5))
 def test_rewording_the_next_step_never_earns_a_turn_when_nothing_observed_changed(
     first: Blocker, words: list[str]
@@ -81,6 +85,7 @@ def test_rewording_the_next_step_never_earns_a_turn_when_nothing_observed_change
     assert stop.kind is FailureKind.REPEATED_TURN
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     earlier=st.lists(BLOCKERS, min_size=1, max_size=5),
     fresh=st.one_of(

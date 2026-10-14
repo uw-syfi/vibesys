@@ -8,6 +8,7 @@ strands a workstream, whatever the refusal code.
 from __future__ import annotations
 
 import pytest
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, Host, begin, config
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
@@ -30,7 +31,7 @@ from vs_core.api import (
     Withdraw,
 )
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def started(*, restarting: bool) -> Host:

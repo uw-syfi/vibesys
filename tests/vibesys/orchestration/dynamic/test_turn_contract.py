@@ -13,6 +13,7 @@ import json
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -47,8 +48,9 @@ from vs_core.api import (
     Wait,
 )
 from vs_core.api.search import ReplyCorrection, WaitUnrecorded
+from vs_sim.api.testing import examples
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 CANDIDATE = RevisionRef.of_git_commit("c1")
 NOT_JSON = "not json"
 
@@ -144,7 +146,7 @@ def check_asked_turns(host: Host) -> None:
 
 
 @MODES
-@settings(max_examples=40, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=40), deadline=None, derandomize=True, database=None)
 @given(steps=STEPS, in_flight=st.integers(1, 2))
 def test_every_turn_is_asked_with_its_roles_template_or_an_exchange_and_a_session_that_never_changes(
     *, restarting: bool, steps: list[tuple[int, int]], in_flight: int

@@ -12,9 +12,9 @@ from __future__ import annotations
 import json
 import unicodedata
 
-import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -53,8 +53,9 @@ from vs_core.api import (
     StartAttempt,
 )
 from vs_core.api.search import ReplyError, ReplyErrorCode
+from vs_sim.api.testing import examples
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 LOST_PLANNER_TURNS = 3
 """How often one planning ask is made before the planner is given up on: first ask and two more."""
 
@@ -341,7 +342,7 @@ _TITLES = st.text(st.characters(exclude_categories=("Cs",)), min_size=1, max_siz
 
 
 @MODES
-@settings(max_examples=25, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=25), deadline=None, derandomize=True, database=None)
 @given(identifier=_IDS, title=_TITLES)
 @example(identifier="0", title="T" * 80)
 @example(identifier="KV.Cache_v2 / ../Ünïcode", title="title")

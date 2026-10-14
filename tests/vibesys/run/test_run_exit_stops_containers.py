@@ -242,68 +242,42 @@ def _execute(
 
 
 # Each exit path ends the run its own typed way: a stop and a failure return normally, a
-# terminating signal exits 128 + n.
+# terminating signal exits 128 + n. (Which signal maps to which code is `supervise`'s own rule,
+# tested where it lives; the stop in the resume test shows a signalled exit removes containers.)
+# Budget: each case is a whole run over a fake Docker daemon, the point of the regression (#1521).
 @pytest.mark.parametrize(
     ("exit_path", "ends_with"),
-    [
-        ("failure", None),
-        ("SIGINT", None),
-        ("SIGTERM", SystemExit),
-        ("SIGHUP", SystemExit),
-        ("SIGINT+SIGTERM", SystemExit),
-        ("start-lost", RuntimeError),
-    ],
+    [("failure", None), ("start-lost", RuntimeError)],
 )
-def test_an_exiting_run_leaves_no_container(
+def test_an_exiting_run_leaves_no_container_and_every_container_carries_the_runs_id(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     exit_path: str,
     ends_with: type[BaseException] | None,
 ) -> None:
-    engine, _observed = _execute(tmp_path, monkeypatch, exit_path=exit_path, ends_with=ends_with)
+    engine, observed = _execute(tmp_path, monkeypatch, exit_path=exit_path, ends_with=ends_with)
 
     assert engine.containers() == ()
     # The daemon saw the run start its container.
     assert any(call[1] == "run" for call in engine.calls)
+    if exit_path != "start-lost":
+        assert observed.run_id
+        assert observed.containers
+        assert all(
+            container.labels == {RUN_ID_LABEL: observed.run_id} for container in observed.containers
+        )
 
 
-def test_every_container_of_a_run_carries_the_runs_id(
+def test_resuming_a_run_ends_only_the_containers_its_dead_host_left_behind(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _engine, observed = _execute(tmp_path, monkeypatch, exit_path="failure")
-
-    assert observed.run_id
-    assert observed.containers
-    assert all(
-        container.labels == {RUN_ID_LABEL: observed.run_id} for container in observed.containers
-    )
-
-
-def test_resuming_a_run_ends_the_containers_its_dead_host_left_behind(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _engine, first = _execute(tmp_path, monkeypatch, exit_path="SIGINT")
+    """A stop ends its containers; a resume refused for a live host recovers nothing; a resume
+    that is accepted removes the run's own orphans and leaves other runs' containers."""
+    engine, first = _execute(tmp_path, monkeypatch, exit_path="SIGINT")
+    assert engine.containers() == ()
     host_docker = FakeDockerEngine()
     own = _plant_container(host_docker, first.run_id)
     other = _plant_container(host_docker, "some-other-run")
-
-    _execute(
-        tmp_path,
-        monkeypatch,
-        exit_path="SIGINT",
-        resumed=_Resumed(first.run_id, host_docker),
-    )
-
-    assert [c.container_id for c in host_docker.containers()] == [other]
-    assert ("docker", "rm", "-f", own) in host_docker.calls
-
-
-def test_a_rejected_concurrent_resume_does_not_begin_orphan_recovery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _engine, first = _execute(tmp_path, monkeypatch, exit_path="SIGINT")
-    host_docker = FakeDockerEngine()
-    orphan = _plant_container(host_docker, first.run_id)
     calls_before_resume = tuple(host_docker.calls)
     project = Project.open(tmp_path / "project")
 
@@ -315,9 +289,18 @@ def test_a_rejected_concurrent_resume_does_not_begin_orphan_recovery(
             ends_with=ProjectStateError,
             resumed=_Resumed(first.run_id, host_docker),
         )
-
-    assert [container.container_id for container in host_docker.containers()] == [orphan]
+    assert {c.container_id for c in host_docker.containers()} == {own, other}
     assert tuple(host_docker.calls) == calls_before_resume
+
+    _execute(
+        tmp_path,
+        monkeypatch,
+        exit_path="SIGINT",
+        resumed=_Resumed(first.run_id, host_docker),
+    )
+
+    assert [c.container_id for c in host_docker.containers()] == [other]
+    assert ("docker", "rm", "-f", own) in host_docker.calls
 
 
 def _plant_container(engine: FakeDockerEngine, run_id: str) -> str:

@@ -113,15 +113,23 @@ def _run(
     return run_virtual(clock, exercise()), contexts
 
 
-def test_the_run_deadline_ends_a_run_that_kept_nothing_as_a_failure_of_kind_deadline(
+def test_the_operators_settings_reach_the_policy_and_the_deadline_ends_a_run_that_kept_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """One idle run: the deadline and a role's model reach the policy as facts, the deadline ends it."""
     set_container_cli_credentials(monkeypatch)
-    config = Config.model_validate({"model": {"name": "core-test"}, "run": {"max_run_seconds": 7}})
+    config = Config.model_validate(
+        {
+            "model": {"name": "core-test"},
+            "run": {"max_run_seconds": 7},
+            "agent": {"roles": {"implementer": {"model": "builder-model"}}},
+        }
+    )
 
     end, contexts = _run(tmp_path, config)
 
     assert [item.max_run_seconds for item in contexts] == [7]
+    assert [dict(item.role_models) for item in contexts] == [{"implementer": "builder-model"}]
     assert end.status is RunStatus.FAILED
     assert end.failure is not None
     assert end.failure.kind is RunFailureKind.DEADLINE
@@ -142,20 +150,3 @@ def test_a_run_that_spent_its_attempt_budget_keeping_nothing_fails_as_budget_exh
     assert end.failure.kind is RunFailureKind.BUDGET_EXHAUSTED
     assert (end.failure.workstreams_started, end.failure.candidates_kept) == (1, 0)
     assert end.failure.workstream_budget == 1
-
-
-def test_a_model_chosen_for_one_role_reaches_the_policy_for_that_role_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    set_container_cli_credentials(monkeypatch)
-    config = Config.model_validate(
-        {
-            "model": {"name": "core-test"},
-            "run": {"max_run_seconds": 7},
-            "agent": {"roles": {"implementer": {"model": "builder-model"}}},
-        }
-    )
-
-    _end, contexts = _run(tmp_path, config)
-
-    assert [dict(item.role_models) for item in contexts] == [{"implementer": "builder-model"}]

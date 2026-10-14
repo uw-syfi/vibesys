@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.reply_variables import context_variables
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
@@ -39,6 +39,7 @@ from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
 from vibesys.serial_search.api import LastProfile, PlanPrompt, PlanTemplate
 from vs_core.api import RevisionId, RevisionRef, Value
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import examples
 
 _ROOT = Path(templates.__file__).parent
 _OBJECTIVE = "Raise queue throughput."
@@ -201,11 +202,13 @@ def _render(
     return text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_PRE_ROUND, kind=st.sampled_from(("none", "linux_cpu")))
 def test_the_routing_prompt_renders_for_every_context(context: PreRoundPrompt, kind: str) -> None:
     assert _OBJECTIVE in _render(PromptTemplate.PRE_ROUND, context, profiler_kind=kind)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     context=_PROFILER,
     kind=st.sampled_from(sorted(kind.value for kind in ACTIVE_PROFILER_KINDS)),
@@ -217,6 +220,7 @@ def test_the_profiler_prompt_renders_for_every_runnable_profiler(
     assert context.evidence_directory in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_PLANNING)
 def test_the_planning_prompt_shows_a_fresh_profile_with_its_evidence_directory(
     context: PlanPrompt,
@@ -226,6 +230,7 @@ def test_the_planning_prompt_shows_a_fresh_profile_with_its_evidence_directory(
         assert "fresh profiler result" in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_IMPLEMENT)
 def test_the_implementation_prompt_renders_for_every_context(context: ImplementPrompt) -> None:
     text = _render(PromptTemplate.IMPLEMENT, context)
@@ -237,6 +242,7 @@ def test_the_implementation_prompt_renders_for_every_context(context: ImplementP
         assert "could not be used" in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_IMPLEMENT.filter(lambda item: item.continuation_step is not None))
 def test_a_continuation_asks_for_the_bounded_step_the_implementer_named(
     context: ImplementPrompt,
@@ -246,6 +252,7 @@ def test_a_continuation_asks_for_the_bounded_step_the_implementer_named(
     assert context.continuation_step in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_JUDGE)
 def test_the_review_prompt_renders_for_every_context(context: JudgePrompt) -> None:
     text = _render(PromptTemplate.JUDGE, context)

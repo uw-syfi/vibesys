@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.reply_variables import context_variables
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
@@ -32,6 +32,7 @@ from vibesys.serial_search.api import (
 )
 from vs_core.api import RevisionId, RevisionRef
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import examples
 
 _ROOT = Path(templates.__file__).parent
 _OBJECTIVE = "Raise queue throughput."
@@ -126,6 +127,7 @@ def _variables(
     }
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_PLAN)
 def test_the_plan_prompt_renders_for_every_context(context: PlanPrompt) -> None:
     text = _RENDERER.render_template(f"{PlanTemplate.PLAN.value}.j2", **_variables(context))
@@ -135,6 +137,7 @@ def test_the_plan_prompt_renders_for_every_context(context: PlanPrompt) -> None:
         assert row.hypothesis_id in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_ROUND, profiler_id=st.sampled_from(("none", "torch_profiler")))
 def test_the_round_prompt_renders_for_every_context(context: RoundPrompt, profiler_id: str) -> None:
     text = _RENDERER.render_template(
@@ -147,6 +150,7 @@ def test_the_round_prompt_renders_for_every_context(context: RoundPrompt, profil
 
 
 @pytest.mark.parametrize("template", [PromptTemplate.ROUND])
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data(), offered=st.booleans())
 def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
     template: PromptTemplate, data: st.DataObject, *, offered: bool

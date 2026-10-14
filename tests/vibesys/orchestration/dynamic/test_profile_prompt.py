@@ -12,9 +12,9 @@ from __future__ import annotations
 import string
 from dataclasses import dataclass
 
-import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, begin
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
@@ -60,8 +60,9 @@ from vs_core.api import (
     TurnFailureKind,
 )
 from vs_core.api.testing import FakeView
+from vs_sim.api.testing import examples
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 OUTPUT = string.ascii_letters + string.digits + " "
 PARENT = revision("parent")
 FIELDS = st.lists(st.sampled_from(["hip_api_timing", "decode_timing"]), unique=True, max_size=2)
@@ -142,6 +143,7 @@ def said(run: RunRecord) -> tuple[ProfileHistoryRow, str]:
     return row_of(prompt), render(PromptTemplate.PORTFOLIO, prompt)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     metrics=METRICS,
     output=st.text(OUTPUT, max_size=6000),
@@ -182,6 +184,7 @@ def test_a_passed_profile_reads_as_observed_evidence_in_the_prompt_whatever_its_
     assert len(row.diagnosis) < 1300
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(output=st.text(OUTPUT, min_size=1, max_size=3000), metrics=METRICS)
 def test_a_failed_profile_states_its_failure_and_its_output_and_no_success_evidence(
     output: str, metrics: tuple[MetricRow, ...]
@@ -197,6 +200,7 @@ def test_a_failed_profile_states_its_failure_and_its_output_and_no_success_evide
     assert "Verdict: the trusted profile succeeded" not in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(output=st.text(OUTPUT, min_size=1, max_size=200))
 def test_a_finished_profile_with_no_reading_is_a_failure_that_shows_its_own_output(
     output: str,
@@ -211,6 +215,7 @@ def test_a_finished_profile_with_no_reading_is_a_failure_that_shows_its_own_outp
     assert output.strip()[-40:] in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     kind=st.sampled_from(
         [FailureKind.OUT_OF_BUDGET, FailureKind.STOPPED, FailureKind.PROFILE_CAPTURE_UNAVAILABLE]

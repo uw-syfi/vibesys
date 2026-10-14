@@ -8,7 +8,7 @@ generate that value and check the two agree.
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._values import portfolio, profile_entry, run_record
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import (
@@ -27,6 +27,7 @@ from vibesys.orchestration.dynamic.search.api import (
     dynamic,
     validate,
 )
+from vs_sim.api.testing import examples
 
 _CAPABILITIES = st.lists(st.sampled_from(ProfileField), unique=True).map(tuple)
 
@@ -44,6 +45,7 @@ def _prompt(fields: tuple[ProfileField, ...], *, profiling: bool = True) -> Plan
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(fields=_CAPABILITIES)
 def test_the_planner_prompt_names_exactly_the_supported_fields(
     fields: tuple[ProfileField, ...],
@@ -55,6 +57,7 @@ def test_the_planner_prompt_names_exactly_the_supported_fields(
     assert ("This run's capture supplies no named measurement field" in text) is not bool(fields)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(fields=_CAPABILITIES)
 def test_a_correction_offers_the_same_fields_as_the_request_it_corrects(
     fields: tuple[ProfileField, ...],
@@ -76,6 +79,7 @@ def test_a_correction_offers_the_same_fields_as_the_request_it_corrects(
         assert (field.value in asked) is (field.value in corrected) is (field in fields)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(request=PLANNER_PROMPTS)
 def test_a_run_without_profiling_offers_no_profile_work(request: PlannerPrompt) -> None:
     quiet = request.model_copy(update={"profiling": False})
@@ -86,6 +90,7 @@ def test_a_run_without_profiling_offers_no_profile_work(request: PlannerPrompt) 
     assert "required_fields" not in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(fields=_CAPABILITIES)
 def test_the_prompt_example_is_valid_whatever_the_offer(fields: tuple[ProfileField, ...]) -> None:
     text = render(PromptTemplate.PORTFOLIO, _prompt(fields))
@@ -96,6 +101,7 @@ def test_the_prompt_example_is_valid_whatever_the_offer(fields: tuple[ProfileFie
             role.reply.model_validate_json(planner_reply_example())
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(supported=_CAPABILITIES, requested=_CAPABILITIES)
 def test_a_plan_requiring_an_unsupported_field_is_a_violation_naming_it(
     supported: tuple[ProfileField, ...], requested: tuple[ProfileField, ...]

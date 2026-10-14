@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from launch.composition import profiler_server
@@ -34,6 +34,7 @@ from vs_agent.api import (
 )
 from vs_evaluation.api.tools import core_evaluation_mcp_descriptor
 from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor
+from vs_sim.api.testing import examples
 
 _PYTHON_NAMES = ("python", "python3")
 _expected_path = os.pathsep.join(container_import_roots())
@@ -97,6 +98,7 @@ _env = st.dictionaries(_names.map(str.upper), _names, max_size=3).filter(
 )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     command=st.sampled_from(_PYTHON_NAMES),
     args=st.lists(_names, max_size=3),
@@ -119,6 +121,7 @@ def test_any_python_server_gets_the_container_interpreter_and_import_path(
     assert started.runtime_env == spec.runtime_env
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(command=_names.filter(lambda name: name not in _PYTHON_NAMES), args=st.lists(_names))
 def test_a_server_that_is_not_python_is_left_alone(command: str, args: list[str]) -> None:
     spec = MCPServerSpec("server", command, tuple(args))
@@ -126,6 +129,7 @@ def test_a_server_that_is_not_python_is_left_alone(command: str, args: list[str]
     assert containerize_server(spec) == spec
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(command=st.sampled_from(_PYTHON_NAMES), in_runtime=st.booleans())
 def test_a_server_that_sets_its_own_import_path_is_rejected(
     *, command: str, in_runtime: bool

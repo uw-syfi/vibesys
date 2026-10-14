@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.reply_variables import context_variables
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
@@ -30,6 +30,7 @@ from vibesys.orchestration.profilers import ACTIVE_PROFILER_KINDS
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
 from vs_core.api import RevisionId, RevisionRef, Value
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import examples
 
 _ROOT = Path(templates.__file__).parent
 _OBJECTIVE = "Raise queue throughput."
@@ -113,6 +114,7 @@ def _render(
     return text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_COLD | _CHILD, reference=st.sampled_from((".", "reference")))
 def test_the_mutation_prompt_renders_for_every_context(
     context: MutatePrompt, reference: str
@@ -125,6 +127,7 @@ def test_the_mutation_prompt_renders_for_every_context(
         assert f"#{context.parent.id}" in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_CHILD)
 def test_the_mutation_prompt_shows_every_inspiration(context: MutatePrompt) -> None:
     text = _render(PromptTemplate.MUTATE, context)
@@ -132,11 +135,13 @@ def test_the_mutation_prompt_shows_every_inspiration(context: MutatePrompt) -> N
         assert f"Individual #{item.id}" in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_JUDGE)
 def test_the_review_prompt_renders_for_every_context(context: JudgePrompt) -> None:
     assert context.candidate.revision_id.root in _render(PromptTemplate.JUDGE, context)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     context=_PROFILER,
     profiler=_PROFILERS,

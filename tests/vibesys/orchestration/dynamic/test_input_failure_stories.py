@@ -11,7 +11,7 @@ to every story here) are those layers' own tests.
 
 from __future__ import annotations
 
-import pytest
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._evidence_host import (
     EvidenceHost,
     begin_with_evidence,
@@ -26,7 +26,7 @@ from vibesys.candidates.api import InputFailureKind
 from vibesys.orchestration.dynamic.search.api import PlannerPrompt, PromptTemplate
 from vs_core.api import Finish, Measure, Operation, RevisionRef, StartAttempt, Wait
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 # What a benchmark that stopped itself printed, with a run of backticks that could close a fence.
 STOP_TEXT = "warmup stopped: 1/100 rounds ```python"
 

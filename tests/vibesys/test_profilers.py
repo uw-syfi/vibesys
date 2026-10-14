@@ -4,7 +4,7 @@ import platform
 from typing import TypedDict, cast
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.constants import ComputeBackend, DomainName
@@ -22,6 +22,7 @@ from vibesys.orchestration.profilers import (
     resolve_profiler_choice,
     resolve_profiler_kind,
 )
+from vs_sim.api.testing import examples
 
 _DOMAINS = tuple(DomainName)
 _REQUESTED = tuple(ProfilerKind)
@@ -132,6 +133,7 @@ def test_rocprof_is_default_for_rocm_kernel_writing_and_can_be_disabled() -> Non
     ("backend", "kernel_profiler"),
     [(ComputeBackend.CUDA, ProfilerKind.NCU), (ComputeBackend.ROCM, ProfilerKind.ROCPROF)],
 )
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(supported=st.frozensets(st.sampled_from(tuple(ProfilerKind))))
 def test_kernel_writing_auto_follows_environment_support(
     backend: ComputeBackend, kernel_profiler: ProfilerKind, supported: frozenset[ProfilerKind]
@@ -309,6 +311,7 @@ def test_auto_profiler_falls_back_by_environment_capability_not_provider_name() 
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     domain=st.sampled_from(_DOMAINS),
     backend=st.sampled_from(tuple(ComputeBackend)),
@@ -355,12 +358,14 @@ def test_profiler_resolution_invariants(
         assert resolved is requested
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(value=st.text(min_size=1, max_size=12).filter(lambda text: text not in _PROFILER_VALUES))
 def test_unknown_profiler_names_raise(value: str) -> None:
     with pytest.raises(ValueError, match="Unknown"):
         coerce_profiler_kind(value)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(backend=st.text(min_size=1, max_size=12))
 def test_resolver_rejects_unparsed_backend_metadata(backend: str) -> None:
     with pytest.raises(TypeError, match="backend must be a ComputeBackend"):
@@ -560,6 +565,7 @@ def test_macos_cpu_preflight_reports_tool_availability(
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     domain=st.sampled_from(tuple(DomainName)),
     backend=st.sampled_from(tuple(ComputeBackend)),

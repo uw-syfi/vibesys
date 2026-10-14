@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vibesys.constants import ComputeBackend
@@ -14,6 +14,7 @@ from vibesys.orchestration.skill_selection import (
     resolve_agent_resource_paths,
 )
 from vs_agent.api import materialize_skills
+from vs_sim.api.testing import examples
 
 
 def _source(root: Path, target: Path) -> Path:
@@ -60,6 +61,7 @@ def test_reviewer_absolute_internal_link_resolves_in_actual_copied_tree(tmp_path
     assert copied_link.read_text() == "Reference."
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     target_parts=st.lists(
         st.from_regex(r"[a-z][a-z0-9_-]{0,8}", fullmatch=True), min_size=1, max_size=4
@@ -127,6 +129,7 @@ def test_materialization_removes_invalid_links(tmp_path: Path, kind: str) -> Non
     assert not (tmp_path / "workspace/.agents/skills/demo/alias.md").is_symlink()
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(absolute=st.booleans(), excluded=st.booleans())
 def test_directory_aliases_resolve_only_to_copied_resources(
     *, absolute: bool, excluded: bool

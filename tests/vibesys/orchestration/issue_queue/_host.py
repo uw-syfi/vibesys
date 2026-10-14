@@ -15,6 +15,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
+from tests.support.vibesys_flows import start_flow
 from tests.vibesys.orchestration.issue_queue._replies import evaluated, implemented, judged
 
 from vibesys.metrics import EvidenceReading
@@ -165,7 +166,7 @@ def begin(
     """Start the issue-queue search of ``cfg`` under a host; ``world`` sets how the far side behaves."""
     facts = world.get("facts", FACTS)
     view = view or FakeView(changes={"facts": facts})
-    run = FlowRun.start(issue_queue, cfg, facts=facts, restarting=restarting, view=view)
+    run = start_flow(issue_queue, cfg, facts=facts, restarting=restarting, view=view)
     return Host(run, cfg, **world)
 
 

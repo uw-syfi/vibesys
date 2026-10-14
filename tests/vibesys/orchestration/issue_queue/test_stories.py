@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.issue_queue._host import (
     FACTS,
     IMPLEMENTER,
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from vs_core.api.search import Flow
     from vs_core.api.testing import Asked
 
-RESTARTING = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restarting"])
+RESTARTING = across_restarts
 
 
 def outcome(host: Host) -> str:
@@ -322,7 +322,7 @@ def test_an_evaluator_that_keeps_naming_too_many_issues_fails_the_run(*, restart
 
 
 @RESTARTING
-@settings(max_examples=examples(pr=12, nightly=48), deadline=None, database=None)
+@settings(max_examples=examples(pr=3, nightly=48), deadline=None, database=None)
 @example(verdicts=[True, True, False])
 @example(verdicts=[True, False])
 @example(verdicts=[False, True])

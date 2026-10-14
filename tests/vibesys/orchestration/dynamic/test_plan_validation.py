@@ -40,6 +40,7 @@ from vibesys.orchestration.dynamic.search.api import (
     WorkPlan,
     validate,
 )
+from vs_sim.api.testing import examples
 
 CAPACITY = 4
 
@@ -201,6 +202,7 @@ def test_every_violation_code_has_a_scenario() -> None:
     assert set(SCENARIOS) == set(ViolationCode)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(code=st.sampled_from(sorted(SCENARIOS, key=str)))
 def test_a_broken_rule_is_named_by_its_code_at_the_field_the_planner_must_fix(
     code: ViolationCode,
@@ -264,7 +266,7 @@ def _entry_positions(result: PlanCheck) -> set[int]:
     }
 
 
-@settings(max_examples=150, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=150), deadline=None, derandomize=True, database=None)
 @given(plan=portfolios, record=records(), capacity=st.integers(0, 4))
 def test_what_is_accepted_fits_the_record_and_alone_makes_a_valid_plan(
     plan: PortfolioPlan, record: Record, capacity: int

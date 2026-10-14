@@ -5,12 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.reply_variables import profiler_reply
 
 import vibesys.orchestration.multi.core_policy.prompts as multi_templates
 from vibesys.prompts import render_template
+from vs_sim.api.testing import examples
 
 _TEMPLATE_DIR = Path(multi_templates.__file__).parent
 _KINDS = ("linux_cpu", "macos_cpu", "otel")
@@ -41,6 +42,7 @@ def test_an_absent_benchmark_command_points_at_the_objective(kind: str, absent: 
     assert "OBJECTIVE.md" in output
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(command=st.text(alphabet="abcdefgh -./", min_size=1, max_size=20).filter(str.strip))
 @pytest.mark.parametrize("kind", _KINDS)
 def test_a_present_benchmark_command_is_named(kind: str, command: str) -> None:

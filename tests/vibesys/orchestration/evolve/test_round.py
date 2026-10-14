@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.evolve._values import failing, passing
 
 from vibesys.orchestration.evolve.search.api import Round
+from vs_sim.api.testing import examples
 
 
 def round_of(children: int, width: int) -> tuple[Round, list]:
@@ -14,6 +15,7 @@ def round_of(children: int, width: int) -> tuple[Round, list]:
     return Round(starts=tuple(d.start for d in dones), width=width, generation_open=True), dones
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     children=st.integers(1, 6),
     width=st.integers(1, 4),
@@ -37,6 +39,7 @@ def test_admission_is_in_slot_order_exactly_once_whatever_order_children_finish_
     assert round_.ready(width, stopping=False) == []
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(children=st.integers(1, 6), free=st.integers(-1, 8))
 def test_ready_never_starts_more_than_the_free_slots_and_nothing_once_stopping(
     children: int, free: int

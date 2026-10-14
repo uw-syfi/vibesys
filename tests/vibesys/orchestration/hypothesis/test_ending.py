@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.hypothesis import RoundRecord, RunEnding, derive_ending
 from vibesys.metrics import MetricSpace
+from vs_sim.api.testing import examples
 
 Kind = Literal["failed", "unmeasured", "measured_rejected", "winner"]
 
@@ -43,6 +44,7 @@ histories = st.lists(
 )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(histories)
 def test_ending_follows_the_work_the_records_show(kinds: list[Kind]) -> None:
     records = [_record(number, kind) for number, kind in enumerate(kinds, start=1)]
@@ -57,6 +59,7 @@ def test_ending_follows_the_work_the_records_show(kinds: list[Kind]) -> None:
         assert ending is RunEnding.NO_TRUSTED_RESULT
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(histories)
 def test_only_a_run_with_something_to_keep_succeeds(kinds: list[Kind]) -> None:
     records = [_record(number, kind) for number, kind in enumerate(kinds, start=1)]

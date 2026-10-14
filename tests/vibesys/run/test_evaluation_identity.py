@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.run.evaluation_identity import semantic_evaluation_identity
 from vs_runtime.api import RunFacts
 from vs_runtime.api.infrastructure import AgentPaths, RunEnvironmentView, TrustedEvaluationPlan
+from vs_sim.api.testing import examples
 
 _plans = st.builds(
     TrustedEvaluationPlan,
@@ -35,6 +36,7 @@ _environments = st.builds(
 _inputs = st.tuples(_plans, _facts, _environments)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(_inputs, _inputs)
 def test_each_identity_follows_only_its_own_input(
     left: tuple[TrustedEvaluationPlan, RunFacts, RunEnvironmentView],

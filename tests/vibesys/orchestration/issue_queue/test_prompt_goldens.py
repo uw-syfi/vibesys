@@ -39,6 +39,7 @@ from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionRef
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import AgentRole, ProfileExecution, RunFacts
+from vs_sim.api.testing import examples
 
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompts"
 
@@ -252,7 +253,7 @@ def test_the_judge_is_shown_every_trusted_evaluation_it_is_given() -> None:
     )
 
 
-@settings(max_examples=30, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=30), deadline=None, derandomize=True, database=None)
 @given(
     value=st.floats(0.1, 1e6, allow_nan=False).map(lambda x: round(x, 1)),
     unit=st.sampled_from(["calls/s", "tokens/s", "ms", "req/min"]),

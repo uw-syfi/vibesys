@@ -1,17 +1,19 @@
 """Strict whole-run bound configuration through the public config schema."""
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vibesys.config import Config
+from vs_sim.api.testing import examples
 
 
 def test_max_run_seconds_is_unbounded_by_default() -> None:
     assert Config(model={"name": "test"}).run.max_run_seconds is None
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(st.integers(min_value=1))
 def test_max_run_seconds_preserves_positive_integer(seconds: int) -> None:
     config = Config.model_validate({"model": {"name": "test"}, "run": {"max_run_seconds": seconds}})
@@ -41,6 +43,7 @@ def test_observe_pacing_defaults() -> None:
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(st.integers(min_value=1, max_value=10**6), st.integers(min_value=0, max_value=10**6))
 def test_observe_pacing_preserves_a_cap_that_covers_the_interval(interval: int, extra: int) -> None:
     evaluation = _evaluation(

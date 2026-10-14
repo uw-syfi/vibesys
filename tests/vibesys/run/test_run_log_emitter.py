@@ -5,12 +5,13 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.run.integration import run_log_emitter
 from vs_agent.api import NullAgentEventSink
 from vs_project.api import RunLogger
+from vs_sim.api.testing import examples
 
 
 class _RecordingEvents(NullAgentEventSink):
@@ -23,6 +24,7 @@ class _RecordingEvents(NullAgentEventSink):
         self.chunks.append(content)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(st.lists(st.text(alphabet=st.characters(codec="ascii", exclude_characters="\n\r"))))
 def test_a_message_after_the_run_log_closed_still_reaches_the_event_stream(
     messages: list[str],

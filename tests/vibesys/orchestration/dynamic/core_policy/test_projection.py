@@ -58,6 +58,7 @@ from vs_core.testing.builders import initial_state
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import RuntimeRecord
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -151,7 +152,7 @@ def _workstreams(tree: IterationTree) -> list:
     return [node for node in tree.nodes if node.parent_id is None]
 
 
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
 @given(_snapshots(), st.integers(0, 50))
 def test_projection_copies_recorded_rounds_and_only_measured_numbers(
     snapshot: RunSnapshot, revision: int
@@ -181,7 +182,7 @@ def test_projection_copies_recorded_rounds_and_only_measured_numbers(
     ]
 
 
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
 @given(_snapshots())
 def test_every_scheduled_workstream_is_one_node_in_the_order_it_was_scheduled(
     snapshot: RunSnapshot,
@@ -203,7 +204,7 @@ def test_every_scheduled_workstream_is_one_node_in_the_order_it_was_scheduled(
     assert [node.label for node in roots] == [plan.title or plan.work_id for _, plan in scheduled]
 
 
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
 @given(_snapshots())
 def test_each_recorded_round_is_an_attempt_under_its_workstream(snapshot: RunSnapshot) -> None:
     tree = project_run_snapshot(snapshot, experiment_revision=1).iterations
@@ -222,7 +223,7 @@ def test_each_recorded_round_is_an_attempt_under_its_workstream(snapshot: RunSna
         assert root.child_count == sum(node.parent_id == root.id for node in attempts)
 
 
-@settings(max_examples=100, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=100), deadline=None)
 @given(_snapshots())
 def test_a_workstream_status_follows_how_it_ended(snapshot: RunSnapshot) -> None:
     tree = project_run_snapshot(snapshot, experiment_revision=1).iterations
@@ -250,7 +251,7 @@ def test_a_workstream_status_follows_how_it_ended(snapshot: RunSnapshot) -> None
             assert status[record.attempt.root] is expected
 
 
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
 @given(_snapshots())
 def test_only_the_leader_is_kept_and_only_running_work_is_active(snapshot: RunSnapshot) -> None:
     view = agent_projection(

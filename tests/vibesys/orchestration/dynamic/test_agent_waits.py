@@ -9,14 +9,14 @@ checkpoint, ask again after a backoff) is core's own: `test_agent_turn_runs.py`,
 
 from __future__ import annotations
 
-import pytest
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, Host, begin, config
 
 from vibesys.orchestration.dynamic.search.api import ROLES, dynamic
 from vs_core.api import Capabilities, LifecycleCapability, RequestTurn
 from vs_core.api.testing import FakeView
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 LIFECYCLE: frozenset[LifecycleCapability] = frozenset({"suspend", "profile-capture"})
 WAITERS = ("implementer", "judge")
 

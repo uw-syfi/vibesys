@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-import pytest
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import FACTS, PLANNER_LABEL, Host, config
 from tests.vibesys.orchestration.dynamic._replies import implement, implemented, plan_reply
 from tests.vibesys.orchestration.dynamic._slots import (
@@ -35,7 +35,7 @@ from vs_core.api import EvidenceKind, EvidenceRef, Finish, Measure, ObservationS
 from vs_core.api.testing import Asked, FlowRun
 
 REQUIRED = 72
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def reached(rounds: int) -> PartialRow:

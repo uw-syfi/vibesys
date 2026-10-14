@@ -14,6 +14,7 @@ from enum import StrEnum
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -40,8 +41,9 @@ from vs_core.api import (
     Wait,
     Withdraw,
 )
+from vs_sim.api.testing import examples
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 class Turn(StrEnum):
@@ -209,7 +211,7 @@ def test_a_rejected_candidate_the_judge_saw_before_does_not_earn_a_turn_under_a_
 
 
 @MODES
-@settings(max_examples=25, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=25), deadline=None, derandomize=True, database=None)
 @given(
     turns=st.lists(st.sampled_from(Turn), min_size=1, max_size=8),
     bound=st.integers(1, 4),

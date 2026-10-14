@@ -10,7 +10,7 @@ decided.
 
 from __future__ import annotations
 
-import pytest
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.evolve._host import Host, begin, config
 
 from vibesys.orchestration.evolve.search.api import (
@@ -32,7 +32,7 @@ from vs_core.api import (
     WorkspaceRef,
 )
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def adopted(host: Host) -> str | None:

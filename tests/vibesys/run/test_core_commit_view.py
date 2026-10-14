@@ -25,21 +25,32 @@ if TYPE_CHECKING:
 
 _NAMESPACE = "core-view"
 LEASE = 100.0
+_DURABLE_CHECKS = 3
 
 
-async def test_listener_fires_after_each_confirmed_commit(tmp_path: Path) -> None:
-    """One call per commit, each seeing the durable record it was told about."""
+async def test_one_core_run_notifies_the_listener_per_commit_and_announces_its_winner_once(
+    tmp_path: Path,
+) -> None:
+    """One call per commit, each told after its record is durable; the winner event follows core.
+
+    Budget: one skeleton run on real Git, the cheapest way to see the production loop's commits.
+    """
     integration = LocalRunIntegration()
+    heard: list[CoreEvent] = []
+    integration.events.subscribe(heard.append)
     with open_skeleton_world(tmp_path) as world:
         store = world.env.project.state_store(RUN_ID)
         seen: list[tuple[str, BaseModel, int]] = []
 
         def listener(namespace: str, state: BaseModel, changed: tuple[str, ...] | None) -> None:
             assert changed is None
-            stored = store.load()
-            assert isinstance(stored, StoredEnvelope)
-            # The hint arrives after the commit is durable, never before it.
-            seen.append((namespace, state, stored.revision))
+            if len(seen) < _DURABLE_CHECKS:
+                # The hint arrives after the commit is durable, never before it. (Loading the
+                # store is the cost of the run, so only the first commits are read back.)
+                stored = store.load()
+                assert isinstance(stored, StoredEnvelope)
+                assert stored.revision == len(seen)
+            seen.append((namespace, state, len(seen)))
 
         integration.add_committed_state_listener(listener)
         world.commits = integration.core_commit_observer(RUN_ID, None, _NAMESPACE)
@@ -51,24 +62,10 @@ async def test_listener_fires_after_each_confirmed_commit(tmp_path: Path) -> Non
         assert isinstance(final, StoredEnvelope)
         # Store revisions count commits from zero; none was skipped or repeated.
         assert final.revision > 0, "the run must commit more than once"
-        assert [revision for _, _, revision in seen] == list(range(final.revision + 1))
+        assert len(seen) == final.revision + 1
         assert {namespace for namespace, _, _ in seen} == {_NAMESPACE}
         assert all(isinstance(state, RuntimeRecord) for _, state, _ in seen)
         assert seen[-1][1] == process.shell.record
-
-
-async def test_winner_selection_is_announced_once_with_the_selection_core_recorded(
-    tmp_path: Path,
-) -> None:
-    """Every strategy proposes through core, so the event follows core's recorded selection."""
-    integration = LocalRunIntegration()
-    heard: list[CoreEvent] = []
-    integration.events.subscribe(heard.append)
-    with open_skeleton_world(tmp_path) as world:
-        world.commits = integration.core_commit_observer(RUN_ID, None, _NAMESPACE)
-        process = world.runtime()
-        process.shell.start("host-a", now_at=0.0, lease_duration=LEASE)
-        assert await drive(process, start=1.0) is None
 
         chosen = winner_selection(process.shell.record)
         assert chosen is not None

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 from unittest.mock import MagicMock
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.api import agent_spec_from_config
@@ -21,6 +21,7 @@ from vs_agent.api import (
     build_agent_client,
 )
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -127,6 +128,7 @@ def test_agentshim_client_passes_model_and_log_dir(tmp_path: Path) -> None:
     assert usage_record["input_tokens"] is None
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(provider=st.text(min_size=1).filter(lambda value: value not in SHIPPED_PROVIDERS))
 def test_spec_rejects_any_provider_agentshim_does_not_ship(provider: str) -> None:
     """An ``AgentSpec`` rejects an unsupported provider before a client is built."""

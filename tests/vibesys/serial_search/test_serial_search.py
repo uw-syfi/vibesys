@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.hypothesis import HypothesisConfig, OrchestratorPlan, rounds
@@ -19,6 +19,7 @@ from vibesys.serial_search.api import (
     plan_evidence,
     record_round,
 )
+from vs_sim.api.testing import examples
 
 _CONFIG = HypothesisConfig(max_rounds=4)
 
@@ -39,6 +40,7 @@ def _reply(identifier: str, **extra: object) -> OrchestratorPlan:
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(identifier=st.text(alphabet=" \tabcxyz-0123", max_size=12))
 def test_a_valid_plan_gets_a_stripped_nonempty_id_whatever_the_designer_wrote(
     identifier: str,

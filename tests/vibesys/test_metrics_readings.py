@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.metrics import EvidenceReading, accept_readings, reading_of
@@ -17,6 +17,7 @@ from vs_core.api import (
     RunId,
     Scope,
 )
+from vs_sim.api.testing import examples
 
 _CANDIDATE = RevisionRef(revision_id=RevisionId(root="c"), digest="d")
 
@@ -45,6 +46,7 @@ def _reading(name: str, kind: EvidenceKind, *, passed: bool) -> EvidenceReading:
 _KINDS = st.sampled_from([EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK])
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(kinds=st.lists(_KINDS, max_size=5))
 def test_every_requested_record_is_bound_to_its_own_request(kinds: list[EvidenceKind]) -> None:
     refs = tuple(_ref(f"e{i}", kind, ObservationStatus.SUCCEEDED) for i, kind in enumerate(kinds))
@@ -54,6 +56,7 @@ def test_every_requested_record_is_bound_to_its_own_request(kinds: list[Evidence
     assert [item.key for item in accepted] == [ref.key for ref in refs]
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(kind=_KINDS)
 def test_a_reading_of_another_kind_or_an_unrequested_id_or_a_repeat_is_refused(
     kind: EvidenceKind,
@@ -76,6 +79,7 @@ def test_a_pass_over_a_record_that_did_not_succeed_is_refused() -> None:
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(kinds=st.lists(_KINDS, min_size=1, max_size=5))
 def test_the_latest_reading_of_a_kind_wins(kinds: list[EvidenceKind]) -> None:
     readings = tuple(_reading(f"e{i}", kind, passed=True) for i, kind in enumerate(kinds))

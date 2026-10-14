@@ -23,6 +23,7 @@ from vs_runtime.api.infrastructure import (
     off_path_tools,
 )
 from vs_sandbox.api.slurm import load_slurm_operator_settings
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,7 +53,7 @@ def _executable(directory: Path, name: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
-@settings(max_examples=40, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=40), deadline=None, derandomize=True, database=None)
 @given(
     on_path=st.booleans(),
     in_toolkit=st.booleans(),

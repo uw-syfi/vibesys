@@ -17,7 +17,7 @@ from dataclasses import replace
 from typing import Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -47,6 +47,7 @@ from vibesys.hypothesis.attempts import (
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi.models import ImplementerResponse
+from vs_sim.api.testing import examples
 
 # --- helpers -----------------------------------------------------------
 
@@ -379,6 +380,7 @@ def test_start_with_no_revert_falls_back_to_the_current_commit() -> None:
 # --- attempts: never exceed budget --------------------------------------
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     retry=st.integers(min_value=1, max_value=20), max_retries=st.integers(min_value=1, max_value=10)
 )
@@ -393,6 +395,7 @@ def test_attempts_never_exceed_budget(retry: int, max_retries: int) -> None:
 # --- review_due / official_due cadence -----------------------------------
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     round_number=st.integers(min_value=1, max_value=20),
     max_rounds=st.integers(min_value=1, max_value=20),
@@ -445,6 +448,7 @@ def test_review_due_override_skips_a_bounded_already_reviewed_continuation() -> 
     assert not due
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     round_number=st.integers(min_value=1, max_value=10),
     max_rounds=st.integers(min_value=1, max_value=10),
@@ -513,6 +517,7 @@ def _attempt_state(
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     passed=st.booleans(),
     reviewed=st.booleans(),

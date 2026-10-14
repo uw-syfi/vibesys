@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import json
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -36,7 +36,7 @@ from vibesys.orchestration.dynamic.models import (
 from vibesys.orchestration.dynamic.search.api import RunSnapshot
 from vs_core.api import Finish, Retained, RevisionRef, StartAttempt
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def retiring_plan(disposition: str, reason_kind: str) -> str:

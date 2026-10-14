@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.support.task_project import task_path, write_task
@@ -23,6 +23,7 @@ from vibesys.inputs import (
     render_input_manifest,
 )
 from vs_project.api import AmbiguousTaskError, InvalidTaskDefinitionError
+from vs_sim.api.testing import examples
 
 _COMMIT = "0123456789abcdef"
 _BENCHMARK_CONTRACTS = st.one_of(
@@ -169,6 +170,7 @@ result_protocol = 2
     assert InputManifest.model_validate(tomllib.loads(rendered)) == manifest
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(contract=_BENCHMARK_CONTRACTS)
 def test_benchmark_contract_alternatives_round_trip_through_manifest_toml(
     contract: BenchmarkResult | Literal[2] | None,
@@ -271,6 +273,7 @@ def test_load_task_reports_missing_files_and_invalid_manifest(tmp_path: Path) ->
 _TASK_NAMES = st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=8)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(task=_TASK_NAMES, has_tasks=st.booleans())
 def test_load_task_rejects_a_root_manifest_naming_the_task_location(
     *, task: str, has_tasks: bool

@@ -17,6 +17,7 @@ from tests.vibesys.orchestration.dynamic.core_policy._inputs import context_of, 
 
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.search.api import ROLES, dynamic
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,7 +27,9 @@ _MODELS = st.text(alphabet="abcdefghij-", min_size=1, max_size=12)
 
 
 @settings(
-    max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=10, nightly=25),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(chosen=st.dictionaries(st.sampled_from(sorted(_IDS)), _MODELS))
 def test_a_model_chosen_for_a_role_id_reaches_that_roles_declaration_and_no_other(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.run.core_services import agent_session_spec
@@ -14,6 +14,7 @@ from vs_agent.api.testing import FakeAgentClient
 from vs_runtime.api import AgentRole
 from vs_runtime.api.infrastructure import AgentExecutionConfiguration
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
+from vs_sim.api.testing import examples
 
 _SHARED = HostResource(Path("/shared"), HostResourceAccess.READ_ONLY, "run-wide mount")
 
@@ -44,6 +45,7 @@ _role_ids = st.lists(
 )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(role_ids=_role_ids, mounted=st.sets(st.integers(min_value=0, max_value=4)))
 def test_each_role_session_mounts_its_own_configured_resources(
     role_ids: list[str], mounted: set[int]

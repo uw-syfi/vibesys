@@ -8,7 +8,7 @@ by replay, and the decisions must not change.
 
 from __future__ import annotations
 
-import pytest
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -35,7 +35,7 @@ from vs_core.api import (
 
 CONFIG = config()
 CANDIDATE = RevisionRef.of_git_commit("def456")
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def start(*, restarting: bool, adopting: bool = True) -> Host:

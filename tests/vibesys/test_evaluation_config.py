@@ -1,18 +1,20 @@
 """Strict suspension-bound configuration through the public config schema."""
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vibesys.config import Config
 from vs_core.api import MeasurementFailure
+from vs_sim.api.testing import examples
 
 
 def test_queue_allowance_defaults_to_fifteen_minutes() -> None:
     assert Config(model={"name": "test"}).evaluation.queue_allowance_seconds == 900
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(st.integers(min_value=1))
 def test_queue_allowance_preserves_positive_integer(seconds: int) -> None:
     config = Config.model_validate(
@@ -40,6 +42,7 @@ def _evaluation(**settings: object) -> Config:
     return Config.model_validate({"model": {"name": "test"}, "evaluation": settings})
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     infrastructure=st.integers(min_value=1, max_value=5),
     ambiguous=st.integers(min_value=1, max_value=5),

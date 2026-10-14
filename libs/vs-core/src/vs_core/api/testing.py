@@ -32,6 +32,7 @@ from vs_core.testing.flows import (
     Interpret,
     Prompt,
     Render,
+    RestartPolicy,
     Verify,
     fake_search,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "Journal",
     "Prompt",
     "Render",
+    "RestartPolicy",
     "Retryable",
     "Running",
     "Script",

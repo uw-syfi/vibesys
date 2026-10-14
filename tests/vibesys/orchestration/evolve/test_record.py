@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.evolve._host import TERMS, config
 from tests.vibesys.orchestration.evolve._values import (
@@ -16,6 +16,7 @@ from tests.vibesys.orchestration.evolve._values import (
 from vibesys.orchestration.evolve.search.api import ChildDone, EvolveRecord, Stage
 from vs_core.api import Kept
 from vs_core.api.search import Input
+from vs_sim.api.testing import examples
 
 
 def record(**settings: object) -> EvolveRecord:
@@ -89,6 +90,7 @@ def test_the_leader_is_the_best_passing_individual_and_the_input_before_any() ->
     assert run.ending() is None
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(children=st.lists(finished_children(), max_size=8))
 def test_the_record_keeps_its_invariants_whatever_children_end_with(
     children: list[ChildDone],

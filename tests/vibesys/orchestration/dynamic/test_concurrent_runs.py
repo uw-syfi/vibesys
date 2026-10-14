@@ -39,6 +39,7 @@ from vs_runtime.api.testing import (
     ScriptedExecutors,
     scripted_host,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -211,7 +212,7 @@ def test_without_an_explicit_cap_the_runs_own_parallelism_sets_it() -> None:
     assert finished(None, [40] * WORKSTREAMS)[0].ledger.most_in_flight == WORKSTREAMS
 
 
-@settings(max_examples=6, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=1, nightly=12), deadline=None, derandomize=True, database=None)
 @given(
     delays=st.lists(
         st.integers(min_value=0, max_value=3), min_size=WORKSTREAMS, max_size=WORKSTREAMS

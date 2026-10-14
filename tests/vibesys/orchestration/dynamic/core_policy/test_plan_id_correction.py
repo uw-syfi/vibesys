@@ -13,7 +13,7 @@ from __future__ import annotations
 import unicodedata
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._replies import implement, plan_reply
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import TURN, planner_fields, render
@@ -22,6 +22,7 @@ from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan, Portfol
 from vibesys.orchestration.dynamic.search.api import PlannerCorrection, PromptTemplate
 from vs_agent.api import AgentOutputSchemaError, parse_typed_response
 from vs_core.api.search import ReplyError, ReplyErrorCode
+from vs_sim.api.testing import examples
 
 CANONICAL = st.text(
     st.characters(categories=("L", "M", "N", "P", "S"), include_characters=" "),
@@ -41,6 +42,7 @@ def refused(reply_type: type[PortfolioPlan], identifier: str, field: str) -> Age
     return raised.value
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     identifier=CANONICAL,
     padding=st.tuples(PADDING, PADDING).filter(any),
@@ -77,6 +79,7 @@ def test_an_id_with_padding_is_refused_at_its_field_and_the_correction_says_how_
     assert violation.message in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(identifier=CANONICAL, field=st.sampled_from(FIELDS))
 def test_an_id_in_its_canonical_spelling_is_accepted_unchanged(identifier: str, field: str) -> None:
     entry = implement("h1") | {field: identifier}

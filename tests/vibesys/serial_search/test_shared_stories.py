@@ -13,6 +13,7 @@ from typing import Unpack
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.multi import _host as multi_host
 from tests.vibesys.orchestration.single import _host as single_host
 from tests.vibesys.serial_search._host import FACTS, SerialHost, World, assert_flow_closed
@@ -32,7 +33,7 @@ from vs_core.api import (
     WorkspaceMode,
 )
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 SEARCHES = pytest.mark.parametrize("search", ["single", "multi"])
 PLANNER = "orchestrator"
 IMPLEMENTER = "implementer"

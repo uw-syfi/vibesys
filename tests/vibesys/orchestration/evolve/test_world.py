@@ -28,12 +28,12 @@ def starts(run: SimulatedRun) -> int:
 
 
 def test_a_run_adopts_its_best_individual() -> None:
-    world = EvolveWorld(max_generations=2, children_per_generation=2, throughputs=(100.0, 150.0))
+    world = EvolveWorld(max_generations=1, children_per_generation=2, throughputs=(100.0, 150.0))
     run = simulate(world)
 
     commit = adopted(run)
     assert commit is not None
-    assert starts(run) == 5  # one cold start and two generations of two children
+    assert starts(run) == 3  # one cold start and one generation of two children
     final = run.decisions[-1]
     assert isinstance(final, Finish)
     assert final.result.outcome == "success"

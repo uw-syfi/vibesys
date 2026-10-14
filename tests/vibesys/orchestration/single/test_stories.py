@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Unpack
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.single._host import (
     IMPLEMENTER,
     PLANNER,
@@ -42,7 +43,7 @@ from vs_sim.api.testing import examples
 if TYPE_CHECKING:
     from vibesys.orchestration.single.search.api import SingleConfig
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 CANDIDATE = RevisionRef.of_git_commit("def456")
 
 

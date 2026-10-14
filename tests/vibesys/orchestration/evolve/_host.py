@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
+from tests.support.vibesys_flows import start_flow
+
 from vibesys.metrics import EvidenceReading, MetricRow, MetricSpace
 from vibesys.orchestration.evolve.models import JudgeResponse, MutatorResponse
 from vibesys.orchestration.evolve.search.api import (
@@ -52,13 +54,14 @@ from vs_core.api import (
     Withdraw,
 )
 from vs_core.api.search import TaskObjective, TaskStage, TaskTerms
-from vs_core.api.testing import Asked, FakeView, FlowRun
 from vs_core.testing.builders import initial_state
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from pydantic import BaseModel
+
+    from vs_core.api.testing import Asked, FakeView, FlowRun
 
 TERMS = TaskTerms(
     recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
@@ -110,7 +113,7 @@ def begin(
     facts = (
         FACTS if metric_space is None else FACTS.model_copy(update={"task": terms_in(metric_space)})
     )
-    run = FlowRun.start(evolve, cfg, facts=facts, restarting=restarting, view=view)
+    run = start_flow(evolve, cfg, facts=facts, restarting=restarting, view=view)
     return (host_type or Host)(run, cfg, **world)
 
 

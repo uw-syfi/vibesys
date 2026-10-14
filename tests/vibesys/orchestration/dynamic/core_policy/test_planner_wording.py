@@ -9,7 +9,7 @@ included).
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import (
     METRIC,
@@ -30,6 +30,7 @@ from vibesys.orchestration.dynamic.search.api import (
 )
 from vs_core.api import EvidenceId
 from vs_core.api.search import ReplyError, ReplyErrorCode
+from vs_sim.api.testing import examples
 
 PARTIALS = st.builds(
     PartialRow,
@@ -71,6 +72,7 @@ def with_partial_parent(fields: dict[str, object], partial: PartialRow) -> Plann
 # -- a candidate whose benchmark failed ------------------------------------------------------------
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(fields=planner_fields(), partial=PARTIALS)
 def test_a_candidate_offered_as_a_parent_is_shown_with_how_far_its_failed_benchmark_got(
     fields: dict[str, object], partial: PartialRow
@@ -89,6 +91,7 @@ def test_a_candidate_offered_as_a_parent_is_shown_with_how_far_its_failed_benchm
     assert ("pass requires" in offered) is (partial.target is not None)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(fields=planner_fields(), metric=METRIC)
 def test_a_passing_candidate_is_shown_by_its_metric_and_not_as_a_partial(
     fields: dict[str, object], metric: MetricRow
@@ -115,6 +118,7 @@ def test_a_passing_candidate_is_shown_by_its_metric_and_not_as_a_partial(
 # -- where a workstream without a parent starts ----------------------------------------------------
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=PLANNER_PROMPTS)
 def test_a_workstream_that_names_no_parent_is_told_it_starts_from_the_input(
     context: PlannerPrompt,
@@ -178,6 +182,7 @@ def facts_named(code: ViolationCode, word: str) -> list[str]:
             return [f"'{word}s'"]
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     code=st.sampled_from(ViolationCode),
     path=st.lists(
@@ -204,6 +209,7 @@ def test_a_correction_names_the_field_and_the_value_of_every_rule_the_reply_brok
         assert fact in corrected
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     fields=planner_fields(),
     path=st.lists(

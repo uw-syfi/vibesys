@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
+from tests.support.vibesys_flows import start_flow
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,
@@ -64,7 +65,6 @@ from vs_core.api import (
     Withdraw,
 )
 from vs_core.api.search import TaskStage, TaskTerms
-from vs_core.api.testing import Asked, FakeView, FlowRun
 from vs_core.testing.builders import initial_state
 
 if TYPE_CHECKING:
@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import OperationRequest, Scope
+    from vs_core.api.testing import Asked, FakeView, FlowRun
 
 TERMS = TaskTerms(
     recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
@@ -115,9 +116,7 @@ def begin(
     **world: Unpack[World],
 ) -> Host:
     """Start the dynamic search of ``cfg`` under a host; ``world`` sets how the far side behaves."""
-    run = FlowRun.start(
-        dynamic, cfg, facts=FACTS, restarting=restarting, view=view, adopting=adopting
-    )
+    run = start_flow(dynamic, cfg, facts=FACTS, restarting=restarting, view=view, adopting=adopting)
     return Host(run, cfg, **world)
 
 

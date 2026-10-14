@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     INPUT_THROUGHPUT,
     PLANNER_LABEL,
@@ -47,8 +48,9 @@ from vs_core.api import (
     StartAttempt,
 )
 from vs_core.api.testing import Asked, FakeView
+from vs_sim.api.testing import examples
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def revision(name: str) -> RevisionRef:
@@ -133,7 +135,7 @@ def planner_context(host: Host) -> PlannerPrompt | PlannerCorrection:
 
 
 @MODES
-@settings(max_examples=25, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=25), deadline=None, derandomize=True, database=None)
 @example(throughputs=[30], judged=[True, True, True], finishing=[0, 1, 2])
 @example(throughputs=[90, 60, 120], judged=[True, True, False], finishing=[2, 0, 1])
 @example(throughputs=[40, 30], judged=[True, True, True], finishing=[0, 1, 2])

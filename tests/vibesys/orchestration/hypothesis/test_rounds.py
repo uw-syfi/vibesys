@@ -16,6 +16,7 @@ from vibesys.hypothesis import (
 from vibesys.metrics import FrameworkBenchmarkOutcome, MetricSpace
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
+from vs_sim.api.testing import examples
 
 SPACE = MetricSpace()
 
@@ -66,7 +67,7 @@ def _facts(
     )
 
 
-@settings(max_examples=25, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=25), deadline=None, derandomize=True, database=None)
 @given(passes=st.lists(st.booleans(), min_size=1, max_size=4))
 def test_rounds_close_in_order_and_the_ledger_round_trips(passes: list[bool]) -> None:
     config = HypothesisConfig(max_rounds=len(passes))

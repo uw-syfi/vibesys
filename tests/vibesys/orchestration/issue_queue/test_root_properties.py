@@ -9,9 +9,9 @@ settled. A failing example prints the run as a timeline.
 
 from __future__ import annotations
 
-import pytest
-from hypothesis import given, note, settings
+from hypothesis import example, given, note, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.issue_queue._host import (
     Host,
     assert_flow_closed,
@@ -22,8 +22,9 @@ from tests.vibesys.orchestration.issue_queue._host import (
 from tests.vibesys.orchestration.issue_queue._replies import evaluated, judged
 
 from vs_core.api import Finish, StartAttempt, Wait
+from vs_sim.api.testing import examples
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def _starts(host: Host) -> int:
@@ -47,7 +48,13 @@ def _check_always(host: Host) -> None:
 
 
 @MODES
-@settings(max_examples=30, deadline=None, derandomize=True, database=None)
+@example(
+    steps=[(0, 0)],
+    stop_before=1,
+    rules={"max_rounds": 1, "max_attempts_per_issue": 1},
+    lost=frozenset(),
+)
+@settings(max_examples=examples(pr=10, nightly=30), deadline=None, derandomize=True, database=None)
 @given(
     steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 13)), max_size=60),
     stop_before=st.none() | st.integers(0, 60),

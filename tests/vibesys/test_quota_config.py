@@ -5,12 +5,13 @@ from __future__ import annotations
 import tomllib
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vibesys.config import Config
 from vs_runtime.api.infrastructure import FallbackTarget, QuotaAction, QuotaPolicy
+from vs_sim.api.testing import examples
 
 
 def _config(**quota: object) -> Config:
@@ -21,6 +22,7 @@ def test_the_default_is_to_pause_for_the_operator() -> None:
     assert Config(model={"name": "test"}).agent.quota.to_policy() == QuotaPolicy()
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     wait=st.none() | st.integers(min_value=1, max_value=10**7),
     retry=st.integers(min_value=1, max_value=10**5),
@@ -69,6 +71,7 @@ def test_a_bad_quota_section_is_rejected_naming_the_offending_key(
     assert "agent.quota" in str(raised.value) or "quota" in str(raised.value)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     wait=st.none() | st.integers(min_value=1, max_value=10**7),
     provider=st.sampled_from(["claude", "codex", "gemini", "opencode"]),

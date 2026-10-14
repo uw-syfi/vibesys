@@ -11,13 +11,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Unpack
 
+from tests.support.vibesys_flows import start_flow
 from tests.vibesys.orchestration.dynamic._host import FACTS, PLANNER_LABEL, Host, World
 from tests.vibesys.orchestration.dynamic._replies import implemented, plan_reply, reviewed
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import dynamic
 from vs_core.api import EvidenceKind, ObservationStatus, Retained, RevisionRef, StartAttempt
-from vs_core.api.testing import FlowRun
 
 if TYPE_CHECKING:
     from vibesys.metrics import EvidenceReading, PartialRow
@@ -69,7 +69,7 @@ def begin_with_evidence(
     **world: Unpack[EvidenceWorld],
 ) -> EvidenceHost:
     """Start the dynamic search of ``cfg`` under an `EvidenceHost` over a task with ``facts``."""
-    run = FlowRun.start(dynamic, cfg, facts=facts, restarting=restarting)
+    run = start_flow(dynamic, cfg, facts=facts, restarting=restarting)
     return EvidenceHost(run, cfg, **world)
 
 

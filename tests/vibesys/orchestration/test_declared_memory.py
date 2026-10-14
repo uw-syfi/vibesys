@@ -27,6 +27,7 @@ from vibesys.api import (
 )
 from vibesys.api.request import load_task
 from vibesys.run.integration import LocalRunIntegration
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -110,7 +111,7 @@ _ascii_text = st.text(
     round2_code=_ascii_text,
     round2_memory=_ascii_text,
 )
-@settings(max_examples=6, deadline=None)
+@settings(max_examples=examples(pr=2, nightly=6), deadline=None)
 def test_declared_memory_survives_any_rollback(
     tmp_path_factory: pytest.TempPathFactory,
     round2_code: str,
