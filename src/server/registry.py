@@ -45,7 +45,6 @@ from __future__ import annotations
 import os
 import platform
 import re
-import secrets
 import stat
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
@@ -188,7 +187,7 @@ class LifetimeLock:
     @classmethod
     def publish(cls, path: Path) -> LifetimeLock:
         """Create, lock, and then publish ``path``; fail if it already exists."""
-        temporary = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
+        temporary = path.with_name(f".{path.name}.{os.urandom(6).hex()}.tmp")
         descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
         try:
             _lock(descriptor)
@@ -563,7 +562,7 @@ def instance_log_path(root: Path, instance_id: str) -> Path:
 
 def new_instance_id() -> str:
     """Return a fresh random registry id."""
-    return secrets.token_hex(6)
+    return os.urandom(6).hex()
 
 
 class InstanceLogError(RuntimeError):
@@ -753,7 +752,7 @@ class FileInstanceMetadataStore:
                 if existing is not None:
                     self._require_same(path, existing, metadata)
                     return
-                temporary = f".{_INSPECTION_METADATA_NAME}.{secrets.token_hex(6)}.tmp"
+                temporary = f".{_INSPECTION_METADATA_NAME}.{os.urandom(6).hex()}.tmp"
                 descriptor = os.open(
                     temporary,
                     os.O_CREAT
@@ -906,7 +905,7 @@ class FileInstanceHold:
 
 
 def _write_record(path: Path, record: LiveInstanceRecord) -> None:
-    temporary = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
+    temporary = path.with_name(f".{path.name}.{os.urandom(6).hex()}.tmp")
     try:
         descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
