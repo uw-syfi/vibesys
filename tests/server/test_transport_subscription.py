@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal, Never, TypedDict, Unpack
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.server.support import REQUEST_TIME, ServerParts, Task, build_server_parts
 
@@ -859,9 +859,10 @@ def test_an_idle_stream_paces_itself_through_the_injected_threads(tmp_path: Path
 @given(
     after_sequence=st.integers(0, 50),
     request_store=st.sampled_from(["named", "unnamed"]),
-    tail=st.none() | st.integers(60, 1_000),
+    tail=st.none() | st.integers(1, 1_000),
     seed=st.integers(0, 2**32),
 )
+@example(after_sequence=50, request_store="unnamed", tail=60, seed=0)
 def test_a_store_swap_mid_stream_replays_the_new_store_from_its_start(
     tmp_path_factory: pytest.TempPathFactory,
     after_sequence: int,
@@ -875,6 +876,9 @@ def test_a_store_swap_mid_stream_replays_the_new_store_from_its_start(
     rebootstrap once resumed from that cursor, so a subscribe that did not name
     its store (an old client, or a store-blind resume) had the new store's
     first events withheld from a batch that supersedes the client's fold.
+
+    A ``tail`` bounds this replay like any other bootstrap: the batch holds the
+    new store's spine at or below ``latest - tail`` and every event above it.
     """
     root = tmp_path_factory.mktemp("swap")
     threads = SimThreads(schedule_seed=seed)
@@ -899,10 +903,21 @@ def test_a_store_swap_mid_stream_replays_the_new_store_from_its_start(
             batch = json.loads(read())
             client.close()
         latest = parts.api.latest_sequence
+        floor = 0 if tail is None else max(0, latest - tail)
         assert batch["rebootstrap"] is True
         assert batch["store_id"] != first_store
         assert batch["through_sequence"] == latest
-        assert [event["sequence"] for event in batch["events"]] == list(range(1, latest + 1))
+        assert batch["history_after_sequence"] == floor
+        sequences = [event["sequence"] for event in batch["events"]]
+        assert [sequence for sequence in sequences if sequence > floor] == list(
+            range(floor + 1, latest + 1)
+        )
+        pre_floor = [event for event in batch["events"] if event["sequence"] <= floor]
+        assert [event["type"] for event in pre_floor] == [
+            event.type.value
+            for event in parts.api.events(0, floor + 1)
+            if event.type in _BOOTSTRAP_SPINE_TYPES
+        ]
 
     threads.run(main)
 
