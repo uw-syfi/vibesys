@@ -23,12 +23,13 @@ cache key depends only on what was selected.
 
 from __future__ import annotations
 
-import json
 import re
 import shlex
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
+
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -102,6 +103,10 @@ class BuildPlan:
     generated_files: Mapping[str, str]
 
 
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
+
+
 def option_env_name(option_id: str) -> str:
     """Return the environment variable a Feature option is exported as.
 
@@ -122,9 +127,10 @@ def parse_feature_metadata(text: str, *, folder_name: str) -> FeatureSpec:
             or declares an option without a usable type and default.
     """
     try:
-        document: Any = json.loads(text)
-    except ValueError as exc:
-        message = f"Feature {folder_name}: devcontainer-feature.json is not valid JSON: {exc}"
+        document: Any = _ANY_JSON.validate_json(text)
+    except ValidationError as exc:
+        reason = exc.errors(include_url=False, include_input=False)[0]["msg"]
+        message = f"Feature {folder_name}: devcontainer-feature.json is not valid JSON: {reason}"
         raise FeatureSpecError(message) from exc
     if not isinstance(document, dict):
         message = f"Feature {folder_name}: devcontainer-feature.json must be a JSON object"

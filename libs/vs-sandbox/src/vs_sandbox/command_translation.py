@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import JsonValue, TypeAdapter, ValidationError
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -34,6 +36,10 @@ def translate_command_arguments(
     )
 
 
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
+
+
 def _translate_command_argument(
     argument: str,
     replacements: list[tuple[str, str]],
@@ -42,8 +48,8 @@ def _translate_command_argument(
     if not any(source in argument for source, _ in replacements):
         return argument
     try:
-        nested = json.loads(argument)
-    except json.JSONDecodeError:
+        nested = _ANY_JSON.validate_json(argument)
+    except ValidationError:
         nested = None
     if isinstance(nested, list) and all(isinstance(item, str) for item in nested):
         _reject_semantic_tokens_in_source(nested, replacements)

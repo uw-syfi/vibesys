@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import json
 import shlex
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from vs_evaluation.api import EvidenceMetric, ExecutorRejectedError, ProfileField
 from vs_slurm.api import PORT_PLACEHOLDER, shell_join_with_port
@@ -179,11 +179,15 @@ class ProfileCaptureDescriptor(BaseModel):
     supported_fields: tuple[ProfileField, ...] = ()
 
 
+_REQUEST: TypeAdapter[dict[str, Any]] = TypeAdapter(dict[str, Any])
+"""A capture request this module serialized; parsed back with pydantic's bounded parser."""
+
+
 def profile_capture_descriptor(command: tuple[str, ...] | None) -> ProfileCaptureDescriptor:
     """Derive support from the capture request actually selected by wiring."""
     if command is None or "--request-json" not in command:
         return ProfileCaptureDescriptor()
-    request = json.loads(command[command.index("--request-json") + 1])
+    request = _REQUEST.validate_json(command[command.index("--request-json") + 1])
     if request.get("kind") == "timeline":
         return ProfileCaptureDescriptor(supported_fields=(ProfileField.HIP_API_TIMING,))
     return ProfileCaptureDescriptor()
@@ -203,7 +207,7 @@ def require_profile_fields(
         message = "configured capture cannot supply fields: " + ", ".join(sorted(missing))
         raise ExecutorRejectedError(message)
     index = command.index("--request-json") + 1
-    request = json.loads(command[index])
+    request = _REQUEST.validate_json(command[index])
     request["options"]["hip_api"] = True
     request["required_fields"] = sorted(set(fields))
     return (

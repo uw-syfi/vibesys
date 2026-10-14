@@ -7,7 +7,6 @@ the partition choice, and the blocking ``srun`` launch the host broker uses.
 
 from __future__ import annotations
 
-import json
 import math
 import secrets
 import shlex
@@ -15,7 +14,16 @@ import shutil
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Protocol, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from vs_sim.api import (
     MergedOutputProcess,
@@ -233,10 +241,14 @@ def read_windows(
     if completed is None or completed.returncode != 0:
         return None
     try:
-        report = json.loads(completed.stdout)
-    except json.JSONDecodeError:
+        report = _ANY_JSON.validate_json(completed.stdout)
+    except ValidationError:
         return None
     return report if isinstance(report, dict) else None
+
+
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
 
 
 def srun_argv(
