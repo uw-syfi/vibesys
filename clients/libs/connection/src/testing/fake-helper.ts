@@ -756,6 +756,12 @@ class PendingEstablish implements DeferredEstablish {
   }
 }
 
+interface FakeEstablishAttempt {
+  readonly controller: AbortController;
+  readonly waiters: Set<object>;
+  promise: Promise<void>;
+}
+
 /** The `Link` to a `FakeHelper`'s host. */
 export class FakeLink implements Link {
   readonly host = 'fake';
@@ -768,6 +774,7 @@ export class FakeLink implements Link {
   establishments = 0;
   released = 0;
   readonly #establishes: PendingEstablish[] = [];
+  #establishing: FakeEstablishAttempt | null = null;
   /** Every line a bootstrap reported, in order. */
   readonly heardLines: string[] = [];
 
@@ -782,15 +789,65 @@ export class FakeLink implements Link {
     return pending;
   }
 
-  async establish(interactive: boolean, signal?: AbortSignal): Promise<void> {
+  establish(interactive: boolean, signal?: AbortSignal): Promise<void> {
     this.establishments += 1;
     if (interactive) this.interactive += 1;
-    if (this.linkFault !== null)
-      throw new ConnectionError(this.linkFault.cause, this.linkFault.detail);
-    await this.#establishes.shift()?.wait(signal);
+    if (this.linkFault !== null) {
+      return Promise.reject(new ConnectionError(this.linkFault.cause, this.linkFault.detail));
+    }
+    if (signal?.aborted === true) {
+      return Promise.reject(new ConnectionError('link', 'the connection attempt was abandoned'));
+    }
+    const attempt = this.#establishing ?? this.#beginEstablish();
+    const waiter = {};
+    attempt.waiters.add(waiter);
+    return new Promise((resolve, reject) => {
+      const stopWaiting = (): boolean => {
+        if (!attempt.waiters.delete(waiter)) return false;
+        signal?.removeEventListener('abort', aborted);
+        return true;
+      };
+      const aborted = (): void => {
+        if (!stopWaiting()) return;
+        reject(new ConnectionError('link', 'the connection attempt was abandoned'));
+        if (attempt.waiters.size === 0) this.#cancelEstablish(attempt);
+      };
+      signal?.addEventListener('abort', aborted, {once: true});
+      void attempt.promise.then(
+        () => {
+          if (stopWaiting()) resolve();
+        },
+        error => {
+          if (stopWaiting()) reject(error);
+        },
+      );
+    });
   }
 
-  networkChanged(): void {}
+  #beginEstablish(): FakeEstablishAttempt {
+    const controller = new AbortController();
+    const attempt: FakeEstablishAttempt = {
+      controller,
+      waiters: new Set(),
+      promise: Promise.resolve(),
+    };
+    this.#establishing = attempt;
+    attempt.promise = (
+      this.#establishes.shift()?.wait(controller.signal) ?? Promise.resolve()
+    ).finally(() => {
+      if (this.#establishing === attempt) this.#establishing = null;
+    });
+    return attempt;
+  }
+
+  #cancelEstablish(attempt: FakeEstablishAttempt): void {
+    if (this.#establishing === attempt) this.#establishing = null;
+    attempt.controller.abort();
+  }
+
+  networkChanged(): void {
+    if (this.#establishing !== null) this.#cancelEstablish(this.#establishing);
+  }
 
   spawnHelper(checkout: string): SpawnedProcess {
     if (this.linkFault !== null) {
@@ -813,7 +870,15 @@ export class FakeLink implements Link {
     return new ConnectionError('incompatible', `the helper for ${where} exited with ${code}`);
   }
 
-  async release(): Promise<void> {
+  release(): Promise<void> {
+    return this.#release();
+  }
+
+  async #release(): Promise<void> {
     this.released += 1;
+    const attempt = this.#establishing;
+    if (attempt === null) return;
+    this.#cancelEstablish(attempt);
+    await attempt.promise.catch(() => {});
   }
 }

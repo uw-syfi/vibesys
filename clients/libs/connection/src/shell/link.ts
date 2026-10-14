@@ -35,8 +35,10 @@ export interface Link {
   /**
    * Bring the link up; only an `interactive` attempt (the user's own action) may prompt. Rejects
    * with a `ConnectionError`: `auth` when the host refused the user, `link` when it is unreachable.
-   * Concurrent calls share one attempt. Aborting one caller stops waiting for it; the attempt is
-   * stopped only when it has no callers left.
+   * Concurrent callers share an attempt while their live intent permits it: any live interactive
+   * caller authorizes the master to prompt, but a caller that leaves before launch does not. An
+   * interactive caller supersedes a noninteractive master already being started. Aborting one
+   * caller stops waiting for it; the attempt is stopped only when it has no callers left.
    */
   establish(interactive: boolean, signal?: AbortSignal): Promise<void>;
   /** Forget in-flight evidence after a network change; the next `establish` starts fresh. */
@@ -141,14 +143,28 @@ const SSH_FAILED = 255;
 const AUTH_FAILURE =
   /Permission denied|Too many authentication failures|Authentication failed|Host key verification failed/;
 
+interface EstablishWaiter {
+  readonly interactive: boolean;
+}
+
+type EstablishStage = 'checking' | 'background-master' | 'interactive-master';
+
+interface EstablishPromotion {
+  requested: boolean;
+  readonly promise: Promise<void>;
+  readonly request: () => void;
+}
+
 interface EstablishAttempt {
   process: SpawnedProcess | null;
   cancelled: boolean;
+  stage: EstablishStage;
+  promotion: EstablishPromotion | null;
   readonly cancellation: Promise<void>;
   readonly cancel: () => void;
   retirement: ProcessRetirement | null;
-  readonly waiters: Set<object>;
-  promise: Promise<void>;
+  readonly waiters: Set<EstablishWaiter>;
+  readonly promise: Promise<void>;
 }
 
 interface RetirementCommandResult {
@@ -166,6 +182,8 @@ export class SshLink implements Link {
   readonly #attempts = new Set<EstablishAttempt>();
   /** Cancelled establishment children whose exact exit has not been observed yet. */
   readonly #retiringAttempts = new Set<ProcessRetirement>();
+  /** A synchronous spawn call in progress; reentrant replacements wait until it owns its child. */
+  #launchingProcess: Promise<void> | null = null;
   #establishing: EstablishAttempt | null = null;
   #released = false;
   #releasing: Promise<void> | null = null;
@@ -194,9 +212,8 @@ export class SshLink implements Link {
     if (signal?.aborted === true) {
       return Promise.reject(new ConnectionError('link', 'the connection attempt was abandoned'));
     }
-    const attempt = this.#establishing ?? this.#begin(interactive);
-    const waiter = {};
-    attempt.waiters.add(waiter);
+    const waiter: EstablishWaiter = {interactive};
+    const attempt = this.#admit(waiter);
     return new Promise((resolve, reject) => {
       const stopWaiting = (): boolean => {
         if (!attempt.waiters.delete(waiter)) return false;
@@ -218,6 +235,25 @@ export class SshLink implements Link {
         },
       );
     });
+  }
+
+  /** Join the live generation, asking its batch master to retire when this caller may prompt. */
+  #admit(waiter: EstablishWaiter): EstablishAttempt {
+    const attempt = this.#establishing;
+    if (attempt === null) return this.#begin(waiter);
+    attempt.waiters.add(waiter);
+    if (waiter.interactive && attempt.stage === 'background-master') {
+      this.#promote(attempt);
+    }
+    return attempt;
+  }
+
+  #promote(attempt: EstablishAttempt): void {
+    const promotion = attempt.promotion;
+    if (promotion === null || promotion.requested) return;
+    promotion.requested = true;
+    this.#retireAttemptProcess(attempt);
+    promotion.request();
   }
 
   networkChanged(): void {
@@ -259,6 +295,10 @@ export class SshLink implements Link {
   }
 
   async #confirmRetiredAttempts(): Promise<void> {
+    // `spawn` is synchronous but is an injected boundary and may re-enter this link. A cancelled
+    // generation publishes this launch barrier before calling it; once it settles, the returned
+    // child has either been retired below or the spawn failed without creating one.
+    while (this.#launchingProcess !== null) await this.#launchingProcess;
     const outcomes = await Promise.all(
       [...this.#retiringAttempts].map(retirement => retirement.outcome),
     );
@@ -334,63 +374,94 @@ export class SshLink implements Link {
     );
   }
 
-  #begin(interactive: boolean): EstablishAttempt {
+  #begin(waiter: EstablishWaiter): EstablishAttempt {
     let cancel = (): void => {};
     const cancellation = new Promise<void>(resolve => {
       cancel = resolve;
     });
+    let resolveAttempt = (): void => {};
+    let rejectAttempt = (_error: unknown): void => {};
+    const promise = new Promise<void>((resolve, reject) => {
+      resolveAttempt = resolve;
+      rejectAttempt = reject;
+    });
     const attempt: EstablishAttempt = {
       process: null,
       cancelled: false,
+      stage: 'checking',
+      promotion: null,
       cancellation,
       cancel,
       retirement: null,
-      waiters: new Set(),
-      promise: Promise.resolve(),
+      waiters: new Set([waiter]),
+      promise,
     };
+    // Publish both the logical generation and its stable completion promise before starting it:
+    // injected spawn implementations may synchronously re-enter release from the very first check.
     this.#establishing = attempt;
-    attempt.promise = this.#establish(interactive, attempt).finally(() => {
-      this.#attempts.delete(attempt);
-      if (this.#establishing === attempt) this.#establishing = null;
-    });
     this.#attempts.add(attempt);
+    void this.#establish(attempt).then(resolveAttempt, rejectAttempt);
+    void attempt.promise.then(
+      () => this.#finishEstablish(attempt),
+      () => this.#finishEstablish(attempt),
+    );
     return attempt;
+  }
+
+  #finishEstablish(attempt: EstablishAttempt): void {
+    this.#attempts.delete(attempt);
+    if (this.#establishing === attempt) this.#establishing = null;
   }
 
   #cancel(attempt: EstablishAttempt): void {
     if (attempt.cancelled) return;
     attempt.cancelled = true;
     if (this.#establishing === attempt) this.#establishing = null;
-    if (attempt.process !== null) {
-      const retirement = prepareProcessRetirement(
-        attempt.process,
-        this.#options.scheduleTimeout,
-        this.#retirementCommandTimeoutMs,
-      );
-      attempt.retirement = retirement;
-      this.#retiringAttempts.add(retirement);
-      void retirement.exit.then(
-        () => this.#retiringAttempts.delete(retirement),
-        () => {},
-      );
-      retirement.start();
-    }
+    this.#retireAttemptProcess(attempt);
     attempt.cancel();
   }
 
-  async #establish(interactive: boolean, attempt: EstablishAttempt): Promise<void> {
-    if (this.#retiringAttempts.size > 0) await this.#confirmRetiredAttempts();
+  #retireAttemptProcess(attempt: EstablishAttempt): void {
+    if (attempt.process === null || attempt.retirement !== null) return;
+    const retirement = prepareProcessRetirement(
+      attempt.process,
+      this.#options.scheduleTimeout,
+      this.#retirementCommandTimeoutMs,
+    );
+    attempt.retirement = retirement;
+    this.#retiringAttempts.add(retirement);
+    void retirement.exit.then(
+      () => this.#retiringAttempts.delete(retirement),
+      () => {},
+    );
+    retirement.start();
+  }
+
+  async #establish(attempt: EstablishAttempt): Promise<void> {
+    while (await this.#establishOnce(attempt)) {}
+  }
+
+  /** Run one check-and-master generation; true asks the same waiters to try a promoted successor. */
+  async #establishOnce(attempt: EstablishAttempt): Promise<boolean> {
+    if (this.#launchingProcess !== null || this.#retiringAttempts.size > 0) {
+      await this.#confirmRetiredAttempts();
+    }
     this.#stillCurrent(attempt);
-    const checkProcess = this.#ssh(['-O', 'check', '--', this.#options.alias]);
-    attempt.process = checkProcess;
+    attempt.stage = 'checking';
+    const checkProcess = this.#launchAttempt(attempt, ['-O', 'check', '--', this.#options.alias]);
     const check = await this.#finishAttempt(checkProcess, attempt);
     attempt.process = null;
     this.#stillCurrent(attempt);
-    if (check.code === 0) return;
+    if (check.code === 0) return false;
+    const interactive = [...attempt.waiters].some(waiter => waiter.interactive);
+    const promotion = interactive ? null : this.#promotion();
+    attempt.promotion = promotion;
+    attempt.stage = interactive ? 'interactive-master' : 'background-master';
     const env: Record<string, string> = interactive
       ? {SSH_ASKPASS: this.#options.askpass, SSH_ASKPASS_REQUIRE: 'force'}
       : {};
-    const masterProcess = this.#ssh(
+    const masterProcess = this.#launchAttempt(
+      attempt,
       [
         ...(interactive ? [] : ['-o', 'BatchMode=yes']),
         '-T',
@@ -404,14 +475,50 @@ export class SshLink implements Link {
         this.#options.alias,
         'true',
       ],
-      undefined,
       env,
     );
-    attempt.process = masterProcess;
-    const master = await this.#finishAttempt(masterProcess, attempt);
+    const master = await this.#finishMaster(masterProcess, attempt, promotion);
     attempt.process = null;
+    attempt.promotion = null;
     this.#stillCurrent(attempt);
+    if (master.kind === 'promoted') {
+      attempt.retirement = null;
+      return true;
+    }
     if (master.code !== 0) throw this.#sshError(master.stderr);
+    return false;
+  }
+
+  #promotion(): EstablishPromotion {
+    let request = (): void => {};
+    const promise = new Promise<void>(resolve => {
+      request = resolve;
+    });
+    return {requested: false, promise, request};
+  }
+
+  /** Publish synchronous launch ownership before crossing the injected process boundary. */
+  #launchAttempt(
+    attempt: EstablishAttempt,
+    args: readonly string[],
+    env: Record<string, string> = {},
+  ): SpawnedProcess {
+    let finishLaunch = (): void => {};
+    const launching = new Promise<void>(resolve => {
+      finishLaunch = resolve;
+    });
+    this.#launchingProcess = launching;
+    try {
+      const process = this.#ssh(args, undefined, env);
+      attempt.process = process;
+      if (attempt.cancelled || attempt.promotion?.requested === true) {
+        this.#retireAttemptProcess(attempt);
+      }
+      return process;
+    } finally {
+      if (this.#launchingProcess === launching) this.#launchingProcess = null;
+      finishLaunch();
+    }
   }
 
   #stillCurrent(attempt: EstablishAttempt): void {
@@ -423,7 +530,38 @@ export class SshLink implements Link {
     process: SpawnedProcess,
     attempt: EstablishAttempt,
   ): Promise<{code: number | null; stderr: string}> {
-    const cancelled = attempt.cancellation.then(async () => {
+    return Promise.race([this.#finish(process), this.#cancelled(attempt)]);
+  }
+
+  #finishMaster(
+    process: SpawnedProcess,
+    attempt: EstablishAttempt,
+    promotion: EstablishPromotion | null,
+  ): Promise<
+    | {readonly kind: 'finished'; readonly code: number | null; readonly stderr: string}
+    | {readonly kind: 'promoted'}
+  > {
+    const finished = this.#finish(process).then(async result => {
+      if (promotion?.requested === true) return this.#confirmedPromotion(attempt);
+      return {kind: 'finished' as const, ...result};
+    });
+    if (promotion === null) return Promise.race([finished, this.#cancelled(attempt)]);
+    const promoted = promotion.promise.then(() => this.#confirmedPromotion(attempt));
+    return Promise.race([finished, promoted, this.#cancelled(attempt)]);
+  }
+
+  async #confirmedPromotion(attempt: EstablishAttempt): Promise<{readonly kind: 'promoted'}> {
+    const retirement = attempt.retirement;
+    if (retirement === null) {
+      throw new Error('a promoted SSH attempt did not own its batch process retirement');
+    }
+    const outcome = await retirement.outcome;
+    if (outcome.kind === 'unconfirmed') throw this.#unconfirmedAttemptError();
+    return {kind: 'promoted'};
+  }
+
+  #cancelled(attempt: EstablishAttempt): Promise<never> {
+    return attempt.cancellation.then(async () => {
       const retirement = attempt.retirement;
       if (retirement !== null) {
         const outcome = await retirement.outcome;
@@ -431,7 +569,6 @@ export class SshLink implements Link {
       }
       throw new ConnectionError('link', 'the connection attempt was abandoned');
     });
-    return Promise.race([this.#finish(process), cancelled]);
   }
 
   #ssh(
