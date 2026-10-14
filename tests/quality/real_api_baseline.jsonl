@@ -169,8 +169,6 @@
 {"path": "libs/vs-slurm/tests/test_run_cancels_abandoned_jobs.py", "rule": "subprocess", "count": 7}
 {"path": "libs/vs-slurm/tests/test_run_cancels_abandoned_jobs.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-slurm/tests/test_shell_join.py", "rule": "subprocess", "count": 1}
-{"path": "sdk/vs-bench/tests/test_runner.py", "rule": "asyncio_sleep", "count": 4}
-{"path": "sdk/vs-bench/tests/test_schedule.py", "rule": "time", "count": 12}
 {"path": "sdk/vs-bench/tests/test_transport.py", "rule": "socket_io", "count": 7}
 {"path": "src/entrypoints/cli/remote.py", "rule": "subprocess", "count": 2}
 {"path": "src/entrypoints/launcher.py", "rule": "process", "count": 3}

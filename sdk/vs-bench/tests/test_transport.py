@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import json
 
 import httpx
@@ -118,14 +119,19 @@ class TestStreamSSE:
 
     @pytest.mark.asyncio
     async def test_latency_positive(self) -> None:
+        ticks = itertools.count(0.0)
         chunks = [_chunk("x")]
         response = _make_sse_response(chunks)
 
         transport = httpx.MockTransport(lambda _req: response)
         async with httpx.AsyncClient(transport=transport) as client:
-            result = await stream_sse(client, "http://test/v1/completions", {"stream": True})
+            result = await stream_sse(
+                client, "http://test/v1/completions", {"stream": True}, clock=ticks.__next__
+            )
 
-        assert result.latency > 0
+        # Read at the start, at the one token, and at the end: one second apart each.
+        assert result.latency == 2.0
+        assert result.ttft == 1.0
 
     @pytest.mark.asyncio
     async def test_single_token_no_itl(self) -> None:

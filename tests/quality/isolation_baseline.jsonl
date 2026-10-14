@@ -37,9 +37,7 @@
 {"path": "libs/vs-sandbox/tests/test_skypilot_bridge.py", "rule": "patch", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_skypilot_evaluator_helper.py", "rule": "patch", "count": 1}
 {"path": "sdk/vs-bench/tests/test_runner.py", "rule": "private_import", "count": 2}
-{"path": "sdk/vs-bench/tests/test_runner.py", "rule": "sleep", "count": 4}
 {"path": "sdk/vs-bench/tests/test_schedule.py", "rule": "private_import", "count": 1}
-{"path": "sdk/vs-bench/tests/test_schedule.py", "rule": "timeout_verdict", "count": 5}
 {"path": "sdk/vs-bench/tests/test_stats.py", "rule": "private_import", "count": 1}
 {"path": "sdk/vs-bench/tests/test_transport.py", "rule": "private_import", "count": 1}
 {"path": "tests/architecture/test_delegated_merge.py", "rule": "patch", "count": 12}

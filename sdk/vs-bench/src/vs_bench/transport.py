@@ -5,8 +5,12 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import httpx
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @dataclass
@@ -71,6 +75,7 @@ async def stream_sse(
     *,
     # lint-waiver: LW-011003 [ASYNC109]; This HTTP request budget is a supported option for a single streaming request.
     timeout: float = 180.0,  # noqa: ASYNC109
+    clock: Callable[[], float] = time.perf_counter,
 ) -> StreamResult:
     """POST a streaming request and parse SSE lines with token-level timing.
 
@@ -78,7 +83,7 @@ async def stream_sse(
     body is sent as-is; ``stream: true`` should already be included by the
     caller if desired (this function does not inject it).
     """
-    started = time.perf_counter()
+    started = clock()
     first_token: float | None = None
     token_timestamps: list[float] = []
     token_count = 0
@@ -98,7 +103,7 @@ async def stream_sse(
                 chunk: dict[str, object] = json.loads(payload)
                 text = _extract_text(chunk)
                 if text:
-                    now = time.perf_counter()
+                    now = clock()
                     text_parts.append(text)
                     token_count += 1
                     token_timestamps.append(now)
@@ -114,12 +119,12 @@ async def stream_sse(
         return StreamResult(
             text="".join(text_parts),
             token_count=token_count,
-            latency=time.perf_counter() - started,
+            latency=clock() - started,
             ttft=None if first_token is None else first_token - started,
             error=str(exc),
         )
 
-    done = time.perf_counter()
+    done = clock()
     itl = [token_timestamps[i] - token_timestamps[i - 1] for i in range(1, len(token_timestamps))]
     return StreamResult(
         text="".join(text_parts),
