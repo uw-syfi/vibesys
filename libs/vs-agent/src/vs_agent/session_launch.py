@@ -303,7 +303,7 @@ class ConfinedSessionLauncher:
         transient_retry_delays: Sequence[float] = TRANSIENT_RETRY_DELAYS_S,
         agent_homes: Path | None = None,
         env_passthrough: Sequence[str] = (),
-        launcher_env: Callable[[], Mapping[str, str]] = agentshim.interactive_env,
+        launcher_env: Callable[[], Mapping[str, str]] | None = None,
         transport: agentshim.TransportKind | None = None,
         clock: agentshim.Clock,
         ids: agentshim.IdAllocator | None = None,
@@ -383,7 +383,7 @@ class ConfinedSessionLauncher:
         self._dropped_names_logged = False
         self._threads = threads or OsThreads()
         self._dropped_names_lock = self._threads.lock()
-        self._launcher_env = launcher_env
+        self._launcher_env = agentshim.interactive_env if launcher_env is None else launcher_env
         self._transport = transport
         self._clock = clock
         self._ids = ids

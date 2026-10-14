@@ -25,7 +25,7 @@ from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
 
     from vs_sandbox.api import HostResource
@@ -37,6 +37,7 @@ class _BuildOptions(TypedDict, total=False):
     use_docker: bool
     log_dir: Path | None
     host_resources: Iterable[HostResource]
+    launcher_env: Callable[[], Mapping[str, str]]
 
 
 def _config(**agent: object) -> Config:
@@ -57,6 +58,7 @@ def _build(
         use_docker=options.get("use_docker", False),
         log_dir=options.get("log_dir"),
         host_resources=options.get("host_resources", ()),
+        launcher_env=options.get("launcher_env"),
         clock=ManualClock(),
     )
     # Every case here selects the cli backend, whose concrete client is what
@@ -161,10 +163,13 @@ def test_built_client_reports_a_missing_provider_cli_before_its_first_turn(
     """
     empty_bin = tmp_path / "bin"
     empty_bin.mkdir()
+    # agentshim's host executor falls back to this process's PATH when the session's
+    # PATH lacks the binary, so the process PATH must be empty too.
     monkeypatch.setenv("PATH", str(empty_bin))
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv(SANDBOX_DISABLE_ENV, "off")
-    client = _build(_config(backend="cli", cli_provider=provider))
+    # An explicit launcher environment: the default one is the operator's login shell,
+    # probed once per process, so it would depend on the host and on earlier tests.
+    environment = {"PATH": str(empty_bin), "HOME": str(tmp_path), SANDBOX_DISABLE_ENV: "off"}
+    client = _build(_config(backend="cli", cli_provider=provider), launcher_env=lambda: environment)
 
     with pytest.raises(ProviderNotReadyError) as raised:
         client.invoke_text(

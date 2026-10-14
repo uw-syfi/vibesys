@@ -11,7 +11,7 @@ from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.spec import AgentBackend
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
     from typing import TextIO
 
@@ -60,6 +60,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
     agent_homes_dir: Path | None = None,
+    launcher_env: Callable[[], Mapping[str, str]] | None = None,
     clock: Clock,
     threads: Threads,
 ) -> AgentClientProtocol:
@@ -68,6 +69,8 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     ``agent_homes_dir`` is the run's root for dedicated provider CLI homes
     (``Project.agent_homes_directory_for``); without it a provider that can
     only isolate through such a home runs with the operator's configuration.
+    ``launcher_env`` reads the environment the session launcher resolves provider CLIs and
+    homes from; ``None`` keeps ``ConfinedSessionLauncher``'s default, the operator's login shell.
     ``clock`` counts seconds since the epoch; it times turns and stamps usage rows.
     ``threads`` is the blocking time agent turns wait on: the session launcher's locks and
     agentshim's clock.
@@ -122,6 +125,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
 
     launcher = ConfinedSessionLauncher(
         provider=provider,
+        launcher_env=launcher_env,
         timeout=timeout,
         docker_sandboxes=docker_sandboxes,
         workspace_sandboxes=workspace_sandboxes,

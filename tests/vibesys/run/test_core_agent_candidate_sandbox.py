@@ -160,6 +160,7 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
     def client_factory(**kwargs: object) -> AgentClientProtocol:
         client = build_agent_client(
             executor_factory=lambda: executor,
+            launcher_env=dict,
             threads=OsThreads(),
             **kwargs,  # ty: ignore[invalid-argument-type]
         )
