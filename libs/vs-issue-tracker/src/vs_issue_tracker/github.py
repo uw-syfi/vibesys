@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Literal
 
+from pydantic import ValidationError
+
 from vs_github.api import GitHubCLI, GitHubClient
 from vs_issue_tracker.core import (
     Issue,
@@ -382,11 +384,12 @@ def _events(comments: object) -> list[IssueEvent]:
         if not body.endswith(_EVENT_END):
             raise IssueTrackerLoadError.issue_event_unclosed()
         try:
-            value = json.loads(body[len(_EVENT_START) : -len(_EVENT_END)])
-            events.append(IssueEvent.model_validate(value))
-        except (ValueError, RecursionError) as exc:
-            # Anyone who can comment on the issue writes this text; ``json`` raises
-            # ``RecursionError`` once its nesting passes the interpreter's limit.
+            # Anyone who can comment on the issue writes this text; pydantic's parser
+            # bounds its nesting.
+            events.append(
+                IssueEvent.model_validate_json(body[len(_EVENT_START) : -len(_EVENT_END)])
+            )
+        except ValidationError as exc:
             raise IssueTrackerLoadError.invalid_issue_event() from exc
     return events
 

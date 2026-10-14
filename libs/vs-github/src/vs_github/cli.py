@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -205,10 +206,14 @@ def _command_detail(result: subprocess.CompletedProcess[str]) -> str:
     return (result.stderr or "").strip() or (result.stdout or "").strip()
 
 
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
+
+
 def _decode_json(raw: str, operation: str) -> object:
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError as exc:
+        return _ANY_JSON.validate_json(raw)
+    except ValidationError as exc:
         raise GitHubCLIError(f"GitHub CLI returned invalid JSON for {operation}.") from exc  # noqa: TRY003  # lint-waiver: LW-920413 [TRY003]; report malformed command output with its operation.
 
 

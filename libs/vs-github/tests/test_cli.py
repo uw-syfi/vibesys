@@ -159,3 +159,15 @@ def test_issue_operations_use_explicit_repository_and_preserve_json() -> None:
         ["label", "create", "vibesys:type/bug"],
     ]
     assert "repos/owner/repo/issues?state=all&per_page=100" in runner.calls[0][0]
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    ["[" * 100_000, "[" * 100_000 + "]" * 100_000, "not json", '{"number": 8'],
+    ids=["deep-open", "deep-closed", "not-json", "truncated"],
+)
+def test_unparseable_issue_json_is_a_cli_error(stdout: str) -> None:
+    github = GitHubCLI(_runner=RecordingRunner([_result(stdout=stdout)]))
+
+    with pytest.raises(GitHubCLIError, match="invalid JSON for issue view"):
+        github.view_issue("owner/repo", 8)
