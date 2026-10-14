@@ -173,7 +173,7 @@ interface CampaignEventSource {
   close(): void;
 }
 
-/** Parsed SSE frames; the subscriber owns the connection and releases it on close. */
+/** Parsed SSE frames; unreadable input ends the subscription, and owner close releases it once. */
 export class EventSourceCampaignStream implements CampaignStream {
   constructor(
     private readonly url: string,
@@ -183,24 +183,33 @@ export class EventSourceCampaignStream implements CampaignStream {
 
   subscribe(onFrame: (frame: CampaignFrame) => void, onError: (error: Error) => void): () => void {
     const source = this.open(this.url);
+    let released = false;
+    const release = (): boolean => {
+      if (released) return false;
+      released = true;
+      source.onmessage = null;
+      source.onerror = null;
+      source.close();
+      return true;
+    };
+    const fail = (error: Error): void => {
+      if (release()) onError(error);
+    };
     source.onmessage = event => {
+      if (released) return;
       let frame: CampaignFrame;
       try {
         frame = parseCampaignFrame(JSON.parse(event.data));
       } catch (error) {
-        onError(error instanceof Error ? error : new Error(String(error)));
+        fail(error instanceof Error ? error : new Error(String(error)));
         return;
       }
       onFrame(frame);
     };
     source.onerror = () => {
       // CONNECTING is recoverable: EventSource retries and the fold ignores replayed sequences.
-      if (source.readyState === 2) onError(new Error('Campaign stream connection error'));
+      if (source.readyState === 2) fail(new Error('Campaign stream connection error'));
     };
-    return () => {
-      source.onmessage = null;
-      source.onerror = null;
-      source.close();
-    };
+    return () => void release();
   }
 }

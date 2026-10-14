@@ -128,7 +128,55 @@ describe('campaign browser boundary', () => {
     ).rejects.toThrow('503');
   });
 
-  test('validates streamed frames, reports terminal errors, and releases the subscription', () => {
+  test('fails closed for malformed JSON and strictly invalid campaign frames', () => {
+    const cases = [
+      {label: 'malformed JSON', data: '{bad json'},
+      {
+        label: 'invalid campaign frame',
+        data: JSON.stringify({kind: 'status', seq: 1, status: 'unknown'}),
+      },
+    ] as const;
+
+    for (const {label, data} of cases) {
+      const source = new ManualCampaignSource();
+      const frames: unknown[] = [];
+      const errors: string[] = [];
+      const stream = new EventSourceCampaignStream('/campaign', () => source);
+      const close = stream.subscribe(
+        frame => frames.push(frame),
+        error => errors.push(error.message),
+      );
+      const staleMessage = source.onmessage;
+      const staleError = source.onerror;
+
+      staleMessage?.({data});
+
+      expect({label, closeCalls: source.closeCalls, errors: errors.length}).toEqual({
+        label,
+        closeCalls: 1,
+        errors: 1,
+      });
+      expect(source.onmessage).toBeNull();
+      expect(source.onerror).toBeNull();
+
+      staleMessage?.({
+        data: JSON.stringify({kind: 'status', seq: 1, status: 'completed'}),
+      });
+      source.readyState = 2;
+      staleError?.({});
+      close();
+      close();
+
+      expect({label, frames, errors: errors.length, closeCalls: source.closeCalls}).toEqual({
+        label,
+        frames: [],
+        errors: 1,
+        closeCalls: 1,
+      });
+    }
+  });
+
+  test('keeps native reconnects live and releases a terminal source once', () => {
     const source = new ManualCampaignSource();
     const frames: unknown[] = [];
     const errors: string[] = [];
@@ -137,18 +185,57 @@ describe('campaign browser boundary', () => {
       frame => frames.push(frame),
       error => errors.push(error.message),
     );
-    source.onmessage?.({data: '{bad json'});
-    source.onmessage?.({data: JSON.stringify({kind: 'status', seq: 1, status: 'completed'})});
-    expect(frames).toEqual([{kind: 'status', seq: 1, status: 'completed'}]);
-    expect(errors).toHaveLength(1);
+    const staleMessage = source.onmessage;
+    const staleError = source.onerror;
+
     source.readyState = 0;
-    source.onerror?.({});
-    expect(errors).toHaveLength(1);
+    staleError?.({});
+    staleMessage?.({
+      data: JSON.stringify({kind: 'status', seq: 1, status: 'completed'}),
+    });
+    expect(frames).toEqual([{kind: 'status', seq: 1, status: 'completed'}]);
+    expect(errors).toEqual([]);
+    expect(source.closeCalls).toBe(0);
+
     source.readyState = 2;
-    source.onerror?.({});
-    expect(errors.at(-1)).toBe('Campaign stream connection error');
+    staleError?.({});
+    staleError?.({});
+    staleMessage?.({
+      data: JSON.stringify({kind: 'status', seq: 2, status: 'completed'}),
+    });
     close();
-    expect(source.closed).toBe(true);
+    close();
+
+    expect(frames).toEqual([{kind: 'status', seq: 1, status: 'completed'}]);
+    expect(errors).toEqual(['Campaign stream connection error']);
+    expect(source.closeCalls).toBe(1);
+    expect(source.onmessage).toBeNull();
+    expect(source.onerror).toBeNull();
+  });
+
+  test('owner disposal is idempotent and fences queued source callbacks', () => {
+    const source = new ManualCampaignSource();
+    const frames: unknown[] = [];
+    const errors: string[] = [];
+    const stream = new EventSourceCampaignStream('/campaign', () => source);
+    const close = stream.subscribe(
+      frame => frames.push(frame),
+      error => errors.push(error.message),
+    );
+    const staleMessage = source.onmessage;
+    const staleError = source.onerror;
+
+    close();
+    close();
+    staleMessage?.({
+      data: JSON.stringify({kind: 'status', seq: 1, status: 'completed'}),
+    });
+    source.readyState = 2;
+    staleError?.({});
+
+    expect(frames).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(source.closeCalls).toBe(1);
     expect(source.onmessage).toBeNull();
     expect(source.onerror).toBeNull();
   });
@@ -158,8 +245,8 @@ class ManualCampaignSource {
   onmessage: ((event: {readonly data: string}) => void) | null = null;
   onerror: ((event: unknown) => void) | null = null;
   readyState = 1;
-  closed = false;
+  closeCalls = 0;
   close(): void {
-    this.closed = true;
+    this.closeCalls += 1;
   }
 }
