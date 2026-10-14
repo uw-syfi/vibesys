@@ -161,6 +161,22 @@ def _flow_walk(world: str, draw: st.DataObject, deaths: int) -> None:
 
 
 @pytest.mark.slow
+def test_a_limit_does_not_pass_while_a_dead_hosts_lease_runs_out() -> None:
+    """The walk that found it: two hosts die right after a commit, and each successor waits
+    for the dead host's lease before it starts.
+
+    No host is alive during those waits, so the restart credits them to every open limit.
+    Crediting only the time after the lease ended timed out a request no host could wait on,
+    and the run stalled closing on the block of it.
+    """
+    path = [CrashPoint(CrashKind.AFTER_COMMIT, 135), CrashPoint(CrashKind.AFTER_COMMIT, 146)]
+    walked = simulate(_WORLDS["multi"]())
+    for point in path:
+        walked = walked.rerun_with_crash(point)
+    _ends_and_owes_nothing(walked, path)
+
+
+@pytest.mark.slow
 def test_a_record_the_close_failed_is_proven_released_by_a_later_inspection() -> None:
     """The walk that found it: the run closes around a blocked render, failing it with nothing
     proven released; the next host inspects it and the executor answers "never started".

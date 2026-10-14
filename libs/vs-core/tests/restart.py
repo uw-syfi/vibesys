@@ -28,24 +28,24 @@ def restarted(
     now_at: float,
     persisted: RunState | None = None,
     *,
-    gone_since: float | None = None,
+    last_alive: float | None = None,
 ) -> RequestRecord:
     """``record`` as a host restarting at ``now_at`` finds it, after the last commit of ``persisted``.
 
     An open record's limit moves later by the downtime (from the later of the last commit and
-    ``gone_since``, when the earlier host was surely gone), no further than the run deadline;
-    recovery's own commands (inspect, cancel, block) keep theirs. Without ``gone_since``
+    ``last_alive``, when the earlier host last proved itself alive), no further than the run deadline;
+    recovery's own commands (inspect, cancel, block) keep theirs. Without ``last_alive``
     nothing moves. ``persisted`` defaults to the run of ``initial_state()``.
     """
     run = persisted or initial_state().run
     if (
-        gone_since is None
+        last_alive is None
         or isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest)
         or record.phase
         not in (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
     ):
         return record
-    at = record.until.at + max(now_at - max(run.now_at, gone_since), 0.0)
+    at = record.until.at + max(now_at - max(run.now_at, last_alive), 0.0)
     if record.until.at <= run.deadline_at:
         at = min(at, run.deadline_at)
     return record.model_copy(update={"until": record.until.model_copy(update={"at": at})})

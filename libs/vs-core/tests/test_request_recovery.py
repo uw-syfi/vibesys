@@ -2229,7 +2229,7 @@ def test_a_restart_gives_an_open_record_back_the_time_no_host_was_alive(
     )
     restart_at = float(died_at + downtime)
     started = step(
-        reload(state), RecoveryStarted(epoch=1, now_at=restart_at, gone_since=float(died_at))
+        reload(state), RecoveryStarted(epoch=1, now_at=restart_at, last_alive=float(died_at))
     )
     moved = started.state.records.records[0]
     assert moved.until.at == min(original.until.at + downtime, state.run.deadline_at)
@@ -2266,13 +2266,17 @@ def test_a_restart_gives_an_open_record_back_the_time_no_host_was_alive(
     assert result.events == ()
 
 
+RENEWAL = 10
+"""How long a live host goes without a durable write (it renews its lease at least this often)."""
+
+
 @settings(max_examples=examples(pr=10, nightly=300))
 @given(
     hosts=st.lists(
         st.tuples(
             st.integers(min_value=0, max_value=50),
             st.integers(min_value=0, max_value=50),
-            st.integers(min_value=0, max_value=50),
+            st.integers(min_value=0, max_value=RENEWAL),
             st.integers(min_value=0, max_value=50),
         ),
         min_size=1,
@@ -2280,17 +2284,20 @@ def test_a_restart_gives_an_open_record_back_the_time_no_host_was_alive(
     ),
     past_deadline=st.booleans(),
 )
-def test_a_crash_loop_credits_a_limit_no_more_than_the_time_no_host_was_alive(
+def test_a_crash_loop_credits_a_limit_the_time_no_host_was_alive(
     hosts: list[tuple[int, int, int, int]], *, past_deadline: bool
 ) -> None:
-    """Across any crash sequence, an open limit moves by at most the real downtime.
+    """Across any crash sequence, an open limit moves by the real downtime, plus at most one
+    renewal interval per death.
 
-    Each host commits last at some time, stays alive (idle) a while after, dies, and its
-    lease ends no earlier than its death; the next host starts at or after that. A limit
-    counted from the last commit would also gain each host's idle time, so a crash loop
-    could push it out without bound, a limit past the run deadline (core's own cleanup
-    budget) included. (REVIEW-4: a limit at 100, a commit at 10, a crash at 99 and a
-    restart at 100 moved the limit to 190, and every later crash added about 90 more.)
+    Each host commits last at some time, stays alive (idle, renewing its lease) a while,
+    dies at most one renewal after its last write, and the next host starts some time
+    later. A limit counted from the last commit would also gain each host's idle time, so a
+    crash loop could push it out without bound, a limit past the run deadline (core's own
+    cleanup budget) included. (REVIEW-4: a limit at 100, a commit at 10, a crash at 99 and a
+    restart at 100 moved the limit to 190, and every later crash added about 90 more.) A
+    limit uncapped by the run deadline also gains the whole downtime, the wait for a dead
+    host's lease included: a crash loop must not time out what no host could wait on.
     """
     original = pending_record(phase=RequestPhase.DISPATCHED)
     state = recovering_state(original)
@@ -2300,20 +2307,22 @@ def test_a_crash_loop_credits_a_limit_no_more_than_the_time_no_host_was_alive(
         )
     clock = state.run.now_at
     downtime = 0.0
-    for epoch, (idle, lease_left, wait, work) in enumerate(hosts, start=1):
+    for epoch, (idle, down, unrenewed, work) in enumerate(hosts, start=1):
         committed = clock + work
         died = committed + idle
-        gone = died + lease_left
-        restart = gone + wait
+        alive = max(committed, died - unrenewed)
+        restart = died + down
         state = state.model_copy(update={"run": state.run.model_copy(update={"now_at": committed})})
         state = step(
-            reload(state), RecoveryStarted(epoch=epoch, now_at=restart, gone_since=gone)
+            reload(state), RecoveryStarted(epoch=epoch, now_at=restart, last_alive=alive)
         ).state
         downtime += restart - died
         clock = restart
 
-    record = state.records.records[0]
-    assert original.until.at <= record.until.at <= original.until.at + downtime
+    moved = state.records.records[0].until.at - original.until.at
+    assert 0 <= moved <= downtime + RENEWAL * len(hosts)
+    if past_deadline:
+        assert moved >= downtime
 
 
 def test_a_limit_that_passed_while_the_host_was_down_waits_for_the_executors_report() -> None:

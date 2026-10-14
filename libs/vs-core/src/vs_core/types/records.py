@@ -592,11 +592,11 @@ class RecoveryStarted(Value):
     kind: Literal["recovery_started"] = "recovery_started"
     epoch: Count
     now_at: Seconds
-    gone_since: Seconds | None = None
-    """Since when no earlier host can have been alive: its lease's end, never before its death.
+    last_alive: Seconds | None = None
+    """When an earlier host last proved itself alive (its last durable write or lease renewal).
 
-    ``None`` when nothing proves an earlier host gone (the first host, or a caller that does
-    not know), so no time is credited to open limits.
+    ``None`` when no earlier host is known (the first host, or a caller that does not know),
+    so no time is credited to open limits.
     """
 
 
