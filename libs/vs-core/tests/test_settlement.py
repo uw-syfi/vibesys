@@ -3,7 +3,7 @@
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
@@ -590,10 +590,12 @@ def judge_state() -> tuple[core.CoreState, core.Settlement]:
             "generation",
             "workspace",
             "json",
+            "deep_json",
             "missing_output",
         ]
     )
 )
+@example(corrupt="deep_json")
 def test_unmeasured_judge_requires_declared_exact_final_authority(corrupt: str) -> None:
     state, value = judge_state()
     invocation = state.sessions.invocations[0]
@@ -626,6 +628,7 @@ def test_unmeasured_judge_requires_declared_exact_final_authority(corrupt: str) 
         "generation": {"scope": invocation.scope.model_copy(update={"generation": 1})},
         "workspace": {"turn": invocation.turn.model_copy(update={"workspace": invocation.scope})},
         "json": {"output_json": "malformed"},
+        "deep_json": {"output_json": "[" * 100_000 + "]" * 100_000},
         "missing_output": {"output_json": None},
     }
     invocation = invocation.model_copy(update=replacements.get(corrupt, {}))

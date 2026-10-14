@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, get_args, get_origin, overload
 
+from pydantic import JsonValue, TypeAdapter, ValidationError
+
 from ._outcomes import prove_outcome
 from ._values import (
     ImmutableSchemaError,
@@ -416,10 +418,14 @@ def operation_result(operation_id: OperationId, event: RequestObserved) -> Opera
     return prove_outcome(result, event.outcome, event.operation_schema)
 
 
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
+
+
 def _read_envelope_version(source: str, path: tuple[str | int, ...]) -> int:
     try:
-        header = json.loads(source)
-    except json.JSONDecodeError as error:
+        header = _ANY_JSON.validate_json(source)
+    except ValidationError as error:
         raise ContractError(path, "valid JSON object envelope required") from error
     version = header.get("schema_version") if isinstance(header, dict) else None
     if type(version) is not int:

@@ -123,6 +123,16 @@ def test_envelope_version_must_be_an_explicit_integer(version: object) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "source",
+    ["[" * 100_000, "[" * 100_000 + "]" * 100_000, '{"schema_version":' + "[" * 100_000, "\ud800"],
+    ids=["deep-open", "deep-closed", "deep-under-key", "lone-surrogate"],
+)
+def test_a_hostile_envelope_is_a_contract_error(source: str) -> None:
+    with pytest.raises(ContractError):
+        OperationRegistry().decode_envelope(RunEnvelope[StrategyState], source)
+
+
 def upgrade_envelope(source: str) -> str:
     payload = json.loads(source)
     payload["schema_version"] = ENVELOPE_SCHEMA_VERSION
