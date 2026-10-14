@@ -132,7 +132,9 @@ def _progress_from_comment(comment: dict[str, object]) -> str | None:
         raise IssueTrackerLoadError.progress_unclosed()
     try:
         value = json.loads(body[len(_ENTRY_START) : -len(_ENTRY_END)])
-    except json.JSONDecodeError as exc:
+    except (ValueError, RecursionError) as exc:
+        # Anyone who can comment on the issue writes this text; ``json`` raises
+        # ``RecursionError`` once its nesting passes the interpreter's limit.
         raise IssueTrackerLoadError.invalid_progress() from exc
     if not isinstance(value, str):
         raise IssueTrackerLoadError.non_text_progress()

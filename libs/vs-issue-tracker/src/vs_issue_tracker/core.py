@@ -501,7 +501,9 @@ class IssueBoard(_MemoryBoard):
     def _load_from_disk(self) -> _IssueBoardData:
         try:
             loaded = json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        except (ValueError, RecursionError) as exc:
+            # ``ValueError`` covers ``JSONDecodeError`` and ``UnicodeDecodeError``;
+            # ``json`` raises ``RecursionError`` past the interpreter's nesting limit.
             raise IssueBoardLoadError.at_path(self.path, f"invalid JSON: {exc}") from exc
         except OSError as exc:
             raise IssueBoardLoadError.at_path(self.path, f"cannot read store: {exc}") from exc

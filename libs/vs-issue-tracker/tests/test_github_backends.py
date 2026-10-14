@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from vs_github.api import FakeGitHubClient
@@ -12,6 +14,9 @@ from vs_issue_tracker.api import (
     IssueTrackerLoadError,
     IssueType,
 )
+from vs_sim.api.testing import hostile_json_frames
+
+_FRAMES = hostile_json_frames()
 
 
 def test_github_issue_tracker_preserves_status_attempts_and_history() -> None:
@@ -89,3 +94,38 @@ def test_reserved_progress_metadata_corruption_is_reported() -> None:
 
     with pytest.raises(IssueTrackerLoadError, match="progress metadata is invalid"):
         progress.read()
+
+
+@pytest.mark.parametrize(
+    "frame", [frame for _, frame in _FRAMES], ids=[name for name, _ in _FRAMES]
+)
+def test_an_issue_event_comment_of_any_text_is_a_load_error(frame: bytes) -> None:
+    """Anyone who can comment writes these; ``json`` raised ``RecursionError`` on deep nesting."""
+    cli = FakeGitHubClient()
+    tracker = GitHubIssueTracker("owner/repo", cli=cli)
+    issue = tracker.create(
+        type=IssueType.BUG, title="t", description="d", created_by="judge", iteration=1
+    )
+    body = frame.decode("utf-8", "replace")
+    cli.issues[issue.id]["comments"].append({"body": f"<!-- vibesys:issue-event:v1\n{body}\n-->"})
+
+    with pytest.raises(IssueTrackerLoadError, match="event metadata is invalid"):
+        tracker.get(issue.id)
+
+
+@pytest.mark.parametrize(("name", "frame"), _FRAMES, ids=[name for name, _ in _FRAMES])
+def test_a_progress_comment_of_any_text_is_its_entry_or_a_load_error(
+    name: str, frame: bytes
+) -> None:
+    """A progress entry is a JSON string; anything else is a typed load error."""
+    cli = FakeGitHubClient()
+    progress = GitHubProgressLog("owner/repo", "run-123", cli=cli)
+    body = frame.decode("utf-8", "replace")
+    cli.issues[1]["comments"].append({"body": f"<!-- vibesys:progress-entry:v1\n{body}\n-->"})
+
+    try:
+        text = progress.read()
+    except IssueTrackerLoadError:
+        return
+    assert isinstance(json.loads(body), str), name
+    assert text.startswith("# Experiment Progress")

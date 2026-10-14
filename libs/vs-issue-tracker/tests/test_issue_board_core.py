@@ -16,7 +16,7 @@ from vs_issue_tracker.api import (
     IssueStatus,
     IssueType,
 )
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, hostile_json_frames
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -100,6 +100,16 @@ class TestCreate:
 
 
 class TestLoadCorrupt:
+    def test_a_store_of_any_hostile_bytes_is_a_load_error(self, tmp_path: Path) -> None:
+        """``json`` raised ``RecursionError`` on deep nesting, past the load error."""
+        path = tmp_path / "issues.json"
+        for name, frame in hostile_json_frames():
+            path.write_bytes(frame)
+
+            with pytest.raises(IssueBoardLoadError):
+                IssueBoard(path)
+            assert path.read_bytes() == frame, name
+
     def test_load_corrupt_json_raises_without_replacing_file(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
         path.write_text("not json", encoding="utf-8")

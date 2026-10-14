@@ -384,7 +384,9 @@ def _events(comments: object) -> list[IssueEvent]:
         try:
             value = json.loads(body[len(_EVENT_START) : -len(_EVENT_END)])
             events.append(IssueEvent.model_validate(value))
-        except (json.JSONDecodeError, ValueError) as exc:
+        except (ValueError, RecursionError) as exc:
+            # Anyone who can comment on the issue writes this text; ``json`` raises
+            # ``RecursionError`` once its nesting passes the interpreter's limit.
             raise IssueTrackerLoadError.invalid_issue_event() from exc
     return events
 
