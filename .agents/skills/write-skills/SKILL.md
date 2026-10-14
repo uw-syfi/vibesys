@@ -66,7 +66,7 @@ moves, and a stale pointer reads exactly like a live one.
   `@vibesys/run-session`); the codebase's concept names (flow, search, Role,
   provider, registry); the public entry points an agent starts from
   (`vs_agent.api`, `pnpm new:package`); stable commands
-  (`./scripts/check_ci.sh`); the identifiers of the checks that enforce a rule;
+  (`./support/repoctl/repoctl test`); the identifiers of the enforcing checks;
   links to pages under `docs/` and to other skills.
 - Remove: file and directory paths, `<file>:<symbol>` and `<test>::<name>`
   pointers, bare repository file names, and module paths past a package's
@@ -114,7 +114,8 @@ citation is one of:
 - a namespaced client package script (`pnpm check:ts-architecture`);
 - an enabled Ruff code (`TID251`) or Biome rule (`lint/security/noGlobalEval`), a Grit
   lint rule or a dependency-cruiser rule by its configured name;
-- a stable command (`./scripts/check_ci.sh`), for "check_ci fails if ...".
+- a CI check group (`python_guards`), for "CI fails if ...", or a stable
+  command (`./scripts/check_lint.sh`).
 
 In codebase skills every top-level item under Steps, Testing and Known
 failure modes must hold one that exists (checked). Anywhere in a skill, a
@@ -137,8 +138,7 @@ follow the `enforce-rules` skill.
   Unenforced: needs judgment.
 - Existing violations live in the shrink-only skill-violation allowlist that
   `check_skills` reads. Never add an entry; when you fix a violation, lower or
-  delete its entry in the same PR (checked: any count change fails until the
-  record matches, and the failure names the file).
+  delete its entry in the same PR (checked: a stale count fails).
 
 ## Steps
 

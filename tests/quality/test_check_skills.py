@@ -84,6 +84,7 @@ BASE_FILES = {
     "src/pkg/__init__.py": "",
     "src/pkg/api.py": "def run() -> None:\n    pass\n",
     "docs/guide.md": "# Guide\n",
+    ".repoctl/checks.toml": '[[check_groups]]\nname = "python_guards"\n',
 }
 
 
@@ -376,7 +377,11 @@ def test_codebase_sections_out_of_order_are_reported(tmp_path: Path) -> None:
         ("Do it; `pnpm check:ts` checks it.", True),
         ("Do it; `ui-no-timers` bans it.", True),
         ("Do it; `no-circular` bans it.", True),
-        ("Do it; `./scripts/check_ci.sh` fails otherwise.", True),
+        ("Do it; `./support/repoctl/repoctl test` fails otherwise.", True),
+        ("Do it; the `python_guards` group fails otherwise.", True),
+        ("Do it; `./support/repoctl/repoctl run-checks --group python_guards` fails.", True),
+        ("Do it; `repoctl run-checks --group python_types` fails.", False),
+        ("Do it; the `python_types` group fails otherwise.", False),
         ("Do it. Unenforced: needs judgment.", True),
         ("Do it; `TID251` bans the rest.", True),
         ("Do it; `E501` would catch it.", False),
@@ -501,7 +506,7 @@ def test_a_path_like_token_in_a_skill_is_reported(tmp_path: Path, line: str) -> 
         "Read [the testing skill](../testing/SKILL.md) and [the guide](references/guide.md).",
         "Read [the docs guide](../../../docs/guide.md) and `docs/guide.md`.",
         "Read [the agent rules](../../../AGENTS.md).",
-        "Run `./scripts/check_ci.sh` and `./scripts/check_lint.sh`.",
+        "Run `./support/repoctl/repoctl test --dry-run` and `./scripts/check_lint.sh`.",
         "Add the key to `pyproject.toml` and `package.json`, and the edge to `tach.toml`.",
         "Put depth in `references/`, and read guide.md when guiding.",
         "Check input/output and and/or cases, or `ok` and `<repo>/.venv`.",
@@ -567,6 +572,9 @@ def test_issue_and_pull_request_numbers_are_reported(
         ("pnpm install", True),
         ("lint/style/noGone", False),
         ("thing", True),
+        ("./support/repoctl/repoctl run-checks --group python_guards", True),
+        ("./support/repoctl/repoctl run-checks --group python_gone", False),
+        ("./support/repoctl/repoctl run-checks --group <name>", True),
     ],
 )
 def test_a_cited_check_identifier_must_exist(tmp_path: Path, span: str, *, exists: bool) -> None:

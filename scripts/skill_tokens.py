@@ -44,7 +44,10 @@ Check citations (`CheckIndex`):
     - an enabled Ruff code (`TID251`) or Biome rule (`lint/style/noVar`);
     - a Grit lint rule (`ui-no-timers`) or a dependency-cruiser rule
       (`no-circular`), by the name its configuration gives it;
-    - one of `STABLE_COMMANDS`.
+    - a CI check group defined in `.repoctl/checks.toml`, by its name
+      (`python_guards`) or as the command that runs it
+      (`./support/repoctl/repoctl run-checks --group python_guards`);
+    - one of `STABLE_COMMANDS`, alone or with arguments.
 
     `unresolved_check` names a span shaped like the first three kinds that
     names nothing, wherever it appears in a skill, so a cited check cannot
@@ -58,6 +61,7 @@ from __future__ import annotations
 import json
 import posixpath
 import re
+import tomllib
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import cached_property
@@ -73,7 +77,7 @@ DOCS_ROOT = "docs"
 # The commands every change runs. A skill may name them as commands and as checks.
 STABLE_COMMANDS = frozenset(
     {
-        "./scripts/check_ci.sh",
+        "./support/repoctl/repoctl",
         "./scripts/check_format.sh",
         "./scripts/check_lint.sh",
         "./scripts/check_types.sh",
@@ -127,6 +131,10 @@ BIOME_RULE = re.compile(r"^(?:lint/)?[a-z]+/(?P<rule>[a-z][A-Za-z]+)$")
 PYTHON_TEST_FILE = re.compile(r"(?:^|/)(?:test_[^/]*|[^/]+_test|conftest)\.py$")
 CHECK_ROOTS = ("scripts/", "clients/tools/")
 DEPCRUISE_CONFIG = "clients/.dependency-cruiser.mjs"
+CHECK_GROUPS_CONFIG = ".repoctl/checks.toml"
+GROUP_SPAN = re.compile(
+    r"^(?:\./support/repoctl/)?repoctl\s+run-checks\s+--group\s+(?P<group>[\w-]+)$"
+)
 
 
 class TokenKind(StrEnum):
@@ -347,6 +355,16 @@ class CheckIndex:
         cruise = set(DEPCRUISE_NAME.findall(self._read(DEPCRUISE_CONFIG)))
         return frozenset(grit | cruise)
 
+    @cached_property
+    def check_groups(self) -> frozenset[str]:
+        """The name of every CI check group."""
+        try:
+            config = tomllib.loads(self._read(CHECK_GROUPS_CONFIG))
+        except tomllib.TOMLDecodeError:
+            return frozenset()
+        groups = config.get("check_groups", [])
+        return frozenset(g["name"] for g in groups if isinstance(g, dict) and "name" in g)
+
     def _read(self, path: str) -> str:
         """The text of the tracked ``path``, or empty when it cannot be read as text."""
         try:
@@ -365,8 +383,13 @@ class CheckIndex:
 
     def cites_check(self, span: str) -> bool:
         """Whether a code span cites a check that exists."""
+        group = _group(span)
+        if group:
+            return group in self.check_groups
+        words = span.split()
         return (
-            span in STABLE_COMMANDS
+            (bool(words) and words[0] in STABLE_COMMANDS)
+            or span in self.check_groups
             or self.enables_lint(span)
             or span in self.lint_rule_names
             or (TEST_NAME.match(span) is not None and span in self.test_names)
@@ -385,10 +408,19 @@ class CheckIndex:
         script = _pnpm_script(span)
         if script and script not in self.package_scripts:
             return f"`{span}` runs `{script}`, but no tracked package.json defines that script"
+        group = _group(span)
+        if group and group not in self.check_groups:
+            return f"`{span}` runs check group `{group}`, but `.repoctl/checks.toml` defines no such group"
         biome = BIOME_RULE.match(span)
         if biome and span.startswith("lint/") and not self.enables_lint(span):
             return f"`{span}` is shaped like a Biome rule, but the configuration does not enable it"
         return None
+
+
+def _group(span: str) -> str:
+    """The check group a `repoctl run-checks --group` span runs, or empty."""
+    match = GROUP_SPAN.match(span)
+    return "" if match is None else match.group("group")
 
 
 def _pnpm_script(span: str) -> str:

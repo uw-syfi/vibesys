@@ -56,8 +56,9 @@ untenable, saying so next to the rule.
    CI component selector ignores (such as the agent skills) select no job, so
    a check over them goes in the always-on `doc-checks` job, stdlib-only.
    Stay inside the CI wall-time budget that CI enforces: a scan of the whole
-   repository should take seconds. `./scripts/check_ci.sh` fails if a check
-   group fails; read the group definitions to see what each runs.
+   repository should take seconds. CI fails if a check group fails;
+   `./support/repoctl/repoctl run-checks --group <name>` runs one group, and
+   the group definitions say what each runs.
 4. **Ratchet existing violations; never weaken the rule to pass today.** Record
    each existing violation in a shrink-only allowlist that the check reads, as
    `check_purity`, `check_file_length`, `check_test_isolation` and
@@ -78,8 +79,8 @@ untenable, saying so next to the rule.
    output.
 6. **Cite the enforcement beside the rule.** Wherever the rule is written,
    name the check that holds it by identifier, never by file: a test function
-   name, a check script name, a lint code such as `TID251`, or
-   `./scripts/check_ci.sh`; or write `Unenforced: <reason>`. In codebase
+   name, a check script name, a lint code such as `TID251`, or a
+   CI check group such as `python_guards`; or write `Unenforced: <reason>`. In codebase
    skills `check_skills` checks this (see
    [write-skills](../write-skills/SKILL.md), "Enforcement"). Unenforced: prose
    outside skills has no machine-readable rule structure to check.
@@ -124,7 +125,8 @@ untenable, saying so next to the rule.
 
 ## Sources of truth
 
-- The CI check groups and their commands, run together by `./scripts/check_ci.sh`.
+- The CI check groups and their commands; `./support/repoctl/repoctl test --dry-run`
+  lists the groups a change selects.
 - The Ruff, Biome and `tach.toml` configuration: the lint and graph rules,
   with their thresholds.
 - [coding-best-practices.md](../../../docs/contributing/coding-best-practices.md):

@@ -53,7 +53,8 @@ Rules (the `Rule` enum):
         No skill Markdown names an issue or pull request number.
     unresolved-check
         Every code span shaped like a check citation (`test_<name>`,
-        `check_<name>`, `pnpm <scope>:<name>`, `lint/<group>/<rule>`) names a
+        `check_<name>`, `pnpm <scope>:<name>`, `lint/<group>/<rule>`,
+        `repoctl run-checks --group <name>`) names a
         check that exists, wherever it appears in a skill.
     index
         `.agents/skills/README.md` lists every skill exactly once, under the
