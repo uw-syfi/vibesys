@@ -632,3 +632,53 @@ def test_slow_tests_run_at_nightly_depth_and_when_selected_by_marker(
     result = suite.runpytest_inprocess(*arguments)
 
     result.assert_outcomes(**outcomes)
+
+
+_SMOKE_SUITE = """
+import pytest
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "case",
+    [pytest.param("known", marks=pytest.mark.xfail(strict=True, reason="known")), "first", "second"],
+)
+def test_slow_sweep(case):
+    assert case != "known"
+
+@pytest.mark.slow
+def test_slow_single():
+    pass
+
+def test_fast():
+    pass
+"""
+
+
+def test_a_pull_request_runs_one_case_of_each_slow_test_in_a_smoke_directory(
+    suite: pytest.Pytester,
+) -> None:
+    suite.makeini(
+        "[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider -p no:tach\n"
+        "markers = slow: s\nsim_smoke_slow =\n    smoke\n"
+    )
+    suite.makepyfile(**{"smoke/test_in": _SMOKE_SUITE, "elsewhere/test_out": _SMOKE_SUITE})
+
+    result = suite.runpytest_inprocess("-v")
+
+    ran = re.findall(r"^(\S+::\S+) PASSED", result.stdout.str(), re.MULTILINE)
+    assert sorted(ran) == [
+        "elsewhere/test_out.py::test_fast",
+        "smoke/test_in.py::test_fast",
+        "smoke/test_in.py::test_slow_single",
+        "smoke/test_in.py::test_slow_sweep[first]",
+    ]
+
+
+def test_the_nightly_depth_runs_every_case_of_a_smoke_directory(suite: pytest.Pytester) -> None:
+    suite.makeini(
+        "[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider -p no:tach\n"
+        "markers = slow: s\nsim_smoke_slow =\n    smoke\n"
+    )
+    suite.makepyfile(**{"smoke/test_in": _SMOKE_SUITE})
+
+    suite.runpytest_inprocess("--depth=nightly").assert_outcomes(passed=4, xfailed=1)

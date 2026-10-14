@@ -34,7 +34,10 @@ reason in a comment.
 (the Hypothesis `ci` profile, about 10, derandomized), crash and restart sweeps try a
 sample of their points, and every pinned past bug or planted fault is always replayed.
 `--depth=nightly` explores: more examples, every crash point, every restart step, and
-the tests marked `slow`. The nightly workflow runs it. Run it yourself when you change
+the tests marked `slow`. The nightly workflow runs it. A pull request still runs one
+case of each `slow` test under `tests/system/chaos` and `libs/vs-core/tests` (the first
+case not marked `xfail`; the directories are the `sim_smoke_slow` setting), so a
+regression only a slow test catches fails the pull request that causes it. Run it yourself when you change
 recovery, the shell, or a contract suite:
 
 ```bash

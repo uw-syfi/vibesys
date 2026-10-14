@@ -17,7 +17,10 @@ What it does:
 * **``--depth``** (``pr``, the default, or ``nightly``) is the session's one search depth
   (`vs_sim.api.testing.depth`). A pull request samples: crash sweeps try a sample of their
   points (`swept`), property tests draw ``examples(pr=..., nightly=...)``, and tests marked
-  ``slow`` are deselected. The nightly job explores: every crash point, the larger example
+  ``slow`` are deselected, except one smoke case of each slow test under the directories of
+  ``sim_smoke_slow``, so a regression only a slow test catches fails the pull request that
+  causes it, not the next nightly run (the smoke case is the first collected case that is
+  not marked ``xfail``, so it is the same case every run). The nightly job explores: every crash point, the larger example
   counts, and the ``slow`` tests. An explicit ``-m`` expression naming ``slow`` keeps them at
   either depth. The repository's root ``conftest.py`` picks the Hypothesis profile from it.
 * **The ``sim`` fixture** is the test's :class:`vs_sim.api.testing.Sim`.
@@ -218,6 +221,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=list(DEFAULT_REAL_TIERS),
         help="directories (relative to the rootdir) of real-system tests, never run virtually",
     )
+    parser.addini(
+        "sim_smoke_slow",
+        type="linelist",
+        default=[],
+        help="directories (relative to the rootdir) whose slow tests still run one case each in a pull request",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -239,7 +248,11 @@ def pytest_report_header(config: pytest.Config) -> str:
 
 
 def _in_real_tier(item: pytest.Item) -> bool:
-    tiers = item.config.getini("sim_real_tiers")
+    return _in_directories(item, "sim_real_tiers")
+
+
+def _in_directories(item: pytest.Item, key: str) -> bool:
+    tiers = item.config.getini(key)
     try:
         relative = item.path.relative_to(item.config.rootpath).as_posix()
     except ValueError:
@@ -272,12 +285,25 @@ def _is_sim_test(item: pytest.Item) -> bool:
     )
 
 
+def _smoke_cases(slow: list[pytest.Item]) -> list[pytest.Item]:
+    """The first case that is not expected to fail of each slow test under ``sim_smoke_slow``."""
+    chosen: dict[tuple[object, object, str], pytest.Item] = {}
+    for item in slow:
+        if not isinstance(item, pytest.Function) or not _in_directories(item, "sim_smoke_slow"):
+            continue
+        if item.get_closest_marker("xfail") is None:
+            chosen.setdefault((item.path, item.cls, item.originalname), item)
+    return list(chosen.values())
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Reject a test that asks for two schedulers; when exploring, keep only what can be repeated."""
     if Depth(config.getoption("depth")) is Depth.PR and "slow" not in (
         config.option.markexpr or ""
     ):
         slow = [item for item in items if item.get_closest_marker("slow") is not None]
+        smoke = _smoke_cases(slow)
+        slow = [item for item in slow if item not in smoke]
         config.hook.pytest_deselected(items=slow)
         items[:] = [item for item in items if item not in slow]
     if config.getoption("sim_explore") > 0:
