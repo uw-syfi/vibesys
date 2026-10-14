@@ -809,12 +809,19 @@ def credit_downtime(state: RecordsState, run: RunState, event: RecoveryStarted) 
 
     A limit says how long core waits for the far side, and while no host runs nothing waits:
     a request prepared but never sent, or sent and never begun, would otherwise end at the
-    restart without ever having had its time. The downtime runs from ``run.now_at``, the
-    dead host's last commit (the kernel calls this before ``event`` moves the clock), to the
-    restart. The run deadline caps the moved limit as ``resolve_until`` caps a new one; a
-    limit already past the deadline (core's own cleanup budget) keeps its full length.
+    restart without ever having had its time. The downtime runs from the later of
+    ``run.now_at`` (the dead host's last commit; the kernel calls this before ``event`` moves
+    the clock) and ``event.gone_since`` (when the dead host's lease ended, so it was surely
+    gone) to the restart. The last commit alone would credit the time a live host sat idle
+    after it, so a crash loop could push a limit out without bound; the lease end is never
+    before the death, so the credit never exceeds the real downtime. Without ``gone_since``
+    nothing is credited. The run deadline caps the moved limit as ``resolve_until`` caps a
+    new one; a limit already past the deadline (core's own cleanup budget) keeps its full
+    length.
     """
-    downtime = event.now_at - run.now_at
+    if event.gone_since is None:
+        return state
+    downtime = event.now_at - max(run.now_at, event.gone_since)
     if downtime <= 0 or run.status == RunStatus.TERMINAL or not _opens_epoch(state.recovery, event):
         return state
 

@@ -2228,7 +2228,9 @@ def test_a_restart_gives_an_open_record_back_the_time_no_host_was_alive(
         update={"run": state.run.model_copy(update={"now_at": float(died_at)})}
     )
     restart_at = float(died_at + downtime)
-    started = step(reload(state), RecoveryStarted(epoch=1, now_at=restart_at))
+    started = step(
+        reload(state), RecoveryStarted(epoch=1, now_at=restart_at, gone_since=float(died_at))
+    )
     moved = started.state.records.records[0]
     assert moved.until.at == min(original.until.at + downtime, state.run.deadline_at)
     assert moved.until.at > restart_at
@@ -2262,6 +2264,56 @@ def test_a_restart_gives_an_open_record_back_the_time_no_host_was_alive(
     assert record.phase in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
     assert record.failure is None
     assert result.events == ()
+
+
+@settings(max_examples=examples(pr=10, nightly=300))
+@given(
+    hosts=st.lists(
+        st.tuples(
+            st.integers(min_value=0, max_value=50),
+            st.integers(min_value=0, max_value=50),
+            st.integers(min_value=0, max_value=50),
+            st.integers(min_value=0, max_value=50),
+        ),
+        min_size=1,
+        max_size=6,
+    ),
+    past_deadline=st.booleans(),
+)
+def test_a_crash_loop_credits_a_limit_no_more_than_the_time_no_host_was_alive(
+    hosts: list[tuple[int, int, int, int]], *, past_deadline: bool
+) -> None:
+    """Across any crash sequence, an open limit moves by at most the real downtime.
+
+    Each host commits last at some time, stays alive (idle) a while after, dies, and its
+    lease ends no earlier than its death; the next host starts at or after that. A limit
+    counted from the last commit would also gain each host's idle time, so a crash loop
+    could push it out without bound, a limit past the run deadline (core's own cleanup
+    budget) included. (REVIEW-4: a limit at 100, a commit at 10, a crash at 99 and a
+    restart at 100 moved the limit to 190, and every later crash added about 90 more.)
+    """
+    original = pending_record(phase=RequestPhase.DISPATCHED)
+    state = recovering_state(original)
+    if past_deadline:
+        state = state.model_copy(
+            update={"run": state.run.model_copy(update={"deadline_at": original.until.at - 1.0})}
+        )
+    clock = state.run.now_at
+    downtime = 0.0
+    for epoch, (idle, lease_left, wait, work) in enumerate(hosts, start=1):
+        committed = clock + work
+        died = committed + idle
+        gone = died + lease_left
+        restart = gone + wait
+        state = state.model_copy(update={"run": state.run.model_copy(update={"now_at": committed})})
+        state = step(
+            reload(state), RecoveryStarted(epoch=epoch, now_at=restart, gone_since=gone)
+        ).state
+        downtime += restart - died
+        clock = restart
+
+    record = state.records.records[0]
+    assert original.until.at <= record.until.at <= original.until.at + downtime
 
 
 def test_a_limit_that_passed_while_the_host_was_down_waits_for_the_executors_report() -> None:

@@ -24,21 +24,28 @@ def restarts() -> bool:
 
 
 def restarted(
-    record: RequestRecord, now_at: float, persisted: RunState | None = None
+    record: RequestRecord,
+    now_at: float,
+    persisted: RunState | None = None,
+    *,
+    gone_since: float | None = None,
 ) -> RequestRecord:
     """``record`` as a host restarting at ``now_at`` finds it, after the last commit of ``persisted``.
 
-    An open record's limit moves later by the downtime, no further than the run deadline;
-    recovery's own commands (inspect, cancel, block) keep theirs. ``persisted`` defaults to
-    the run of ``initial_state()``.
+    An open record's limit moves later by the downtime (from the later of the last commit and
+    ``gone_since``, when the earlier host was surely gone), no further than the run deadline;
+    recovery's own commands (inspect, cancel, block) keep theirs. Without ``gone_since``
+    nothing moves. ``persisted`` defaults to the run of ``initial_state()``.
     """
     run = persisted or initial_state().run
-    if isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest) or (
-        record.phase
+    if (
+        gone_since is None
+        or isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest)
+        or record.phase
         not in (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
     ):
         return record
-    at = record.until.at + max(now_at - run.now_at, 0.0)
+    at = record.until.at + max(now_at - max(run.now_at, gone_since), 0.0)
     if record.until.at <= run.deadline_at:
         at = min(at, run.deadline_at)
     return record.model_copy(update={"until": record.until.model_copy(update={"at": at})})

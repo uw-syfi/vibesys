@@ -95,6 +95,11 @@ class StoreOperations(ABC):
         with self._transaction():
             return self._read().record
 
+    def lease(self) -> StoreFence | None:
+        """Read the persisted lease under the store lock."""
+        with self._transaction():
+            return self._read().fence
+
     def acquire(self, host_id: str, now: float, duration: float) -> StoreFence | None:
         """Claim only absent or expired ownership, increasing the epoch."""
         timing = _Time(now=now, duration=duration)

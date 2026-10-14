@@ -100,6 +100,10 @@ class FaultingStore:
         """The inner store's quarantine."""
         return self._inner.quarantine(expected_revision, envelope, fence, now)
 
+    def lease(self) -> StoreFence | None:
+        """The inner store's persisted lease."""
+        return self._inner.lease()
+
     def acquire(self, host_id: str, now: float, duration: float) -> StoreFence | None:
         """The inner store's lease acquisition."""
         return self._inner.acquire(host_id, now, duration)

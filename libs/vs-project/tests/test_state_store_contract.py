@@ -323,6 +323,33 @@ def test_fault_histories_preserve_prior_or_complete_successor(
             assert store.load() == latest
 
 
+@given(
+    held=st.integers(min_value=1, max_value=100),
+    released_after=st.one_of(st.none(), st.integers(min_value=0, max_value=99)),
+)
+@settings(max_examples=examples(pr=5, nightly=20))
+def test_the_persisted_lease_ends_no_earlier_than_its_host_held_it(
+    make_store: StoreFactory,
+    tmp_path_factory: pytest.TempPathFactory,
+    held: int,
+    released_after: int | None,
+) -> None:
+    """``lease`` reads the last lease, ended or not: the next host learns when the last was gone."""
+    store = make_store(tmp_path_factory.mktemp("store"), ())
+    assert store.lease() is None
+    fence = store.acquire("host-a", now=10, duration=held)
+    assert fence is not None
+    assert store.lease() == fence
+    renewed = store.renew(fence, now=10, duration=held)
+    assert renewed == fence
+    if released_after is not None and released_after < held:
+        assert store.release(fence, now=10 + released_after)
+        assert store.lease() == fence.model_copy(update={"expires_at": 10 + released_after})
+    ended = store.lease()
+    assert ended is not None
+    assert store.acquire("host-b", now=ended.expires_at, duration=1) is not None
+
+
 def test_same_host_reacquires_only_after_expiry_with_a_new_epoch(
     make_store: StoreFactory, tmp_path: Path
 ) -> None:

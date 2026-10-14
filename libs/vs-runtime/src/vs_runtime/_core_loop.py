@@ -530,6 +530,9 @@ class CoreRuntime[S: StrategyState]:
         )
         if recheck:
             self._validate_provisional(provisional, host_id)
+        # The earlier host's lease end, read before this host replaces it: no earlier host
+        # can have been alive after it, so core credits open limits only from there.
+        previous = self._store.lease()
         fence = self._store.acquire(host_id, now=now_at, duration=lease_duration)
         if fence is None:
             message = "runtime lease unavailable"
@@ -547,7 +550,14 @@ class CoreRuntime[S: StrategyState]:
         )
         try:
             self._consume(
-                _Input[S](event=RecoveryStarted(epoch=fence.epoch, now_at=now_at), now_at=now_at)
+                _Input[S](
+                    event=RecoveryStarted(
+                        epoch=fence.epoch,
+                        now_at=now_at,
+                        gone_since=None if previous is None else previous.expires_at,
+                    ),
+                    now_at=now_at,
+                )
             )
             self._require_no_orphan_waits()
         except BaseException:

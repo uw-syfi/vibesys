@@ -157,6 +157,14 @@ class StateStore(Protocol):
         """Atomically replace active state with an explicit blocked record."""
         ...
 
+    def lease(self) -> StoreFence | None:
+        """The persisted lease, live or ended; None before any host acquired one.
+
+        An ended lease's ``expires_at`` is when its host was surely gone: a host stops
+        holding authority there, whether it released the lease or died.
+        """
+        ...
+
     def acquire(self, host_id: str, now: float, duration: float) -> StoreFence | None:
         """Acquire an absent or expired lease with a new epoch.
 
