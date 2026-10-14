@@ -144,6 +144,18 @@ _EXPLAINED_BY: dict[type[BaseException], frozenset[AgentFault | ClusterFault]] =
 #: Faults that can make a run report failure rather than success: a lost or wrong turn is
 #: retried a bounded number of times, and a cluster fault can lose a measurement.
 _FAILS_A_RUN = _TRANSPORT_FAULTS | _OUTPUT_FAULTS | frozenset(ClusterFault)
+#: Cluster faults that hide a job's fate: the reply is lost (the transport failed after the
+#: command may have run), the job never starts, or the answer about it is missing or cut off.
+#: Core then waits such a job out, so a run stopped at its own deadline is their doing. A fault
+#: whose outcome is definite (the command failed, the job died) explains no such stop.
+_HIDES_A_JOB = frozenset(
+    {
+        ClusterFault.SSH_DOWN,
+        ClusterFault.PENDING_FOREVER,
+        ClusterFault.ACCOUNTING_GAP,
+        ClusterFault.TRUNCATED,
+    }
+)
 
 
 def unexplained_end(
@@ -156,11 +168,11 @@ def unexplained_end(
     """Return why a run's ending is none ``injected`` can explain (``None``: it is explained).
 
     ``status`` is how the run reported when it did not raise (``error`` is then ``None``).
-    ``at_deadline``: the run stopped itself at its deadline. A cluster fault can hide a job's
-    fate, and core then waits the job out to its allowance, so such a stop is that fault's doing.
+    ``at_deadline``: the run stopped itself at its deadline. Only a fault that hides a job's
+    fate (``_HIDES_A_JOB``) explains that: core then waits the job out to its allowance.
     """
     if error is None:
-        if status is RunStatus.STOPPED and at_deadline and injected.cluster:
+        if status is RunStatus.STOPPED and at_deadline and injected.cluster & _HIDES_A_JOB:
             return None
         return _unexplained_report(status, injected)
     if isinstance(error, RunStopped):
