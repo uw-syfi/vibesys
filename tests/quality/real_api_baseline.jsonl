@@ -11,7 +11,6 @@
 {"path": "libs/vs-core/tests/test_payload_contracts.py", "rule": "bare_wait", "count": 1}
 {"path": "libs/vs-core/tests/test_payload_contracts.py", "rule": "process", "count": 1}
 {"path": "libs/vs-core/tests/test_payload_contracts.py", "rule": "subprocess", "count": 5}
-{"path": "libs/vs-evaluation/src/vs_evaluation/agent_wire.py", "rule": "socket", "count": 4}
 {"path": "libs/vs-evaluation/src/vs_evaluation/filesystem_store.py", "rule": "executor", "count": 1}
 {"path": "libs/vs-evaluation/src/vs_evaluation/filesystem_store.py", "rule": "fs_sync", "count": 2}
 {"path": "libs/vs-evaluation/tests/test_started_operation.py", "rule": "bare_wait", "count": 4}

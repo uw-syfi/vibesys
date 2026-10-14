@@ -68,6 +68,7 @@ from vs_runtime.api.core import (
     handle_for,
 )
 from vs_runtime.contracts import AgentRole, AgentTool
+from vs_sim.api import MonotonicClock, UnixNetwork
 from vs_sim.api.testing import VirtualClock, clock_from, examples, run_virtual
 
 if TYPE_CHECKING:
@@ -114,6 +115,8 @@ class ToolUsingWriter(CandidateWriter):
             for tool in build_core_evaluation_tools(
                 socket_path=Path(self.descriptor_env["VS_EVALUATION_SOCKET"]),
                 token=self.descriptor_env["VS_EVALUATION_TOKEN"],
+                network=UnixNetwork(),
+                clock=MonotonicClock(),
             )
         }
         submit = tools[SUBMIT_TOOL]

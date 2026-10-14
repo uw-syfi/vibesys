@@ -17,6 +17,7 @@ from typing import Any
 from vs_evaluation.agent_models import EvidenceKindsArgs, SubmitCall, WaitArgs, WaitCall
 from vs_evaluation.agent_wire import Offer, SocketClient
 from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, serve_stdio
+from vs_sim.api import Clock, MonotonicClock, Network, UnixNetwork
 
 SERVER_NAME = "vs-evaluation"
 SUBMIT_TOOL = "submit_evaluation"
@@ -38,9 +39,11 @@ def core_evaluation_mcp_descriptor(token: str, socket_path: str) -> ToolServerDe
     )
 
 
-def build_core_evaluation_tools(*, socket_path: Path, token: str) -> tuple[ToolSpec[Any], ...]:
-    """The two core-path tools; every other option is absent from the schema."""
-    offer = Offer(SocketClient(socket_path), token)
+def build_core_evaluation_tools(
+    *, socket_path: Path, token: str, network: Network, clock: Clock
+) -> tuple[ToolSpec[Any], ...]:
+    """The two core-path tools, dialing ``socket_path`` on ``network``; every other option is absent."""
+    offer = Offer(SocketClient(socket_path, network=network, clock=clock), token)
     return (
         offer.tool(
             SUBMIT_TOOL,
@@ -71,6 +74,8 @@ def main() -> None:
         build_core_evaluation_tools(
             socket_path=Path(os.environ["VS_EVALUATION_SOCKET"]),
             token=os.environ["VS_EVALUATION_TOKEN"],
+            network=UnixNetwork(),
+            clock=MonotonicClock(),
         ),
         server_name=SERVER_NAME,
     )

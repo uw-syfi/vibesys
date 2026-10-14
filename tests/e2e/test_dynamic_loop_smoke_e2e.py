@@ -73,6 +73,7 @@ from vs_agent.api.testing import (
 )
 from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools
 from vs_project.api import Project, StoredEnvelope
+from vs_sim.api import MonotonicClock, UnixNetwork
 from vs_slurm.fake_connector import active_jobs, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
@@ -521,6 +522,8 @@ class _RoleLaunchers:
                 for tool in build_core_evaluation_tools(
                     socket_path=Path(env["VS_EVALUATION_SOCKET"]),
                     token=env["VS_EVALUATION_TOKEN"],
+                    network=UnixNetwork(),
+                    clock=MonotonicClock(),
                 )
             }
             submit = tools[SUBMIT_TOOL]

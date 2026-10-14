@@ -518,13 +518,13 @@ depends_on = ["vs_evaluator_protocol"]
 # The core-path tool server: submit and validate-wait only, over the shared wire.
 path = "vs_evaluation.agent_core_mcp"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_models", "vs_evaluation.agent_wire", "vs_mcp"]
+depends_on = ["vs_evaluation.agent_models", "vs_evaluation.agent_wire", "vs_mcp", "vs_sim.api"]
 
 [[modules]]
 # Client side of the evaluation tool wire shared by both tool servers.
 path = "vs_evaluation.agent_wire"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_models", "vs_mcp"]
+depends_on = ["vs_evaluation.agent_models", "vs_mcp", "vs_sim.api"]
 
 [[modules]]
 path = "vs_evaluation.agent_models"

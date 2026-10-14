@@ -54,6 +54,7 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
 )
 from vs_runtime.contracts import AgentRole, AgentTool
+from vs_sim.api import MonotonicClock, UnixNetwork
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -102,6 +103,8 @@ class ScriptedAgent(CandidateWriter):
             for tool in build_core_evaluation_tools(
                 socket_path=Path(self.env["VS_EVALUATION_SOCKET"]),
                 token=self.env["VS_EVALUATION_TOKEN"],
+                network=UnixNetwork(),
+                clock=MonotonicClock(),
             )
         }
         program = self.programs[(self.turns - 1) % len(self.programs)] if self.programs else ()
