@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 import agentshim
 import pytest
 from agentshim.testing import (
+    FakeClock,
     FakeExecutor,
     FakeProcess,
     FakeRun,
@@ -203,6 +204,7 @@ def _launcher(
         transport=agentshim.TransportKind.ONE_SHOT,
         # Zero waits keep the retry tests instant; the schedule is the knob.
         transient_retry_delays=options.get("transient_retry_delays", (0.0, 0.0)),
+        clock=FakeClock(),
     )
     return launcher, fake
 
@@ -1884,7 +1886,7 @@ def test_the_shipped_providers_are_the_ones_the_launcher_accepts() -> None:
 
 def test_an_unknown_provider_is_rejected_by_name() -> None:
     with pytest.raises(ValueError, match="nonesuch"):
-        subject.ConfinedSessionLauncher(provider="nonesuch")
+        subject.ConfinedSessionLauncher(provider="nonesuch", clock=FakeClock())
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
@@ -2236,6 +2238,7 @@ def test_a_container_launcher_reports_no_config_isolation_even_with_a_run_home(
         provider="codex",
         docker_sandboxes=sandboxes,
         agent_homes=tmp_path / "agent-homes",
+        clock=FakeClock(),
     )
 
     assert launcher.capabilities.config_isolation is False
@@ -2287,6 +2290,7 @@ def test_process_spawn_os_errors_are_retryable_typed_faults(
             docker_sandboxes={"worker": cast("DockerSandbox", FakeDockerConfinement(tmp_path))},
             executor_factory=lambda: executor,
             launcher_env=dict,
+            clock=FakeClock(),
         )
         client = AgentClient(launcher, provider="claude", containerized=True, clock=ManualClock())
         try:

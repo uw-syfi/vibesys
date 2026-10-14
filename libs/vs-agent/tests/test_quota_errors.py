@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 
 import agentshim
 import pytest
-from agentshim.testing import FakeExecutor, FakeRun, scripted_failure, scripted_turn
+from agentshim.testing import FakeClock, FakeExecutor, FakeRun, scripted_failure, scripted_turn
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -46,6 +46,7 @@ def _client(provider: str, runs: list[FakeRun], home: Path) -> AgentClient:
                 SANDBOX_DISABLE_ENV: "off",
             },
             transient_retry_delays=(),
+            clock=FakeClock(),
         ),
         provider=provider,
         run_log_file=None,

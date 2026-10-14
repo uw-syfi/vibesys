@@ -39,7 +39,9 @@ from vs_agent.contracts import (
     AgentTurnRequest,
 )
 from vs_agent.session_launch import ConfinedSessionLauncher
+from vs_agent.shim_clock import ThreadsClock
 from vs_sandbox.api import HostResource, HostResourceAccess
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -161,7 +163,9 @@ def _session(
     spec_fields: dict[str, Any] | None = None,
 ) -> Iterator[LaunchedSession]:
     """Launch one session and close its launcher afterwards."""
-    launcher = ConfinedSessionLauncher(provider=provider, timeout=TURN_TIMEOUT_S, log=print)
+    launcher = ConfinedSessionLauncher(
+        provider=provider, timeout=TURN_TIMEOUT_S, log=print, clock=ThreadsClock(OsThreads())
+    )
     session = launcher.launch(
         AgentSessionSpec(
             role="e2e",

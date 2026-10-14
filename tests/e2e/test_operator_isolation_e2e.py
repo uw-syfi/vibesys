@@ -28,6 +28,8 @@ from tests.support import run_test_command
 
 from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
 from vs_agent.session_launch import ConfinedSessionLauncher
+from vs_agent.shim_clock import ThreadsClock
+from vs_sim.api import OsThreads
 
 ENABLE_ENV = "VIBESYS_E2E_AGENTS"
 OPERATOR_WORD = "OPERATOR-TANGERINE"
@@ -104,6 +106,7 @@ def test_a_confined_session_sees_the_project_and_not_the_operator(
         timeout=300,
         agent_homes=tmp_path / "agent-homes",
         launcher_env=lambda: environment,
+        clock=ThreadsClock(OsThreads()),
     )
     try:
         session = launcher.launch(

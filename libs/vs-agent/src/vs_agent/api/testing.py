@@ -153,6 +153,7 @@ def fake_agentshim_launcher(
         launcher_env=dict,
         transient_retry_delays=(),
         transport=transport,
+        clock=FakeClock(),
     )
 
 

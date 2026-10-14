@@ -14,7 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from agentshim.testing import FakeExecutor, FakeRun, scripted_turn
+from agentshim.testing import FakeClock, FakeExecutor, FakeRun, scripted_turn
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -85,6 +85,7 @@ def _run_turn(info: dict[str, object], root: Path, home: Path) -> tuple[list[Cor
                 "HOME": str(home),
                 SANDBOX_DISABLE_ENV: "off",
             },
+            clock=FakeClock(),
         ),
         provider="claude",
         run_log_file=log,

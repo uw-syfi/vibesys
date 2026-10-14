@@ -305,7 +305,7 @@ class ConfinedSessionLauncher:
         env_passthrough: Sequence[str] = (),
         launcher_env: Callable[[], Mapping[str, str]] = agentshim.interactive_env,
         transport: agentshim.TransportKind | None = None,
-        clock: agentshim.Clock | None = None,
+        clock: agentshim.Clock,
         ids: agentshim.IdAllocator | None = None,
         threads: Threads | None = None,
     ) -> None:
@@ -347,9 +347,11 @@ class ConfinedSessionLauncher:
         mode's budget: a container check crosses a ``docker exec`` and is given
         four times as long as a host one.
 
-        ``clock`` and ``ids`` replace agentshim's wall clock and random turn ids,
-        so a test measures turn timeouts and retry waits on a fake clock and
-        names turns reproducibly; production leaves them ``None``.
+        ``clock`` is the time agentshim measures turn timeouts and retry waits
+        on (:class:`~vs_agent.shim_clock.ThreadsClock` over the run's threads
+        in production, a fake in a test). ``ids`` replaces agentshim's random
+        turn ids so a test names turns reproducibly; production leaves it
+        ``None``.
 
         ``transient_retry_delays`` are the waits before each retry of a turn
         that failed on a transient provider error; see

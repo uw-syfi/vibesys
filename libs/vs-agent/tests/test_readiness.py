@@ -13,7 +13,14 @@ from pathlib import Path
 
 import agentshim
 import pytest
-from agentshim.testing import FakeExecutor, FakeRun, probe_executor, probe_run, scripted_turn
+from agentshim.testing import (
+    FakeClock,
+    FakeExecutor,
+    FakeRun,
+    probe_executor,
+    probe_run,
+    scripted_turn,
+)
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -69,7 +76,10 @@ def _spec(root: Path, provider: str, role: str = "implementer") -> AgentSessionS
 
 def _launcher(provider: str, fake: FakeExecutor, home: Path) -> ConfinedSessionLauncher:
     return ConfinedSessionLauncher(
-        provider=provider, executor_factory=lambda: fake, launcher_env=lambda: _env_of(home)
+        provider=provider,
+        executor_factory=lambda: fake,
+        launcher_env=lambda: _env_of(home),
+        clock=FakeClock(),
     )
 
 
@@ -242,6 +252,7 @@ def test_a_failure_is_not_remembered_so_a_fixed_environment_is_rechecked(
         provider=provider,
         executor_factory=lambda: current[0],
         launcher_env=lambda: _env_of(home),
+        clock=FakeClock(),
     )
     client = AgentClient(launcher, provider=provider, check_readiness=True, clock=ManualClock())
 

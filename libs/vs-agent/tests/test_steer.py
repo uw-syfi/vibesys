@@ -18,6 +18,7 @@ import pytest
 from agentshim.testing import (
     AwaitSteer,
     CodexScript,
+    FakeClock,
     FakeExecutor,
     RunCommand,
     Say,
@@ -74,6 +75,7 @@ def _launcher(
             SANDBOX_DISABLE_ENV: "off",
         },
         transport=transport,
+        clock=FakeClock(),
     )
 
 

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
-from agentshim.testing import FakeExecutor, scripted_turn
+from agentshim.testing import FakeClock, FakeExecutor, scripted_turn
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -111,6 +111,7 @@ def _turn(
         env_passthrough=passthrough,
         launcher_env=lambda: operator_env,
         log=logs.append,
+        clock=FakeClock(),
     )
     session = launcher.launch(spec)
     session.run_turn(AgentTurnRequest(message="go"))
@@ -242,7 +243,7 @@ def test_no_variable_outside_the_allowlist_or_the_run_reaches_a_session(
 
 def test_an_env_passthrough_entry_that_is_not_a_variable_name_is_rejected() -> None:
     with pytest.raises(ValueError, match="'BAD-NAME'"):
-        ConfinedSessionLauncher(provider="claude", env_passthrough=("BAD-NAME",))
+        ConfinedSessionLauncher(provider="claude", env_passthrough=("BAD-NAME",), clock=FakeClock())
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
@@ -281,6 +282,7 @@ def test_the_dropped_launcher_variable_names_are_logged_once_and_never_their_val
         env_passthrough=("KEPT",),
         launcher_env=lambda: operator_env,
         log=logs.append,
+        clock=FakeClock(),
     )
 
     for _ in range(2):

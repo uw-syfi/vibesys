@@ -5,9 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from vs_agent.client import AgentClient, AgentDiagnosticLog
+from vs_agent.shim_clock import ThreadsClock
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.spec import AgentBackend
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -125,6 +127,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
         log=diagnostic_log,
         agent_homes=agent_homes_dir,
         env_passthrough=spec.env_passthrough,
+        clock=ThreadsClock(OsThreads()),
     )
 
     return AgentClient(
