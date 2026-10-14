@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -36,7 +38,36 @@ def test_the_reader_recovers_the_envelope_of_a_payload_carrying_response(
 
     read = ResponseEnvelopeReader.model_validate_json(response.model_dump_json())
 
-    assert read.model_dump() == response.model_dump(include=set(_ENVELOPE_FIELDS))
+    assert read.model_dump(include=set(_ENVELOPE_FIELDS)) == response.model_dump(
+        include=set(_ENVELOPE_FIELDS)
+    )
+
+
+def test_the_reader_knows_every_field_of_the_full_response() -> None:
+    assert list(ResponseEnvelopeReader.model_fields) == list(Response.model_fields)
+
+
+@given(
+    populated=st.booleans(),
+    key=st.text(min_size=1, max_size=12).filter(lambda key: key not in Response.model_fields),
+    value=st.none() | st.booleans() | st.integers() | st.text(max_size=8),
+)
+def test_the_reader_rejects_a_key_the_full_response_does_not_have(
+    *, populated: bool, key: str, value: object
+) -> None:
+    response = (
+        fully_populated_response()
+        if populated
+        else Response(timestamp=REQUEST_TIME, request_id="r")
+    )
+    line = json.dumps({**json.loads(response.model_dump_json()), key: value})
+
+    with pytest.raises(ValidationError) as rejected:
+        ResponseEnvelopeReader.model_validate_json(line)
+
+    assert [(error["type"], error["loc"]) for error in rejected.value.errors()] == [
+        ("extra_forbidden", (key,))
+    ]
 
 
 def test_the_reader_still_validates_the_envelope_fields() -> None:

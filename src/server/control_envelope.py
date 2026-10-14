@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import ClassVar, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from server.diagnostics import Diagnostic
 from server.host_api import PROTOCOL_VERSION
@@ -80,12 +80,26 @@ class ResponseEnvelopeReader(ResponseEnvelope):
     """Read the envelope of a full ``Response`` without its payload types.
 
     A server writes every ``Response`` field, payloads included. A light client
-    validates the envelope fields strictly and leaves the payload fields, which
-    belong to ``server.api.protocol``, unread. This is the one model that does
-    not reject unknown keys, and only a reader of server responses uses it.
+    validates the envelope fields strictly and accepts each payload field
+    ``server.api.protocol.Response`` declares as any JSON value, unread. Like
+    every protocol model it rejects a key the full ``Response`` does not have;
+    ``tests/server/test_control_envelope.py`` keeps the payload names below
+    equal to ``Response``'s.
     """
 
-    model_config = ConfigDict(extra="ignore")
-    unknown_keys_reason: ClassVar[str] = (
-        "Reads the envelope of a full Response and leaves its payload fields unread."
-    )
+    chat: JsonValue = None
+    chat_thread: JsonValue = None
+    chat_options: JsonValue = None
+    tui_defaults: JsonValue = None
+    snapshot: JsonValue = None
+    events: JsonValue = None
+    performance: JsonValue = None
+    performance_context: JsonValue = None
+    experiments: JsonValue = None
+    experiment_update: JsonValue = None
+    experiments_ready: JsonValue = None
+    iterations: JsonValue = None
+    iterations_ready: JsonValue = None
+    design: JsonValue = None
+    design_ready: JsonValue = None
+    design_patch: JsonValue = None
