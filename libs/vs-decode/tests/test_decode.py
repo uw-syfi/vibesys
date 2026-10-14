@@ -94,9 +94,34 @@ def test_input_past_the_cap_is_too_large(cap: int) -> None:
     )
 
 
-def test_a_model_that_drops_unknown_keys_is_refused() -> None:
-    with pytest.raises(TypeError, match="extra='forbid'"):
-        decode_json(b'{"name": "n"}', _Lenient, source="s", max_bytes=_CAP)
+class _HoldsLenient(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[_Lenient]
+
+
+_LENIENT_TARGETS = [_Lenient, _HoldsLenient, TypeAdapter(dict[str, _Lenient])]
+
+
+@settings(max_examples=examples(pr=20, nightly=200))
+@given(
+    target=st.sampled_from(_LENIENT_TARGETS),
+    data=st.binary(max_size=64),
+    max_bytes=st.integers(min_value=0, max_value=64),
+)
+def test_a_target_that_drops_unknown_keys_at_any_depth_is_refused_whatever_the_input(
+    target: type[BaseModel] | TypeAdapter[object], data: bytes, max_bytes: int
+) -> None:
+    with pytest.raises(TypeError, match="_Lenient must set extra='forbid'"):
+        decode_json(data, target, source="s", max_bytes=max_bytes)
+
+
+@pytest.mark.parametrize("target", _LENIENT_TARGETS)
+def test_read_json_refuses_a_lenient_target_before_reading(
+    tmp_path: Path, target: type[BaseModel] | TypeAdapter[object]
+) -> None:
+    with pytest.raises(TypeError, match="_Lenient must set extra='forbid'"):
+        read_json(tmp_path / "absent.json", target, max_bytes=_CAP)
 
 
 def test_a_type_adapter_decodes_values_that_are_not_models() -> None:
