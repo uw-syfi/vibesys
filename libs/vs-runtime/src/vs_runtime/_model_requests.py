@@ -11,15 +11,16 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    JsonValue,
     StrictStr,
-    TypeAdapter,
     ValidationError,
     field_validator,
 )
 
-# Parses untrusted JSON with nesting bounded, failing as a ValueError.
-_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+from vs_runtime._workspace_files import (
+    WorkspaceFileProblem,
+    WorkspaceFileProblemKind,
+    read_agent_json,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -33,8 +34,12 @@ class ModelRequestError(ValueError):
     """A model-request manifest is malformed or operator-disallowed."""
 
     @classmethod
-    def invalid_json(cls, error: ValueError) -> ModelRequestError:
-        return cls(f"{MODEL_MANIFEST_RELPATH} is not valid JSON: {error}")
+    def invalid_json(cls, detail: str) -> ModelRequestError:
+        return cls(f"{MODEL_MANIFEST_RELPATH} is not valid JSON: {detail}")
+
+    @classmethod
+    def unreadable(cls, detail: str) -> ModelRequestError:
+        return cls(f"{MODEL_MANIFEST_RELPATH} {detail}")
 
     @classmethod
     def invalid_root(cls) -> ModelRequestError:
@@ -131,16 +136,17 @@ class _ModelRequestReconciler:
 
 
 def _read_model_requests(workspace: Path) -> tuple[_ModelRequest, ...]:
-    path = workspace / MODEL_MANIFEST_RELPATH
-    if not path.exists():
-        return ()
-    try:
-        # The agent writes this manifest: pydantic's parser reports invalid UTF-8
-        # and deep nesting as ``ValueError``, where ``read_text`` and
-        # ``json.loads`` raised ``UnicodeDecodeError`` and ``RecursionError``.
-        raw = _JSON.validate_json(path.read_bytes())
-    except ValueError as exc:
-        raise ModelRequestError.invalid_json(exc) from exc
+    # The agent writes this manifest: it is read contained in the workspace, size
+    # bounded, and parsed by pydantic's depth-bounded parser.
+    raw = read_agent_json(workspace, MODEL_MANIFEST_RELPATH)
+    if isinstance(raw, WorkspaceFileProblem):
+        match raw.kind:
+            case WorkspaceFileProblemKind.MISSING:
+                return ()
+            case WorkspaceFileProblemKind.NOT_JSON | WorkspaceFileProblemKind.INVALID:
+                raise ModelRequestError.invalid_json(raw.detail)
+            case WorkspaceFileProblemKind.ESCAPES | WorkspaceFileProblemKind.TOO_LARGE:
+                raise ModelRequestError.unreadable(raw.detail)
 
     entries = raw.get("models") if isinstance(raw, dict) else raw
     if not isinstance(entries, list):

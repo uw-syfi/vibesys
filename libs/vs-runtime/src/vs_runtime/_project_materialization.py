@@ -539,6 +539,23 @@ def _run_git(args: Sequence[str], cwd: Path) -> str:
     return result.stdout
 
 
+def copy_support_directories(project_root: Path, workspace: Path, names: Iterable[str]) -> None:
+    """Copy each named support directory of the project into a new candidate workspace.
+
+    A name with no directory in the project is skipped. Symlinks are copied as links and
+    ``__pycache__`` directories are left out.
+    """
+    for name in sorted(names):
+        source = project_root / name
+        if source.is_dir():
+            shutil.copytree(
+                source,
+                workspace / name,
+                symlinks=True,
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
+
+
 __all__ = [
     "FreshProjectError",
     "FreshProjectErrorKind",
@@ -549,4 +566,5 @@ __all__ = [
     "ProjectMaterializer",
     "ProjectTreeCopy",
     "WorkspaceSourceValue",
+    "copy_support_directories",
 ]

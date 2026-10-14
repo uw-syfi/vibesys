@@ -13,8 +13,9 @@ loop exactly as the legacy loop ran them, one board operation at a time per run.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Protocol, cast
+
+from pydantic import JsonValue, TypeAdapter
 
 from vs_issue_tracker.api import (
     AppliedChanges,
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
     from vs_runtime._core_requests import ExecutionContext
 
 _PROGRESS_MARKER = "<!-- vibesys:progress-key:v1 {key} -->\n"
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 class BoardTexts(Protocol):
@@ -215,5 +217,5 @@ class IssueBoardOwner:
 def _payload(payload_json: str) -> dict[str, object] | None:
     if not payload_json:
         return None
-    loaded = json.loads(payload_json)
+    loaded = _JSON_VALUE.validate_json(payload_json)
     return loaded if isinstance(loaded, dict) else {"value": loaded}

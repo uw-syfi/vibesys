@@ -25,7 +25,6 @@ container or remote process lifetime at the command layer.
 
 from __future__ import annotations
 
-import json
 import os
 import shlex
 import shutil
@@ -65,6 +64,7 @@ from vs_runtime._environment_startup import (
     EnvironmentStartupStage,
 )
 from vs_runtime._image_features import image_features
+from vs_runtime._model_artifacts import read_model_metadata
 from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
@@ -78,6 +78,7 @@ from vs_runtime._trusted_evaluation_preparation import (
     remote_evaluator_setup_command,
     required_evaluator_tools_root,
 )
+from vs_runtime._workspace_files import write_for_agent
 from vs_sandbox.api import (
     CONTAINER_RUNTIME_TOOLCHAIN,
     DeviceLease,
@@ -127,6 +128,7 @@ from vs_sandbox.api.symlink_mounts import (
 )
 
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
+_RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
 """The runtime resource declaration's ``agent_path`` for the effective objective.
 
 Used in exactly one place: the ``HostResource`` :func:`_container_mount_plan`
@@ -1229,8 +1231,7 @@ class SkyPilotEnvironment(DockerEnvironment):
                     (str(caller_state), caller_state_path, False),
                 )
             )
-            runtime_document = request.log_dir / "runtime-environment.md"
-            runtime_document.write_text(runtime_presentation)
+            runtime_document = _write_runtime_document(request.log_dir, runtime_presentation)
             runtime_path = "/opt/vibesys-runtime/environment.md"
             resources.append(
                 host_resource_for_mount(str(runtime_document), runtime_path, read_only=True)
@@ -1396,8 +1397,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
         cli_provider_env["VIBESYS_MODAL_APP_NAME"] = app_name
-        runtime_document = request.log_dir / "runtime-environment.md"
-        runtime_document.write_text(runtime_presentation)
+        runtime_document = _write_runtime_document(request.log_dir, runtime_presentation)
         runtime_container_path = "/opt/vibesys-runtime/environment.md"
         resources.append(
             host_resource_for_mount(str(runtime_document), runtime_container_path, read_only=True)
@@ -1522,22 +1522,15 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             return
         ensure_model_volume = import_module("vs_sandbox.api").ensure_model_volume
 
-        meta = json.loads(meta_path.read_text())
-        model_id = meta.get("model_id")
-        if not model_id:
-            message = (
-                f"meta.json at {meta_path} missing required 'model_id' field "
-                "(needed for Modal auto-upload)"
-            )
-            raise ValueError(message)
+        meta = read_model_metadata(meta_path)
         hf_available = bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"))
         local_model = request.ref_dir / "model"
         local_path = None
         if not hf_available and local_model.exists() and local_model.resolve().is_dir():
             local_path = str(local_model.resolve())
         self.model_volume = ensure_model_volume(
-            model_id,
-            revision=meta.get("revision"),
+            meta.model_id,
+            revision=meta.revision,
             local_path=local_path,
             log=request.log or print,
         )
@@ -1560,22 +1553,24 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             return None
         ensure_model_volume = import_module("vs_sandbox.api").ensure_model_volume
 
-        draft_meta = json.loads(draft_meta_path.read_text())
-        draft_model_id = draft_meta.get("model_id")
-        if not draft_model_id:
-            message = f"draft_meta.json at {draft_meta_path} missing required 'model_id' field"
-            raise ValueError(message)
+        draft_meta = read_model_metadata(draft_meta_path)
         hf_available = bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"))
         local_draft = request.ref_dir / "draft_model"
         local_path = None
         if not hf_available and local_draft.exists() and local_draft.resolve().is_dir():
             local_path = str(local_draft.resolve())
         return ensure_model_volume(
-            draft_model_id,
-            revision=draft_meta.get("revision"),
+            draft_meta.model_id,
+            revision=draft_meta.revision,
             local_path=local_path,
             log=request.log or print,
         )
+
+
+def _write_runtime_document(log_dir: Path, presentation: str) -> Path:
+    """Write the runtime environment document the agent's container mounts read-only."""
+    write_for_agent(log_dir, _RUNTIME_DOCUMENT_NAME, presentation.encode("utf-8"))
+    return log_dir / _RUNTIME_DOCUMENT_NAME
 
 
 def _modal_app_name(run_id: str, fallback: str) -> str:

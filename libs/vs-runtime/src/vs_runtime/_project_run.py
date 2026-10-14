@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable, Iterable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -22,6 +21,7 @@ from vs_project.api import (
 )
 from vs_runtime import _boot_trace as boot_trace
 from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._project_materialization import copy_support_directories
 from vs_runtime._recorded_environment import migrate_recorded_run_environment
 from vs_runtime._run_state import RunState
 from vs_runtime.contracts import OrchestrationResumeDecision
@@ -207,15 +207,10 @@ class ProjectRunResources:
             teardown_stack.callback(self.git.remove_worktree, workspace)
             if not reattach:
                 self.git.add_worktree(workspace, revision)
-            for name in sorted(self._request.candidate_support_dirs):
-                source = self._request.project_root / name
-                if source.is_dir() and not reattach:
-                    shutil.copytree(
-                        source,
-                        workspace / name,
-                        symlinks=True,
-                        ignore=shutil.ignore_patterns("__pycache__"),
-                    )
+            if not reattach:
+                copy_support_directories(
+                    self._request.project_root, workspace, self._request.candidate_support_dirs
+                )
             logger = RunLogger(
                 log_dir, clock=self._effects.clock, tee_stderr=False, emit=self._effects.log_emit
             )

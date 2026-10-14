@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 
 from vs_core.api import (
     ContractError,
@@ -56,10 +55,19 @@ class ResolvedCoreResume[S: StrategyState]:
     record: RuntimeRecord[S]
 
 
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+
+
 def _schema(source: bytes) -> str:
+    """The ``schema_version`` a legacy file declares, for the diagnostic.
+
+    Total over any bytes: pydantic's parser reports invalid UTF-8 and deep
+    nesting as a ``ValidationError``, where ``json.loads`` raised
+    ``RecursionError`` past this function.
+    """
     try:
-        value = json.loads(source)
-    except (ValueError, UnicodeDecodeError):
+        value = _JSON_VALUE.validate_json(source)
+    except ValidationError:
         return "unparseable"
     if isinstance(value, dict):
         version = value.get("schema_version")

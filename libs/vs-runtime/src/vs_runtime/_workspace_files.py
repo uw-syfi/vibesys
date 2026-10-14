@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from vs_project.api import atomic_write_bytes
 
@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 
 MAX_AGENT_DOCUMENT_BYTES = 1024 * 1024
 """The largest agent-written JSON document the runtime reads."""
+
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 class WorkspaceFileProblemKind(StrEnum):
@@ -63,6 +65,35 @@ def read_agent_model[ModelT: BaseModel](
     max_bytes: int = MAX_AGENT_DOCUMENT_BYTES,
 ) -> ModelT | WorkspaceFileProblem:
     """Read the agent's JSON file at ``relative`` as ``model``, or say why it is not one."""
+    content = _read_contained(workspace, relative, max_bytes)
+    if isinstance(content, WorkspaceFileProblem):
+        return content
+    try:
+        return model.model_validate_json(content)
+    except ValidationError as error:
+        return _problem(relative, error)
+
+
+def read_agent_json(
+    workspace: Path,
+    relative: str,
+    *,
+    max_bytes: int = MAX_AGENT_DOCUMENT_BYTES,
+) -> JsonValue | WorkspaceFileProblem:
+    """Read the agent's JSON file at ``relative`` as a plain JSON value, or say why not.
+
+    For a format whose caller validates the shape itself to give its own messages.
+    """
+    content = _read_contained(workspace, relative, max_bytes)
+    if isinstance(content, WorkspaceFileProblem):
+        return content
+    try:
+        return _JSON_VALUE.validate_json(content)
+    except ValidationError as error:
+        return _problem(relative, error)
+
+
+def _read_contained(workspace: Path, relative: str, max_bytes: int) -> bytes | WorkspaceFileProblem:
     path = contained_path(workspace, relative)
     if path is None:
         return WorkspaceFileProblem(
@@ -79,10 +110,7 @@ def read_agent_model[ModelT: BaseModel](
         return WorkspaceFileProblem(
             WorkspaceFileProblemKind.TOO_LARGE, relative, f"is larger than {max_bytes} bytes"
         )
-    try:
-        return model.model_validate_json(content)
-    except ValidationError as error:
-        return _problem(relative, error)
+    return content
 
 
 def _problem(relative: str, error: ValidationError) -> WorkspaceFileProblem:
@@ -167,6 +195,7 @@ __all__ = [
     "WorkspaceFileProblemKind",
     "contained_path",
     "hash_inputs",
+    "read_agent_json",
     "read_agent_model",
     "write_for_agent",
 ]

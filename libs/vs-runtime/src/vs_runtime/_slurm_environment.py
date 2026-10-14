@@ -58,9 +58,9 @@ from vs_sandbox.api.slurm import (
     configured_capture_lifecycle,
     load_slurm_gpu_alias_settings,
     load_slurm_operator_settings,
-    render_slurm_operator_toml,
     trusted_profile_command,
     write_slurm_capture_plan,
+    write_slurm_operator_toml,
 )
 from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
@@ -523,7 +523,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         state_root = request.log_dir / "slurm-cluster"
         state_root.mkdir(parents=True, exist_ok=True)
         config_path = request.log_dir / "slurm-operator.toml"
-        config_path.write_text(render_slurm_operator_toml(self._settings), encoding="utf-8")
+        write_slurm_operator_toml(self._settings, config_path)
         capture_plan_path = (
             request.log_dir / "slurm-capture-plan.json" if remote_profiling else None
         )

@@ -8,10 +8,11 @@ does not own domain selection or any long-lived resource that needs teardown.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol, cast
+
+from pydantic import JsonValue, TypeAdapter
 
 from vs_sandbox.api import EnvironmentBindMount
 
@@ -55,8 +56,13 @@ class PreparedModelArtifacts:
     bind_mounts: tuple[EnvironmentBindMount, ...] = ()
 
 
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+
+
 @dataclass(frozen=True, slots=True)
-class _ModelMetadata:
+class ModelMetadata:
+    """What a task's ``meta.json`` (or ``draft_meta.json``) says to download."""
+
     model_id: str
     revision: str | None
 
@@ -125,7 +131,7 @@ def _ensure_primary_model(
         )
         raise FileNotFoundError(message)
 
-    metadata = _read_model_metadata(metadata_path)
+    metadata = read_model_metadata(metadata_path)
     request.log(
         f"[model] Weights not found at {model_path}. "
         f"Downloading {metadata.model_id} to {request.model_cache_dir}..."
@@ -141,22 +147,28 @@ def _ensure_primary_model(
     return model_path
 
 
-def _read_model_metadata(path: Path) -> _ModelMetadata:
-    raw = json.loads(path.read_text())
+def read_model_metadata(path: Path) -> ModelMetadata:
+    """Read a task's model metadata file: the one reader of ``meta.json``.
+
+    Raises ``ValueError`` for a file that is not JSON (pydantic's parser, so deep
+    nesting is a ``ValueError`` too) or lacks a usable ``model_id``, and
+    ``TypeError`` for a document that is not an object.
+    """
+    raw = _JSON_VALUE.validate_json(path.read_bytes())
     if not isinstance(raw, dict):
-        message = f"meta.json at {path} must contain a JSON object"
+        message = f"{path.name} at {path} must contain a JSON object"
         raise TypeError(message)
 
     model_id = raw.get("model_id")
     if not isinstance(model_id, str) or not model_id.strip():
-        message = f"meta.json at {path} missing required 'model_id' field"
+        message = f"{path.name} at {path} missing required 'model_id' field"
         raise ValueError(message)
 
     revision = raw.get("revision")
     if revision is not None and not isinstance(revision, str):
-        message = f"meta.json at {path} field 'revision' must be a string"
+        message = f"{path.name} at {path} field 'revision' must be a string"
         raise ValueError(message)
-    return _ModelMetadata(model_id=model_id, revision=revision)
+    return ModelMetadata(model_id=model_id, revision=revision)
 
 
 def _download_model_snapshot(

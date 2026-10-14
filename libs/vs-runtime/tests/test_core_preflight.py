@@ -240,6 +240,22 @@ def test_unreadable_legacy_state_path_is_a_resume_diagnostic(tmp_path: Path) -> 
     assert failure.value.diagnostic.path == namespace.agent_visible_path("state.json")
 
 
+@pytest.mark.parametrize(
+    "source",
+    [b"not json", b"\xff\xfe", b"[" * 100_000 + b"]" * 100_000, b'{"schema_version":' * 5_000],
+    ids=["not-json", "invalid-utf8", "deep-array", "deep-object"],
+)
+def test_any_legacy_state_bytes_are_an_unparseable_diagnostic(
+    tmp_path: Path, source: bytes
+) -> None:
+    project, run_id = project_run(tmp_path)
+    project.state.portable_namespace(run_id, "dynamic").write_bytes("state.json", source)
+    with pytest.raises(CoreResumeError) as failure:
+        reject_legacy_resume(project, run_id)
+    assert failure.value.diagnostic.code == "dynamic_legacy_resume_unsupported"
+    assert failure.value.diagnostic.source_schema == "unparseable"
+
+
 def test_legacy_state_file_rejects_even_beside_a_valid_new_envelope(tmp_path: Path) -> None:
     # Pinned policy: the dynamic/state.json name is reserved for legacy runs, so a
     # strategy must never write it in the dynamic namespace.
