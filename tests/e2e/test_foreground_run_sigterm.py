@@ -1,8 +1,9 @@
 """A SIGTERM taken by any thread of a real foreground run process interrupts the run.
 
 The kernel may hand a process SIGTERM to any thread while CPython runs handlers on the main
-thread. Every interleaving runs in a forked child of the test (real threads, real signals,
-no interpreter start-up); one case runs the real entrypoint process to prove the wiring.
+thread. Each thread the run owns takes it once, in a forked child of the test (real
+threads, real signals, no interpreter start-up); one case runs the real entrypoint process
+to prove the wiring.
 """
 
 from __future__ import annotations
@@ -14,14 +15,11 @@ import sys
 from functools import partial
 
 import pytest
-from hypothesis import example, given, settings
-from hypothesis.strategies import integers
 from tests.e2e.foreground_run_child import interrupted_run
 
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     TGKILL_SUPPORTED,
-    examples,
     run_in_child,
     send_to_thread,
 )
@@ -32,18 +30,14 @@ requires_tgkill = pytest.mark.skipif(
 
 
 @requires_tgkill
-@example(transports=1, target=0)
-@example(transports=1, target=1)
-@example(transports=3, target=3)
-@settings(max_examples=examples(pr=8, nightly=40), deadline=None)
-@given(transports=integers(min_value=1, max_value=3), target=integers(min_value=0, max_value=3))
-def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
-    transports: int, target: int
-) -> None:
+@pytest.mark.parametrize("target", [0, 1, 2], ids=["main", "relay", "transport"])
+def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(target: int) -> None:
     # The kernel may hand a process SIGTERM to any thread while CPython runs
     # handlers on the main thread, which is blocked driving the run. Aim it at
-    # the main thread or at any transport thread to force each interleaving.
-    cleanups, ended = run_in_child(partial(interrupted_run, transports, target))
+    # each thread the run owns. However late the main thread's wake signal
+    # lands, the run ends interrupted (the interleavings are in
+    # tests/entrypoints/test_main_thread_interrupt.py).
+    cleanups, ended = run_in_child(partial(interrupted_run, 1, target))
 
     assert ended == "interrupted"
     assert cleanups == [True]

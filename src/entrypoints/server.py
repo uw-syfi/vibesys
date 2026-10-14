@@ -12,11 +12,13 @@ import webbrowser
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from entrypoints import cli
+from entrypoints.main_thread_interrupt import MainThreadInterrupt
 from entrypoints.web_assets import WebAssetBundle
 from launch import default_runs
 from server.host_api import (
@@ -85,20 +87,23 @@ def _termination_signal(runtime: ServerRuntime) -> Iterator[None]:
     CPython runs Python handlers on the main thread only, so a handler installed
     for SIGTERM is not run while the main thread is blocked in the run. The
     relay observes SIGTERM on whichever thread took it, then interrupts the main
-    thread with a private wake signal that is always delivered to it.
+    thread with a private wake signal that is always delivered to it, resent
+    until the main thread has taken it (see ``MainThreadInterrupt``).
     """
-    main_thread = threading.get_ident()
+    interrupt = MainThreadInterrupt(
+        partial(signal.pthread_kill, threading.get_ident(), _INTERRUPT_SIGNAL), OsThreads()
+    )
 
-    def interrupt(signum: int, frame: object) -> None:
+    def on_interrupt_signal(signum: int, frame: object) -> None:
         del signum, frame
-        raise KeyboardInterrupt
+        interrupt.take()
 
     def terminate(signum: int) -> None:
         del signum
         runtime.shutdown()
-        signal.pthread_kill(main_thread, _INTERRUPT_SIGNAL)
+        interrupt.request()
 
-    previous = signal.signal(_INTERRUPT_SIGNAL, interrupt)
+    previous = signal.signal(_INTERRUPT_SIGNAL, on_interrupt_signal)
     try:
         with relay_signals([signal.SIGTERM], terminate):
             yield
