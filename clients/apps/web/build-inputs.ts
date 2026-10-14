@@ -10,7 +10,6 @@ export const WEB_BUNDLE_PACKAGES = [
   'features/gateway-connect',
   'features/campaign',
   'features/conversation',
-  'features/replay',
   'features/run-view',
   'libs/hosts',
   'libs/ipc',

@@ -22,7 +22,6 @@
   "dependencies": {
     "@vibesys/contracts": "workspace:*",
     "@vibesys/feature-gateway-connect": "workspace:*",
-    "@vibesys/feature-replay": "workspace:*",
     "@vibesys/feature-run-view": "workspace:*",
     "@vibesys/ipc": "workspace:*",
     "@vibesys/run-session": "workspace:*",

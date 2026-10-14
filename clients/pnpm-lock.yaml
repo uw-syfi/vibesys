@@ -152,9 +152,6 @@ importers:
       '@vibesys/feature-gateway-connect':
         specifier: workspace:*
         version: link:../../features/gateway-connect
-      '@vibesys/feature-replay':
-        specifier: workspace:*
-        version: link:../../features/replay
       '@vibesys/feature-run-view':
         specifier: workspace:*
         version: link:../../features/run-view

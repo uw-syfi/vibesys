@@ -14,14 +14,13 @@ import {
   type GatewayConnectState,
   GatewayForm,
 } from '@vibesys/feature-gateway-connect/renderer';
-import {DEFAULT_REPLAY_FIXTURE_URL} from '@vibesys/feature-replay/state';
 import {RunPage} from '@vibesys/feature-run-view/renderer';
 import type {RunStore, WebSession} from '@vibesys/run-session';
 import {hasRunEnded} from '@vibesys/run-state';
 import type {Store} from '@vibesys/store';
 import {Button, Dialog} from '@vibesys/ui';
 import {type JSX, type ReactNode, useState, useSyncExternalStore} from 'react';
-import {bootstrapGateway, fetchCampaignFixture, fetchReplayFixture} from '../platform/backend.js';
+import {bootstrapGateway, fetchCampaignFixture} from '../platform/backend.js';
 import '@vibesys/ui/tokens.css';
 import '@vibesys/feature-gateway-connect/styles.css';
 import '@vibesys/feature-run-view/styles.css';
@@ -51,13 +50,11 @@ export interface DemoAppOptions {
 
 export interface DemoAppServices {
   readonly bootstrap: (capabilityUrl: string, signal: AbortSignal) => Promise<string>;
-  readonly loadReplay: typeof fetchReplayFixture;
   readonly loadCampaign: (signal: AbortSignal) => Promise<CampaignRecord>;
 }
 
 const DEFAULT_DEMO_SERVICES: DemoAppServices = {
   bootstrap: (capabilityUrl, signal) => bootstrapGateway(capabilityUrl, {signal}),
-  loadReplay: fetchReplayFixture,
   loadCampaign: fetchCampaignFixture,
 };
 
@@ -71,14 +68,7 @@ export function createDemoApp(
   }: DemoAppOptions,
   services: DemoAppServices = DEFAULT_DEMO_SERVICES,
 ): PreviewPage {
-  let attempt = 0;
-  const campaign = createCampaignReplayStore(async signal => {
-    const [record] = await Promise.all([
-      services.loadCampaign(signal),
-      services.loadReplay(`${DEFAULT_REPLAY_FIXTURE_URL}?attempt=${attempt++}`, undefined, signal),
-    ]);
-    return record;
-  });
+  const campaign = createCampaignReplayStore(signal => services.loadCampaign(signal));
   const gateway = createGatewayConnectStore({
     page,
     initialError: initialGatewayError,

@@ -5,7 +5,6 @@ import {
   EventSourceCampaignStream,
   type Fetch,
   fetchCampaignFixture,
-  fetchReplayFixture,
 } from './backend.js';
 
 const CAPABILITY = 'http://127.0.0.1:8765/?token=secret';
@@ -110,104 +109,6 @@ describe('bootstrapGateway', () => {
     await expect(exchange).rejects.toThrow('attempt superseded');
     expect(requestSignals[0]?.aborted).toBe(true);
     expect(scheduler.activeDelays()).toEqual([]);
-  });
-});
-
-/** Load a replay fixture over `fetcher`: its events, or the message it failed with. */
-async function load(fetcher: () => Promise<Response>) {
-  try {
-    return {events: await fetchReplayFixture('replay.jsonl', fetcher), failure: null};
-  } catch (error) {
-    return {events: [], failure: error instanceof Error ? error.message : String(error)};
-  }
-}
-
-describe('fetchReplayFixture', () => {
-  test('loads JSONL events', async () => {
-    const {events, failure} = await load(
-      async () =>
-        new Response('{"type":"server_ready","sequence":1,"timestamp":"2026-09-27T00:00:00Z"}\n'),
-    );
-    expect(failure).toBeNull();
-
-    expect(events).toHaveLength(1);
-  });
-
-  test('reports the HTTP status', async () => {
-    const {events, failure} = await load(async () => new Response('unavailable', {status: 503}));
-    expect(failure).toBe('Replay fixture request failed with 503');
-    expect(events).toHaveLength(0);
-  });
-
-  test('reports the line containing malformed replay JSON', async () => {
-    const {events, failure} = await load(
-      async () =>
-        new Response(
-          '{"type":"server_ready","sequence":1,"timestamp":"2026-09-27T00:00:00Z"}\n{\n',
-        ),
-    );
-    expect(failure).toBe('Replay fixture contains invalid JSON on line 2');
-    expect(events).toHaveLength(0);
-  });
-
-  test('rejects one malformed event atomically and names its line and field', async () => {
-    const {events, failure} = await load(
-      async () =>
-        new Response(
-          '{"type":"server_ready","sequence":1,"timestamp":"2026-09-27T00:00:00Z"}\n' +
-            '{"type":"server_ready","sequence":2}\n',
-        ),
-    );
-    expect(failure).toBe(
-      'Replay fixture contains invalid event on line 2: Invalid server run event: timestamp must be a string',
-    );
-    expect(events).toHaveLength(0);
-  });
-
-  test('rejects malformed fields inside known event data before folding any line', async () => {
-    const {events, failure} = await load(
-      async () =>
-        new Response(
-          '{"type":"server_ready","sequence":1,"timestamp":"2026-09-27T00:00:00Z"}\n' +
-            '{"type":"agent_execution_started","sequence":2,"timestamp":"2026-09-27T00:00:01Z","data":{"kind":"agent_execution_started","stage":"implement"}}\n',
-        ),
-    );
-    expect(failure).toBe(
-      'Replay fixture contains invalid event on line 2: Invalid server run event.data: activity must be present',
-    );
-    expect(events).toHaveLength(0);
-  });
-
-  test('accepts unknown closed-set members with valid wire kinds', async () => {
-    const {events, failure} = await load(
-      async () =>
-        new Response(
-          JSON.stringify({
-            protocol_version: 1,
-            sequence: 1,
-            timestamp: '2026-09-27T00:00:00Z',
-            type: 'future-event-type',
-            status: 'future-status',
-            data: {kind: 'future-data-kind', future_field: true},
-          }),
-        ),
-    );
-    expect(failure).toBeNull();
-
-    expect(events).toHaveLength(1);
-  });
-
-  test('rejects an incompatible event protocol version', async () => {
-    const {events, failure} = await load(
-      async () =>
-        new Response(
-          '{"protocol_version":2,"type":"server_ready","sequence":1,"timestamp":"2026-09-27T00:00:00Z"}\n',
-        ),
-    );
-    expect(failure).toBe(
-      'Replay fixture contains invalid event on line 1: Invalid server run event: protocol_version must be 1',
-    );
-    expect(events).toHaveLength(0);
   });
 });
 

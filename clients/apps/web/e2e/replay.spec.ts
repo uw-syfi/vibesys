@@ -614,16 +614,19 @@ test('keeps active work visible and anchors completed rows as the campaign advan
   expect(await results.getByRole('row').count()).toBeLessThan(21);
 });
 
-test('surfaces a replay load failure and retries it', async ({page}) => {
+test('surfaces a campaign load failure and retries it', async ({page}) => {
   let failRequest = true;
-  await page.route(/\/__vibesys\/fixtures\/framework-events\.jsonl(?:\?.*)?$/, async route => {
-    if (failRequest) await route.fulfill({status: 503, body: 'temporarily unavailable'});
-    else await route.continue();
-  });
+  await page.route(
+    url => /\/trajectory-replay(?:-[\w-]+)?\.json$/.test(url.pathname),
+    async route => {
+      if (failRequest) await route.fulfill({status: 503, body: 'temporarily unavailable'});
+      else await route.continue();
+    },
+  );
 
   await page.goto('/');
   await expect(page.getByTestId('replay-banner')).toContainText(
-    'Replay fixture request failed with 503',
+    'Campaign fixture request failed with 503',
   );
 
   failRequest = false;
@@ -646,27 +649,25 @@ test('keeps the replay navigable on a narrow viewport', async ({page}) => {
   expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
 });
 
-test('surfaces a malformed replay event and retries it', async ({page}) => {
-  let corruptReplay = true;
-  await page.route(/\/__vibesys\/fixtures\/framework-events\.jsonl(?:\?.*)?$/, async route => {
-    if (corruptReplay) {
-      await route.fulfill({
-        contentType: 'application/x-ndjson',
-        body:
-          '{"type":"server_ready","sequence":1,"timestamp":"2026-09-27T00:00:00Z"}\n' +
-          '{"type":"agent_execution_started","sequence":2,"timestamp":"2026-09-27T00:00:01Z","data":{"kind":"agent_execution_started","stage":"implement"}}\n',
-      });
-    } else await route.continue();
-  });
+test('surfaces a malformed campaign record and retries it', async ({page}) => {
+  let corruptCampaign = true;
+  await page.route(
+    url => /\/trajectory-replay(?:-[\w-]+)?\.json$/.test(url.pathname),
+    async route => {
+      if (corruptCampaign) {
+        await route.fulfill({contentType: 'application/json', body: '{"schemaVersion":99}'});
+      } else await route.continue();
+    },
+  );
 
   await page.goto('/');
   // By test id, not by role: three banners share the alert role and the same
   // class, so the role alone cannot say which failure is on screen.
   await expect(page.getByTestId('replay-banner')).toContainText(
-    'Replay fixture contains invalid event on line 2: Invalid server run event.data: activity must be present',
+    'Invalid replay scenario at $.schemaVersion: expected 1',
   );
 
-  corruptReplay = false;
+  corruptCampaign = false;
   await page.getByRole('button', {name: 'Retry'}).click();
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();

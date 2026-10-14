@@ -4,11 +4,10 @@
  * (`clients/.dependency-cruiser.mjs` and `clients/tools/lint-rules/web-fetch-only-in-backend.grit` hold
  * it to that): the control transport (a WebSocket, or the desktop shell's bridge shaped as one)
  * that `@vibesys/run-session`'s `connectRun` runs the run over, the gateway's capability exchange,
- * and the replay fixture. It is also the
+ * and the campaign fixture. It is also the
  * entry of the browser transport bundle that `check:web-browser-bundle` keeps free of Node builtins.
  */
 
-import {type RunEvent, validateRunEvent} from '@vibesys/contracts';
 import {
   type CampaignFrame,
   type CampaignRecord,
@@ -154,38 +153,6 @@ function fetchUntilAbort(
 function abortReason(signal: AbortSignal): Error {
   if (signal.reason instanceof Error) return signal.reason;
   return new DOMException('Gateway connection was aborted', 'AbortError');
-}
-
-/** Fetch a JSONL replay fixture and validate every event; any bad line rejects the whole file. */
-export async function fetchReplayFixture(
-  url: string,
-  fetcher: Fetch = fetch,
-  signal?: AbortSignal,
-): Promise<RunEvent[]> {
-  const response = await fetcher(url, signal === undefined ? undefined : {signal});
-  if (!response.ok) throw new Error(`Replay fixture request failed with ${response.status}`);
-  const events: RunEvent[] = [];
-  for (const [index, line] of (await response.text()).split('\n').entries()) {
-    if (line.trim().length === 0) continue;
-    const lineNumber = index + 1;
-    let value: unknown;
-    try {
-      value = JSON.parse(line);
-    } catch (reason) {
-      throw new Error(`Replay fixture contains invalid JSON on line ${lineNumber}`, {
-        cause: reason,
-      });
-    }
-    try {
-      events.push(validateRunEvent(value));
-    } catch (reason) {
-      const detail = reason instanceof Error ? `: ${reason.message}` : '';
-      throw new Error(`Replay fixture contains invalid event on line ${lineNumber}${detail}`, {
-        cause: reason,
-      });
-    }
-  }
-  return events;
 }
 
 /** Load and validate the source-backed campaign record at the browser's I/O boundary. */

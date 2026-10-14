@@ -28,8 +28,6 @@
     {"path": "../../libs/ipc/tsconfig.lib.json"},
     {"path": "../../features/run-view/tsconfig.state.json"},
     {"path": "../../features/run-view/tsconfig.renderer.json"},
-    {"path": "../../features/gateway-connect/tsconfig.renderer.json"},
-    {"path": "../../features/replay/tsconfig.state.json"},
-    {"path": "../../features/replay/tsconfig.renderer.json"}
+    {"path": "../../features/gateway-connect/tsconfig.renderer.json"}
   ]
 }

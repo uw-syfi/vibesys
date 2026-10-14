@@ -12,6 +12,10 @@ const campaignRecord = parseReplayScenario(
   ),
 );
 
+async function flush(): Promise<void> {
+  for (let turn = 0; turn < 10; turn++) await Promise.resolve();
+}
+
 test('renders an initial capability launch before its exchange settles', () => {
   const target = targetFromCapability(
     'http://127.0.0.1:5173/',
@@ -30,7 +34,6 @@ test('renders an initial capability launch before its exchange settles', () => {
         attempts.push({url, signal});
         return new Promise<string>(() => undefined);
       },
-      loadReplay: async () => [],
       loadCampaign: () => new Promise(() => undefined),
     },
   );
@@ -48,6 +51,22 @@ test('renders an initial capability launch before its exchange settles', () => {
   expect(html).not.toContain('launch-secret');
   app.close();
   expect(attempts[0]?.signal.aborted).toBe(true);
+});
+
+test('campaign preview loads through its campaign service alone', async () => {
+  const app = createDemoApp(
+    {page: 'http://127.0.0.1:5173/', onGatewayConnected: () => undefined},
+    {
+      bootstrap: async () => 'unused',
+      loadCampaign: async () => campaignRecord,
+    },
+  );
+
+  await flush();
+  const html = renderToStaticMarkup(app.view);
+  expect(html).toContain('Qwen3.5-397B-A17B on 4x MI300A');
+  expect(html).not.toContain('Replay failed to load');
+  app.close();
 });
 
 test('the page owner releases a preview stream independently of React render lifetimes', () => {
