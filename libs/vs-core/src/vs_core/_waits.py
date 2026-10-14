@@ -313,7 +313,9 @@ def _session_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[OpenWa
     for session in core.sessions.sessions:
         if not session_waits(session.phase):
             continue
-        related = [row for row in core.records.records if _about_session(row, session)]
+        related = _with_successors(
+            core, [row for row in core.records.records if _about_session(row, session)]
+        )
         found.append(
             OpenWait(
                 waiter=WaitKind.SESSION,
@@ -378,11 +380,14 @@ def _acquisition_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Op
     """A turn acquiring waits for the session request that carries it forward."""
     found = []
     for row in _acquiring(core.sessions):
-        related = [
-            record
-            for record in core.records.records
-            if _concerns(record.request, row.invocation.session_id, record.lifecycle)
-        ]
+        related = _with_successors(
+            core,
+            [
+                record
+                for record in core.records.records
+                if _concerns(record.request, row.invocation.session_id, record.lifecycle)
+            ],
+        )
         carried = _carried(core.sessions, core.records.records, (), row.invocation)
         found.append(
             OpenWait(
@@ -412,16 +417,32 @@ def _recovery_waits(core: CoreState) -> list[OpenWait]:
     ]
 
 
+def _with_successors(core: CoreState, related: list[RequestRecord]) -> list[RequestRecord]:
+    """``related`` and the live requests that inspect, block or cancel one of them.
+
+    Recovery asks about a request a dead host left behind (and blocks it once its limit passed)
+    before the resource it serves moves on: a job is polled again, a session carried forward.
+    While that inspection is in flight it is what produces the waited-on fact.
+    """
+    return [
+        *related,
+        *(row for row in core.records.records if any(_addresses(row, item) for item in related)),
+    ]
+
+
 def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[OpenWait]:
     found = []
     for job in core.evaluation.jobs:
         if job.terminal:
             continue
-        related = [
-            row
-            for row in core.records.records
-            if row.request_id == job.submission_id or _observes(row, job.resource_id)
-        ]
+        related = _with_successors(
+            core,
+            [
+                row
+                for row in core.records.records
+                if row.request_id == job.submission_id or _observes(row, job.resource_id)
+            ],
+        )
         producer = Producer.TIMER if job.pacing.next_at is not None else None
         found.append(
             OpenWait(
@@ -439,12 +460,15 @@ def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[OpenWait]:
     for registered in core.evaluation.registered_jobs:
         if registered.terminal:
             continue
-        related = [
-            row
-            for row in core.records.records
-            if row.request_id == registered.request_id
-            or (registered.resource_id is not None and _observes(row, registered.resource_id))
-        ]
+        related = _with_successors(
+            core,
+            [
+                row
+                for row in core.records.records
+                if row.request_id == registered.request_id
+                or (registered.resource_id is not None and _observes(row, registered.resource_id))
+            ],
+        )
         producer = Producer.TIMER if registered.pacing.next_at is not None else None
         found.append(
             OpenWait(
@@ -600,7 +624,9 @@ def _yield_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[OpenWait
             kinds.append(WaitKind.YIELD_PUBLICATION)
         if draining_without_cancel(core.sessions, invocation.invocation):
             kinds.append(WaitKind.INTERRUPT)
-        related = _checkpoint_records(core.records.records, invocation.invocation)
+        related = _with_successors(
+            core, list(_checkpoint_records(core.records.records, invocation.invocation))
+        )
         found.extend(
             OpenWait(
                 waiter=kind,

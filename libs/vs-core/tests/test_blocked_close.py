@@ -266,6 +266,7 @@ def test_a_job_whose_poll_blocked_while_the_host_was_down_is_polled_again(down_f
     ] == []
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(case=_CASES)
 def test_a_host_that_restarts_a_run_closed_around_a_blocked_record_finds_nothing_to_do(
     case: _Case,
@@ -280,3 +281,20 @@ def test_a_host_that_restarts_a_run_closed_around_a_blocked_record_finds_nothing
     restarted = core.step(closed, core.RecoveryStarted(epoch=3, now_at=BOUND + case.late_by + 200))
     assert restarted.requests == ()
     assert restarted.state.run.status == core.RunStatus.TERMINAL
+
+
+@settings(max_examples=examples(pr=4, nightly=100))
+@given(
+    down_for=st.floats(min_value=0.0, max_value=10_000.0),
+    down_again_for=st.floats(min_value=0.0, max_value=10_000.0),
+)
+def test_a_host_that_restarts_while_a_blocked_job_poll_is_inspected_still_has_a_producer(
+    down_for: float, down_again_for: float
+) -> None:
+    """The next host inspects the blocked poll before polling again: the job is waited on."""
+    state = _poll_blocked_by_late_restart(down_for)
+    restart = core.RecoveryStarted(epoch=3, now_at=state.run.now_at + down_again_for)
+    restarted = core.step(state, restart).state
+    assert [
+        wait for wait in core.orphan_waits(restarted) if wait.waiter == core.WaitKind.OWNED_JOB
+    ] == []
