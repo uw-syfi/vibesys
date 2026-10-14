@@ -467,7 +467,7 @@ depends_on = ["vs_async_ops.testing"]
 [[modules]]
 path = "vs_async_ops.coordinator"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_async_ops.models", "vs_async_ops.ports"]
+depends_on = ["vs_async_ops.models", "vs_async_ops.ports", "vs_async_ops.settling"]
 
 [[modules]]
 path = "vs_async_ops.models"
