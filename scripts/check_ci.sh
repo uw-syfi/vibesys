@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the Python checks CI runs, from the same policy CI reads
 # (.repoctl/checks.toml), stopping at the first failing command.
-# Run this before opening a PR. Needs Go and uv.
+# CI runs these on every PR; run this to reproduce a CI failure. Needs Go and uv.
 #
 # The last step is CI's patch-coverage gate: it runs the whole suite once (the
 # CI shards, unsharded), combines the coverage data, applies the repo-wide and

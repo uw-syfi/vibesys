@@ -113,11 +113,12 @@ grows and then names unrelated code.
 Run the narrowest relevant test first, then broaden when the change crosses
 module boundaries.
 
-Before opening or updating a PR, run the one command that runs CI's Python
-checks (`python_quality`, `python_guards` and `python_types` in `.repoctl/checks.toml`,
-through `support/repoctl`, which needs Go). It stops at the first failing command and
-names it. When the branch changes a measured source file it ends with CI's patch-coverage
-gate (the `python_ci_tests_shard`, `python_ci_coverage` and `patch_coverage` groups), which
+CI runs the full check suite on every PR, so you need not run it locally before
+opening one. To reproduce CI's Python checks (`python_quality`, `python_guards` and
+`python_types` in `.repoctl/checks.toml`, through `support/repoctl`, which needs Go),
+run the command below. It stops at the first failing command and names it. When the
+branch changes a measured source file it ends with CI's patch-coverage gate (the
+`python_ci_tests_shard`, `python_ci_coverage` and `patch_coverage` groups), which
 runs the whole suite once and takes several minutes; `CHECK_CI_SKIP_COVERAGE=1` skips it.
 
 ```bash
