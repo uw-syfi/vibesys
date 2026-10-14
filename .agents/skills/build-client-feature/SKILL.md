@@ -79,8 +79,8 @@ core; it owns sockets, timers and processes.
    events through `@vibesys/run-state` directly.
 8. **Consume the protocol; do not redefine it.** Import message types from
    `@vibesys/contracts` and turn wire text into them only through its
-   validators; never edit its generated bindings. `./scripts/check_ci.sh`
-   regenerates the bindings and fails on a diff.
+   validators; never edit its generated bindings. The `tui_quality` check
+   group regenerates the bindings and fails on a diff.
 9. **Desktop: respect the runtimes.** Main-process code is a feature's
    `./main` entry or the desktop main app; a preload imports workspace
    packages only as types; welcome-view requests go through `@vibesys/ipc`'s
@@ -147,4 +147,4 @@ core; it owns sockets, timers and processes.
   [desktop-connection.md](../../../docs/contributing/desktop-connection.md).
 - The package-graph checker (`check_package_graph`): graph rules and their tables.
 - The clients Biome configuration: which Grit rules cover which packages, with exclusions.
-- The client CI groups, run by `./scripts/check_ci.sh`.
+- The client CI check groups; `./support/repoctl/repoctl test --dry-run` lists those a change selects.
