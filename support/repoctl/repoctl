@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
+# CI sets REPOCTL_BIN to a prebuilt binary (.github/actions/setup-repoctl) so a job needs no Go
+# toolchain; it runs from this directory exactly as `go run .` does.
+if [ -n "${REPOCTL_BIN:-}" ] && [ -x "$REPOCTL_BIN" ]; then
+  exec "$REPOCTL_BIN" "$@"
+fi
 exec go run . "$@"

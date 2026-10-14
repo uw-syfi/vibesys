@@ -1,0 +1,31 @@
+name: Set up repoctl
+description: >-
+  Puts a prebuilt repoctl binary in REPOCTL_BIN, which support/repoctl/repoctl runs instead of
+  `go run .`. Go is installed only when no binary is cached for this source, so a job pays one
+  cache restore (about 1 s) instead of the Go toolchain restore (2-3 s) plus a compile-and-link on
+  every repoctl call.
+
+runs:
+  using: composite
+  steps:
+    # The key covers everything the binary is built from (tests excluded). A change to repoctl's
+    # source misses once, builds, and saves the new binary for the following jobs and runs.
+    - id: cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/repoctl-bin
+        key: repoctl-bin-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('support/repoctl/**/*.go', 'support/repoctl/go.mod', 'support/repoctl/go.sum', '!support/repoctl/**/*_test.go') }}
+
+    - if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: support/repoctl/go.mod
+        cache-dependency-path: support/repoctl/go.sum
+
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: support/repoctl
+      run: go build -o "$RUNNER_TEMP/repoctl-bin/repoctl" .
+
+    - shell: bash
+      run: echo "REPOCTL_BIN=$RUNNER_TEMP/repoctl-bin/repoctl" >> "$GITHUB_ENV"

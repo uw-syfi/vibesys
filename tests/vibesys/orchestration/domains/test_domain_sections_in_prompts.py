@@ -10,6 +10,7 @@ from the pack path.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from functools import cache
 from typing import TYPE_CHECKING
 
 import pytest
@@ -46,6 +47,7 @@ from vs_project.api import OrchestrationDescriptor
 from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from pydantic import BaseModel, JsonValue
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
     from vibesys.plugin_registration import OrchestrationRegistration
     from vs_runtime.api import CorePlan, OrchestrationPlugin, RunFacts
 
+_RolePrompts = tuple[tuple[DomainRole, "BaseModel"], ...]
 _CRITERIA = "criteria"
 _REV = RevisionRef(revision_id=RevisionId(root="a1"), digest="git-commit:a1")
 _ROUND: dict[str, JsonValue] = {
@@ -98,13 +101,21 @@ class _Strategy:
     name: str
     registration: OrchestrationRegistration
     options: dict[str, JsonValue]
-    prompts: tuple[tuple[DomainRole, BaseModel], ...]
+    # Eager, or a callable run on first use: the dynamic search's contexts come from
+    # hypothesis `find`, which takes seconds, and a module-level call would be paid by
+    # every xdist worker while it collects, before the first test starts.
+    role_prompts: _RolePrompts | Callable[[], _RolePrompts]
+
+    @property
+    def prompts(self) -> _RolePrompts:
+        return self.role_prompts() if callable(self.role_prompts) else self.role_prompts
 
     @property
     def plugin(self) -> OrchestrationPlugin:
         return self.registration.plugin
 
 
+@cache
 def _example(template: PromptTemplate) -> BaseModel:
     """The simplest context the dynamic search generates for ``template``."""
     return find(CONTEXTS[template], lambda _: True)
@@ -198,7 +209,7 @@ _STRATEGIES = (
         "dynamic",
         dynamic.REGISTRATION,
         _ROUNDS | {"max_in_flight": 2},
-        (
+        lambda: (
             (DomainRole.ORCHESTRATOR, _example(PromptTemplate.PORTFOLIO)),
             (DomainRole.IMPLEMENTER, _example(PromptTemplate.IMPLEMENT)),
             (DomainRole.JUDGE, _example(PromptTemplate.REVIEW)),
