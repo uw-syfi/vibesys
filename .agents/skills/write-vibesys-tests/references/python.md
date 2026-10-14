@@ -99,8 +99,17 @@ The untrusted-input corpus every JSON decoder runs against is
 
 ## Golden fixtures
 
-Prompt goldens compare through `tests/vibesys/golden/helpers.py`. Regenerate
-with `UPDATE_PROMPT_SNAPSHOTS=1 uv run pytest <file>`, then read the diff.
+Prompt and text goldens live in a `fixtures/` (or `*_goldens/`) directory
+beside each covering test. Byte-exact ones compare through
+`tests/vibesys/golden/helpers.py:assert_exact_text`, which rewrites the
+fixture instead of comparing when `UPDATE_PROMPT_SNAPSHOTS=1` is set; the
+domain packs pin a SHA-256 per rendered role instead. Run the test without the
+variable first and read the diff, then regenerate, then rerun without it. The
+full table of goldens is in the `write-agent-prompt` skill.
+
+`tests/vibesys/golden/snapshots/` is read by no test (nothing calls
+`assert_prompt_snapshot` since #2032 and #2044), so regenerating it checks
+nothing.
 
 ## Isolation and timeout verdicts
 

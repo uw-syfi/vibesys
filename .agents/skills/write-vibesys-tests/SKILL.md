@@ -62,9 +62,12 @@ conformance corpus.
    on it; do not write a faulty Fake per test.
    Unenforced: a second fault mechanism is a design choice a check cannot
    tell from a legitimate Fake failure knob.
-7. **Pin goldens and protocol behavior in the shared fixtures.** Prompt
-   goldens go through `tests/vibesys/golden/helpers.py`; protocol changes
-   extend `tests/conformance/`, which
+7. **Pin goldens and protocol behavior in the shared fixtures.** Each prompt
+   golden lives beside the test that covers it; byte-exact ones compare
+   through `tests/vibesys/golden/helpers.py:assert_exact_text`. Which golden
+   covers which prompt, and how to update one, is in the `write-agent-prompt`
+   skill's goldens reference. Protocol changes extend `tests/conformance/`,
+   which
    `clients/tools/scripts/check_conformance_corpus.mjs` gates for coverage.
 8. **Stay inside the CI budgets.** The whole-run wall-time thresholds are the
    `CI_WALL_TIME_*` values in `.github/workflows/test.yml`, checked by
