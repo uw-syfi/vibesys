@@ -447,15 +447,36 @@ class _Loop:
             raise failure
 
     async def _heartbeat(self) -> None:
-        """Renew the lease every third of its duration until cancelled."""
+        """Renew the lease a third of its duration after the last renewal, and tell core.
+
+        Core learns of a renewal at the next commit, which may come in the middle of a loop
+        iteration that publishes or waits for requests. So the proof of life core holds is at
+        most one renewal interval old, plus the longest stretch without a commit (one
+        publication, or a wait for requests). Queuing the renewal only at the top of the
+        next iteration added every publication of the iteration to that age.
+        """
         while True:
-            await self._clock.sleep(self._config.lease_duration / 3)
-            self._renew(self._read())
+            # Sleep until the next renewal is due, not for a fixed period: the loop also
+            # renews, and a period out of phase with it wakes just short of due, skips,
+            # and leaves up to two intervals between renewals.
+            due = self._renewal_due()
+            await self._clock.sleep(max(due - self._read(), 0.0))
+            if self._renewal_due() == due:
+                # Renew even if float rounding woke this a hair before ``due``; checking
+                # ``now >= due`` again could skip it and sleep for nothing, forever.
+                self._renew_now(self._read())
+            self._shell.record_renewal()
+
+    def _renewal_due(self) -> float:
+        return self._renewed_at + self._config.lease_duration / 3
 
     def _renew(self, now: float) -> None:
-        if now - self._renewed_at >= self._config.lease_duration / 3:
-            self._shell.renew(now_at=now, lease_duration=self._config.lease_duration)
-            self._renewed_at = now
+        if now >= self._renewal_due():
+            self._renew_now(now)
+
+    def _renew_now(self, now: float) -> None:
+        self._shell.renew(now_at=now, lease_duration=self._config.lease_duration)
+        self._renewed_at = now
 
     def _due_controls(self, now: float) -> tuple[CoreEvent, ...]:
         core = self._core()
@@ -535,7 +556,7 @@ class _Loop:
         past_deadline = now >= core.run.deadline_at
         if due is None and not paused and (not recovering or past_deadline):
             raise RunStalledError(_describe(core, self._stall_notes()))
-        wake = [self._renewed_at + self._config.lease_duration / 3]
+        wake = [self._renewal_due()]
         if due is not None:
             wake.append(due)
         if recovering and due is None:
@@ -556,7 +577,7 @@ class _Loop:
         the wait itself; the heartbeat renews the lease.
         """
         now = self._read()
-        wake = [self._renewed_at + self._config.lease_duration / 3]
+        wake = [self._renewal_due()]
         if due is not None and due > now:
             wake.append(due)
         if self._controls is not None:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from itertools import pairwise
 
+import pytest
 from hypothesis import Phase, example, given, settings
 from hypothesis import strategies as st
 from tests.support.skeleton_world import LEASE
@@ -53,3 +54,35 @@ def test_core_always_holds_a_proof_of_life_at_most_one_renewal_old(
     commits = [*timed.alive, (timed.ended_at, timed.ended_at)]
     stale = max(later - proof for (_, proof), (later, _) in pairwise(commits))
     assert stale <= _RENEWAL + _SLACK_S
+
+
+@pytest.mark.parametrize(
+    "publications_per_renewal",
+    [pytest.param(2.0, marks=pytest.mark.slow), pytest.param(1.0, marks=pytest.mark.slow), 0.5],
+)
+def test_a_slow_publication_delays_the_proof_of_life_by_at_most_its_own_length(
+    publications_per_renewal: float,
+) -> None:
+    """Core's proof of life is at most one renewal interval plus one publication old.
+
+    Nothing commits while the loop awaits a publication, so a host that dies then is credited
+    up to one publication on top of one renewal interval; that is the real bound. Before,
+    a renewal reached core only at the top of the next loop iteration, so the publications
+    of one iteration added up (three of them: 100 s against a 67 s bound), and the heartbeat
+    slept a fixed period out of phase with the loop's renewals, so up to two intervals
+    passed between renewals.
+    """
+    publish_s = _RENEWAL / publications_per_renewal
+    timed = run_timed(
+        StaggeredStrategy(config=StaggeredConfig(workers=1)),
+        Plan(
+            duration=lambda _worker, _ordinal: 1.5 * LEASE,
+            control_poll_s=4 * LEASE,
+            publish_s=publish_s,
+        ),
+    )
+
+    assert timed.failure is None
+    commits = [*timed.alive, (timed.ended_at, timed.ended_at)]
+    stale = max(later - proof for (_, proof), (later, _) in pairwise(commits))
+    assert stale <= _RENEWAL + publish_s + _SLACK_S

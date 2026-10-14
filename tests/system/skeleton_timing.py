@@ -65,6 +65,10 @@ if TYPE_CHECKING:
         CoreRuntimeBindings,
         ExecutionContext,
         ExecutionOutcome,
+        Publication,
+        PublicationAcknowledgement,
+        PublicationContext,
+        PublicationDelivery,
         RuntimeRecord,
     )
     from vs_slurm.api import ClusterSubmitOutcome, SlurmBatchRequest, SlurmJobRequest
@@ -383,6 +387,23 @@ class Plan:
     pause_when: Callable[[TurnTimeline, HoldingCluster], bool] | None = None
     control_poll_s: float = 30.0
     observe_s: float = 1.0
+    publish_s: float = 0.0
+    """How long each publication takes to deliver, on the virtual clock."""
+
+
+@dataclass
+class _SlowDelivery:
+    """Delivers each publication through ``inner`` after ``seconds`` of virtual time."""
+
+    inner: PublicationDelivery
+    clock: VirtualClock
+    seconds: float
+
+    async def publish(
+        self, publication: Publication, context: PublicationContext
+    ) -> PublicationAcknowledgement:
+        await self.clock.sleep(self.seconds)
+        return await self.inner.publish(publication, context)
 
 
 def run_timed(strategy: SkeletonStrategy, plan: Plan) -> Timed:
@@ -447,9 +468,8 @@ async def _play(path: Path, clock: VirtualClock, strategy: SkeletonStrategy, pla
         )
         channel = RuntimeRunControlChannel(_ignore, threads=OsThreads())
         process = world.runtime()
-        host = CoreRunHost(
-            process.shell, process.delivery, clock, RunControlBridge(channel, _Steers())
-        )
+        delivery = _SlowDelivery(process.delivery, clock, plan.publish_s)
+        host = CoreRunHost(process.shell, delivery, clock, RunControlBridge(channel, _Steers()))
         config = RunLoopConfig(
             host_id="timed",
             lease_duration=LEASE,
