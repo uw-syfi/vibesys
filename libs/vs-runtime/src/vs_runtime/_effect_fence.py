@@ -18,8 +18,8 @@ entry (``ReceiptStore.exclusive``), and a creation outside the store enters agai
 it commits, so a close that came in between stops it.
 
 ``NothingHeld`` is the only proof ``ObservationFacts.never_held`` accepts, and only this
-module makes one: from a close of a fence nobody entered, or from ``cleared`` once the closer
-removed what every entry may have made and no entry can still be creating. An entry can
+module makes one: from a close of a fence nobody entered, or from ``cleared`` with typed
+``Evidence`` that the entries hold nothing, once no entry can still be creating. An entry can
 still be creating while it has not left and its host is not older than the closer's: an
 older host is a process a restart replaced (fencing a still running stale host is the host
 epoch's job, not this fence's).
@@ -168,6 +168,35 @@ class MayHold:
 type Closure = NothingHeld | MayHold
 
 
+@dataclass(frozen=True)
+class Unrecorded:
+    """Read after the close: the record an entry writes with its creation is absent for ``key``.
+
+    For a creation that is itself a record written in the same locked step as its entry (a
+    binding, a job registration, a journal row), an entry without the record created nothing.
+    """
+
+    key: FenceKey
+
+
+@dataclass(frozen=True)
+class Removed:
+    """The closer removed what the entries of ``key`` created (an unbound worktree)."""
+
+    key: FenceKey
+
+
+@dataclass(frozen=True)
+class OwnerNotApplied:
+    """The owner of ``key``'s effect, asked after the close, reports that it did not happen."""
+
+    key: FenceKey
+
+
+type Evidence = Unrecorded | Removed | OwnerNotApplied
+"""Why nothing is held behind a closed fence that requests entered; ``cleared`` requires one."""
+
+
 class StillCreatingError(Exception):
     """``cleared`` was asked for a fence an entry may still be creating behind."""
 
@@ -239,15 +268,21 @@ class EffectFences:
 
         return self._store.modify(_FAMILY, _PART, key.storage_key, _FenceRecord, decide)
 
-    def cleared(self, closure: MayHold) -> NothingHeld:
-        """Nothing is held: the closer removed what every entry made, and none is still creating.
+    def cleared(self, closure: MayHold, evidence: Evidence) -> NothingHeld:
+        """Nothing is held: ``evidence`` shows the entries hold nothing, and none is still creating.
 
-        Only the closer may call this, after it removed everything the entries of the closed
-        fence may have created. Raises ``StillCreatingError`` for a live closure.
+        Raises ``StillCreatingError`` for a live closure and ``TypeError`` for evidence about
+        another fence.
         """
         if closure.live:
             message = f"an entry of {closure.key.storage_key} may still be creating"
             raise StillCreatingError(message)
+        if evidence.key != closure.key:
+            message = (
+                f"evidence about {evidence.key.storage_key} clears no other fence than its own, "
+                f"not {closure.key.storage_key}"
+            )
+            raise TypeError(message)
         return NothingHeld(closure.key, _MINT)
 
 
@@ -256,10 +291,14 @@ __all__ = [
     "Closure",
     "EffectFences",
     "Entered",
+    "Evidence",
     "FenceKey",
     "FenceKind",
     "Fenced",
     "MayHold",
     "NothingHeld",
+    "OwnerNotApplied",
+    "Removed",
     "StillCreatingError",
+    "Unrecorded",
 ]

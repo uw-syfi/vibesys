@@ -109,12 +109,16 @@ from vs_runtime._core_wiring import (
 from vs_runtime._effect_fence import (
     EffectFences,
     Entered,
+    Evidence,
     Fenced,
     FenceKey,
     FenceKind,
     MayHold,
     NothingHeld,
+    OwnerNotApplied,
+    Removed,
     StillCreatingError,
+    Unrecorded,
 )
 from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
@@ -286,6 +290,7 @@ __all__ = [
     "EffectFences",
     "Entered",
     "EvaluationRequests",
+    "Evidence",
     "EvidenceEntry",
     "EvidenceLookup",
     "EvidenceRecorder",
@@ -340,6 +345,7 @@ __all__ = [
     "OwedSubmissions",
     "OwnerEvent",
     "OwnerEventRejectedError",
+    "OwnerNotApplied",
     "Performed",
     "Performer",
     "ProductionCoreTransitions",
@@ -358,6 +364,7 @@ __all__ = [
     "RefusingRequestExecution",
     "RegisteredOperationRequests",
     "ReleasedRunInvocations",
+    "Removed",
     "RenderArtifactsOwner",
     "Replayed",
     "RequestExecutors",
@@ -408,6 +415,7 @@ __all__ = [
     "TurnDispatcher",
     "TurnMessages",
     "TurnYields",
+    "Unrecorded",
     "ValidateLocalOwner",
     "VerifyRevisionOwner",
     "WinnerSelection",

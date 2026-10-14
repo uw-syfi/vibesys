@@ -70,6 +70,7 @@ from vs_runtime._effect_fence import (
     FenceKind,
     MayHold,
     NothingHeld,
+    Unrecorded,
 )
 from vs_runtime._evaluation_jobs import (
     JobView,
@@ -664,7 +665,11 @@ class MeasurementRequests:
             # record was fenced before it registered, or died first.
             if submitting:
                 return self._unknown(request, context, "the job's submission is still running")
-            proof = closure if isinstance(closure, NothingHeld) else self._fences.cleared(closure)
+            proof = (
+                closure
+                if isinstance(closure, NothingHeld)
+                else self._fences.cleared(closure, Unrecorded(fence))
+            )
             return self._never_held(
                 request, context, proof, fence, "job is not owned by this scope"
             )

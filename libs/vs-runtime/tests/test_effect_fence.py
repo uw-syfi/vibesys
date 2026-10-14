@@ -22,7 +22,9 @@ from vs_runtime.api.core import (
     NothingHeld,
     ObservationFacts,
     ReceiptStore,
+    Removed,
     StillCreatingError,
+    Unrecorded,
 )
 from vs_sim.api.testing import examples
 
@@ -88,9 +90,9 @@ def test_enter_and_close_answer_as_the_model_does_and_nothing_held_stays_true(
                     assert closure.live == live
                     if live:
                         with pytest.raises(StillCreatingError):
-                            fences.cleared(closure)
+                            fences.cleared(closure, Removed(key))
                     else:
-                        assert fences.cleared(closure).key == key
+                        assert fences.cleared(closure, Removed(key)).key == key
                         proven[index] = True
 
 
@@ -133,3 +135,23 @@ def test_a_proof_copied_or_meant_for_another_fence_proves_nothing() -> None:
             replace(live, live=False)
         with pytest.raises(TypeError, match="only from never_held"):
             replace(facts, diagnostic="copied")
+
+
+def test_evidence_clears_only_the_fence_it_is_about() -> None:
+    """``cleared`` requires evidence that the entries hold nothing, about the closed fence.
+
+    Before, ``cleared(closure)`` took the caller's word: any finished closure became a proof.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        fences = EffectFences(
+            ReceiptStore(Project.open(Path(directory)).state.state_store_namespace("run"))
+        )
+        closed, other = _KEYS
+        fences.enter(closed, by=RequestId(root="dispatch-a"), host=_host(1))
+        fences.leave(closed, by=RequestId(root="dispatch-a"))
+        closure = fences.close(closed, by=RequestId(root="cancel-r"), host=_host(1))
+        assert isinstance(closure, MayHold)
+        assert not closure.live
+        with pytest.raises(TypeError, match="clears no other fence"):
+            fences.cleared(closure, Unrecorded(other))
+        assert fences.cleared(closure, Unrecorded(closed)).key == closed

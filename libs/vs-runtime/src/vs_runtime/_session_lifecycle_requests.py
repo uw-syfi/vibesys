@@ -75,7 +75,7 @@ from vs_runtime._access_settlement import (
 )
 from vs_runtime._core_identity import CoreRequestId, core_identity
 from vs_runtime._core_requests import ExecutionContext, ExecutionOutcome, ExecutionResult
-from vs_runtime._effect_fence import EffectFences, MayHold, NothingHeld
+from vs_runtime._effect_fence import EffectFences, MayHold, NothingHeld, Unrecorded
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
@@ -489,7 +489,6 @@ class SessionLifecycleRequests:
             return _unknown("a dispatch of the turn is in flight and may still start", binding)
         # Every dispatch ended without a provider call (refused, or its host replaced), and
         # none can start any more: the cancel ended the turn.
-        self._fences.cleared(closure)
         return _released(
             ObservationStatus.CANCELLED, binding, "the turn was cancelled before it began"
         )
@@ -508,7 +507,11 @@ class SessionLifecycleRequests:
             # without a binding only has entries that refused: nothing was bound.
             if isinstance(closure, MayHold) and closure.live:
                 return _unknown("an ensure of the session is in flight")
-            proof = closure if isinstance(closure, NothingHeld) else self._fences.cleared(closure)
+            proof = (
+                closure
+                if isinstance(closure, NothingHeld)
+                else self._fences.cleared(closure, Unrecorded(fence))
+            )
             return ObservationFacts.never_held(proof, fence, "no ensured session to close")
         try:
             self._sessions.release(AgentSessionKey.parse(binding.session_key))

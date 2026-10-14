@@ -63,6 +63,7 @@ from vs_runtime._effect_fence import (
     FenceKind,
     MayHold,
     NothingHeld,
+    Removed,
 )
 from vs_runtime._observation_factory import (
     ObservationFactory,
@@ -393,7 +394,7 @@ class RuntimeWorkspaceRequests:
                 await leftover.discard()
             except (OSError, BaseExceptionGroup) as error:
                 return _unknown(f"an unbound worktree of the attempt was not removed: {error}")
-        return _never_held(self._fences.cleared(closure), attempt, _WITHDRAWN)
+        return _never_held(self._fences.cleared(closure, Removed(closure.key)), attempt, _WITHDRAWN)
 
     async def _attempt_request(
         self,
