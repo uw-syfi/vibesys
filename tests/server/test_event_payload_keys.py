@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from server.events import EventData, EventType, RunEvent
 from vibesys.api import CoreEvent, CoreEventType
@@ -43,7 +43,7 @@ def _payloads(model: type[EventPayload]) -> st.SearchStrategy[EventPayload]:
     return st.fixed_dictionaries(required).map(model.model_validate)
 
 
-def _record(envelope: type[BaseModel], data: dict[str, object]) -> str:
+def _record(envelope: type[RunEvent | CoreEvent], data: dict[str, object]) -> str:
     """One recorded event line carrying ``data`` as its payload."""
     event_type = EventType.RUN_STARTED if envelope is RunEvent else CoreEventType.RUN_STARTED
     event = envelope.model_validate({"timestamp": _AT, "type": event_type})
@@ -60,7 +60,7 @@ _RETIRING = [case for case in _CASES if case[1].retired_keys]
 @settings(max_examples=examples(pr=60, nightly=2000))
 @given(case=st.sampled_from(_CASES), data=st.data(), key=st.text(min_size=1, max_size=12))
 def test_an_unknown_payload_key_is_rejected_by_name(
-    case: tuple[type[BaseModel], type[EventPayload]], data: st.DataObject, key: str
+    case: tuple[type[RunEvent | CoreEvent], type[EventPayload]], data: st.DataObject, key: str
 ) -> None:
     envelope, kind = case
     payload = data.draw(_payloads(kind))
@@ -79,7 +79,7 @@ def test_an_unknown_payload_key_is_rejected_by_name(
 @settings(max_examples=examples(pr=20, nightly=500))
 @given(case=st.sampled_from(_RETIRING), data=st.data(), value=_JSON_SCALARS)
 def test_a_retired_payload_key_replays_and_is_never_written_again(
-    case: tuple[type[BaseModel], type[EventPayload]], data: st.DataObject, value: object
+    case: tuple[type[RunEvent | CoreEvent], type[EventPayload]], data: st.DataObject, value: object
 ) -> None:
     envelope, kind = case
     payload = data.draw(_payloads(kind))
