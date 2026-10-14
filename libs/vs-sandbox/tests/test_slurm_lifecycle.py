@@ -30,7 +30,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     ClusterCancelOutcome,
     ClusterSubmitOutcome,
@@ -217,7 +217,7 @@ async def _publishes_monotonically(schedule: _Schedule, operations: list[str]) -
         await executor.close()
 
 
-@settings(max_examples=30)
+@settings(max_examples=examples(pr=5, nightly=30))
 @given(
     queue_wait=_SECONDS,
     run=_SECONDS,
@@ -292,7 +292,7 @@ async def _stopped_while_active(schedule: _Schedule) -> None:
         assert cluster.scancels == 1
 
 
-@settings(max_examples=30)
+@settings(max_examples=examples(pr=5, nightly=30))
 @given(
     queue_wait=st.floats(0, 95, allow_nan=False),
     completing=st.floats(0, _CONFIRMATION_S - 1, allow_nan=False),

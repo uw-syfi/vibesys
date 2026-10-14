@@ -4,11 +4,12 @@ A logical clock stands in for the shell. Nothing here sleeps or reads wall time.
 """
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
 
 from .test_measurements import committed, observation, requested
 
@@ -176,6 +177,7 @@ def test_a_poll_that_reached_its_limit_is_polled_anew_once(interval: float, extr
     assert world.tick(late + 2 * QUARTER) == []
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(interval=intervals, extra=caps, retries=st.integers(min_value=1, max_value=12))
 def test_an_unknown_poll_is_retried_within_the_backoff_bound(
     interval: float, extra: float, retries: int

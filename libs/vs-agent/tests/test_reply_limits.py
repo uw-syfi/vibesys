@@ -25,6 +25,7 @@ from vs_agent.api import (
     reply_breach,
 )
 from vs_agent.api.testing import FakeAgentClient, FakeProvider, assistant_text
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -67,7 +68,7 @@ def _executors(chunks: list[str]) -> dict[str, AgentClient | FakeAgentClient]:
     padding=_PADDING,
     pieces=st.integers(min_value=1, max_value=4),
 )
-@settings(max_examples=15, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=15), deadline=None)
 def test_a_whitespace_flood_fails_the_turn_however_it_is_chunked(
     tmp_path_factory: pytest.TempPathFactory,
     implementation: str,
@@ -88,7 +89,7 @@ def test_a_whitespace_flood_fails_the_turn_however_it_is_chunked(
 
 @pytest.mark.parametrize("implementation", ["client", "fake"])
 @given(filler=_FILLER)
-@settings(max_examples=6, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=6), deadline=None)
 def test_an_oversized_reply_fails_the_turn(
     tmp_path_factory: pytest.TempPathFactory, implementation: str, filler: str
 ) -> None:

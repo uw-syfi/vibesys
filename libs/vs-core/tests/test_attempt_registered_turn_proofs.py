@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 import vs_core.api as core
 
+from .guard_rows import guard_rows
 from .test_attempt_invocation_proofs import context, invocation_fixture
 
 
@@ -159,19 +160,28 @@ def restored(state: core.CoreState, codec: core.OperationRegistry) -> core.CoreS
 
 
 @pytest.mark.parametrize(
-    "receipt_kind",
-    ["absent", "rejected", "mismatched", "exact", "no-membership", "foreign-decision"],
-)
-@pytest.mark.parametrize("episode", ["absent", "old", "current"])
-@pytest.mark.parametrize("correlation", ["exact", "unrelated"])
-@pytest.mark.parametrize("action", ["billing", "checkpoint", "refund"])
-@pytest.mark.parametrize(
-    "lifecycle",
-    [
-        (phase, status)
-        for phase in (core.SessionPhase.EXECUTING, core.SessionPhase.ACQUIRING)
-        for status in (core.ObservationStatus.SUCCEEDED, core.ObservationStatus.REJECTED)
-    ],
+    ("receipt_kind", "episode", "correlation", "action", "lifecycle"),
+    # Only an exact receipt can prove; what the proof then reads (episode, correlation, action,
+    # phase) it reads together, so those are crossed in full and the receipt kinds by pairs.
+    guard_rows(
+        ["absent", "rejected", "mismatched", "exact", "no-membership", "foreign-decision"],
+        ["absent", "old", "current"],
+        ["exact", "unrelated"],
+        ["billing", "checkpoint", "refund"],
+        [
+            (phase, status)
+            for phase in (core.SessionPhase.EXECUTING, core.SessionPhase.ACQUIRING)
+            for status in (core.ObservationStatus.SUCCEEDED, core.ObservationStatus.REJECTED)
+        ],
+        positive=(
+            "exact",
+            "current",
+            "exact",
+            "billing",
+            (core.SessionPhase.EXECUTING, core.ObservationStatus.SUCCEEDED),
+        ),
+        joint=(1, 2, 3, 4),
+    ),
 )
 def test_registered_turn_requires_exact_canonical_operation_authority(
     receipt_kind: str,

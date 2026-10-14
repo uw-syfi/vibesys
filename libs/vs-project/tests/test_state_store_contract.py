@@ -29,7 +29,7 @@ from vs_project.api import (
     Unknown,
 )
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_until_started_sync
+from vs_sim.api.testing import HANG_GUARD_S, examples, start_thread, wait_until_started_sync
 
 if TYPE_CHECKING:
     from typing import Protocol
@@ -113,7 +113,7 @@ def test_empty_store_and_atomic_revision_conflict(make_store: StoreFactory, tmp_
 @given(
     operations=st.lists(st.tuples(st.booleans(), st.binary(max_size=64)), min_size=1, max_size=25)
 )
-@settings(max_examples=20)
+@settings(max_examples=examples(pr=5, nightly=20))
 def test_commit_sequences_follow_compare_and_swap(
     make_store: StoreFactory, operations: list[tuple[bool, bytes]]
 ) -> None:
@@ -299,7 +299,7 @@ def test_quarantine_replaces_ready_record_in_the_same_revision_domain(
     faults=st.lists(st.sampled_from(list(CommitFault)), min_size=1, max_size=12),
     payload=st.binary(max_size=64),
 )
-@settings(max_examples=20)
+@settings(max_examples=examples(pr=5, nightly=20))
 def test_fault_histories_preserve_prior_or_complete_successor(
     make_store: StoreFactory, faults: list[CommitFault], payload: bytes
 ) -> None:
@@ -565,7 +565,7 @@ def test_renewal_does_not_shrink_the_persisted_lease(
         max_size=12,
     )
 )
-@settings(max_examples=20)
+@settings(max_examples=examples(pr=5, nightly=20))
 def test_record_and_takeover_histories_preserve_cas_and_fence_authority(
     make_store: StoreFactory, operations: list[tuple[bool, bytes, int]]
 ) -> None:

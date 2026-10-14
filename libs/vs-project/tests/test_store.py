@@ -30,7 +30,7 @@ from vs_project.api import (
     is_project_state_path,
 )
 from vs_project.api.testing import run_execution_record
-from vs_sim.api.testing import file_size_limit
+from vs_sim.api.testing import examples, file_size_limit
 
 NOW = datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC)
 UNIQUE = UUID("12345678-1234-5678-1234-567812345678")
@@ -827,7 +827,9 @@ def test_list_runs_skips_an_incompatible_run_and_surfaces_it(tmp_path: Path) -> 
 
 @given(validity=st.lists(st.booleans(), min_size=1, max_size=6))
 @settings(
-    max_examples=20, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=5, nightly=20),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 def test_list_runs_property_any_mix_of_valid_and_incompatible_runs(
     validity: list[bool], tmp_path_factory: pytest.TempPathFactory

@@ -9,6 +9,7 @@ import subprocess
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vs_sim.api.testing import examples
 from vs_slurm.api import PORT_PLACEHOLDER, shell_join_with_port
 
 _PORT = "20047"
@@ -41,7 +42,7 @@ def _run(line: str) -> tuple[int, str, str]:
     )
 
 
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=60), deadline=None)
 @given(st.lists(_ARGUMENT, min_size=1, max_size=4))
 def test_every_argument_reaches_the_command_with_only_the_port_expanded(
     arguments: list[str],
@@ -54,7 +55,7 @@ def test_every_argument_reaches_the_command_with_only_the_port_expanded(
     ]
 
 
-@settings(max_examples=20, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=20), deadline=None)
 @given(status=st.integers(min_value=0, max_value=125))
 def test_a_wrapped_script_with_a_port_argument_keeps_its_own_exit_status(status: int) -> None:
     """Regression for r19: a failed trusted benchmark exited 0 on Slurm.

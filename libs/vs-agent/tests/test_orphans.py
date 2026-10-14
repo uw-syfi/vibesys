@@ -16,6 +16,7 @@ from vs_agent.api import OrphanReapError, reap_orphaned_agents
 from vs_agent.api.testing import DockerResult, docker_result, docker_timed_out
 from vs_sandbox.api import RUN_ID_LABEL
 from vs_sandbox.fake_docker_engine import FakeDockerEngine
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -49,7 +50,7 @@ class _FailingReap(FakeConfinement):
         raise agentshim.ReapError(msg)
 
 
-@settings(max_examples=40, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=40), deadline=None)
 @given(
     own=st.integers(min_value=0, max_value=4),
     others=st.integers(min_value=0, max_value=3),

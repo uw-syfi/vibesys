@@ -18,6 +18,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vs_sim.api.testing import examples
 from vs_slurm.api import (
     ClusterCancelRequested,
     ClusterSubmitted,
@@ -112,7 +113,7 @@ def test_a_cancel_set_during_the_pause_ends_the_wait_without_the_interval_passin
     assert recorded_commands(tmp_path).count(f"scancel {JOB_ID}") == 1
 
 
-@settings(max_examples=15, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=15), deadline=None)
 @given(
     pauses_before_cancel=st.integers(min_value=0, max_value=4),
     poll_interval=st.floats(min_value=0.01, max_value=60.0),
@@ -135,7 +136,7 @@ def test_a_cancel_is_seen_at_the_first_pause_after_it_is_set(
     assert recorded_commands(state).count(f"scancel {JOB_ID}") == 1
 
 
-@settings(max_examples=10, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=10), deadline=None)
 @given(inspections_before_cancel=st.integers(min_value=0, max_value=3))
 def test_a_cancel_asks_the_scheduler_before_it_records_the_tombstone(
     tmp_path_factory: pytest.TempPathFactory, inspections_before_cancel: int

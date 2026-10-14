@@ -3,10 +3,11 @@
 import hashlib
 import json
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_continuations import fixture, job_change
 from .test_session_turns import (
@@ -186,6 +187,7 @@ def test_profiler_yield_checkpoint_authorization_and_one_resumed_dispatch() -> N
     assert reload_step(committed.state, checkpoint_event(state, request)).events == ()
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     status=st.sampled_from(list(core.ObservationStatus)),
     accepted=st.booleans(),
@@ -236,6 +238,7 @@ def test_run_checkpoint_revision_must_equal_the_observed_revision(carried: str) 
     assert bool(result.state.sessions.run_checkpoints) == (carried == "same")
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(order=st.lists(st.sampled_from(["yield", "checkpoint", "foreign"]), min_size=0, max_size=15))
 def test_pending_suspension_replays_once_with_reordered_duplicate_and_stale_events(
     order: list[str],
@@ -303,6 +306,7 @@ def run_drain_state() -> tuple[core.CoreState, core.RunSessionsDrainRequested]:
     return state, core.RunSessionsDrainRequested(scope=scope(), authority=decision.decision_id)
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     authority=st.booleans(),
     generation=st.booleans(),

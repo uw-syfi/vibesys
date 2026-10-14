@@ -16,6 +16,7 @@ from vs_sandbox.api.slurm import (
     agent_gpu_capability,
     load_slurm_policy,
 )
+from vs_sim.api.testing import examples
 from vs_slurm.api import load_slurm_config
 
 _SERVICE = (
@@ -72,7 +73,7 @@ _unknown_keys = st.from_regex(r"[a-z][a-z_]{0,15}", fullmatch=True).filter(
 )
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=25), deadline=None)
 @given(key=_unknown_keys)
 def test_an_unknown_agent_gpu_key_is_rejected_naming_it(key: str) -> None:
     with tempfile.TemporaryDirectory() as directory:
@@ -92,7 +93,7 @@ def test_a_key_of_the_slurm_gpu_table_that_the_slurm_file_says_elsewhere_is_reje
 
 
 @pytest.mark.parametrize("field", ["max_gpus", "max_time_minutes", "default_time_minutes"])
-@settings(max_examples=15, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=15), deadline=None)
 @given(value=st.integers(max_value=0))
 def test_a_non_positive_agent_gpu_limit_is_rejected_naming_the_key(field: str, value: int) -> None:
     table = _AGENT_GPU.replace(f"{field} =", f"#{field} =") if field in _AGENT_GPU else _AGENT_GPU
@@ -102,7 +103,7 @@ def test_a_non_positive_agent_gpu_limit_is_rejected_naming_the_key(field: str, v
             load_slurm_policy(path)
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=25), deadline=None)
 @given(maximum=st.integers(1, 64), default=st.integers(1, 600), limit=st.integers(1, 600))
 def test_a_default_time_above_the_time_limit_is_rejected_and_otherwise_requests_obey_limits(
     maximum: int, default: int, limit: int

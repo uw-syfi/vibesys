@@ -24,6 +24,7 @@ from vs_sandbox.api import (
     workspace_container_root,
 )
 from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -222,7 +223,10 @@ def test_the_workspace_mounts_at_its_host_path(tmp_path: Path) -> None:
     assert _flag_values(_run_call(engine), "--workdir") == [str(workspace)]
 
 
-@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=5, nightly=40),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(workspace=_ABSOLUTE_DIRS, relative=st.lists(_SEGMENT, max_size=3))
 def test_every_host_path_under_the_workspace_is_the_same_path_in_the_container(
     tmp_path: Path, workspace: Path, relative: list[str]
@@ -240,7 +244,10 @@ def test_every_host_path_under_the_workspace_is_the_same_path_in_the_container(
     assert workspace_container_root(str(workspace), same_path=False) == "/workspace"
 
 
-@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=5, nightly=40),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(workspace=_ABSOLUTE_DIRS, relative=st.lists(_SEGMENT, max_size=3))
 def test_exec_runs_in_the_agent_cwd_at_the_host_path(
     tmp_path: Path, workspace: Path, relative: list[str]
@@ -262,7 +269,10 @@ def test_exec_runs_in_the_agent_cwd_at_the_host_path(
         sandbox.stop()
 
 
-@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=5, nightly=40),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(workspace=_ABSOLUTE_DIRS, relative=st.lists(_SEGMENT, max_size=3))
 def test_a_same_path_workspace_needs_no_container_runtime(
     tmp_path: Path, workspace: Path, relative: list[str]

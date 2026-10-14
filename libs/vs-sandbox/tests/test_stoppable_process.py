@@ -29,7 +29,7 @@ from vs_sandbox.process_execution import (
     StopSignal,
     wait_stoppable,
 )
-from vs_sim.api.testing import SimThreads
+from vs_sim.api.testing import SimThreads, examples
 
 SEEDS = st.one_of(st.none(), st.integers(0, 2**32))
 _NATURAL_STATUS = 5
@@ -144,7 +144,7 @@ _SCENARIOS = st.builds(
 )
 
 
-@settings(max_examples=150, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=150), deadline=None)
 @given(seed=SEEDS, scenario=_SCENARIOS, with_remote=st.booleans())
 def test_a_process_is_stopped_by_whichever_comes_first_and_killed_only_after_the_grace(
     seed: int | None,

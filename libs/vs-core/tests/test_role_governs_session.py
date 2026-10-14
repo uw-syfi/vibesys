@@ -16,6 +16,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import FakeView, FlowRun, Prompt, fake_search
+from vs_sim.api.testing import examples
 
 from .flow_support import Config, Plan, open_workspace
 
@@ -26,7 +27,9 @@ if TYPE_CHECKING:
 
     from vs_core.api.testing import Asked
 
-_SETTINGS = settings(max_examples=25, deadline=None, derandomize=True, database=None)
+_SETTINGS = settings(
+    max_examples=examples(pr=5, nightly=25), deadline=None, derandomize=True, database=None
+)
 _RESTARTING = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart"])
 
 EXCHANGES = core.Exchanges(correction="c.j2", resume="r.j2", wait_unrecorded="w.j2")

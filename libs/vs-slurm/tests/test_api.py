@@ -16,6 +16,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from vs_sim.api.testing import examples
 from vs_slurm.api import (
     SlurmBatchHandle,
     SlurmBatchRequest,
@@ -554,7 +555,7 @@ _ENVIRONMENT_VALUES = st.text(
 
 
 @given(host=st.dictionaries(_ENVIRONMENT_NAMES, _ENVIRONMENT_VALUES, max_size=12))
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=60), deadline=None)
 def test_local_transport_processes_get_exactly_the_login_environment(host: dict[str, str]) -> None:
     """Whatever the host holds, a local-transport process gets only the login-like names."""
     process = _FakeSshProcess(program="bash")

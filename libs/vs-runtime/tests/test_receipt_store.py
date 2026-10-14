@@ -26,7 +26,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.executor_contexts import RevocableLease, context_for
 from vs_runtime.api.operation_fixtures import SCOPE
-from vs_sim.api.testing import Gate
+from vs_sim.api.testing import Gate, examples
 
 if TYPE_CHECKING:
     from vs_runtime.api.core import ExecutionContext
@@ -148,7 +148,9 @@ def store_at(root: Path) -> ReceiptStore:
 
 
 @settings(
-    suppress_health_check=[HealthCheck.function_scoped_fixture], deadline=None, max_examples=25
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    deadline=None,
+    max_examples=examples(pr=5, nightly=25),
 )
 @given(repeats=st.integers(min_value=1, max_value=5))
 async def test_a_settled_effect_runs_once_however_often_the_request_is_replayed(
@@ -185,7 +187,7 @@ async def test_a_live_duplicate_waits_for_and_replays_the_in_flight_result() -> 
         assert await run(store, Performer(), context) == Replayed(Done(value=1))
 
 
-@settings(deadline=None, max_examples=20)
+@settings(deadline=None, max_examples=examples(pr=5, nightly=20))
 @given(duplicates=st.integers(min_value=1, max_value=5))
 async def test_any_number_of_live_duplicates_share_one_performer(duplicates: int) -> None:
     with tempfile.TemporaryDirectory() as raw:

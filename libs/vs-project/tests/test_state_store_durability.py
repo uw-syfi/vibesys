@@ -18,6 +18,7 @@ from vs_project.api import (
     Project,
     StoredEnvelope,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vs_project.api import AtomicWriteStream
@@ -47,7 +48,7 @@ def _envelope(revision: int, payload: bytes = b"p") -> StoredEnvelope:
 
 
 @given(reads=st.integers(min_value=1, max_value=6))
-@settings(max_examples=10, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=10), deadline=None)
 def test_reloading_bytes_this_store_published_synchronizes_nothing(reads: int) -> None:
     with TemporaryDirectory() as directory:
         effects = _CountingEffects()

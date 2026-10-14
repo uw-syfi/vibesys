@@ -1,12 +1,13 @@
 """Run-owned session authority and execution manifests through public contracts."""
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
 import vs_core.api as core
 from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
 
 
 def _scope(generation: int = 0) -> core.Scope:
@@ -308,6 +309,7 @@ def test_run_checkpoint_pending_request_preserves_record_in_public_codec(generat
     assert unchanged.state.sessions.run_checkpoints == ()
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(st.integers(min_value=0, max_value=1000))
 def test_run_drain_requires_run_ownership_and_typed_stop_authority(generation: int) -> None:
     event = core.RunSessionsDrainRequested(

@@ -13,6 +13,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vs_runtime.api import SlotLease, SlotMeter, SlotMeterError
+from vs_sim.api.testing import examples
 
 
 class _Clock:
@@ -35,7 +36,7 @@ _OPERATIONS = st.lists(
 
 
 @given(operations=_OPERATIONS)
-@settings(max_examples=50)
+@settings(max_examples=examples(pr=5, nightly=50))
 def test_arbitrary_lease_sequences_match_occupancy_and_reload_is_idempotent(
     operations: list[tuple[str, int, int]],
 ) -> None:

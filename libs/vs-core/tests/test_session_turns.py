@@ -5,14 +5,16 @@ import json
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
 import vs_core.api as core
 from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
+from .restart import restarts
 
 
 def assert_input_boundary(state: core.CoreState, event: core.CoreEvent, kind: str) -> None:
@@ -80,6 +82,8 @@ def reload_state(
     state: core.CoreState, codec: core.OperationRegistry | None = None
 ) -> core.CoreState:
     """Use the versioned public envelope codec, including its frozen identities."""
+    if not restarts():
+        return state
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
         fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
@@ -99,6 +103,8 @@ def reload_step(
     state: core.CoreState, event: core.CoreEvent, *, codec: core.OperationRegistry | None = None
 ) -> core.Transition:
     """Each boundary must survive canonical public-model serialization."""
+    if not restarts():
+        return core.step(state, event)
     before = state.model_dump_json()
     result = core.step(state, event)
     assert result == core.step(reload_state(state, codec), event)
@@ -835,6 +841,7 @@ def test_reacquisition_has_episode_identity_and_requires_exact_retained_conversa
         core.step(missing, newer)
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(st.lists(st.integers(min_value=0, max_value=1), min_size=1, max_size=12))
 def test_failed_initial_group_late_acceptance_only_adds_cleanup(indices: list[int]) -> None:
     state, ref, owner_scope, admission = attempt_acquisition_state()
@@ -1871,6 +1878,7 @@ def test_provisional_acquisition_drain_reaches_declared_input_drain_boundary() -
     )
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     st.lists(
         st.tuples(

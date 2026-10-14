@@ -19,6 +19,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_session_sibling_fakes import fake_evaluation
 from .test_session_yield_completion import terminal_yield, yield_state
@@ -285,7 +286,7 @@ SCENARIOS = st.builds(
 )
 
 
-@settings(max_examples=300, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=300), deadline=None)
 @example(
     scenario=Scenario(
         access=core.Access.READ_ONLY,

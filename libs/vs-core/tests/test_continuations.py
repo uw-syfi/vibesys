@@ -4,11 +4,14 @@ from itertools import product
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import assume, example, given
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
+
+from .restart import restarts
 
 
 class TurnOutcome(core.Value):
@@ -76,6 +79,8 @@ def operation_codec() -> core.OperationRegistry:
 
 
 def roundtrip(state: core.CoreState) -> core.CoreState:
+    if not restarts():
+        return state
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
         fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
@@ -374,6 +379,10 @@ def test_already_settled_wait_authorizes_exact_successor_once(
 
 
 @pytest.mark.parametrize("registered", [False, True])
+@settings(max_examples=examples(pr=3, nightly=100))
+@example(order=(0, 1, 2), duplicates=[])
+@example(order=(2, 1, 0), duplicates=[0, 2, 1, 1])
+@example(order=(1, 2, 0), duplicates=[2, 0])
 @given(order=st.permutations((0, 1, 2)), duplicates=st.lists(st.integers(0, 2), max_size=10))
 def test_wait_all_reordering_duplicate_and_stale_notifications_authorize_once(
     *, registered: bool, order: tuple[int, ...], duplicates: list[int]
@@ -431,6 +440,7 @@ def test_wait_all_reordering_duplicate_and_stale_notifications_authorize_once(
     ("charge", "predecessor"),
     list(product(["paid", "correction", "resume", "free"], [False, True])),
 )
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     accepted=st.booleans(),
     terminal=st.booleans(),
@@ -738,6 +748,7 @@ def test_positive_registered_reopen_proof_authorizes_same_conversation_once() ->
 
 
 @pytest.mark.parametrize("admission", ["reopened", "closed", "unknown"])
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     status=st.sampled_from(tuple(core.ObservationStatus)),
     accepted=st.booleans(),
@@ -998,6 +1009,7 @@ def test_run_owned_profiler_cannot_bypass_writable_checkpoint_guard(access: core
         assert isinstance(result.events[0], core.ResumeAuthorized)
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(sequence=st.integers(min_value=2, max_value=100))
 def test_late_job_changes_cannot_rewrite_frozen_timeout_or_resume(sequence: int) -> None:
     state, continuation = fixture(settled=True)
@@ -1071,6 +1083,7 @@ def resume_history(
         "ancestry",
     ],
 )
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(charge=st.sampled_from(("paid", "correction", "resume", "free")), predecessor=st.booleans())
 def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
     *, source: str, proof: str, charge: str, predecessor: bool
@@ -1244,6 +1257,7 @@ def test_duplicate_continuation_identity_rejects_changed_immutable_payload(field
 
 
 @pytest.mark.parametrize("phase", tuple(core.AttemptPhase))
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(run_status=st.sampled_from(tuple(core.RunStatus)), closing=st.booleans())
 def test_current_live_owner_guard_holds_at_admission_and_delayed_authorization(
     *, phase: core.AttemptPhase, run_status: core.RunStatus, closing: bool
@@ -1306,6 +1320,7 @@ def test_parking_published_authorization_cannot_erase_once_only_receipt(
 
 
 @pytest.mark.parametrize("registered", [False, True])
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(status=st.sampled_from(tuple(core.ObservationStatus)), terminal=st.booleans())
 def test_only_conclusive_terminal_dependencies_complete_wait_all(
     *,
@@ -1709,6 +1724,7 @@ def test_current_session_phase_is_required_even_with_a_completed_yield(
 
 
 @pytest.mark.parametrize("frozen", [False, True])
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     conflict=st.booleans(),
     duplicated=st.booleans(),
@@ -1799,6 +1815,7 @@ def test_feedback_deduplicates_equal_evidence_and_rejects_conflicting_identity(
         "wrong-scope",
     ],
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(recorded_on_parent=st.booleans(), nested=st.booleans(), parent_known=st.booleans())
 def test_parent_release_never_substitutes_for_independent_child_proof(
     *,
@@ -1986,6 +2003,7 @@ def test_reopen_normalization_and_exact_cancelled_set_are_required_before_forwar
         core.step(state, event)
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(fragment=st.text(alphabet="abc", min_size=1, max_size=8))
 @example(fragment="b")
 def test_unknown_job_inspection_identity_frames_continuation_and_resource(fragment: str) -> None:

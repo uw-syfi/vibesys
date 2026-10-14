@@ -1101,7 +1101,7 @@ def _poll_after_cancel(kind: str) -> ExecutorPoll:
 
 
 @settings(
-    max_examples=examples(pr=8, nightly=40),
+    max_examples=examples(pr=5, nightly=40),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )

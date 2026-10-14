@@ -10,10 +10,11 @@ from __future__ import annotations
 from typing import Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_attempt_registered_turn_proofs import registered_state
 from .test_session_inputs import occurrence
@@ -73,6 +74,7 @@ def test_a_closed_reserver_returns_a_run_input_to_pending(disposition: _Disposit
     assert not result.events
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(fates=st.lists(st.sampled_from(["deliver", "rejected", "failed", "cancelled", "crash"])))
 def test_a_run_input_is_delivered_exactly_once_or_stays_pending(fates: list[_Fate]) -> None:
     item = _run_input()

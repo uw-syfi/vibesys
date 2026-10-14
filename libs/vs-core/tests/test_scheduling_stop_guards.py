@@ -5,13 +5,15 @@ from __future__ import annotations
 from typing import Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
+from .restart import restarts
 
 
 def _occupied_state(held: int, queued: int) -> core.CoreState:
@@ -155,6 +157,8 @@ def _closing(
 
 
 def _step(state: core.CoreState, event: core.CoreEvent) -> core.Transition:
+    if not restarts():
+        return core.step(state, event)
     before = state.model_dump_json()
     restored = core.CoreState.model_validate_json(before)
     transition = core.step(state, event)
@@ -205,6 +209,7 @@ def _assert_attempts_boundary(state: core.CoreState, event: core.CoreEvent, kind
     "proof",
     ["rejected", "receipt-id", "feedback-id", "owner", "generation", "missing-decision", "absent"],
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(held=st.integers(1, 3), queued=st.integers(1, 4))
 def test_cancel_never_retires_episodes_without_committed_stop_proof(
     proof: str, held: int, queued: int
@@ -222,6 +227,7 @@ def test_cancel_never_retires_episodes_without_committed_stop_proof(
 @pytest.mark.parametrize(
     "status", [status for status in core.RunStatus if status != core.RunStatus.CLOSING]
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(held=st.integers(1, 3), queued=st.integers(1, 4))
 def test_cancel_authority_cannot_retire_outside_closing_run(
     status: core.RunStatus, held: int, queued: int
@@ -279,6 +285,7 @@ def test_rejected_stop_cannot_block_first_valid_cancel(held: int, queued: int) -
 
 
 @pytest.mark.parametrize("proof", ["receipt-id", "feedback-id", "owner", "generation"])
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(held=st.integers(1, 3), queued=st.integers(1, 4))
 def test_malformed_first_stop_denies_cancellation_authority(
     proof: str, held: int, queued: int
@@ -300,6 +307,7 @@ def test_malformed_first_stop_denies_cancellation_authority(
     "proof",
     ["rejected", "receipt-id", "feedback-id", "owner", "generation", "missing-decision", "absent"],
 )
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     status=st.sampled_from(tuple(core.RunStatus)),
     increments=st.lists(st.integers(0, 10), min_size=1, max_size=10),

@@ -36,6 +36,7 @@ from vs_runtime.api.core import (
     NotApplied,
 )
 from vs_runtime.api.executor_contexts import RevocableLease
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -188,7 +189,7 @@ def settle(owner: IssueBoardOwner, request: ApplyIssueChanges) -> AppliedChanges
     schedule=st.sets(st.integers(0, 40), max_size=8),
     when=st.sampled_from(["before", "after"]),
 )
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=60), deadline=None)
 def test_any_fault_schedule_and_replay_lands_exactly_the_clean_board(
     plans: list[list[Step]], schedule: set[int], when: str
 ) -> None:

@@ -16,6 +16,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vs_sim.api.testing import examples
 from vs_slurm.api import (
     SlurmConfig,
     SlurmConnectorTransport,
@@ -121,7 +122,7 @@ def _run(tmp_path: Path, cluster: _Cluster) -> None:
     _runner(cluster).run(_request(tmp_path))
 
 
-@settings(max_examples=12, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=12), deadline=None)
 @given(polls=st.integers(min_value=0, max_value=3), kind=st.sampled_from(sorted(_FAILURES)))
 def test_a_failed_poll_cancels_the_submitted_job(
     tmp_path_factory: pytest.TempPathFactory, polls: int, kind: str

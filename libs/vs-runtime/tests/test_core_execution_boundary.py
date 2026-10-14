@@ -39,7 +39,7 @@ from vs_core.api import (
     Until,
     initial_state,
 )
-from vs_project.api import FakeStateStore, StoredEnvelope
+from vs_project.api import CommitOutcome, FakeStateStore, StoredEnvelope, StoreFence
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
     CoreRuntime,
@@ -552,3 +552,76 @@ async def test_an_owner_event_core_rejects_halts_the_shell_instead_of_being_drop
         shell.advance()
     # The rejected event is still durable: a restart cannot lose it silently either.
     assert len(shell.record.pending_inputs) == count
+
+
+class RivalAfterCommit(FakeStateStore):
+    """A store whose lease passes to a rival host right after this host's next commit."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.armed = False
+
+    def commit(
+        self,
+        expected_revision: int | None,
+        envelope: StoredEnvelope,
+        fence: StoreFence,
+        now: float,
+    ) -> CommitOutcome:
+        outcome = super().commit(expected_revision, envelope, fence, now)
+        if self.armed:
+            self.armed = False
+            assert self.acquire("rival", now=10_000, duration=100) is not None
+        return outcome
+
+
+@pytest.mark.asyncio
+async def test_a_host_that_loses_its_lease_after_authorizing_starts_no_effect_and_halts() -> None:
+    """The fence is verified after the authorization is durable and before the executor starts."""
+    store = RivalAfterCommit()
+    started: list[str] = []
+
+    async def effect(
+        request: Request, context: ExecutionContext, result: ExecutionResult
+    ) -> ExecutionOutcome:
+        del context
+        started.append(request.kind)
+        return result
+
+    shell = make_shell(store, ScriptedExecution(effect))
+    await prepared(shell, store)
+    store.armed = True
+    with pytest.raises(RuntimeCommitError, match="fence lost before execution"):
+        await shell.dispatch_one(now_at=1)
+    assert started == []
+    # The authorization stayed durable: the next host's inspection settles it.
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.DISPATCHED
+    with pytest.raises(RuntimeCommitError):
+        await shell.dispatch_one(now_at=2)
+    assert started == []
+
+
+@pytest.mark.asyncio
+async def test_a_host_that_loses_its_lease_before_a_publication_publishes_nothing_and_halts() -> (
+    None
+):
+    store = FakeStateStore()
+    shell = make_shell(store)
+    await prepared(shell, store)
+    assert store.acquire("rival", now=10_000, duration=100) is not None
+    published: list[Publication] = []
+
+    class Recording:
+        async def publish(
+            self, publication: Publication, context: PublicationContext
+        ) -> PublicationAcknowledgement:
+            del context
+            published.append(publication)
+            return PublicationAcknowledgement(
+                publication_id=publication.publication_id, sequence=publication.sequence
+            )
+
+    delivery: PublicationDelivery = Recording()
+    with pytest.raises(RuntimeCommitError, match="fence lost before publication"):
+        await shell.publish_one(delivery, now_at=1)
+    assert published == []

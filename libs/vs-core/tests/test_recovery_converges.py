@@ -27,6 +27,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import Answer, Faults, Running
+from vs_sim.api.testing import examples
 
 from .toy_agent_search import ROLES, Config, ToyHost, run_toy, summary
 
@@ -146,7 +147,7 @@ def outcome(trace: Trace) -> dict[str, object]:
 # hundreds of them. The pinned examples below are the minimal counterexamples we know; a new
 # failure prints its world and crash numbers (see ``note``) unshrunk.
 @settings(
-    max_examples=16,
+    max_examples=examples(pr=3, nightly=16),
     deadline=None,
     derandomize=True,
     database=None,

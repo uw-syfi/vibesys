@@ -66,7 +66,7 @@ pytestmark = pytest.mark.asyncio
 
 # Each example builds a run. A pull request draws a sample; the nightly depth searches deeper.
 _EXAMPLES = settings(
-    max_examples=examples(pr=10, nightly=40),
+    max_examples=examples(pr=5, nightly=40),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )

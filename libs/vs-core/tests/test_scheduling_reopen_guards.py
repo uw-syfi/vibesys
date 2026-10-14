@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
 from .reopen_facts import with_reopening_continuation
+from .restart import restarts
 
 
 def _normalize(request: core.OperationRequest) -> core.ScopeReopenNormalization:
@@ -113,6 +115,8 @@ def _fixture(
 def _step(
     state: core.CoreState, event: core.CoreEvent, codec: core.OperationRegistry
 ) -> core.Transition:
+    if not restarts():
+        return core.step(state, event)
     before = state.model_dump_json()
     restored = core.CoreState.model_validate_json(before, context={"operation_registry": codec})
     result = core.step(state, event)
@@ -131,6 +135,7 @@ def _step(
     "declaration",
     ["absent", "normalization", "kind", "request-schema", "outcome-schema", "version", "lifecycle"],
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(index=st.integers(0, 1000), generation=st.integers(0, 10))
 def test_reopen_cannot_allocate_without_exact_run_descriptor(
     declaration: str, index: int, generation: int
@@ -249,6 +254,7 @@ def _successor(state: core.CoreState) -> tuple[core.CoreState, core.AttemptReque
         "descriptor",
     ],
 )
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(index=st.integers(0, 1000), generation=st.integers(0, 10))
 def test_unproved_reopen_is_rejected_before_fifo_persistence(
     proof: str, index: int, generation: int

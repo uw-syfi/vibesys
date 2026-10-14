@@ -4,10 +4,11 @@ from itertools import product
 from typing import Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 Episode = Literal["missing", "matching", "different"]
 
@@ -199,6 +200,7 @@ def admission_identity(kind: Episode, episode: str) -> core.DecisionId | None:
     ("owner_episode", "request_episode"), product(("missing", "matching", "different"), repeat=2)
 )
 @pytest.mark.parametrize("action", ["park", "reopen"])
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(episode=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=32))
 def test_cleanup_requires_owner_closure_and_request_in_same_present_episode(
     owner_episode: Episode, request_episode: Episode, action: str, episode: str

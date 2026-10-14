@@ -10,6 +10,7 @@ from hypothesis import strategies as st
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent import cli_docker
 from vs_agent.api.testing import fake_profiles
+from vs_sim.api.testing import examples
 
 _SHIPPED = ("claude", "codex", "gemini", "opencode")
 
@@ -207,7 +208,7 @@ _LEAVES = (".codex/auth.json", ".codex/config.toml", ".claude.json", ".gemini/se
 class TestCredentialFilesAreShared:
     """Credential files are mounted writable in place; settings stay read-only copies."""
 
-    @settings(max_examples=40, deadline=None)
+    @settings(max_examples=examples(pr=5, nightly=40), deadline=None)
     @given(
         credentials=st.sets(st.sampled_from(_LEAVES)),
         present=st.sets(st.sampled_from(_LEAVES)),

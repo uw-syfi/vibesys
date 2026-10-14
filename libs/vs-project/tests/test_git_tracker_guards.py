@@ -417,7 +417,7 @@ def _turn(draw: st.DrawFn) -> list[tuple[str, str, bytes | None]]:
 
 
 @settings(
-    max_examples=examples(pr=6, nightly=40),
+    max_examples=examples(pr=5, nightly=40),
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(turn=_turn())

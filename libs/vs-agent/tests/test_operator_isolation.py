@@ -34,6 +34,7 @@ from vs_agent.api import (
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -202,7 +203,10 @@ _NAME = st.text(string.ascii_uppercase + string.digits + "_", min_size=1, max_si
 )
 
 
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=40)
+@settings(
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    max_examples=examples(pr=5, nightly=40),
+)
 @given(
     provider=st.sampled_from(PROVIDERS),
     extra=st.dictionaries(

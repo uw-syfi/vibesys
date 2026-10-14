@@ -32,6 +32,7 @@ from vs_core.api.testing import (
     sample_limits,
     sample_retries,
 )
+from vs_sim.api.testing import examples
 
 from .toy_agent_search import (
     ENDINGS,
@@ -47,7 +48,9 @@ from .toy_agent_search import (
 if TYPE_CHECKING:
     from vs_core.api.testing import Trace
 
-_SETTINGS = settings(max_examples=12, deadline=None, derandomize=True, database=None)
+_SETTINGS = settings(
+    max_examples=examples(pr=3, nightly=12), deadline=None, derandomize=True, database=None
+)
 _OPEN = {
     core.ContinuationPhase.WAITING,
     core.ContinuationPhase.AUTHORIZED,
@@ -145,7 +148,7 @@ def test_a_judge_that_waits_for_its_own_evaluation_is_resumed() -> None:
     assert summary(trace).done[0].asked == ("implementer", "judge")
 
 
-@settings(max_examples=3, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=3, nightly=3), deadline=None, derandomize=True, database=None)
 @given(scenario=SCENARIOS)
 def test_a_run_ends_whatever_its_agents_wait_for_when_the_host_restarts_at_every_step(
     scenario: Scenario,

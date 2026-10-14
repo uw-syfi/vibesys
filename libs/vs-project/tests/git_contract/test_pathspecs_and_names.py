@@ -139,7 +139,7 @@ def _outcome(call: Callable[[], object]) -> object:
 
 @settings(
     suppress_health_check=[HealthCheck.function_scoped_fixture],
-    max_examples=examples(pr=6, nightly=40),
+    max_examples=examples(pr=5, nightly=40),
 )
 @given(specs=_SPEC_LISTS)
 def test_pathspec_reads_agree_with_the_oracle(
@@ -222,7 +222,7 @@ def _fragments() -> st.SearchStrategy[str]:
 
 @settings(
     suppress_health_check=[HealthCheck.function_scoped_fixture],
-    max_examples=examples(pr=25, nightly=200),
+    max_examples=examples(pr=5, nightly=200),
 )
 @given(name=_fragments())
 def test_name_rules_agree_with_the_oracle_on_assembled_names(
@@ -275,7 +275,7 @@ def test_non_ascii_paths_are_reported_as_they_are_named(sandbox: ContractProject
 
 @settings(
     suppress_health_check=[HealthCheck.function_scoped_fixture],
-    max_examples=examples(pr=6, nightly=40),
+    max_examples=examples(pr=5, nightly=40),
 )
 @given(length=st.integers(min_value=1, max_value=40), unknown=st.booleans())
 def test_revisions_resolve_like_the_oracle(

@@ -1,10 +1,11 @@
 """Public terminal-input output contract accepts only exact immutable disposal."""
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 TIMES = st.floats(min_value=1.0, max_value=1000.0, allow_nan=False, allow_infinity=False)
 
@@ -97,6 +98,7 @@ def test_valid_disposal_preserves_occurrences_and_previous_receipts(
         "sibling-interrupt",
     ],
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(now_at=TIMES)
 def test_terminal_finalization_rejects_invalid_outputs(flaw: str, now_at: float) -> None:
     pending, completed = occurrence(0), occurrence(1, "item")

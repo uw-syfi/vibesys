@@ -1,7 +1,7 @@
 """Canonical budget normalization properties through published proof contracts."""
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -13,6 +13,7 @@ from vs_core.api.proofs import (
     Proven,
     submission_budget_for,
 )
+from vs_sim.api.testing import examples
 
 from .test_recovery_proof_regressions import _record, _recovering, _resolution, measurement_fixture
 
@@ -40,6 +41,7 @@ def submission_facts(draw: st.DrawFn) -> tuple[core.SubmitMeasurement, core.Subm
         "recipe_digest",
     ],
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(facts=submission_facts())
 def test_submission_budget_matches_the_canonical_measurement(
     field: str,

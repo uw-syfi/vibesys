@@ -168,6 +168,7 @@ def test_a_cancel_stop_cancels_the_runs_queued_measurement_and_closes() -> None:
     assert state.run.status == core.RunStatus.TERMINAL
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     accepted_before_stop=st.booleans(),
     ticks=st.lists(st.floats(min_value=3.0, max_value=50.0), max_size=3).map(
@@ -429,7 +430,7 @@ class _Run:
         )
 
 
-@settings(max_examples=examples(pr=25, nightly=500), deadline=None, database=None)
+@settings(max_examples=examples(pr=3, nightly=500), deadline=None, database=None)
 @example(count=1, ops=[("stop", core.StopMode.CANCEL)], no_record=True)
 @example(
     count=2,

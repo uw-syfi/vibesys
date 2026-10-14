@@ -78,6 +78,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
     submission,
 )
 from vs_runtime.api.testing import FakeEvidenceLedger, FakeWorkspace, FakeWorkspaces
+from vs_sim.api.testing import examples
 
 pytestmark = pytest.mark.asyncio
 
@@ -226,7 +227,11 @@ entries = st.lists(
 )
 
 
-@settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(
+    max_examples=examples(pr=5, nightly=40),
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
 @given(items=entries, data=st.data())
 def test_ledger_writes_are_idempotent_and_order_independent(
     items: list[tuple[str, int, float]], data: st.DataObject
@@ -394,7 +399,7 @@ def _eval_context(request: BaseModel) -> ExecutionContext:
     )
 
 
-@settings(max_examples=40, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=40), deadline=None)
 @given(
     recorded=st.sets(st.integers(0, 4)), asked=st.lists(st.integers(0, 4), min_size=1, max_size=4)
 )
@@ -457,7 +462,7 @@ C1, C2, C3 = ("1" * 40, "2" * 40, "3" * 40)
 revisions = st.sampled_from([C1, C2, C3])
 
 
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=60), deadline=None)
 @given(
     kind=proof_kinds,
     status=proof_status,

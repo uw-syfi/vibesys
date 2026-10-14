@@ -259,7 +259,7 @@ async def test_crash_at_every_boundary_then_restart_yields_one_effect_and_the_sa
 
 
 @settings(
-    max_examples=examples(pr=8, nightly=40),
+    max_examples=examples(pr=5, nightly=40),
     deadline=None,
     suppress_health_check=[HealthCheck.too_slow],
 )
@@ -609,7 +609,7 @@ async def test_parent_verification_requires_a_retained_canonical_revision(
 
 
 @settings(
-    max_examples=examples(pr=8, nightly=40),
+    max_examples=examples(pr=5, nightly=40),
     deadline=None,
     suppress_health_check=[HealthCheck.too_slow],
 )

@@ -17,6 +17,7 @@ from vs_sandbox.api.slurm import (
     render_slurm_operator_toml,
     translate_slurm_gpu,
 )
+from vs_sim.api.testing import examples
 from vs_slurm.api import SlurmLocalTransport
 
 _STAGE = "/shared/stage"
@@ -89,7 +90,7 @@ def test_the_translation_keeps_the_limits_and_sizes_the_gates(
     assert result.config.remote_workspace_root == _STAGE
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=25), deadline=None)
 @given(table=_tables())
 def test_a_translated_file_round_trips_through_the_operator_file_format(
     table: dict[str, Any],
@@ -101,7 +102,7 @@ def test_a_translated_file_round_trips_through_the_operator_file_format(
         assert load_slurm_operator_settings(path) == result
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=25), deadline=None)
 @given(table=_tables(), key=st.from_regex(r"x[a-z]{2,8}", fullmatch=True))
 def test_an_unknown_key_is_rejected_naming_it(table: dict[str, Any], key: str) -> None:
     with tempfile.TemporaryDirectory() as directory:

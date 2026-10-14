@@ -29,6 +29,7 @@ from vs_core.api import ObservationStatus, ReplyErrorCode
 from vs_project.api import Project
 from vs_runtime.api import AgentId
 from vs_runtime.api.core import ExecutionResult, ReceiptStore
+from vs_sim.api.testing import examples
 
 
 class Named(BaseModel):
@@ -63,7 +64,7 @@ def _failed_with_errors(result: ExecutionResult) -> tuple[object, ...]:
     return result.observation.reply_errors
 
 
-@settings(max_examples=10)
+@settings(max_examples=examples(pr=5, nightly=10))
 @given(
     identifier=st.text(st.characters(categories=("L", "N")), min_size=1, max_size=20),
     padding=st.integers(1, 3),
@@ -82,7 +83,7 @@ def test_a_reply_with_a_padded_id_fails_at_the_id_with_the_validators_words(
     assert f"{padded!r} is not a valid identifier" in error.message  # ty: ignore[unresolved-attribute]
 
 
-@settings(max_examples=10)
+@settings(max_examples=examples(pr=5, nightly=10))
 @given(reason=_ERRORS)
 def test_a_provider_that_gave_up_on_the_schema_hands_core_its_last_errors_whole(
     reason: str,

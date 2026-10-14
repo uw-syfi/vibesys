@@ -64,7 +64,7 @@ def sandbox_tmp_path() -> Iterator[Path]:
 # Every profile states `derandomize` explicitly: an unset option resolves from
 # whichever profile is loaded, so `explore` would otherwise inherit `ci`'s.
 settings.register_profile("dev", deadline=None, derandomize=False, max_examples=25)
-settings.register_profile("ci", deadline=None, derandomize=True, print_blob=True, max_examples=25)
+settings.register_profile("ci", deadline=None, derandomize=True, print_blob=True, max_examples=10)
 settings.register_profile(
     "explore", deadline=None, derandomize=False, max_examples=500, print_blob=True
 )

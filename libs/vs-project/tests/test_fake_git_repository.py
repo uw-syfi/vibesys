@@ -14,6 +14,7 @@ from hypothesis import strategies as st
 
 from vs_project.api import GitCommandError, NullGitTrackerEvents, run_git
 from vs_project.api.testing import FakeGitRepositories, RepositoryCensus
+from vs_sim.api.testing import examples
 
 
 class _Warnings(NullGitTrackerEvents):
@@ -100,7 +101,7 @@ def test_the_census_counts_what_a_repository_holds(tmp_path: Path) -> None:
     assert disks.census(project) == RepositoryCensus(worktrees=2, commits=2, refs=2)
 
 
-@settings(max_examples=8, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=8), deadline=None)
 @given(
     files=st.dictionaries(
         st.sampled_from(["a.txt", "dir/b.txt", "dir/sub/c.py", "z", "dir.txt", "dir/a b"]),

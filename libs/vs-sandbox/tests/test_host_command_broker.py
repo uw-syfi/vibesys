@@ -36,7 +36,7 @@ from vs_sandbox.api.slurm import (
 
 # test-isolation: the client is a single-file CLI that is intentionally absent from the library API.
 from vs_sandbox.host_command_client import Stop, execute
-from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
+from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -367,7 +367,7 @@ def _frames(
 
 
 class TestRoots:
-    @settings(max_examples=80, deadline=None)
+    @settings(max_examples=examples(pr=5, nightly=80), deadline=None)
     @given(
         seed=SEEDS,
         base=st.sampled_from(["workspace", "worktrees", "other", "root"]),
@@ -480,7 +480,7 @@ class TestClient:
         assert status == 1
         assert "closed the connection" in capsys.readouterr().err
 
-    @settings(max_examples=25, deadline=None)
+    @settings(max_examples=examples(pr=5, nightly=25), deadline=None)
     @given(seed=SEEDS, argument_bytes=st.integers(min_value=0, max_value=4 * 1024 * 1024))
     def test_a_dropped_connection_never_depends_on_how_much_was_sent_or_who_runs_first(
         self, seed: int | None, argument_bytes: int

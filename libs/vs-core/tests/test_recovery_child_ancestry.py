@@ -1,10 +1,11 @@
 """Descendant ancestry and cleanup guards through the public kernel step."""
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_request_recovery import (
     observed,
@@ -123,6 +124,7 @@ def test_prepared_source_with_descendants_cannot_be_safe_to_dispatch(count: int)
     assert replay.state.records == result.state.records
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(st.lists(st.integers(min_value=100, max_value=200), min_size=1, max_size=10))
 def test_reattached_parent_deadlines_cancel_only_unreleased_descendants(times: list[int]) -> None:
     original = pending_record()

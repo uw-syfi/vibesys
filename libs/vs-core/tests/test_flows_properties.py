@@ -25,6 +25,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import Prompt
+from vs_sim.api.testing import examples
 
 from .flow_support import FACTS, WORKER, Config, Plan, answer_of, ask, open_workspace, start
 
@@ -365,7 +366,7 @@ class Host:
         assert len(set(self.sessions.values())) == len(self.sessions)
 
 
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=3, nightly=60), deadline=None)
 @given(body=PROGRAMS, script=st.lists(_MOVE, max_size=16))
 # The last choice stands: a first-choice-wins flow adopts the input here.
 @example(

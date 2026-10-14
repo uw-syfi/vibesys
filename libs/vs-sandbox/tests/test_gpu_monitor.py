@@ -29,7 +29,7 @@ from vs_sandbox.api.testing import (
     TelemetryHarness,
     docker_result,
 )
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import ManualClock, SimThreads, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -297,7 +297,7 @@ class TestMonitorLifecycle:
         mon = GpuContentionMonitor(log_dir=tmp_path, gpu_uuid=GPU_A, threads=SimThreads())
         mon.stop()  # should not raise
 
-    @settings(deadline=None, max_examples=60)
+    @settings(deadline=None, max_examples=examples(pr=5, nightly=60))
     @given(
         baseline=st.sets(st.integers(1, 6)),
         later=st.dictionaries(st.integers(1, 12), st.sampled_from([GPU_A, GPU_B])),

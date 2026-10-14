@@ -1,10 +1,11 @@
 """Recovery-produced source watermarks compose with kernel run finality."""
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_proof_ownership_regressions import stopped
 from .test_request_child_guards import pending_record, recovering_state, reload
@@ -253,6 +254,7 @@ def test_new_discovery_source_invalidates_previously_complete_history(
     )
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(count=st.integers(min_value=1, max_value=5), inspected=st.integers(min_value=0, max_value=5))
 def test_authoritative_coverage_requires_every_discovery_source(count: int, inspected: int) -> None:
     state = discovered_state(count)
@@ -268,6 +270,7 @@ def test_authoritative_coverage_requires_every_discovery_source(count: int, insp
 
 
 @example(terminal=False, released=False, complete=True, status=core.ObservationStatus.PENDING)
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     terminal=st.booleans(),
     released=st.booleans(),
@@ -302,6 +305,7 @@ def test_produced_source_coverage_keeps_conservative_release(
     )
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     sequence=st.integers(min_value=2, max_value=100),
     foreign=st.integers(min_value=1, max_value=100),

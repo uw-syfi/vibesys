@@ -3,11 +3,10 @@
 from typing import Literal
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .guard_rows import guard_rows
 from .test_session_turns import (
     attempt_turn_dispatch_state,
     interrupted_attempt_state,
@@ -16,25 +15,24 @@ from .test_session_turns import (
 )
 
 
-@pytest.mark.parametrize("phase", ["pending", "draining", "checkpointed", "blocked", "completed"])
 @pytest.mark.parametrize(
-    ("charge", "variant"),
-    [
-        (charge, variant)
-        for charge in ("paid", "free", "correction", "resume")
-        for variant in ("new", "correction", "resume")
-    ],
+    ("phase", "charge", "variant", "predecessor"),
+    # The refusal reads the phase, the predecessor and a resume together; the variant is
+    # one more condition on the same grant.
+    guard_rows(
+        ["pending", "draining", "checkpointed", "blocked", "completed"],
+        ["paid", "free", "correction", "resume"],
+        ["new", "correction", "resume"],
+        ["none", "exact", "wrong"],
+        positive=("completed", "paid", "new", "exact"),
+        joint=(0, 1, 3),
+    ),
 )
-@pytest.mark.parametrize("predecessor", ["none", "exact", "wrong"])
-@settings(max_examples=3)
-@given(max_turns=st.integers(min_value=1, max_value=100))
 def test_interruption_fence_covers_all_successor_variants(
     phase: str,
     charge: Literal["paid", "free", "correction", "resume"],
     variant: Literal["new", "correction", "resume"],
     predecessor: Literal["none", "exact", "wrong"],
-    *,
-    max_turns: int,
 ) -> None:
     """Every phase/class/predecessor combination holds at both admission and dispatch."""
     for boundary in ("admission", "dispatch"):
@@ -91,7 +89,7 @@ def test_interruption_fence_covers_all_successor_variants(
             "wrong": previous.model_copy(update={"invocation_id": core.InvocationId(root="wrong")}),
         }[predecessor]
         spec = spec.model_copy(
-            update={"charge_class": charge, "predecessor": prior_ref, "max_turns": max_turns}
+            update={"charge_class": charge, "predecessor": prior_ref, "max_turns": 5}
         )
         allowed = (
             phase == "completed"

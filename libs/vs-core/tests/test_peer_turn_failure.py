@@ -35,6 +35,7 @@ from vs_core.api.testing import (
     sample_limits,
     sample_retries,
 )
+from vs_sim.api.testing import examples
 
 from .toy_agent_search import EXCHANGES, FACTS, OPERATIONS, Prompt, Result, ToyHost, revision_of
 
@@ -206,7 +207,9 @@ def test_a_revision_the_workspace_never_held_does_not_keep_the_attempt_closing()
     assert_released(trace)
 
 
-_SETTINGS = settings(max_examples=60, deadline=None, derandomize=True, database=None)
+_SETTINGS = settings(
+    max_examples=examples(pr=3, nightly=60), deadline=None, derandomize=True, database=None
+)
 
 
 @_SETTINGS

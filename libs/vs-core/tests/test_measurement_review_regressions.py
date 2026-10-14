@@ -1,10 +1,11 @@
 """Review regressions for the measurements leaf, driven through the public kernel."""
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_measurements import (
     committed,
@@ -84,6 +85,7 @@ def test_inert_job_observations_emit_no_events(sequence: int, fault: str) -> Non
 # F2: retry authority comes from committed facts, never from the failure claim.
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     claim=st.sampled_from([None, *core.MeasurementFailure]),
     status=st.sampled_from(list(S)),
@@ -148,6 +150,7 @@ def test_workload_claim_on_running_job_does_not_freeze_the_receipt() -> None:
 # F3: late evidence is published exactly once; UNKNOWN terminal never suppresses.
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     split=st.lists(st.integers(min_value=0, max_value=2), min_size=1, max_size=4),
     replay=st.booleans(),

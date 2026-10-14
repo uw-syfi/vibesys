@@ -17,6 +17,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import Failed
+from vs_sim.api.testing import examples
 
 from .test_peer_turn_failure import Fault, PeerHost, assert_released, run_peers
 
@@ -68,7 +69,7 @@ def test_a_retention_the_owner_refuses_at_closure_fails_the_settlement_and_relea
     assert not settlement.eligible
 
 
-@settings(max_examples=40, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=3, nightly=40), deadline=None, derandomize=True, database=None)
 @given(
     refuse=st.sets(st.sampled_from(REFUSED_KINDS), min_size=1).map(tuple),
     script=st.lists(st.sampled_from(("ok", "crash")), min_size=1, max_size=3).map(tuple),

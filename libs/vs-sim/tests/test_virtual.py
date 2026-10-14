@@ -15,6 +15,7 @@ from vs_sim.api.testing import (
     VirtualDeadlockError,
     VirtualTimeLimitError,
     current_virtual_clock,
+    examples,
     run_virtual,
     wait_or_fail,
 )
@@ -313,7 +314,7 @@ def test_different_schedule_seeds_reach_different_orders() -> None:
 # Seed 358 with four callbacks once left one of them unrun (#1674). The `ci` Hypothesis profile
 # is derandomized with few examples, so a rare failing pair stays hidden: pin it, and search deeper.
 @example(seed=358, count=4)
-@settings(max_examples=300)
+@settings(max_examples=examples(pr=5, nightly=300))
 @given(st.integers(0, 2**32), st.integers(1, 12))
 def test_ready_callbacks_run_in_a_seeded_order_and_all_run(seed: int, count: int) -> None:
     def order(schedule_seed: int | None) -> list[int]:
@@ -370,7 +371,7 @@ def _run_plan(plan: list[tuple[str, float]], schedule_seed: int | None) -> list[
     return ran
 
 
-@settings(max_examples=200)
+@settings(max_examples=examples(pr=5, nightly=200))
 @given(st.integers(0, 2**32), _PLANS)
 def test_every_callback_runs_exactly_once_under_every_schedule(
     seed: int, plan: list[tuple[str, float]]
@@ -382,7 +383,7 @@ def test_every_callback_runs_exactly_once_under_every_schedule(
     assert sorted(seeded) == expected
 
 
-@settings(max_examples=200)
+@settings(max_examples=examples(pr=5, nightly=200))
 @given(st.integers(0, 2**32), _PLANS)
 def test_a_schedule_seed_replays_callbacks_scheduled_on_the_loop(
     seed: int, plan: list[tuple[str, float]]
@@ -398,7 +399,7 @@ _ADJACENT = st.lists(st.integers(0, 3).map(lambda k: 0.5 + k * 2.0**-52), min_si
 
 
 @example(durations=[0.5, 0.5 + 2.0**-52, 0.5], seed=None)
-@settings(max_examples=300)
+@settings(max_examples=examples(pr=5, nightly=300))
 @given(_ADJACENT, st.none() | st.integers(0, 2**32))
 def test_sleeps_wake_by_due_time_even_when_due_times_are_one_float_step_apart(
     durations: list[float], seed: int | None
