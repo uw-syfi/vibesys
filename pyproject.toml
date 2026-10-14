@@ -103,13 +103,15 @@ test = [
 testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "sdk/vs-bench/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
 # below, so `uv run pytest` reports coverage locally without needing the full
-# flag string CI uses. CI layers on `--cov-report=xml`, `--cov-report=json`,
-# and `--cov-fail-under` on top of this; it does not need its own `--cov=...`
-# flags.
+# flag string CI uses; with no `--cov-report`, pytest-cov prints its terminal
+# report, and `[tool.coverage.report] show_missing` adds the missing lines.
+# Name no report here: a command's `--cov-report=` adds to this list instead of
+# replacing it, so CI's shards (which pass `--cov-report=` and leave reporting
+# to the combine job) would still build a report, 15 to 25 s each.
 # Keep worker queues short so long tests do not remain queued behind fast tests.
 # loadgroup keeps each xdist_group (shared native-build fixtures, shared worlds)
 # on one worker, locally as in CI.
-addopts = "-ra -p no:tach --import-mode=importlib --dist loadgroup --maxschedchunk=1 --cov --cov-report=term-missing -m 'not native_build'"
+addopts = "-ra -p no:tach --import-mode=importlib --dist loadgroup --maxschedchunk=1 --cov -m 'not native_build'"
 pythonpath = [".", "packaging", "libs/vs-sim/pytest_plugin"]
 # A test still running after this many seconds dumps every thread's stack to
 # stderr (xdist workers inherit the controller's stderr, so it reaches the CI
