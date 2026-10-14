@@ -24,10 +24,10 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
-
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from mcp.server.fastmcp import FastMCP
 
 _HERE = Path(__file__).resolve().parent
 
@@ -77,12 +77,12 @@ def _resolve_report(report: str) -> str:
     return str(capture_dir / primary)
 
 
-strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
 
 
 def build_server() -> FastMCP:  # noqa: C901  # LW-910137; this function implements one cohesive parsing/validation routine that resists a clean split
     """Construct the FastMCP instance with torch-profiler analysis tools."""
-    mcp = FastMCP("vibesys-torch-profiler")
+    mcp = StrictFastMCP("vibesys-torch-profiler")
 
     @mcp.tool()
     async def profile_ops(  # noqa: PLR0913  # LW-910138; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
@@ -410,7 +410,7 @@ def build_server() -> FastMCP:  # noqa: C901  # LW-910137; this function impleme
             top=top,
         )
 
-    return strict_arguments(mcp)
+    return mcp
 
 
 def main(argv: list[str] | None = None) -> None:

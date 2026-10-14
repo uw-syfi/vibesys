@@ -14,9 +14,10 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from mcp.server.fastmcp import FastMCP
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 # The same common runtime is staged beside each standalone profiler bundle.
 for _common_name in ("_common", "profilers_common"):
@@ -77,7 +78,7 @@ def _invoke(
     }
 
 
-strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
 
 
 def build_server(
@@ -90,7 +91,7 @@ def build_server(
     ``withheld`` names tools the run does not offer (those needing a GPU driver the
     editor lacks); they are absent from the tool list, not rejected when called.
     """
-    mcp = FastMCP("vibesys-ncu-profiler")
+    mcp = StrictFastMCP("vibesys-ncu-profiler")
     invoke = functools.partial(_invoke, runner=runner)
 
     @mcp.tool()
@@ -163,7 +164,7 @@ def build_server(
     for name in sorted(withheld):
         mcp.remove_tool(name)  # a name the server lacks raises: a stale list must not pass silently
 
-    return strict_arguments(mcp)
+    return mcp
 
 
 def main(argv: list[str] | None = None) -> None:

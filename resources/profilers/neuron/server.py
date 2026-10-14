@@ -20,10 +20,10 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
-
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from mcp.server.fastmcp import FastMCP
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 # lint-waiver: LW-008017 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
@@ -42,12 +42,12 @@ for _common_name in ("_common", "profilers_common"):
         sys.path.insert(0, str(_common_path))
         break
 
-strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
 
 
 def build_server() -> FastMCP:
     """Build the profiler MCP server."""
-    mcp = FastMCP("vibesys-neuron-profiler")
+    mcp = StrictFastMCP("vibesys-neuron-profiler")
 
     @mcp.tool()
     def capture(
@@ -102,7 +102,7 @@ def build_server() -> FastMCP:
         """
         return _capture(analyze_neuron.cmd_view, report=report, output_format=output_format)
 
-    return strict_arguments(mcp)
+    return mcp
 
 
 def main(argv: list[str] | None = None) -> None:

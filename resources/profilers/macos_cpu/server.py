@@ -19,12 +19,12 @@ for _common_name in ("_common", "profilers_common"):
         sys.path.insert(0, str(_common_path))
         break
 
-strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
 
 
 def build_server() -> FastMCP:
     """Build the profiler MCP server."""
-    mcp = FastMCP("vibesys-macos_cpu-profiler")
+    mcp = StrictFastMCP("vibesys-macos_cpu-profiler")
 
     @mcp.tool()
     def capabilities() -> dict:
@@ -60,7 +60,7 @@ def build_server() -> FastMCP:
             "summary": result.summary,
         }
 
-    return strict_arguments(mcp)
+    return mcp
 
 
 if __name__ == "__main__":

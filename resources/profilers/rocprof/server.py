@@ -30,11 +30,11 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from mcp.server.fastmcp import FastMCP
-
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from types import ModuleType
+
+    from mcp.server.fastmcp import FastMCP
 
 
 class RemoteCapture(Protocol):
@@ -90,7 +90,7 @@ import kernel_bench  # noqa: E402  # LW-920177; the sys.path setup directly abov
 _capture_cli = capture.run_cli
 
 
-strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
 
 
 def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements one cohesive parsing/validation routine that resists a clean split
@@ -107,7 +107,7 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
     ``profile_*`` capture off the event loop; ``import_sibling`` locates the
     torch plugin's analyzer module.
     """
-    mcp = FastMCP("vibesys-rocprof-profiler")
+    mcp = StrictFastMCP("vibesys-rocprof-profiler")
     jobs = capture_jobs.CaptureJobs()
 
     def _run_profile(
@@ -1079,7 +1079,7 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
 
     for name in sorted(withheld):
         mcp.remove_tool(name)  # a name the server lacks raises: a stale list must not pass silently
-    return strict_arguments(mcp)
+    return mcp
 
 
 def main(argv: list[str] | None = None) -> None:  # noqa: D103  # LW-910106; this is a small standalone-script helper whose name and body are self-explanatory

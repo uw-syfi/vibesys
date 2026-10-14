@@ -26,17 +26,8 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 _PROFILERS = Path(__file__).resolve().parents[3] / "resources" / "profilers"
-_SERVERS = (
-    "headroom",
-    "linux_cpu",
-    "macos_cpu",
-    "ncu",
-    "neuron",
-    "nsys",
-    "otel",
-    "rocprof",
-    "torch",
-)
+#: Every profiler server in the bundle, so a new one cannot skip the rule.
+_SERVERS = tuple(sorted(path.parent.name for path in _PROFILERS.glob("*/server.py")))
 
 
 @functools.cache
@@ -58,8 +49,9 @@ def _build(profiler: str) -> FastMCP:
 _KEYS = st.text(alphabet="abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=12)
 
 
-def test_every_profiler_server_is_held_to_the_rule() -> None:
-    assert sorted(_SERVERS) == sorted(path.parent.name for path in _PROFILERS.glob("*/server.py"))
+def test_the_bundle_has_profiler_servers() -> None:
+    """Guards the glob: an empty match would make the property below vacuous."""
+    assert len(_SERVERS) >= 9
 
 
 @pytest.mark.parametrize("profiler", _SERVERS)

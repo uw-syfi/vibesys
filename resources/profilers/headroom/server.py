@@ -21,10 +21,10 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
-
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from mcp.server.fastmcp import FastMCP
 
 _HERE = Path(__file__).resolve().parent
 
@@ -46,12 +46,12 @@ def _capture(fn: Callable[..., None], **kwargs: object) -> str:
     return capture_runtime.run_analysis(fn, **kwargs)
 
 
-strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
 
 
 def build_server() -> FastMCP:
     """Construct the FastMCP instance with headroom-report analysis tools."""
-    mcp = FastMCP("vibesys-headroom-profiler")
+    mcp = StrictFastMCP("vibesys-headroom-profiler")
 
     @mcp.tool()
     def waterfall(report: str) -> str:
@@ -113,7 +113,7 @@ def build_server() -> FastMCP:
         """
         return _capture(analyze_headroom.cmd_summary, report=report, top=top, klass=None)
 
-    return strict_arguments(mcp)
+    return mcp
 
 
 def main(argv: list[str] | None = None) -> None:

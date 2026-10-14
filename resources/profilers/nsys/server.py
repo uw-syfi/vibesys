@@ -20,10 +20,10 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
-
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from mcp.server.fastmcp import FastMCP
 
 _HERE = Path(__file__).resolve().parent
 
@@ -46,7 +46,7 @@ for _common_name in ("_common", "profilers_common"):
         sys.path.insert(0, str(_common_path))
         break
 
-strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
 
 
 def build_server() -> FastMCP:
@@ -55,11 +55,11 @@ def build_server() -> FastMCP:
     Exposed separately so unit tests can introspect registered tools
     without spawning a stdio loop.
     """
-    mcp = FastMCP("vibesys-nsys-profiler")
+    mcp = StrictFastMCP("vibesys-nsys-profiler")
     _register_report_tools(mcp)
     _register_timing_tools(mcp)
     _register_detail_tools(mcp)
-    return strict_arguments(mcp)
+    return mcp
 
 
 def _register_report_tools(mcp: FastMCP) -> None:

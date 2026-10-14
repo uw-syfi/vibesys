@@ -898,12 +898,12 @@ for _common_name in ("_common", "profilers_common"):
         sys.path.insert(0, str(_common_path))
         break
 
-strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
 
 
 def build_server() -> FastMCP:
     """Build the profiler MCP server."""
-    mcp = FastMCP("vibesys-otel-profiler")
+    mcp = StrictFastMCP("vibesys-otel-profiler")
 
     @mcp.tool()
     def reports(root: str = ".") -> list[str]:
@@ -935,7 +935,7 @@ def build_server() -> FastMCP:
         """Return a graph's call structure and representative request waterfall."""
         return summarize_trace_breakdown(path, telemetry_path, top=top)
 
-    return strict_arguments(mcp)
+    return mcp
 
 
 if __name__ == "__main__":
