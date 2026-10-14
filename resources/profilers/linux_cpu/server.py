@@ -7,11 +7,13 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from vs_runtime.cpu_profilers import (
+    LinuxProfilerEffects,
     collect_linux_profile,
     detect_linux_profiler,
     parse_profile_command,
     summarize_linux_profile,
 )
+from vs_sim.api import SystemClock
 
 # The same common runtime is staged beside each standalone profiler bundle.
 for _common_name in ("_common", "profilers_common"):
@@ -55,6 +57,7 @@ def build_server() -> FastMCP:
             timeout=timeout,
             frequency=frequency,
             call_graph=call_graph,
+            effects=LinuxProfilerEffects(now=SystemClock().now),
         )
         return {
             "status": result.status,

@@ -73,7 +73,6 @@ def _runner(
         ),
         process=connector,
         clock=clock,
-        pause=clock.advance,
     )
     return runner, connector, clock
 

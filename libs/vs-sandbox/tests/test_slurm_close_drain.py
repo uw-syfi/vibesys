@@ -98,7 +98,7 @@ def _executor(root: Path, cluster: _GatedCluster) -> SlurmEvaluationExecutor:
         handle_root=root / "handles",
         cluster=cluster,
         admission=SharedSlurmAdmission(1),
-        pause=lambda _seconds: None,
+        sleeper=ManualClock(),
         clock=ManualClock(),
     )
 

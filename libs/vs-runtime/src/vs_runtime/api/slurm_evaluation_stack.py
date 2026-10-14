@@ -211,6 +211,8 @@ async def build_stack(
         root / "handles",
         stage_failure_text=render_stage_failure,
         clock=clock if clock is not None else ManualClock(),
+        # Pacing moves a timeline of its own, so polling never brings a deadline nearer.
+        sleeper=ManualClock(),
         cluster=cluster,
     )
     return Stack(executor, cluster, snapshot)

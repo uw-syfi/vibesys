@@ -78,7 +78,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_sim.api.testing import ManualClock, clock_from
+from vs_sim.api.testing import ManualClock, clock_from, current_virtual_clock
 from vs_slurm.api import (
     SlurmConfig,
     SlurmSshTransport,
@@ -169,6 +169,14 @@ class TimedPolls:
         if self.clock.now() >= seen + self.runtime:
             return polled
         return ExecutorPoll(phase=PollPhase.RUNNING, current_stage=polled.current_stage)
+
+
+class _LoopPacing:
+    """Paces job polls on the virtual loop the world runs on, so polling lets run time pass."""
+
+    async def sleep(self, seconds: float) -> None:
+        """Sleep on the running virtual loop's clock."""
+        await current_virtual_clock().sleep(seconds)
 
 
 @dataclass
@@ -264,6 +272,7 @@ class World:
             self.root / "handles",
             stage_failure_text=render_stage_failure,
             clock=self.job_clock,
+            sleeper=_LoopPacing(),
             cluster=self.cluster,
         )
         self.evaluations.append(evaluation)

@@ -7,10 +7,12 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from vs_runtime.api.infrastructure import (
+    MacOSProfilerEffects,
     collect_macos_profile,
     detect_macos_profiler,
     parse_profile_command,
 )
+from vs_sim.api import OsThreads, SystemClock
 
 # The same common runtime is staged beside each standalone profiler bundle.
 for _common_name in ("_common", "profilers_common"):
@@ -48,7 +50,11 @@ def build_server() -> FastMCP:
     ) -> dict:
         """Profile a diagnostic run. This never supplies a scored benchmark result."""
         result = collect_macos_profile(
-            parse_profile_command(command), Path(output_dir), duration=duration, warmup=warmup
+            parse_profile_command(command),
+            Path(output_dir),
+            duration=duration,
+            warmup=warmup,
+            effects=MacOSProfilerEffects(now=SystemClock().now, sleep=OsThreads().sleep),
         )
         return {
             "status": result.status,

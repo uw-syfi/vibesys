@@ -32,18 +32,26 @@ _RUNNING = ContainerListing(({"app_name": APP, "container_id": "ta-1"},))
 _STARTING = ContainerListing(({"app_name": "another-app", "container_id": "ta-2"},))
 
 
-class SleepingClock(ManualClock):
-    """A manual clock whose sleep moves it forward, recording each pause."""
+class AdvancingClock:
+    """A manual clock whose blocking sleep moves it forward, recording each pause."""
 
     def __init__(self) -> None:
         """Start at zero with no pauses."""
-        super().__init__(0.0)
+        self._clock = ManualClock(0.0)
         self.sleeps: list[float] = []
 
+    def now(self) -> float:
+        """The current time."""
+        return self._clock.now()
+
+    def advance(self, seconds: float) -> None:
+        """Move the clock forward without pausing."""
+        self._clock.advance(seconds)
+
     def sleep(self, seconds: float) -> None:
-        """Pause ``seconds`` virtual seconds."""
+        """Pause ``seconds`` manual seconds."""
         self.sleeps.append(seconds)
-        self.advance(seconds)
+        self._clock.advance(seconds)
 
 
 type HealthAnswer = int | OSError
@@ -53,7 +61,7 @@ _ANSWERS = st.one_of(st.sampled_from([200, 404, 502, 503]), st.just(OSError("con
 
 
 def _health_probe(
-    clock: SleepingClock, answers: list[HealthAnswer], took: list[float]
+    clock: AdvancingClock, answers: list[HealthAnswer], took: list[float]
 ) -> tuple[Callable[[str, float], int], list[float]]:
     """A probe that answers from ``answers`` (then 503), taking up to its timeout each time."""
     timeouts: list[float] = []
@@ -80,7 +88,7 @@ def _health_probe(
 def test_wait_for_health_keeps_to_its_deadline(
     timeout: float, answers: list[HealthAnswer], took: list[float]
 ) -> None:
-    clock = SleepingClock()
+    clock = AdvancingClock()
     probe, timeouts = _health_probe(clock, answers, took)
 
     try:
@@ -98,7 +106,7 @@ def test_wait_for_health_keeps_to_its_deadline(
 
 
 def test_wait_for_health_reports_the_last_error() -> None:
-    clock = SleepingClock()
+    clock = AdvancingClock()
     probe, _ = _health_probe(clock, [OSError("refused"), 502], [0.0])
 
     with pytest.raises(TimeoutError, match="did not become ready: HTTP 503"):
@@ -107,7 +115,7 @@ def test_wait_for_health_reports_the_last_error() -> None:
 
 
 def test_wait_for_health_rejects_untrusted_urls_before_any_probe() -> None:
-    clock = SleepingClock()
+    clock = AdvancingClock()
     probe, timeouts = _health_probe(clock, [], [0.0])
 
     with pytest.raises(ValueError, match="invalid web URL"):
@@ -128,7 +136,7 @@ _LISTINGS = st.sampled_from([_STARTING, ListingFailed("modal exited 1"), Contain
 def test_find_app_container_keeps_to_its_deadline(
     timeout: float, listings: list[object], running_after: int | None, took: list[float]
 ) -> None:
-    clock = SleepingClock()
+    clock = AdvancingClock()
     listed_at: list[float] = []
     warmed: list[str] = []
 

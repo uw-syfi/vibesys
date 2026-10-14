@@ -104,7 +104,7 @@ def _executor(root: Path, cluster: _QueuedCluster) -> SlurmEvaluationExecutor:
         cluster=cluster,
         admission=SharedSlurmAdmission(1),
         # Pacing is free: the holder's wait loop never sleeps on the wall clock.
-        pause=lambda _seconds: None,
+        sleeper=ManualClock(),
         clock=ManualClock(),
     )
 

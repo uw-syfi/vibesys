@@ -14,6 +14,7 @@ from vs_runtime.api.infrastructure import (
     parse_profile_command,
     preflight_native_cpu_profiler,
 )
+from vs_sim.api.testing import ManualClock
 
 
 class Result(subprocess.CompletedProcess[str]):
@@ -43,6 +44,10 @@ class FakeProcess:
 
     def kill(self) -> None:
         self.killed = True
+
+
+def _no_sleep(_seconds: float) -> None:
+    """The warm-up passes at once; these cases do not sample a running workload."""
 
 
 def test_command_line_tools_shim_falls_back_to_sample() -> None:
@@ -113,8 +118,12 @@ def test_detection_reports_unavailable_tools_after_xcode_select_failure() -> Non
 
 
 def test_collection_persists_reproduction_metadata(tmp_path: Path) -> None:
+    clock = ManualClock(100.0)
     result = collect_macos_profile(
-        ["./benchmark"], tmp_path, capability=detect_macos_profiler(system="Linux")
+        ["./benchmark"],
+        tmp_path,
+        capability=detect_macos_profiler(system="Linux"),
+        effects=MacOSProfilerEffects(now=clock.now, sleep=clock.advance),
     )
     metadata = Path(result.metadata).read_text()
     assert result.status == "error"
@@ -141,7 +150,7 @@ def test_instruments_collection_builds_bounded_launch_command(tmp_path: Path) ->
         tmp_path,
         duration=7,
         capability=capability,
-        effects=MacOSProfilerEffects(run=run, now=lambda: 100.0),
+        effects=MacOSProfilerEffects(run=run, now=lambda: 100.0, sleep=_no_sleep),
     )
 
     assert result.status == "ok"
@@ -178,7 +187,7 @@ def test_collection_converts_profiler_launch_error_to_diagnostic(tmp_path: Path)
         ["./benchmark"],
         tmp_path,
         capability=capability,
-        effects=MacOSProfilerEffects(run=fail_run),
+        effects=MacOSProfilerEffects(run=fail_run, now=lambda: 100.0, sleep=_no_sleep),
     )
     assert result.status == "error"
     assert MacOSProfilerDiagnostic.COLLECTION_FAILED in result.diagnostics
@@ -205,7 +214,8 @@ def test_permission_failure_and_child_target_are_structured(tmp_path: Path) -> N
         effects=MacOSProfilerEffects(
             run=run,
             start=lambda *_args, **_kwargs: process,
-            sleep=lambda _seconds: None,
+            now=lambda: 100.0,
+            sleep=_no_sleep,
         ),
     )
     assert result.target_pid == 456
@@ -221,19 +231,24 @@ def test_sample_kills_launcher_when_graceful_wait_times_out(tmp_path: Path) -> N
     def run(command: Sequence[str], **_kwargs: object) -> Result:
         return Result(stdout="123 1\n") if command[:2] == ["ps", "-axo"] else Result()
 
+    clock = ManualClock(100.0)
     result = collect_macos_profile(
         ["./benchmark"],
         tmp_path,
+        warmup=30.0,
         capability=capability,
         effects=MacOSProfilerEffects(
             run=run,
             start=lambda *_args, **_kwargs: process,
-            sleep=lambda _seconds: None,
+            now=clock.now,
+            sleep=clock.advance,
         ),
     )
     assert result.status == "ok"
     assert result.target_pid == 123
     assert process.killed
+    # The warm-up is spent on the injected clock, not slept for real.
+    assert clock.now() == 130.0
 
 
 def test_parse_command_preserves_quoted_arguments_without_shell_execution() -> None:

@@ -88,6 +88,12 @@ def _runner(cluster: _Cluster, poll_interval: float) -> SlurmJobRunner:
     return SlurmJobRunner(config, process=cluster.process, clock=ManualClock())
 
 
+def _unpaused(seconds: float) -> None:
+    """A wait with a cancel event pauses on the event, never through its ``pause``."""
+    message = f"the wait paused for {seconds} s outside its cancel event"
+    raise AssertionError(message)
+
+
 def _request(directory: Path) -> SlurmJobRequest:
     workspace = directory / "workspace"
     workspace.mkdir(exist_ok=True)
@@ -106,7 +112,7 @@ def test_a_cancel_set_during_the_pause_ends_the_wait_without_the_interval_passin
     cancel = _CancelDuringPause(pauses_before_cancel=0)
 
     with pytest.raises(SlurmError, match="was cancelled"):
-        runner.wait(job, cancel_event=cancel, timeout_seconds=_JOB_TIMEOUT_SECONDS)
+        runner.wait(job, cancel_event=cancel, timeout_seconds=_JOB_TIMEOUT_SECONDS, pause=_unpaused)
 
     # The pause was spent on the event, for at most the interval, and it ended there.
     assert len(cancel.pauses) == 1
@@ -127,13 +133,52 @@ def test_a_cancel_is_seen_at_the_first_pause_after_it_is_set(
     cancel = _CancelDuringPause(pauses_before_cancel=pauses_before_cancel)
 
     with pytest.raises(SlurmError, match="was cancelled"):
-        runner.wait(job, cancel_event=cancel, timeout_seconds=_JOB_TIMEOUT_SECONDS)
+        runner.wait(job, cancel_event=cancel, timeout_seconds=_JOB_TIMEOUT_SECONDS, pause=_unpaused)
 
     # One status read before each pause; the cancel ends the pause it arrived in.
     assert len(cancel.pauses) == pauses_before_cancel + 1
     assert _status_reads(state) == pauses_before_cancel + 1
     assert all(pause is not None and pause <= poll_interval for pause in cancel.pauses)
     assert recorded_commands(state).count(f"scancel {JOB_ID}") == 1
+
+
+@settings(max_examples=examples(pr=5, nightly=15), deadline=None)
+@given(
+    poll_interval=st.floats(min_value=1.0, max_value=3600.0),
+    polls=st.integers(min_value=1, max_value=20),
+)
+def test_a_wait_without_a_cancel_pauses_only_through_its_pause(
+    tmp_path_factory: pytest.TempPathFactory, poll_interval: float, polls: int
+) -> None:
+    """Every pause between polls is the caller's: hours of waiting take no real time.
+
+    The wait once fell back to ``time.sleep`` when no pause was injected, so a caller
+    that forgot one slept for real; the pause is now a required argument.
+    """
+    state = tmp_path_factory.mktemp("cluster")
+    timeout = poll_interval * polls
+    clock = ManualClock()
+    config = SlurmConfig(
+        name="fake",
+        remote_workspace_root="/remote/runs",
+        transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+        poll_interval_seconds=poll_interval,
+        job_timeout_seconds=_JOB_TIMEOUT_SECONDS,
+    )
+    runner = SlurmJobRunner(config, process=_Cluster(state).process, clock=clock)
+    job = runner.submit(_request(state))
+    pauses: list[float] = []
+
+    def pause(seconds: float) -> None:
+        pauses.append(seconds)
+        clock.advance(seconds)
+
+    outcome = runner.wait(job, timeout_seconds=timeout, pause=pause)
+
+    assert outcome.timed_out
+    assert outcome.status is SlurmJobStatus.PENDING
+    assert sum(pauses) == pytest.approx(timeout)
+    assert all(seconds <= poll_interval for seconds in pauses)
 
 
 @settings(max_examples=examples(pr=5, nightly=10), deadline=None)

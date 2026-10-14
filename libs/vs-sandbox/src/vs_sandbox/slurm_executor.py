@@ -70,7 +70,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
     from pathlib import Path
 
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Sleeper
     from vs_slurm.api import (
         Cluster,
         ClusterCollectOutcome,
@@ -331,14 +331,15 @@ class SlurmEvaluationExecutor:
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
         process: SlurmProcess | None = None,
-        pause: Callable[[float], None] | None = None,
         clock: Clock,
+        sleeper: Sleeper,
         cancel_confirmation_seconds: float = _DEFAULT_CANCEL_CONFIRMATION_SECONDS,
     ) -> None:
         """Bind scheduler policy, durable intent, and the cluster interface.
 
         ``clock`` times the job deadline and availability readings. The deadline is
         persisted, so a production clock is :class:`vs_sim.api.SystemClock`.
+        ``sleeper`` paces the polls of a running job and of a cancel's confirmation.
         """
         self._cluster = (
             cluster
@@ -347,10 +348,10 @@ class SlurmEvaluationExecutor:
                 config, state_root=handle_root / "cluster", process=process, clock=clock
             )
         )
-        self._pause = pause
+        self._sleeper = sleeper
         self._poll_interval = config.poll_interval_seconds
         # Confirmation is bounded by an inspection count so that it follows the
-        # same pacing as the wait loop (and an injected pause), not the wall clock.
+        # same pacing as the wait loop (``sleeper``), not the wall clock.
         self._cancel_confirmations = max(
             1, math.ceil(cancel_confirmation_seconds / config.poll_interval_seconds)
         )
@@ -958,7 +959,7 @@ class SlurmEvaluationExecutor:
             remaining = wait_deadline_epoch_s - self._clock.now()
             if remaining <= 0:
                 raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
-            await self._pace(min(self._poll_interval, remaining))
+            await self._sleeper.sleep(min(self._poll_interval, remaining))
 
     def _scheduler_view(
         self, handle_id: str, observed: ClusterObservation
@@ -1015,12 +1016,6 @@ class SlurmEvaluationExecutor:
         index = floor if reported is None else max(floor, min(reported, last))
         self._stage_floor[handle_id] = index
         return request.stages[index].name
-
-    async def _pace(self, interval: float) -> None:
-        if self._pause is None:
-            await asyncio.sleep(interval)
-        else:
-            await self._in_thread(self._pause, interval)
 
     async def _in_thread[**P, R](
         self, function: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
@@ -1157,7 +1152,7 @@ class SlurmEvaluationExecutor:
             left = max(0, left - 1)
             self._confirmations_left[handle_id] = left
             if left > 0:
-                await self._pace(self._poll_interval)
+                await self._sleeper.sleep(self._poll_interval)
         return _CancelRequested(job_id)
 
     async def _confirm_unaccepted(
@@ -1180,7 +1175,7 @@ class SlurmEvaluationExecutor:
                 self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELING))
                 return await self._confirm_termination(handle_id, target, job_id)
             if attempt + 1 < _SUBMISSION_ABSENCE_CONFIRMATIONS:
-                await self._pace(self._poll_interval)
+                await self._sleeper.sleep(self._poll_interval)
         return _CancelConfirmed()
 
     async def _cancel_running_best_effort(self, handle_id: str) -> bool:

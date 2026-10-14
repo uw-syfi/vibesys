@@ -94,6 +94,7 @@ async def test_a_stop_during_sbatch_reply_cancels_the_submitted_job_once(tmp_pat
             state_root=tmp_path / "identity",
         ),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     coordinator = EvaluationCoordinator(
         executor, evaluation_testing.InMemoryEvaluationStore(), ManualClock()

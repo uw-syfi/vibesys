@@ -39,6 +39,12 @@ if TYPE_CHECKING:
 _JOB_NAME = re.compile(r"--job-name=\S+")
 
 
+def _unpaused(seconds: float) -> None:
+    """The pause of a wait whose job is terminal at its first poll: it is never called."""
+    message = f"the job was not terminal at its first poll (pause of {seconds} s)"
+    raise AssertionError(message)
+
+
 def _connector_program(state: Path) -> tuple[str, ...]:
     """The executable connector, which answers the connector protocol and the local programs."""
     return (sys.executable, "-m", "vs_slurm.fake_connector", str(state))
@@ -96,7 +102,7 @@ def _observe(
     workspace.mkdir()
     (root / "scratch").mkdir()
     result = make(root, remote).run(
-        SlurmJobRequest(workspace=workspace, command=("sh", "-c", script))
+        SlurmJobRequest(workspace=workspace, command=("sh", "-c", script)), pause=_unpaused
     )
     commands = [
         # The scheduler job name embeds a digest of the (per-side) workspace path.

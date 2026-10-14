@@ -62,6 +62,8 @@ from vs_slurm.api import SlurmBatchStageResult as _StageResult
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from vs_sim.api import Sleeper
+
 _POLL_INTERVAL_S = 10.0
 # The executor waits this long for a cancelled job to end before it leaves the
 # evaluation CANCELING. It exceeds every recorded teardown.
@@ -229,7 +231,6 @@ def _replay_world(
         ),
         process=faults,
         clock=clock,
-        pause=clock.advance,
     )
     cluster = SlurmCluster(runner, state_root=root / "identity")
     return _World(
@@ -279,9 +280,7 @@ def _request() -> EvaluationRequest:
     )
 
 
-def _executor(
-    world: _World, pause: Callable[[float], None] | None = None
-) -> SlurmEvaluationExecutor:
+def _executor(world: _World, sleeper: Sleeper | None = None) -> SlurmEvaluationExecutor:
     """An executor over the world; by default its waiting advances the world's clock."""
     workspace = world.root / "workspace"
     workspace.mkdir(exist_ok=True)
@@ -294,7 +293,7 @@ def _executor(
         support_trees={},
         handle_root=world.root / "handles",
         cluster=world.cluster,
-        pause=pause or world.clock.advance,
+        sleeper=sleeper or world.clock,
         cancel_confirmation_seconds=_CONFIRMATION_S,
         # The job deadline is not under test here, and worlds leap the scheduler clock far
         # past it; a separate clock that never moves keeps it out of every outcome.
@@ -303,9 +302,9 @@ def _executor(
 
 
 def _stack(
-    world: _World, pause: Callable[[float], None] | None = None
+    world: _World, sleeper: Sleeper | None = None
 ) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator]:
-    executor = _executor(world, pause)
+    executor = _executor(world, sleeper)
     store = evaluation_testing.InMemoryEvaluationStore()
     return executor, EvaluationCoordinator(executor, store, ManualClock())
 
@@ -375,9 +374,25 @@ def test_published_lifecycle_never_goes_backwards(spec: _WorldSpec, operations: 
     asyncio.run(_publishes_monotonically(spec, operations))
 
 
+class _ParkFirstSleep:
+    """Parks the first sleep until ``release`` is set; later sleeps run on ``then``."""
+
+    def __init__(self, then: ManualClock) -> None:
+        self.idle = asyncio.Event()
+        self.release = asyncio.Event()
+        self._then = then
+
+    async def sleep(self, seconds: float) -> None:
+        if not self.idle.is_set():
+            self.idle.set()
+            await self.release.wait()
+        else:
+            await self._then.sleep(seconds)
+
+
 def _after_submitter_idles(
     world: _World,
-) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator, threading.Event, threading.Event]:
+) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator, asyncio.Event, asyncio.Event]:
     """A stack whose submitter parks at its first wait, so a test alone sends commands.
 
     The first pause is the submitter's own wait loop and parks; every later pause
@@ -387,23 +402,9 @@ def _after_submitter_idles(
     a stop could land mid-acceptance, which sends its own scancel and a second one
     when the confirmation budget runs out.
     """
-    idle = threading.Event()
-    release = threading.Event()
-    lock = threading.Lock()
-    parked = []
-
-    def pause(seconds: float) -> None:
-        with lock:
-            first = not parked
-            parked.append(True)
-        if first:
-            idle.set()
-            release.wait()
-        else:
-            world.clock.advance(seconds)
-
-    executor, coordinator = _stack(world, pause)
-    return executor, coordinator, idle, release
+    sleeper = _ParkFirstSleep(world.clock)
+    executor, coordinator = _stack(world, sleeper)
+    return executor, coordinator, sleeper.idle, sleeper.release
 
 
 async def _stopped_after(spec: _WorldSpec, delay_s: float) -> None:
@@ -541,13 +542,9 @@ def test_an_evaluation_ends_when_accounting_reports_the_job_ended(spec: _WorldSp
 async def _stages_reported_while_running(spec: _WorldSpec) -> list[str]:
     with tempfile.TemporaryDirectory() as raw:
         world = spec.build(Path(raw))
-        parked = threading.Event()
         # The submitting executor's own waiting is parked, so this test alone moves time.
-
-        def park(_seconds: float) -> None:
-            parked.wait()
-
-        submitter, coordinator = _stack(world, pause=park)
+        parked = _ParkFirstSleep(world.clock)
+        submitter, coordinator = _stack(world, parked)
         handle = await coordinator.submit(_request())
         await wait_until_executor_started(world.cluster.accepted, submitter, handle.id)
         reader = _executor(world)
@@ -561,7 +558,7 @@ async def _stages_reported_while_running(spec: _WorldSpec) -> list[str]:
                 if polled.phase is PollPhase.RUNNING and polled.current_stage is not None:
                     seen.append(polled.current_stage)
         finally:
-            parked.set()
+            parked.release.set()
             await submitter.close()
         return seen
 

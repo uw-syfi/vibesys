@@ -76,7 +76,7 @@ if TYPE_CHECKING:
         WorkspaceRuntime,
     )
     from vs_sandbox.api import ComputeBackendImpl, DockerSandbox
-    from vs_sim.api import Clock
+    from vs_sim.api import SleepingClock
 
 
 type StatelessToolServer = Callable[[object], ToolServerDescriptor | None]
@@ -464,7 +464,7 @@ class _ProductHostFactory:
         resources: _PreparedRun,
         workspaces: Workspaces,
         namespace: StateNamespace,
-        clock: Clock,
+        clock: SleepingClock,
     ) -> SlurmSemanticEvaluationExecutor | None:
         """Build the cluster's semantic execution adapter when the environment reports one."""
         cluster = resources.environment_resources.view.cluster_evaluation
@@ -479,6 +479,7 @@ class _ProductHostFactory:
             namespace,
             namespace.external_directory() / "slurm-provider-handles",
             clock=clock,
+            sleeper=clock,
             process=integration.slurm_process,
         )
 

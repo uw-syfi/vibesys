@@ -221,7 +221,7 @@ def test_collect_reports_failed_stat_record_and_missing_counters(tmp_path: Path)
         tmp_path,
         capability=capability,
         timeout=3,
-        effects=LinuxProfilerEffects(run=fake_run),
+        effects=LinuxProfilerEffects(run=fake_run, now=lambda: 100.0),
     )
 
     assert result.status == "error"
@@ -254,7 +254,10 @@ def test_collect_reports_failed_perf_report(tmp_path: Path) -> None:
         raise AssertionError(command)
 
     result = collect_linux_profile(
-        ["bench"], tmp_path, capability=capability, effects=LinuxProfilerEffects(run=fake_run)
+        ["bench"],
+        tmp_path,
+        capability=capability,
+        effects=LinuxProfilerEffects(run=fake_run, now=lambda: 100.0),
     )
 
     assert result.status == "error"
@@ -285,7 +288,9 @@ def test_collect_degrades_when_perf_unavailable(tmp_path: Path) -> None:
         diagnostics=(LinuxProfilerDiagnostic.PERF_UNAVAILABLE,),
     )
 
-    result = collect_linux_profile(["bench"], tmp_path, capability=capability)
+    result = collect_linux_profile(
+        ["bench"], tmp_path, capability=capability, effects=LinuxProfilerEffects(now=lambda: 100.0)
+    )
 
     assert result.status == "error"
     assert result.stat_artifact is None

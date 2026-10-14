@@ -10,7 +10,6 @@ import re
 import shlex
 import subprocess
 import tempfile
-import time
 import uuid
 from collections.abc import Mapping
 from contextlib import suppress
@@ -543,7 +542,7 @@ class SlurmJobRunner:
     """Run a command in Slurm without knowing cluster credentials or transport."""
 
     def __init__(  # noqa: PLR0913  # LW-951301; each keyword is an independent injected effect or local resource.
-        # > A settings object would group unrelated effects (process, clock, pause,
+        # > A settings object would group unrelated effects (process, clock,
         # > identity, scratch) into a shallow carrier; carrying scratch on each
         # > request cannot reach collect(), which receives only a durable handle.
         self,
@@ -551,7 +550,6 @@ class SlurmJobRunner:
         *,
         process: SlurmProcess | None = None,
         clock: Clock,
-        pause: Callable[[float], None] | None = None,
         invocation_id: Callable[[], str] = lambda: uuid.uuid4().hex,
         scratch_root: Path | None = None,
         host_environment: Callable[[], Mapping[str, str]] | None = None,
@@ -561,9 +559,6 @@ class SlurmJobRunner:
         ``clock`` times staging, submission and the job deadline. ``host_environment``
         returns this process's environment, from which the local transport takes its
         login-like one (``login_environment``); this process's own when omitted.
-        ``pause`` replaces the pause between polls wholesale (tests advance a virtual
-        clock with it). Left unset, a wait that has a ``cancel_event`` pauses on that
-        event, so a cancel ends the pause at once, and a wait without one sleeps.
 
         ``scratch_root`` holds the runner's own transfer files (the job script,
         collected status, log, and batch results); the system temporary
@@ -580,16 +575,18 @@ class SlurmJobRunner:
         )
         self._operations = RemoteOperations(self._transport, config, scratch_root)
         self._clock = clock
-        self._pause = pause
         self._invocation_id = invocation_id
 
-    def run(self, request: SlurmJobRequest) -> SlurmJobResult:
-        """Stage, submit, wait, and collect as a blocking compatibility API."""
+    def run(self, request: SlurmJobRequest, *, pause: Callable[[float], None]) -> SlurmJobResult:
+        """Stage, submit, wait, and collect as a blocking compatibility API.
+
+        ``pause`` waits between polls, as in :meth:`wait`.
+        """
         if request.cancel_event is not None and request.cancel_event.is_set():
             raise SlurmError.cancelled_before_submission()
         handle = self.submit(request)
         try:
-            outcome = self._await_terminal(handle, request.cancel_event)
+            outcome = self._await_terminal(handle, request.cancel_event, pause)
         except BaseException as failure:
             # This call submitted the job, so no other owner can cancel it:
             # whatever ends the wait (a cancel, a timeout, a failed poll, an
@@ -810,12 +807,15 @@ class SlurmJobRunner:
         self,
         handle: SlurmBatchHandle,
         *,
+        pause: Callable[[float], None],
         timeout_seconds: float | None = None,
         cancel_event: Event | None = None,
     ) -> SlurmBatchWaitResult:
         """Wait on a batch without changing its one-job lifecycle semantics."""
         started = self._clock.now()
-        result = self.wait(handle.job, timeout_seconds=timeout_seconds, cancel_event=cancel_event)
+        result = self.wait(
+            handle.job, pause=pause, timeout_seconds=timeout_seconds, cancel_event=cancel_event
+        )
         elapsed = max(0.0, self._clock.now() - started)
         updated = handle.model_copy(update={"waited_seconds": handle.waited_seconds + elapsed})
         return SlurmBatchWaitResult(
@@ -957,6 +957,7 @@ class SlurmJobRunner:
         self,
         handle: SlurmJobHandle,
         *,
+        pause: Callable[[float], None],
         timeout_seconds: float | None = None,
         cancel_event: Event | None = None,
     ) -> SlurmJobWaitResult:
@@ -965,12 +966,17 @@ class SlurmJobRunner:
         The timeout never cancels the job. An explicitly set ``cancel_event``
         requests cancellation and raises the cancellation error; this retains
         the legacy ``run()`` behavior.
+
+        Between polls the wait pauses on ``cancel_event`` when there is one, so a
+        cancel ends the pause at once, and with ``pause`` otherwise. Either runs on
+        the runner clock's timeline: production passes a real sleep
+        (``vs_sim.api.OsThreads().sleep``), a test one that advances its clock.
         """
         timeout = self._config.job_timeout_seconds if timeout_seconds is None else timeout_seconds
         if not math.isfinite(timeout) or timeout <= 0:
             raise SlurmError.invalid_wait_timeout()
         try:
-            return self._observe(handle, timeout, cancel_event)
+            return self._observe(handle, timeout, cancel_event, pause)
         except SlurmError as failure:
             if cancel_event is None or not cancel_event.is_set():
                 raise
@@ -978,7 +984,11 @@ class SlurmJobRunner:
             raise
 
     def _observe(
-        self, handle: SlurmJobHandle, timeout: float, cancel_event: Event | None
+        self,
+        handle: SlurmJobHandle,
+        timeout: float,
+        cancel_event: Event | None,
+        pause: Callable[[float], None],
     ) -> SlurmJobWaitResult:
         """Poll until terminal or *timeout*; a set *cancel_event* raises, uncancelled."""
         deadline = self._clock.now() + timeout
@@ -991,28 +1001,19 @@ class SlurmJobRunner:
             remaining = deadline - self._clock.now()
             if remaining <= 0:
                 return SlurmJobWaitResult(handle=handle, status=status, timed_out=True)
-            self._pause_between_polls(
-                min(self._config.poll_interval_seconds, remaining), cancel_event
-            )
-
-    def _pause_between_polls(self, seconds: float, cancel_event: Event | None) -> None:
-        """Pause *seconds*, ending early when *cancel_event* is set.
-
-        The pause is bounded by *seconds*, and the event's setter is the cancel
-        path of the caller that owns the wait, so no wait here is unbounded.
-        """
-        if self._pause is not None:
-            self._pause(seconds)
-        elif cancel_event is not None:
-            cancel_event.wait(seconds)
-        else:
-            time.sleep(seconds)
+            seconds = min(self._config.poll_interval_seconds, remaining)
+            # Bounded by *seconds*; the event's setter is the cancel path of the
+            # caller that owns the wait, so no pause here is unbounded.
+            if cancel_event is not None:
+                cancel_event.wait(seconds)
+            else:
+                pause(seconds)
 
     def _await_terminal(
-        self, handle: SlurmJobHandle, cancel_event: Event | None
+        self, handle: SlurmJobHandle, cancel_event: Event | None, pause: Callable[[float], None]
     ) -> SlurmJobWaitResult:
         """Observe within the configured job timeout; running past it raises."""
-        outcome = self._observe(handle, self._config.job_timeout_seconds, cancel_event)
+        outcome = self._observe(handle, self._config.job_timeout_seconds, cancel_event, pause)
         if outcome.timed_out:
             raise SlurmError.job_timed_out(handle.job_id)
         return outcome

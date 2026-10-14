@@ -8,7 +8,6 @@ import platform
 import shlex
 import shutil
 import subprocess
-import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from enum import StrEnum
@@ -183,13 +182,13 @@ def _run_text(
 
 @dataclass(frozen=True)
 class LinuxProfilerEffects:
-    """Injected process and clock effects for Linux profile collection."""
+    """Injected process and clock effects for Linux profile collection.
 
+    ``now`` stamps the collection's start and end, in seconds since the epoch.
+    """
+
+    now: Callable[[], float]
     run: Callable[..., subprocess.CompletedProcess[str]] = _run_text
-    now: Callable[[], float] = time.time
-
-
-_DEFAULT_EFFECTS = LinuxProfilerEffects()
 
 
 def _parse_perf_stat_csv(path: Path) -> tuple[dict[str, str], ...]:
@@ -230,7 +229,7 @@ def collect(  # noqa: PLR0913  # lint-waiver: LW-009000 [PLR0913]; preserve the 
     timeout: int | None = None,
     frequency: int = 99,
     call_graph: str = "fp",
-    effects: LinuxProfilerEffects = _DEFAULT_EFFECTS,
+    effects: LinuxProfilerEffects,
 ) -> CollectionResult:
     """Run separate diagnostic ``perf stat`` and ``perf record`` workloads."""
     capability = capability or detect_capability()

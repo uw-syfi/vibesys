@@ -98,6 +98,7 @@ async def test_close_waits_for_every_cluster_call_still_running_in_a_thread(
             handle_root=tmp_path / "handles",
             cluster=cluster,
             clock=SystemClock(),
+            sleeper=SystemClock(),
         )
 
     first = executor()

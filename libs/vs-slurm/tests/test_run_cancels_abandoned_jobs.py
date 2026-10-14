@@ -87,8 +87,7 @@ class _Cluster:
         return subprocess.CompletedProcess(argv, 0, json.dumps(handle(self.state, request)))
 
 
-def _runner(cluster: _Cluster, clock: ManualClock | None = None) -> SlurmJobRunner:
-    clock = clock or ManualClock()
+def _runner(cluster: _Cluster, clock: ManualClock) -> SlurmJobRunner:
     config = SlurmConfig(
         name="fake",
         remote_workspace_root="/remote/runs",
@@ -96,7 +95,7 @@ def _runner(cluster: _Cluster, clock: ManualClock | None = None) -> SlurmJobRunn
         poll_interval_seconds=10.0,
         job_timeout_seconds=60,
     )
-    return SlurmJobRunner(config, process=cluster.process, clock=clock, pause=clock.advance)
+    return SlurmJobRunner(config, process=cluster.process, clock=clock)
 
 
 def _request(tmp_path: Path) -> SlurmJobRequest:
@@ -106,7 +105,8 @@ def _request(tmp_path: Path) -> SlurmJobRequest:
 
 
 def _run(tmp_path: Path, cluster: _Cluster) -> None:
-    _runner(cluster).run(_request(tmp_path))
+    clock = ManualClock()
+    _runner(cluster, clock).run(_request(tmp_path), pause=clock.advance)
 
 
 @settings(max_examples=examples(pr=5, nightly=12), deadline=None)
@@ -156,13 +156,14 @@ def test_a_cancelled_wait_cancels_the_job_and_reports_a_failed_cancel(
     cluster = _Cluster(tmp_path, _killed_transport)
     cluster.polls_before_failure = 1_000
     cluster.fail_scancel = scancel_fails
-    runner = _runner(cluster)
+    clock = ManualClock()
+    runner = _runner(cluster, clock)
     job = runner.submit(_request(tmp_path))
     cancel = threading.Event()
     cancel.set()
 
     with pytest.raises(SlurmError, match="was cancelled") as raised:
-        runner.wait(job, cancel_event=cancel)
+        runner.wait(job, cancel_event=cancel, pause=clock.advance)
 
     assert recorded_commands(tmp_path).count(f"scancel {JOB_ID}") == 1
     notes = getattr(raised.value, "__notes__", [])
@@ -171,10 +172,11 @@ def test_a_cancelled_wait_cancels_the_job_and_reports_a_failed_cancel(
 
 def test_a_failed_poll_without_a_cancel_leaves_wait_to_its_caller(tmp_path: Path) -> None:
     cluster = _Cluster(tmp_path, _killed_transport)
-    runner = _runner(cluster)
+    clock = ManualClock()
+    runner = _runner(cluster, clock)
     job = runner.submit(_request(tmp_path))
 
     with pytest.raises(SlurmError, match="failed with exit code"):
-        runner.wait(job)
+        runner.wait(job, pause=clock.advance)
 
     assert f"scancel {JOB_ID}" not in recorded_commands(tmp_path)

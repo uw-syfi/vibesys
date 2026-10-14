@@ -58,6 +58,7 @@ from vs_slurm.api import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from vs_runtime.api import CandidateWorkspace, Workspace, Workspaces
@@ -258,10 +259,11 @@ class _Runner(SlurmJobRunner):
         self,
         handle: SlurmBatchHandle,
         *,
+        pause: Callable[[float], None],
         timeout_seconds: float | None = None,
         cancel_event: Event | None = None,
     ) -> SlurmBatchWaitResult:
-        del timeout_seconds, cancel_event
+        del pause, timeout_seconds, cancel_event
         self.wait_started.set()
         wait_or_fail(self._release_wait, "the held Slurm wait to be released")
         self.wait_finished.set()
@@ -409,6 +411,7 @@ async def test_semantic_executor_preserves_infrastructure_failure_provenance(
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     await executor.submit(_request(snapshot, (kind,)), handle_id="provenance")
     observed = await _terminal(executor, "provenance")
@@ -482,6 +485,7 @@ async def test_coordinator_retains_completed_stages_after_late_infrastructure_fa
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     coordinator = EvaluationCoordinator(
         executor, InMemoryEvaluationStore(), ManualClock(), max_await_timeout_s=5
@@ -528,6 +532,7 @@ async def test_semantic_executor_fuses_recovers_and_reports_shared_capacity(tmp_
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
 
     availability = await first.availability(ResourceRequirements())
@@ -552,6 +557,7 @@ async def test_semantic_executor_fuses_recovers_and_reports_shared_capacity(tmp_
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     assert (await _terminal(resumed, "fused")).state is EvaluationState.SUCCEEDED
     assert runner.submissions == 1
@@ -581,6 +587,7 @@ async def test_unsupported_profile_evaluation_fails_instead_of_staying_queued(
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     clock = ManualClock()
     coordinator = EvaluationCoordinator(
@@ -617,6 +624,7 @@ async def test_a_kind_without_a_command_is_rejected_not_passed(
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     coordinator = EvaluationCoordinator(
         executor, InMemoryEvaluationStore(), ManualClock(), max_await_timeout_s=5
@@ -667,6 +675,7 @@ async def test_a_plan_with_a_trusted_capture_produces_profile_evidence(tmp_path:
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
 
     availability = await executor.availability(ResourceRequirements())
@@ -704,6 +713,7 @@ async def test_a_plan_without_a_capture_reports_no_profile_kind(tmp_path: Path) 
         tmp_path / "handles",
         cluster=SlurmCluster(_Runner(tmp_path / "runner"), state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
 
     availability = await executor.availability(ResourceRequirements())
@@ -752,6 +762,7 @@ async def test_failed_accuracy_fails_the_evaluation_with_its_diagnostics(tmp_pat
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
 
     await executor.submit(_request(snapshot), handle_id="fused")
@@ -809,6 +820,7 @@ async def test_silent_benchmark_failure_reports_the_time_limit_and_server_log(
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
 
     await executor.submit(_request(snapshot), handle_id="fused")
@@ -841,6 +853,7 @@ async def test_close_drains_provider_before_discarding_candidate(tmp_path: Path)
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     await executor.submit(_request(snapshot), handle_id="close-running")
     await wait_until_executor_started(runner.wait_started, executor, "close-running")
@@ -873,6 +886,7 @@ async def test_close_retains_execution_until_cleanup_settles(tmp_path: Path) -> 
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     await executor.submit(_request(snapshot), handle_id="retained-during-close")
     assert (await _terminal(executor, "retained-during-close")).state is EvaluationState.SUCCEEDED
@@ -912,6 +926,7 @@ async def test_close_attempts_every_cleanup_and_aggregates_errors(tmp_path: Path
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     await executor.submit(_request(snapshot), handle_id="cleanup-one")
     await executor.submit(_request(snapshot), handle_id="cleanup-two")
@@ -948,6 +963,7 @@ async def test_close_discards_workspace_when_provider_cleanup_fails(tmp_path: Pa
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     await executor.submit(_request(snapshot), handle_id="provider-cleanup-error")
     await wait_until_executor_started(runner.wait_started, executor, "provider-cleanup-error")
@@ -982,6 +998,7 @@ async def test_read_only_restart_inspection_does_not_recreate_candidate_workspac
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     await first.submit(_request(snapshot, (EvidenceKind.ACCURACY,)), handle_id="inspect-only")
     assert (await _terminal(first, "inspect-only")).state is EvaluationState.SUCCEEDED
@@ -996,6 +1013,7 @@ async def test_read_only_restart_inspection_does_not_recreate_candidate_workspac
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     assert await resumed.inspect_only("inspect-only") is None
     await resumed.close()
@@ -1065,6 +1083,7 @@ async def test_aggregate_ambiguity_cannot_promote_completed_stage_evidence(
         tmp_path / "handles",
         cluster=cluster,
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     try:
         await executor.submit(_request(snapshot), handle_id="aggregate")
@@ -1129,6 +1148,7 @@ async def test_required_hip_timing_reaches_fake_slurm_as_the_actual_capture_flag
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
         clock=ManualClock(),
+        sleeper=ManualClock(),
     )
     request = _request(snapshot, (EvidenceKind.PROFILE,))
     stage = SemanticEvaluationStage.model_validate(request.stages[0].payload).model_copy(

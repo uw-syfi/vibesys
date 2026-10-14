@@ -10,12 +10,14 @@ re-exports must import nothing outside the standard library (a test pins that).
 
 from __future__ import annotations
 
+from vs_runtime._linux_cpu_profiler import LinuxProfilerEffects
 from vs_runtime._linux_cpu_profiler import collect as collect_linux_profile
 from vs_runtime._linux_cpu_profiler import detect_capability as detect_linux_profiler
 from vs_runtime._linux_cpu_profiler import parse_command as parse_profile_command
 from vs_runtime._linux_cpu_profiler import summarize as summarize_linux_profile
 
 __all__ = [
+    "LinuxProfilerEffects",
     "collect_linux_profile",
     "detect_linux_profiler",
     "parse_profile_command",

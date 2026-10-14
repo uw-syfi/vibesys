@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_sim.api import MonotonicClock
+from vs_sim.api import MonotonicClock, OsThreads
 from vs_slurm.api import (
     SlurmConfig,
     SlurmConnectorTransport,
@@ -67,7 +67,7 @@ def test_transport_timeout_kills_descendant_that_inherits_captured_streams(
 
     with pytest.raises(SlurmError, match="transport timed out during exec"):
         SlurmJobRunner(config, clock=MonotonicClock()).run(
-            SlurmJobRequest(workspace=workspace, command=("true",))
+            SlurmJobRequest(workspace=workspace, command=("true",)), pause=OsThreads().sleep
         )
 
     pid = int(child_pid.read_text(encoding="utf-8"))

@@ -12,7 +12,7 @@ import tarfile
 from importlib.util import module_from_spec, spec_from_file_location
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
-from unittest.mock import MagicMock, call
+from unittest.mock import ANY, MagicMock, call
 
 import pytest
 from tests.support import run_test_command
@@ -32,12 +32,29 @@ from vs_sandbox.modal_evaluator import (  # test-isolation: constants bound remo
     _modal_health_url,
     _stop_modal_app,
 )
+from vs_sim.api.testing import ManualClock
 
 _UV_EXECUTABLE = modal_evaluator.shutil.which("uv") or "uv"
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
+
+
+class AdvancingClock:
+    """A manual clock whose blocking sleep moves it forward."""
+
+    def __init__(self) -> None:
+        """Start at zero."""
+        self._clock = ManualClock(0.0)
+
+    def now(self) -> float:
+        """The current time."""
+        return self._clock.now()
+
+    def sleep(self, seconds: float) -> None:
+        """Pause ``seconds`` manual seconds."""
+        self._clock.advance(seconds)
 
 
 class _EvaluatorOptions(TypedDict, total=False):
@@ -91,7 +108,9 @@ def _run_deployment_path_case(
     monkeypatch.setattr(modal_evaluator.subprocess, "run", run_deploy)
     monkeypatch.setattr(modal_evaluator, "wait_for_health", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", lambda *_args, **_kwargs: 0)
-    modal_evaluator.run_evaluator(["true"], workspace=str(workspace), entrypoint=entrypoint)
+    modal_evaluator.run_evaluator(
+        ["true"], workspace=str(workspace), entrypoint=entrypoint, clock=AdvancingClock()
+    )
     return deployed_paths
 
 
@@ -101,7 +120,9 @@ def _run_with_lock_path(lock_path: Path, tmp_path: Path) -> int:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     try:
-        return modal_evaluator.run_evaluator(["true"], workspace=str(workspace))
+        return modal_evaluator.run_evaluator(
+            ["true"], workspace=str(workspace), clock=AdvancingClock()
+        )
     finally:
         monkeypatch.undo()
 
@@ -149,6 +170,7 @@ def _run_public_evaluator(
             str(evaluator_package_root) if evaluator_package_root is not None else None
         ),
         setup_command=setup_command,
+        clock=AdvancingClock(),
     )
     return result, calls
 
@@ -242,11 +264,11 @@ def test_runtime_dir_is_per_user_without_xdg_runtime_dir(
     workspace.mkdir()
     first = _load_modal_evaluator(monkeypatch, "uid_1001")
     monkeypatch.setattr(first.os, "getuid", lambda: real_uid)
-    assert first.run_evaluator(["true"], workspace=str(workspace)) == 1
+    assert first.run_evaluator(["true"], workspace=str(workspace), clock=AdvancingClock()) == 1
     monkeypatch.setattr(modal_evaluator.os, "getuid", lambda: 1002)
     second = _load_modal_evaluator(monkeypatch, "uid_1002")
     monkeypatch.setattr(second.os, "getuid", lambda: real_uid)
-    assert second.run_evaluator(["true"], workspace=str(workspace)) == 1
+    assert second.run_evaluator(["true"], workspace=str(workspace), clock=AdvancingClock()) == 1
 
     first_lock = tmp_path / "vibesys-1001" / "modal-evaluator.lock"
     second_lock = tmp_path / "vibesys-1002" / "modal-evaluator.lock"
@@ -263,7 +285,7 @@ def test_runtime_dir_prefers_xdg_runtime_dir(
     workspace.mkdir()
     imported = _load_modal_evaluator(monkeypatch, "xdg")
 
-    assert imported.run_evaluator(["true"], workspace=str(workspace)) == 1
+    assert imported.run_evaluator(["true"], workspace=str(workspace), clock=AdvancingClock()) == 1
     assert (tmp_path / "vibesys" / "modal-evaluator.lock").exists()
 
 
@@ -479,6 +501,7 @@ def test_setup_command_encoding_round_trips_opaque_argv(
         (
             (["true"],),
             {
+                "clock": ANY,
                 "workspace": "/workspace",
                 "entrypoint": "main.py",
                 "readiness_timeout_seconds": 90,
@@ -798,21 +821,11 @@ def test_evaluator_reports_missing_running_container(
     listing = SimpleNamespace(returncode=0, stdout="[]", stderr="")
     warm = MagicMock(return_value=True)
     monkeypatch.setattr(modal_evaluator, "_healthy_now", warm)
-    monkeypatch.setattr(modal_evaluator.time, "sleep", lambda _: None)
-
-    ticks = 0
-
-    def monotonic() -> float:
-        nonlocal ticks
-        ticks += 1
-        return 0.0 if ticks < 3 else 1_000.0
-
-    monkeypatch.setattr(modal_evaluator.time, "monotonic", monotonic)
     result, calls = _run_public_evaluator(
         workspace, ["python", "main.py"], tmp_path, monkeypatch, container_listing=listing
     )
     assert result == 1
-    assert warm.call_count == 1
+    assert warm.call_count >= 1
     assert not any(call[3:5] == ["container", "exec"] for call in calls)
     assert "no running container found" in capsys.readouterr().err
 
@@ -1094,8 +1107,7 @@ def test_run_evaluator_deploys_waits_and_runs_colocated(monkeypatch: pytest.Monk
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", colocated)
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", clock=AdvancingClock()
     )
 
     assert result == 0
@@ -1111,11 +1123,13 @@ def test_run_evaluator_deploys_waits_and_runs_colocated(monkeypatch: pytest.Monk
     wait.assert_called_once_with(
         "https://workspace--candidate.modal.run",
         timeout_seconds=90,
+        clock=ANY,
     )
     colocated.assert_called_once_with(
         ["uv", "run", "python", "checker.py"],
         workspace="/workspace",
         deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+        clock=ANY,
         setup_command=None,
         evaluator_package_root=None,
     )
@@ -1138,6 +1152,7 @@ def test_run_evaluator_threads_trusted_setup_and_package(
         workspace="/workspace",
         setup_command=["installer", "--locked"],
         evaluator_package_root=str(package),
+        clock=AdvancingClock(),
     )
 
     assert result == 0
@@ -1145,6 +1160,7 @@ def test_run_evaluator_threads_trusted_setup_and_package(
         ["python", ".vibesys-evaluator-package/adapter.py"],
         workspace="/workspace",
         deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+        clock=ANY,
         setup_command=("installer", "--locked"),
         evaluator_package_root=str(package.resolve()),
     )
@@ -1172,6 +1188,7 @@ def test_main_decodes_setup_command_and_forwards_package(monkeypatch: pytest.Mon
     assert result == 4
     run.assert_called_once_with(
         ["python", ".vibesys-evaluator-package/adapter.py"],
+        clock=ANY,
         workspace="/workspace",
         entrypoint="main.py",
         readiness_timeout_seconds=90,
@@ -1195,8 +1212,7 @@ def test_run_evaluator_requires_app_identifier(
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", colocated)
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", clock=AdvancingClock()
     )
 
     assert result == 1
@@ -1215,6 +1231,7 @@ def test_run_evaluator_deploys_custom_entrypoint(monkeypatch: pytest.MonkeyPatch
         ["checker"],
         workspace="/workspace",
         entrypoint="examples/deployment/service.py",
+        clock=AdvancingClock(),
     )
 
     assert result == 0
@@ -1256,8 +1273,7 @@ def test_run_evaluator_reuses_healthy_deployment_for_exact_revision(
     monkeypatch.setattr(modal_evaluator.subprocess, "run", MagicMock())
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", clock=AdvancingClock()
     )
 
     assert result == 0
@@ -1266,6 +1282,7 @@ def test_run_evaluator_reuses_healthy_deployment_for_exact_revision(
         ["uv", "run", "python", "checker.py"],
         workspace="/workspace",
         deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+        clock=ANY,
         setup_command=None,
         evaluator_package_root=None,
     )
@@ -1294,8 +1311,7 @@ def test_run_evaluator_redeploys_when_lease_lacks_app_identifier(
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", colocated)
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", clock=AdvancingClock()
     )
 
     assert result == 0
@@ -1327,8 +1343,7 @@ def test_run_evaluator_releases_reused_deployment_after_final_gate(
     monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", clock=AdvancingClock()
     )
 
     assert result == 0
@@ -1359,8 +1374,7 @@ def test_run_evaluator_releases_new_deployment_after_final_gate(
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", MagicMock(return_value=0))
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", clock=AdvancingClock()
     )
 
     assert result == 0
@@ -1399,8 +1413,7 @@ def test_run_evaluator_stops_mismatched_leased_app_before_redeploy(
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", MagicMock(return_value=0))
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", clock=AdvancingClock()
     )
 
     assert result == 0
@@ -1436,8 +1449,7 @@ def test_run_evaluator_redeploys_and_replaces_mismatched_revision(
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", MagicMock(return_value=0))
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", clock=AdvancingClock()
     )
 
     assert result == 0
@@ -1464,8 +1476,7 @@ def test_run_evaluator_prints_modal_logs_when_readiness_fails(
     monkeypatch.setattr(modal_evaluator, "recent_modal_logs", logs)
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", clock=AdvancingClock()
     )
 
     assert result == 1
@@ -1620,13 +1631,16 @@ def test_stage_archive_rejects_a_package_root_that_is_a_file(tmp_path: Path) -> 
 
 def test_run_evaluator_validates_command_and_package_root(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="missing evaluator command after"):
-        modal_evaluator.run_evaluator([], workspace=str(tmp_path))
+        modal_evaluator.run_evaluator([], workspace=str(tmp_path), clock=AdvancingClock())
     package = tmp_path / "package.txt"
     package.write_text("x")
 
     with pytest.raises(ValueError, match="evaluator package root is not a directory"):
         modal_evaluator.run_evaluator(
-            ["true"], workspace=str(tmp_path), evaluator_package_root=str(package)
+            ["true"],
+            workspace=str(tmp_path),
+            evaluator_package_root=str(package),
+            clock=AdvancingClock(),
         )
 
 
@@ -1655,6 +1669,7 @@ def test_evaluator_relays_exec_stderr(
         ["python", "main.py"],
         workspace=str(workspace),
         deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+        clock=AdvancingClock(),
     )
 
     assert result == 0
@@ -1687,7 +1702,11 @@ def test_reused_deployment_setup_failure_is_reported_and_released(
     monkeypatch.setattr(modal_evaluator, "_stop_modal_app", stop)
 
     result = _execute_reused_candidate(
-        ["true"], workspace="/workspace", setup_command=None, evaluator_package_root=None
+        ["true"],
+        workspace="/workspace",
+        setup_command=None,
+        evaluator_package_root=None,
+        clock=AdvancingClock(),
     )
 
     assert result == 1

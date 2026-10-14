@@ -53,6 +53,12 @@ def test_runtime_content_identity_is_stable_and_opaque() -> None:
     assert len(identity) == len("sha256:") + 64
 
 
+def _unpaused(seconds: float) -> None:
+    """The pause of a wait whose job is terminal at its first poll: it is never called."""
+    message = f"the job was not terminal at its first poll (pause of {seconds} s)"
+    raise AssertionError(message)
+
+
 def _config(**overrides: object) -> SlurmConfig:
     values: dict[str, object] = {
         "name": "test-cluster",
@@ -373,7 +379,8 @@ def test_runner_uses_versioned_connector_protocol_and_collects_artifacts(tmp_pat
             command=("python", "benchmark.py"),
             file_artifacts=(SlurmFileArtifact("metrics.json", file_output),),
             tree_artifacts=(SlurmTreeArtifact("profile", tree_output),),
-        )
+        ),
+        pause=_unpaused,
     )
 
     assert result.job_id == "1234"
@@ -464,7 +471,7 @@ def test_runner_uses_builtin_ssh_and_rsync_transport(tmp_path: Path) -> None:
 
     result = SlurmJobRunner(
         config, process=process, invocation_id=lambda: "ssh_01", clock=ManualClock()
-    ).run(SlurmJobRequest(workspace=workspace, command=("true",)))
+    ).run(SlurmJobRequest(workspace=workspace, command=("true",)), pause=_unpaused)
 
     assert result.job_id == "4567"
     assert result.output == "ssh output\n"
@@ -508,7 +515,7 @@ def test_local_transport_runs_commands_and_copies_on_this_host(tmp_path: Path) -
 
     result = SlurmJobRunner(
         config, process=process, invocation_id=lambda: "local_01", clock=ManualClock()
-    ).run(SlurmJobRequest(workspace=workspace, command=("true",)))
+    ).run(SlurmJobRequest(workspace=workspace, command=("true",)), pause=_unpaused)
 
     assert result.job_id == "4567"
     assert result.output == "ssh output\n"
@@ -540,7 +547,7 @@ def test_the_ssh_transport_leaves_the_environment_to_the_login_session(tmp_path:
     config = _config(transport={"kind": "ssh", "host": "cluster.example"})
     SlurmJobRunner(
         config, process=process, invocation_id=lambda: "env_01", clock=ManualClock()
-    ).run(SlurmJobRequest(workspace=workspace, command=("true",)))
+    ).run(SlurmJobRequest(workspace=workspace, command=("true",)), pause=_unpaused)
 
     assert process.environments
     assert all(environment is None for environment in process.environments)
@@ -576,7 +583,7 @@ def test_local_transport_processes_get_exactly_the_login_environment(host: dict[
             invocation_id=lambda: "env_01",
             host_environment=lambda: host,
             clock=ManualClock(),
-        ).run(SlurmJobRequest(workspace=Path(workspace), command=("true",)))
+        ).run(SlurmJobRequest(workspace=Path(workspace), command=("true",)), pause=_unpaused)
 
     expected = {
         name: value
@@ -667,12 +674,11 @@ def test_public_job_handle_recovers_without_resubmission(tmp_path: Path) -> None
         process=connector,
         invocation_id=lambda: "recover_01",
         clock=clock,
-        pause=clock.advance,
     )
 
     handle = runner.submit(SlurmJobRequest(workspace=workspace, command=("true",)))
     recovered_handle = type(handle).model_validate_json(handle.model_dump_json())
-    bounded = runner.wait(recovered_handle, timeout_seconds=2)
+    bounded = runner.wait(recovered_handle, timeout_seconds=2, pause=clock.advance)
 
     assert bounded.status == SlurmJobStatus.RUNNING
     assert bounded.timed_out is True
@@ -683,7 +689,7 @@ def test_public_job_handle_recovers_without_resubmission(tmp_path: Path) -> None
 
     connector.active_polls = 0
     resumed = SlurmJobRunner(_config(), process=connector, clock=ManualClock()).wait(
-        recovered_handle
+        recovered_handle, pause=clock.advance
     )
     result = SlurmJobRunner(_config(), process=connector, clock=ManualClock()).collect(
         recovered_handle
@@ -763,7 +769,7 @@ def test_bounded_wait_requires_positive_timeout(tmp_path: Path) -> None:
     handle = runner.submit(SlurmJobRequest(workspace=workspace, command=("true",)))
 
     with pytest.raises(SlurmError, match="greater than zero"):
-        runner.wait(handle, timeout_seconds=0)
+        runner.wait(handle, timeout_seconds=0, pause=_unpaused)
 
     assert not any(
         request.get("operation") == "exec" and "scancel" in str(request.get("command"))
@@ -786,7 +792,7 @@ def test_builtin_transport_enforces_hard_process_timeout(tmp_path: Path) -> None
 
     with pytest.raises(SlurmError, match="transport timed out during exec"):
         SlurmJobRunner(config, process=_TimedOutProcess(), clock=ManualClock()).run(
-            SlurmJobRequest(workspace=workspace, command=("true",))
+            SlurmJobRequest(workspace=workspace, command=("true",)), pause=_unpaused
         )
 
 
@@ -806,7 +812,8 @@ def test_service_and_setup_are_request_policy(tmp_path: Path) -> None:
             command=("python", "check.py", "http://127.0.0.1:VIBESYS_DYNAMIC_PORT"),
             setup_script="/operator/setup.sh",
             service=service,
-        )
+        ),
+        pause=_unpaused,
     )
 
     assert connector.uploaded_script is not None
@@ -825,7 +832,8 @@ def test_artifact_paths_are_candidate_relative(path: str, tmp_path: Path) -> Non
                 workspace=workspace,
                 command=("true",),
                 file_artifacts=(SlurmFileArtifact(path, tmp_path / "out"),),
-            )
+            ),
+            pause=_unpaused,
         )
 
 
@@ -836,7 +844,7 @@ def test_connector_failure_does_not_expose_output(tmp_path: Path) -> None:
 
     with pytest.raises(SlurmError, match="exit code 23") as error:
         SlurmJobRunner(_config(), process=connector, clock=ManualClock()).run(
-            SlurmJobRequest(workspace=workspace, command=("true",))
+            SlurmJobRequest(workspace=workspace, command=("true",)), pause=_unpaused
         )
     assert "private error" not in str(error.value)
 
@@ -852,7 +860,8 @@ def test_nonzero_job_skips_output_artifact_collection(tmp_path: Path) -> None:
             workspace=workspace,
             command=("false",),
             file_artifacts=(SlurmFileArtifact("metrics.json", output),),
-        )
+        ),
+        pause=_unpaused,
     )
 
     assert result.exit_code == 2
@@ -885,7 +894,6 @@ def test_a_lost_or_cut_progress_count_is_unknown_not_zero(tmp_path: Path, raw: s
         process=_ProgressAnswer(raw),
         invocation_id=lambda: "batch_01",
         clock=clock,
-        pause=clock.advance,
     )
     handle = runner.submit_batch(
         SlurmBatchRequest(
@@ -906,7 +914,6 @@ def test_a_whole_progress_count_is_read(tmp_path: Path) -> None:
         process=_ProgressAnswer(f"2\n{SCHEDULER_READ_END}\n"),
         invocation_id=lambda: "batch_01",
         clock=clock,
-        pause=clock.advance,
     )
     handle = runner.submit_batch(
         SlurmBatchRequest(
@@ -961,7 +968,6 @@ def test_batch_runs_ordered_stages_in_one_allocation_and_stops_after_failure(
         process=connector,
         invocation_id=lambda: "batch_01",
         clock=clock,
-        pause=clock.advance,
     )
 
     handle = runner.submit_batch(
@@ -988,7 +994,7 @@ def test_batch_runs_ordered_stages_in_one_allocation_and_stops_after_failure(
             ),
         )
     )
-    wait_result = runner.wait_batch(handle)
+    wait_result = runner.wait_batch(handle, pause=clock.advance)
     assert wait_result.timed_out is False
     recovered_handle = SlurmBatchHandle.model_validate_json(wait_result.handle.model_dump_json())
     result = runner.collect_batch(recovered_handle)
@@ -1317,7 +1323,6 @@ def _service_log_tail(tmp_path: Path, log_lines: list[str]) -> tuple[str, str | 
         process=connector,
         invocation_id=lambda: "batch_tail",
         clock=clock,
-        pause=clock.advance,
     )
     handle = runner.submit_batch(
         SlurmBatchRequest(
@@ -1331,7 +1336,7 @@ def _service_log_tail(tmp_path: Path, log_lines: list[str]) -> tuple[str, str | 
         )
     )
 
-    result = runner.collect_batch(runner.wait_batch(handle).handle)
+    result = runner.collect_batch(runner.wait_batch(handle, pause=clock.advance).handle)
     return result.service_log_tail, connector.uploaded_script
 
 

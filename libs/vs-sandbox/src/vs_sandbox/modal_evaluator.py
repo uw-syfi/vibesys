@@ -300,7 +300,11 @@ class WaitClock(Protocol):
 
 
 class MonotonicWaits:
-    """The operating system's monotonic clock and real sleeping."""
+    """The operating system's monotonic clock and real sleeping, for ``main`` alone.
+
+    This helper runs as one stdlib-only file in the run environment, where ``vs_sim``'s
+    real clocks are not importable; everything below ``main`` takes its clock.
+    """
 
     def now(self) -> float:
         """Monotonic seconds."""
@@ -321,7 +325,7 @@ def wait_for_health(
     base_url: str,
     *,
     timeout_seconds: float,
-    clock: WaitClock | None = None,
+    clock: WaitClock,
     probe: Callable[[str, float], int] = _health_status,
 ) -> None:
     """Wait until the deployed candidate returns HTTP 200 from ``/health``.
@@ -329,7 +333,6 @@ def wait_for_health(
     Gives up once ``timeout_seconds`` pass on ``clock``: no probe or pause runs past that
     deadline. ``probe(url, timeout)`` returns the status or raises ``OSError``.
     """
-    clock = clock or MonotonicWaits()
     deadline = clock.now() + timeout_seconds
     health_url = _modal_health_url(base_url)
     last_error = "no response"
@@ -728,7 +731,7 @@ def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; th
     workspace: str,
     base_url: str,
     timeout_seconds: float = _CONTAINER_DISCOVERY_TIMEOUT_SECONDS,
-    clock: WaitClock | None = None,
+    clock: WaitClock,
     list_containers: Callable[[str], ContainerListing | ListingFailed] | None = None,
     warm: Callable[[str], bool] | None = None,
 ) -> str:
@@ -739,7 +742,6 @@ def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; th
     Gives up once ``timeout_seconds`` pass on ``clock``, after a last listing at that
     deadline; no pause runs past it.
     """
-    clock = clock or MonotonicWaits()
     list_containers = list_containers or _list_containers
     warm = warm or _healthy_now
     deadline = clock.now() + timeout_seconds
@@ -917,11 +919,14 @@ class _DeploymentKeepWarm:
             _healthy_now(self._base_url)
 
 
-def _execute_colocated(
+def _execute_colocated(  # noqa: PLR0913  # lint-waiver: LW-918417 [PLR0913]; the command, its workspace and deployment, the clock discovery waits on, and two staging inputs.
+    # > A request object would be built only to unpack here (both callers hold the values
+    # > separately), and discovering the container in each caller would duplicate the wait.
     command: Sequence[str],
     *,
     workspace: str,
     deployment: tuple[str, str],
+    clock: WaitClock,
     setup_command: Sequence[str] | None = None,
     evaluator_package_root: str | None = None,
 ) -> int:
@@ -942,6 +947,7 @@ def _execute_colocated(
         app_identifier,
         workspace=workspace,
         base_url=base_url,
+        clock=clock,
     )
     script = _bootstrap_script(
         command,
@@ -989,13 +995,17 @@ def _execute_colocated(
 def run_evaluator(  # noqa: PLR0913  # lint-waiver: LW-011128 [PLR0913]; This installed CLI helper accepts argv, workspace, entrypoint, readiness timeout, trusted setup argv, and evaluator package root as separate caller controls.
     command: Sequence[str],
     *,
+    clock: WaitClock,
     workspace: str = "/workspace",
     entrypoint: str = "main.py",
     readiness_timeout_seconds: float = 90,
     setup_command: Sequence[str] | None = None,
     evaluator_package_root: str | None = None,
 ) -> int:
-    """Deploy the candidate and run ``command`` inside its serving container."""
+    """Deploy the candidate and run ``command`` inside its serving container.
+
+    ``clock`` times and paces the readiness and container-discovery waits.
+    """
     if not command:
         message = "missing evaluator command after '--'"
         raise ValueError(message)
@@ -1014,6 +1024,7 @@ def run_evaluator(  # noqa: PLR0913  # lint-waiver: LW-011128 [PLR0913]; This in
     with _exclusive_evaluation():
         return _run_evaluator_unlocked(
             command,
+            clock=clock,
             workspace=workspace,
             entrypoint=entrypoint,
             readiness_timeout_seconds=readiness_timeout_seconds,
@@ -1025,6 +1036,7 @@ def run_evaluator(  # noqa: PLR0913  # lint-waiver: LW-011128 [PLR0913]; This in
 def _execute_reused_candidate(
     command: Sequence[str],
     *,
+    clock: WaitClock,
     workspace: str,
     setup_command: Sequence[str] | None,
     evaluator_package_root: str | None,
@@ -1052,6 +1064,7 @@ def _execute_reused_candidate(
             command,
             workspace=workspace,
             deployment=(lease.base_url, lease.app_identifier),
+            clock=clock,
             setup_command=setup_command,
             evaluator_package_root=evaluator_package_root,
         )
@@ -1064,7 +1077,7 @@ def _execute_reused_candidate(
 
 
 def _deploy_and_wait_for_health(
-    *, workspace: str, entrypoint: str, readiness_timeout_seconds: float
+    *, workspace: str, entrypoint: str, readiness_timeout_seconds: float, clock: WaitClock
 ) -> tuple[str, str] | int:
     try:
         deployment_path = _deployment_path(workspace, entrypoint)
@@ -1089,7 +1102,7 @@ def _deploy_and_wait_for_health(
     try:
         base_url = extract_modal_web_url(deploy_output)
         app_identifier = extract_modal_app_identifier(deploy_output)
-        wait_for_health(base_url, timeout_seconds=readiness_timeout_seconds)
+        wait_for_health(base_url, timeout_seconds=readiness_timeout_seconds, clock=clock)
     except (TimeoutError, ValueError) as exc:
         print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000222 [T201]; setup failure diagnostics are reported to the invoking CLI.
         if app_identifier is None:
@@ -1108,6 +1121,7 @@ def _deploy_and_wait_for_health(
 def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913]; This phase shares the validated argv/path/setup values across fresh and reused deployments; another request wrapper would duplicate run_evaluator's CLI options.
     command: Sequence[str],
     *,
+    clock: WaitClock,
     workspace: str,
     entrypoint: str,
     readiness_timeout_seconds: float,
@@ -1117,6 +1131,7 @@ def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913
     candidate_revision = os.environ.get(_CANDIDATE_REVISION_ENV)
     reused_result = _execute_reused_candidate(
         command,
+        clock=clock,
         workspace=workspace,
         setup_command=setup_command,
         evaluator_package_root=evaluator_package_root,
@@ -1128,6 +1143,7 @@ def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913
         workspace=workspace,
         entrypoint=entrypoint,
         readiness_timeout_seconds=readiness_timeout_seconds,
+        clock=clock,
     )
     if isinstance(deployed, int):
         return deployed
@@ -1141,6 +1157,7 @@ def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913
             command,
             workspace=workspace,
             deployment=deployed,
+            clock=clock,
             setup_command=setup_command,
             evaluator_package_root=evaluator_package_root,
         )
@@ -1179,6 +1196,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         command = command[1:]
     return run_evaluator(
         command,
+        clock=MonotonicWaits(),
         workspace=args.workspace,
         entrypoint=args.entrypoint,
         readiness_timeout_seconds=args.readiness_timeout_seconds,

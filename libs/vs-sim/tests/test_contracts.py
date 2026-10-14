@@ -117,6 +117,12 @@ class TestVirtualClockSleeping(SleeperContract):
         return _virtual()[1]
 
 
+class TestManualClockSleeping(SleeperContract):
+    def sleeper_under_test(self) -> SleeperUnderTest:
+        clock = ManualClock()
+        return SleeperUnderTest(clock, clock, asyncio.run, tick=1.0, exact=True)
+
+
 class TestSystemClockSleeping(SleeperContract):
     def sleeper_under_test(self) -> SleeperUnderTest:
         clock = SystemClock()

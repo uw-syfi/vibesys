@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 def test_the_container_surface_is_the_same_mechanism_the_host_api_exposes() -> None:
     assert sorted(cpu_profilers.__all__) == [
+        "LinuxProfilerEffects",
         "collect_linux_profile",
         "detect_linux_profiler",
         "parse_profile_command",
