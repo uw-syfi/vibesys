@@ -16,6 +16,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_retries
 from vs_sim.api.testing import examples
 
 from .test_attempt_retirement import fixture, retirement
@@ -42,6 +43,8 @@ class Cluster:
     ending: core.ObservationStatus
     lost: bool = False
     """The executor holds no record of the job until a cancel ends it (its submit was lost)."""
+    failing_cancels: int = 0
+    """How many cancels, first to last, fail with an unknown outcome and leave the job running."""
     polls: int = 0
     sequence: int = 1
     authorized: set[str] = field(default_factory=set)
@@ -112,6 +115,21 @@ class Cluster:
         if request.request_id.root not in self.authorized:
             self.authorized.add(request.request_id.root)
             self.feed(core.DispatchAuthorized(request_id=request.request_id))
+        if isinstance(request, core.CancelOwnedJob) and self.failing_cancels:
+            # The executor's cancel raised (SSH down, a command error): the runtime reports an
+            # outcome it cannot prove, and the job runs on.
+            self.failing_cancels -= 1
+            unknown = self.completed(request).model_copy(
+                update={
+                    "status": core.ObservationStatus.UNKNOWN,
+                    "accepted": False,
+                    "terminal": False,
+                    "released": False,
+                    "children_complete": False,
+                }
+            )
+            self.feed(core.RequestObserved(observation=unknown))
+            return
         self.feed(core.RequestObserved(observation=self.completed(request)))
         if isinstance(request, core.CancelOwnedJob):
             # A cancel ends the job whether or not the executor still knew of it.
@@ -261,4 +279,60 @@ def test_a_job_the_executor_lost_is_inspected_then_cancelled_once(
     assert asked.count(core.CancelOwnedJob) == 1
     assert cluster.state.evaluation.jobs[0].terminal
     if closed:
+        assert cluster.attempt().phase == core.AttemptPhase.TERMINAL
+
+
+def _answer_new_requests(cluster: Cluster, rounds: int) -> None:
+    """The far side answers each request once, when core first sends it, and lets time pass.
+
+    A request whose answer proved nothing stays open in core until its bound and is never
+    answered again: the runtime does not resend a request by itself.
+    """
+    for _ in range(rounds):
+        sent = tuple(
+            row.request
+            for row in cluster.state.records.records
+            if row.phase == core.RequestPhase.PREPARED
+            and not isinstance(row.request, core.SubmitMeasurement)
+        )
+        if sent:
+            cluster.answer(sent[0])
+            continue
+        due = core.project(cluster.state).next_observe_at
+        if due is None:
+            return
+        cluster.now = max(cluster.state.run.now_at + 1.0, due)
+        cluster.feed(core.ClockAdvanced(now_at=cluster.now))
+
+
+@settings(max_examples=examples(pr=4, nightly=100), deadline=None)
+@example(failing=1, retries=3)
+@example(failing=2, retries=1)
+@given(failing=st.integers(0, 3), retries=st.integers(0, 2))
+def test_a_cancel_that_failed_is_sent_again_within_the_retry_limit(
+    failing: int, retries: int
+) -> None:
+    """A closing attempt's job whose cancel fails is cancelled again, at most ``retries`` times.
+
+    The job never ends by itself (a held cluster job). Its cancel's outcome is unknown (the
+    executor's cancel raised) until core blocks it at its bound. Before the fix core counted
+    that blocked cancel as done and polled the running job for as long as the run lasted, the
+    attempt held closing.
+    """
+    cluster = started(running_polls=10**6, ending=core.ObservationStatus.CANCELLED)
+    limits = cluster.state.run.limits.model_copy(
+        update={"request_retries": sample_retries(retries)}
+    )
+    run = cluster.state.run.model_copy(update={"limits": limits})
+    cluster.state = cluster.state.model_copy(update={"run": run})
+    cluster.failing_cancels = failing
+    cluster.feed(retirement(cluster.ref, "cancel"))
+    _answer_new_requests(cluster, rounds=40 * (failing + 2))
+
+    cancels = [
+        row for row in cluster.state.records.records if isinstance(row.request, core.CancelOwnedJob)
+    ]
+    assert len(cancels) == min(failing, retries + 1) + (failing <= retries)
+    if failing <= retries:
+        assert cluster.state.evaluation.jobs[0].terminal
         assert cluster.attempt().phase == core.AttemptPhase.TERMINAL

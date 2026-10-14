@@ -1696,9 +1696,21 @@ def _cancelling_scope(context: EvaluationContext) -> Scope | None:
 
 
 def _cancel_requested(context: EvaluationContext, resource: ResourceId) -> bool:
-    return any(
-        isinstance(row.request, CancelOwnedJob) for row in context.records.about_resource(resource)
+    """Whether core is done asking to cancel *resource*: one cancel is open or was answered.
+
+    A cancel blocked at its bound proved nothing: the executor's cancel failed or its outcome
+    is unknown, and the job may still run. It does not count, so the job's next observation
+    asks for a new cancel (its id names that observation) instead of holding the run closing
+    until the job ends by itself. The backend's ``request_retries.limit`` bounds those
+    re-sends; past it core waits for the job's own end, as it did before any retry.
+    """
+    cancels = tuple(
+        row
+        for row in context.records.about_resource(resource)
+        if isinstance(row.request, CancelOwnedJob)
     )
+    blocked = sum(1 for row in cancels if row.phase == RequestPhase.BLOCKED)
+    return blocked < len(cancels) or blocked > context.run.limits.request_retries.limit
 
 
 def _known(job: OwnedJob | RegisteredOwnedJob) -> bool:
