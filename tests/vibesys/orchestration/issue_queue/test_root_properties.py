@@ -11,34 +11,31 @@ from __future__ import annotations
 
 from hypothesis import example, given, note, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.issue_queue._host import (
-    Host,
-    assert_flow_closed,
-    begin,
-    config,
-    suspending_view,
-)
+from tests.vibesys.orchestration.issue_queue._host import Host, begin, config, suspending_view
 from tests.vibesys.orchestration.issue_queue._replies import evaluated, judged
+from tests.vibesys.search_faults import Step, Stop, play, steps, stops
 from tests.vibesys.vibesys_flows import across_restarts
 
-from vs_core.api import Finish, StartAttempt, Wait
+from vs_core.api import StartAttempt, StopMode, Wait
 from vs_sim.api.testing import examples
 
 MODES = across_restarts
 
 
-def _starts(host: Host) -> int:
-    return sum(
+def _unopened_starts(host: Host) -> int:
+    """Starts core ended without a workspace: refused, lost or timed out."""
+    asked = sum(
         isinstance(item, Wait) and isinstance(item.request, StartAttempt)
         for item in host.run.decisions
     )
+    return asked - len(host.opened) - len(host.open(StartAttempt))
 
 
 def _check_always(host: Host) -> None:
     """What holds after every step."""
     rules, where = host.config, host.run.timeline()
     assert len(host.unsettled) <= 1, f"two jobs at once: {where}"
-    assert len(host.opened) <= rules.max_jobs + host.refused_starts, (
+    assert len(host.opened) <= rules.max_jobs + _unopened_starts(host), (
         f"more jobs than allowed: {where}"
     )
     for issue in host.tracker.list():
@@ -49,15 +46,15 @@ def _check_always(host: Host) -> None:
 
 @MODES
 @example(
-    steps=[(0, 0)],
-    stop_before=1,
+    story=[Step(0, 0, None)],
+    stop=Stop(1, StopMode.DRAIN),
     rules={"max_rounds": 1, "max_attempts_per_issue": 1},
     lost=frozenset(),
 )
 @settings(max_examples=examples(pr=10, nightly=30), deadline=None, derandomize=True, database=None)
 @given(
-    steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 13)), max_size=60),
-    stop_before=st.none() | st.integers(0, 60),
+    story=steps(),
+    stop=stops(),
     rules=st.fixed_dictionaries(
         {"max_rounds": st.integers(1, 3), "max_attempts_per_issue": st.integers(1, 3)}
     ),
@@ -66,8 +63,8 @@ def _check_always(host: Host) -> None:
 def test_the_root_keeps_its_promises_whatever_core_answers_and_whenever_the_operator_stops(
     *,
     restarting: bool,
-    steps: list[tuple[int, int]],
-    stop_before: int | None,
+    story: list[Step],
+    stop: Stop | None,
     rules: dict[str, int],
     lost: frozenset[int],
 ) -> None:
@@ -80,26 +77,7 @@ def test_the_root_keeps_its_promises_whatever_core_answers_and_whenever_the_oper
         judge=[judged(bugs=("bug one",)), judged(passed=False)],
         perf=[evaluated("faster")],
     )
-    stopped_at: int | None = None
     try:
-        for index, (pick, variant) in enumerate(steps):
-            if index == stop_before:
-                host.run.stop()
-                stopped_at = _starts(host)
-            _check_always(host)
-            if not host.step(pick, variant):
-                break
-        if stop_before is not None and stopped_at is None:
-            host.run.stop()
-            stopped_at = _starts(host)
-        for _ in range(500):
-            _check_always(host)
-            if not host.step(0):
-                break
-        assert_flow_closed(host)
-        finishes = [item for item in host.run.decisions if isinstance(item, Finish)]
-        assert len(finishes) == 1, f"{len(finishes)} finishes: {host.run.timeline()}"
-        if stopped_at is not None:
-            assert _starts(host) == stopped_at, f"work began after the stop: {host.run.timeline()}"
+        play(host, story, stop, check=lambda: _check_always(host))
     finally:
         note(host.run.timeline())

@@ -12,7 +12,6 @@ from __future__ import annotations
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
-    assert_flow_closed,
     begin,
     config,
 )
@@ -23,6 +22,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     reviewed,
 )
 from tests.vibesys.orchestration.dynamic._slots import implement_and_judge, turn_about
+from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult

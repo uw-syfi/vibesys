@@ -20,11 +20,11 @@ from tests.vibesys.orchestration.single._host import (
     config,
     implemented,
 )
+from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.serial_search._host import (
     INPUT_THROUGHPUT,
     Baseline,
     World,
-    assert_flow_closed,
 )
 from tests.vibesys.serial_search._replies import plan_reply
 from tests.vibesys.vibesys_flows import across_restarts

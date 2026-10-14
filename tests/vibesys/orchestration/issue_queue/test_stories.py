@@ -14,7 +14,6 @@ from tests.vibesys.orchestration.issue_queue._host import (
     PERF,
     UNGATED,
     Host,
-    assert_flow_closed,
     begin,
     config,
 )
@@ -24,6 +23,7 @@ from tests.vibesys.orchestration.issue_queue._replies import (
     implemented,
     judged,
 )
+from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.issue_queue.search.api import issue_queue

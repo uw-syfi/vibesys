@@ -17,9 +17,10 @@ from tests.vibesys.orchestration.dynamic._evidence_host import (
     finish_workstream,
     plan,
 )
-from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, assert_flow_closed, config
+from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, config
 from tests.vibesys.orchestration.dynamic._replies import implement
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
+from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.candidates.api import InputFailureKind

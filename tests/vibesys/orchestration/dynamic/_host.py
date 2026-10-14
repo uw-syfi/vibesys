@@ -68,8 +68,6 @@ from vs_core.api.search import TaskStage, TaskTerms
 from vs_core.testing.builders import initial_state
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from pydantic import BaseModel
 
     from vs_core.api import OperationRequest, Scope
@@ -417,18 +415,3 @@ class Host:
             terminal=True,
             released=True,
         )
-
-
-def play(host: Host, steps: Sequence[tuple[int, int]]) -> None:
-    """Answer the open waits as ``steps`` say (which wait, which way), then in the ordinary way."""
-    for pick, variant in steps:
-        if not host.step(pick, variant):
-            break
-    host.drain()
-
-
-def assert_flow_closed(host: Host) -> None:
-    """The flow finished the run and left no attempt open and no wait unanswered."""
-    assert host.run.finished is not None, host.run.timeline()
-    assert not host.unsettled, host.run.timeline()
-    assert not [item for item in host.run.open if item.until is not None], host.run.timeline()

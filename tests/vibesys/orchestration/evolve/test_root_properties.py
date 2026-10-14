@@ -11,25 +11,14 @@ from __future__ import annotations
 
 from hypothesis import given, note, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.evolve._host import (
-    Host,
-    assert_flow_closed,
-    begin,
-    config,
-)
+from tests.vibesys.orchestration.evolve._host import Host, begin, config
+from tests.vibesys.search_faults import Step, Stop, play, steps, stops
 from tests.vibesys.vibesys_flows import across_restarts
 
-from vs_core.api import Finish, StartAttempt, Wait
+from vs_core.api import Finish
 from vs_sim.api.testing import examples
 
 MODES = across_restarts
-
-
-def _starts(host: Host) -> int:
-    return sum(
-        isinstance(item, Wait) and isinstance(item.request, StartAttempt)
-        for item in host.run.decisions
-    )
 
 
 def _check_always(host: Host) -> None:
@@ -69,8 +58,8 @@ def _check_at_the_end(host: Host) -> None:
 @MODES
 @settings(max_examples=examples(pr=10, nightly=60), deadline=None, derandomize=True, database=None)
 @given(
-    steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 11)), max_size=60),
-    stop_before=st.none() | st.integers(0, 60),
+    story=steps(),
+    stop=stops(),
     shape=st.fixed_dictionaries(
         {
             "max_generations": st.integers(1, 2),
@@ -87,36 +76,14 @@ def _check_at_the_end(host: Host) -> None:
 def test_the_root_keeps_its_promises_whatever_core_answers_and_whenever_the_operator_stops(
     *,
     restarting: bool,
-    steps: list[tuple[int, int]],
-    stop_before: int | None,
+    story: list[Step],
+    stop: Stop | None,
     shape: dict[str, object],
     throughputs: dict[str, float],
 ) -> None:
-    cfg = config(**shape)
-    host = begin(cfg, restarting=restarting, throughputs=throughputs)
-    stopped_with: int | None = None
+    host = begin(config(**shape), restarting=restarting, throughputs=throughputs)
     try:
-        for index, (pick, variant) in enumerate(steps):
-            if index == stop_before:
-                host.run.stop()
-                stopped_with = _starts(host)
-            _check_always(host)
-            if not host.step(pick, variant):
-                break
-        if stop_before is not None and stopped_with is None:
-            host.run.stop()
-            stopped_with = _starts(host)
-        for _ in range(1000):
-            _check_always(host)
-            if not host.step(0):
-                break
-        assert_flow_closed(host)
-        finishes = [item for item in host.run.decisions if isinstance(item, Finish)]
-        assert len(finishes) == 1, f"{len(finishes)} finishes: {host.run.timeline()}"
-        if stopped_with is not None:
-            assert _starts(host) == stopped_with, (
-                f"work began after the stop: {host.run.timeline()}"
-            )
+        play(host, story, stop, check=lambda: _check_always(host))
         _check_at_the_end(host)
     finally:
         note(host.run.timeline())

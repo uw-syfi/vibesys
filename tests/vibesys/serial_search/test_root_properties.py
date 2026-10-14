@@ -18,10 +18,10 @@ from tests.vibesys.orchestration.multi._host import MultiHost
 from tests.vibesys.orchestration.multi._host import config as multi_config
 from tests.vibesys.orchestration.single._host import SingleHost
 from tests.vibesys.orchestration.single._host import config as single_config
-from tests.vibesys.serial_search._host import assert_flow_closed
+from tests.vibesys.search_faults import Step, Stop, play, steps, stops
 from tests.vibesys.vibesys_flows import across_restarts
 
-from vs_core.api import Finish, RequestTurn, StartAttempt, Wait
+from vs_core.api import RequestTurn, StartAttempt, Wait
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -57,39 +57,20 @@ def _check_always(host: SerialHost, rounds: int) -> None:
 @MODES
 @settings(max_examples=examples(pr=10, nightly=40), deadline=None, derandomize=True, database=None)
 @given(
-    steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 13)), max_size=50),
-    stop_before=st.none() | st.integers(0, 50),
+    story=steps(),
+    stop=stops(),
     rounds=st.integers(1, 3),
 )
 def test_the_root_keeps_its_promises_whatever_core_answers_and_whenever_the_operator_stops(
     *,
     search: str,
     restarting: bool,
-    steps: list[tuple[int, int]],
-    stop_before: int | None,
+    story: list[Step],
+    stop: Stop | None,
     rounds: int,
 ) -> None:
     host = begin(search, rounds=rounds, restarting=restarting)
-    stopped_at: int | None = None
     try:
-        for index, (pick, variant) in enumerate(steps):
-            if index == stop_before:
-                host.run.stop()
-                stopped_at = _starts(host)
-            _check_always(host, rounds)
-            if not host.step(pick, variant):
-                break
-        if stop_before is not None and stopped_at is None:
-            host.run.stop()
-            stopped_at = _starts(host)
-        for _ in range(500):
-            _check_always(host, rounds)
-            if not host.step(0):
-                break
-        assert_flow_closed(host)
-        finishes = [item for item in host.run.decisions if isinstance(item, Finish)]
-        assert len(finishes) == 1, f"{len(finishes)} finishes: {host.run.timeline()}"
-        if stopped_at is not None:
-            assert _starts(host) == stopped_at, f"work began after the stop: {host.run.timeline()}"
+        play(host, story, stop, check=lambda: _check_always(host, rounds))
     finally:
         note(host.run.timeline())

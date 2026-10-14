@@ -15,7 +15,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.multi import _host as multi_host
 from tests.vibesys.orchestration.single import _host as single_host
-from tests.vibesys.serial_search._host import FACTS, SerialHost, World, assert_flow_closed
+from tests.vibesys.search_faults import assert_flow_closed
+from tests.vibesys.serial_search._host import FACTS, SerialHost, World
 from tests.vibesys.serial_search._replies import attribution, plan_reply
 from tests.vibesys.vibesys_flows import across_restarts
 

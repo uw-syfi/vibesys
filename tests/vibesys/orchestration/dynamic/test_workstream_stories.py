@@ -17,7 +17,6 @@ from tests.vibesys.orchestration.dynamic._host import (
     INPUT_THROUGHPUT,
     PLANNER_LABEL,
     Host,
-    assert_flow_closed,
     begin,
     config,
 )
@@ -28,6 +27,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     profile,
     reviewed,
 )
+from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ProfilerResult, ReviewResult

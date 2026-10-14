@@ -10,16 +10,11 @@ from __future__ import annotations
 
 from hypothesis import given, note, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic._host import (
-    PLANNER_LABEL,
-    Host,
-    assert_flow_closed,
-    begin,
-    config,
-)
+from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, Host, begin, config
+from tests.vibesys.search_faults import Step, Stop, play, steps, stops
 from tests.vibesys.vibesys_flows import across_restarts
 
-from vs_core.api import Finish, RequestTurn, StartAttempt, Wait
+from vs_core.api import RequestTurn, StartAttempt, Wait
 from vs_sim.api.testing import examples
 
 MODES = across_restarts
@@ -59,42 +54,27 @@ def _check_always(host: Host) -> None:
 @MODES
 @settings(max_examples=examples(pr=10, nightly=60), deadline=None, derandomize=True, database=None)
 @given(
-    steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 11)), max_size=50),
-    stop_before=st.none() | st.integers(0, 50),
+    story=steps(),
+    stop=stops(),
     rounds=st.integers(1, 3),
     in_flight=st.integers(1, 3),
 )
 def test_the_root_keeps_its_promises_whatever_core_answers_and_whenever_the_operator_stops(
     *,
     restarting: bool,
-    steps: list[tuple[int, int]],
-    stop_before: int | None,
+    story: list[Step],
+    stop: Stop | None,
     rounds: int,
     in_flight: int,
 ) -> None:
     host = begin(config(max_rounds=rounds, max_in_flight=in_flight), restarting=restarting)
-    stopped_with: tuple[int, int] | None = None
     try:
-        for index, (pick, variant) in enumerate(steps):
-            if index == stop_before:
-                host.run.stop()
-                stopped_with = (_starts(host), _planning_calls(host))
-            _check_always(host)
-            if not host.step(pick, variant):
-                break
-        if stop_before is not None and stopped_with is None:
-            host.run.stop()
-            stopped_with = (_starts(host), _planning_calls(host))
-        for _ in range(500):
-            _check_always(host)
-            if not host.step(0):
-                break
-        assert_flow_closed(host)
-        finishes = [item for item in host.run.decisions if isinstance(item, Finish)]
-        assert len(finishes) == 1, f"{len(finishes)} finishes: {host.run.timeline()}"
-        if stopped_with is not None:
-            assert (_starts(host), _planning_calls(host)) == stopped_with, (
-                f"work began after the stop: {host.run.timeline()}"
-            )
+        play(
+            host,
+            story,
+            stop,
+            check=lambda: _check_always(host),
+            work=lambda: (_starts(host), _planning_calls(host)),
+        )
     finally:
         note(host.run.timeline())

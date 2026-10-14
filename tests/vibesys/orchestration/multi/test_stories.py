@@ -27,11 +27,11 @@ from tests.vibesys.orchestration.multi._host import (
     reviewed,
     routed,
 )
+from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.serial_search._host import (
     INPUT_THROUGHPUT,
     Baseline,
     World,
-    assert_flow_closed,
 )
 from tests.vibesys.serial_search._replies import plan_reply
 from tests.vibesys.vibesys_flows import across_restarts

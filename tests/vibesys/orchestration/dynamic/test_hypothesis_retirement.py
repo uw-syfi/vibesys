@@ -15,7 +15,6 @@ from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
-    assert_flow_closed,
     begin,
     config,
 )
@@ -25,6 +24,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     plan_reply,
     reviewed,
 )
+from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.hypothesis import HypothesisStrategy

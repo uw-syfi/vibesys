@@ -353,10 +353,3 @@ class SerialHost:
             terminal=True,
             released=True,
         )
-
-
-def assert_flow_closed(host: SerialHost) -> None:
-    """The flow finished the run and left no attempt open and no wait unanswered."""
-    assert host.run.finished is not None, host.run.timeline()
-    assert not host.unsettled, host.run.timeline()
-    assert not [item for item in host.run.open if item.until is not None], host.run.timeline()
