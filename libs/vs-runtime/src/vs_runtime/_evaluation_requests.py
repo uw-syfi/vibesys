@@ -652,15 +652,20 @@ class MeasurementRequests:
     async def _cancel(self, request: CancelOwnedJob, context: ExecutionContext) -> ExecutionResult:
         # Fence first: a submission of this job that has not entered by now submits nothing.
         fence = job_fence(request.scope, request.admission_id, request.resource_id.root)
-        with self._store.exclusive():
-            closure = self._fences.close(
-                fence,
-                by=core_identity(request),
-                host=context.fence,
-            )
+
+        def episode_job() -> JobRecord | None:
             record = self._owned(request, request.resource_id)
+            return (
+                record
+                if record is not None and record.admission_id == request.admission_id
+                else None
+            )
+
+        closure, record = self._fences.close_and_load(
+            fence, by=core_identity(request), host=context.fence, load=episode_job
+        )
         submitting = isinstance(closure, MayHold) and closure.live
-        if record is None or record.admission_id != request.admission_id:
+        if isinstance(record, Unrecorded):
             # A submission that entered registers in the same step, so one that left no
             # record was fenced before it registered, or died first.
             if submitting:
@@ -668,7 +673,7 @@ class MeasurementRequests:
             proof = (
                 closure
                 if isinstance(closure, NothingHeld)
-                else self._fences.cleared(closure, Unrecorded(fence))
+                else self._fences.cleared(closure, record)
             )
             return self._never_held(
                 request, context, proof, fence, "job is not owned by this scope"

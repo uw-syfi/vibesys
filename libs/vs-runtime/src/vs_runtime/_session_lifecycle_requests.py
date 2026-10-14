@@ -498,10 +498,13 @@ class SessionLifecycleRequests:
         """Close the episode's fence, then release the session an ensure bound, if any."""
         bkey = session_binding_key(request, request.session_id)
         fence = episode_fence(bkey, request.episode)
-        with self._store.exclusive():
-            closure = self._fences.close(fence, by=core_identity(request), host=context.fence)
-            binding = load_session_binding(self._store, bkey)
-        if binding is None:
+        closure, binding = self._fences.close_and_load(
+            fence,
+            by=core_identity(request),
+            host=context.fence,
+            load=lambda: load_session_binding(self._store, bkey),
+        )
+        if isinstance(binding, Unrecorded):
             # An ensure binds in the same locked step as it enters, so an entered fence
             # without a binding only has entries that refused: nothing was bound.
             if isinstance(closure, MayHold) and closure.live:
@@ -509,7 +512,7 @@ class SessionLifecycleRequests:
             proof = (
                 closure
                 if isinstance(closure, NothingHeld)
-                else self._fences.cleared(closure, Unrecorded(fence))
+                else self._fences.cleared(closure, binding)
             )
             return ObservationFacts.never_held(proof, fence, "no ensured session to close")
         try:

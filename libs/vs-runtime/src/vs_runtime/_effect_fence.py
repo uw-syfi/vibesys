@@ -36,6 +36,9 @@ from pydantic import BaseModel, ConfigDict
 from vs_core.api import HostFence, RequestId
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from vs_runtime._operation_catalog import NotApplied
     from vs_runtime._receipt_store import ReceiptStore
 
 _FAMILY = "effect-fences"
@@ -169,28 +172,39 @@ type Closure = NothingHeld | MayHold
 
 
 @dataclass(frozen=True)
-class Unrecorded:
+class _Minted:
+    """Evidence only the step that establishes it returns (an ``EffectFences`` method)."""
+
+    key: FenceKey
+    _mint: InitVar[object]
+
+    def __post_init__(self, _mint: object) -> None:
+        if _mint is not _MINT:
+            message = f"{type(self).__name__} comes only from the step that establishes it"
+            raise TypeError(message)
+
+
+@dataclass(frozen=True)
+class Unrecorded(_Minted):
     """Read after the close: the record an entry writes with its creation is absent for ``key``.
 
     For a creation that is itself a record written in the same locked step as its entry (a
-    binding, a job registration, a journal row), an entry without the record created nothing.
+    binding, a job registration), an entry without the record created nothing. Only
+    ``EffectFences.close_and_load`` returns one.
     """
 
-    key: FenceKey
+
+@dataclass(frozen=True)
+class Removed(_Minted):
+    """The closer removed what the entries of ``key`` created; only ``EffectFences.remove``."""
 
 
 @dataclass(frozen=True)
-class Removed:
-    """The closer removed what the entries of ``key`` created (an unbound worktree)."""
+class OwnerNotApplied(_Minted):
+    """The owner, asked after the close, says ``key``'s effect did not happen.
 
-    key: FenceKey
-
-
-@dataclass(frozen=True)
-class OwnerNotApplied:
-    """The owner of ``key``'s effect, asked after the close, reports that it did not happen."""
-
-    key: FenceKey
+    Only ``EffectFences.not_applied`` returns one, from the owner's ``NotApplied`` answer.
+    """
 
 
 type Evidence = Unrecorded | Removed | OwnerNotApplied
@@ -267,6 +281,36 @@ class EffectFences:
             return (None if closed == stored else closed), MayHold(key, live, _MINT)
 
         return self._store.modify(_FAMILY, _PART, key.storage_key, _FenceRecord, decide)
+
+    def close_and_load[T](
+        self, key: FenceKey, *, by: RequestId, host: HostFence, load: Callable[[], T | None]
+    ) -> tuple[Closure, T | Unrecorded]:
+        """Close the fence of *key*, then ``load`` the record its entries write as they create.
+
+        Both run under one hold of the store's lock. An entry writes that record in the same
+        locked step as it enters, so when ``load`` finds none the entries created nothing,
+        and the answer is ``Unrecorded`` evidence for ``cleared``.
+        """
+        with self._store.exclusive():
+            closure = self.close(key, by=by, host=host)
+            found = load()
+        return closure, (Unrecorded(key, _MINT) if found is None else found)
+
+    async def remove(
+        self, closure: MayHold, leftover: Callable[[], Awaitable[None]] | None
+    ) -> Removed:
+        """Remove what the entries of *closure* left behind (``leftover``, when anything is).
+
+        A removal that fails raises, and then there is no evidence.
+        """
+        if leftover is not None:
+            await leftover()
+        return Removed(closure.key, _MINT)
+
+    def not_applied(self, closure: MayHold, answer: NotApplied) -> OwnerNotApplied:
+        """The owner's ``NotApplied`` answer, asked after *closure*, as evidence for ``cleared``."""
+        del answer  # its type is the evidence: only the owner's NotApplied answer reaches here
+        return OwnerNotApplied(closure.key, _MINT)
 
     def cleared(self, closure: MayHold, evidence: Evidence) -> NothingHeld:
         """Nothing is held: ``evidence`` shows the entries hold nothing, and none is still creating.

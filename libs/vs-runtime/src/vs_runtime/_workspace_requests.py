@@ -63,7 +63,6 @@ from vs_runtime._effect_fence import (
     FenceKind,
     MayHold,
     NothingHeld,
-    Removed,
 )
 from vs_runtime._observation_factory import (
     ObservationFactory,
@@ -388,12 +387,13 @@ class RuntimeWorkspaceRequests:
         leftover = self._workspaces.live_candidate(member)
         if leftover is None:
             leftover = await self._workspaces.reattach_candidate(member)
-        if leftover is not None:
-            try:
-                await leftover.discard()
-            except (OSError, BaseExceptionGroup) as error:
-                return _unknown(f"an unbound worktree of the attempt was not removed: {error}")
-        return _never_held(self._fences.cleared(closure, Removed(closure.key)), attempt, _WITHDRAWN)
+        try:
+            removed = await self._fences.remove(
+                closure, None if leftover is None else leftover.discard
+            )
+        except (OSError, BaseExceptionGroup) as error:
+            return _unknown(f"an unbound worktree of the attempt was not removed: {error}")
+        return _never_held(self._fences.cleared(closure, removed), attempt, _WITHDRAWN)
 
     async def _attempt_request(
         self,

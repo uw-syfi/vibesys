@@ -21,6 +21,7 @@ from vs_runtime.api.core import (
     MayHold,
     NothingHeld,
     ObservationFacts,
+    OwnerNotApplied,
     ReceiptStore,
     Removed,
     StillCreatingError,
@@ -84,7 +85,9 @@ def test_enter_and_close_answer_as_the_model_does_and_nothing_held_stays_true(
                     if request in model.entries:
                         model.entries[request] = (model.entries[request][0], True)
                 case _:
-                    closure = fences.close(key, by=by, host=_host(epoch))
+                    closure, evidence = fences.close_and_load(
+                        key, by=by, host=_host(epoch), load=lambda: None
+                    )
                     model.closed = True
                     if not model.entries:
                         assert isinstance(closure, NothingHeld)
@@ -95,9 +98,9 @@ def test_enter_and_close_answer_as_the_model_does_and_nothing_held_stays_true(
                     assert closure.live == live
                     if live:
                         with pytest.raises(StillCreatingError):
-                            fences.cleared(closure, Removed(key))
+                            fences.cleared(closure, evidence)
                     else:
-                        assert fences.cleared(closure, Removed(key)).key == key
+                        assert fences.cleared(closure, evidence).key == key
                         proven[index] = True
 
 
@@ -160,9 +163,39 @@ def test_evidence_clears_only_the_fence_it_is_about() -> None:
         closed, other = _KEYS
         fences.enter(closed, by=RequestId(root="dispatch-a"), host=_host(1))
         fences.leave(closed, by=RequestId(root="dispatch-a"))
-        closure = fences.close(closed, by=RequestId(root="cancel-r"), host=_host(1))
+        closure, unrecorded = fences.close_and_load(
+            closed, by=RequestId(root="cancel-r"), host=_host(1), load=lambda: None
+        )
+        _, elsewhere = fences.close_and_load(
+            other, by=RequestId(root="cancel-r"), host=_host(1), load=lambda: None
+        )
         assert isinstance(closure, MayHold)
         assert not closure.live
+        assert isinstance(elsewhere, Unrecorded)
         with pytest.raises(TypeError, match="clears no other fence"):
-            fences.cleared(closure, Unrecorded(other))
-        assert fences.cleared(closure, Unrecorded(closed)).key == closed
+            fences.cleared(closure, elsewhere)
+        assert isinstance(unrecorded, Unrecorded)
+        assert fences.cleared(closure, unrecorded).key == closed
+
+
+def test_a_found_record_is_returned_instead_of_evidence() -> None:
+    """``close_and_load`` mints Unrecorded only when the load under the closing lock found nothing."""
+    with tempfile.TemporaryDirectory() as directory:
+        fences = EffectFences(
+            ReceiptStore(
+                Project.open(Path(directory)).state.state_store_namespace("run"),
+                threads=OsThreads(),
+            )
+        )
+        key = _KEYS[0]
+        _, found = fences.close_and_load(
+            key, by=RequestId(root="cancel-r"), host=_host(1), load=lambda: "binding"
+        )
+        assert found == "binding"
+
+
+@pytest.mark.parametrize("evidence", [Unrecorded, Removed, OwnerNotApplied])
+def test_evidence_comes_only_from_the_step_that_establishes_it(evidence: type) -> None:
+    """Before, any caller could construct evidence and clear a fence on its own word."""
+    with pytest.raises(TypeError, match="comes only from the step"):
+        evidence(_KEYS[0], object())
