@@ -3124,12 +3124,14 @@ version = "0.1.0"
 source = { editable = "libs/vs-faults" }
 dependencies = [
     { name = "pydantic" },
+    { name = "vs-decode" },
     { name = "vs-sim" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 
@@ -3139,12 +3141,14 @@ version = "0.1.0"
 source = { editable = "libs/vs-github" }
 dependencies = [
     { name = "pydantic" },
+    { name = "vs-decode" },
     { name = "vs-sim" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 
@@ -3155,6 +3159,7 @@ source = { editable = "libs/vs-issue-tracker" }
 dependencies = [
     { name = "pydantic" },
     { name = "vs-core" },
+    { name = "vs-decode" },
     { name = "vs-github" },
     { name = "vs-sim" },
 ]
@@ -3163,6 +3168,7 @@ dependencies = [
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-core", editable = "libs/vs-core" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-github", editable = "libs/vs-github" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]

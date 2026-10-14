@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic import JsonValue, TypeAdapter
 
+from vs_decode.api import Unreadable, decode_json
 from vs_sim.api import ProcessOutcome, ProcessSpec
 
 if TYPE_CHECKING:
@@ -221,14 +222,15 @@ def _command_detail(result: _Output) -> str:
 
 
 _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
-"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
+_MAX_OUTPUT_BYTES = 64 * 1024 * 1024
+"""The largest JSON document read from one ``gh`` command (a paginated issue list)."""
 
 
 def _decode_json(raw: str, operation: str) -> object:
-    try:
-        return _ANY_JSON.validate_json(raw)
-    except ValidationError as exc:
-        raise GitHubCLIError(f"GitHub CLI returned invalid JSON for {operation}.") from exc  # noqa: TRY003  # lint-waiver: LW-920413 [TRY003]; report malformed command output with its operation.
+    decoded = decode_json(raw, _ANY_JSON, source=f"gh {operation}", max_bytes=_MAX_OUTPUT_BYTES)
+    if isinstance(decoded, Unreadable):
+        raise GitHubCLIError(f"GitHub CLI returned invalid JSON for {operation}: {decoded.kind}.")  # noqa: TRY003  # lint-waiver: LW-920413 [TRY003]; report malformed command output with its operation.
+    return decoded
 
 
 def _issue_snapshot(item: dict[str, object]) -> dict[str, object]:

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vs_decode.api import Unreadable, read_json
 from vs_sim.api.testing import fault_stream, match_rule
 
 if TYPE_CHECKING:
@@ -118,6 +119,9 @@ class ConversationFault(StrEnum):
 
 type Fault = AgentFault | ToolFault | ClusterFault | HostFault | ProcessFault | ConversationFault
 
+_MAX_PLAN_BYTES = 16 * 1024 * 1024
+"""The largest fault plan file read back."""
+
 _FAULT_TYPES: dict[Boundary, type[Fault]] = {
     Boundary.AGENT_TURN: AgentFault,
     Boundary.TOOL_CALL: ToolFault,
@@ -205,8 +209,11 @@ class FaultPlan(BaseModel):
 
     @classmethod
     def load(cls, path: Path) -> FaultPlan:
-        """Read a plan written by :meth:`save`, rejecting unknown keys."""
-        return cls.model_validate_json(path.read_text(encoding="utf-8"))
+        """Read a plan written by :meth:`save`; ``ValueError`` if it is not a valid plan."""
+        plan = read_json(path, cls, max_bytes=_MAX_PLAN_BYTES)
+        if not isinstance(plan, Unreadable):
+            return plan
+        raise ValueError(str(plan))
 
     @classmethod
     def generate(

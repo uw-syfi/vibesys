@@ -444,7 +444,7 @@ depends_on = ["vs_decode.api", "vs_sim.api"]
 [[modules]]
 path = "vs_issue_tracker"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core", "vs_github", "vs_sim.api"]
+depends_on = ["vs_decode.api", "vs_core", "vs_github", "vs_sim.api"]
 
 [[modules]]
 path = "vs_evaluator_protocol"
@@ -602,7 +602,7 @@ depends_on = []
 [[modules]]
 path = "vs_github"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.api"]
+depends_on = ["vs_decode.api", "vs_sim.api"]
 
 [[modules]]
 path = "vs_mcp"
@@ -631,7 +631,7 @@ visibility = ["vs_sandbox", "vs_runtime"]
 [[modules]]
 path = "vs_faults"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.api", "vs_sim.api.testing"]
+depends_on = ["vs_decode.api", "vs_sim.api", "vs_sim.api.testing"]
 
 # Deterministic simulation kit: a standard-library-only leaf with no outgoing VibeSys edges.
 [[modules]]

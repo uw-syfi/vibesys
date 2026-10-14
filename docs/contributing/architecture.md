@@ -182,9 +182,12 @@ graph TD
     vs_evaluation --> vs_mcp
     vs_evaluation --> vs_project
     vs_evaluation --> vs_sim
+    vs_faults --> vs_decode
     vs_faults --> vs_sim
+    vs_github --> vs_decode
     vs_github --> vs_sim
     vs_issue_tracker --> vs_core
+    vs_issue_tracker --> vs_decode
     vs_issue_tracker --> vs_github
     vs_issue_tracker --> vs_sim
     vs_project --> vs_decode

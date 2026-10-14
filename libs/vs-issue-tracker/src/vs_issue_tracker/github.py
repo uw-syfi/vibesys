@@ -13,8 +13,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import ValidationError
-
+from vs_decode.api import Unreadable, decode_json
 from vs_issue_tracker.core import (
     Issue,
     IssueBoard,
@@ -39,6 +38,8 @@ _STATUS_PREFIX = "vibesys:status/"
 _PROGRESS_LABEL = "vibesys:progress-log"
 _EVENT_START = "<!-- vibesys:issue-event:v1\n"
 _EVENT_END = "\n-->"
+_MAX_EVENT_BYTES = 256 * 1024
+"""The largest issue event read out of one comment (GitHub caps a comment at 64 KiB)."""
 _KEY_START = "<!-- vibesys:issue-key:v1 "
 _KEY_END = " -->"
 _TYPE_RANK = {IssueType.BUG: 0, IssueType.FEATURE: 1, IssueType.PERF: 2}
@@ -382,14 +383,16 @@ def _events(comments: object) -> list[IssueEvent]:
             continue
         if not body.endswith(_EVENT_END):
             raise IssueTrackerLoadError.issue_event_unclosed()
-        try:
-            # Anyone who can comment on the issue writes this text; pydantic's parser
-            # bounds its nesting.
-            events.append(
-                IssueEvent.model_validate_json(body[len(_EVENT_START) : -len(_EVENT_END)])
-            )
-        except ValidationError as exc:
-            raise IssueTrackerLoadError.invalid_issue_event() from exc
+        # Anyone who can comment on the issue writes this text.
+        event = decode_json(
+            body[len(_EVENT_START) : -len(_EVENT_END)],
+            IssueEvent,
+            source="issue event comment",
+            max_bytes=_MAX_EVENT_BYTES,
+        )
+        if isinstance(event, Unreadable):
+            raise IssueTrackerLoadError.invalid_issue_event()
+        events.append(event)
     return events
 
 
