@@ -153,7 +153,7 @@ def _within_run(context: AttemptsContext, request: Request) -> Outbound:
 
 
 def _record(context: AttemptsContext, identity: RequestId) -> RequestRecord | None:
-    return next((row for row in context.records.records if row.request_id == identity), None)
+    return context.records.record(identity)
 
 
 def _fresh_observation(record: RequestRecord, observation: Observation) -> bool:

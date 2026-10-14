@@ -776,9 +776,7 @@ def _yield_proof(
         ),
         None,
     )
-    record = next(
-        (row for row in context.records.records if row.request_id == observation.request_id), None
-    )
+    record = context.records.record(observation.request_id)
     if (
         session is None
         or session.spec != invocation.turn.session
@@ -1158,9 +1156,7 @@ def _retire(
         raise ContractError(("park_authority",), "parking requires exact cleanup authority")
     if event.disposition == "park":
         scope = _invocation(context, continuation).scope
-        authority = next(
-            (row for row in context.records.records if row.request_id == event.park_authority), None
-        )
+        authority = context.records.record(event.park_authority)
         if (
             authority is None
             or not isinstance(authority.request, CloseAttemptScope)
@@ -1281,10 +1277,7 @@ def _reopen(
         raise ContractError(
             ("resolved_cancelled_jobs",), "must resolve exactly cancelled dependencies"
         )
-    authority = next(
-        (row for row in context.records.records if row.request_id == continuation.park_authority),
-        None,
-    )
+    authority = context.records.record(continuation.park_authority)
     if (
         authority is None
         or not isinstance(authority.request, CloseAttemptScope)
@@ -1327,10 +1320,7 @@ def _reopened(
     scope = _invocation(context, continuation).scope
     attempt = _attempt(context, scope)
     observation = event.observation
-    authority = next(
-        (row for row in context.records.records if row.request_id == continuation.reopen_authority),
-        None,
-    )
+    authority = context.records.record(continuation.reopen_authority)
     decision = (
         _reopen_decision(context, authority.request)
         if authority is not None and isinstance(authority.request, ExecuteRegisteredOperation)

@@ -75,9 +75,9 @@ def run_view(core: CoreState) -> RunView:
 
 
 def _record(core: CoreState, request_id: RequestId) -> RequestRecord:
-    for record in core.records.records:
-        if record.request_id == request_id:
-            return record
+    record = core.records.record(request_id)
+    if record is not None:
+        return record
     raise ContractError(("request_id", request_id.root), "result for an unknown request")
 
 
@@ -186,7 +186,7 @@ def _never_started(core: CoreState, event: TurnResult) -> DecisionId | None:
 
 def _turn(core: CoreState, event: TurnResult) -> Event | Discarded | None:
     request = event.observation.request_id
-    if not any(record.request_id == request for record in core.records.records):
+    if not core.records.positions(request):
         decision = _never_started(core, event)
         return None if decision is None else TurnEnded(decision=decision, result=event)
     decision = _decision_of(core, request)

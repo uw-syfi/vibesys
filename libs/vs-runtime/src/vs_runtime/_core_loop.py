@@ -990,14 +990,7 @@ class CoreRuntime[S: StrategyState]:
             self._halted = True
             message = "runtime fence lost before execution"
             raise RuntimeCommitError(message)
-        authorized_record = next(
-            (
-                row
-                for row in self.record.envelope.core.records.records
-                if row.request_id == record.request_id
-            ),
-            None,
-        )
+        authorized_record = self.record.envelope.core.records.record(record.request_id)
         if (
             authorized_record is None
             or authorized_record.phase != RequestPhase.DISPATCHED
@@ -1229,14 +1222,7 @@ class CoreRuntime[S: StrategyState]:
         Core ends a record at its limit and when a watch fires (it becomes BLOCKED and
         its owner hears ``Failed``). The executor may not know, so the loop stops it.
         """
-        current = next(
-            (
-                row
-                for row in self.record.envelope.core.records.records
-                if row.request_id == flight.record.request_id
-            ),
-            None,
-        )
+        current = self.record.envelope.core.records.record(flight.record.request_id)
         ended = current is None or current.phase in (RequestPhase.BLOCKED, RequestPhase.COMPLETED)
         return ended or flight.until.at <= now_at
 

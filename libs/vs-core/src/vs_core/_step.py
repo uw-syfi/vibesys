@@ -340,6 +340,7 @@ def register_requests(
 ) -> tuple[CoreState, tuple[Request, ...]]:
     """Allocate stable identities and persist every proposed request in the outbox."""
     records = list(state.records.records)
+    appended: dict[RequestId, RequestRecord] = {}
     allocated: list[Request] = []
     added: dict[DecisionId | None, list[RequestId]] = {}
     for index, scheduled in enumerate(requests):
@@ -349,7 +350,7 @@ def register_requests(
         )
         request = proposal.model_copy(update={"request_id": request_id})
         payload_digest = digest(request)
-        previous = next((record for record in records if record.request_id == request_id), None)
+        previous = state.records.record(request_id) or appended.get(request_id)
         if previous is not None:
             if not _same_request(previous, request):
                 raise ContractError(("request_id", request_id.root), "request identity conflict")
@@ -366,6 +367,7 @@ def register_requests(
                 limit_from_dispatch=scheduled.limit_from_dispatch,
             )
         )
+        appended[request_id] = records[-1]
         allocated.append(request)
         added.setdefault(request.decision_id, []).append(request_id)
     if not allocated:
@@ -633,7 +635,7 @@ def _signal_admission(
     """Keep an observation's original episode through successor signal propagation."""
     observation = getattr(signal, "observation", None)
     identity = getattr(observation, "request_id", None)
-    record = next((row for row in state.records.records if row.request_id == identity), None)
+    record = state.records.record(identity)
     if record is not None:
         return record.request.admission_id
     explicit = getattr(signal, "admission_id", None) or getattr(observation, "admission_id", None)
@@ -705,9 +707,7 @@ def propagate(
         signal, cause, admission_id = pending.pop(0)
         admission_id = _signal_admission(state, signal, admission_id)
         observation = getattr(signal, "observation", None)
-        if observation is not None and any(
-            record.request_id == observation.request_id for record in state.records.records
-        ):
+        if observation is not None and state.records.positions(observation.request_id):
             cause = _event_cause(state, signal)
         if isinstance(signal, DecisionCompleted):
             completed, notifications = _complete_decision(state, signal)
@@ -1488,7 +1488,7 @@ def _validate_resume_owner(
 
 
 def _unique_record(state: CoreState, identity: RequestId) -> RequestRecord | None:
-    candidates = tuple(item for item in state.records.records if item.request_id == identity)
+    candidates = state.records.find(identity)
     if len(candidates) > 1:
         raise ContractError(("request_id",), "ambiguous canonical request identity")
     return candidates[0] if candidates else None

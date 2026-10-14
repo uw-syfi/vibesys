@@ -603,10 +603,7 @@ def dependencies_for(request: RequestBase, records: RecordsState) -> Verdict[Req
     Inspect every declared obligation. Within concrete denials, declaration order
     is deterministic. An unfinished obligation cannot hide a later known failure.
     """
-    proofs = tuple(
-        _request_dependency(tuple(row for row in records.records if row.request_id == identity))
-        for identity in request.depends_on
-    )
+    proofs = tuple(_request_dependency(records.find(identity)) for identity in request.depends_on)
     failures = tuple(proof for proof in proofs if not isinstance(proof, Proven))
     if not failures:
         return Proven(request)
@@ -653,10 +650,7 @@ def dependency_failed(request: Request, records: RecordsState) -> bool:
     Only a dependency that has concluded counts: one that is unfinished, or not yet recorded,
     may still succeed. A concluded failure is final, so the request can never be dispatched.
     """
-    proofs = tuple(
-        _request_dependency(tuple(row for row in records.records if row.request_id == identity))
-        for identity in request.depends_on
-    )
+    proofs = tuple(_request_dependency(records.find(identity)) for identity in request.depends_on)
     return any(
         (isinstance(proof, Mismatch) and proof.field == ProofField.STATUS)
         or (isinstance(proof, Missing) and proof.reason not in _NOT_YET_KNOWN)

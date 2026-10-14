@@ -357,9 +357,38 @@ class RecoveryBarrier(Value):
 class RecordsState(Value):
     """Records state lifecycle contract."""
 
+    # The index from request identity to positions in ``records``, built on the first lookup.
+    # A state never changes, so neither does its index; a copy is a new state and builds its
+    # own. Like `Value`'s slots it stays out of equality, copies and serialization.
+    __slots__ = ("_positions",)
+
     records: tuple[RequestRecord, ...] = ()
     children: tuple[ChildLease, ...] = ()
     recovery: RecoveryBarrier = RecoveryBarrier()
+
+    def positions(self, request_id: RequestId | None) -> tuple[int, ...]:
+        """Where the records of ``request_id`` sit in ``records``: one place, or none.
+
+        More than one is a corrupt ledger, which the callers that need a unique record reject.
+        A lookup costs a dictionary read instead of comparing the identity with every record.
+        """
+        try:
+            index: dict[RequestId, tuple[int, ...]] = object.__getattribute__(self, "_positions")
+        except AttributeError:
+            index = {}
+            for position, record in enumerate(self.records):
+                index[record.request_id] = (*index.get(record.request_id, ()), position)
+            object.__setattr__(self, "_positions", index)
+        return () if request_id is None else index.get(request_id, ())
+
+    def find(self, request_id: RequestId | None) -> tuple[RequestRecord, ...]:
+        """The records of ``request_id``, in ledger order (see `positions`)."""
+        return tuple(self.records[position] for position in self.positions(request_id))
+
+    def record(self, request_id: RequestId | None) -> RequestRecord | None:
+        """The first record of ``request_id``, as a scan of ``records`` would find it."""
+        positions = self.positions(request_id)
+        return self.records[positions[0]] if positions else None
 
 
 class OperationView(Value):

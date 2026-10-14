@@ -71,7 +71,7 @@ def dispatching_request(records: RecordsState, invocation: Invocation) -> Reques
 def inspect_turn(context: SessionsContext, invocation: Invocation) -> InspectTurn:
     """The inspection request of one invocation's turn: the recorded one, or a new one."""
     identity = turn_request_id(invocation.invocation, "inspect")
-    previous = next((row for row in context.records.records if row.request_id == identity), None)
+    previous = context.records.record(identity)
     if previous is not None and isinstance(previous.request, InspectTurn):
         return previous.request
     owner = attempt_for(context, invocation.scope)

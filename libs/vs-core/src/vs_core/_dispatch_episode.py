@@ -306,7 +306,7 @@ def _inspection_moot(state: EpisodeFacts, request: InspectRequest) -> bool:
     Core ends a prepared request of an ended episode itself (provably unaccepted). An
     inspection prepared meanwhile would report a second, conflicting first observation.
     """
-    target = next((row for row in state.records.records if row.request_id == request.target), None)
+    target = state.records.record(request.target)
     observation = None if target is None else target.observation
     return (
         target is not None

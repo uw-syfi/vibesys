@@ -173,7 +173,7 @@ def _inspection(
         root=f"input-inspect:{len(ref.session_id.root)}:{ref.session_id.root}:"
         f"{ref.generation}:{len(ref.invocation_id.root)}:{ref.invocation_id.root}"
     )
-    previous = next((row for row in context.records.records if row.request_id == identity), None)
+    previous = context.records.record(identity)
     owner = attempt_for(context, invocation.scope)
     request = (
         previous.request
@@ -198,9 +198,7 @@ def _input_proof(
 ) -> Invocation | None:
     invocation = proven_invocation(state, event.invocation)
     obs = event.observation
-    record = next(
-        (row for row in context.records.records if row.request_id == obs.request_id), None
-    )
+    record = context.records.record(obs.request_id)
     if (
         invocation is None
         or invocation.observation is None

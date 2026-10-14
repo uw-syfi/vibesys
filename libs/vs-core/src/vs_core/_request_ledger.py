@@ -134,20 +134,17 @@ def advance(
 
 
 def _unique(state: RecordsState, identity: RequestId) -> RequestRecord | None:
-    rows = tuple(row for row in state.records if row.request_id == identity)
+    rows = state.find(identity)
     if len(rows) > 1:
         raise ContractError(("request_id", identity.root), "ambiguous canonical request identity")
     return rows[0] if rows else None
 
 
 def _replace(state: RecordsState, record: RequestRecord) -> RecordsState:
-    return state.model_copy(
-        update={
-            "records": tuple(
-                record if row.request_id == record.request_id else row for row in state.records
-            )
-        }
-    )
+    records = list(state.records)
+    for position in state.positions(record.request_id):
+        records[position] = record
+    return state.model_copy(update={"records": tuple(records)})
 
 
 def _conclusive(observation: Observation | None) -> bool:

@@ -88,7 +88,7 @@ def _reconciling(context: SessionsContext, request: Request) -> Outbound:
 
 
 def _record(context: SessionsContext, identity: RequestId | None) -> RequestRecord | None:
-    return next((row for row in context.records.records if row.request_id == identity), None)
+    return context.records.record(identity)
 
 
 def _episode(context: SessionsContext, scope: Scope) -> DecisionId | None:

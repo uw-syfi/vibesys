@@ -158,7 +158,7 @@ def _resolved_plan(
 def _snapshot_revision(
     context: EvaluationContext, scope: Scope, candidate: SnapshotResultRef
 ) -> Verdict[RevisionRef]:
-    rows = tuple(row for row in context.records.records if row.request_id == candidate.request_id)
+    rows = context.records.find(candidate.request_id)
     if len(rows) != 1:
         return Missing(ProofReason.ABSENT_REQUEST)
     row = rows[0]
@@ -311,9 +311,7 @@ def _reusable_capture(
     if len(jobs) != 1:
         return Missing(ProofReason.ABSENT_RESOURCE)
     job = jobs[0]
-    source = next(
-        (r for r in context.records.records if r.request_id == evidence.source_request), None
-    )
+    source = context.records.record(evidence.source_request)
     if source is None:
         return Missing(ProofReason.ABSENT_REQUEST)
     binding = _job_source(state, context, job, source)
@@ -535,7 +533,7 @@ def _deadline_of(
     )
     if call is not None:
         return call.deadline_at
-    row = next((r for r in context.records.records if r.request_id == request_id), None)
+    row = context.records.record(request_id)
     if row is not None and isinstance(row.request, SubmitMeasurement):
         return row.until.at
     return None
@@ -622,7 +620,7 @@ def _reported_to_strategy(context: EvaluationContext, job: OwnedJob | Registered
     """
     if isinstance(job, RegisteredOwnedJob):
         return True
-    row = next((r for r in context.records.records if r.request_id == job.submission_id), None)
+    row = context.records.record(job.submission_id)
     return not (
         row is not None
         and isinstance(row.request, SubmitMeasurement)
@@ -654,7 +652,7 @@ def _source(
     hold the submission's observation, and the incoming one may be newer than it: an
     earlier or conflicting one is refused, and freshness against the job follows.
     """
-    rows = tuple(row for row in context.records.records if row.request_id == observation.request_id)
+    rows = context.records.find(observation.request_id)
     if len(rows) != 1:
         return Missing(ProofReason.ABSENT_REQUEST) if not rows else Mismatch(ProofField.REQUEST_ID)
     row = rows[0]
@@ -1316,7 +1314,7 @@ def _job_observed(
             # One collection per job. A collection that yields nothing (a job that failed
             # before producing evidence) is itself observed as a job event, and asking
             # again on that event would never end.
-            if not any(row.request_id == collect.request_id for row in context.records.records):
+            if not context.records.positions(collect.request_id):
                 requests = (_job_outbound(CollectEvidence, updated, context, "evidence"),)
     closing = _ended(context, job, event)
     return AreaChange(
@@ -1350,9 +1348,7 @@ def _ended(
         or _conclusive(job.observation)
     ):
         return ()
-    record = next(
-        (row for row in context.records.records if row.request_id == job.submission_id), None
-    )
+    record = context.records.record(job.submission_id)
     if record is None or record.phase in (RequestPhase.PREPARED, RequestPhase.COMPLETED):
         return ()
     return (
@@ -1445,7 +1441,7 @@ def _job_budget(
     if job.observation is None:
         return state
     source_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
-    source = next((r for r in context.records.records if r.request_id == source_id), None)
+    source = context.records.record(source_id)
     if source is None or not isinstance(
         source.request, SubmitMeasurement | ExecuteRegisteredOperation
     ):
@@ -1542,7 +1538,7 @@ def _job_request(
     sequence = observation.sequence if observation is not None else 0
     # Evidence is collected once per job, so its id does not name an observation.
     suffix = "" if model is CollectEvidence else f":{sequence}"
-    canonical = next((r for r in context.records.records if r.request_id == source), None)
+    canonical = context.records.record(source)
     # A step on a job is the job's own, whoever asks for it: a poll raised by the clock, a
     # stop, a drain and a late observation all name the submission's decision. Left to the
     # asker, two events asking for one step at one instant stamp it differently and the one
@@ -1588,7 +1584,7 @@ def _terminate(
     if isinstance(released_owner(job, context.records.records), Proven):
         return AreaChange(state=state)
     source_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
-    source = next((r for r in context.records.records if r.request_id == source_id), None)
+    source = context.records.record(source_id)
     if (
         source is None
         or not isinstance(request_matches(source, source.request), Proven)
@@ -1626,7 +1622,7 @@ def _termination(
     carry two payloads, so a step already on the ledger is the job's one outstanding intent.
     """
     request_id = outbound.request.request_id
-    if any(row.request_id == request_id for row in context.records.records):
+    if context.records.positions(request_id):
         return AreaChange(state=state)
     return AreaChange(state=state, requests=(outbound,))
 
@@ -1643,7 +1639,7 @@ def _drain(
         return AreaChange(state=state)
     owner = owners[0]
     proof = current_closure(owner, owner.closure)
-    authority = next((r for r in context.records.records if r.request_id == event.authority), None)
+    authority = context.records.record(event.authority)
     if (
         not isinstance(proof, Proven)
         or proof.value.authority != event.authority

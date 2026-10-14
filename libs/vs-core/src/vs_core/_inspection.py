@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 def _canonical_record(state: CoreState, identity: RequestId) -> RequestRecord | None:
-    records = tuple(row for row in state.records.records if row.request_id == identity)
+    records = state.records.find(identity)
     if len(records) > 1:
         raise ContractError(("request_id",), "requires a unique canonical request")
     return records[0] if records else None

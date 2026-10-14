@@ -83,7 +83,7 @@ def _replace_invocation(state: SessionsState, invocation: Invocation) -> Session
 
 
 def _record(context: SessionsContext, identity: RequestId | None) -> RequestRecord | None:
-    return next((row for row in context.records.records if row.request_id == identity), None)
+    return context.records.record(identity)
 
 
 def _terminal(invocation: Invocation) -> bool:

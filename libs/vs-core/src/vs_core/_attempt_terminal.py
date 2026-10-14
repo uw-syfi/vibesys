@@ -88,7 +88,7 @@ def request_turn_matches(invocation: Invocation, request: RequestBase) -> bool:
 def _terminal_request(
     invocation: Invocation, records: RecordsState, observation: Observation, episode: DecisionId
 ) -> Verdict[Observation]:
-    rows = tuple(row for row in records.records if row.request_id == observation.request_id)
+    rows = records.find(observation.request_id)
     if not rows:
         return Missing(ProofReason.ABSENT_REQUEST)
     if len(rows) != 1:
