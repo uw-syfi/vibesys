@@ -254,7 +254,10 @@ export class RunControl {
     this.#run?.connection.dispatch({type: 'user-retry'});
   }
 
-  /** Relay one connection the run page opened to the attached run, over a run channel. */
+  /**
+   * Relay one connection the run page opened to the attached run, over a run channel. Message and
+   * close listener ownership is installed synchronously before this returns.
+   */
   connect(port: RelayPort): void {
     const run = this.#run;
     if (run === null) {

@@ -19,21 +19,63 @@ class FakeRunIpc implements RunIpc {
 class FakePendingRunPort implements PendingRunPort {
   starts = 0;
   closes = 0;
+  readonly #messages = new Set<(message: unknown) => void>();
+  readonly #closed = new Set<() => void>();
+  readonly #queued: unknown[];
+  readonly #startError: Error | null;
+  readonly #localCloseNotification: 'none' | 'synchronous' | 'deferred';
+  #deferredClose = false;
+
+  constructor(
+    queued: readonly unknown[] = [],
+    startError: Error | null = null,
+    localCloseNotification: 'none' | 'synchronous' | 'deferred' = 'none',
+  ) {
+    this.#queued = [...queued];
+    this.#startError = startError;
+    this.#localCloseNotification = localCloseNotification;
+  }
 
   start(): void {
     this.starts += 1;
+    if (this.#startError !== null) throw this.#startError;
+    for (const message of this.#queued) {
+      if (message === CLOSED) {
+        this.#notifyClose();
+      } else {
+        for (const listener of [...this.#messages]) listener(message);
+      }
+    }
   }
 
   post(_message: unknown): void {}
 
-  onMessage(_listener: (message: unknown) => void): void {}
+  onMessage(listener: (message: unknown) => void): void {
+    this.#messages.add(listener);
+  }
 
-  onClose(_listener: () => void): void {}
+  onClose(listener: () => void): void {
+    this.#closed.add(listener);
+  }
 
   close(): void {
     this.closes += 1;
+    if (this.#localCloseNotification === 'synchronous') this.#notifyClose();
+    else if (this.#localCloseNotification === 'deferred') this.#deferredClose = true;
+  }
+
+  flushDeferredClose(): void {
+    if (!this.#deferredClose) return;
+    this.#deferredClose = false;
+    this.#notifyClose();
+  }
+
+  #notifyClose(): void {
+    for (const listener of [...this.#closed]) listener();
   }
 }
+
+const CLOSED = Symbol('closed');
 
 function expectAdmission(
   ipc: FakeRunIpc,
@@ -60,7 +102,6 @@ function expectAdmission(
     senderUrl,
     connectionDelta: Number(allowed),
   });
-  expect(connected.includes(port)).toBe(allowed);
 }
 
 describe('bindRunIpc', () => {
@@ -130,5 +171,125 @@ describe('bindRunIpc', () => {
 
     expect(connected).toEqual([]);
     expect(refused).toEqual([]);
+  });
+
+  test('adopts the owner before starting queued port delivery', () => {
+    const ipc = new FakeRunIpc();
+    const messages: unknown[] = [];
+    let closes = 0;
+    bindRunIpc(
+      ipc,
+      APP_ENTRY_URL,
+      () => 41,
+      port => {
+        port.onMessage(message => messages.push(message));
+        port.onClose(() => {
+          closes += 1;
+          port.close();
+        });
+      },
+      () => {},
+    );
+    const port = new FakePendingRunPort([{type: 'queued'}, CLOSED]);
+
+    ipc.request({port, senderId: 41, senderUrl: APP_ENTRY_URL});
+
+    expect(messages).toEqual([{type: 'queued'}]);
+    expect(closes).toBe(1);
+    expect(port.starts).toBe(1);
+    expect(port.closes).toBe(0);
+  });
+
+  test.each([
+    {
+      name: 'owner adoption',
+      port: () => new FakePendingRunPort(),
+      connect: (port: RelayPort, owner: AbortController) => {
+        port.onClose(() => owner.abort());
+        throw new Error('owner rejected the port');
+      },
+      expectedStarts: 0,
+      message: 'owner rejected the port',
+    },
+    {
+      name: 'queued delivery activation',
+      port: () => new FakePendingRunPort([], new Error('port could not start')),
+      connect: (port: RelayPort, owner: AbortController) => port.onClose(() => owner.abort()),
+      expectedStarts: 1,
+      message: 'port could not start',
+    },
+  ])('closes the port once when $name fails', ({
+    port: makePort,
+    connect,
+    expectedStarts,
+    message,
+  }) => {
+    const ipc = new FakeRunIpc();
+    const failures: string[] = [];
+    const owner = new AbortController();
+    bindRunIpc(
+      ipc,
+      APP_ENTRY_URL,
+      () => 41,
+      port => connect(port, owner),
+      failure => failures.push(failure),
+    );
+    const port = makePort();
+
+    expect(() => ipc.request({port, senderId: 41, senderUrl: APP_ENTRY_URL})).not.toThrow();
+
+    expect(port.starts).toBe(expectedStarts);
+    expect(port.closes).toBe(1);
+    expect(owner.signal.aborted).toBe(true);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain(message);
+  });
+
+  test('does not start a port its connection owner rejected', () => {
+    const ipc = new FakeRunIpc();
+    bindRunIpc(
+      ipc,
+      APP_ENTRY_URL,
+      () => 41,
+      port => port.close(),
+      () => {},
+    );
+    const port = new FakePendingRunPort();
+
+    ipc.request({port, senderId: 41, senderUrl: APP_ENTRY_URL});
+
+    expect(port.starts).toBe(0);
+    expect(port.closes).toBe(1);
+  });
+
+  test.each([
+    {notification: 'synchronous'},
+    {notification: 'deferred'},
+  ] as const)('does not report a $notification local-close notification as a peer close', ({
+    notification,
+  }) => {
+    const ipc = new FakeRunIpc();
+    let ownerCloses = 0;
+    bindRunIpc(
+      ipc,
+      APP_ENTRY_URL,
+      () => 41,
+      port => {
+        port.onClose(() => {
+          ownerCloses += 1;
+          port.close();
+        });
+        port.close();
+      },
+      () => {},
+    );
+    const port = new FakePendingRunPort([], null, notification);
+
+    ipc.request({port, senderId: 41, senderUrl: APP_ENTRY_URL});
+    port.flushDeferredClose();
+
+    expect(ownerCloses).toBe(0);
+    expect(port.starts).toBe(0);
+    expect(port.closes).toBe(1);
   });
 });

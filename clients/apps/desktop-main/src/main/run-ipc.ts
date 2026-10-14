@@ -24,11 +24,75 @@ export interface RunIpc {
   onConnect(listener: (event: RunConnectEvent) => void): void;
 }
 
+interface AdoptedRunPort {
+  /** The feature-owned side; closing it repeatedly still closes the native port at most once. */
+  readonly relay: RelayPort;
+  /** Begin queued Electron delivery, unless the feature rejected the port while adopting it. */
+  start(): void;
+  /** Cancel the admitted owner synchronously, then close the native port exactly once. */
+  dispose(): void;
+}
+
+/**
+ * Transfer listener ownership before queued delivery can begin.
+ *
+ * Electron owns activation, while the feature owns the relay listeners. This adapter is the one
+ * handoff point between them: it records either side's close before delegating it, so rejection,
+ * an incoming close, and activation failure all converge on one native close operation.
+ */
+function adopt(port: PendingRunPort): AdoptedRunPort {
+  let nativeClosed = false;
+  let ownerClosed = false;
+  const closeListeners = new Set<() => void>();
+  const closeOwner = (): void => {
+    if (ownerClosed) return;
+    ownerClosed = true;
+    for (const listener of [...closeListeners]) listener();
+    closeListeners.clear();
+  };
+  const relay: RelayPort = {
+    post: message => port.post(message),
+    onMessage: listener => port.onMessage(listener),
+    onClose: listener => closeListeners.add(listener),
+    close: () => {
+      if (nativeClosed) return;
+      nativeClosed = true;
+      port.close();
+    },
+  };
+  port.onClose(() => {
+    // Electron may acknowledge our own `close()` with this event. Only the peer-originated event
+    // owns feature cancellation; local teardown already chose whether to cancel the owner.
+    if (nativeClosed) return;
+    nativeClosed = true;
+    closeOwner();
+  });
+  return {
+    relay,
+    start: () => {
+      if (!nativeClosed) port.start();
+    },
+    dispose: () => {
+      try {
+        closeOwner();
+      } finally {
+        relay.close();
+      }
+    },
+  };
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Admit connection ports only from the current run view's exact document.
  *
  * `currentSenderId` is read for every event because replacing a run page immediately retires the
- * old WebContents authority. Rejected ports are closed here and never reach `connect`.
+ * old WebContents authority. Rejected ports are closed here and never reach `connect`. `connect`
+ * synchronously installs the admitted owner's message and close listeners before returning; only
+ * then does this boundary start Electron's queued delivery.
  */
 export function bindRunIpc(
   ipc: RunIpc,
@@ -45,7 +109,15 @@ export function bindRunIpc(
       port.close();
       return;
     }
-    port.start();
-    connect(port);
+    let adopted: AdoptedRunPort | null = null;
+    try {
+      adopted = adopt(port);
+      connect(adopted.relay);
+      adopted.start();
+    } catch (error) {
+      if (adopted === null) port.close();
+      else adopted.dispose();
+      log(`could not activate the run page connection: ${describe(error)}`);
+    }
   });
 }
