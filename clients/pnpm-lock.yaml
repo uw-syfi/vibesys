@@ -152,6 +152,9 @@ importers:
       '@vibesys/feature-run-view':
         specifier: workspace:*
         version: link:../../features/run-view
+      '@vibesys/feature-web-theme':
+        specifier: workspace:*
+        version: link:../../features/web-theme
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../libs/ipc
@@ -189,6 +192,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: 5.0.4
         version: 5.0.4(vite@7.1.5(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.1))
+      happy-dom:
+        specifier: 20.14.5
+        version: 20.14.5
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -445,6 +451,31 @@ importers:
       react-dom:
         specifier: 19.1.1
         version: 19.1.1(react@19.1.1)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  features/web-theme:
+    dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../../libs/contracts
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../../libs/machine
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../../libs/store
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../../libs/transport
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

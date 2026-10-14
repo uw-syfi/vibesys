@@ -31,6 +31,7 @@
       "@vibesys/feature-start-run/renderer": ["features/start-run/src/renderer/index.ts"],
       "@vibesys/feature-start-run/state": ["features/start-run/src/state/index.ts"],
       "@vibesys/feature-start-run/styles.css": ["features/start-run/src/renderer/styles.css"],
+      "@vibesys/feature-web-theme/state": ["features/web-theme/src/state/index.ts"],
       "@vibesys/hosts": ["libs/hosts/src/index.ts"],
       "@vibesys/ipc": ["libs/ipc/src/index.ts"],
       "@vibesys/ipc/testing": ["libs/ipc/src/testing/index.ts"],

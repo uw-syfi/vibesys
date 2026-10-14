@@ -2,6 +2,7 @@ import {expect, test} from 'bun:test';
 import {targetFromCapability} from '@vibesys/feature-gateway-connect/renderer';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {createDemoApp} from './compose.js';
+import {createWebThemeController} from './theme.js';
 
 test('renders an initial capability launch before its exchange settles', () => {
   const target = targetFromCapability(
@@ -15,6 +16,10 @@ test('renders an initial capability launch before its exchange settles', () => {
       page: 'http://127.0.0.1:5173/',
       initialGatewayTarget: {...target, bootstrapUrl: target.bootstrapUrl},
       onGatewayConnected: () => undefined,
+      theme: createWebThemeController(
+        {dataset: {}, style: {setProperty: () => undefined}},
+        {read: () => null, save: () => undefined, remove: () => undefined},
+      ),
     },
     {
       bootstrap: (url, signal) => {

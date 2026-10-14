@@ -52,6 +52,7 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
         "clients/features/run-control/package.json",
         "clients/features/run-view/package.json",
         "clients/features/start-run/package.json",
+        "clients/features/web-theme/package.json",
         "clients/apps/desktop-main/package.json",
         "clients/apps/desktop-renderer/package.json",
         "clients/apps/web/package.json",

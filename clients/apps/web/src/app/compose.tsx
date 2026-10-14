@@ -18,9 +18,11 @@ import {type ReplayAction, type ReplayState, replayFailure} from '@vibesys/featu
 import {RunPage} from '@vibesys/feature-run-view/renderer';
 import {createRunStore, type RunStore, type WebSession} from '@vibesys/run-session';
 import type {Store} from '@vibesys/store';
-import type {JSX} from 'react';
+import type {JSX, ReactNode} from 'react';
 import {useSyncExternalStore} from 'react';
 import {bootstrapGateway, fetchReplayFixture} from '../platform/backend.js';
+import type {WebThemeController} from './theme.js';
+import {WebThemePicker} from './theme-picker.js';
 // Each feature styles its own views; the page frame is the entry's `styles.css`.
 import '@vibesys/feature-gateway-connect/styles.css';
 import '@vibesys/feature-run-view/styles.css';
@@ -39,6 +41,8 @@ export interface DemoAppOptions {
   readonly initialGatewayError?: string | null;
   /** Begin this already-validated launch without delaying the first render. */
   readonly initialGatewayTarget?: GatewayBootstrapTarget | null;
+  /** The page-owned preference survives replacement of replay and live run surfaces. */
+  readonly theme: WebThemeController;
 }
 
 export interface DemoAppServices {
@@ -58,6 +62,7 @@ export function createDemoApp(
     onGatewayConnected,
     initialGatewayError = null,
     initialGatewayTarget = null,
+    theme,
   }: DemoAppOptions,
   services: DemoAppServices = DEFAULT_DEMO_SERVICES,
 ): JSX.Element {
@@ -74,7 +79,11 @@ export function createDemoApp(
     bootstrap: services.bootstrap,
   });
   replay.dispatch({type: 'load'});
-  return <Demo run={run} replay={replay} gateway={gateway} />;
+  return (
+    <WebAppShell theme={theme}>
+      <Demo run={run} replay={replay} gateway={gateway} />
+    </WebAppShell>
+  );
 }
 
 function Demo({
@@ -105,9 +114,28 @@ function Demo({
 }
 
 /** The live page over `session`, which this starts. */
-export function createLiveApp(session: WebSession): JSX.Element {
+export function createLiveApp(session: WebSession, theme: WebThemeController): JSX.Element {
   void session.start();
-  return <Live session={session} run={session.store} />;
+  return (
+    <WebAppShell theme={theme}>
+      <Live session={session} run={session.store} />
+    </WebAppShell>
+  );
+}
+
+function WebAppShell({
+  theme,
+  children,
+}: {
+  readonly theme: WebThemeController;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <>
+      <WebThemePicker theme={theme} />
+      {children}
+    </>
+  );
 }
 
 function Live({session, run}: {readonly session: WebSession; readonly run: RunStore}): JSX.Element {
