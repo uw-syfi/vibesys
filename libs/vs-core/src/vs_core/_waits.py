@@ -437,6 +437,12 @@ def _with_successors(core: CoreState, related: list[RequestRecord]) -> list[Requ
     ]
 
 
+#: Producers from the one that fires last to the one that fires first: a committed event is
+#: applied at the next step, a request is answered when the shell hears back, and a timer
+#: fires only once the clock reaches it.
+_SETTLES_LAST = (Producer.TIMER, Producer.PENDING_REQUEST, Producer.OUTBOX_EVENT)
+
+
 def _children_producer(
     core: CoreState, target: RequestId, outbox: frozenset[RequestId]
 ) -> Producer | None:
@@ -446,6 +452,9 @@ def _children_producer(
     ended, recovery hands the child to it and re-resolves the check. So each child waits on
     its job's own wait (``_job_waits``), over both ledgers; one child no job answers for, or a
     job nothing will move, leaves the check an orphan.
+
+    The check ends only once every child has settled, so it is the slowest child's producer
+    that ends it (``_SETTLES_LAST``), whatever order the children were recorded in.
     """
     children = [child for child in core.records.children if target in child.source_requests]
     jobs = {
@@ -466,7 +475,7 @@ def _children_producer(
     ]
     if not found or None in found:
         return None
-    return found[0]
+    return next(producer for producer in _SETTLES_LAST if producer in found)
 
 
 def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[OpenWait]:

@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vs_core.api import (
     RESOLUTIONS,
@@ -23,6 +25,7 @@ from vs_core.api import (
     ItemId,
     Observation,
     ObservationStatus,
+    ObserveOwnedJob,
     ObservePacing,
     OperationId,
     Outcome,
@@ -35,6 +38,7 @@ from vs_core.api import (
     ReleaseDependency,
     RequestObserved,
     RequestPhase,
+    ResourceId,
     RunStatus,
     SessionPhase,
     SessionsState,
@@ -50,6 +54,7 @@ from vs_core.api import (
     step,
     waits,
 )
+from vs_sim.api.testing import examples
 
 from .test_measurements import submitted
 from .test_request_recovery import (
@@ -325,6 +330,90 @@ def test_a_check_on_a_left_job_waits_on_that_job_in_either_ledger_and_only_while
     )
     assert (WaitKind.RECOVERY_CHECK, expected) in found
     assert (WaitKind.OWNED_JOB, expected) in found
+
+
+#: How a left job's next observation comes: its poll timer, a poll in flight, or a poll
+#: answer already committed in the outbox.
+_CHILD_PRODUCERS = {
+    "timer": Producer.TIMER,
+    "request": Producer.PENDING_REQUEST,
+    "outbox": Producer.OUTBOX_EVENT,
+}
+
+
+@settings(max_examples=examples(pr=10, nightly=300), deadline=None)
+@given(kinds=st.lists(st.sampled_from(sorted(_CHILD_PRODUCERS)), min_size=1, max_size=4))
+def test_a_check_on_several_left_jobs_waits_on_the_one_that_settles_last_in_any_order(
+    kinds: list[str],
+) -> None:
+    """A check whose target left several jobs ends once the last of them settles.
+
+    Each child job is moved by its own producer. The check reports the one that fires last (a
+    timer after a request in flight, a request after a committed event), and never depends on
+    the order the children were recorded in; it once took the first child's.
+    """
+    state = _left_a_child(inspecting=False, job_terminal=False)
+    (job,) = state.evaluation.jobs
+    (lease,) = state.records.children
+    jobs, leases, records, outbox = [], [], list(state.records.records), []
+    for index, kind in enumerate(kinds):
+        resource = ResourceId(root=f"left-{index}")
+        paced = kind == "timer"
+        jobs.append(
+            job.model_copy(
+                update={
+                    "resource_id": resource,
+                    "pacing": job.pacing if paced else ObservePacing(),
+                }
+            )
+        )
+        leases.append(lease.model_copy(update={"resource_id": resource}))
+        if not paced:
+            poll = pending_record(
+                identity=f"poll-{index}",
+                phase=RequestPhase.DISPATCHED if kind == "request" else RequestPhase.COMPLETED,
+            )
+            records.append(
+                poll.model_copy(
+                    update={
+                        "request": ObserveOwnedJob(
+                            request_id=poll.request_id, scope=job.scope, resource_id=resource
+                        )
+                    }
+                )
+            )
+            if kind == "outbox":
+                outbox.append(
+                    RequestObserved(
+                        observation=Observation(
+                            event_id=EventId(root=f"polled-{index}"),
+                            request_id=poll.request_id,
+                            scope=job.scope,
+                            sequence=1,
+                            observed_at=1.0,
+                            status=ObservationStatus.PENDING,
+                        )
+                    )
+                )
+    expected = next(
+        producer
+        for producer in (Producer.TIMER, Producer.PENDING_REQUEST, Producer.OUTBOX_EVENT)
+        if producer in {_CHILD_PRODUCERS[kind] for kind in kinds}
+    )
+
+    for order in (leases, leases[::-1]):
+        left = state.model_copy(
+            update={
+                "evaluation": state.evaluation.model_copy(update={"jobs": tuple(jobs)}),
+                "records": state.records.model_copy(
+                    update={"records": tuple(records), "children": tuple(order)}
+                ),
+            }
+        )
+        checks = [
+            wait.producer for wait in waits(left, outbox) if wait.waiter == WaitKind.RECOVERY_CHECK
+        ]
+        assert checks == [expected]
 
 
 def test_a_fresh_run_has_no_waits() -> None:
