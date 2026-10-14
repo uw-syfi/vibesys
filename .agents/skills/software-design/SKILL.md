@@ -1,6 +1,8 @@
 ---
 name: software-design
-description: Design, structure, or change code in any language in this repository. Applies to every code change, especially adding or moving modules, interfaces, dependencies, data flow, config, resource handling, or calls to agents, clusters, or subprocesses, to every bug fix, and to any refactor, split, migration, or contract change.
+description: Design, structure, or change code in any language in this repository. Use when making any code change, especially adding or moving modules, interfaces, dependencies, data flow, config, resource handling, or calls to agents, clusters, or subprocesses, to every bug fix, and to any refactor, split, migration, or contract change.
+metadata:
+  kind: generic
 ---
 
 # Software design
@@ -122,10 +124,7 @@ section.
     never append to rendered output. `tests/architecture/test_prompt_templates.py`
     enforces this. Text agents read later (progress files, tool results) is
     agent-bound too: take it as a `RenderedPrompt` parameter, which makes the
-    call a checked sink. A prompt that points the agent at written text takes
-    the proof of the write as data (a `ProgressEntry` from `ProgressLog.append`)
-    and guards the pointer on it; `tests/architecture/test_progress_pointers.py`
-    enforces this. A template names a reply field only as `{{ reply.<field> }}`,
+    call a checked sink. A template names a reply field only as `{{ reply.<field> }}`,
     derived from that turn's capability-trimmed reply schema, so the schema stays
     the source of truth for names and a dangling reference fails the render;
     `tests/architecture/test_prompt_reply_fields.py` enforces this.
@@ -152,6 +151,14 @@ section.
     `<Variant><Role>` (`SlurmCluster`, `FakeCluster`, `DockerSandbox`,
     `ModalSandbox`); each interface has several substitutable implementations
     that all pass one contract test suite shipped by the owning library.
+
+Encode invariants in types and checks rather than conventions. A rule that
+lives only in prose, a comment, or reviewers' memory holds until the first
+author who never read it. Prefer, strongest first: a type that cannot represent
+the invalid state (a closed set, a value only its parser constructs, a schema
+that rejects unknown keys); a lint or dependency-graph rule; a test or check
+that scans the whole codebase. Write a rule down only when none of these is
+tenable, and say why.
 
 ## Before handing back
 

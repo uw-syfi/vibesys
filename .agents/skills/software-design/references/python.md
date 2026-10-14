@@ -72,15 +72,15 @@ Named by symbol; read them before writing something similar.
 | Rule | Look at |
 | --- | --- |
 | 1, 2 | `vibesys.api` (facade with a documented contract); `vs_agent.api` |
-| 3 | `vs_runtime.api.AgentSessions` (a role-named interface with real and Fake implementations) |
+| 3 | `vs_agent.api.AgentSessions` (a role-named interface with real and Fake implementations) |
 | 4 | The `tach.toml` module graph; `entrypoints` reaching core only through `vibesys.api` |
 | 5 | The `libs/` packages, each a separately declared unit behind `<pkg>.api` |
-| 6 | The `vibesys.backends` registry (`register`, `get`) and `vibesys.domains.registry.DOMAINS` keyed by enums |
+| 6 | `vibesys.plugin_catalog.OrchestrationRegistry` (stable ids to registrations) and `vibesys.domains.registry.DOMAINS` keyed by enums |
 | 7 | The `server.api.protocol` models (`extra="forbid"`) |
-| 8 | `server.api.protocol` to `protocol.schema.json` to generated TypeScript types (`pnpm generate:protocol`); `vs_project.Project.open` as the only way to reach the `.vibesys` layout |
+| 8 | `server.api.protocol` to `protocol.schema.json` to generated TypeScript types (`pnpm generate:protocol`); `vs_project.api.Project.open` as the only way to reach the `.vibesys` layout |
 | 9 | `vs_agent.api.testing` (`FakeAgentClient`) |
-| 10 | `vibesys.features` (`FeatureFlag` enum plus `FEATURES` registry) for gating a change |
-| 14 | `vibesys.orchestration.dynamic.control.HostCore` and its stateful property tests (decision boundary; see [functional-core.md](functional-core.md) for its current limits) |
+| 10 | `vs_sim.api.testing.hostile_json_frames` (the shared hostile-input corpus every untrusted JSON decoder runs against) |
+| 14 | `vs_core.api.step` (`state + event -> new state + requests`) and the property tests in `libs/vs-core/tests/` |
 
 ## Commands
 

@@ -21,6 +21,10 @@ Skills (load them, in every language):
   threads, processes, sockets, and signals. Only the real tiers
   (`sim_real_tiers`: `tests/e2e`, `tests/slurm_cluster`,
   `tests/minimal_container`) drive real systems.
+- Prefer a type, lint rule or check over a written rule; a written rule names
+  its enforcement or says why there is none (the `enforce-rules` skill). All
+  skills are indexed in [`.agents/skills/README.md`](.agents/skills/README.md);
+  change them with the `write-skills` skill.
 
 Architecture:
 

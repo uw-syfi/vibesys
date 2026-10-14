@@ -1,0 +1,110 @@
+[
+  {
+    "path": ".agents/skills/hunt-client-bugs/SKILL.md",
+    "rule": "skill-lines",
+    "count": 435,
+    "reason": "Over the SKILL.md line limit since before the convention; move depth to references/."
+  },
+  {
+    "path": ".agents/skills/hunt-client-bugs/scripts/tuidrv.sh",
+    "rule": "unrun-script",
+    "count": 1,
+    "reason": "A manual helper that no test or CI step runs; give it a test or turn it into a reference."
+  },
+  {
+    "path": ".agents/skills/review-pr/SKILL.md",
+    "rule": "skill-lines",
+    "count": 169,
+    "reason": "Over the SKILL.md line limit since before the convention; move depth to references/."
+  },
+  {
+    "path": ".agents/skills/software-design/SKILL.md",
+    "rule": "repo-specific-name",
+    "count": 5,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/software-design/SKILL.md",
+    "rule": "skill-lines",
+    "count": 167,
+    "reason": "Over the SKILL.md line limit since before the convention; move depth to references/."
+  },
+  {
+    "path": ".agents/skills/software-design/agents/openai.yaml",
+    "rule": "repo-specific-name",
+    "count": 1,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/software-design/references/boundaries.md",
+    "rule": "repo-specific-name",
+    "count": 7,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/software-design/references/functional-core.md",
+    "rule": "repo-specific-name",
+    "count": 17,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/software-design/references/python.md",
+    "rule": "repo-specific-name",
+    "count": 37,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/software-design/references/typescript.md",
+    "rule": "repo-specific-name",
+    "count": 25,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/testing/SKILL.md",
+    "rule": "repo-specific-name",
+    "count": 8,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/testing/agents/openai.yaml",
+    "rule": "repo-specific-name",
+    "count": 1,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/testing/references/fakes-and-contracts.md",
+    "rule": "repo-specific-name",
+    "count": 1,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/testing/references/fault-injection.md",
+    "rule": "repo-specific-name",
+    "count": 7,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/testing/references/flakiness.md",
+    "rule": "repo-specific-name",
+    "count": 5,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/testing/references/python.md",
+    "rule": "repo-specific-name",
+    "count": 39,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/testing/references/typescript.md",
+    "rule": "repo-specific-name",
+    "count": 11,
+    "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/triage-prs/scripts/pr_inventory.sh",
+    "rule": "unrun-script",
+    "count": 1,
+    "reason": "A manual helper that no test or CI step runs; give it a test or turn it into a reference."
+  }
+]

@@ -1,5 +1,5 @@
 ---
-name: tui-bug-hunt
+name: hunt-client-bugs
 description: >-
   Drive the VibeSys terminal UI (TUI) headlessly via tmux against real
   Claude-Code-provider runs, to find and report display bugs,
@@ -9,6 +9,8 @@ description: >-
   experiment log / chat / rounds view / agent graph / perf pane / themes, or to
   produce TUI issue tickets. Covers responsive-layout, keybinding, streaming,
   error-banner, clipboard, and theme testing.
+metadata:
+  kind: workflow
 ---
 
 # VibeSys TUI bug hunt
@@ -33,7 +35,7 @@ Always run a real Claude-Code-provider run, and keep it to **1-2 rounds** (§2):
 short enough to be cheap, long enough to reach a resolved hypothesis and see the
 log table, `Measured` deltas, and `/perf` update live.
 
-Read `reference.md` (same folder) for the exhaustive command/keybinding/
+Read [references/tui-reference.md](references/tui-reference.md) for the exhaustive command/keybinding/
 breakpoint/error/issue-form tables. This file is the workflow.
 
 ## 0. Prerequisites (verify once)
@@ -55,7 +57,7 @@ breakpoint/error/issue-form tables. This file is the workflow.
 
 ## 1. The driving harness
 
-Use `tuidrv.sh` in this folder. It wraps a detached tmux session.
+Use [`scripts/tuidrv.sh`](scripts/tuidrv.sh). It wraps a detached tmux session.
 
 ```
 tuidrv.sh start <COLSxROWS> <PROJECT> <TASK> [vibesys args...]
@@ -114,7 +116,7 @@ landing. `/resume` to continue.
 
 Work the surfaces in order. At each step: send the keys/command, `wait`, `cap`
 (and `capE` when color matters), and check against the intended behavior in
-`reference.md` / the TUI README. Log every deviation as a candidate finding.
+`references/tui-reference.md` / the TUI README. Log every deviation as a candidate finding.
 
 1. **Startup & experiment log.** Launch real (claude provider); wait for the
    backend (≤30s) and the first agent turn. Verify the landing view is the
@@ -147,7 +149,7 @@ Work the surfaces in order. At each step: send the keys/command, `wait`, `cap`
    pane and restores selection/scroll on toggle; `Escape` on the right pane
    closes it.
 8. **Responsive matrix.** Repeat key views at several sizes and check reflow and
-   the exact breakpoints in `reference.md`: `size 200x50` (wide), `120x40`,
+   the exact breakpoints in `references/tui-reference.md`: `size 200x50` (wide), `120x40`,
    `104x40`, `100x40`, `92x40`, `88x40`, `72x30`, `60x24`. Watch: chat docks ≥92
    else modal; `/perf` splits ≥100 else modal; log columns drop Kept(104) →
    Claim(90) → Measured(62); agents graph → stacked; footer hint collapses <60.
@@ -181,7 +183,7 @@ theme, a resumed run, a mid-stream resize, an error banner plus an overlay.
 Vary one axis at a time from a known-good baseline so a regression is
 attributable. Cross the high-value axes below; capture the frame at each cell.
 
-- **Terminal geometry.** Every breakpoint in `reference.md` §Responsive, plus the
+- **Terminal geometry.** Every breakpoint in `references/tui-reference.md` §Responsive, plus the
   boundary itself (`99` vs `100`, `91` vs `92`, `103` vs `104`, `61` vs `62`) and
   one column *below* the smallest (`58x20`) to see graceful degradation vs
   corruption. Also very tall/short (`120x12`, `120x80`) to stress vertical
@@ -225,7 +227,7 @@ it. The richest bugs come from a surface built for the common case meeting an
 edge you forced (empty, overflow, mutation-in-place, transport loss, a width the
 author cached).
 
-A finding is any deviation from `reference.md` / the README, or any of:
+A finding is any deviation from `references/tui-reference.md` / the README, or any of:
 
 - **Layout:** broken/misaligned box-drawing borders; content past the right
   edge; overlapping panes/overlays (e.g. a modal colliding with the error
@@ -287,10 +289,10 @@ re-runnable** repro before writing it up.
      state (`clients/tui/src/ui/**` or `session-model`/`session-controller`).
    - Wrong data present but formatted correctly (a count, a status, a selection
      surviving refetch) → **run-state** fold or a **backend projection**
-     (`src/vibesys/server/**`), not rendering.
+     (`src/server/**`), not rendering.
    - Traceback / `protocol_error` / malformed frame in `backend.log`, or the
      event stream and the persisted record disagree → **transport framing**
-     or **Python backend/loop** (`src/vibesys/loops/**`, `server/**`).
+     or **Python backend/loop** (`src/vibesys/orchestration/**`, `src/server/**`).
    State which one your evidence supports; the ticket's "Affected subsystem" and
    the eventual fix both hinge on it.
 5. **Capture evidence verbatim.** Paste the `cap`/`capE` frame (trailing spaces
@@ -302,7 +304,7 @@ re-runnable** repro before writing it up.
 ## 7. Reporting (issue-ready)
 
 Produce one report per independently closable finding. Use the repo forms (see
-`reference.md` §Reporting) and the repo-local `create-issue` skill.
+`references/tui-reference.md` §Reporting) and the repo-local `create-issue` skill.
 
 - **Bug →** `01-bug.yml`: Observed; Expected (cite intended behavior); numbered
   Reproduction (exact `tuidrv.sh` sequence: size, project/task, keys/commands);
@@ -315,7 +317,7 @@ Produce one report per independently closable finding. Use the repo forms (see
   `#284`. Label `enhancement`.
 - Title: specific outcome, no `[Bug]`/`[Feature]` prefix (topic prefix `TUI:` is
   fine). Search open+closed issues first to avoid dupes; the taxonomy list in
-  `reference.md` is the known landscape.
+  `references/tui-reference.md` is the known landscape.
 - Rank findings by severity (Blocks use > Major impaired > Workaround exists >
   Minor/cosmetic) and present the list to the user for which to file. Do not
   create GitHub issues without the user's go-ahead.
@@ -356,7 +358,7 @@ Ownership (put the fix where the state lives, per `tui-architecture.md`):
 | Protocol types, socket framing, connection lifecycle, requests, event subscription | `transport`, `transport-node` | `clients/libs/transport/**`, `clients/libs/transport-node/**` |
 | Status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics (a pure fold over snapshot + ordered events) | `run-state` | `clients/libs/run-state/**` |
 | Focus, selection, layout, zoom, theme, modals, drafts, query progress; widgets, rendering, key/mouse | `tui` | `clients/tui/src/**`, `ui/**` |
-| Event/query payloads, run state, projection into experiments/design/rounds, the optimization loop | Python backend | `src/vibesys/server/**`, `src/vibesys/loops/**` |
+| Event/query payloads, run state, projection into experiments/design/rounds, the optimization loop | Python backend | `src/server/**`, `src/vibesys/orchestration/**` |
 
 Rules that follow from this and from AGENTS.md and the `software-design` skill:
 - **Backend events are the frontend contract.** Emit semantic fields from the
@@ -374,7 +376,7 @@ Rules that follow from this and from AGENTS.md and the `software-design` skill:
 
 **Contract changes are authoritative-first.** If the fix needs a new or changed
 event/query field, edit the one authoritative definition
-(`src/vibesys/server/protocol.py`), then regenerate the TS bindings
+(`src/server/api/protocol.py`), then regenerate the TS bindings
 (`pnpm --dir clients/libs/contracts generate:protocol`) rather than hand-editing
 generated files. Keep changes additive/backward-compatible; bump the protocol
 version only for an incompatible change. Round-trip a representative payload at

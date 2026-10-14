@@ -1,6 +1,8 @@
 ---
 name: review-pr
 description: Review VibeSys pull requests and local diffs for correctness, regressions, architecture violations, insufficient tests, contract or documentation drift, and risky prompt changes. Use when a user asks to review, audit, assess, or find bugs in a VibeSys PR, branch, commit, patch, or working-tree change, including pre-merge reviews and second-pass reviews after updates.
+metadata:
+  kind: workflow
 ---
 
 # Review PR
@@ -72,6 +74,10 @@ repository's contracts, architecture, tests, and affected callers.
      red flags in `.agents/skills/software-design/references/red-flags.md`.
      Look for an existing violating pattern that the diff extends, and for a
      new or split module that does not declare its public interface.
+   - For every new written rule (in a skill, `AGENTS.md`, a doc, or a review
+     comment) and every fix of a bug class that recurs, ask: could a check
+     catch this? Request the type, lint rule, graph rule or test that would
+     (the `enforce-rules` skill), or an `Unenforced: <reason>` on the rule.
    - For stateful systems, apply
      [Functional core, interfaces and implementations](../software-design/references/functional-core.md).
      Flag lifecycle decisions in the shell or implementations, transitions
@@ -97,7 +103,7 @@ repository's contracts, architecture, tests, and affected callers.
      head), write a throwaway test or script from the issue's steps, or for
      TUI rendering fixes render the affected view at a fixed width with the
      `clients/tui` test harness. Drive the live TUI through the
-     `tui-bug-hunt` harness only when no cheaper reproduction exists and the
+     `hunt-client-bugs` harness only when no cheaper reproduction exists and the
      cost is justified.
    - Report the reproduction as evidence: the command, the observed failure
      at the base, and the observed result at the head. If a reproduction was

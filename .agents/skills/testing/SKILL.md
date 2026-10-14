@@ -1,6 +1,8 @@
 ---
 name: testing
 description: Write, change, review, or fix tests in any language in this repository. Use when adding or editing any test, fixing a bug (regression test), tempted to patch or mock, adding or changing a Fake, writing property-based, golden-fixture, or fault-injection tests, testing code that calls agents, clusters, or subprocesses, or diagnosing a flaky test.
+metadata:
+  kind: generic
 ---
 
 # Testing

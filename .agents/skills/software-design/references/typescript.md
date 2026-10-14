@@ -3,8 +3,8 @@
 Workspace: pnpm packages under `clients/`, one per concept (`libs/*`: `contracts`,
 `store`, `run-state`, `transport`, `hosts`, `runs`, `run-session`, `ipc`, `ui`;
 then `features/*`, `apps/*`), with the checkers and shared configs in
-`clients/tools/`. A package's folder follows its `vibesys.layer`
-(`layer-matches-folder`); the graph and its rules are in
+`clients/tools/`. A package's folder follows the `layer` in its
+`package.json` `vibesys` field (`layer-matches-folder`); the graph and its rules are in
 [clients-architecture.md](../../../../docs/contributing/clients-architecture.md).
 Lint: Biome. Boundaries: dependency-cruiser and the package-graph checker.
 
@@ -43,7 +43,7 @@ anything else in another package is an error.
 - **Closed sets.** A string-literal union. When the values cross the backend
   boundary, take the union from the generated protocol types, never a
   hand-written copy. Branch exhaustively so a new member is a compile error.
-- **Generated types.** Never edit `libs/contracts/src/generated/`. Regenerate
+- **Generated types.** Never edit `clients/libs/contracts/src/generated/`. Regenerate
   with `pnpm generate:protocol` (from `clients/libs/contracts`) and review the
   diff.
 - **State.** Frontend state changes only from backend events; keep folds pure

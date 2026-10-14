@@ -14,17 +14,24 @@ from __future__ import annotations
 import keyword
 from pathlib import Path
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from scripts.check_doc_citations import (
     GATED_DOCS,
     Citation,
     check,
+    check_references,
     extract_citations,
+    is_dotted_name,
+    is_repo_path,
     python_definitions,
+    repo_index,
     stale_gate_entries,
     tracked_paths,
+    unresolved_dotted_name_reason,
     unresolved_reason,
+    unresolved_repo_path_reason,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -255,3 +262,100 @@ def test_no_line_locator_ever_resolves(start: int, end: int) -> None:
 @given(span=st.text(alphabet=st.characters(blacklist_characters="`:"), max_size=40))
 def test_a_code_span_without_a_colon_is_never_a_citation(span: str) -> None:
     assert _citations(f"Text `{span}` more.\n") == []
+
+
+PACKAGE_FILES = {
+    "tach.toml": 'source_roots = ["src"]\n',
+    "src/pkg/__init__.py": "",
+    "src/pkg/mod.py": (
+        "class A:\n    def meth(self) -> None:\n        pass\n\n\ndef f() -> None:\n    pass\n"
+    ),
+    "src/pkg/star.py": "Z = 1\n",
+    "src/pkg/api/__init__.py": (
+        "from pydantic import BaseModel\n"
+        "from pkg.mod import A as B\n"
+        "from ..mod import f\n"
+        "from pkg.star import *\n"
+    ),
+    "docs/guide.md": "# Guide\n",
+    "clients/tui/package.json": "{}\n",
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "resolves"),
+    [
+        ("pkg.mod", True),
+        ("pkg.mod.A", True),
+        ("pkg.mod.A.meth", True),
+        ("pkg.api.B", True),
+        ("pkg.api.B.meth", True),
+        ("pkg.api.f", True),
+        ("pkg.api.Z", True),
+        ("pkg.api.BaseModel", True),
+        ("pkg.gone", False),
+        ("pkg.mod.missing", False),
+        ("pkg.mod.A.gone", False),
+        ("pkg.api.C", False),
+    ],
+)
+def test_a_dotted_name_resolves_through_modules_and_re_exports(
+    tmp_path: Path, name: str, *, resolves: bool
+) -> None:
+    index = repo_index(tmp_path, _repo(tmp_path, PACKAGE_FILES))
+
+    assert is_dotted_name(name, index)
+    assert (unresolved_dotted_name_reason(name, index) is None) == resolves
+
+
+@pytest.mark.parametrize("text", ["pkg.input.toml", "other.mod", "pkg", "pkg.mod()"])
+def test_file_names_foreign_and_partial_names_are_not_dotted_names(
+    tmp_path: Path, text: str
+) -> None:
+    index = repo_index(tmp_path, _repo(tmp_path, PACKAGE_FILES))
+
+    assert not is_dotted_name(text, index)
+
+
+@pytest.mark.parametrize(
+    ("path", "resolves"),
+    [
+        ("docs/guide.md", True),
+        ("docs/", True),
+        ("src/pkg", True),
+        ("src/*/mod.py", True),
+        ("docs/gone.md", False),
+        ("src/*/gone.py", False),
+    ],
+)
+def test_a_repo_path_resolves_to_a_tracked_file_directory_or_glob(
+    tmp_path: Path, path: str, *, resolves: bool
+) -> None:
+    index = repo_index(tmp_path, _repo(tmp_path, PACKAGE_FILES))
+
+    assert is_repo_path(path, index)
+    assert (unresolved_repo_path_reason(path, index) is None) == resolves
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["clients/tui/dist/launcher.js", "elsewhere/file.md", "docs/<name>.md", "uv run docs/x"],
+)
+def test_build_outputs_foreign_roots_and_placeholders_are_prose(tmp_path: Path, text: str) -> None:
+    index = repo_index(tmp_path, _repo(tmp_path, PACKAGE_FILES))
+
+    assert not is_repo_path(text, index)
+
+
+def test_check_references_reports_each_kind_and_resolves_against_a_base(tmp_path: Path) -> None:
+    doc = "See `pkg.mod.gone`, `docs/gone.md`, `mod.py:gone`, `local/x.md`, `docs/guide.md`.\n"
+    files = {**PACKAGE_FILES, "skill/SKILL.md": doc, "skill/local/x.md": "x\n"}
+    index = repo_index(tmp_path, _repo(tmp_path, files))
+
+    findings = check_references([tmp_path / "skill/SKILL.md"], index, base="skill")
+
+    assert sorted(finding.text for finding in findings) == [
+        "docs/gone.md",
+        "mod.py:gone",
+        "pkg.mod.gone",
+    ]

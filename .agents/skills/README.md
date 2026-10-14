@@ -1,0 +1,38 @@
+# Agent skills
+
+Skills for agents developing VibeSys. `.claude/skills` is a symlink to this
+directory. These are not the product skills in `resources/skills/`, which ship
+to optimization agents. The convention for writing and changing skills here is
+the [write-skills](write-skills/SKILL.md) skill, and `scripts/check_skills.py`
+checks it, including that this index lists every skill under its kind.
+
+## Generic
+
+Engineering judgment that holds in any well-run codebase.
+
+- [software-design](software-design/SKILL.md): deep modules, declared
+  interfaces, one-way dependencies, fitting a change to the design.
+- [testing](testing/SKILL.md): public-API tests, Fakes instead of mocks,
+  property-based tests, no flakiness.
+
+## Codebase
+
+How to make one kind of change in this repository.
+
+- [enforce-rules](enforce-rules/SKILL.md): enforce a rule with the strongest
+  mechanism that holds it, from types and lint rules to marked prose.
+
+## Workflow
+
+Tasks around the code.
+
+- [create-issue](create-issue/SKILL.md): investigate, draft and file issues.
+- [hunt-client-bugs](hunt-client-bugs/SKILL.md): drive the TUI headlessly to
+  find and report bugs.
+- [open-pr](open-pr/SKILL.md): prepare and open pull requests, including stacks.
+- [review-pr](review-pr/SKILL.md): review a pull request or local diff.
+- [triage-prs](triage-prs/SKILL.md): triage open pull requests into a
+  maintainer queue.
+- [vs-meta-opt](vs-meta-opt/SKILL.md): run and audit meta-optimization campaigns.
+- [write-skills](write-skills/SKILL.md): the convention for skills in this
+  directory, and how to apply it.
