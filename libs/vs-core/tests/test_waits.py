@@ -20,6 +20,7 @@ from vs_core.api import (
     ClockAdvanced,
     ContinuationPhase,
     DispatchTurn,
+    EnsureSession,
     EventId,
     InspectRequest,
     ItemId,
@@ -47,11 +48,14 @@ from vs_core.api import (
     TurnResult,
     WaitingPhase,
     WaitKind,
+    WaitSubject,
     WorkspaceMode,
     WorkspacePlan,
     orphan_waits,
     phase_waits,
+    producers,
     step,
+    subjects,
     waits,
 )
 from vs_sim.api.testing import examples
@@ -558,3 +562,107 @@ def test_a_turn_acquiring_with_no_request_is_a_wait_that_core_ends_with_a_named_
     [ended] = [event for event in result.events if isinstance(event, TurnResult)]
     assert ended.failure == TurnFailureKind.CANCELLED
     assert "acquisition stalled" in ended.detail
+
+
+def _session_record(state: CoreState, identity: str, phase: RequestPhase) -> RequestRecord:
+    """A lease request about the acquiring turn's session, in *phase*."""
+    [invocation] = state.sessions.invocations
+    record = pending_record(identity=identity, phase=phase)
+    assert isinstance(record.request, EnsureSession)
+    spec = record.request.spec.model_copy(update={"session_id": invocation.invocation.session_id})
+    return record.model_copy(update={"request": record.request.model_copy(update={"spec": spec})})
+
+
+def _inspection(identity: str, target: RequestRecord, phase: RequestPhase) -> RequestRecord:
+    """An inspection of *target*, as recovery or a bound sends, in *phase*."""
+    record = pending_record(identity=identity, phase=phase)
+    request = InspectRequest(
+        request_id=record.request_id, scope=target.request.scope, target=target.request_id
+    )
+    return record.model_copy(update={"request": request})
+
+
+def _acquiring_with(records: tuple[RequestRecord, ...]) -> CoreState:
+    state = _acquiring_without_a_request()
+    return state.model_copy(
+        update={"records": state.records.model_copy(update={"records": records})}
+    )
+
+
+def test_a_turn_whose_session_lease_is_being_inspected_is_carried_and_not_ended() -> None:
+    """The step ends an acquiring turn only when its wait is an orphan, never before.
+
+    The turn's lease request completed and an inspection of it is still in flight: its answer
+    is what moves the session, so the wait has a producer. The step's resolver once read a
+    narrower rule than the wait (requests about the session only, not their inspections) and
+    cancelled the turn while that inspection was out.
+    """
+    lease = _session_record(_acquiring_without_a_request(), "lease", RequestPhase.COMPLETED)
+    inspecting = _acquiring_with((lease, _inspection("inspect", lease, RequestPhase.DISPATCHED)))
+
+    assert orphan_waits(inspecting) == ()
+    [carried] = step(inspecting, ClockAdvanced(now_at=2.0)).state.sessions.invocations
+    assert carried.phase == SessionPhase.ACQUIRING
+
+    answered = _acquiring_with((lease, _inspection("inspect", lease, RequestPhase.COMPLETED)))
+    assert [w.waiter for w in orphan_waits(answered)] == [WaitKind.TURN_ACQUISITION]
+    [ended] = step(answered, ClockAdvanced(now_at=2.0)).state.sessions.invocations
+    assert ended.phase == SessionPhase.TERMINAL
+
+
+_PHASES = st.sampled_from(list(RequestPhase))
+
+
+@st.composite
+def _records_about_the_turn(draw: st.DrawFn) -> tuple[RequestRecord, ...]:
+    """Lease requests about the acquiring turn's session, and inspections of earlier records."""
+    base = _acquiring_without_a_request()
+    records: list[RequestRecord] = []
+    for index in range(draw(st.integers(0, 4))):
+        if records and draw(st.booleans()):
+            target = draw(st.sampled_from(records))
+            records.append(_inspection(f"inspect-{index}", target, draw(_PHASES)))
+        else:
+            records.append(_session_record(base, f"lease-{index}", draw(_PHASES)))
+    return tuple(records)
+
+
+@settings(max_examples=examples(pr=20, nightly=500), deadline=None)
+@given(records=_records_about_the_turn(), answered=st.sets(st.integers(0, 3)))
+def test_every_wait_reports_the_one_derivation_and_the_step_ends_exactly_the_orphans(
+    records: tuple[RequestRecord, ...], answered: set[int]
+) -> None:
+    """``waits`` and the step's resolvers read one derivation, ``producers``.
+
+    Each wait has a producer exactly when ``producers`` names one, with or without committed
+    answers in the outbox, and the step ends the acquiring turn exactly when its wait is an
+    orphan: never one a live request about its session, or an inspection of one, can carry.
+    """
+    state = _acquiring_with(records)
+    outbox = tuple(
+        RequestObserved(
+            observation=Observation(
+                event_id=EventId(root=f"answer-{index}"),
+                request_id=records[index].request_id,
+                scope=records[index].request.scope,
+                sequence=1,
+                observed_at=1.0,
+                status=ObservationStatus.SUCCEEDED,
+            )
+        )
+        for index in answered
+        if index < len(records)
+    )
+    for pending in ((), outbox):
+        found = waits(state, pending)
+        assert [(w.waiter, w.subject) for w in found] == [
+            (subject.kind, subject.identity) for subject in subjects(state)
+        ]
+        for wait in found:
+            named = producers(state, WaitSubject(kind=wait.waiter, identity=wait.subject), pending)
+            assert (wait.producer is None) == (not named)
+            assert wait.producer is None or wait.producer in named
+
+    orphaned = WaitKind.TURN_ACQUISITION in {w.waiter for w in orphan_waits(state)}
+    [turn] = step(state, ClockAdvanced(now_at=2.0)).state.sessions.invocations
+    assert (turn.phase == SessionPhase.TERMINAL) == orphaned

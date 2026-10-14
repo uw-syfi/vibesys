@@ -1092,7 +1092,7 @@ depends_on = ["vs_core._dispatch_episode", "vs_core._proofs", "vs_core.types", "
 
 [[interfaces]]
 from = ["vs_core._waits"]
-expose = ["Outcome", "Producer", "RESOLUTIONS", "OpenWait", "Resolution", "WaitKind", "WaitingPhase", "awaiting_refund", "draining_without_cancel", "orphan_waits", "phase_waits", "stalled_acquisitions", "stalled_blocked_records", "stalled_checkpoint_waits", "undispatchable_requests", "waits"]
+expose = ["Outcome", "Producer", "RESOLUTIONS", "OpenWait", "Resolution", "WaitKind", "WaitSubject", "WaitingPhase", "awaiting_refund", "draining_without_cancel", "orphan_waits", "phase_waits", "producers", "stalled_acquisitions", "stalled_blocked_records", "stalled_checkpoint_waits", "subjects", "undispatchable_requests", "waits"]
 
 [[modules]]
 path = "vs_core._dispatch_episode"
