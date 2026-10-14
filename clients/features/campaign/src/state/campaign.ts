@@ -70,13 +70,18 @@ export function orderedMeasurements(record: CampaignRecord | null): CampaignReco
   return [...(record?.measurements ?? [])].sort((a, b) => a.sequence - b.sequence);
 }
 
-export function initialCampaignUi(record: CampaignRecord | null): CampaignUi {
-  const measurements = orderedMeasurements(record);
-  const metricId =
-    measurements.at(-1)?.values[0]?.metricId ??
+export function defaultMetricId(record: CampaignRecord | null): string {
+  return (
     record?.objective.target?.metricId ??
     record?.objective.metrics[0]?.id ??
-    '';
+    orderedMeasurements(record)[0]?.values[0]?.metricId ??
+    ''
+  );
+}
+
+export function initialCampaignUi(record: CampaignRecord | null): CampaignUi {
+  const measurements = orderedMeasurements(record);
+  const metricId = defaultMetricId(record);
   return {
     metricId,
     pointIndex: latestMetricIndex(measurements, metricId),

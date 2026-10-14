@@ -1,7 +1,12 @@
 import {expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
-import {framesFromRecord, parseReplayScenario} from '@vibesys/feature-campaign/state';
+import {CampaignDashboard, createCampaignHistoryStore} from '@vibesys/feature-campaign/renderer';
+import {
+  type CampaignRecord,
+  framesFromRecord,
+  parseReplayScenario,
+} from '@vibesys/feature-campaign/state';
 import {targetFromCapability} from '@vibesys/feature-gateway-connect/renderer';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {createDemoApp, createLiveCampaignApp} from './compose.js';
@@ -14,6 +19,27 @@ const campaignRecord = parseReplayScenario(
 
 async function flush(): Promise<void> {
   for (let turn = 0; turn < 10; turn++) await Promise.resolve();
+}
+
+function renderCampaignAt(record: CampaignRecord, pointIndex: number): string {
+  const store = createCampaignHistoryStore(record);
+  store.dispatch({type: 'point', index: pointIndex});
+  const {scenario, campaign} = store.getState();
+  if (scenario === null || campaign === null) throw new Error('Campaign history did not project');
+  try {
+    return renderToStaticMarkup(<CampaignDashboard scenario={scenario} campaign={campaign} />);
+  } finally {
+    store.close();
+  }
+}
+
+function trajectoryAnalytics(markup: string): {readonly axis: string; readonly changed: boolean} {
+  const axis =
+    /<div class="chart-y-axis chart-y-axis-left" aria-hidden="true">([\s\S]*?)<\/div>/.exec(
+      markup,
+    )?.[1];
+  if (axis === undefined) throw new Error('Campaign trajectory axis did not render');
+  return {axis, changed: markup.includes('Benchmark changed mid-run')};
 }
 
 test('renders an initial capability launch before its exchange settles', () => {
@@ -99,4 +125,83 @@ test('live campaign replay with no usage omits the token column', () => {
   expect(html).toContain('Work history');
   expect(html).not.toContain('Sort by Tokens');
   page.close();
+});
+
+test('historical trajectory analytics depend only on measurements through the cursor', () => {
+  let firstAnalytics: ReturnType<typeof trajectoryAnalytics> | undefined;
+  let boundaryAnalytics: ReturnType<typeof trajectoryAnalytics> | undefined;
+  for (let pointIndex = 0; pointIndex < campaignRecord.measurements.length; pointIndex++) {
+    const completedMarkup = renderCampaignAt(campaignRecord, pointIndex);
+    const prefixMarkup = renderCampaignAt(
+      {...campaignRecord, measurements: campaignRecord.measurements.slice(0, pointIndex + 1)},
+      pointIndex,
+    );
+    expect(trajectoryAnalytics(completedMarkup)).toEqual(trajectoryAnalytics(prefixMarkup));
+    if (pointIndex === 0) {
+      firstAnalytics = trajectoryAnalytics(completedMarkup);
+      expect(completedMarkup).toContain('111 recorded');
+      expect(completedMarkup).toContain('01 <i>/</i> 111');
+    }
+    if (pointIndex === 74) boundaryAnalytics = trajectoryAnalytics(completedMarkup);
+  }
+  expect(firstAnalytics?.axis).toContain('13.8 tok/s');
+  expect(firstAnalytics?.changed).toBe(false);
+  expect(boundaryAnalytics?.changed).toBe(true);
+});
+
+test('a future multi-metric suffix cannot change the implicit historical metric', () => {
+  const latencyMetric = {
+    id: 'latency',
+    name: 'Latency',
+    unit: 'ms',
+    direction: 'minimize' as const,
+    description: 'Request latency under the recorded benchmark contract.',
+    benchmarkVersions: ['v5', 'v6'],
+  };
+  const lastIndex = campaignRecord.measurements.length - 1;
+  const multiMetricRecord = parseReplayScenario({
+    ...campaignRecord,
+    objective: {
+      ...campaignRecord.objective,
+      metrics: [...campaignRecord.objective.metrics, latencyMetric],
+    },
+    benchmarkVersions: campaignRecord.benchmarkVersions.map(version => ({
+      ...version,
+      definitions: [
+        ...version.definitions,
+        {
+          metricId: latencyMetric.id,
+          unit: latencyMetric.unit,
+          direction: latencyMetric.direction,
+          description: latencyMetric.description,
+        },
+      ],
+    })),
+    measurements: campaignRecord.measurements.map((measurement, index) => ({
+      ...measurement,
+      values:
+        index === 0
+          ? [...measurement.values, {metricId: latencyMetric.id, value: 80, unit: 'ms'}]
+          : index === lastIndex
+            ? [{metricId: latencyMetric.id, value: 10, unit: 'ms'}, ...measurement.values]
+            : measurement.values,
+    })),
+  });
+  const completedAnalytics = trajectoryAnalytics(renderCampaignAt(multiMetricRecord, 0));
+  const prefixAnalytics = trajectoryAnalytics(
+    renderCampaignAt(
+      {...multiMetricRecord, measurements: multiMetricRecord.measurements.slice(0, 1)},
+      0,
+    ),
+  );
+
+  expect(completedAnalytics).toEqual(prefixAnalytics);
+  expect(completedAnalytics.axis).toContain('tok/s');
+
+  const store = createCampaignHistoryStore(multiMetricRecord);
+  expect(store.getState().campaign?.metricId).toBe('goodput');
+  store.getState().campaign?.setMetric(latencyMetric.id);
+  expect(store.getState().campaign?.metricId).toBe(latencyMetric.id);
+  expect(store.getState().campaign?.pointIndex).toBe(lastIndex);
+  store.close();
 });

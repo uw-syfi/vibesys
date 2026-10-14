@@ -218,8 +218,11 @@ function PerformancePanel({
   readonly scenario: CampaignRecord;
   readonly campaign: CampaignViewModel;
 }): JSX.Element {
-  const benchmarkChanged =
-    new Set(campaign.orderedMeasurements.map(item => item.benchmarkVersion)).size > 1;
+  const visibleMeasurements = measurementsThrough(
+    campaign.orderedMeasurements,
+    campaign.pointIndex,
+  );
+  const benchmarkChanged = new Set(visibleMeasurements.map(item => item.benchmarkVersion)).size > 1;
   return (
     <section className="panel performance-panel" aria-labelledby="performance-title">
       <div className="section-head performance-head">
@@ -568,6 +571,14 @@ interface PerformanceChartProps {
   readonly onSelect: (index: number) => void;
 }
 
+function measurementsThrough(
+  measurements: CampaignRecord['measurements'],
+  throughIndex: number,
+): CampaignRecord['measurements'] {
+  const length = Math.max(0, Math.min(measurements.length, throughIndex + 1));
+  return measurements.slice(0, length);
+}
+
 function chartModel({
   scenario,
   measurements,
@@ -576,12 +587,15 @@ function chartModel({
   selectedIndex,
 }: PerformanceChartProps) {
   const metric = scenario.objective.metrics.find(item => item.id === metricId);
+  const visibleMeasurements = measurementsThrough(measurements, throughIndex);
   const allPoints = measurements
     .map((measurement, index) => ({measurement, index}))
     .filter(item => item.measurement.values.some(value => value.metricId === metricId));
-  const points = allPoints.filter(item => item.index <= throughIndex);
-  const values = measurements
-    .map(measurement => measurement.values.find(value => value.metricId === metricId)?.value)
+  const points = visibleMeasurements
+    .map((measurement, index) => ({measurement, index}))
+    .filter(item => item.measurement.values.some(value => value.metricId === metricId));
+  const values = points
+    .map(({measurement}) => measurement.values.find(value => value.metricId === metricId)?.value)
     .filter((value): value is number => value !== undefined);
   const rawMin = values.length === 0 ? 0 : Math.min(...values);
   const rawMax = values.length === 0 ? 1 : Math.max(...values);
