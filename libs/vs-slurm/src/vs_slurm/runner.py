@@ -58,7 +58,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from threading import Event
 
-_JOB_ID = re.compile(r"Submitted batch job ([0-9]+)")
+# The whole line, newline included: an answer cut off mid-number ("Submitted batch
+# job 50" of job 5000) would otherwise name another job.
+_JOB_ID = re.compile(r"^Submitted batch job ([0-9]+)\r?\n", re.MULTILINE)
 # The allocation's own exit status when its server never answered the readiness probe
 # (it exited or hung while starting), so no stage ran. The job script writes it.
 SERVICE_NOT_READY_EXIT_CODE = 70
@@ -439,6 +441,11 @@ class SlurmError(RuntimeError):
     def missing_job_id(cls) -> SlurmError:
         """Describe submission output without a job identifier."""
         return cls("sbatch did not return a Slurm job id")
+
+    @classmethod
+    def truncated_output(cls) -> SlurmError:
+        """Describe a scheduler answer whose last line was cut off."""
+        return cls("Slurm scheduler output ended mid-line")
 
     @classmethod
     def job_timed_out(cls, job_id: str) -> SlurmError:
@@ -1228,9 +1235,21 @@ class SlurmJobRunner:
         dropped connection turns a known job into an unknown one.
         """
         try:
-            return self._transport.exec(command).stdout.strip()
+            return self._whole_reading(command)
         except SlurmError:
-            return self._transport.exec(command).stdout.strip()
+            return self._whole_reading(command)
+
+    def _whole_reading(self, command: str) -> str:
+        """Stdout of ``command``, refused when its last line is cut off.
+
+        ``squeue`` and ``sacct`` end every line with a newline. Output that stops
+        mid-line lost its tail in transit, and a cut job id or state would read as
+        another job's or as a different state.
+        """
+        stdout = self._transport.exec(command).stdout
+        if stdout and not stdout.endswith("\n"):
+            raise SlurmError.truncated_output()
+        return stdout.strip()
 
     def collect_evidence(
         self, handle: SlurmJobHandle, *, observed: SlurmJobStatus | None = None

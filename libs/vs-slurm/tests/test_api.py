@@ -596,7 +596,7 @@ def test_builtin_ssh_does_not_consume_embedding_process_stdin(tmp_path: Path) ->
             elif "printf 'READY'" in command:
                 print("MISSING", end="")
             elif "sbatch" in command:
-                print("Submitted batch job 4567", end="")
+                print("Submitted batch job 4567")
             """
         ),
         encoding="utf-8",
