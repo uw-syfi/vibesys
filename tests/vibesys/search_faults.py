@@ -5,14 +5,17 @@ opens the ordinary way and in the ways that are particular to it (a plan with no
 checkpoint core declined). What core does to *any* wait is the same for every search: it refuses
 the decision with any `RejectionCode`, loses it, lets it time out; a turn's transport drops, the
 provider fails it, the reply is not JSON or breaks its model, the prompt does not render, the
-agent suspends it to wait for an evaluation (where the view offers that). `FAULTS` lists those
+agent suspends it to wait for an evaluation (where the view offers that), or replies with its
+reply model filled with odd values drawn from the model's schema; an operation's owner reports a
+failure; a measurement leaves no evidence; the adoption of the winner fails. `FAULTS` lists those
 once, so a new search is held to all of them by registering its host, not by copying a menu.
 
 `play` runs one generated story: each step picks an open wait and answers it the host's way
 (``variant``) or with a fault, the operator may stop (draining or cancelling) before any step, and
 then everything is answered the ordinary way. It checks the promises every search makes whatever
 core answers: the run ends in exactly one `Finish`, with every attempt it opened settled, no wait
-left open, and no attempt started after the stop.
+left open, no attempt started after the stop, and any winner it proposed officially measured and
+settled as an eligible candidate.
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ from pydantic import ValidationError
 
 from vs_core.api import (
     AdoptionFailureReason,
+    CheckpointDecline,
+    Declined,
     FailureReason,
     Finish,
     Measure,
@@ -38,12 +43,17 @@ from vs_core.api import (
     ReplyError,
     ReplyErrorCode,
     RequestTurn,
+    Retained,
+    RetainedCandidate,
+    RevisionRef,
+    Settle,
     StartAttempt,
     StopMode,
     TurnFailureKind,
     Wait,
     Withdraw,
 )
+from vs_sim.api import SeededRandom
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -173,6 +183,123 @@ def _not_adopted(reason: AdoptionFailureReason) -> Fault:
     )
 
 
+_STRINGS = ("", " ", "x", "h1", "c1", "0", "-1", "nominated", "pass", "../x", "a" * 300, "é\u0000")
+_INTS = (0, 1, -1, 2, 3, 1000, 2**31)
+_FLOATS = (0.0, 1.0, -1.0, 0.5, 1e9, -1e9)
+_MAX_DEPTH = 3
+
+type Schema = dict[str, Any]
+
+
+def _resolved(schema: Schema, defs: Schema, rng: SeededRandom) -> Schema:
+    """The schema with references followed and one branch of each union chosen."""
+    while True:
+        if "$ref" in schema:
+            schema = defs[schema["$ref"].rsplit("/", 1)[1]]
+        elif "anyOf" in schema or "oneOf" in schema:
+            schema = rng.choice(schema.get("anyOf") or schema["oneOf"])
+        elif "allOf" in schema:
+            schema = schema["allOf"][0]
+        else:
+            return schema
+
+
+def _array(schema: Schema, defs: Schema, rng: SeededRandom, depth: int) -> list[object]:
+    if "prefixItems" in schema:
+        return [_value(item, defs, rng, depth + 1) for item in schema["prefixItems"]]
+    size = 0 if depth > _MAX_DEPTH else rng.choice((0, 1, 1, 2, 3))
+    return [_value(schema.get("items") or {}, defs, rng, depth + 1) for _ in range(size)]
+
+
+def _object(schema: Schema, defs: Schema, rng: SeededRandom, depth: int) -> dict[str, object]:
+    required = set(schema.get("required", ()))
+    fields = {
+        name: _value(sub, defs, rng, depth + 1)
+        for name, sub in schema.get("properties", {}).items()
+        if name in required or rng.random() < 0.6
+    }
+    extra = schema.get("additionalProperties")
+    if isinstance(extra, dict) and rng.random() < 0.5:
+        fields[rng.choice(_STRINGS[:6])] = _value(extra, defs, rng, depth + 1)
+    return fields
+
+
+def _number(schema: Schema, rng: SeededRandom, odd: tuple[float, ...]) -> float:
+    """An odd number, or one at an edge of the schema's bounds, often enough to pass them."""
+    edges = [
+        bound + offset
+        for key, inside in (("minimum", 0), ("exclusiveMinimum", 1), ("maximum", 0))
+        if isinstance(bound := schema.get(key), int | float)
+        for offset in (inside, inside + 1)
+    ]
+    return rng.choice((*odd, *edges, *edges))
+
+
+_LEAVES: dict[str, Callable[[Schema, SeededRandom], object]] = {
+    "string": lambda _schema, rng: rng.choice(_STRINGS),
+    "integer": lambda schema, rng: int(_number(schema, rng, _INTS)),
+    "number": lambda schema, rng: _number(schema, rng, _FLOATS),
+    "boolean": lambda _schema, rng: rng.random() < 0.5,
+    "null": lambda _schema, _rng: None,
+}
+
+
+def _value(schema: Schema, defs: Schema, rng: SeededRandom, depth: int) -> object:
+    """A value of ``schema``, chosen among odd ones: empty, long, negative, absent."""
+    schema = _resolved(schema, defs, rng)
+    if "const" in schema:
+        return schema["const"]
+    if "enum" in schema:
+        return rng.choice(schema["enum"])
+    kind = schema.get("type")
+    if isinstance(kind, list):
+        kind = rng.choice(kind)
+    if kind == "array":
+        return _array(schema, defs, rng, depth)
+    if kind == "object":
+        return _object(schema, defs, rng, depth)
+    leaf = _LEAVES.get(str(kind))
+    return rng.choice((None, "", 0)) if leaf is None else leaf(schema, rng)
+
+
+def _odd_reply(model: type[BaseModel], rng: SeededRandom) -> BaseModel | None:
+    """A valid ``model`` with odd values, or None when no try of a few validates.
+
+    It validates from JSON, as an agent's reply or an operator's options arrive.
+    """
+    schema = model.model_json_schema()
+    defs = schema.get("$defs", {})
+    for _ in range(40):
+        try:
+            return model.model_validate_json(json.dumps(_value(schema, defs, rng, 0)))
+        except ValidationError:
+            continue
+    return None
+
+
+def _odd(run: FlowRun[Any], asked: Asked) -> None:
+    """The agent replies with its reply model, valid and filled with odd values; core checkpoints.
+
+    The values come from the model's JSON schema (empty, long, negative, every enum member,
+    optional fields left out), seeded by the decision, so a story replays exactly.
+    """
+    request = asked.request
+    assert isinstance(request, RequestTurn)
+    model = run.definition.reply_schemas[request.turn.output_schema]
+    rng = SeededRandom(f"{asked.decision.root}/{len(run.decisions)}")
+    reply = _odd_reply(model, rng)
+    if reply is None:
+        run.reply_raw(asked, "{}")
+        return
+    revision = RevisionRef.of_git_commit(f"odd-{len(run.decisions)}")
+    checkpoint = (
+        Retained(revision=revision)
+        if rng.random() < 0.8
+        else Declined(reason=rng.choice(list(CheckpointDecline)))
+    )
+    run.reply(asked, reply, checkpoint=checkpoint)
+
+
 _BROKEN = (ReplyError(path=("summary",), code=ReplyErrorCode.MISSING),)
 
 FAULTS: tuple[Fault, ...] = (
@@ -191,6 +318,9 @@ FAULTS: tuple[Fault, ...] = (
     ),
     Fault("render-failed", _turn, lambda run, asked: run.fail(asked, FailureReason.RENDER_FAILED)),
     Fault("suspended", _suspendable, _suspended),
+    Fault("odd-reply", _turn, _odd),
+    Fault("odd-reply", _turn, _odd),
+    Fault("odd-reply", _turn, _odd),
     *(_operation_ended(status) for status in ("failed", "rejected", "cancelled", "unknown")),
     Fault("unmeasured", _measure, _unmeasured),
     *(_not_adopted(reason) for reason in AdoptionFailureReason),
@@ -299,10 +429,34 @@ def play(
         message = f"the flow did not settle in {DRAIN_LIMIT} steps: {run.timeline()}"
         raise AssertionError(message)
     assert_flow_closed(host)
+    _assert_winner_earned(run)
     finishes = [item for item in run.decisions if isinstance(item, Finish)]
     assert len(finishes) == 1, f"{len(finishes)} finishes: {run.timeline()}"
     if stopped:
         assert begun() == stopped_with, f"work began after the stop: {run.timeline()}"
+
+
+def _assert_winner_earned(run: FlowRun[Any]) -> None:
+    """A candidate proposed as the winner was officially measured and settled as eligible."""
+    asked = [item.request for item in run.decisions if isinstance(item, Wait)]
+    eligible = {
+        item.disposition.candidate
+        for item in asked
+        if isinstance(item, Withdraw)
+        and isinstance(item.disposition, Settle)
+        and item.disposition.eligible
+        and item.disposition.retention == "candidate"
+    }
+    measured = {
+        item.plan.candidate
+        for item in asked
+        if isinstance(item, Measure) and item.plan.purpose == "official"
+    }
+    for item in asked:
+        if isinstance(item, ProposeWinner) and isinstance(item.selection, RetainedCandidate):
+            revision = item.selection.revision
+            assert revision in eligible, f"won without an eligible settle: {run.timeline()}"
+            assert revision in measured, f"won without an official measurement: {run.timeline()}"
 
 
 def assert_flow_closed(host: SearchHost) -> None:
