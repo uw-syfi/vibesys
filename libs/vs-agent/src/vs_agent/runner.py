@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TypeVar
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from vs_agent.contracts import AgentOutputSchemaError, SchemaViolation
 
@@ -135,9 +135,13 @@ def _candidates(text: str) -> list[str]:
     return candidates
 
 
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
+
+
 def _is_json(text: str) -> bool:
     try:
-        json.loads(text)
-    except (ValueError, RecursionError):
+        _ANY_JSON.validate_json(text)
+    except ValidationError:
         return False
     return True

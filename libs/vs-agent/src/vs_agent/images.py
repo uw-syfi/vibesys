@@ -15,7 +15,6 @@ metadata otherwise changes the manifest ID when all filesystem layers match.
 
 from __future__ import annotations
 
-import json
 import math
 import queue
 import re
@@ -24,6 +23,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
+
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from vs_agent.agent_feature import AGENT_USER, AGENT_WORKDIR, agent_feature
 from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
@@ -1345,14 +1346,18 @@ def _cached_repo_digest(
     return _repo_digest_for(result.stdout, repository)
 
 
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
+
+
 def _repo_digest_for(repo_digests_json: str, repository: str) -> str | None:
     """Pick the ``repository@sha256:...`` entry out of a ``RepoDigests`` JSON list.
 
     Absent, malformed, or non-list output resolves to ``None``.
     """
     try:
-        digests = json.loads(repo_digests_json.strip() or "null")
-    except json.JSONDecodeError:
+        digests = _ANY_JSON.validate_json(repo_digests_json.strip() or "null")
+    except ValidationError:
         return None
     if not isinstance(digests, list):
         return None

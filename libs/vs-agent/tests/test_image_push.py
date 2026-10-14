@@ -281,6 +281,17 @@ class TestEnsurePushed:
         assert ensure_pushed(_IMAGE_ID, command_runner=runner) == _DIGEST
         assert any(call[1] == "push" for call in runner.calls)
 
+    @pytest.mark.parametrize(
+        "cached",
+        ["[" * 60_000, "[" * 30_000 + "]" * 30_000, '{"a":1}', "not json"],
+        ids=["deep-open", "deep-closed", "object", "not-json"],
+    )
+    def test_unparseable_cached_digest_output_means_push(self, cached: str) -> None:
+        runner = _FakeRegistryRunner(cached_repo_digests=cached)
+
+        assert ensure_pushed(_IMAGE_ID, command_runner=runner) == _DIGEST
+        assert any(call[1] == "push" for call in runner.calls)
+
     def test_ignores_cached_digest_for_a_different_repository(self) -> None:
         runner = _FakeRegistryRunner(
             cached_repo_digests='["ghcr.io/someone-else/agent@sha256:' + "a" * 64 + '"]'

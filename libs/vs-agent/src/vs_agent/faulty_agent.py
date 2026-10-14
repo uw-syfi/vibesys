@@ -17,7 +17,7 @@ from collections import Counter
 from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from vs_agent.contracts import (
     AgentClientProtocol,
@@ -52,6 +52,10 @@ T = TypeVar("T", bound=BaseModel)
 #: The turn budget a faulted turn reports exceeding, as the CLI client does.
 TURN_BUDGET_S = 3600.0
 _NO_JSON = "the reply contained no JSON object"
+
+
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
 
 
 class AgentCrashError(RuntimeError):
@@ -346,8 +350,8 @@ class FaultyAgentClient:
             # is not one JSON object (prose around it, say) has no place for a
             # key: the reply is unusable, as a malformed one is.
             try:
-                body = json.loads(text)
-            except json.JSONDecodeError:
+                body = _ANY_JSON.validate_json(text)
+            except ValidationError:
                 body = None
             return json.dumps({**body, "notes": "extra"}) if isinstance(body, dict) else _NO_JSON
         return _NO_JSON
