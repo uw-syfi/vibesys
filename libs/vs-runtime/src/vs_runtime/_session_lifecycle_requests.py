@@ -302,9 +302,7 @@ class SessionLifecycleRequests:
             case Replayed(result) | Performed(result):
                 return result
             case Conflict():
-                return self._result(
-                    request, context, _rejected("same request identity with another payload")
-                )
+                return self._result(request, context, ObservationFacts.payload_conflict())
             case Declined(reason):
                 return self._result(request, context, _unknown(reason))
             case _:

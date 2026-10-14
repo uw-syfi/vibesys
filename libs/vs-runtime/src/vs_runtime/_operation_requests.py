@@ -154,6 +154,19 @@ class RegisteredOperationRequests:
             )
         )
 
+    def _conflict(self, request: RequestBase, context: ExecutionContext) -> ExecutionResult:
+        """The refusal of a reused identity: it proves nothing about what the identity holds."""
+        return ExecutionResult(
+            observation=RequestObserved(
+                observation=self._observations.observe(
+                    ObservationSubject.of(request),
+                    ObservationFacts.payload_conflict(),
+                    observed_at=context.now_at,
+                ),
+                setup_failure=_setup_failure(ObservationStatus.REJECTED),
+            )
+        )
+
     # execute
 
     async def _execute(
@@ -184,12 +197,7 @@ class RegisteredOperationRequests:
             case Replayed(receipt) | Performed(receipt):
                 return self._replay(request, context, entry, receipt)
             case Conflict():
-                return self._result(
-                    request,
-                    context,
-                    ObservationStatus.REJECTED,
-                    "same request identity with another payload",
-                )
+                return self._conflict(request, context)
             case Declined(reason):
                 return self._result(request, context, ObservationStatus.UNKNOWN, reason)
             case _:
@@ -492,12 +500,7 @@ class RegisteredOperationRequests:
             case Replayed(receipt) | Performed(receipt):
                 return self._cancel_result(request, context, receipt.status, receipt.detail)
             case Conflict():
-                return self._result(
-                    request,
-                    context,
-                    ObservationStatus.REJECTED,
-                    "same request identity with another payload",
-                )
+                return self._conflict(request, context)
             case Declined(reason):
                 return self._result(request, context, ObservationStatus.UNKNOWN, reason)
             case _:

@@ -159,8 +159,14 @@ class MeasurementRequests:
             case Replayed(result) | Performed(result):
                 return result
             case Conflict():
-                return self._rejected(
-                    request, context, "same request identity with another payload"
+                return ExecutionResult(
+                    observation=RequestObserved(
+                        observation=self._observations.observe(
+                            ObservationSubject.of(request),
+                            ObservationFacts.payload_conflict(),
+                            observed_at=context.now_at,
+                        )
+                    )
                 )
             case Declined(reason):
                 return self._unknown(request, context, reason)

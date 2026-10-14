@@ -10,7 +10,8 @@ registered case through the same checks:
   core receives are accepted in order;
 * a stale host (lost lease, older fence) performs zero effects and reports Unknown;
 * the observation contract (``assert_core_accepts``) over Unknown-then-final and replays;
-* the same request identity with another payload is a REJECTED observation;
+* the same request identity with another payload is a REJECTED observation that claims
+  no release (the identity's first request may still hold its resource);
 * ``InspectRequest`` of the request, at every crash boundary, never says "never started"
   once an effect happened, and reports the sealed result once the request finished.
 

@@ -61,7 +61,7 @@ async def test_a_kind_acts_once_under_its_lease_and_its_identity_and_core_accept
 
     A host that lost its lease does nothing and core accepts the retry. The current host then
     acts and leaves an execution record. An inspection reports what was executed. Another payload
-    under the same request identity is rejected and changes nothing.
+    under the same request identity is rejected, changes nothing and claims no release.
     """
     async with case.world() as world:
         request = await world.prepare(scenario)
@@ -95,6 +95,8 @@ async def test_a_kind_acts_once_under_its_lease_and_its_identity_and_core_accept
             request, lease=RevocableLease(), crash_at=None, digest="another-payload"
         )
         assert other.observation.observation.status is ObservationStatus.REJECTED
+        # The first payload's effect may still hold what it took: a conflict proves nothing.
+        assert not other.observation.observation.released
         assert world.effects() == effects
         assert_core_accepts([done, answer], expect_retry=False)
         assert_core_accepts([done, other], expect_retry=False)

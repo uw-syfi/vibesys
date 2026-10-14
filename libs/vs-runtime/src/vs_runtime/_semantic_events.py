@@ -123,10 +123,7 @@ class JournalSemanticEvents:
             case Replayed() | Performed():
                 facts = PUBLISHED_FACTS
             case Conflict():
-                facts = ObservationFacts(
-                    ObservationStatus.REJECTED,
-                    diagnostic="same request identity with another payload",
-                )
+                facts = ObservationFacts.payload_conflict()
             case Declined(reason):
                 facts = ObservationFacts(
                     ObservationStatus.UNKNOWN, terminal=False, diagnostic=reason

@@ -119,6 +119,19 @@ class _Facts:
     setup_failure: SetupFailureKind = SetupFailureKind.UNKNOWN
 
 
+def _conflict() -> _Facts:
+    """The refusal of a reused identity: it proves nothing about what the identity holds."""
+    facts = ObservationFacts.payload_conflict()
+    return _Facts(
+        facts.status,
+        terminal=facts.terminal,
+        released=facts.released,
+        children_complete=facts.children_complete,
+        diagnostic=facts.diagnostic,
+        setup_failure=SetupFailureKind.PERMANENT,
+    )
+
+
 def _rejected(diagnostic: str) -> _Facts:
     """A refusal decided before the request did anything: it holds nothing, now or later.
 
@@ -217,9 +230,7 @@ class RuntimeWorkspaceRequests:
             case Replayed(result) | Performed(result):
                 return result
             case Conflict():
-                return self._result(
-                    request, context, _rejected("same request identity with another payload")
-                )
+                return self._result(request, context, _conflict())
             case Declined(reason):
                 return self._result(request, context, _unknown(reason))
             case _:

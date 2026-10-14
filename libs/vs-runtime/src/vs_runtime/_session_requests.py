@@ -357,6 +357,9 @@ class _Facts:
     output_schema: SchemaRef | None = None
     output_json: str | None = None
     reply_errors: tuple[ReplyError, ...] = ()
+    settles: bool = True
+    """False when the answer proves nothing about what the request holds (a reused identity),
+    so even a terminal one claims no release and no complete children."""
 
 
 def _reply_errors(violations: tuple[SchemaViolation, ...]) -> tuple[ReplyError, ...]:
@@ -374,6 +377,18 @@ def _reply_errors(violations: tuple[SchemaViolation, ...]) -> tuple[ReplyError, 
 def _same_session(bound: SessionSpec, asked: SessionSpec) -> bool:
     """Same session identity, role, lifetime and access; the policy only says how to acquire it."""
     return bound == asked.model_copy(update={"policy": bound.policy})
+
+
+def _conflict() -> _Facts:
+    """The refusal of a reused identity: it proves nothing about what the identity holds."""
+    facts = ObservationFacts.payload_conflict()
+    return _Facts(
+        facts.status,
+        terminal=facts.terminal,
+        diagnostic=facts.diagnostic,
+        setup_failure=SetupFailureKind.PERMANENT,
+        settles=False,
+    )
 
 
 def _rejected(diagnostic: str, resource_id: ResourceId | None = None) -> _Facts:
@@ -538,9 +553,7 @@ class RuntimeSessionRequests:
             case Replayed(result) | Performed(result):
                 return result
             case Conflict():
-                return self._result(
-                    request, context, _rejected("same request identity with another payload")
-                )
+                return self._result(request, context, _conflict())
             case Declined(reason):
                 return self._result(request, context, _unknown(reason))
             case _:
@@ -563,8 +576,8 @@ class RuntimeSessionRequests:
                 status=facts.status,
                 terminal=facts.terminal,
                 accepted=facts.accepted,
-                released=isinstance(request, DispatchTurn) and facts.terminal,
-                children_complete=facts.terminal,
+                released=facts.settles and isinstance(request, DispatchTurn) and facts.terminal,
+                children_complete=facts.settles and facts.terminal,
                 resource_id=facts.resource_id,
                 diagnostic=facts.diagnostic,
             ),

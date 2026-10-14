@@ -52,6 +52,10 @@ class ObservationLedgerCorruptError(Exception):
     """A stored observation row cannot be read back, so no sequence can be chosen."""
 
 
+PAYLOAD_CONFLICT = "same request identity with another payload"
+"""The diagnostic of every executor's refusal of a reused identity (``payload_conflict``)."""
+
+
 @dataclass(frozen=True)
 class ObservationFacts:
     """What an executor learned about one request, without any identity fields."""
@@ -66,6 +70,16 @@ class ObservationFacts:
     diagnostic: str = ""
     revision: RevisionRef | None = None
     """The revision a snapshot or retain produced; a derived event may carry only this one."""
+
+    @classmethod
+    def payload_conflict(cls) -> ObservationFacts:
+        """A terminal refusal of a request identity the executor already holds with another payload.
+
+        The identity's first request may hold a resource, so the refusal proves nothing about
+        what the identity holds: it claims no release and no complete children, and core
+        learns those only from the first request's own answers.
+        """
+        return cls(status=ObservationStatus.REJECTED, diagnostic=PAYLOAD_CONFLICT)
 
     @classmethod
     def never_held(cls, diagnostic: str) -> ObservationFacts:
