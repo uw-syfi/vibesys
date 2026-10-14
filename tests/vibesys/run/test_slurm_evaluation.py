@@ -35,7 +35,12 @@ from vs_project.api import StateNamespace
 from vs_runtime.api import ProfileField, RunCleanupError
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
-from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
+from vs_sandbox.api.slurm import (
+    PROFILE_END,
+    PROFILE_OUTPUT_ROOT,
+    SlurmEvaluationPlan,
+    SlurmExecutionPolicy,
+)
 from vs_sim.api import OsThreads, yield_now
 from vs_sim.api.testing import ManualClock, arrival, wait_or_fail
 from vs_slurm.api import (
@@ -654,7 +659,7 @@ async def test_a_plan_with_a_trusted_capture_produces_profile_evidence(tmp_path:
             SlurmBatchStageResult(
                 name="profile",
                 exit_code=0,
-                stdout="top kernels: gemm 61%, attention 22%\n",
+                stdout=f"top kernels: gemm 61%, attention 22%\n{PROFILE_END}\n",
                 stderr="",
                 elapsed_seconds=3.0,
                 skipped=False,
@@ -1131,7 +1136,7 @@ async def test_required_hip_timing_reaches_fake_slurm_as_the_actual_capture_flag
             SlurmBatchStageResult(
                 name="profile",
                 exit_code=0,
-                stdout="HIP API: hipLaunchKernel 40ns\n",
+                stdout=f"HIP API: hipLaunchKernel 40ns\n{PROFILE_END}\n",
                 stderr="",
                 elapsed_seconds=3.0,
                 skipped=False,

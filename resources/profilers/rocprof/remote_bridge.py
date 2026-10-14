@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib
 import json
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -14,8 +13,11 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING, Protocol, TypedDict, cast
+from typing import TYPE_CHECKING, Annotated, Protocol, TypedDict
 
+from pydantic import BaseModel, ConfigDict, StringConstraints
+
+from vs_decode.api import Unreadable, read_json
 from vs_sandbox.api.slurm import (
     configured_capture_lifecycle,
     load_slurm_policy,
@@ -59,8 +61,6 @@ if TYPE_CHECKING:
 
     from vs_sim.api import Clock
     from vs_slurm.api import Cluster, ClusterInspectOutcome, SlurmProcess
-
-_CAPTURE_ID = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
 
 
 class RemoteCaptureError(ValueError):
@@ -362,22 +362,29 @@ class RemoteCaptureBridge:
         return remote_capabilities(self._config_path)
 
 
+class _CaptureResultDocument(BaseModel):
+    """The result file the remote capture writes, as one whole document."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    failed_fields: list[str] = []
+    output: str
+    capture_ids: list[Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.-]{1,128}$")]]
+    profiles_path: str | None
+
+
+_RESULT_MAX_BYTES = 16 * 1024 * 1024
+
+
 def _load_result(path: Path) -> _CaptureResult:
-    try:
-        envelope = capture_runtime.read_json_file(path)
-    except (OSError, ValueError) as exc:
-        raise RemoteCaptureError.malformed_result() from exc
-    if not isinstance(envelope, dict) or not isinstance(envelope.get("output"), str):
+    document = read_json(path, _CaptureResultDocument, max_bytes=_RESULT_MAX_BYTES)
+    if isinstance(document, Unreadable):
         raise RemoteCaptureError.malformed_result()
-    capture_ids = envelope.get("capture_ids")
-    if not isinstance(capture_ids, list) or any(
-        not isinstance(item, str) or _CAPTURE_ID.fullmatch(item) is None for item in capture_ids
-    ):
-        raise RemoteCaptureError.malformed_result()
-    profiles_path = envelope.get("profiles_path")
-    if profiles_path is not None and not isinstance(profiles_path, str):
-        raise RemoteCaptureError.malformed_result()
-    return cast("_CaptureResult", envelope)
+    return {
+        "output": document.output,
+        "capture_ids": document.capture_ids,
+        "profiles_path": document.profiles_path,
+    }
 
 
 def remote_capabilities(config_path: Path) -> str:

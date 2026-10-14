@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from vs_evaluation.api import EvidenceMetric, ExecutorRejectedError, ProfileField
-from vs_slurm.api import PORT_PLACEHOLDER, shell_join_with_port
+from vs_slurm.api import PORT_PLACEHOLDER, shell_join_with_port, unframed_output
 
 if TYPE_CHECKING:
     from vs_sandbox.slurm_policy import SlurmExecutionPolicy
@@ -29,6 +29,11 @@ PROFILE_OUTPUT_ROOT = ".vibesys-profile"
 # `ProfileStats` JSON object. The remote script cannot import this library, so it spells
 # the prefix itself and a test keeps the two equal.
 PROFILE_STATS_PREFIX = "VIBESYS_PROFILE_STATS "
+# The capture's very last stdout line when it succeeded, after the summary and any statistics
+# line. A capture whose output lacks it was cut (a lost or truncated read), and "no
+# statistics line" must not be read from output that may have lost it. The remote script
+# spells the line itself and a test keeps the two equal.
+PROFILE_END = "VIBESYS_PROFILE_END"
 GPU_ACTIVE_FRACTION_METRIC = "gpu_active_fraction"
 HIP_API_TIME_METRIC_PREFIX = "hip_api_time_ms."
 _PORT_FILE = ".vibesys-profile-port"
@@ -265,12 +270,18 @@ def split_profile_stats(stdout: str) -> tuple[str, ProfileStats | None]:
     """Separate a capture's printed summary from its typed statistics line.
 
     Returns the text without the statistics line, and the parsed statistics, or None
-    when the capture printed none. A statistics line that does not parse raises
-    ``ValueError`` naming the problem: the capture's own record is never guessed at.
+    when the capture printed none. Raises ``ValueError`` naming the problem when the
+    output does not end with :data:`PROFILE_END` (it did not arrive whole, so what it
+    lacks is unknown, not absent) or when a statistics line does not parse: the
+    capture's own record is never guessed at.
     """
+    body = unframed_output(stdout, PROFILE_END)
+    if body is None:
+        message = "profile capture output did not arrive whole: it lacks its end line"
+        raise ValueError(message)
     kept: list[str] = []
     stats: ProfileStats | None = None
-    for line in stdout.splitlines(keepends=True):
+    for line in body.splitlines(keepends=True):
         if not line.startswith(PROFILE_STATS_PREFIX):
             kept.append(line)
             continue
@@ -285,6 +296,7 @@ def split_profile_stats(stdout: str) -> tuple[str, ProfileStats | None]:
 __all__ = [
     "GPU_ACTIVE_FRACTION_METRIC",
     "HIP_API_TIME_METRIC_PREFIX",
+    "PROFILE_END",
     "PROFILE_OUTPUT_ROOT",
     "PROFILE_STATS_PREFIX",
     "HipApiTime",

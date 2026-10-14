@@ -13,10 +13,12 @@ from collections import deque
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, assert_never, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, assert_never, runtime_checkable
 
 import yaml
+from pydantic import TypeAdapter
 
+from vs_decode.api import Unreadable, UnreadableKind, decode_json
 from vs_sandbox.skypilot_states import (
     INITIAL_JOB_LIFE,
     ClusterEnded,
@@ -104,6 +106,32 @@ class SkyPilotControlPlaneError(SkyPilotCLIError):
     def operation_failed(cls, operation: str, returncode: int) -> SkyPilotControlPlaneError:
         """Describe a failed SkyPilot lifecycle command."""
         return cls(f"SkyPilot {operation} failed with exit code {returncode}")
+
+
+# A control command's JSON reply is read whole or not at all: ``vs_decode`` bounds its size and
+# refuses text that is not one complete JSON document (a cut reply, unbalanced or absurdly nested
+# brackets), and a document without the list the caller reads is an error, never "no entries".
+_CONTROL_JSON_MAX_BYTES = 16 * 1024 * 1024
+_STATUS_DOCUMENT: TypeAdapter[list[dict[str, Any]] | dict[str, Any]] = TypeAdapter(
+    list[dict[str, Any]] | dict[str, Any]
+)
+_QUEUE_DOCUMENT: TypeAdapter[dict[str, Any]] = TypeAdapter(dict[str, Any])
+
+
+def _status_error(unreadable: Unreadable) -> SkyPilotOutputError:
+    if unreadable.kind is UnreadableKind.NOT_JSON:
+        return SkyPilotOutputError.invalid_status_json()
+    if unreadable.kind is UnreadableKind.TOO_LARGE:
+        return SkyPilotOutputError.truncated_control_output("status")
+    return SkyPilotOutputError.status_missing_cluster_list()
+
+
+def _queue_error(unreadable: Unreadable) -> SkyPilotOutputError:
+    if unreadable.kind is UnreadableKind.NOT_JSON:
+        return SkyPilotOutputError.invalid_queue_json()
+    if unreadable.kind is UnreadableKind.TOO_LARGE:
+        return SkyPilotOutputError.truncated_control_output("queue")
+    return SkyPilotOutputError.queue_missing_job_list()
 
 
 class SkyPilotOutputError(SkyPilotCLIError):
@@ -734,17 +762,12 @@ class SkyPilotJobRunner:
         result = self._control(["status", "--refresh", "--output", "json", name], timeout=timeout)
         if result.stdout_truncated:
             raise SkyPilotOutputError.truncated_control_output("status")
-        try:
-            payload = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise SkyPilotOutputError.invalid_status_json() from exc
-        entries = (
-            payload
-            if isinstance(payload, list)
-            else payload.get("clusters", [])
-            if isinstance(payload, dict)
-            else None
+        payload = decode_json(
+            result.stdout, _STATUS_DOCUMENT, source="sky status", max_bytes=_CONTROL_JSON_MAX_BYTES
         )
+        if isinstance(payload, Unreadable):
+            raise _status_error(payload)
+        entries = payload if isinstance(payload, list) else payload.get("clusters")
         if not isinstance(entries, list):
             raise SkyPilotOutputError.status_missing_cluster_list()
         for entry in entries:
@@ -922,11 +945,12 @@ class SkyPilotJobRunner:
 
     @staticmethod
     def _queue_records(stdout: str, cluster_name: str) -> list[dict[str, object]]:
-        try:
-            payload = json.loads(stdout)
-        except json.JSONDecodeError as exc:
-            raise SkyPilotOutputError.invalid_queue_json() from exc
-        records = payload.get(cluster_name) if isinstance(payload, dict) else None
+        payload = decode_json(
+            stdout, _QUEUE_DOCUMENT, source="sky queue", max_bytes=_CONTROL_JSON_MAX_BYTES
+        )
+        if isinstance(payload, Unreadable):
+            raise _queue_error(payload)
+        records = payload.get(cluster_name)
         if not isinstance(records, list) or not all(isinstance(record, dict) for record in records):
             raise SkyPilotOutputError.queue_missing_job_list()
         return records

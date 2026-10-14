@@ -25,9 +25,11 @@ from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
 from vs_sandbox.api.slurm import (
     GPU_ACTIVE_FRACTION_METRIC,
     HIP_API_TIME_METRIC_PREFIX,
+    PROFILE_END,
     PROFILE_STATS_PREFIX,
     HipApiTime,
     ProfileStats,
+    split_profile_stats,
 )
 from vs_sim.api.testing import examples, yield_until
 
@@ -108,7 +110,9 @@ async def test_printed_statistics_become_evidence_metrics_and_leave_the_summary(
     stats: ProfileStats, log: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     line = f"{PROFILE_STATS_PREFIX}{stats.model_dump_json()}\n"
-    evidence = await _profile(tmp_path_factory.mktemp("profile"), f"{log}\nsummary text\n{line}")
+    evidence = await _profile(
+        tmp_path_factory.mktemp("profile"), f"{log}\nsummary text\n{line}{PROFILE_END}\n"
+    )
 
     assert evidence.outcome is EvidenceOutcome.PASSED
     assert evidence.metrics == stats.metrics()
@@ -122,7 +126,7 @@ async def test_printed_statistics_become_evidence_metrics_and_leave_the_summary(
 
 
 async def test_a_capture_without_statistics_is_still_passed_evidence(tmp_path: Path) -> None:
-    evidence = await _profile(tmp_path, "summary text\n")
+    evidence = await _profile(tmp_path, f"summary text\n{PROFILE_END}\n")
     assert evidence.outcome is EvidenceOutcome.PASSED
     assert evidence.metrics == ()
 
@@ -131,6 +135,34 @@ async def test_a_malformed_statistics_line_fails_the_profile_naming_the_problem(
     tmp_path: Path,
 ) -> None:
     bad = json.dumps({"gpu_active_fraction": 7})
-    evidence = await _profile(tmp_path, f"summary text\n{PROFILE_STATS_PREFIX}{bad}\n")
+    evidence = await _profile(
+        tmp_path, f"summary text\n{PROFILE_STATS_PREFIX}{bad}\n{PROFILE_END}\n"
+    )
     assert evidence.outcome is EvidenceOutcome.FAILED
     assert "malformed profile statistics line" in (evidence.semantic_summary or "")
+
+
+@settings(max_examples=examples(pr=5, nightly=15), deadline=None)
+@given(stats=_stats(), data=st.data())
+async def test_a_capture_cut_anywhere_is_failed_never_passed_with_missing_metrics(
+    stats: ProfileStats, data: st.DataObject, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Output that stops before its end line may have lost the statistics: unknown, not zero."""
+    whole = f"summary text\n{PROFILE_STATS_PREFIX}{stats.model_dump_json()}\n{PROFILE_END}\n"
+    cut = data.draw(st.integers(min_value=0, max_value=len(whole) - 1))
+    evidence = await _profile(tmp_path_factory.mktemp("profile"), whole[:cut])
+
+    assert evidence.outcome is EvidenceOutcome.FAILED
+    assert "did not arrive whole" in (evidence.semantic_summary or "")
+    assert evidence.metrics == ()
+
+
+@given(stats=_stats(), data=st.data())
+def test_split_profile_stats_reads_only_whole_output(
+    stats: ProfileStats, data: st.DataObject
+) -> None:
+    whole = f"summary\n{PROFILE_STATS_PREFIX}{stats.model_dump_json()}\n{PROFILE_END}\n"
+    assert split_profile_stats(whole) == ("summary\n", stats)
+    cut = data.draw(st.integers(min_value=0, max_value=len(whole) - 1))
+    with pytest.raises(ValueError, match="did not arrive whole"):
+        split_profile_stats(whole[:cut])

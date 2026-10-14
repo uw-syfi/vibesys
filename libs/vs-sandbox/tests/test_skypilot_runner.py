@@ -948,6 +948,46 @@ def test_inspect_cluster_rejects_invalid_json_with_message() -> None:
         runner.inspect_cluster("lease")
 
 
+_WHOLE_STATUS = json.dumps([{"name": "lease", "status": "UP"}])
+_WHOLE_QUEUE = json.dumps({"lease": [{"job_name": "j", "job_id": 7, "status": "RUNNING"}]})
+
+
+@given(cut=st.integers(min_value=0, max_value=len(_WHOLE_STATUS) - 1))
+def test_a_cut_status_reply_is_an_error_never_an_absent_cluster(cut: int) -> None:
+    """Every proper prefix of a status document is unknown, not "the cluster is gone"."""
+    runner = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=_WHOLE_STATUS[:cut])]))
+
+    with pytest.raises(SkyPilotOutputError):
+        runner.inspect_cluster("lease")
+
+
+@given(cut=st.integers(min_value=0, max_value=len(_WHOLE_QUEUE) - 1))
+def test_a_cut_queue_reply_is_an_error_never_an_absent_job(cut: int) -> None:
+    runner = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=_WHOLE_QUEUE[:cut])]))
+
+    with pytest.raises(SkyPilotOutputError):
+        runner.query_job("lease", job_name="j")
+
+
+@pytest.mark.parametrize("stdout", ["{}", '{"error": "boom"}', '{"clusters": null}'])
+def test_a_status_object_without_its_cluster_list_is_not_an_absent_cluster(stdout: str) -> None:
+    runner = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=stdout)]))
+
+    with pytest.raises(SkyPilotOutputError, match="must contain a cluster list"):
+        runner.inspect_cluster("lease")
+
+
+@pytest.mark.parametrize("stdout", ["[" * 100_000, "{" * 100_000, '{"lease": ' * 50_000])
+def test_absurdly_nested_control_output_is_a_typed_error(stdout: str) -> None:
+    status = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=stdout)]))
+    queue = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=stdout)]))
+
+    with pytest.raises(SkyPilotOutputError):
+        status.inspect_cluster("lease")
+    with pytest.raises(SkyPilotOutputError):
+        queue.query_job("lease", job_name="j")
+
+
 def test_ensure_rejects_unknown_cluster_status() -> None:
     fake = FakeCommandRunner([_result(stdout=json.dumps([{"name": "lease", "status": "ODD"}]))])
 

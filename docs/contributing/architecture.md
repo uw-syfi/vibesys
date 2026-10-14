@@ -198,6 +198,7 @@ graph TD
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_sim
     vs_runtime --> vs_slurm
+    vs_sandbox --> vs_decode
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_project
     vs_sandbox --> vs_sim

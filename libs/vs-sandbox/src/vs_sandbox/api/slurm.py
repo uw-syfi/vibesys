@@ -61,6 +61,7 @@ from vs_sandbox.slurm_policy import (
 from vs_sandbox.slurm_profile import (
     GPU_ACTIVE_FRACTION_METRIC,
     HIP_API_TIME_METRIC_PREFIX,
+    PROFILE_END,
     PROFILE_OUTPUT_ROOT,
     PROFILE_STATS_PREFIX,
     HipApiTime,
@@ -83,6 +84,7 @@ __all__ = [
     "GPU_ACTIVE_FRACTION_METRIC",
     "HIP_API_TIME_METRIC_PREFIX",
     "HOST_COMMAND_CLIENT",
+    "PROFILE_END",
     "PROFILE_OUTPUT_ROOT",
     "PROFILE_STATS_PREFIX",
     "AgentGpuConfig",

@@ -12,6 +12,7 @@ dependencies = [
     "modal>=1.4.2",
     "pydantic>=2",
     "pyyaml>=6",
+    "vs-decode",
     "vs-evaluation",
     "vs-project",
     "vs-sim",
@@ -25,6 +26,7 @@ where = ["src"]
 vs_sandbox = ["py.typed", "devcontainer-cli/Dockerfile", "devcontainer-cli/test_features.sh", "features/src/*/*", "features/test/*/*"]
 
 [tool.uv.sources]
+vs-decode = { workspace = true }
 vs-evaluation = { workspace = true }
 vs-project = { workspace = true }
 vs-sim = { workspace = true }
