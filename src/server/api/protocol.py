@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated, Literal, TypeAliasType
 
-from pydantic import Field, FiniteFloat
+from pydantic import Field, FiniteFloat, TypeAdapter
 
 from server.api.iterations import MAX_ITERATION_PAGE_SIZE, IterationSlice
 from server.chat.options import ChatOptions
@@ -533,6 +534,38 @@ class Response(ResponseEnvelope):
             error=diagnostic.summary,
             diagnostic=diagnostic,
         )
+
+
+_REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
+
+
+def decode_request(frame: str | bytes) -> ProtocolRequest | Response:
+    """Parse one request frame, or the failed response that rejects it.
+
+    Every transport decodes through here, so a malformed frame (invalid JSON or
+    UTF-8, a JSON value that is not an object, a missing or unknown ``type``,
+    unknown keys) draws the same typed response on each of them. The rejection
+    echoes the frame's ``request_id`` and ``client_id`` when it carries them as
+    an object, so a client can match it to what it sent.
+    """
+    try:
+        return _REQUEST_ADAPTER.validate_json(frame)
+    except ValueError as error:
+        request_id, client_id = _frame_ids(frame)
+        return Response.from_exception(request_id, error, operation="Request").model_copy(
+            update={"client_id": client_id}
+        )
+
+
+def _frame_ids(frame: str | bytes) -> tuple[str, str]:
+    try:
+        value = json.loads(frame)
+    except ValueError:
+        return "unknown", ""
+    if not isinstance(value, dict):
+        return "unknown", ""
+    client_id = value.get("client_id")
+    return str(value.get("request_id", "unknown")), client_id if isinstance(client_id, str) else ""
 
 
 class SubscribedMessage(ProtocolModel):

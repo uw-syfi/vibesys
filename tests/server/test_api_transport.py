@@ -28,12 +28,13 @@ from server.transport.unix_jsonl import (
 from vs_sim.api.testing import HANG_GUARD_S
 
 
-def _request(socket_path: Path, request: Request) -> dict[str, Any]:
+def _request(socket_path: Path, request: Request | bytes) -> dict[str, Any]:
+    frame = request if isinstance(request, bytes) else request.model_dump_json().encode()
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(HANG_GUARD_S)
         client.connect(str(socket_path))
         stream = client.makefile("rwb")
-        stream.write(request.model_dump_json().encode() + b"\n")
+        stream.write(frame + b"\n")
         stream.flush()
         return json.loads(stream.readline())
 
@@ -106,6 +107,24 @@ def test_transport_supports_multiple_clients_and_replay(socket_dir: Path) -> Non
         assert sequences == sorted(sequences)
         assert len(sequences) == len(set(sequences))
         assert any(event["type"] == "server_started" for event in replay["events"])
+    finally:
+        parts.close()
+
+
+@pytest.mark.parametrize("frame", [b"[]", b"null", b'"text"', b"7", b"not json", b"\xff\xfe"])
+def test_transport_rejects_a_malformed_frame_as_invalid_input(
+    socket_dir: Path, frame: bytes
+) -> None:
+    parts = build_server_parts(socket_dir / "logs")
+    socket_path = socket_dir / "server.sock"
+
+    try:
+        with UnixJsonlServer(socket_path, parts.api):
+            response = _request(socket_path, frame)
+
+        assert response["ok"] is False
+        assert response["request_id"] == "unknown"
+        assert response["error"] == "Request received invalid input"
     finally:
         parts.close()
 

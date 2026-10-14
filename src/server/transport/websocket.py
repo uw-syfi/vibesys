@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import json
 import logging
 import mimetypes
 import os
@@ -24,15 +23,13 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from pydantic import TypeAdapter
-
 from server.api.protocol import (
     EventBatchMessage,
     ProtocolErrorMessage,
-    ProtocolRequest,
     Response,
     SubscribedMessage,
     SubscribeRequest,
+    decode_request,
 )
 from server.transport.discovery import (
     CAPABILITY_ROTATION_HEADER,
@@ -56,7 +53,6 @@ if TYPE_CHECKING:
 
 _LOG = logging.getLogger(__name__)
 
-_REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 _DISCONNECT_POLL_SECONDS = 0.1
 WEBSOCKET_CLOSE_TIMEOUT_SECONDS = 10.0
 """Canonical bound for completing or aborting the WebSocket close handshake."""
@@ -1145,15 +1141,9 @@ class WebSocketGateway:
                 await websocket.close()
 
     async def _handle_request(self, websocket: ServerConnection, raw: str) -> bool:
-        request_id, client_id = _request_metadata(raw)
-        try:
-            request = _REQUEST_ADAPTER.validate_json(raw)
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101017 [BLE001]; convert malformed browser frames into protocol responses
-            response = Response.from_exception(
-                request_id,
-                error,
-                operation="Request",
-            ).model_copy(update={"client_id": client_id})
+        request = decode_request(raw)
+        if isinstance(request, Response):
+            response = request
         else:
             if isinstance(request, SubscribeRequest):
                 with self.subscriptions.track():
@@ -1174,10 +1164,10 @@ class WebSocketGateway:
             # > Listing current service exceptions would leak future request failures out of the transport; a helper would retain the same broad boundary catch with more indirection.
             except Exception as error:  # noqa: BLE001
                 response = Response.from_exception(
-                    request_id,
+                    request.request_id,
                     error,
                     operation="Request",
-                ).model_copy(update={"client_id": client_id})
+                ).model_copy(update={"client_id": request.client_id})
         await self._send(websocket, response.model_dump_json())
         return False
 
@@ -1452,17 +1442,6 @@ def _origin_rejection(value: str) -> str | None:
         (port != 0, "the port must be between 1 and 65535"),
     )
     return next((reason for satisfied, reason in requirements if not satisfied), None)
-
-
-def _request_metadata(raw: str) -> tuple[str, str]:
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        return "unknown", ""
-    if not isinstance(value, dict):
-        return "unknown", ""
-    client_id = value.get("client_id")
-    return str(value.get("request_id", "unknown")), client_id if isinstance(client_id, str) else ""
 
 
 def _request_header(request: Request, name: str) -> str | None:

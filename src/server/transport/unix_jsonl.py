@@ -3,22 +3,19 @@
 from __future__ import annotations
 
 import errno
-import json
 import socket
 import socketserver
 import sys
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, TypeAdapter
-
 from server.api.protocol import (
     EventBatchMessage,
     ProtocolErrorMessage,
-    ProtocolRequest,
     Response,
     SubscribedMessage,
     SubscribeRequest,
+    decode_request,
 )
 from server.transport.subscriptions import SubscriptionTracker
 from vs_sim.api import OsThreads
@@ -26,11 +23,11 @@ from vs_sim.api import OsThreads
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from pydantic import BaseModel
+
     from server.api.service import RunApi, SubscriptionBootstrap
     from server.transport.subscriptions import StreamDelivery
     from vs_sim.api import Threads, Worker
-
-_REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 
 # Polling slack on the teardown path. After the last client hangs up, the
 # server exits only once the stream loop notices the closed peer, the
@@ -74,14 +71,11 @@ class _RequestHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         api = self.server.api
         for line in self.rfile:
-            request_id = "unknown"
-            client_id = ""
+            request = decode_request(line)
+            if isinstance(request, Response):
+                self._write_message(request)
+                continue
             try:
-                raw = json.loads(line)
-                request_id = str(raw.get("request_id", request_id))
-                if isinstance(raw.get("client_id"), str):
-                    client_id = raw["client_id"]
-                request = _REQUEST_ADAPTER.validate_python(raw)
                 if isinstance(request, SubscribeRequest):
                     with self.server.subscriptions.track() as delivery:
                         try:
@@ -94,12 +88,11 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 response = api.execute(request)
             except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010253 [BLE001]; the socket boundary converts request failures into typed protocol responses.
                 response = Response.from_exception(
-                    request_id,
+                    request.request_id,
                     exc,
                     operation="Request",
-                ).model_copy(update={"client_id": client_id})
-            self.wfile.write(response.model_dump_json().encode() + b"\n")
-            self.wfile.flush()
+                ).model_copy(update={"client_id": request.client_id})
+            self._write_message(response)
 
     def _stream(self, request: SubscribeRequest, delivery: StreamDelivery) -> None:
         api = self.server.api
