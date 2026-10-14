@@ -2304,3 +2304,39 @@ def test_capability_rotation_failure_rolls_back_with_a_gateway_response(tmp_path
         assert _fetch(gateway.bound_port, f"/health?token={old_token}")[0] == HTTPStatus.OK
 
     assert not instance_path.exists()
+
+
+def test_a_browser_stream_reports_what_it_delivered_so_a_closing_server_can_wait(
+    tmp_path: Path,
+) -> None:
+    """The gateway's streams report delivery to the tracker, as Unix streams do.
+
+    A server that ends with its run waits on the tracker until every open
+    stream wrote the run's last event, then closes. A browser stream entered
+    the tracker but never reported, so the wait could not see it deliver
+    anything and the browser lost the event that said why the run ended.
+    """
+    parts = build_server_parts(tmp_path / "logs")
+    tracker = SubscriptionTracker()
+    gateway = WebSocketGateway(parts.api, subscriptions=tracker)
+    caught_up: list[bool] = []
+
+    async def subscribe() -> None:
+        async with _gateway_connection(gateway) as websocket:
+            await websocket.send(SubscribeRequest(client_id="browser").model_dump_json())
+            assert json.loads(await websocket.recv())["type"] == "subscribed"
+            assert json.loads(await websocket.recv())["type"] == "event_batch"
+            caught_up.append(
+                tracker.wait_until_delivered(parts.api.latest_sequence, DEADLOCK_GUARD_S)
+            )
+            parts.journal.publish_output("stdout", "the run's last line")
+            assert json.loads(await websocket.recv())["type"] == "event_batch"
+            caught_up.append(
+                tracker.wait_until_delivered(parts.api.latest_sequence, DEADLOCK_GUARD_S)
+            )
+
+    with gateway:
+        asyncio.run(subscribe())
+    parts.close()
+
+    assert caught_up == [True, True]

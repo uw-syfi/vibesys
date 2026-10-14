@@ -98,6 +98,18 @@ def _project_scope(project_root: Path) -> str:
     return hashlib.sha256(project_root.expanduser().resolve().as_posix().encode()).hexdigest()
 
 
+class _Once:
+    """Run a callback on its first call only; later calls do nothing."""
+
+    def __init__(self, callback: Callable[[], object]) -> None:
+        self._callback: Callable[[], object] | None = callback
+
+    def __call__(self) -> None:
+        callback, self._callback = self._callback, None
+        if callback is not None:
+            callback()
+
+
 class ServerLifecycleObserver(Protocol):
     """Told the facts a registry record advertises: the server's milestones and its run's phase."""
 
@@ -301,7 +313,8 @@ class ServerRuntime:
                 # transport closes, on every exit path: a run that raised
                 # (a configuration or run failure) or ended leaves its
                 # clients the event that says why before they see the close.
-                transports.callback(self._drain_subscribers, transport)
+                drain = _Once(partial(self._drain_subscribers, transport))
+                transports.callback(drain)
                 self.transport_listening.set()
                 if self.observer is not None:
                     self.observer.listening()
@@ -321,6 +334,9 @@ class ServerRuntime:
                     else None
                 )
                 if web_transport is not None:
+                    # Again after the gateway, so its browsers drain before it
+                    # closes too; the callback above then finds it done.
+                    transports.callback(drain)
                     print(f"VibeSys web UI: {web_transport.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101006 [T201]; expose the capability URL to the interactive launcher user
                 if not self._detachable_mode:
                     self._wait_for_subscriber(transport)

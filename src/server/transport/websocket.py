@@ -37,7 +37,7 @@ from server.transport.discovery import (
     WebInstanceClaim,
     WebInstanceRecord,
 )
-from server.transport.subscriptions import SubscriptionTracker
+from server.transport.subscriptions import StreamDelivery, SubscriptionTracker
 from vs_async_ops.api import finish
 from vs_sim.api import SystemClock, ThreadBlockingRunner
 
@@ -1147,9 +1147,9 @@ class WebSocketGateway:
             response = request
         else:
             if isinstance(request, SubscribeRequest):
-                with self.subscriptions.track():
+                with self.subscriptions.track() as delivery:
                     try:
-                        await self._stream(websocket, request)
+                        await self._stream(websocket, request, delivery)
                     except _WriteDeadlineError:
                         raise
                     # lint-waiver: LW-101018 [BLE001]; the transport boundary converts every replay or serialization failure into the stream protocol's typed error.
@@ -1172,7 +1172,14 @@ class WebSocketGateway:
         await self._send(websocket, response.model_dump_json())
         return False
 
-    async def _stream(self, websocket: ServerConnection, request: SubscribeRequest) -> None:
+    async def _stream(
+        self, websocket: ServerConnection, request: SubscribeRequest, delivery: StreamDelivery
+    ) -> None:
+        """Write the replay, then every new batch, reporting each one to ``delivery``.
+
+        A server about to close waits on ``delivery`` so a browser reads the
+        run's last events before its connection closes, as a Unix client does.
+        """
         try:
             bootstrap = await _run_owned_blocking(
                 self._request_runner,
@@ -1209,6 +1216,7 @@ class WebSocketGateway:
         cursor, reported_floor, store_id = await self._write_bootstrap(
             websocket, request, bootstrap
         )
+        delivery.delivered(cursor)
         while True:
             changed = await _run_owned_blocking(
                 self._request_runner,
@@ -1231,6 +1239,7 @@ class WebSocketGateway:
                 cursor, reported_floor, store_id = await self._write_bootstrap(
                     websocket, request, bootstrap, rebootstrap=True
                 )
+                delivery.delivered(cursor)
                 continue
             checkpoint = await _run_owned_blocking(
                 self._request_runner,
@@ -1249,6 +1258,7 @@ class WebSocketGateway:
                 cursor, reported_floor, store_id = await self._write_bootstrap(
                     websocket, request, bootstrap, rebootstrap=True
                 )
+                delivery.delivered(cursor)
                 continue
             await self._send_event_batch(
                 websocket,
@@ -1261,6 +1271,7 @@ class WebSocketGateway:
                 ),
             )
             cursor = checkpoint.through_sequence
+            delivery.delivered(cursor)
 
     async def _write_stream_error(
         self,
