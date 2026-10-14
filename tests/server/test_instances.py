@@ -244,6 +244,21 @@ def test_file_records_are_private_and_reject_unknown_keys(tmp_path: Path) -> Non
     assert judge(store.observe(IDS[0]), 0.0) is Verdict.UNREADABLE
 
 
+@pytest.mark.parametrize(
+    "content",
+    [b"\xff\xfe", b'{"version": 4, "id": "\xff"}', b"[" * 100_000],
+    ids=["invalid-utf8", "invalid-utf8-in-a-string", "nested-past-the-recursion-limit"],
+)
+def test_a_corrupt_record_file_is_unreadable_not_an_error(tmp_path: Path, content: bytes) -> None:
+    store = FileInstanceStore(tmp_path)
+    hold = store.hold(IDS[0])
+    hold.publish(_record(IDS[0]))
+    (tmp_path / "instances" / f"{IDS[0]}.json").write_bytes(content)
+
+    assert store.observe(IDS[0]).record == UnreadableRecord(id=IDS[0], version=None)
+    assert judge(store.observe(IDS[0]), 0.0) is Verdict.UNREADABLE
+
+
 # --- inspection ---------------------------------------------------------------
 
 

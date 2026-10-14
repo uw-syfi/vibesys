@@ -993,7 +993,9 @@ class FileInstanceStore:
 
     def _read(self, instance_id: str) -> LiveInstanceRecord | UnreadableRecord | None:
         try:
-            raw = self._record_path(instance_id).read_text(encoding="utf-8")
+            # Bytes, so ``parse_record`` judges invalid UTF-8 unreadable; ``read_text``
+            # raised ``UnicodeDecodeError`` out of every listing instead.
+            raw = self._record_path(instance_id).read_bytes()
         except FileNotFoundError:
             return None
         except OSError:

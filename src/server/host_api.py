@@ -317,8 +317,11 @@ def _upgrade_v3(record: LiveInstanceRecord) -> LiveInstanceRecord | None:
     return record
 
 
-def parse_record(instance_id: str, raw: str) -> LiveInstanceRecord | UnreadableRecord:
+def parse_record(instance_id: str, raw: str | bytes) -> LiveInstanceRecord | UnreadableRecord:
     """Parse one stored record, strictly, if it is of a version this reader knows.
+
+    Total: any content, invalid UTF-8 included when given as bytes, is a record
+    or an ``UnreadableRecord``.
 
     A version 3 record is upgraded (``_upgrade_v3``). Records of earlier
     versions predate phases and tombstones and are not upgraded: their servers
