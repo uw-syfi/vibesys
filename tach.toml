@@ -449,7 +449,7 @@ depends_on = ["vs_decode.api", "vs_core", "vs_github", "vs_sim.api"]
 [[modules]]
 path = "vs_evaluator_protocol"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_decode.api"]
 
 [[modules]]
 path = "vs_decode"

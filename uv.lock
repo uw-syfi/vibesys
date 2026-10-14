@@ -3115,10 +3115,14 @@ version = "0.1.0"
 source = { editable = "libs/vs-evaluator-protocol" }
 dependencies = [
     { name = "pydantic" },
+    { name = "vs-decode" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
+]
 
 [[package]]
 name = "vs-faults"

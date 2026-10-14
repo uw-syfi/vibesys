@@ -34,8 +34,12 @@ if TYPE_CHECKING:
 class ValidationOptions:
     """How pydantic validates the parsed value."""
 
-    strict: bool = False
-    """pydantic's strict mode: no coercion between JSON types."""
+    strict: bool | None = None
+    """pydantic's strict mode: no coercion between JSON types.
+
+    ``None`` keeps the target's own ``strict`` setting; ``False`` would switch a strict
+    model to lax validation.
+    """
     context: Mapping[str, Any] | None = None
     """Validation context handed to the target's validators."""
 

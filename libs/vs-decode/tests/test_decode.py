@@ -11,7 +11,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from vs_decode.api import Unreadable, UnreadableKind, decode_json, read_json
+from vs_decode.api import Unreadable, UnreadableKind, ValidationOptions, decode_json, read_json
 from vs_sim.api.testing import examples, hostile_json_frames
 
 if TYPE_CHECKING:
@@ -214,3 +214,23 @@ def test_a_problem_names_its_location_and_error_type() -> None:
     too_large = decode_json(b"{}", _Doc, source="s", max_bytes=1)
     assert isinstance(too_large, Unreadable)
     assert too_large.problems[0].error_type is None
+
+
+class _StrictCount(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    count: int
+
+
+@given(st.integers())
+@settings(max_examples=25)
+def test_a_strict_model_stays_strict_unless_the_caller_relaxes_it(count: int) -> None:
+    coerced = json.dumps({"count": str(count)})
+    refused = decode_json(coerced, _StrictCount, source="doc", max_bytes=1024)
+    relaxed = decode_json(
+        coerced, _StrictCount, source="doc", max_bytes=1024, options=ValidationOptions(strict=False)
+    )
+
+    assert isinstance(refused, Unreadable)
+    assert refused.kind is UnreadableKind.INVALID
+    assert relaxed == _StrictCount(count=count)
