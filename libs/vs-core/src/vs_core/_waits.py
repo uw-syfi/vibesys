@@ -6,20 +6,28 @@ a request the shell still holds, an event committed but not yet applied (the out
 timer. A wait with none of these is an orphan: nothing will ever end it, so the run would sit
 until its deadline. ``orphan_waits`` reports it at the step that created it.
 
-An owned job, a session, an acquiring turn, a yield and an interruption record what they
-wait on when they start waiting (``WaitOn``: a job's poll timer or the poll in flight; the
-session's ensure, turn, inspection or close; the turn's session; the checkpoint request or
-turn inspection a yield or a draining interruption needs), so their producers are read from
-that record and nothing is inferred. A waiter may name another waiting entity only as ``MAY_WAIT_ON`` allows
-(I1: the graph is acyclic), and the entity carries it while its own recorded wait does. A named request whose
+Every waiter records what it waits on when it starts waiting (``WaitOn``), and nothing is
+inferred from the ledger:
+
+- an owned job names its poll timer or the poll in flight;
+- a session names its ensure, turn, inspection or close;
+- an acquiring turn names its session;
+- a yield or a draining interruption names the checkpoint request or turn inspection it needs;
+- a recovery check names its target, the inspections of it and its children, and the jobs
+  that settle those children;
+- a blocked record names the inspections, cancels and blocks sent about it
+  (``RequestRecord.addressed_by``);
+- a prepared request waits on its own dispatch, and a retryably failed one on its retry time.
+
+A waiter may name another waiting entity only as ``MAY_WAIT_ON`` allows (I1: the graph is
+acyclic), and the entity carries it while its own recorded wait does. A named request whose
 answer the shell committed but has not applied (a turn's reply rides its session's owner
 event, a step after the turn's own end) still counts. A named request that ends without
 moving its waiter wakes it (``lapsed_job_waits``, ``lapsed_session_waits``), and
-``unmet_waits`` refuses a step that records a wait on a request not open, or leaves a job or
-session waiting without one. The other kinds are still derived, by ``producers``, until each
-records its own wait (#2428). Either way the
-waits report one answer, and every resolver below ends exactly the entities it finds nothing
-for, so a wait and its resolver cannot disagree about whether something will end it.
+``unmet_waits`` refuses a step that records a wait on a request not open, or leaves a job,
+session, turn, yield or interruption waiting without one. ``waits`` and every resolver below
+read the same recorded waits, so a wait and its resolver cannot disagree about whether
+something will end it.
 
 Reporting is not enough, so every kind also declares in ``RESOLUTIONS`` what core does when
 a wait of that kind would be an orphan: fail the waiter with a named reason, retry with a
@@ -62,7 +70,7 @@ from .types.sessions import (
 from .types.waits import WaitKind, WaitOn, WaitSubject
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from .types.common import RequestId
     from .types.kernel import CoreEvent, CoreState
@@ -246,25 +254,6 @@ _SETTLES_LAST = (Producer.TIMER, Producer.PENDING_REQUEST, Producer.OUTBOX_EVENT
 
 def _reported(found: frozenset[Producer]) -> Producer | None:
     return next((producer for producer in _SETTLES_LAST if producer in found), None)
-
-
-def _from_records(
-    related: Sequence[RequestRecord],
-    outbox: frozenset[RequestId],
-    *,
-    spent: RequestId | None = None,
-) -> frozenset[Producer]:
-    """What *related* records can still produce: a request in flight, or a committed answer.
-
-    *spent* names a record that stays open without producing anything more (a job's answered
-    submission): it does not count as in flight, though an answer of it in the outbox does.
-    """
-    found: set[Producer] = set()
-    if any(record_waits(row.phase) and row.request_id != spent for row in related):
-        found.add(Producer.PENDING_REQUEST)
-    if any(row.request_id in outbox for row in related):
-        found.add(Producer.OUTBOX_EVENT)
-    return frozenset(found)
 
 
 def _acquiring(sessions: SessionsState) -> tuple[Invocation, ...]:
@@ -719,12 +708,20 @@ def _blocked_records(core: CoreState) -> tuple[RequestRecord, ...]:
     )
 
 
-def _blocked_producers(
-    records: RecordsState, outbox: frozenset[RequestId], record: RequestRecord
-) -> frozenset[Producer]:
-    """What can end a blocked record: the reconciliation commands it recorded as sent about it."""
-    named = (records.record(request_id) for request_id in record.addressed_by)
-    return _from_records([row for row in named if row is not None], outbox)
+def _blocked_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
+    """A closing run's wait on each blocked record: the commands the record names.
+
+    A record names each inspection, cancel and block of it as the command is registered
+    (``RequestRecord.addressed_by``); one that names none waits on nothing.
+    """
+    return tuple(
+        (
+            WaitSubject(kind=WaitKind.BLOCKED_RECORD, identity=row.request_id.root),
+            WaitOn(requests=row.addressed_by),
+        )
+        for row in _blocked_records(core)
+        if row.addressed_by
+    )
 
 
 def stalled_blocked_records(core: CoreState) -> tuple[RequestId, ...]:
@@ -733,10 +730,15 @@ def stalled_blocked_records(core: CoreState) -> tuple[RequestId, ...]:
     Each is a wait nothing produces: its bound passed and the close would sit on it forever, so
     the step ends it (``BlockedRecordStalled``).
     """
+    named = dict(_blocked_waits(core))
     return tuple(
         record.request_id
         for record in _blocked_records(core)
-        if not _blocked_producers(core.records, frozenset(), record)
+        if not _live_wait(
+            core,
+            named.get(WaitSubject(kind=WaitKind.BLOCKED_RECORD, identity=record.request_id.root)),
+            frozenset(),
+        )
     )
 
 
@@ -805,108 +807,68 @@ def subjects(core: CoreState) -> tuple[WaitSubject, ...]:
     return tuple(WaitSubject(kind=kind, identity=identity) for kind, identity in found)
 
 
-def _dispatch_producers(core: CoreState, identity: str) -> frozenset[Producer]:
-    """A prepared request is dispatched by the shell, unless core can never allow it."""
-    if identity in {row.root for row in undispatchable_requests(core)}:
-        return frozenset()
-    return frozenset({Producer.PENDING_REQUEST})
+def _ledger_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
+    """The waits a request record states by its own fields.
 
-
-def _blocked_record_producers(
-    core: CoreState, identity: str, outbox: frozenset[RequestId]
-) -> frozenset[Producer]:
-    record = next(row for row in core.records.records if row.request_id.root == identity)
-    return _blocked_producers(core.records, outbox, record)
-
-
-def _session_wait_producers(
-    core: CoreState, identity: str, queued: frozenset[RequestId]
-) -> frozenset[Producer]:
-    """What can end a waiting session's recorded wait; a waiting session without one, nothing."""
-    session = next(row for row in core.sessions.sessions if row.spec.session_id.root == identity)
-    return frozenset() if session.wait is None else wait_producers(core, session.wait, queued)
-
-
-def _turn_wait_producers(
-    core: CoreState, identity: str, queued: frozenset[RequestId]
-) -> frozenset[Producer]:
-    """What can carry an acquiring turn on: its recorded wait; one without a wait, nothing."""
-    turn = next(
-        row for row in _acquiring(core.sessions) if row.invocation.invocation_id.root == identity
-    )
-    return frozenset() if turn.wait is None else wait_producers(core, turn.wait, queued)
-
-
-def _owned_job_producers(core: CoreState, identity: str) -> frozenset[Producer]:
-    wait = next(
-        wait
-        for subject, wait in recorded_waits(core)
-        if subject == WaitSubject(kind=WaitKind.OWNED_JOB, identity=identity)
-    )
-    return wait_producers(core, wait)
-
-
-type _Derivation = Callable[[CoreState, str, frozenset[RequestId]], frozenset[Producer]]
-
-
-def _recorded_wait_producers(kind: WaitKind) -> _Derivation:
-    """What can end a recorded wait of *kind*; a waiter of that kind without one, nothing."""
-
-    def derive(core: CoreState, identity: str, queued: frozenset[RequestId]) -> frozenset[Producer]:
-        subject = WaitSubject(kind=kind, identity=identity)
-        wait = next((wait for named, wait in recorded_waits(core) if named == subject), None)
-        return frozenset() if wait is None else wait_producers(core, wait, queued)
-
-    return derive
-
-
-#: How the producers of each kind of wait are derived, from the waiting entity's identity.
-#: A release recorded after the attempt stopped listening is not re-announced, and a refund is
-#: a signal of the step that retained the checkpoint, so nothing can produce either.
-_DERIVATIONS: Mapping[WaitKind, _Derivation] = MappingProxyType(
-    {
-        WaitKind.SESSION: _session_wait_producers,
-        WaitKind.TURN_ACQUISITION: _turn_wait_producers,
-        WaitKind.YIELD_PUBLICATION: _recorded_wait_producers(WaitKind.YIELD_PUBLICATION),
-        WaitKind.INTERRUPT: _recorded_wait_producers(WaitKind.INTERRUPT),
-        # A check, like the jobs it names, is moved only by what core holds open: an answer
-        # still queued in the shell belongs to a request core holds open anyway.
-        WaitKind.RECOVERY_CHECK: lambda core, identity, _queued: _recorded_wait_producers(
-            WaitKind.RECOVERY_CHECK
-        )(core, identity, frozenset()),
-        WaitKind.OWNED_JOB: lambda core, identity, _outbox: _owned_job_producers(core, identity),
-        WaitKind.RELEASE_DEPENDENCY: lambda _core, _identity, _outbox: frozenset(),
-        WaitKind.REFUND: lambda _core, _identity, _outbox: frozenset(),
-        WaitKind.DISPATCH: lambda core, identity, _outbox: _dispatch_producers(core, identity),
-        WaitKind.RETRY: lambda _core, _identity, _outbox: frozenset({Producer.TIMER}),
-        WaitKind.BLOCKED_RECORD: _blocked_record_producers,
-    }
-)
-
-
-def producers(
-    core: CoreState, subject: WaitSubject, outbox: Sequence[CoreEvent] = ()
-) -> frozenset[Producer]:
-    """Everything live that can move *subject* on: the one derivation every wait reads.
-
-    ``waits`` reports each subject with the producer that ends it, and each resolver the step
-    runs (``stalled_acquisitions``, ``stalled_checkpoint_waits``, ``stalled_blocked_records``,
-    ``undispatchable_requests``) ends exactly the subjects of its kind this returns empty for.
-    *outbox* holds the events committed but not yet applied (the shell's pending inputs).
+    A prepared request waits on the shell to dispatch it (itself, while core can still allow
+    it: ``undispatchable_requests``), and a retryably failed one on its retry time.
     """
-    return _DERIVATIONS[subject.kind](core, subject.identity, _outbox_requests(outbox))
+    blocked = frozenset(undispatchable_requests(core))
+    dispatch = (
+        (
+            WaitSubject(kind=WaitKind.DISPATCH, identity=row.request_id.root),
+            WaitOn(requests=(row.request_id,)),
+        )
+        for row in core.records.records
+        if row.phase == RequestPhase.PREPARED and row.request_id not in blocked
+    )
+    retry = (
+        (WaitSubject(kind=WaitKind.RETRY, identity=row.request_id.root), WaitOn(timer=at))
+        for row in core.records.records
+        if (at := row.retry_wait_until) is not None
+    )
+    return (*dispatch, *retry)
+
+
+def _live_wait(
+    core: CoreState, wait: WaitOn | None, queued: frozenset[RequestId]
+) -> frozenset[Producer]:
+    """What can still end *wait*; a waiter that recorded none, nothing."""
+    return frozenset() if wait is None else wait_producers(core, wait, queued)
+
+
+#: The kinds a queued answer cannot move. Core forwards a job's answer to the job in the step
+#: that records it, so an answer still queued in the shell belongs to a request core holds
+#: open anyway; a recovery check is moved, like the jobs it names, only by what core holds open.
+_MOVED_ONLY_BY_OPEN_REQUESTS = frozenset({WaitKind.OWNED_JOB, WaitKind.RECOVERY_CHECK})
 
 
 def waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[OpenWait, ...]:
-    """Every wait in *core*, each with the producer that will end it (``producers``).
+    """Every wait in *core*, each with the producer that will end it, read from its record.
 
-    *outbox* holds the events committed but not yet applied (the shell's pending inputs).
+    Each waiter's wait is the one it recorded (``recorded_waits``), the commands a blocked
+    record names, or what a request record states by its own fields (a prepared request's
+    dispatch, a retry time). A waiter with none has no producer. *outbox* holds the events
+    committed but not yet applied (the shell's pending inputs): an answer among them still
+    moves the waits that name its request.
     """
+    answers = _outbox_requests(outbox)
+    table = {
+        **dict(recorded_waits(core)),
+        **dict(_blocked_waits(core)),
+        **dict(_ledger_waits(core)),
+    }
     return tuple(
         OpenWait(
             waiter=subject.kind,
             subject=subject.identity,
-            producer=_reported(producers(core, subject, outbox)),
+            producer=_reported(
+                _live_wait(
+                    core,
+                    table.get(subject),
+                    frozenset() if subject.kind in _MOVED_ONLY_BY_OPEN_REQUESTS else answers,
+                )
+            ),
         )
         for subject in subjects(core)
     )
@@ -935,7 +897,6 @@ __all__ = [
     "lapsed_session_waits",
     "orphan_waits",
     "phase_waits",
-    "producers",
     "recorded_waits",
     "stalled_acquisitions",
     "stalled_blocked_records",

@@ -71,7 +71,6 @@ from vs_core.api import (
     orphan_waits,
     owned_job_subject,
     phase_waits,
-    producers,
     step,
     subjects,
     waits,
@@ -736,15 +735,14 @@ def _records_about_the_turn(draw: st.DrawFn) -> tuple[RequestRecord, ...]:
 
 @settings(max_examples=examples(pr=20, nightly=500), deadline=None)
 @given(records=_records_about_the_turn(), answered=st.sets(st.integers(0, 3)))
-def test_every_wait_reports_the_one_derivation_and_the_step_ends_exactly_the_orphans(
+def test_every_wait_reads_the_recorded_waits_and_the_step_ends_exactly_the_orphans(
     records: tuple[RequestRecord, ...], answered: set[int]
 ) -> None:
-    """``waits`` and the step's resolvers read one derivation, ``producers``.
+    """``waits`` and the step's resolvers read the same recorded waits.
 
-    Each wait has a producer exactly when ``producers`` names one, with or without committed
-    answers in the outbox. The acquiring turn waits on its session, which waits on the
-    requests it named: the turn's wait is an orphan exactly when none of them is open, and the
-    step ends the turn exactly then.
+    Each subject is reported once, with or without committed answers in the outbox. The
+    acquiring turn waits on its session, which waits on the requests it named: the turn's wait
+    is an orphan exactly when none of them is open, and the step ends the turn exactly then.
     """
     state = _acquiring_with(records)
     outbox = tuple(
@@ -766,10 +764,6 @@ def test_every_wait_reports_the_one_derivation_and_the_step_ends_exactly_the_orp
         assert [(w.waiter, w.subject) for w in found] == [
             (subject.kind, subject.identity) for subject in subjects(state)
         ]
-        for wait in found:
-            named = producers(state, WaitSubject(kind=wait.waiter, identity=wait.subject), pending)
-            assert (wait.producer is None) == (not named)
-            assert wait.producer is None or wait.producer in named
 
     orphaned = WaitKind.TURN_ACQUISITION in {w.waiter for w in orphan_waits(state)}
     assert orphaned == (not any(phase_waits(row.phase) for row in records))
