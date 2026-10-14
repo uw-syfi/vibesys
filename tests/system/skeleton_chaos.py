@@ -52,7 +52,7 @@ from vs_agent.api.testing import (
     FaultyAgentClient,
 )
 from vs_core.api import RunStatus as CoreStatus
-from vs_core.api import StopMode
+from vs_core.api import StopMode, waits
 from vs_core.api.testing import Budget, End, Journal, liveness, sample_limits
 from vs_faults.api import AgentFault, Boundary, ClusterFault, ClusterOperation, FaultPlan
 from vs_prompts.api import TemplateRenderer
@@ -452,17 +452,32 @@ class ChaosRun:
         return "\n".join(lines)
 
 
-class _TickingClock(ProbedRunClock):
-    """The run clock; each wait of the loop is a tick."""
+class PastBudgetError(Exception):
+    """The run's virtual time passed its budget: it is stuck, so the harness stops it."""
 
-    def __init__(self, inner: VirtualClock, ticks: Ticks) -> None:
+    def __init__(self, now: float, budget_s: float) -> None:
+        super().__init__(f"virtual time {now:.1f} s passed the {budget_s:.0f} s budget")
+        self.now = now
+
+
+class _TickingClock(ProbedRunClock):
+    """The run clock; each wait of the loop is a tick, and no wait may pass the budget.
+
+    A stuck run that keeps waiting would otherwise advance virtual time forever, costing real
+    time until the test's own timeout. Ending it at the budget makes a hang fail in seconds.
+    """
+
+    def __init__(self, inner: VirtualClock, ticks: Ticks, budget_s: float) -> None:
         super().__init__(inner)
         self._ticks = ticks
+        self._budget_s = budget_s
 
     async def sleep(self, seconds: float) -> None:
-        """Wait, then count the wait."""
+        """Wait, then count the wait; raise ``PastBudgetError`` once the wait passes the budget."""
         await super().sleep(seconds)
         self._ticks.tick()
+        if self.now() > self._budget_s:
+            raise PastBudgetError(self.now(), self._budget_s)
 
 
 class _NoSteers:
@@ -480,15 +495,21 @@ def shape_for(seed: int) -> SkeletonConfig:
     return SkeletonConfig(turns=rng.randint(1, 3))
 
 
-async def run_chaos(
+async def run_chaos(  # noqa: PLR0913  # LW-150102 [PLR0913]; the options are independent and keyword-only with defaults.
+    # > Bundling stop_at, config and budget_s into an options object would make every one of
+    # > the nine callers build it to set a single option, without adding meaning.
     base: Path,
     seed: int,
     plan: FaultPlan | None = None,
     *,
     stop_at: int | None | str = "seeded",
     config: SkeletonConfig | None = None,
+    budget_s: float = BUDGET_S,
 ) -> ChaosRun:
-    """Run the skeleton once under ``seed``'s faults and stop, and check every invariant."""
+    """Run the skeleton once under ``seed``'s faults and stop, and check every invariant.
+
+    A run whose virtual time passes ``budget_s`` is stopped there and reported as a hang.
+    """
     plan = plan if plan is not None else plan_for(seed)
     rng = plan.rng("options")
     if stop_at == "seeded":
@@ -498,9 +519,10 @@ async def run_chaos(
     ticks = Ticks(stop_at, channel)
     cluster = FaultyCluster(plan, ticks)
     strategy = SkeletonStrategy(config=config or shape_for(seed))
-    clock = _TickingClock(clock_from(1.0), ticks)
+    clock = _TickingClock(clock_from(1.0), ticks, budget_s)
     outcome: RunOutcome | None = None
     error: BaseException | None = None
+    hung: PastBudgetError | None = None
     violations: list[tuple[str, str]] = []
     with open_skeleton_world(base, strategy, cluster, agents=_faulted_agents(plan)) as world:
         turns = strategy.config.turns + strategy.config.peers
@@ -519,6 +541,8 @@ async def run_chaos(
         )
         try:
             outcome = await drive_core(host, loop)
+        except PastBudgetError as stuck:
+            hung = stuck
         except Exception as raised:  # noqa: BLE001  # lint-waiver: LW-150100 [BLE001]; whatever the run raises is its ending, judged by the oracle.
             error = raised
         core = process.shell.record.envelope.core
@@ -532,8 +556,30 @@ async def run_chaos(
         stop_delivered=ticks.stop_delivered,
     )
     injected = [str(item) for item in faulty.injected] + [str(item) for item in cluster.injected]
-    if clock.now() > BUDGET_S:
-        violations.append((ChaosInvariant.HANG, f"run took {clock.now()} s > {BUDGET_S} s"))
+    if hung is not None:
+        # The run never ended, so there is no ending to judge: report what it waits on.
+        open_waits = ", ".join(f"{wait.waiter}:{wait.subject}" for wait in waits(core))
+        ended = repr(hung)
+        violations.append((ChaosInvariant.HANG, f"{hung}; still waiting on: {open_waits}"))
+    else:
+        if clock.now() > budget_s:
+            violations.append((ChaosInvariant.HANG, f"run took {clock.now()} s > {budget_s} s"))
+        ended, judged = _judge_ending(outcome, error, suffered, core, cluster)
+        violations += judged
+    chaos = ChaosRun(seed, plan, ended, violations, injected, suffered, stop_at)
+    _log(chaos)
+    return chaos
+
+
+def _judge_ending(
+    outcome: RunOutcome | None,
+    error: BaseException | None,
+    suffered: Injected,
+    core: CoreState,
+    cluster: FaultyCluster,
+) -> tuple[str, list[tuple[str, str]]]:
+    """How a run that ended ended, and the violations its ending and record show."""
+    violations: list[tuple[str, str]] = []
     end_error, status = ending_of(outcome, error)
     reason = outcome.result.reason if outcome is not None and outcome.result is not None else ""
     ended = repr(end_error) if end_error is not None else f"{status} ({reason})"
@@ -541,9 +587,7 @@ async def run_chaos(
     if (why := unexplained_end(end_error, status, suffered, at_deadline=at_deadline)) is not None:
         violations.append((ChaosInvariant.UNEXPLAINED_END, f"{why}: {ended}"))
     violations += _record_violations(core, cluster, end_error, status)
-    chaos = ChaosRun(seed, plan, ended, violations, injected, suffered, stop_at)
-    _log(chaos)
-    return chaos
+    return ended, violations
 
 
 def _log(chaos: ChaosRun) -> None:

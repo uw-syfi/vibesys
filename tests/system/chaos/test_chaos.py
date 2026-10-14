@@ -288,3 +288,48 @@ def test_the_oracle_verdict_depends_on_the_faults_a_seed_declares_not_on_which_c
 
     assert (verdict is None) == bool(declared)
     assert unexplained_end(cleanup, None, Injected(agent=frozenset(AgentFault))) is not None
+
+
+async def test_a_run_past_its_virtual_budget_is_stopped_and_reported_as_a_hang(
+    tmp_path: Path,
+) -> None:
+    """A stuck run that keeps waiting is ended at the budget, so a hang fails in seconds.
+
+    A budget shorter than any run stands in for a run that never ends.
+    """
+    chaos = await run_chaos(
+        tmp_path, 1, FaultPlan(seed=1), stop_at=None, config=SkeletonConfig(), budget_s=2.0
+    )
+
+    assert [kind for kind, _ in chaos.violations] == [ChaosInvariant.HANG], chaos.report()
+    assert "still waiting on" in chaos.violations[0][1]
+
+
+@pytest.mark.slow  # about 20 s each: the run waits the lost job out to its deadline
+@pytest.mark.parametrize("scancel", [3, 4])
+@pytest.mark.parametrize("fault", [ClusterFault.SSH_DOWN, ClusterFault.COMMAND_ERROR])
+async def test_a_measurement_whose_submit_and_cancel_both_fail_still_ends_the_run(
+    tmp_path: Path, fault: ClusterFault, scancel: int
+) -> None:
+    """Seeds 268 and 479: the candidate's sbatch fails, then its close-time scancel fails too.
+
+    Fixed in vs-core by #2344 and in the Slurm executor by #2328; vs-core's own tests pin
+    each layer fast, and this is the end-to-end check.
+    """
+    rules = (
+        FaultRule(
+            boundary=Boundary.CLUSTER, target=ClusterOperation.SBATCH.value, at=2, fault=fault
+        ),
+        FaultRule(
+            boundary=Boundary.CLUSTER,
+            target=ClusterOperation.SCANCEL.value,
+            at=scancel,
+            fault=fault,
+        ),
+    )
+
+    chaos = await run_chaos(
+        tmp_path, 1, FaultPlan(seed=1, rules=rules), stop_at=None, config=SkeletonConfig()
+    )
+
+    assert chaos.violations == [], chaos.report()
