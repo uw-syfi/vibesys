@@ -39,6 +39,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import ComputeBackend, DockerSandbox, LocalBackend
 from vs_sandbox.api.slurm import load_slurm_operator_settings
+from vs_sim.api import MonotonicClock
 
 if TYPE_CHECKING:
     import threading
@@ -311,6 +312,7 @@ def make_request(
         benchmark_command="python3 benchmark.py",
         benchmark_output_argument=BENCHMARK_OUTPUT_ARGUMENT,
         evaluator_requirements=TrustedEvaluatorRequirements(),
+        clock=MonotonicClock(),
     )
 
 

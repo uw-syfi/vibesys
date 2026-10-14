@@ -225,6 +225,7 @@ def _env(
                 framework_root=tmp_path,
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
+                clock=ManualClock(),
             ),
             lambda _request: _Session(),
             clock=ManualClock(),

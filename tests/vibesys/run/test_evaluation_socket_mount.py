@@ -23,6 +23,7 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDockerBuildRunner
 from vs_runtime.api.core import RunTiming
+from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
@@ -76,6 +77,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             ),
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+            stop_timer=FakeStopTimer(),
         ) as host:
             for _ in range(candidates):
                 await host.workspaces.create_candidate()

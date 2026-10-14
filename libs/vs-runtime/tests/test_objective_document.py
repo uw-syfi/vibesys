@@ -14,6 +14,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api.testing import ManualClock
 
 
 def test_materializes_exact_objective_at_the_selected_destination(tmp_path: Path) -> None:
@@ -115,6 +116,7 @@ def test_candidate_objective_verification_uses_run_root_and_requires_exact_text(
             framework_root=root,
             objective=objective,
             objective_document=document,
+            clock=ManualClock(),
         )
         presentation = RunEnvironmentPresentation(prompt_notes="")
         with unconfined_host_environment().prepare(request).open(presentation) as session:

@@ -260,6 +260,7 @@ def _measure_with_lost_command(
                 framework_root=tmp_path,
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
+                clock=ManualClock(),
             ),
             lambda _request: _Session(sandbox),
             clock=ManualClock(),
@@ -289,7 +290,9 @@ def _measure_with_lost_command(
             )
 
             async def exercise() -> ExecutorObservation:
-                executor = PollingEvaluationExecutor(evaluation, runtime.workspaces)
+                executor = PollingEvaluationExecutor(
+                    evaluation, runtime.workspaces, clock=ManualClock()
+                )
                 try:
                     snapshot = await runtime.workspaces.root.snapshot("candidate")
                     await executor.submit(_measurement(snapshot, kind), handle_id=_HANDLE)

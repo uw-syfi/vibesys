@@ -196,6 +196,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                     if owns_candidate_worktrees
                     else ()
                 ),
+                clock=ManualClock(),
             ),
             open_session if open_session is not None else lambda _request: _Session(),
             clock=ManualClock(),

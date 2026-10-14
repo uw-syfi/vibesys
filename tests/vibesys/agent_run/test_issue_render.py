@@ -5,6 +5,7 @@ from typing import Required, TypedDict, Unpack
 
 from vibesys.issue_queue_board import publish_view, render_all, render_issue
 from vs_issue_tracker.api import Issue, IssueBoard, IssueEvent, IssueStatus, IssueType
+from vs_sim.api.testing import ManualClock
 
 
 class _IssueOptions(TypedDict, total=False):
@@ -123,7 +124,7 @@ def test_render_issue_preserves_markdown_and_handles_missing_payload() -> None:
 
 
 def test_render_all_projects_board_in_status_order_and_is_idempotent(tmp_path: Path) -> None:
-    board = IssueBoard(tmp_path / "issues.json")
+    board = IssueBoard(tmp_path / "issues.json", clock=ManualClock())
     opened = board.create(
         type=IssueType.FEATURE,
         title="Build server",
@@ -183,7 +184,7 @@ class _MemoryDocuments:
 
 
 def test_publish_view_removes_stale_issue_files_and_keeps_others(tmp_path: Path) -> None:
-    board = IssueBoard(tmp_path / "issues.json")
+    board = IssueBoard(tmp_path / "issues.json", clock=ManualClock())
     board.create(
         type=IssueType.BUG,
         title="Current issue",
@@ -206,6 +207,6 @@ def test_publish_view_removes_stale_issue_files_and_keeps_others(tmp_path: Path)
 
 
 def test_render_all_writes_empty_index(tmp_path: Path) -> None:
-    board = IssueBoard(tmp_path / "issues.json")
+    board = IssueBoard(tmp_path / "issues.json", clock=ManualClock())
 
     assert "no issues yet" in render_all(board)["INDEX.md"]

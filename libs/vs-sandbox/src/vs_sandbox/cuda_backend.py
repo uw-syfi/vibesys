@@ -158,6 +158,7 @@ class CudaBackend:
             gpu_uuid=self.selected_device.uuid,
             telemetry=self._telemetry,
             threads=self._threads,
+            clock=self._clock,
         )
         return self._monitor
 
@@ -211,6 +212,7 @@ class CudaBackend:
             gpu_uuid=new_gpu.uuid,
             telemetry=self._telemetry,
             threads=self._threads,
+            clock=self._clock,
         )
         self._monitor.start()
 

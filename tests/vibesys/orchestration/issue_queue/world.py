@@ -69,6 +69,7 @@ from vs_dst.api import RunSetup
 from vs_issue_tracker.api import FakeIssueTracker, LogProgress, MemoryProgressLog
 from vs_runtime.api.core import IssueBoardOwner, handle_for
 from vs_runtime.api.testing import Launch
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -212,7 +213,8 @@ class IssueQueueWorld:
             schemas=issue_queue.reply_schemas,
         )
         self.tracker = FakeIssueTracker(
-            faults=None if tracker_faults is None else ScheduledFaults(dict(tracker_faults))
+            faults=None if tracker_faults is None else ScheduledFaults(dict(tracker_faults)),
+            clock=ManualClock(),
         )
         self.progress = MemoryProgressLog()
         self.requests: list[Request] = []

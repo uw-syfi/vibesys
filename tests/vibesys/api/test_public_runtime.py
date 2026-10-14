@@ -23,6 +23,7 @@ from vibesys.run.core_services import CoreCompositionError
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.core import RunTiming
+from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import SystemClock
 from vs_sim.api.testing import ManualClock
@@ -129,6 +130,7 @@ def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) ->
                 options=EmptyOptions(),
                 timing=RunTiming(SystemClock(), 60.0),
                 backend_factory=backend_factory,
+                stop_timer=FakeStopTimer(),
             ):
                 pytest.fail("failed product assembly yielded a run")
 

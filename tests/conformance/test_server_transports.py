@@ -22,6 +22,7 @@ from websockets.sync.client import ClientConnection, connect
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import WebSocketGateway, WebSocketLimits
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable, Mapping
@@ -120,7 +121,9 @@ def _running_connection(
                 connection.close()
         return
     assert transport == "websocket", f"unknown transport: {transport}"
-    with WebSocketGateway(parts.api, limits=limits or WebSocketLimits()) as gateway:
+    with WebSocketGateway(
+        parts.api, limits=limits or WebSocketLimits(), clock=ManualClock()
+    ) as gateway:
         connection = _WebSocketConnection(gateway)
         try:
             yield connection
@@ -361,7 +364,7 @@ def test_dual_transport_subscriptions_have_independent_floors_and_teardown(
     try:
         with (
             UnixJsonlServer(socket_path, parts.api, tracker),
-            WebSocketGateway(parts.api, subscriptions=tracker) as gateway,
+            WebSocketGateway(parts.api, subscriptions=tracker, clock=ManualClock()) as gateway,
         ):
             connections: dict[str, ScenarioConnection] = {
                 "terminal": _UnixConnection(socket_path),

@@ -133,6 +133,7 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
             run_id="workspace-resource-test",
             framework_root=tmp_path,
             project_path_policy=ProjectPathPolicy(),
+            clock=ManualClock(),
         ),
         open_session,
         clock=ManualClock(),
@@ -184,6 +185,7 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
             cli_provider="codex",
             run_id="workspace-resource-test",
             framework_root=tmp_path,
+            clock=ManualClock(),
         ),
         lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
         clock=ManualClock(),
@@ -242,6 +244,7 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             objective=agent_objective,
             objective_document=authored,
             git_history_root=project.git.history_root,
+            clock=ManualClock(),
         )
         objective_paths: list[str] = []
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 from server.chat.manager import (
@@ -24,7 +23,7 @@ from server.chat.transcript import FileChatTranscriptStore
 from server.events import ChatThreadCreatedData, ChatThreadId
 from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.api import AuxiliaryAgentLaunch
-from vs_sim.api import OsThreads, SystemClock
+from vs_sim.api import OsThreads, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -102,11 +101,11 @@ class ExperimentChatFactory:
         build_agent: ChatAgentBuilder,
         fallback: Callable[[str], str],
         threads: Threads | None = None,
-        clock: Clock | None = None,
+        clock: Clock,
     ) -> None:
         """Configure session construction and resource ownership for one run."""
         self._threads = threads or OsThreads()
-        self._clock = clock or SystemClock()
+        self._clock = clock
         self._manager = manager
         self._controller = controller
         self._executions = executions
@@ -195,7 +194,7 @@ class ExperimentChatFactory:
                 thread_id=thread_id,
                 provider=selection.provider,
                 model=selection.model,
-                created_at=datetime.fromtimestamp(self._clock.now(), UTC),
+                created_at=utc_datetime(self._clock),
             ),
             handler=session.ask,
             close=session.close,

@@ -18,8 +18,6 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from vs_sim.api import SystemClock
-
 if TYPE_CHECKING:
     import builtins
     from collections.abc import Callable
@@ -224,11 +222,11 @@ class _MemoryBoard:
         self,
         *,
         on_change: Callable[[], None] | None = None,
-        clock: Clock | None = None,
+        clock: Clock,
     ) -> None:
         self._lock = RLock()
         self._on_change = on_change
-        self._clock = clock or SystemClock()
+        self._clock = clock
         self._data = _IssueBoardData(version=_STORE_VERSION, next_id=1, issues=[])
 
     def _refresh_locked(self) -> None:
@@ -486,7 +484,7 @@ class IssueBoard(_MemoryBoard):
         path: Path,
         *,
         on_change: Callable[[], None] | None = None,
-        clock: Clock | None = None,
+        clock: Clock,
     ) -> None:
         """Open the JSON issue board; ``clock`` (epoch seconds) stamps every event."""
         super().__init__(clock=clock)

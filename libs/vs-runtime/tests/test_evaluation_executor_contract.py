@@ -42,7 +42,7 @@ from vs_runtime.api import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
-from vs_sim.api.testing import yield_until
+from vs_sim.api.testing import ManualClock, yield_until
 from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
@@ -105,7 +105,12 @@ async def _local(root: Path, script: _Script) -> _World:
     async def visible(_handle_id: str) -> None:
         return None
 
-    return _World(PollingEvaluationExecutor(evaluation, workspaces), snapshot, running, visible)
+    return _World(
+        PollingEvaluationExecutor(evaluation, workspaces, clock=ManualClock()),
+        snapshot,
+        running,
+        visible,
+    )
 
 
 async def _slurm(root: Path, script: _Script) -> _World:

@@ -23,10 +23,11 @@ from vs_issue_tracker.policy import (
     create_issue_under_policy,
     parse_type,
 )
+from vs_sim.api.testing import ManualClock
 
 
 def _make_store(tmp_path: Path) -> IssueBoard:
-    return IssueBoard(tmp_path / "issues.json")
+    return IssueBoard(tmp_path / "issues.json", clock=ManualClock())
 
 
 def _all_types() -> frozenset[IssueType]:

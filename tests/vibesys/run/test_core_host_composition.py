@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -47,6 +46,7 @@ from vs_runtime.api import (
     RunStatus,
 )
 from vs_runtime.api.core import RunTiming
+from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
@@ -158,6 +158,7 @@ def _open(
                 invocation_store_factory=(
                     (lambda _state, _key: FakeAgentInvocationStore()) if journal else None
                 ),
+                stop_timer=FakeStopTimer(),
             ) as host:
                 return host.services
         finally:
@@ -187,6 +188,7 @@ def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
                 profiler_preflight=lambda kind: ProfilerPreflightResult(kind=kind, usable=True),
+                stop_timer=FakeStopTimer(),
             ):
                 return "\n".join(repr(event) for event in integration.events.read())
         finally:
@@ -395,7 +397,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
             EmptyOptions(),
             agent_client_factory=_resumable_client,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
-            stop_timer=asyncio.sleep,
+            stop_timer=clock.sleep,
             timing=RunTiming(clock, 60.0),
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
         )

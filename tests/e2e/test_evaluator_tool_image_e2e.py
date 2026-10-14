@@ -32,6 +32,7 @@ from vs_runtime.api.infrastructure import (
     load_evaluator_package,
 )
 from vs_sandbox.api.evaluator_tools import evaluator_tools_install_command, tool_install_root
+from vs_sim.api import MonotonicClock
 
 pytestmark = pytest.mark.e2e
 
@@ -65,6 +66,7 @@ def test_every_bundled_evaluator_tool_installs_in_the_agent_image(base: str, roo
         base,
         features=image_features(evaluator_agent_toolchains(requirements)),
         timeout=_BUILD_TIMEOUT_S,
+        clock=MonotonicClock(),
     )
     script = "set -eux\n" + "\n".join(
         (

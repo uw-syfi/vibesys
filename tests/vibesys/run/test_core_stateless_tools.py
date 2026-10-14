@@ -30,6 +30,7 @@ from vs_agent.api.testing import FakeAgentInvocationStore
 from vs_mcp.api import StdioServerDescriptor
 from vs_runtime.api import AgentRole, AgentTool, OrchestrationPlugin
 from vs_runtime.api.core import RunTiming
+from vs_runtime.api.testing import FakeStopTimer
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -83,6 +84,7 @@ def _compose(
                     if declined
                     else None
                 ),
+                stop_timer=FakeStopTimer(),
             ):
                 return
         finally:

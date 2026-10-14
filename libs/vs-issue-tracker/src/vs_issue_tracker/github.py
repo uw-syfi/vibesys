@@ -26,7 +26,6 @@ from vs_issue_tracker.core import (
     timestamp_at,
 )
 from vs_issue_tracker.errors import IssueTrackerLoadError
-from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     import builtins
@@ -60,14 +59,14 @@ class GitHubIssueTracker(IssueTracker):
         repository: str,
         *,
         cli: GitHubClient | None = None,
-        clock: Clock | None = None,
+        clock: Clock,
     ) -> None:
         """Authenticate, bind to a repository, and ensure metadata labels exist.
 
         ``clock`` (epoch seconds) stamps the events this tracker writes.
         """
         self._cli = cli or GitHubCLI()
-        self._clock = clock or SystemClock()
+        self._clock = clock
         self._cli.ensure_authenticated()
         self.repository = repository
         self._ensure_metadata_labels()
@@ -451,13 +450,17 @@ def open_issue_tracker(
     local_path: Path,
     repository: str | None = None,
     on_change: Callable[[], None] | None = None,
+    clock: Clock,
 ) -> IssueTracker:
-    """Construct the selected issue tracker behind the IssueTracker contract."""
+    """Construct the selected issue tracker behind the IssueTracker contract.
+
+    ``clock`` (epoch seconds) stamps the events the tracker writes.
+    """
     if backend == "local":
-        return IssueBoard(local_path, on_change=on_change)
+        return IssueBoard(local_path, on_change=on_change, clock=clock)
     if repository is None:
         raise ValueError("repository is required for the GitHub issue backend")  # noqa: TRY003  # lint-waiver: LW-771017 [TRY003]; name the missing backend configuration field.
-    return GitHubIssueTracker(repository)
+    return GitHubIssueTracker(repository, clock=clock)
 
 
 __all__ = ["GitHubIssueTracker", "open_issue_tracker"]

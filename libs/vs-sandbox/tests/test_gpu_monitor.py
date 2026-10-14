@@ -294,7 +294,9 @@ class TestMonitorLifecycle:
         threads.run(case)
 
     def test_stop_without_start(self, tmp_path: Path) -> None:
-        mon = GpuContentionMonitor(log_dir=tmp_path, gpu_uuid=GPU_A, threads=SimThreads())
+        mon = GpuContentionMonitor(
+            log_dir=tmp_path, gpu_uuid=GPU_A, threads=SimThreads(), clock=ManualClock()
+        )
         mon.stop()  # should not raise
 
     @settings(deadline=None, max_examples=examples(pr=5, nightly=60))

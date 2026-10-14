@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from vs_runtime._operation_wiring import OperationRole
     from vs_runtime._run_environment import RunEnvironmentView
     from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
+    from vs_sim.api import Clock
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 _CONTROL_CHARACTER_LIMIT = 32
@@ -744,6 +745,7 @@ class OwnedOperationResources:
 
     ``variables`` are the plan's run-level template variables and ``templates`` is the
     directory of the policy's templates, the same two inputs the render operation reads.
+    ``clock`` is the run's clock, for owners that stamp what they record.
     """
 
     run_id: str
@@ -751,6 +753,7 @@ class OwnedOperationResources:
     options: BaseModel
     variables: Mapping[str, object]
     templates: Path
+    clock: Clock
 
 
 @dataclass(frozen=True, slots=True)

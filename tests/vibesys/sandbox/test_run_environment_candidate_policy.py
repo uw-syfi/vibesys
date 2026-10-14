@@ -12,6 +12,7 @@ from vs_project.api import Project
 from vs_runtime.api.infrastructure import RunEnvironmentRequest
 from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,6 +42,7 @@ def test_run_environment_prepares_hidden_state_before_opening(
         run_id="run",
         framework_root=tmp_path,
         project_path_policy=policy,
+        clock=ManualClock(),
     )
 
     with open_run_environment(unconfined_host_environment(), request):

@@ -61,6 +61,7 @@ from vs_runtime.api.core import (
     build_operation_catalog,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
+from vs_sim.api.testing import ManualClock
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 
@@ -274,7 +275,7 @@ def scenarios(root: Path, namespace: StateNamespace) -> tuple[OperationScenario,
     workspace = FakeWorkspace(path=root / "workspace", known_revisions={"abc"})
     workspaces = FakeWorkspaces(workspace)
     artifacts = root_artifacts(namespace)
-    board = FakeIssueTracker()
+    board = FakeIssueTracker(clock=ManualClock())
     echo_entry = OperationEntry.owned(
         _registration(
             "test.echo", EchoRequest, EchoOutcome, LifecycleClass.IDEMPOTENT_WRITE, cancel=True

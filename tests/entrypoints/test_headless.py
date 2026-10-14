@@ -542,7 +542,8 @@ def test_task_dockerfile_builds_once_for_a_launch(tmp_path: Path) -> None:
 
     assert spec.name == "docker"
     assert spec.options["image"] == image_id
-    build.assert_called_once_with(dockerfile.resolve())
+    build.assert_called_once()
+    assert build.call_args.args == (dockerfile.resolve(),)
 
 
 @pytest.mark.parametrize(
@@ -580,7 +581,8 @@ def test_each_outer_loop_builds_the_task_image_once(
     ):
         request = cli.build_run_request(invocation)
 
-    build.assert_called_once_with(dockerfile.resolve())
+    build.assert_called_once()
+    assert build.call_args.args == (dockerfile.resolve(),)
     assert request.run_environment is not None
     assert request.run_environment.options["image"] == image_id
 
@@ -1120,7 +1122,8 @@ def test_repository_resume_rebuilds_a_recorded_task_docker_environment(
 
     assert spec.name == "docker"
     assert spec.options["image"] == rebuilt_image
-    build.assert_called_once_with(dockerfile.resolve())
+    build.assert_called_once()
+    assert build.call_args.args == (dockerfile.resolve(),)
 
 
 def test_repository_resume_rejects_a_different_task(tmp_path: Path) -> None:

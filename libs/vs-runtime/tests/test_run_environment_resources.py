@@ -84,6 +84,7 @@ def _request(tmp_path: Path, backend: _Backend) -> RunEnvironmentRequest:
         run_id="run-1",
         framework_root=tmp_path,
         project_path_policy=ProjectPathPolicy(),
+        clock=ManualClock(),
     )
 
 

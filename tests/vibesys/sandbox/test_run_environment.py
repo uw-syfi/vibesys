@@ -71,6 +71,7 @@ from vs_sandbox.api.slurm import (
     read_slurm_capture_plan,
     run_brokered_process,
 )
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -235,6 +236,7 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: object) -> RunEn
         "cli_provider": None,
         "run_id": "run-123",
         "framework_root": tmp_path / "framework",
+        "clock": ManualClock(),
     }
     package_root = overrides.pop("evaluator_package_root", None)
     tools_root = overrides.pop("evaluator_tools_root", None)
@@ -1899,6 +1901,7 @@ def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path: Path) ->
         cli_provider="codex",
         run_id="20260429-100000-runa",
         framework_root=tmp_path / "framework",
+        clock=ManualClock(),
     )
     req_b = RunEnvironmentRequest(
         log_dir=log_b,
@@ -1909,6 +1912,7 @@ def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path: Path) ->
         cli_provider="codex",
         run_id="20260429-100100-runb",
         framework_root=tmp_path / "framework",
+        clock=ManualClock(),
     )
     _open(env, req_a)
     _open(env, req_b)

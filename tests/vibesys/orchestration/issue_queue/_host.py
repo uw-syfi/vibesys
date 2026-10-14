@@ -63,6 +63,7 @@ from vs_issue_tracker.api import (
     MemoryProgressLog,
 )
 from vs_runtime.api.core import IssueBoardOwner
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -185,7 +186,7 @@ class Host:
     dropped_writes: frozenset[int] = frozenset()
     accurate: bool = True
     suspending: bool = False
-    tracker: FakeIssueTracker = field(default_factory=FakeIssueTracker)
+    tracker: FakeIssueTracker = field(default_factory=lambda: FakeIssueTracker(clock=ManualClock()))
     opened: list[AttemptRef] = field(default_factory=list)
     """Every attempt the host admitted, in order."""
     settled: dict[str, Settle] = field(default_factory=dict)

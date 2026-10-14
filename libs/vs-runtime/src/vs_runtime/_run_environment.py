@@ -367,6 +367,8 @@ class RunEnvironmentRequest:
     cli_provider: str | None
     run_id: str
     framework_root: Path
+    clock: Clock
+    """Measures the agent image build budget."""
     objective: str | None = None
     # Authored run state belongs to git_history_root, including when workspace
     # is a candidate revision that predates the objective's committed document.
@@ -935,6 +937,7 @@ class DockerEnvironment:
                 else self.config.image_build_timeout_seconds
             ),
             on_progress=_image_build_progress(request),
+            clock=request.clock,
         )
         workspace_root = _workspace_root(request, same_path=extras.same_path_workspace)
         resources, docker_symlinks = _container_mount_plan(
@@ -1205,6 +1208,7 @@ class SkyPilotEnvironment(DockerEnvironment):
                 _docker_backend_image(request),
                 features=image_features(evaluator_agent_toolchains(requirements)),
                 on_progress=_image_build_progress(request),
+                clock=request.clock,
             )
             container_image = _ensure_pushed_for_remote_backend(
                 container_image,
@@ -1383,6 +1387,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                 evaluator_agent_toolchains(requirements), _MODAL_EDITOR_PIP_EXTRAS
             ),
             on_progress=_image_build_progress(request),
+            clock=request.clock,
         )
         container_image = _ensure_pushed_for_remote_backend(
             container_image,

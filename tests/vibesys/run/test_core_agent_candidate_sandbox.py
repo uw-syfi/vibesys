@@ -33,6 +33,7 @@ from vs_agent.api.testing import (
 )
 from vs_runtime.api import AgentWorkspaceRouteError
 from vs_runtime.api.core import RunTiming
+from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
@@ -85,6 +86,7 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+            stop_timer=FakeStopTimer(),
         ) as host:
             lookup = cast(
                 "Callable[[Path], DockerSandbox | None]", given_to_client["workspace_sandboxes"]
@@ -188,6 +190,7 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+            stop_timer=FakeStopTimer(),
         ) as host:
             turns.root_containers = {c.container_id for c in engine.containers()}
             paths = [

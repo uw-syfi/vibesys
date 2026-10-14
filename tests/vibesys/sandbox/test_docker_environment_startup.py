@@ -18,6 +18,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
 )
 from vs_runtime.api.testing import DaemonBackend, daemon_engine
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -48,6 +49,7 @@ def _open(
         framework_root=tmp_path / "framework",
         evaluator_requirements=TrustedEvaluatorRequirements(),
         startup=observed.append,
+        clock=ManualClock(),
     )
     environment = DockerEnvironment(DockerEnvironmentConfig(docker=engine, build_runner=runner))
     open_run_environment(environment, request).close()

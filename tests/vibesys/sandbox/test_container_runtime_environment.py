@@ -34,6 +34,7 @@ from vs_sandbox.api import (
     SandboxKind,
 )
 from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -138,6 +139,7 @@ def _request(
         benchmark_command=benchmark_command,
         evaluator_requirements=TrustedEvaluatorRequirements(),
         docker_in_docker=docker_in_docker,
+        clock=ManualClock(),
     )
 
 

@@ -36,7 +36,7 @@ from vs_runtime.api.core import (
     NotApplied,
 )
 from vs_runtime.api.executor_contexts import RevocableLease
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -193,10 +193,10 @@ def settle(owner: IssueBoardOwner, request: ApplyIssueChanges) -> AppliedChanges
 def test_any_fault_schedule_and_replay_lands_exactly_the_clean_board(
     plans: list[list[Step]], schedule: set[int], when: str
 ) -> None:
-    clean = FakeIssueTracker()
+    clean = FakeIssueTracker(clock=ManualClock())
     clean_owner = owner_over(clean)
     faulty_calls = iter(range(10_000))
-    faulty = FakeIssueTracker()
+    faulty = FakeIssueTracker(clock=ManualClock())
 
     def fail_on_schedule(operation: str, phase: str) -> None:
         if operation in {"list", "get"}:
@@ -218,7 +218,7 @@ def test_any_fault_schedule_and_replay_lands_exactly_the_clean_board(
 
 
 def test_inspect_says_applied_only_when_every_change_landed() -> None:
-    tracker = FakeIssueTracker()
+    tracker = FakeIssueTracker(clock=ManualClock())
     owner = owner_over(tracker)
     batch = batch_of(
         [Step("create", 0, IssueStatus.OPEN), Step("create", 0, IssueStatus.OPEN)], "x", 0
@@ -239,7 +239,7 @@ def test_inspect_says_applied_only_when_every_change_landed() -> None:
 
 
 def test_a_change_on_a_missing_issue_is_rejected_by_name_without_raising() -> None:
-    owner = owner_over(FakeIssueTracker())
+    owner = owner_over(FakeIssueTracker(clock=ManualClock()))
     batch = ApplyIssueChanges(
         changes=(
             SetIssueStatus(
@@ -254,7 +254,7 @@ def test_a_change_on_a_missing_issue_is_rejected_by_name_without_raising() -> No
 
 
 def test_a_template_body_is_rendered_by_the_strategys_texts() -> None:
-    tracker = FakeIssueTracker()
+    tracker = FakeIssueTracker(clock=ManualClock())
     batch = ApplyIssueChanges(
         changes=(
             CreateIssue(
@@ -272,7 +272,7 @@ def test_a_template_body_is_rendered_by_the_strategys_texts() -> None:
 
 
 def test_read_board_omits_the_text_of_closed_issues_only() -> None:
-    tracker = FakeIssueTracker()
+    tracker = FakeIssueTracker(clock=ManualClock())
     for number in (1, 2):
         tracker.create(
             type=IssueType.BUG,
@@ -289,7 +289,7 @@ def test_read_board_omits_the_text_of_closed_issues_only() -> None:
 
 def test_progress_is_logged_once_per_key() -> None:
     progress = MemoryProgressLog()
-    owner = owner_over(FakeIssueTracker(), progress)
+    owner = owner_over(FakeIssueTracker(clock=ManualClock()), progress)
     entry = LogProgress(
         key="p1", iteration=1, step="implement", issue_id=1, payload_json='{"summary": "s"}'
     )
@@ -301,7 +301,7 @@ def test_progress_is_logged_once_per_key() -> None:
 
 
 def test_every_board_read_is_published_for_a_human_readable_mirror() -> None:
-    tracker = FakeIssueTracker()
+    tracker = FakeIssueTracker(clock=ManualClock())
     tracker.create(type=IssueType.BUG, title="t", description="d", created_by="loop", iteration=1)
     seen: list[int] = []
     owner = IssueBoardOwner(

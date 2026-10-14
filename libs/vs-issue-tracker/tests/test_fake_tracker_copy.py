@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 
 from vs_issue_tracker.api import FakeIssueTracker, IssueType
+from vs_sim.api.testing import ManualClock
 
 
 def _file(tracker: FakeIssueTracker, title: str) -> int:
@@ -14,7 +15,7 @@ def _file(tracker: FakeIssueTracker, title: str) -> int:
 
 
 def test_a_copy_holds_the_same_issues_and_then_diverges_from_the_original() -> None:
-    tracker = FakeIssueTracker()
+    tracker = FakeIssueTracker(clock=ManualClock())
     first = _file(tracker, "first")
 
     clone = copy.deepcopy(tracker)

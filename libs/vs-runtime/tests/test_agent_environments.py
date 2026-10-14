@@ -23,6 +23,7 @@ from vs_sandbox.api import (
     ProjectPathPolicy,
 )
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from vs_sandbox.api import CommandRunner
@@ -69,6 +70,7 @@ def _request(tmp_path: Path) -> RunEnvironmentRequest:
         framework_root=tmp_path,
         environment_bind_mounts=(EnvironmentBindMount(tmp_path / "base", "/base", read_only=True),),
         project_path_policy=ProjectPathPolicy(),
+        clock=ManualClock(),
     )
 
 

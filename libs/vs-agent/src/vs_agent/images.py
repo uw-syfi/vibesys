@@ -34,7 +34,6 @@ from vs_agent.agent_feature import AGENT_USER, AGENT_WORKDIR, agent_feature
 from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
 from vs_sim.api import (
     Clock,
-    MonotonicClock,
     OsThreads,
     PipedProcess,
     PipedProcessLauncher,
@@ -794,13 +793,17 @@ class SubprocessDockerBuildRunner:
         return _Settlement(workers_stopped, tuple(errors))
 
 
-def build_task_image(
+# lint-waiver: LW-731409 [PLR0913]; the Dockerfile, base, runner, budget, progress sink and the
+# > clock that measures the budget each change one build independently; a settings object would
+# > only rename the keywords agent_image already passes the same way.
+def build_task_image(  # noqa: PLR0913
     dockerfile_path: Path,
     *,
     base_image: str | None = None,
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     on_progress: BuildProgressSink | None = None,
+    clock: Clock,
 ) -> str:
     """Build a task Dockerfile and return its immutable Docker image ID.
 
@@ -829,13 +832,14 @@ def build_task_image(
     ``timeout`` is the budget for the whole build, not for one Docker command.
     When it runs out, the running Docker process group is killed and
     :class:`ImageBuildTimeoutError` carries the step and output tail.
+    ``clock`` measures the budget.
     """
     dockerfile = _validated_task_dockerfile(dockerfile_path, timeout)
     runner = command_runner or SubprocessDockerBuildRunner()
     return _build_task_image(
         dockerfile,
         base_image=base_image,
-        build=_BuildRun(runner=runner, timeout=timeout, on_progress=on_progress),
+        build=_BuildRun(runner=runner, timeout=timeout, on_progress=on_progress, clock=clock),
     ).image_id
 
 
@@ -964,7 +968,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     on_progress: BuildProgressSink | None = None,
-    clock: Clock | None = None,
+    clock: Clock,
 ) -> str:
     """Build the agent layer on top of a task image, and return its image ID.
 
@@ -1001,9 +1005,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
         raise ValueError(message)
 
     runner = command_runner or SubprocessDockerBuildRunner()
-    build = _BuildRun(
-        runner=runner, timeout=timeout, on_progress=on_progress, clock=clock or MonotonicClock()
-    )
+    build = _BuildRun(runner=runner, timeout=timeout, on_progress=on_progress, clock=clock)
     if task_dockerfile is not None:
         dockerfile = _validated_task_dockerfile(task_dockerfile, timeout)
         base = _build_task_image(
@@ -1043,8 +1045,8 @@ class _BuildRun:
 
     runner: DockerBuildRunner
     timeout: float
+    clock: Clock
     on_progress: BuildProgressSink | None = None
-    clock: Clock = field(default_factory=MonotonicClock)
     started: float = field(init=False)
 
     def __post_init__(self) -> None:

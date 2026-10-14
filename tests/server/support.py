@@ -216,7 +216,9 @@ def build_server_parts(
     )
     journal.add_listener(chat.apply_replayed_event, replay_filter=chat.replay_filter)
     if chat_agent_builder is None:
-        integration = RunIntegrationAdapter(controller, executions, journal, chat)
+        integration = RunIntegrationAdapter(
+            controller, executions, journal, chat, clock=ManualClock()
+        )
     else:
         integration = RunIntegrationAdapter(
             controller,
@@ -224,6 +226,7 @@ def build_server_parts(
             journal,
             chat,
             chat_agent_builder=chat_agent_builder,
+            clock=ManualClock(),
         )
     chat.set_fallback_answer(RunInspector(integration).answer)
     core_events = CoreEventJournal(clock=clock)

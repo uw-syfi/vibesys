@@ -37,7 +37,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import ComputeBackend, ComputeBackendImpl, DockerSandbox, create_compute_backend
 from vs_sandbox.api.slurm import load_slurm_operator_settings
-from vs_sim.api import SystemClock
+from vs_sim.api import MonotonicClock, SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -232,6 +232,7 @@ def open_editor(base: Base, directory: Path) -> Iterator[Editor]:
         profiler_support_path=str(support),
         profiler_support_name=definition.support_name,
         profiler_support_extra=profiler_support_extra(definition),
+        clock=MonotonicClock(),
     )
     environment = SlurmEnvironment(
         load_slurm_operator_settings(_slurm_config(directory)),

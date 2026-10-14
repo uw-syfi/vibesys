@@ -15,6 +15,7 @@ from tests.server.support import build_server_parts
 from entrypoints.server import main
 from server.runtime import WebPortInspector, WebPortState
 from server.transport.websocket import WebSocketBindError, WebSocketGateway
+from vs_sim.api import MonotonicClock
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -98,7 +99,7 @@ def test_gateway_reports_a_collision_that_occurs_when_the_bound_socket_listens(
 ) -> None:
     parts = build_server_parts(tmp_path / "logs")
     startup = _ListenCollision()
-    gateway = WebSocketGateway(parts.api, startup=startup)
+    gateway = WebSocketGateway(parts.api, startup=startup, clock=MonotonicClock())
 
     try:
         with pytest.raises(WebSocketBindError) as failure:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
 from launch import LaunchSettings
@@ -34,7 +33,7 @@ def create_session(  # noqa: PLR0913
     registry: OrchestrationRegistry,
     agent_client_factory: Callable[..., AgentClientProtocol],
     backend_factory: Callable[..., ComputeBackendImpl],
-    stop_timer: StopTimer = asyncio.sleep,
+    stop_timer: StopTimer,
     git_repository: GitRepositoryFactory | None = None,
     slurm_process: SlurmProcess | None = None,
     state_stores: StateStoreFactory | None = None,

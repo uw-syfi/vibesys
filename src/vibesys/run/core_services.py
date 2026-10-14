@@ -415,6 +415,7 @@ def _catalog(
                 options=resources.options,
                 variables=plan.prompt_variables,
                 templates=policy.prompt_templates,
+                clock=resources.clock,
             )
         )
     )

@@ -6,7 +6,6 @@ receive the resulting contracts and never import this package.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
@@ -55,7 +54,8 @@ class LaunchSettings:
     registry: OrchestrationRegistry | None = None
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None
     backend_factory: Callable[..., ComputeBackendImpl] | None = None
-    stop_timer: StopTimer = asyncio.sleep
+    stop_timer: StopTimer | None = None
+    """Times a stop's grace period; ``None`` sleeps on the run's clock."""
     timing: RunTiming | None = None
     agents: SessionAgents | None = None
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore] | None = (
@@ -89,6 +89,7 @@ def create_session(
     backend_factory = (
         create_compute_backend if selected.backend_factory is None else selected.backend_factory
     )
+    timing = RunTiming.production() if selected.timing is None else selected.timing
     agents = BuiltInSessionAgents(client_factory) if selected.agents is None else selected.agents
 
     def publish(event: CoreEvent) -> None:
@@ -106,8 +107,8 @@ def create_session(
             backend_factory=backend_factory,
             profiler_preflight=selected.profiler_preflight,
             agents=agents,
-            stop_timer=selected.stop_timer,
-            timing=RunTiming.production() if selected.timing is None else selected.timing,
+            stop_timer=timing.clock.sleep if selected.stop_timer is None else selected.stop_timer,
+            timing=timing,
             invocation_store_factory=(
                 _durable_invocation_store
                 if selected.invocation_store_factory is None

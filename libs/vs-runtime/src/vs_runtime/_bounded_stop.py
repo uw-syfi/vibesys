@@ -119,7 +119,7 @@ async def bounded_stop(
     *,
     grace_s: float,
     on_stop: Callable[[], Awaitable[None]],
-    timer: StopTimer = asyncio.sleep,
+    timer: StopTimer,
 ) -> AsyncIterator[None]:
     """Bound how long the enclosed block outlives a stop request on *channel*.
 

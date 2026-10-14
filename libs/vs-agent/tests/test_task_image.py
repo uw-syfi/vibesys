@@ -23,6 +23,7 @@ from vs_agent.api.testing import (
     docker_result_without_output,
     docker_timed_out,
 )
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -92,8 +93,8 @@ def test_build_reuses_the_existing_tag_and_image_for_an_unchanged_task(tmp_path:
     dockerfile = _task(tmp_path) / "Dockerfile"
     store = _FakeDockerImageStore()
 
-    first_id = build_task_image(dockerfile, command_runner=store)
-    second_id = build_task_image(dockerfile, command_runner=store)
+    first_id = build_task_image(dockerfile, command_runner=store, clock=ManualClock())
+    second_id = build_task_image(dockerfile, command_runner=store, clock=ManualClock())
 
     assert store.builds[0] == store.builds[1]
     assert first_id == second_id
@@ -109,10 +110,10 @@ def test_build_tags_a_changed_task_differently_and_prunes_the_old_tag(tmp_path: 
     dockerfile.write_text("FROM scratch\nRUN echo one\n", encoding="utf-8")
     store = _FakeDockerImageStore()
 
-    first_id = build_task_image(dockerfile, command_runner=store)
+    first_id = build_task_image(dockerfile, command_runner=store, clock=ManualClock())
 
     dockerfile.write_text("FROM scratch\nRUN echo two\n", encoding="utf-8")
-    second_id = build_task_image(dockerfile, command_runner=store)
+    second_id = build_task_image(dockerfile, command_runner=store, clock=ManualClock())
 
     assert store.builds[0] != store.builds[1]
     assert first_id != second_id
@@ -129,8 +130,10 @@ def test_build_tags_differ_by_base_image_argument(tmp_path: Path) -> None:
     dockerfile = _task(tmp_path) / "Dockerfile"
     store = _FakeDockerImageStore()
 
-    build_task_image(dockerfile, command_runner=store)
-    build_task_image(dockerfile, base_image="python:3.12-bookworm", command_runner=store)
+    build_task_image(dockerfile, command_runner=store, clock=ManualClock())
+    build_task_image(
+        dockerfile, base_image="python:3.12-bookworm", command_runner=store, clock=ManualClock()
+    )
 
     assert store.builds[0] != store.builds[1]
     assert list(store.tags) == [store.builds[1]]
@@ -144,8 +147,8 @@ def test_build_tag_is_unchanged_when_the_context_is_rebuilt_unchanged(content: s
         (task_root / "payload.txt").write_text(content, encoding="utf-8")
         store = _FakeDockerImageStore()
 
-        build_task_image(task_root / "Dockerfile", command_runner=store)
-        build_task_image(task_root / "Dockerfile", command_runner=store)
+        build_task_image(task_root / "Dockerfile", command_runner=store, clock=ManualClock())
+        build_task_image(task_root / "Dockerfile", command_runner=store, clock=ManualClock())
 
     assert store.builds[0] == store.builds[1]
 
@@ -165,10 +168,10 @@ def test_build_tags_differ_whenever_the_context_changes(contents: tuple[str, str
         store = _FakeDockerImageStore()
 
         payload.write_text(first_content, encoding="utf-8")
-        build_task_image(dockerfile, command_runner=store)
+        build_task_image(dockerfile, command_runner=store, clock=ManualClock())
 
         payload.write_text(second_content, encoding="utf-8")
-        build_task_image(dockerfile, command_runner=store)
+        build_task_image(dockerfile, command_runner=store, clock=ManualClock())
 
     assert store.builds[0] != store.builds[1]
 
@@ -177,7 +180,10 @@ def test_build_uses_task_context_and_returns_runnable_image_id(tmp_path: Path) -
     task_root = _task(tmp_path)
     runner = FakeDockerBuildRunner()
     assert (
-        build_task_image(task_root / "Dockerfile", command_runner=runner, timeout=42) == _IMAGE_ID
+        build_task_image(
+            task_root / "Dockerfile", command_runner=runner, timeout=42, clock=ManualClock()
+        )
+        == _IMAGE_ID
     )
 
     build_argv, cwd, timeout = runner.calls[0]
@@ -214,7 +220,10 @@ def test_build_passes_base_image_as_build_arg(tmp_path: Path) -> None:
     task_root = _task(tmp_path)
     runner = FakeDockerBuildRunner()
     build_task_image(
-        task_root / "Dockerfile", base_image="python:3.12-bookworm", command_runner=runner
+        task_root / "Dockerfile",
+        base_image="python:3.12-bookworm",
+        command_runner=runner,
+        clock=ManualClock(),
     )
 
     build_argv, _cwd, _timeout = runner.calls[0]
@@ -250,7 +259,9 @@ def test_build_translates_process_failures(
     runner = FakeDockerBuildRunner(build_result=failure)
 
     with pytest.raises(TaskImageBuildError, match=match):
-        build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner, timeout=7)
+        build_task_image(
+            _task(tmp_path) / "Dockerfile", command_runner=runner, timeout=7, clock=ManualClock()
+        )
 
     assert len(runner.calls) == 1
 
@@ -268,7 +279,7 @@ def test_build_reports_bounded_truncated_docker_failure(tmp_path: Path) -> None:
     )
 
     with pytest.raises(TaskImageBuildError, match=r"exit 17.*characters truncated") as caught:
-        build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner)
+        build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner, clock=ManualClock())
 
     diagnostic = str(caught.value)
     assert diagnostic.endswith("specific failure tail")
@@ -284,7 +295,7 @@ def test_build_uses_domain_fallback_when_legacy_runner_did_not_capture_output(
     )
 
     with pytest.raises(TaskImageBuildError, match=r"exit 17.*docker build failed"):
-        build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner)
+        build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner, clock=ManualClock())
 
 
 def test_build_rejects_truncated_stdout_even_when_tail_is_a_valid_image_id(
@@ -301,7 +312,7 @@ def test_build_rejects_truncated_stdout_even_when_tail_is_a_valid_image_id(
     )
 
     with pytest.raises(TaskImageBuildError, match="characters truncated"):
-        build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner)
+        build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner, clock=ManualClock())
 
 
 @pytest.mark.parametrize(
@@ -319,7 +330,7 @@ def test_build_rejects_malformed_runnable_image_id(
     runner = FakeDockerBuildRunner(image_id=image_id)
 
     with pytest.raises(TaskImageBuildError, match=match):
-        build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner)
+        build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner, clock=ManualClock())
 
     assert len(runner.calls) == 2
 
@@ -346,7 +357,9 @@ def test_build_translates_inspect_failures(
     runner = FakeDockerBuildRunner(inspect_result=failure)
 
     with pytest.raises(TaskImageBuildError, match=match):
-        build_task_image(_task(tmp_path) / "Dockerfile", command_runner=runner, timeout=7)
+        build_task_image(
+            _task(tmp_path) / "Dockerfile", command_runner=runner, timeout=7, clock=ManualClock()
+        )
 
     assert len(runner.calls) == 2
 
@@ -357,10 +370,12 @@ def test_build_validates_dockerfile_before_running_docker(tmp_path: Path) -> Non
     task_root = tmp_path / "task"
     task_root.mkdir()
     with pytest.raises(TaskImageBuildError, match="Dockerfile must be a regular file"):
-        build_task_image(task_root / "Dockerfile", command_runner=runner)
+        build_task_image(task_root / "Dockerfile", command_runner=runner, clock=ManualClock())
     (task_root / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
     with pytest.raises(ValueError, match="timeout must be positive"):
-        build_task_image(task_root / "Dockerfile", command_runner=runner, timeout=0)
+        build_task_image(
+            task_root / "Dockerfile", command_runner=runner, timeout=0, clock=ManualClock()
+        )
     assert runner.calls == []
 
 
@@ -374,6 +389,6 @@ def test_build_rejects_dockerfile_symlink_without_widening_context(tmp_path: Pat
     runner = FakeDockerBuildRunner()
 
     with pytest.raises(TaskImageBuildError, match="must be a regular file"):
-        build_task_image(dockerfile, command_runner=runner)
+        build_task_image(dockerfile, command_runner=runner, clock=ManualClock())
 
     assert runner.calls == []

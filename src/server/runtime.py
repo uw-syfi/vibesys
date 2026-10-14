@@ -206,6 +206,7 @@ class ServerRuntime:
         # client learns it can dial without polling the filesystem.
         self.transport_listening = self.threads.event()
         self.condition = self.threads.condition(self.threads.rlock())
+        self._clock = clock
         self.journal = WireJournal(self.condition, clock=clock, threads=self.threads)
         self.executions = ExecutionTracker(self.condition, self.journal, clock=clock)
         self.controller = RunController(self.condition, self.journal, self.executions)
@@ -233,6 +234,7 @@ class ServerRuntime:
             self.executions,
             self.journal,
             self.chat,
+            clock=clock,
         )
         self.chat.set_fallback_answer(RunInspector(self.integration).answer)
         self.controls = RunControlSlot(self.condition)
@@ -332,6 +334,7 @@ class ServerRuntime:
                             allowed_origins=self.web_origins,
                             subscriptions=subscriptions,
                             instance_path=self.instance_path,
+                            clock=self._clock,
                         )
                     )
                     if self.web

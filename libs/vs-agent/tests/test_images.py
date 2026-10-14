@@ -147,7 +147,7 @@ def test_the_image_runs_as_agent_in_workspace_and_never_mounts_the_docker_socket
     """The Dockerfile ends with WORKDIR and USER, and no command runs a container or mounts a path."""
     runner = _FakeRunner()
 
-    agent_image("python:3.12-bookworm", command_runner=runner)
+    agent_image("python:3.12-bookworm", command_runner=runner, clock=ManualClock())
 
     assert runner.workspaces[0].dockerfile.splitlines()[-2:] == [
         "WORKDIR /workspace",
@@ -173,6 +173,7 @@ def test_agent_image_chains_task_image_as_base(tmp_path: Path) -> None:
         "python:3.12-bookworm",
         task_dockerfile=task_dockerfile,
         command_runner=runner,
+        clock=ManualClock(),
     )
 
     assert image_id == _AGENT_IMAGE_ID
@@ -213,21 +214,23 @@ def test_extra_features_follow_the_agent_feature_in_order(tmp_path: Path) -> Non
         extras.append(LocalFeature(directory))
     runner = _FakeRunner()
 
-    agent_image("python:3.12-bookworm", features=extras, command_runner=runner)
+    agent_image("python:3.12-bookworm", features=extras, command_runner=runner, clock=ManualClock())
 
     assert runner.workspaces[0].feature_ids == ("vibesys-agent", "zeta", "alpha")
 
 
 def test_agent_image_rejects_nonpositive_timeout() -> None:
     with pytest.raises(ValueError, match="timeout must be positive"):
-        agent_image("python:3.12-bookworm", command_runner=_FakeRunner(), timeout=0)
+        agent_image(
+            "python:3.12-bookworm", command_runner=_FakeRunner(), timeout=0, clock=ManualClock()
+        )
 
 
 def test_a_failed_feature_image_build_is_a_task_image_build_error_and_cleans_up() -> None:
     runner = _FakeRunner(build_returncode=1)
 
     with pytest.raises(TaskImageBuildError, match=r"feature image build failed.*build failed"):
-        agent_image("python:3.12-bookworm", command_runner=runner)
+        agent_image("python:3.12-bookworm", command_runner=runner, clock=ManualClock())
 
     assert runner.verbs() == [("image", "inspect"), ("build",)]
     assert not runner.workspaces[0].root.exists()
@@ -237,7 +240,7 @@ def test_agent_image_rejects_a_truncated_inspect_id() -> None:
     runner = _FakeRunner(agent_inspect_omitted_characters=2048)
 
     with pytest.raises(TaskImageBuildError, match="characters truncated"):
-        agent_image("python:3.12-bookworm", command_runner=runner)
+        agent_image("python:3.12-bookworm", command_runner=runner, clock=ManualClock())
 
 
 def test_agent_feature_ships_as_package_data() -> None:
@@ -272,7 +275,9 @@ def test_agent_base_image_is_never_a_bare_image_id(base_image: str, flow: str) -
             task_dockerfile.write_text("ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n", encoding="utf-8")
         runner = _FakeRunner()
 
-        agent_image(base_image, task_dockerfile=task_dockerfile, command_runner=runner)
+        agent_image(
+            base_image, task_dockerfile=task_dockerfile, command_runner=runner, clock=ManualClock()
+        )
 
         agent_base = _devcontainer_base(runner)
         assert _BARE_ID.fullmatch(agent_base) is None
@@ -289,7 +294,7 @@ def test_agent_image_tags_a_bare_base_image_id_before_building() -> None:
     """The entrypoint records the task image by ID; the agent layer tags it."""
     runner = _FakeRunner()
 
-    agent_image(_TASK_IMAGE_ID, command_runner=runner)
+    agent_image(_TASK_IMAGE_ID, command_runner=runner, clock=ManualClock())
 
     tag = "vibesys-base:" + "a" * 64
     assert runner.calls[0][0] == ("docker", "tag", _TASK_IMAGE_ID, tag)

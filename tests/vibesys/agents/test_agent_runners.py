@@ -261,9 +261,7 @@ class TestAgentLoggerEventHandler:
     def test_agent_logger_event_handler_methods_drive_formatters(self) -> None:
         log_file = MagicMock()
         logger = AgentLogger(
-            log_file=log_file,
-            model_name="m",
-            agent_label="Judge",
+            log_file=log_file, model_name="m", agent_label="Judge", clock=ManualClock()
         )
 
         with (
@@ -294,6 +292,7 @@ class TestAgentLoggerEventHandler:
             event_sink=event_sink,
             model_name="claude-sonnet-4-6",
             agent_label="Implementer",
+            clock=ManualClock(),
         )
 
         usage = {

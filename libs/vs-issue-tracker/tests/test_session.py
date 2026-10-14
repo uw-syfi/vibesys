@@ -10,6 +10,7 @@ from vs_issue_tracker.api import (
     IssueType,
     open_issue_tracker_session,
 )
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from vs_github.api import GitHubClient
@@ -43,6 +44,7 @@ def test_local_session_unifies_tracker_and_progress(tmp_path: Path) -> None:
         local_store_path=tmp_path / "issues.json",
         local_progress_path=tmp_path / "progress.md",
         run_id="run-1",
+        clock=ManualClock(),
     )
     issue = session.tracker.create(
         type=IssueType.FEATURE,
@@ -65,6 +67,7 @@ def test_refresh_publishes_current_issue_snapshot_to_view_sink(tmp_path: Path) -
         local_progress_path=tmp_path / "progress.md",
         run_id="run-1",
         view_sink=published.append,
+        clock=ManualClock(),
     )
     issue = session.tracker.create(
         type=IssueType.BUG,
@@ -88,6 +91,7 @@ def test_remote_session_owns_provider_wiring_and_run_identity(tmp_path: Path) ->
         local_progress_path=tmp_path / "unused.md",
         run_id="canonical-run-id",
         github_cli=cast("GitHubClient", github),
+        clock=ManualClock(),
     )
 
     assert github.created[0][0:2] == (

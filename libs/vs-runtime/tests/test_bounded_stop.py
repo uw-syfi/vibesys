@@ -186,7 +186,9 @@ def test_a_grace_that_is_not_positive_and_finite_is_rejected(grace_s: float) -> 
     channel = create_run_control_channel(FakeRunControlEventSink())
 
     async def enter() -> None:
-        async with bounded_stop(channel, grace_s=grace_s, on_stop=_StopWork()):
+        async with bounded_stop(
+            channel, grace_s=grace_s, on_stop=_StopWork(), timer=FakeStopTimer()
+        ):
             pass
 
     with pytest.raises(StopGraceError, match="positive finite"):

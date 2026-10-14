@@ -117,7 +117,7 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
                     capabilities=AgentCapabilities(provider_session_resume=True)
                 ),
                 backend_factory=host_container_backend,
-                stop_timer=asyncio.sleep,
+                stop_timer=SystemClock().sleep,
                 timing=RunTiming(SystemClock(), 60.0),
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
             )

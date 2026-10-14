@@ -27,7 +27,7 @@ type FaultHook = Callable[[str, FaultPhase], None]
 class FakeIssueTracker(_MemoryBoard):
     """An in-memory `IssueTracker` whose operations can fail on either side of their effect."""
 
-    def __init__(self, *, faults: FaultHook | None = None, clock: Clock | None = None) -> None:
+    def __init__(self, *, clock: Clock, faults: FaultHook | None = None) -> None:
         """Open an empty board; ``faults`` is consulted around every operation.
 
         ``clock`` (epoch seconds) stamps every event; copies share it.

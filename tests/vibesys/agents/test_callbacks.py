@@ -38,7 +38,9 @@ class TestOnThinkingChannel:
     def _chunks(*events: AgentEvent) -> list[AgentOutputChunkData]:
         seen: list[CoreEvent] = []
         observer = _LoggerObserver(
-            AgentLogger(event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()))
+            AgentLogger(
+                event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()), clock=ManualClock()
+            )
         )
         for event in events:
             observer.on_event(event)
@@ -70,15 +72,17 @@ class TestOnThinkingChannel:
     def test_empty_text_publishes_nothing_directly(self) -> None:
         """``on_thinking`` and ``on_diagnostic`` share a no-op-on-empty helper."""
         seen: list[CoreEvent] = []
-        AgentLogger(event_sink=CoreAgentEventSink(seen.append, clock=ManualClock())).on_thinking("")
+        AgentLogger(
+            event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()), clock=ManualClock()
+        ).on_thinking("")
 
         assert [event.data for event in seen if isinstance(event.data, AgentOutputChunkData)] == []
 
     def test_writes_to_log_file(self) -> None:
         log = io.StringIO()
-        AgentLogger(log_file=log, event_sink=NULL_AGENT_EVENT_SINK).on_thinking(
-            "The ring buffer is the hot path."
-        )
+        AgentLogger(
+            log_file=log, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock()
+        ).on_thinking("The ring buffer is the hot path.")
 
         assert "The ring buffer is the hot path." in log.getvalue()
 
@@ -89,9 +93,9 @@ class TestOnDiagnostic:
     @staticmethod
     def _chunks(text: str) -> list[AgentOutputChunkData]:
         seen: list[CoreEvent] = []
-        AgentLogger(event_sink=CoreAgentEventSink(seen.append, clock=ManualClock())).on_diagnostic(
-            text
-        )
+        AgentLogger(
+            event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()), clock=ManualClock()
+        ).on_diagnostic(text)
         return [event.data for event in seen if isinstance(event.data, AgentOutputChunkData)]
 
     def test_text_publishes_verbatim_on_the_diagnostic_channel(self) -> None:
@@ -107,9 +111,9 @@ class TestOnDiagnostic:
 
     def test_writes_to_log_file(self) -> None:
         log = io.StringIO()
-        AgentLogger(log_file=log, event_sink=NULL_AGENT_EVENT_SINK).on_diagnostic(
-            "agentshim: restarting the provider process"
-        )
+        AgentLogger(
+            log_file=log, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock()
+        ).on_diagnostic("agentshim: restarting the provider process")
 
         assert "agentshim: restarting the provider process" in log.getvalue()
 
@@ -117,7 +121,9 @@ class TestOnDiagnostic:
 class TestToolCorrelation:
     def test_cli_events_get_stable_fifo_call_ids(self) -> None:
         seen: list[CoreEvent] = []
-        logger = AgentLogger(event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()))
+        logger = AgentLogger(
+            event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()), clock=ManualClock()
+        )
         logger.on_tool_call("Read", {"path": "a"})
         logger.on_tool_call("Read", {"path": "b"})
         logger.on_tool_result("Read", stdout="result a")
@@ -130,31 +136,31 @@ class TestToolCorrelation:
 
 class TestToolResultOutput:
     def test_prints_result_with_name(self, capsys: pytest.CaptureFixture[str]) -> None:
-        logger = AgentLogger(event_sink=_rendering_sink())
+        logger = AgentLogger(event_sink=_rendering_sink(), clock=ManualClock())
         logger.log_tool_result("shell", "file1.py\nfile2.py")
         out = capsys.readouterr().out
         assert "file1.py" in out
 
     def test_truncates_long_output(self, capsys: pytest.CaptureFixture[str]) -> None:
-        logger = AgentLogger(event_sink=_rendering_sink(max_result_len=10))
+        logger = AgentLogger(event_sink=_rendering_sink(max_result_len=10), clock=ManualClock())
         logger.log_tool_result("shell", "a" * 20)
         out = capsys.readouterr().out
         assert "..." in out
 
     def test_exact_limit_no_truncation(self, capsys: pytest.CaptureFixture[str]) -> None:
-        logger = AgentLogger(event_sink=_rendering_sink(max_result_len=10))
+        logger = AgentLogger(event_sink=_rendering_sink(max_result_len=10), clock=ManualClock())
         logger.log_tool_result("shell", "a" * 10)
         out = capsys.readouterr().out
         assert "..." not in out
 
     def test_custom_max_result_len(self, capsys: pytest.CaptureFixture[str]) -> None:
-        logger = AgentLogger(event_sink=_rendering_sink(max_result_len=5))
+        logger = AgentLogger(event_sink=_rendering_sink(max_result_len=5), clock=ManualClock())
         logger.log_tool_result("test", "abcdefghij")
         out = capsys.readouterr().out
         assert "abcde..." in out
 
     def test_normal_output_is_plain_text(self, capsys: pytest.CaptureFixture[str]) -> None:
-        logger = AgentLogger(event_sink=_rendering_sink())
+        logger = AgentLogger(event_sink=_rendering_sink(), clock=ManualClock())
         logger.log_tool_result("shell", "ok")
         out = capsys.readouterr().out
         assert "ok" in out
@@ -162,7 +168,7 @@ class TestToolResultOutput:
         assert _RED not in out
 
     def test_error_status_is_plain_text(self, capsys: pytest.CaptureFixture[str]) -> None:
-        logger = AgentLogger(event_sink=_rendering_sink())
+        logger = AgentLogger(event_sink=_rendering_sink(), clock=ManualClock())
         logger.log_tool_result("shell", "Error: file not found")
         out = capsys.readouterr().out
         assert "Error: file not found" in out
@@ -172,7 +178,7 @@ class TestToolResultOutput:
     def test_command_failed_exit_code_is_plain_text(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        logger = AgentLogger(event_sink=_rendering_sink())
+        logger = AgentLogger(event_sink=_rendering_sink(), clock=ManualClock())
         logger.log_tool_result(
             "execute",
             (
@@ -189,7 +195,7 @@ class TestToolResultOutput:
     def test_command_succeeded_exit_code_is_plain_text(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        logger = AgentLogger(event_sink=_rendering_sink())
+        logger = AgentLogger(event_sink=_rendering_sink(), clock=ManualClock())
         logger.log_tool_result("execute", "hello world\n[Command succeeded with exit code 0]")
         out = capsys.readouterr().out
         assert "hello world" in out
@@ -204,7 +210,9 @@ class TestLogFile:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         log = io.StringIO()
-        logger = AgentLogger(log_file=log, event_sink=_rendering_sink(max_result_len=10))
+        logger = AgentLogger(
+            log_file=log, event_sink=_rendering_sink(max_result_len=10), clock=ManualClock()
+        )
         logger.log_tool_result("shell", "a" * 50)
         stdout = capsys.readouterr().out
         log_text = log.getvalue()
@@ -217,7 +225,7 @@ class TestLogFile:
 
     def test_tool_call_full_args_in_log(self, capsys: pytest.CaptureFixture[str]) -> None:
         log = io.StringIO()
-        logger = AgentLogger(log_file=log, event_sink=_rendering_sink())
+        logger = AgentLogger(log_file=log, event_sink=_rendering_sink(), clock=ManualClock())
         long_arg = "x" * 200
         logger.log_tool_call("shell", {"cmd": long_arg})
         stdout = capsys.readouterr().out
@@ -230,20 +238,20 @@ class TestLogFile:
 
     def test_text_written_to_log(self) -> None:
         log = io.StringIO()
-        logger = AgentLogger(log_file=log, event_sink=NULL_AGENT_EVENT_SINK)
+        logger = AgentLogger(log_file=log, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock())
         logger.log_text("hello")
         log_text = log.getvalue()
         assert "hello" in log_text
 
     def test_thinking_written_to_log(self) -> None:
         log = io.StringIO()
-        logger = AgentLogger(log_file=log, event_sink=NULL_AGENT_EVENT_SINK)
+        logger = AgentLogger(log_file=log, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock())
         logger.on_thinking("deep thoughts")
         assert "deep thoughts" in log.getvalue()
 
     def test_no_log_file_works_normally(self, capsys: pytest.CaptureFixture[str]) -> None:
         """AgentLogger without log_file still works as before."""
-        logger = AgentLogger(event_sink=_rendering_sink(max_result_len=10))
+        logger = AgentLogger(event_sink=_rendering_sink(max_result_len=10), clock=ManualClock())
         logger.log_tool_result("shell", "a" * 20)
         stdout = capsys.readouterr().out
         assert "..." in stdout
@@ -252,13 +260,13 @@ class TestLogFile:
         """Streamed events must hit disk immediately so ``tail -f`` on the run
         log shows codex output as it arrives, not in buffered bursts."""
         log = MagicMock()
-        logger = AgentLogger(log_file=log, event_sink=NULL_AGENT_EVENT_SINK)
+        logger = AgentLogger(log_file=log, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock())
         logger.log_text("streamed chunk")
         assert log.flush.called
 
     def test_tool_result_flushes_log_file(self) -> None:
         log = MagicMock()
-        logger = AgentLogger(log_file=log, event_sink=NULL_AGENT_EVENT_SINK)
+        logger = AgentLogger(log_file=log, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock())
         logger.log_tool_result("shell", "ok")
         assert log.flush.called
 
@@ -318,7 +326,7 @@ class TestDefaultContextWindowLookup:
 class TestPrefixFormat:
     def test_no_label_no_prefix_on_streaming(self, capsys: pytest.CaptureFixture[str]) -> None:
         # Existing behavior preserved: AgentLogger without agent_label produces no prefix
-        logger = AgentLogger(event_sink=_rendering_sink())
+        logger = AgentLogger(event_sink=_rendering_sink(), clock=ManualClock())
         logger.log_text("hello")
         out = _strip_ansi(capsys.readouterr().out)
         assert "[" not in out
@@ -326,7 +334,10 @@ class TestPrefixFormat:
 
     def test_prefix_with_label_and_known_model(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
-            agent_label="Implementer", model_name="claude-sonnet-4-6", event_sink=_rendering_sink()
+            agent_label="Implementer",
+            model_name="claude-sonnet-4-6",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.log_text("hi")
         out = _strip_ansi(capsys.readouterr().out)
@@ -339,6 +350,7 @@ class TestPrefixFormat:
             progress=RoundProgress(3, 24),
             model_name="claude-sonnet-4-6",
             event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.log_text("hi")
         out = _strip_ansi(capsys.readouterr().out)
@@ -349,7 +361,10 @@ class TestPrefixFormat:
 
     def test_prefix_with_gpt5_4(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
-            agent_label="Judge", model_name="gpt-5.4", event_sink=_rendering_sink()
+            agent_label="Judge",
+            model_name="gpt-5.4",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.log_text("hi")
         out = _strip_ansi(capsys.readouterr().out)
@@ -358,7 +373,10 @@ class TestPrefixFormat:
 
     def test_prefix_omits_max_when_model_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
-            agent_label="X", model_name="unknown-future-model", event_sink=_rendering_sink()
+            agent_label="X",
+            model_name="unknown-future-model",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.log_text("y")
         out = _strip_ansi(capsys.readouterr().out)
@@ -368,7 +386,7 @@ class TestPrefixFormat:
         assert match.group(1) == "0"
 
     def test_prefix_omits_max_when_no_model_name(self, capsys: pytest.CaptureFixture[str]) -> None:
-        logger = AgentLogger(agent_label="X", event_sink=_rendering_sink())
+        logger = AgentLogger(agent_label="X", event_sink=_rendering_sink(), clock=ManualClock())
         logger.log_text("y")
         out = _strip_ansi(capsys.readouterr().out)
         match = re.search(r"\[X \| \d+\.\ds \| ([^\]]+)\]", out)
@@ -377,7 +395,10 @@ class TestPrefixFormat:
 
     def test_prefix_updates_after_update_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
-            agent_label="Implementer", model_name="claude-sonnet-4-6", event_sink=_rendering_sink()
+            agent_label="Implementer",
+            model_name="claude-sonnet-4-6",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.update_usage({"input_tokens": 20_100, "output_tokens": 100})
         capsys.readouterr()  # discard
@@ -387,7 +408,10 @@ class TestPrefixFormat:
 
     def test_tool_call_path_uses_dynamic_prefix(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
-            agent_label="Implementer", model_name="gpt-5.4", event_sink=_rendering_sink()
+            agent_label="Implementer",
+            model_name="gpt-5.4",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.update_usage({"input_tokens": 5_000, "output_tokens": 50})
         logger.log_tool_call("shell", {"cmd": "ls"})
@@ -402,6 +426,7 @@ class TestPrefixFormat:
             model_name="anything",
             context_window_lookup=lambda _: 999_999,
             event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.log_text("x")
         out = _strip_ansi(capsys.readouterr().out)
@@ -411,7 +436,12 @@ class TestPrefixFormat:
     def test_default_lookup_used_when_not_injected(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        logger = AgentLogger(agent_label="Test", model_name="gpt-5.4", event_sink=_rendering_sink())
+        logger = AgentLogger(
+            agent_label="Test",
+            model_name="gpt-5.4",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
+        )
         logger.log_text("status")
         out = _strip_ansi(capsys.readouterr().out)
         assert "0/1.1M" in out
@@ -440,7 +470,10 @@ class TestUpdateUsagePublicHook:
 
     def test_update_usage_sets_input_tokens(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
-            agent_label="Implementer", model_name="claude-sonnet-4-6", event_sink=_rendering_sink()
+            agent_label="Implementer",
+            model_name="claude-sonnet-4-6",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.update_usage({"input_tokens": 12_345, "output_tokens": 42})
         logger.log_text("status")
@@ -452,7 +485,10 @@ class TestUpdateUsagePublicHook:
     ) -> None:
         """The latest turn overwrites; usage does not accumulate."""
         logger = AgentLogger(
-            agent_label="X", model_name="claude-sonnet-4-6", event_sink=_rendering_sink()
+            agent_label="X",
+            model_name="claude-sonnet-4-6",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.update_usage({"input_tokens": 1_000})
         logger.update_usage({"input_tokens": 5_000})
@@ -462,7 +498,10 @@ class TestUpdateUsagePublicHook:
 
     def test_update_usage_empty_dict_is_noop(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
-            agent_label="X", model_name="claude-sonnet-4-6", event_sink=_rendering_sink()
+            agent_label="X",
+            model_name="claude-sonnet-4-6",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.update_usage({"input_tokens": 500})
         logger.update_usage({})
@@ -472,7 +511,10 @@ class TestUpdateUsagePublicHook:
 
     def test_update_usage_none_is_noop(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
-            agent_label="X", model_name="claude-sonnet-4-6", event_sink=_rendering_sink()
+            agent_label="X",
+            model_name="claude-sonnet-4-6",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.update_usage({"input_tokens": 500})
         logger.update_usage(None)
@@ -485,7 +527,10 @@ class TestUpdateUsagePublicHook:
     ) -> None:
         """A zero-count usage dict should not clobber a real prior value."""
         logger = AgentLogger(
-            agent_label="X", model_name="claude-sonnet-4-6", event_sink=_rendering_sink()
+            agent_label="X",
+            model_name="claude-sonnet-4-6",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.update_usage({"input_tokens": 25_000})
         logger.update_usage({"input_tokens": 0, "output_tokens": 50})
@@ -496,7 +541,10 @@ class TestUpdateUsagePublicHook:
     def test_update_usage_reflected_in_prefix(self, capsys: pytest.CaptureFixture[str]) -> None:
         """The formatted prefix includes the compact token count after an update."""
         logger = AgentLogger(
-            agent_label="Implementer", model_name="claude-sonnet-4-6", event_sink=_rendering_sink()
+            agent_label="Implementer",
+            model_name="claude-sonnet-4-6",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.update_usage({"input_tokens": 12_345})
         logger.log_text("status")
@@ -505,7 +553,10 @@ class TestUpdateUsagePublicHook:
 
     def test_update_usage_drives_tool_call_prefix(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
-            agent_label="Implementer", model_name="claude-sonnet-4-6", event_sink=_rendering_sink()
+            agent_label="Implementer",
+            model_name="claude-sonnet-4-6",
+            event_sink=_rendering_sink(),
+            clock=ManualClock(),
         )
         logger.update_usage({"input_tokens": 14_000})
         logger.log_tool_call("Bash", {"command": "ls"})

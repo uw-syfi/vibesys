@@ -262,7 +262,7 @@ def test_the_fake_can_lose_an_acknowledgement_after_the_write_landed() -> None:
             message = "connection lost"
             raise ConnectionError(message)
 
-    tracker = FakeIssueTracker(faults=lose_the_answer)
+    tracker = FakeIssueTracker(faults=lose_the_answer, clock=ManualClock())
     with pytest.raises(ConnectionError):
         tracker.create(
             type=IssueType.BUG,
@@ -282,7 +282,7 @@ def test_the_fake_can_fail_before_the_write_lands() -> None:
             message = "unavailable"
             raise ConnectionError(message)
 
-    tracker = FakeIssueTracker(faults=refuse)
+    tracker = FakeIssueTracker(faults=refuse, clock=ManualClock())
     with pytest.raises(ConnectionError):
         tracker.create(
             type=IssueType.BUG, title="t", description="d", created_by="t", iteration=1, key="k"

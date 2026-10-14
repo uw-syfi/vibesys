@@ -294,9 +294,7 @@ def test_timeout_kills_reaps_and_closes_the_fake_process_group(tmp_path: Path) -
     with pytest.raises(TaskImageBuildError, match="budget of 7 seconds ran out"):
         threads.run(
             lambda: build_task_image(
-                dockerfile,
-                command_runner=runner,
-                timeout=7,
+                dockerfile, command_runner=runner, timeout=7, clock=ManualClock()
             )
         )
 
@@ -478,7 +476,9 @@ def test_a_stopped_task_build_reports_the_output_tail_and_running_step(tail: str
         dockerfile = Path(directory) / "Dockerfile"
         dockerfile.write_text("FROM scratch\n", encoding="utf-8")
         with pytest.raises(ImageBuildTimeoutError) as caught:
-            build_task_image(dockerfile, command_runner=StallingRunner(), timeout=30)
+            build_task_image(
+                dockerfile, command_runner=StallingRunner(), timeout=30, clock=ManualClock()
+            )
 
     assert caught.value.step == "step 2/9: RUN pip install torch"
     assert caught.value.output == tail.strip()[-4000:]

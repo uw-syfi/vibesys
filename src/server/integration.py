@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from server.execution import ExecutionTracker
     from server.journal import WireJournal
     from vibesys.api import AuxiliaryAgents, CoreEvent, RunReady, RunRecord, RunSession
+    from vs_sim.api import Clock
 
 _EVENT_DATA_ADAPTER = TypeAdapter(EventData)
 _TERMINAL_TRIGGERS: dict[EventType, RunTrigger] = {
@@ -188,20 +189,28 @@ def _core_event_diagnostic(
 class RunIntegrationAdapter:
     """Implement the neutral core integration port with server components."""
 
-    def __init__(
+    # lint-waiver: LW-731410 [PLR0913]; four server services, the run clock and the chat builder.
+    # > Bundling the services would only rename what ServerRuntime and the tests already build
+    # > one by one; the clock and builder are independent seams.
+    def __init__(  # noqa: PLR0913
         self,
         controller: RunController,
         executions: ExecutionTracker,
         journal: WireJournal,
         chat: ChatManager,
         *,
+        clock: Clock,
         chat_agent_builder: ChatAgentBuilder = build_chat_agent,
     ) -> None:
-        """Compose the core port over independently testable server services."""
+        """Compose the core port over independently testable server services.
+
+        ``clock`` counts seconds since the epoch; experiment chat stamps its threads with it.
+        """
         self.controller = controller
         self.executions = executions
         self.journal = journal
         self.chat = chat
+        self._clock = clock
         self._chat_agent_builder = chat_agent_builder
         self._chat_factory: ExperimentChatFactory | None = None
         self._auxiliary_scopes = ExitStack()
@@ -276,6 +285,7 @@ class RunIntegrationAdapter:
             attachment=attachment,
             build_agent=self._chat_agent_builder,
             fallback=RunInspector(self).answer,
+            clock=self._clock,
         )
         self._chat_factory = factory
         try:

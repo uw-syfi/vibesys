@@ -31,6 +31,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import ComputeBackend, ProjectPathPolicy
 from vs_sandbox.local_compute_backend import LocalBackend
+from vs_sim.api import MonotonicClock
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -80,6 +81,7 @@ def candidate(tmp_path: Path) -> Iterator[tuple[RunEnvironmentSession, Path, Pat
         framework_root=tmp_path,
         project_path_policy=ProjectPathPolicy(),
         git_history_root=project,
+        clock=MonotonicClock(),
     )
     session = open_run_environment(build_run_environment(RunEnvironmentSpec("docker")), request)
     try:

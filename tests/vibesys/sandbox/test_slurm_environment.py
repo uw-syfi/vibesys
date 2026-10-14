@@ -33,6 +33,7 @@ from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_e
 from vs_sandbox.api import DockerSandbox, SandboxKind
 from vs_sandbox.api.slurm import SlurmPolicyError, load_slurm_operator_settings
 from vs_sim.api import SubprocessProbe
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -174,6 +175,7 @@ def _request(
         accuracy_command=accuracy,
         benchmark_command=benchmark,
         evaluator_requirements=TrustedEvaluatorRequirements(),
+        clock=ManualClock(),
     )
 
 

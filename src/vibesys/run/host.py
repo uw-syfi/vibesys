@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -395,7 +394,7 @@ class _ProductHostFactory:
                 evaluation=RetryingEvaluationExecutor(
                     executor
                     if executor is not None
-                    else PollingEvaluationExecutor(evaluation, workspaces),
+                    else PollingEvaluationExecutor(evaluation, workspaces, clock=self.timing.clock),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(
                         project.state.run_id, "core-evaluation-tries"
@@ -540,7 +539,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     profiler_preflight: ProfilerPreflight | None = None,
-    stop_timer: StopTimer = asyncio.sleep,
+    stop_timer: StopTimer,
     timing: RunTiming,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
     | None = None,

@@ -137,6 +137,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                     cli_provider="codex",
                     run_id="workspace-contract",
                     framework_root=Path(scratch),
+                    clock=ManualClock(),
                 ),
                 lambda _request: _EnvironmentSession(
                     FakeCommandRunner(),

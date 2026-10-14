@@ -39,7 +39,7 @@ from server.transport.discovery import (
 )
 from server.transport.subscriptions import StreamDelivery, SubscriptionTracker
 from vs_async_ops.api import finish
-from vs_sim.api import SystemClock, ThreadBlockingRunner
+from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -338,7 +338,7 @@ class WebSocketGateway:
         allowed_origins: Sequence[str] = (),
         limits: WebSocketLimits | None = None,
         startup: StartupSynchronization | None = None,
-        clock: Clock | None = None,
+        clock: Clock,
         request_runner: BlockingRunner | None = None,
     ) -> None:
         """Create a loopback gateway around a shared run API.
@@ -371,7 +371,7 @@ class WebSocketGateway:
         self.subscriptions = subscriptions or SubscriptionTracker()
         self._start_lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
-        self._clock = clock or SystemClock()
+        self._clock = clock
         self._request_runner = (
             request_runner if request_runner is not None else ThreadBlockingRunner()
         )
