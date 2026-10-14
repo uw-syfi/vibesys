@@ -54,8 +54,6 @@ from importlib.metadata import version as distribution_version
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from pydantic import ValidationError
-
 from server.host_api import (
     INSPECTION_LOG_TAIL_BYTES,
     INSTANCE_ID_PATTERN,
@@ -77,6 +75,7 @@ from server.host_api import (
     UnreadableRecord,
     parse_record,
 )
+from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_project.api import ensure_private_directory, user_runtime_root
 from vs_sim.api import sync_descriptor
 
@@ -821,10 +820,16 @@ class FileInstanceMetadataStore:
             os.close(descriptor)
         if len(contents) > _INSPECTION_METADATA_BYTES:
             raise InstanceMetadataError.unsafe(path, "snapshot exceeds its byte bound")
-        try:
-            return InstanceInspectionMetadata.model_validate_json(contents, strict=True)
-        except ValidationError as exc:
-            raise InstanceMetadataError.unreadable(path, exc) from exc
+        metadata = decode_json(
+            contents,
+            InstanceInspectionMetadata,
+            source=str(path),
+            max_bytes=_INSPECTION_METADATA_BYTES,
+            options=ValidationOptions(strict=True),
+        )
+        if isinstance(metadata, Unreadable):
+            raise InstanceMetadataError.unreadable(path, ValueError(metadata.details("snapshot")))
+        return metadata
 
     @staticmethod
     def _require_same(

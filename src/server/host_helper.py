@@ -35,9 +35,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Final, assert_never
 
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic import JsonValue, TypeAdapter
 
 from server.host_api import (
+    HELPER_LINE_MAX_BYTES,
     HELPER_REQUEST_FEATURES,
     HelloRequest,
     HelperError,
@@ -70,6 +71,7 @@ from server.relay import (
     ClientStreams,
     relay,
 )
+from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -83,7 +85,7 @@ MAX_EXECUTING_REQUESTS: Final = 16
 """The most request or compensation workers one channel owns at once."""
 MAX_ACTIVE_WATCHES: Final = 1
 """The most active or physically stopping watch workers one channel owns at once."""
-MAX_LINE_BYTES: Final = 1 << 20
+MAX_LINE_BYTES: Final = HELPER_LINE_MAX_BYTES
 """The longest request line; a longer one is read in pieces, each answered ``invalid_request``."""
 _READ_BYTES: Final = 64 * 1024
 _MAX_ERROR_DETAIL: Final = 2000
@@ -358,9 +360,8 @@ def _error(request_id: str | None, code: HelperErrorCode, message: str) -> Helpe
 
 def _request_id_of(line: bytes) -> str | None:
     """The ``request_id`` of a line that is not a valid request, when it carries a usable one."""
-    try:
-        document = _JSON_VALUE.validate_json(line)
-    except ValidationError:
+    document = decode_json(line, _JSON_VALUE, source="request", max_bytes=MAX_LINE_BYTES)
+    if isinstance(document, Unreadable):
         return None
     value = document.get("request_id") if isinstance(document, dict) else None
     if isinstance(value, str) and 0 < len(value) <= _MAX_REQUEST_ID:
@@ -373,10 +374,9 @@ def _received(
 ) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
     if not accepts_input(state):
         return state, ()
-    try:
-        request = parse_helper_request(line)
-    except ValidationError as error:
-        detail = str(error)[:_MAX_ERROR_DETAIL]
+    request = parse_helper_request(line)
+    if isinstance(request, Unreadable):
+        detail = request.details("request")[:_MAX_ERROR_DETAIL]
         refused = _error(_request_id_of(line), HelperErrorCode.INVALID_REQUEST, detail)
         return state, (Send(refused),)
     state, refusal = _admission(state, request, vibesys_version)

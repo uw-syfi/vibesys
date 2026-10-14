@@ -34,6 +34,7 @@ from server.registry import (
     LiveRegistry,
     StopEffects,
 )
+from vs_decode.api import Unreadable
 from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller
 
 if TYPE_CHECKING:
@@ -220,7 +221,7 @@ class ChannelClient:
             assert self._cond.wait_for(lambda: b"\n" in self.data, HANG_GUARD_S)
             line, _, rest = bytes(self.data).partition(b"\n")
             self.data = bytearray(rest)
-        parse_helper_message(line)
+        assert not isinstance(parse_helper_message(line), Unreadable), line
         return json.loads(line)
 
 

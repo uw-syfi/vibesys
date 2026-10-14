@@ -12,7 +12,7 @@ import sys
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-from server.api.protocol import Response, decode_request
+from server.api.protocol import MAX_REQUEST_FRAME_BYTES, Response, decode_request
 from vs_sim.api.testing import ManualClock, examples
 
 _REJECTED = "Request received invalid input"
@@ -131,3 +131,33 @@ def test_a_rejection_echoes_the_ids_of_an_object_frame(request_id: str, client_i
 
     assert isinstance(decoded, Response)
     assert (decoded.request_id, decoded.client_id) == (request_id, client_id)
+
+
+def test_a_frame_past_the_size_cap_is_rejected_without_being_parsed() -> None:
+    request = json.dumps({"type": "query.snapshot", "request_id": "r"})
+    frame = request[:-1] + " " * MAX_REQUEST_FRAME_BYTES + "}"
+
+    decoded = decode_request(frame, clock=ManualClock())
+
+    assert isinstance(decoded, Response)
+    assert decoded.ok is False
+    assert decoded.diagnostic is not None
+    assert "larger than" in (decoded.diagnostic.detail or "")
+
+
+@settings(max_examples=examples(pr=20, nightly=200))
+@given(
+    after_sequence=st.text(alphabet="abc -", min_size=1)
+    | st.lists(st.integers(), max_size=2)
+    | st.dictionaries(st.text(max_size=2), st.integers(), max_size=2)
+)
+def test_an_invalid_frame_names_its_failing_paths(after_sequence: object) -> None:
+    frame = json.dumps(
+        {"type": "subscribe", "timestamp": "2026-01-01T00:00:00Z", "after_sequence": after_sequence}
+    )
+
+    decoded = decode_request(frame, clock=ManualClock())
+
+    assert isinstance(decoded, Response)
+    assert decoded.diagnostic is not None
+    assert ("subscribe", "after_sequence") in (decoded.diagnostic.validation_paths or ())

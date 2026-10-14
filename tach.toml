@@ -95,7 +95,7 @@ depends_on = ["vibesys.api"]
 
 [[modules]]
 path = "server.api"
-depends_on = ["vibesys.api", "vibesys.api.hypothesis", "server.control_envelope", "server.host_api", "server.diagnostics", "server.journal", "server.execution", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle", "vs_sim.api"]
+depends_on = ["vs_decode.api", "vibesys.api", "vibesys.api.hypothesis", "server.control_envelope", "server.host_api", "server.diagnostics", "server.journal", "server.execution", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle", "vs_sim.api"]
 
 [[modules]]
 path = "server.chat"
@@ -103,7 +103,7 @@ depends_on = ["vibesys.api", "vs_prompts", "server", "server.controller", "serve
 
 [[modules]]
 path = "server.transport"
-depends_on = ["server.api", "server.registry", "vs_async_ops.api", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.api", "server.registry", "vs_async_ops.api", "vs_sim.api"]
 
 [[modules]]
 path = "server.controller"
@@ -134,13 +134,13 @@ depends_on = ["server", "server.execution", "server.chat", "server.events", "vib
 # the standard library only; tests/architecture/test_light_entrypoints.py keeps
 # the light entrypoints' import closure free of the engine.
 path = "server.host_api"
-depends_on = []
+depends_on = ["vs_decode.api"]
 
 [[modules]]
 # The per-user live registry: lifetime locks, records, listing, and the stop
 # decision. Light; the control-socket stop requester is server.instances.
 path = "server.registry"
-depends_on = ["server.host_api", "vs_project", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_api", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The run protocol's control envelope: request and response framing and
@@ -151,7 +151,7 @@ depends_on = ["server.diagnostics", "server.host_api"]
 [[modules]]
 # Asks a live server to stop over its control socket (control envelope only).
 path = "server.instances"
-depends_on = ["server.control_envelope", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.control_envelope", "vs_sim.api"]
 
 [[modules]]
 path = "server.journal"
@@ -184,7 +184,7 @@ depends_on = ["server.host_api", "vs_sim.api"]
 # The host helper's channel: its pure core and shell (docs/contributing/desktop-connection.md).
 # Light: no engine, no run protocol beyond the control envelope's requester.
 path = "server.host_helper"
-depends_on = ["server.host_api", "server.host_helper_requests", "server.relay", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests", "server.relay", "vs_sim.api"]
 
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
@@ -194,7 +194,7 @@ depends_on = ["server.host_api", "server.registry", "server.relay", "vs_sim.api"
 [[modules]]
 # The host helper's interfaces on a real host: projects, directories, launches, the checkout.
 path = "server.host_helper_os"
-depends_on = ["server.host_api", "server.host_helper_requests", "vs_project", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests", "vs_project", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys"

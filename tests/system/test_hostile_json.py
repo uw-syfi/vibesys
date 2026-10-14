@@ -289,8 +289,8 @@ _DECODERS = {
     "protocol-request": _Decoder(_decode_request),
     "instance-record": _Decoder(_parse_record),
     "helper-channel": _Decoder(_helper_channel),
-    "helper-request": _Decoder(lambda frame, _: parse_helper_request(frame), (ValidationError,)),
-    "helper-message": _Decoder(lambda frame, _: parse_helper_message(frame), (ValidationError,)),
+    "helper-request": _Decoder(lambda frame, _: parse_helper_request(frame)),
+    "helper-message": _Decoder(lambda frame, _: parse_helper_message(frame)),
     "response-envelope": _Decoder(
         lambda frame, _: ResponseEnvelopeReader.model_validate_json(frame), (ValidationError,)
     ),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAliasType
 
-from pydantic import Field, FiniteFloat, JsonValue, TypeAdapter, ValidationError
+from pydantic import Field, FiniteFloat, JsonValue, TypeAdapter
 
 from server.api.iterations import MAX_ITERATION_PAGE_SIZE, IterationSlice
 from server.chat.options import ChatOptions
@@ -28,6 +28,7 @@ from vibesys.api.hypothesis import (
     JudgeVerdict,
     PerfDeltaReason,
 )
+from vs_decode.api import Unreadable, UnreadableKind, decode_json
 from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
@@ -543,6 +544,8 @@ class Response(ResponseEnvelope):
 
 
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
+MAX_REQUEST_FRAME_BYTES = 16 * 1024 * 1024
+"""The largest request frame any transport hands to ``decode_request``."""
 _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
@@ -556,16 +559,30 @@ def decode_request(frame: str | bytes, *, clock: Clock) -> ProtocolRequest | Res
     ``request_id`` and ``client_id`` when it carries them as an object, so a
     client can match it to what it sent.
 
-    Total: no frame makes this raise. A frame is parsed only by pydantic's JSON
-    parser, which bounds nesting and reports it as a ``ValueError``; Python's
-    ``json`` recurses per level and raises ``RecursionError`` instead, which
-    escaped to the transport and ended the client's session.
+    Total: no frame makes this raise. A frame is parsed only by ``vs_decode``: at most
+    ``MAX_REQUEST_FRAME_BYTES``, with nesting bounded by pydantic's JSON parser, where
+    Python's ``json`` recursed per level and raised ``RecursionError``, which escaped to
+    the transport and ended the client's session. A frame that fails validation names
+    its failing paths in the diagnostic's ``validation_paths``.
     """
-    try:
-        return _REQUEST_ADAPTER.validate_json(frame)
-    except ValueError as error:
-        request_id, client_id = _frame_ids(frame)
-        return failure_response(request_id, client_id, error, clock=clock)
+    request = decode_json(
+        frame, _REQUEST_ADAPTER, source="request frame", max_bytes=MAX_REQUEST_FRAME_BYTES
+    )
+    if not isinstance(request, Unreadable):
+        return request
+    request_id, client_id = _frame_ids(frame)
+    response = failure_response(
+        request_id, client_id, RequestFrameError(request.details("frame")), clock=clock
+    )
+    if request.kind is not UnreadableKind.INVALID or response.diagnostic is None:
+        return response
+    paths = tuple(problem.location for problem in request.problems)
+    diagnostic = response.diagnostic.model_copy(update={"validation_paths": paths})
+    return response.model_copy(update={"diagnostic": diagnostic})
+
+
+class RequestFrameError(ValueError):
+    """A request frame that is not a valid request; the message names each failing path."""
 
 
 def failure_response(
@@ -578,9 +595,10 @@ def failure_response(
 
 
 def _frame_ids(frame: str | bytes) -> tuple[str, str]:
-    try:
-        value = _JSON_VALUE.validate_json(frame)
-    except ValidationError:
+    value = decode_json(
+        frame, _JSON_VALUE, source="request frame", max_bytes=MAX_REQUEST_FRAME_BYTES
+    )
+    if isinstance(value, Unreadable):
         return "unknown", ""
     if not isinstance(value, dict):
         return "unknown", ""

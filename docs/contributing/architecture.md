@@ -152,6 +152,7 @@ graph TD
     launch --> vs_slurm
     server --> vibesys
     server --> vs_async_ops
+    server --> vs_decode
     server --> vs_project
     server --> vs_prompts
     server --> vs_sim

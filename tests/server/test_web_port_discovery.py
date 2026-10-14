@@ -10,6 +10,7 @@ from hypothesis import given
 from hypothesis.strategies import integers
 
 from server.runtime import WebPortInspector, WebPortState
+from server.transport.discovery import WebInstanceRecord
 from vs_sim.api.testing import FakeProcessSignaller
 
 if TYPE_CHECKING:
@@ -221,3 +222,13 @@ def test_inspector_refuses_to_signal_after_the_listener_identity_changes(tmp_pat
 
     assert signaller.opened == [_PID]
     assert signaller.terminated == []
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+def test_a_fifo_in_place_of_the_instance_record_reads_as_no_record_without_blocking(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "web-gateway.json"
+    os.mkfifo(path)
+
+    assert WebInstanceRecord.read(path) is None

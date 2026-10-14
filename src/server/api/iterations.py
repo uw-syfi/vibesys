@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import base64
-import json
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.api import IterationSummary, IterationTree, IterationUnavailable, RunView
+from vs_decode.api import Unreadable, ValidationOptions, decode_json
 
 MAX_ITERATION_PAGE_SIZE = 200
 
@@ -127,18 +127,30 @@ def _require_parent(projection: IterationTree, parent_id: str | None) -> None:
         raise IterationQueryError.unknown_parent(parent_id)
 
 
+_MAX_CURSOR_BYTES = 4096
+"""Far past any cursor this server issues; a longer one is malformed."""
+
+
 def _encode_cursor(revision: str, parent_id: str | None, offset: int) -> str:
     raw = _Cursor(revision=revision, parent_id=parent_id, offset=offset).model_dump_json()
     return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
 
 
 def _decode_cursor(cursor: str, projection: IterationTree, parent_id: str | None) -> int:
+    padded = cursor + "=" * (-len(cursor) % 4)
     try:
-        padded = cursor + "=" * (-len(cursor) % 4)
-        raw = base64.b64decode(padded, altchars=b"-_", validate=True).decode()
-        decoded = _Cursor.model_validate_json(raw, strict=True)
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError, ValidationError) as error:
+        raw = base64.b64decode(padded, altchars=b"-_", validate=True)
+    except ValueError as error:
         raise IterationQueryError.malformed_cursor() from error
+    decoded = decode_json(
+        raw,
+        _Cursor,
+        source="cursor",
+        max_bytes=_MAX_CURSOR_BYTES,
+        options=ValidationOptions(strict=True),
+    )
+    if isinstance(decoded, Unreadable):
+        raise IterationQueryError.malformed_cursor()
     if decoded.revision != projection.revision:
         raise IterationQueryError.stale_cursor()
     if decoded.parent_id != parent_id:

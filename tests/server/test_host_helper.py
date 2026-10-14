@@ -97,6 +97,7 @@ from server.host_helper_requests import (
 )
 from server.registry import FakeInstanceStore, LiveRegistry, StopEffects
 from server.relay import EXIT_STATUS
+from vs_decode.api import Unreadable
 from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller, SimNetwork, SimThreads, examples
 
 if TYPE_CHECKING:
@@ -755,7 +756,9 @@ def test_project_errors_are_typed_and_name_the_path(
 
 
 def parse_helper_request_dict(message: dict[str, Any]) -> HelperRequest:
-    return parse_helper_request(_line(message))
+    request = parse_helper_request(_line(message))
+    assert not isinstance(request, Unreadable), request
+    return request
 
 
 def test_tasks_and_runs_of_a_project(tmp_path: Path) -> None:

@@ -13,9 +13,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import ValidationError
-
 from server.control_envelope import ResponseEnvelopeReader, StopCommand
+from vs_decode.api import Unreadable, decode_json
 from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
@@ -61,9 +60,10 @@ class ControlSocketStopRequester:
             return False
         finally:
             connection.close()
-        try:
-            response = ResponseEnvelopeReader.model_validate_json(line)
-        except ValidationError:
+        response = decode_json(
+            line, ResponseEnvelopeReader, source="stop reply", max_bytes=_MAX_REPLY_BYTES
+        )
+        if isinstance(response, Unreadable):
             return False
         return response.ok and response.ack is not None and response.ack.action == "stop"
 

@@ -21,9 +21,10 @@ from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from pydantic_core import from_json
+from pydantic import JsonValue, TypeAdapter
 
 from server.registry import FLOCK_AVAILABLE, LockState, probe_lock, try_lock, unlock
+from vs_decode.api import Unreadable, read_json
 from vs_sim.api import PidfdProcessSignaller
 
 if TYPE_CHECKING:
@@ -645,11 +646,18 @@ def _holds_file(descriptors: tuple[Path, ...], device: int, inode: int) -> bool:
     return False
 
 
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_RECORD_BYTES = 64 * 1024
+"""Far past any web instance record; a longer file is not one."""
+
+
 def _read_record(path: Path) -> WebInstanceRecord | None:
+    # Another process wrote the file, so ``vs_decode`` reads it: bounded, with nesting
+    # bounded by pydantic's parser, and never blocking on a FIFO put in its place.
+    raw = read_json(path, _JSON_VALUE, max_bytes=_MAX_RECORD_BYTES)
+    if isinstance(raw, Unreadable):
+        return None
     try:
-        # Pydantic's parser bounds nesting and reports it, and invalid UTF-8, as
-        # ``ValueError``; ``json.loads`` raised ``RecursionError`` past this handler.
-        raw = from_json(path.read_bytes())
         if not isinstance(raw, dict) or raw.get("version") != 1:
             return None
         return WebInstanceRecord(

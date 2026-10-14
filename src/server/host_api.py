@@ -56,6 +56,8 @@ from pydantic import (
     model_validator,
 )
 
+from vs_decode.api import Unreadable, decode_json
+
 PROTOCOL_VERSION = 1
 """The run protocol version a server speaks on its control socket.
 
@@ -302,8 +304,10 @@ class UnreadableRecord(BaseModel):
 
 
 _UPGRADED_RECORD_VERSION = 3
-_JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
 """The earlier record version this reader still reads, through ``_upgrade_v3``."""
+_JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
+MAX_RECORD_BYTES = 1024 * 1024
+"""The largest instance record ``parse_record`` reads; a longer one is unreadable."""
 
 
 def _upgrade_v3(record: LiveInstanceRecord) -> LiveInstanceRecord | None:
@@ -328,9 +332,10 @@ def parse_record(instance_id: str, raw: str | bytes) -> LiveInstanceRecord | Unr
     versions predate phases and tombstones and are not upgraded: their servers
     report no phase this reader could stand behind.
     """
-    try:
-        document = _JSON_OBJECT.validate_json(raw)
-    except ValidationError:
+    document = decode_json(
+        raw, _JSON_OBJECT, source=f"instance record {instance_id}", max_bytes=MAX_RECORD_BYTES
+    )
+    if isinstance(document, Unreadable):
         return UnreadableRecord(id=instance_id, version=None)
     version = document.get("version")
     if not isinstance(version, int) or isinstance(version, bool):
@@ -766,9 +771,13 @@ HelperRequest = Annotated[
 _REQUEST: TypeAdapter[HelperRequest] = TypeAdapter(HelperRequest)
 
 
-def parse_helper_request(line: bytes) -> HelperRequest:
-    """Parse one request line strictly; ``ValidationError`` names what is wrong."""
-    return _REQUEST.validate_json(line)
+HELPER_LINE_MAX_BYTES: Final = 1 << 20
+"""The longest line either end of a helper channel parses."""
+
+
+def parse_helper_request(line: bytes) -> HelperRequest | Unreadable:
+    """Parse one request line strictly, or say what is wrong with it."""
+    return decode_json(line, _REQUEST, source="request", max_bytes=HELPER_LINE_MAX_BYTES)
 
 
 class Checkout(BaseModel):
@@ -1016,9 +1025,9 @@ HelperMessage = Annotated[HelperReply | InstancesChanged | HelperError, Field(di
 _MESSAGE: TypeAdapter[HelperMessage] = TypeAdapter(HelperMessage)
 
 
-def parse_helper_message(line: bytes) -> HelperMessage:
-    """Parse one helper message line strictly, as a client does."""
-    return _MESSAGE.validate_json(line)
+def parse_helper_message(line: bytes) -> HelperMessage | Unreadable:
+    """Parse one helper message line strictly, as a client does, or say what is wrong."""
+    return decode_json(line, _MESSAGE, source="message", max_bytes=HELPER_LINE_MAX_BYTES)
 
 
 class ChannelEndOutcome(StrEnum):
