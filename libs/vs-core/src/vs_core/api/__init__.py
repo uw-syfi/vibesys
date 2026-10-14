@@ -16,6 +16,7 @@ from vs_core._evidence_views import (
     trusted_keys,
     turn_candidate,
 )
+from vs_core._host_epochs import downtime
 from vs_core._ids import (
     IdScheme,
     attempt_id,
@@ -428,6 +429,8 @@ from vs_core.types.records import (
     ChildObservationWatermark,
     DispatchAuthorized,
     ExecuteRegisteredOperation,
+    HostEpoch,
+    HostRenewed,
     InspectRequest,
     OperationResult,
     OperationRetireRequested,
@@ -898,8 +901,10 @@ __all__ = [
     "Generation",
     "Group",
     "HistoricalSubmissionReceipt",
+    "HostEpoch",
     "HostFence",
     "HostId",
+    "HostRenewed",
     "IdScheme",
     "Identity",
     "IdentityTypeError",
@@ -1254,6 +1259,7 @@ __all__ = [
     "check_envelope_version",
     "component",
     "decision_of_operation",
+    "downtime",
     "encode_json",
     "evidence_view",
     "flow",

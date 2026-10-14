@@ -354,6 +354,30 @@ class RecoveryBarrier(Value):
         return self
 
 
+HOST_LOG_LENGTH = 2
+"""Host epochs core keeps: the current one and the one before it, which bound the last downtime."""
+
+
+class HostEpoch(Value):
+    """One lease acquisition (an epoch): when its host started and when it last proved itself alive.
+
+    ``alive_at`` is the host's last recorded lease renewal while the epoch is current. When the
+    next epoch opens it becomes the later of that and the host's last commit, the last moment
+    the host is known to have been alive.
+    """
+
+    epoch: Count
+    started_at: Seconds
+    alive_at: Seconds
+
+    @model_validator(mode="after")
+    def alive_after_start(self) -> HostEpoch:
+        """A host proves itself alive no earlier than it started."""
+        if self.alive_at < self.started_at:
+            raise ContractValidationError("alive_at", "a host is alive no earlier than it started")
+        return self
+
+
 class RecordsState(Value):
     """Records state lifecycle contract."""
 
@@ -366,6 +390,18 @@ class RecordsState(Value):
     records: tuple[RequestRecord, ...] = ()
     children: tuple[ChildLease, ...] = ()
     recovery: RecoveryBarrier = RecoveryBarrier()
+    hosts: tuple[HostEpoch, ...] = Field(max_length=HOST_LOG_LENGTH)
+    """The latest host epochs, oldest first; the last is the recovery barrier's epoch."""
+
+    @model_validator(mode="after")
+    def host_log(self) -> RecordsState:
+        """Epochs strictly increase and the newest is the one recovery started."""
+        epochs = [host.epoch for host in self.hosts]
+        if epochs != sorted(set(epochs)):
+            raise ContractValidationError("hosts", "host epochs must strictly increase")
+        if epochs and epochs[-1] != self.recovery.epoch:
+            raise ContractValidationError("hosts", "the newest host epoch is the recovery epoch")
+        return self
 
     def positions(self, request_id: RequestId | None) -> tuple[int, ...]:
         """Where the records of ``request_id`` sit in ``records``: one place, or none.
@@ -587,17 +623,19 @@ class RequestObserved(OutcomeValue):
 
 
 class RecoveryStarted(Value):
-    """Recovery started lifecycle contract."""
+    """A host acquired the lease: epoch ``epoch`` starts at ``now_at``."""
 
     kind: Literal["recovery_started"] = "recovery_started"
     epoch: Count
     now_at: Seconds
-    last_alive: Seconds | None = None
-    """When an earlier host last proved itself alive (its last durable write or lease renewal).
 
-    ``None`` when no earlier host is known (the first host, or a caller that does not know),
-    so no time is credited to open limits.
-    """
+
+class HostRenewed(Value):
+    """The current epoch's host renewed its lease at ``now_at``, so it was alive then."""
+
+    kind: Literal["host_renewed"] = "host_renewed"
+    epoch: Count
+    now_at: Seconds
 
 
 class RecoveryReady(Value):
@@ -695,7 +733,8 @@ type RecordsEvent = Annotated[
     | RetryDue
     | RequestUndispatchable
     | BlockedRecordStalled
-    | OperationRetireRequested,
+    | OperationRetireRequested
+    | HostRenewed,
     Field(discriminator="kind"),
 ]
 

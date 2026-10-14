@@ -6,11 +6,12 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from . import _request_ledger, _request_recovery
+from . import _host_epochs, _request_ledger, _request_recovery
 from .types.kernel import AreaChange
 from .types.records import (
     BlockedRecordStalled,
     DispatchAuthorized,
+    HostRenewed,
     OperationRetireRequested,
     ReconciliationDeadline,
     RecoveryReady,
@@ -66,6 +67,7 @@ EVENT_TO_SUBAREA: Mapping[type[RecordsEvent], Reducer] = MappingProxyType(
         RetryDue: _request_ledger.advance,
         RequestUndispatchable: _request_ledger.advance,
         BlockedRecordStalled: _request_ledger.advance,
+        HostRenewed: _host_epochs.renewed,
     }
 )
 
@@ -90,6 +92,6 @@ def recover(
     return _request_recovery.advance(state, context, event)
 
 
-def credit_downtime(state: RecordsState, run: RunState, event: RecoveryStarted) -> RecordsState:
-    """Open records' limits moved past the downtime ``event`` ends (before the clock moves)."""
-    return _request_recovery.credit_downtime(state, run, event)
+def open_host_epoch(state: RecordsState, run: RunState, event: RecoveryStarted) -> RecordsState:
+    """The host log with the epoch ``event`` opens, and open limits moved past the downtime."""
+    return _request_recovery.open_host_epoch(state, run, event)

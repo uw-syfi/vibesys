@@ -158,7 +158,7 @@ def test_kernel_event_cause_requires_the_recorded_observation_episode(
         phase=core.RequestPhase.DISPATCHED,
         until=core.Until(at=10.0),
     )
-    state = state.model_copy(update={"records": core.RecordsState(records=(record,))})
+    state = state.model_copy(update={"records": core.RecordsState(hosts=(), records=(record,))})
     event = core.SessionObserved(
         session_id=spec.session_id,
         observation=core.Observation(

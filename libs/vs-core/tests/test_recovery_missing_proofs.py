@@ -104,7 +104,7 @@ def _state(record: RequestRecord) -> CoreState:
     return state.model_copy(
         update={
             "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
-            "records": RecordsState(records=(record, anchor)),
+            "records": RecordsState(hosts=(), records=(record, anchor)),
         }
     )
 

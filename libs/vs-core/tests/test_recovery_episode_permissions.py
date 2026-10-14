@@ -8,8 +8,6 @@ from pydantic import BaseModel
 
 import vs_core.api as core
 
-from .restart import restarted
-
 
 class CleanupOutcome(core.Value):
     retained: bool
@@ -110,7 +108,7 @@ def episode_state(
         update={
             "run": state.run.model_copy(update={"status": core.RunStatus.PAUSED}),
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "records": core.RecordsState(records=(prepared, anchor)),
+            "records": core.RecordsState(hosts=(), records=(prepared, anchor)),
         }
     )
     active = phase in (core.AttemptPhase.ACTIVE, core.AttemptPhase.ACQUIRING)
@@ -146,7 +144,7 @@ def test_prepared_cleanup_recovers_only_with_current_episode_authority(
     inspections = {row.target for row in result.requests if isinstance(row, core.InspectRequest)}
     assert (prepared.request_id in inspections) is not authorized
     assert result.state.attempts == state.attempts
-    assert result.state.records.records[0] == restarted(prepared, 10.0, state.run)
+    assert result.state.records.records[0] == prepared
     assert result.state.run.receipts == state.run.receipts
     assert result.events == ()
 
@@ -220,6 +218,6 @@ def test_prepared_registered_cleanup_uses_descriptor_and_exact_release_identity(
     authorized = cleanup and dependency != "foreign"
     assert check.resolution == ("safe-prepared" if authorized else "pending")
     assert result.state.attempts == state.attempts
-    assert result.state.records.records[0] == restarted(record, 10.0, state.run)
+    assert result.state.records.records[0] == record
     assert result.state.run.receipts == state.run.receipts
     assert result.events == ()

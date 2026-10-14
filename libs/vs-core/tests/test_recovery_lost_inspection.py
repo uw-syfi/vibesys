@@ -95,7 +95,7 @@ def test_an_inspection_that_never_reported_goes_out_again_with_a_bound_from_the_
     state = initial_state()
     state = state.model_copy(
         update={
-            "records": RecordsState(records=(target, lost), recovery=RecoveryBarrier()),
+            "records": RecordsState(hosts=(), records=(target, lost), recovery=RecoveryBarrier()),
             "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
         }
     )

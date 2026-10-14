@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from . import _host_epochs
 from ._proofs import (
     Mismatch,
     Missing,
@@ -804,31 +805,28 @@ def _opens_epoch(barrier: RecoveryBarrier, event: RecoveryStarted) -> bool:
     )
 
 
-def credit_downtime(state: RecordsState, run: RunState, event: RecoveryStarted) -> RecordsState:
-    """Every open record's limit, moved later by the time no host was alive to wait on it.
+def open_host_epoch(state: RecordsState, run: RunState, event: RecoveryStarted) -> RecordsState:
+    """Record the epoch ``event`` opens, and move every open record's limit past the downtime.
 
     A limit says how long core waits for the far side, and while no host runs nothing waits:
     a request prepared but never sent, or sent and never begun, would otherwise end at the
-    restart without ever having had its time. The downtime runs from the later of
-    ``run.now_at`` (the dead host's last commit; the kernel calls this before ``event`` moves
-    the clock) and ``event.last_alive`` (the dead host's last durable write or lease renewal)
-    to the restart. The last commit alone would credit the time a live host sat idle after
-    it, so a crash loop could push a limit out without bound; a live host renews its lease,
-    so the credit exceeds the real downtime by at most one renewal interval. The lease's end
-    would never over-credit, but it charges the wait for a dead host's lease to the limit,
-    and a crash loop then times out requests no host could have waited on. Without
-    ``last_alive`` nothing is credited. The run deadline caps the moved limit as ``resolve_until`` caps a
-    new one; a limit already past the deadline (core's own cleanup budget) keeps its full
-    length.
+    restart without ever having had its time. The kernel calls this before ``event`` moves
+    the clock, while ``run.now_at`` is still the dead host's last commit, which proves it
+    alive as its lease renewals do. The credit is ``downtime`` of the host log, so it never
+    exceeds the real downtime by more than one renewal interval. The run deadline caps the
+    moved limit as ``resolve_until`` caps a new one; a limit already past the deadline (core's
+    own cleanup budget) keeps its full length. A repeated or stale start changes nothing.
     """
-    if event.last_alive is None:
+    if not _opens_epoch(state.recovery, event):
         return state
-    downtime = event.now_at - max(run.now_at, event.last_alive)
-    if downtime <= 0 or run.status == RunStatus.TERMINAL or not _opens_epoch(state.recovery, event):
+    hosts = _host_epochs.opened(state.hosts, event.epoch, event.now_at, run.now_at)
+    state = state.model_copy(update={"hosts": hosts})
+    credit = _host_epochs.downtime(hosts)
+    if credit <= 0 or run.status == RunStatus.TERMINAL:
         return state
 
     def moved(record: RequestRecord) -> RequestRecord:
-        at = record.until.at + downtime
+        at = record.until.at + credit
         if record.until.at <= run.deadline_at:
             at = min(at, run.deadline_at)
         if not is_open(record) or at == record.until.at:

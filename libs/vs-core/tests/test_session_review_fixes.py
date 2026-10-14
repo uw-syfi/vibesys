@@ -137,7 +137,7 @@ def refund_state(
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "records": core.RecordsState(records=records),
+            "records": core.RecordsState(hosts=(), records=records),
             "run": state.run.model_copy(
                 update={"limits": sample_limits(max_turns=10, max_refunds=5)}
             ),
@@ -231,7 +231,7 @@ def release_after_closure(
     seeded = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "records": core.RecordsState(records=(record,)),
+            "records": core.RecordsState(hosts=(), records=(record,)),
             "sessions": state.sessions.model_copy(
                 update={
                     "invocations": (inv,),

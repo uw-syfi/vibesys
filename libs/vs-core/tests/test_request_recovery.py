@@ -7,7 +7,7 @@ from typing import ClassVar, Literal
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
@@ -44,8 +44,10 @@ from vs_core.api import (
     ExecuteRegisteredOperation,
     Failed,
     FailureReason,
+    HostEpoch,
     HostFence,
     HostId,
+    HostRenewed,
     InputDelivered,
     InputDropped,
     InputDropReason,
@@ -113,10 +115,11 @@ from vs_core.api import (
     project,
     step,
 )
+from vs_core.api import downtime as downtime_of
 from vs_core.api.testing import sample_limits
 from vs_sim.api.testing import examples
 
-from .restart import restarted, restarts
+from .restart import restarts
 
 
 class RegisteredOutcome(Value):
@@ -198,7 +201,7 @@ def recovering_state(*records: RequestRecord) -> CoreState:
     state = initial_state()
     return state.model_copy(
         update={
-            "records": RecordsState(records=records, recovery=RecoveryBarrier()),
+            "records": RecordsState(hosts=(), records=records, recovery=RecoveryBarrier()),
             "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
         }
     )
@@ -335,7 +338,7 @@ def test_recovery_inspects_unfinished_authority_without_replaying_payload(
     assert isinstance(inspection, InspectRequest)
     assert inspection.target == original.request_id
     assert inspection.request_id == check.inspection
-    assert result.state.records.records[0] == restarted(original, 12.0)
+    assert result.state.records.records[0] == original
     assert result.state.run.status == RunStatus.PAUSED
     assert result.state.run.now_at == 12.0
     assert project(result.state).scheduling.charged == project(state).scheduling.charged
@@ -566,7 +569,7 @@ def test_unknown_acceptance_flags_never_replace_positive_recovery_proof(
     assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
     assert len(result.requests) == 1
     assert isinstance(result.requests[0], InspectRequest)
-    assert result.state.records.records[0] == restarted(original, 11.0)
+    assert result.state.records.records[0] == original
     assert result.state.records.children == state.records.children
     assert result.state.scheduling == state.scheduling
     assert result.state.attempts == state.attempts
@@ -801,7 +804,7 @@ def test_session_turn_recovery_requires_exact_typed_owner(case: str) -> None:
     )
     assert check.resolution == ("reattached" if case == "exact" else "pending")
     assert result.state.sessions == state.sessions
-    assert result.state.records.records[0] == restarted(original, 11.0)
+    assert result.state.records.records[0] == original
     assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
     assert not any(isinstance(request, CancelOwnedResource) for request in result.requests)
 
@@ -1010,9 +1013,7 @@ def test_recovery_reconstructs_shared_descendant_proofs_canonically(
             ResourceId(root=f"parent-resource-{index}") for index in parents
         )
         assert child.observation is None
-    assert result.state.records.records[: len(originals)] == tuple(
-        restarted(record, 11.0) for record in originals
-    )
+    assert result.state.records.records[: len(originals)] == tuple(record for record in originals)
     inspections = [request for request in result.requests if isinstance(request, InspectRequest)]
     assert len(inspections) == len(originals) + sum(len(set(manifest)) for manifest in manifests)
     assert len({request.request_id for request in inspections}) == len(inspections)
@@ -1060,9 +1061,7 @@ def test_composite_resource_ids_cannot_alias_another_targets_cleanup(
         cancels.append(requests[0])
         state = reload(result.state)
     assert cancels[0].request_id != cancels[1].request_id
-    assert state.records.records[:2] == tuple(
-        timed_out(restarted(record, 11.0)) for record in records
-    )
+    assert state.records.records[:2] == tuple(timed_out(record) for record in records)
 
 
 def with_sibling_history(state: CoreState, amounts: tuple[int, int]) -> CoreState:
@@ -1454,7 +1453,7 @@ def test_ambiguous_acceptance_never_replays_any_lifecycle_class(
         for request in result.requests
     )
     assert all(isinstance(request, InspectRequest) for request in result.requests)
-    assert result.state.records.records[0] == restarted(original, 11.0)
+    assert result.state.records.records[0] == original
     assert result.state.sessions == state.sessions
     assert result.state.attempts == state.attempts
     assert result.events == ()
@@ -1512,7 +1511,7 @@ def test_stale_retirement_recovery_cannot_release_newer_generation_or_episode(cl
         for request in blocked.requests
     )
     assert not non_diagnostic(blocked)
-    assert blocked.state.records.records[0] == timed_out(restarted(original, 11.0))
+    assert blocked.state.records.records[0] == timed_out(original)
 
 
 @given(
@@ -1744,8 +1743,8 @@ def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: st
             )
         assert result.state.evaluation == state.evaluation
         assert result.state.records.records[:2] == (
-            restarted(parent, 11.0),
-            restarted(submission, 11.0),
+            parent,
+            submission,
         )
         assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
         assert result.events == ()
@@ -1952,7 +1951,7 @@ def test_registered_job_can_reattach_to_its_provisional_owner_without_inventing_
     )
     assert check.resolution == ("reattached" if case == "exact" else "pending")
     assert result.state.evaluation == state.evaluation
-    assert result.state.records.records[0] == restarted(original, 11.0)
+    assert result.state.records.records[0] == original
     assert result.events == ()
 
 
@@ -2159,7 +2158,7 @@ def test_a_request_proven_never_begun_is_prepared_again_and_recovery_resolves(
     reissued = next(
         row for row in result.state.records.records if row.request_id == original.request_id
     )
-    assert reissued == restarted(original, 11.0).model_copy(update={"phase": RequestPhase.PREPARED})
+    assert reissued == original.model_copy(update={"phase": RequestPhase.PREPARED})
     barrier = result.state.records.recovery
     assert [check.resolution for check in barrier.checks] == ["safe-prepared"]
     assert barrier.phase == RecoveryPhase.READY
@@ -2207,6 +2206,17 @@ def test_a_second_inspection_of_a_request_already_reissued_changes_nothing() -> 
     assert again.state.records.records == once.state.records.records
 
 
+def hosted(state: CoreState, *hosts: HostEpoch) -> CoreState:
+    """``state`` as the epochs in ``hosts`` left it: the last host still holds the lease."""
+    records = state.records.model_copy(
+        update={
+            "hosts": hosts,
+            "recovery": RecoveryBarrier(epoch=hosts[-1].epoch, phase=RecoveryPhase.READY),
+        }
+    )
+    return state.model_copy(update={"records": records})
+
+
 @settings(max_examples=examples(pr=10, nightly=300))
 @given(
     died_at=st.integers(min_value=0, max_value=99),
@@ -2221,19 +2231,16 @@ def test_a_restart_gives_an_open_record_back_the_time_no_host_was_alive(
     The host dies with the request's limit not yet passed and restarts after it. The
     executor's answer to the restart's inspection says nothing new (unknown), and a deadline
     arriving before the moved limit ends nothing: the request still has the time it had when
-    the host died. (The crash walk that found it: a session turn begun and never delivered,
-    whose limit passed during four short-lived hosts, was ended before Sessions learned the
-    turn never started, so the attempt was lost.)
+    the host died. (#2381, the crash walk that found it: a session turn begun and never
+    delivered, whose limit passed during four short-lived hosts, was ended before Sessions
+    learned the turn never started, so the attempt was lost.)
     """
     original = pending_record(phase=phase)
-    state = recovering_state(original)
-    state = state.model_copy(
-        update={"run": state.run.model_copy(update={"now_at": float(died_at)})}
+    state = hosted(
+        recovering_state(original), HostEpoch(epoch=1, started_at=0.0, alive_at=float(died_at))
     )
     restart_at = float(died_at + downtime)
-    started = step(
-        reload(state), RecoveryStarted(epoch=1, now_at=restart_at, last_alive=float(died_at))
-    )
+    started = step(reload(state), RecoveryStarted(epoch=2, now_at=restart_at))
     moved = started.state.records.records[0]
     assert moved.until.at == min(original.until.at + downtime, state.run.deadline_at)
     assert moved.until.at > restart_at
@@ -2270,37 +2277,53 @@ def test_a_restart_gives_an_open_record_back_the_time_no_host_was_alive(
 
 
 RENEWAL = 10
-"""How long a live host goes without a durable write (it renews its lease at least this often)."""
+"""The longest a live host goes between proofs that it is alive (lease renewals or commits)."""
+
+
+@st.composite
+def host_lives(draw: st.DrawFn) -> tuple[list[float], float, float]:
+    """One host's life from its start: the renewals core records, its last commit, its death.
+
+    A live host proves itself alive (a renewal or a commit) at least every ``RENEWAL``
+    seconds, and core records its latest proof one way or the other. Other renewals reach
+    core late, out of order and more than once (a heartbeat renewal recorded by a later
+    iteration), each carrying the time it happened. The host dies at most one renewal
+    interval after its last proof.
+    """
+    gaps = draw(st.lists(st.integers(min_value=0, max_value=RENEWAL), max_size=4))
+    proofs = [0.0, *(float(sum(gaps[: i + 1])) for i in range(len(gaps)))]
+    last = proofs[-1]
+    renewals = draw(st.lists(st.sampled_from(proofs), max_size=6))
+    if draw(st.booleans()):
+        committed = last
+    else:
+        committed = draw(st.sampled_from(proofs))
+        renewals.insert(draw(st.integers(min_value=0, max_value=len(renewals))), last)
+    died = last + draw(st.integers(min_value=0, max_value=RENEWAL))
+    return renewals, committed, died
 
 
 @settings(max_examples=examples(pr=10, nightly=300))
 @given(
-    hosts=st.lists(
-        st.tuples(
-            st.integers(min_value=0, max_value=50),
-            st.integers(min_value=0, max_value=50),
-            st.integers(min_value=0, max_value=RENEWAL),
-            st.integers(min_value=0, max_value=50),
-        ),
-        min_size=1,
-        max_size=6,
+    lives=st.lists(
+        st.tuples(host_lives(), st.integers(min_value=0, max_value=200)), min_size=1, max_size=6
     ),
     past_deadline=st.booleans(),
 )
 def test_a_crash_loop_credits_a_limit_the_time_no_host_was_alive(
-    hosts: list[tuple[int, int, int, int]], *, past_deadline: bool
+    lives: list[tuple[tuple[list[float], float, float], int]], *, past_deadline: bool
 ) -> None:
-    """Across any crash sequence, an open limit moves by the real downtime, plus at most one
-    renewal interval per death.
+    """Across any history of host deaths, an open limit moves by the real downtime, plus at
+    most one renewal interval per death, and never back.
 
-    Each host commits last at some time, stays alive (idle, renewing its lease) a while,
-    dies at most one renewal after its last write, and the next host starts some time
-    later. A limit counted from the last commit would also gain each host's idle time, so a
-    crash loop could push it out without bound, a limit past the run deadline (core's own
-    cleanup budget) included. (REVIEW-4: a limit at 100, a commit at 10, a crash at 99 and a
-    restart at 100 moved the limit to 190, and every later crash added about 90 more.) A
-    limit uncapped by the run deadline also gains the whole downtime, the wait for a dead
-    host's lease included: a crash loop must not time out what no host could wait on.
+    Each host starts, renews its lease and commits, then dies; the next starts some time
+    later (waiting out the dead host's lease included). The credit is measured from the dead
+    host's last recorded renewal or commit, so it never falls short of the real downtime, and
+    exceeds it by at most the time between that proof and the death. (#2417: crediting from
+    the last commit alone also credited a live idle host's time, so a crash loop pushed a
+    limit out without bound. #2425: crediting only after the dead host's lease ended timed
+    out a request no host could wait on.) A limit past the run deadline (core's own cleanup
+    budget) is never capped, so there both bounds hold exactly.
     """
     original = pending_record(phase=RequestPhase.DISPATCHED)
     state = recovering_state(original)
@@ -2308,24 +2331,60 @@ def test_a_crash_loop_credits_a_limit_the_time_no_host_was_alive(
         state = state.model_copy(
             update={"run": state.run.model_copy(update={"deadline_at": original.until.at - 1.0})}
         )
-    clock = state.run.now_at
+    start = state.run.now_at
     downtime = 0.0
-    for epoch, (idle, down, unrenewed, work) in enumerate(hosts, start=1):
-        committed = clock + work
-        died = committed + idle
-        alive = max(committed, died - unrenewed)
-        restart = died + down
-        state = state.model_copy(update={"run": state.run.model_copy(update={"now_at": committed})})
-        state = step(
-            reload(state), RecoveryStarted(epoch=epoch, now_at=restart, last_alive=alive)
-        ).state
-        downtime += restart - died
-        clock = restart
+    for epoch, ((renewals, committed, died), down) in enumerate(lives, start=1):
+        state = step(reload(state), RecoveryStarted(epoch=epoch, now_at=start)).state
+        for renewal in renewals:
+            state = step(state, HostRenewed(epoch=epoch, now_at=start + renewal)).state
+        run = state.run.model_copy(update={"now_at": max(state.run.now_at, start + committed)})
+        state = state.model_copy(update={"run": run})
+        if epoch < len(lives):
+            downtime += down
+        start += died + down
 
     moved = state.records.records[0].until.at - original.until.at
-    assert 0 <= moved <= downtime + RENEWAL * len(hosts)
+    deaths = len(lives) - 1
+    assert 0 <= moved <= downtime + RENEWAL * deaths
     if past_deadline:
         assert moved >= downtime
+
+
+def test_a_saved_state_without_a_host_log_is_refused() -> None:
+    """A state saved before the host log existed fails to load, naming the missing log.
+
+    With a default, such a state would load with no log and credit no downtime for the
+    restart that follows, which brings back the limit that expires while no host was alive.
+    """
+    saved = json.loads(RecordsState(hosts=()).model_dump_json())
+    del saved["hosts"]
+    with pytest.raises(ValidationError, match="hosts"):
+        RecordsState.model_validate(saved)
+
+
+def test_the_host_log_keeps_only_what_the_last_downtime_needs() -> None:
+    """However many hosts die, core keeps the current epoch and the one before it."""
+    state = recovering_state(pending_record(phase=RequestPhase.DISPATCHED))
+    for epoch in range(1, 6):
+        state = step(reload(state), RecoveryStarted(epoch=epoch, now_at=10.0 * epoch)).state
+        state = step(state, HostRenewed(epoch=epoch, now_at=10.0 * epoch + 3)).state
+
+    assert state.records.hosts == (
+        HostEpoch(epoch=4, started_at=40.0, alive_at=43.0),
+        HostEpoch(epoch=5, started_at=50.0, alive_at=53.0),
+    )
+    assert downtime_of(state.records.hosts) == 7.0
+
+
+def test_a_renewal_from_an_epoch_that_is_not_current_is_refused() -> None:
+    """Only the host holding the lease renews it, so a renewal naming another epoch is a defect."""
+    state = step(
+        recovering_state(pending_record(phase=RequestPhase.DISPATCHED)),
+        RecoveryStarted(epoch=2, now_at=10.0),
+    ).state
+
+    with pytest.raises(ContractError, match="not current"):
+        step(state, HostRenewed(epoch=1, now_at=11.0))
 
 
 @pytest.mark.parametrize("status", [ObservationStatus.UNKNOWN, ObservationStatus.PENDING])
@@ -2390,7 +2449,7 @@ def test_a_limit_that_passed_while_the_host_was_down_waits_for_the_executors_rep
 
     waiting = step(reload(started.state), deadline)
 
-    assert waiting.state.records.records[0] == restarted(original, late)
+    assert waiting.state.records.records[0] == original
     assert not waiting.events
     assert not [r for r in waiting.requests if isinstance(r, BlockRequest)]
     dispatched = step(waiting.state, DispatchAuthorized(request_id=inspection.request_id))
@@ -2514,7 +2573,7 @@ def test_a_blocked_check_never_returns_to_pending(*, answers: int, restart_betwe
     original = pending_record(phase=RequestPhase.DISPATCHED)
     started = step(reload(recovering_state(original)), RecoveryStarted(epoch=1, now_at=11.0))
     deadline = ReconciliationDeadline(
-        request_id=original.request_id, now_at=restarted(original, 11.0).until.at + 1.0
+        request_id=original.request_id, now_at=original.until.at + 1.0
     )
     blocked = step(reload(started.state), deadline)
     assert [check.resolution for check in blocked.state.records.recovery.checks] == ["blocked"]

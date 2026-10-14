@@ -24,6 +24,7 @@ from vs_core.api import (
     EventCursor,
     HostFence,
     HostId,
+    HostRenewed,
     Inbox,
     KernelNotImplementedError,
     Observation,
@@ -372,6 +373,9 @@ class CoreRuntime[S: StrategyState]:
         self._publication_failure: OSError | ContractError | None = None
         # Latest time a lease renewal or check supplied; commits never use an earlier time.
         self._time_floor = 0.0
+        # When this host last renewed its lease, and the latest renewal queued for core.
+        self._renewed_at: float | None = None
+        self._renewal_queued_at = 0.0
         self._queue: deque[_Input[S] | _Flush] = deque()
         # Durable turn ends whose wait names a job its submission has not made core's yet.
         self._held: list[_Input[S]] = []
@@ -530,9 +534,6 @@ class CoreRuntime[S: StrategyState]:
         )
         if recheck:
             self._validate_provisional(provisional, host_id)
-        # When an earlier host last wrote, read before this host's acquisition writes: core
-        # credits open limits only the time since, not a live host's idle time.
-        last_alive = self._store.last_alive()
         fence = self._store.acquire(host_id, now=now_at, duration=lease_duration)
         if fence is None:
             message = "runtime lease unavailable"
@@ -551,11 +552,7 @@ class CoreRuntime[S: StrategyState]:
         try:
             self._consume(
                 _Input[S](
-                    event=RecoveryStarted(
-                        epoch=fence.epoch,
-                        now_at=now_at,
-                        last_alive=last_alive,
-                    ),
+                    event=RecoveryStarted(epoch=fence.epoch, now_at=now_at),
                     now_at=now_at,
                 )
             )
@@ -596,7 +593,28 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime lease renewal rejected"
             raise RuntimeCommitError(message)
         self._fence = renewed
+        self._renewed_at = self._time_floor
         return renewed
+
+    def record_renewal(self) -> None:
+        """Queue the latest lease renewal for core, which records that this host was alive then.
+
+        Core credits open limits with the time no host was alive, measured from the dead
+        host's last recorded renewal or commit, so the loop records each renewal before it
+        settles. A renewal core already holds, or one already queued, is not queued again.
+        """
+        self._require_active(queue_only=True)
+        renewed_at = self._renewed_at
+        hosts = self.record.envelope.core.records.hosts
+        if (
+            renewed_at is None
+            or self._fence is None
+            or not hosts
+            or renewed_at <= max(hosts[-1].alive_at, self._renewal_queued_at)
+        ):
+            return
+        self._renewal_queued_at = renewed_at
+        self.submit(HostRenewed(epoch=self._fence.epoch, now_at=renewed_at), now_at=renewed_at)
 
     def release_lease(self, *, now_at: float) -> None:
         """Give the lease back so a restart need not wait for it to expire.

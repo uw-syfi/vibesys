@@ -192,7 +192,7 @@ def test_legacy_aggregate_is_not_certified_without_source_inspection() -> None:
         }
     )
     state = state.model_copy(
-        update={"records": core.RecordsState(records=(source,), children=(child,))}
+        update={"records": core.RecordsState(hosts=(), records=(source,), children=(child,))}
     )
     recovered = core.step(reload(state), core.RecoveryStarted(epoch=2, now_at=1.0))
     assert recovered.state.records.children == (child,)

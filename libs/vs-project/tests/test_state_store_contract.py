@@ -323,37 +323,6 @@ def test_fault_histories_preserve_prior_or_complete_successor(
             assert store.load() == latest
 
 
-@given(writes=st.lists(st.sampled_from(["renew", "commit"]), max_size=4), released=st.booleans())
-@settings(max_examples=examples(pr=5, nightly=20))
-def test_last_alive_is_the_time_of_the_last_host_write(
-    make_store: StoreFactory,
-    tmp_path_factory: pytest.TempPathFactory,
-    writes: list[str],
-    *,
-    released: bool,
-) -> None:
-    """``last_alive`` is when a host last wrote: the next host learns when the last was alive."""
-    store = make_store(tmp_path_factory.mktemp("store"), ())
-    assert store.last_alive() is None
-    fence = store.acquire("host-a", now=10, duration=100)
-    assert fence is not None
-    assert store.last_alive() == 10
-    now = 10
-    revision = None
-    for write in writes:
-        now += 5
-        if write == "renew":
-            assert store.renew(fence, now=now, duration=100) is not None
-        else:
-            envelope = _envelope(0 if revision is None else revision + 1)
-            assert isinstance(store.commit(revision, envelope, fence, now=now), Committed)
-            revision = envelope.revision
-        assert store.last_alive() == now
-    if released:
-        assert store.release(fence, now=now + 1)
-        assert store.last_alive() == now + 1
-
-
 def test_same_host_reacquires_only_after_expiry_with_a_new_epoch(
     make_store: StoreFactory, tmp_path: Path
 ) -> None:

@@ -1571,8 +1571,8 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
     else:
         if isinstance(event, RecoveryStarted):
             # Before the clock moves, while ``run.now_at`` is still the dead host's last commit.
-            credited = records.credit_downtime(state.records, state.run, event)
-            state = state.model_copy(update={"records": credited})
+            opened = records.open_host_epoch(state.records, state.run, event)
+            state = state.model_copy(update={"records": opened})
         state = _advance_event_time(state, event)
         result = propagate(state, (event,), dispatch, _event_cause(state, event))
     unmet = unmet_waits(given, result.state)

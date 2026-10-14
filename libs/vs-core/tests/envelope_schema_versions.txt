@@ -1,3 +1,4 @@
 # version sha256-of-RunEnvelope[StrategyState]-JSON-schema; see test_envelope_schema_version.py
 # A shape change adds a line for the next version; never edit an existing line.
 7 1913454915d8978e2b235a00f6546839dcab7395a88f61be6f660201a3ecad28
+8 51df898a11220aca248b2584a1ef48bcd63c8b370febbf13d785736b90f033c9

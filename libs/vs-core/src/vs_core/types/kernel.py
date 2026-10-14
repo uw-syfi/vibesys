@@ -149,7 +149,7 @@ class CoreState(Value):
     sessions: SessionsState = SessionsState()
     evaluation: EvaluationState = EvaluationState()
     settlement: SettlementState = SettlementState()
-    records: RecordsState = RecordsState()
+    records: RecordsState = RecordsState(hosts=())
 
 
 class CoreView(Value):

@@ -139,7 +139,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         state.model_copy(
             update={
                 "records": core.RecordsState(
-                    recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY)
+                    hosts=(), recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY)
                 )
             }
         ),
@@ -243,6 +243,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                 ),
             ),
             "records": core.RecordsState(
+                hosts=(),
                 recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY),
                 records=(
                     core.RequestRecord(

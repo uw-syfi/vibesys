@@ -314,17 +314,23 @@ def open_timed_world(
 
 @dataclass
 class Observed:
-    """What the run's commits showed: when the run first read as paused."""
+    """What the run's commits showed: when the run first read as paused, and host liveness."""
 
     clock: VirtualClock
     paused_at: float | None = None
+    alive: list[tuple[float, float]] = field(default_factory=list)
+    """For each commit, its virtual time and the latest time core holds the host alive at."""
 
     def committed(self, previous: object, current: RuntimeRecord[Any]) -> None:
-        """Note the first commit that leaves the run paused."""
+        """Note the first commit that leaves the run paused, and every commit's liveness."""
         del previous
-        paused = current.envelope.core.run.status == core.RunStatus.PAUSED
+        state = current.envelope.core
+        paused = state.run.status == core.RunStatus.PAUSED
         if paused and self.paused_at is None:
             self.paused_at = self.clock.now()
+        self.alive.append(
+            (self.clock.now(), max(state.records.hosts[-1].alive_at, state.run.now_at))
+        )
 
 
 @dataclass(frozen=True)
@@ -352,6 +358,8 @@ class Timed:
     """The run's state when the loop returned."""
     failure: Exception | None = None
     """What the loop raised (halting the run); None when it returned or was cancelled."""
+    alive: tuple[tuple[float, float], ...] = ()
+    """For each commit, its virtual time and the latest time core held the host alive at."""
 
     @property
     def wall_s(self) -> float:
@@ -491,6 +499,7 @@ async def _play(path: Path, clock: VirtualClock, strategy: SkeletonStrategy, pla
             holds,
             process.shell.record.envelope.core,
             failure if isinstance(failure, Exception) else None,
+            tuple(observed.alive),
         )
 
 

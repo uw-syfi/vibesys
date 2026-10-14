@@ -116,7 +116,7 @@ def new_core_state(
     )
     return CoreState(
         registry=selected.operations,
-        records=RecordsState(recovery=RecoveryBarrier(phase=RecoveryPhase.READY)),
+        records=RecordsState(hosts=(), recovery=RecoveryBarrier(phase=RecoveryPhase.READY)),
         run=RunState(
             run_id=RunId(root=run_id),
             now_at=0.0,

@@ -397,6 +397,7 @@ class _Loop:
             self._raise_if_lease_lost()
             now = self._read()
             self._renew(now)
+            self._shell.record_renewal()
             self._woken.clear()
             for event in self._due_controls(now):
                 self._shell.submit(event, now_at=now)
@@ -506,11 +507,15 @@ class _Loop:
         )
 
     def _signature(self) -> object:
-        """Everything that changes when work happened; time and the revision counter do not."""
+        """Everything that changes when work happened; time, liveness and the revision do not."""
         record = self._shell.record
         core = record.envelope.core
         quiet = core.model_copy(
-            update={"revision": 0, "run": core.run.model_copy(update={"now_at": 0.0})}
+            update={
+                "revision": 0,
+                "run": core.run.model_copy(update={"now_at": 0.0}),
+                "records": core.records.model_copy(update={"hosts": ()}),
+            }
         )
         return (quiet, record.envelope.strategy, record.delivery_cursor, self._shell.dispatched)
 
@@ -544,30 +549,29 @@ class _Loop:
 
         That is a request finishing, an operator stop, the time core asked for next (a
         job poll, or a wake the strategy requested), the next control poll (pause and
-        steer are read there) or the run deadline. A turn can run for many minutes, so
-        these are timers of the wait itself; the heartbeat renews the lease. With none
-        due the loop does not sleep at all.
+        steer are read there), the run deadline, or the next lease renewal, which the next
+        iteration records in core. A turn can run for many minutes, so these are timers of
+        the wait itself; the heartbeat renews the lease.
         """
         now = self._read()
-        wake = [due] if due is not None and due > now else []
+        wake = [self._renewed_at + self._config.lease_duration / 3]
+        if due is not None and due > now:
+            wake.append(due)
         if self._controls is not None:
             wake.append(now + self._config.control_poll_interval)
         if not self._deadline_stop:
             wake.append(self._shell.record.envelope.core.run.deadline_at)
-        await self._race(max(min(wake) - now, 0.0) if wake else None)
+        await self._race(max(min(wake) - now, 0.0))
 
-    async def _race(self, seconds: float | None) -> None:
+    async def _race(self, seconds: float) -> None:
         """Wait for a request to finish, the operator to stop, or ``seconds`` to pass."""
         waiting: list[asyncio.Future[Any]] = [
             asyncio.ensure_future(self._shell.wait_for_flight()),
             asyncio.ensure_future(self._woken.wait()),
+            asyncio.create_task(
+                self._clock.sleep(max(seconds, self._config.min_sleep)), name=WAIT_TASK
+            ),
         ]
-        if seconds is not None:
-            waiting.append(
-                asyncio.create_task(
-                    self._clock.sleep(max(seconds, self._config.min_sleep)), name=WAIT_TASK
-                )
-            )
         if self._lease is not None:
             waiting.append(self._lease)
         try:

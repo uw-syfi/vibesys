@@ -95,7 +95,7 @@ def recovering_state(*records: RequestRecord) -> CoreState:
     state = initial_state()
     return state.model_copy(
         update={
-            "records": RecordsState(records=records, recovery=RecoveryBarrier()),
+            "records": RecordsState(hosts=(), records=records, recovery=RecoveryBarrier()),
             "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
         }
     )

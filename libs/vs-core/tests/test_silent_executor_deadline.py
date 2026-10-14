@@ -76,7 +76,9 @@ def _silent(phase: RequestPhase, status: ObservationStatus, *, terminal: bool) -
     return state.model_copy(
         update={
             "records": RecordsState(
-                records=(record,), recovery=RecoveryBarrier(epoch=1, phase=RecoveryPhase.READY)
+                hosts=(),
+                records=(record,),
+                recovery=RecoveryBarrier(epoch=1, phase=RecoveryPhase.READY),
             )
         }
     )

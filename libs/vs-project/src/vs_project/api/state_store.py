@@ -157,14 +157,6 @@ class StateStore(Protocol):
         """Atomically replace active state with an explicit blocked record."""
         ...
 
-    def last_alive(self) -> float | None:
-        """When a host last wrote here (acquire, renew, commit or release); None before any.
-
-        A host that wrote at that time was alive then, and a live host renews its lease, so
-        a dead host died no earlier than this and no later than one renewal after it.
-        """
-        ...
-
     def acquire(self, host_id: str, now: float, duration: float) -> StoreFence | None:
         """Acquire an absent or expired lease with a new epoch.
 

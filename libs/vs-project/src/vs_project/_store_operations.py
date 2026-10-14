@@ -95,12 +95,6 @@ class StoreOperations(ABC):
         with self._transaction():
             return self._read().record
 
-    def last_alive(self) -> float | None:
-        """Read the time watermark under the store lock; None before any acquisition."""
-        with self._transaction():
-            document = self._read()
-            return None if document.fence is None else document.observed_at
-
     def acquire(self, host_id: str, now: float, duration: float) -> StoreFence | None:
         """Claim only absent or expired ownership, increasing the epoch."""
         timing = _Time(now=now, duration=duration)

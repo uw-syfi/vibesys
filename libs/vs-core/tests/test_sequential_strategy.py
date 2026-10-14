@@ -457,6 +457,7 @@ def test_sequential_strategy_has_no_optional_capabilities_or_product_state() -> 
                 invocations=result.state.sessions.invocations,
             ),
             "records": core.RecordsState(
+                hosts=(),
                 records=tuple(
                     record.model_copy(
                         update={
@@ -479,7 +480,7 @@ def test_sequential_strategy_has_no_optional_capabilities_or_product_state() -> 
                         }
                     )
                     for record in result.state.records.records
-                )
+                ),
             ),
         }
     )
