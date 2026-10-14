@@ -10,14 +10,14 @@ from typing import TYPE_CHECKING
 
 from ._waits import record_waits
 from .types.common import ContractValidationError, RequestId
-from .types.sessions import session_may_wait, turn_acquires
+from .types.sessions import session_may_wait, turn_may_wait
 from .types.waits import WaitOn
 
 if TYPE_CHECKING:
     from .types.common import InvocationRef, SessionId
     from .types.kernel import SessionsContext
     from .types.records import Request
-    from .types.sessions import Invocation, SessionsState, SessionView
+    from .types.sessions import InterruptClaim, Invocation, SessionsState, SessionView
 
 
 def session_row(state: SessionsState, identity: SessionId) -> SessionView | None:
@@ -53,12 +53,21 @@ def awaiting(
     not recorded yet has not ended. A session left naming nothing carries no wait, which the
     step's wait check reports as a waiting session without one.
     """
+    return session.model_copy(update={"wait": waiting_on(session.wait, context, *requests)})
+
+
+def waiting_on(
+    wait: WaitOn | None, context: SessionsContext, *requests: Request | RequestId
+) -> WaitOn | None:
+    """A wait on *requests* and on the requests of *wait* still open; None if none is left.
+
+    Requests of the old wait that ended drop out; one this step sent and core has not
+    recorded yet has not ended. A request named by identity that already ended is not named.
+    """
     kept = (
         ()
-        if session.wait is None
-        else tuple(
-            request for request in session.wait.requests if not request_ended(context, request)
-        )
+        if wait is None
+        else tuple(request for request in wait.requests if not request_ended(context, request))
     )
     named_now: list[RequestId] = []
     for request in requests:
@@ -67,10 +76,10 @@ def awaiting(
                 named_now.append(request)
             continue
         if request.request_id is None:
-            raise ContractValidationError("request_id", "a session waits on a named request")
+            raise ContractValidationError("request_id", "a wait names a request by its identity")
         named_now.append(request.request_id)
     named = tuple(dict.fromkeys((*kept, *named_now)))
-    return session.model_copy(update={"wait": WaitOn(requests=named) if named else None})
+    return WaitOn(requests=named) if named else None
 
 
 def request_ended(context: SessionsContext, request: RequestId) -> bool:
@@ -80,8 +89,8 @@ def request_ended(context: SessionsContext, request: RequestId) -> bool:
 
 
 def replace_invocation(state: SessionsState, invocation: Invocation) -> SessionsState:
-    """*state* with *invocation* stored; a turn that stopped acquiring drops its wait."""
-    if invocation.wait is not None and not turn_acquires(invocation):
+    """*state* with *invocation* stored; a turn that stopped acquiring or yielding drops its wait."""
+    if invocation.wait is not None and not turn_may_wait(invocation):
         invocation = invocation.model_copy(update={"wait": None})
     rows = tuple(
         invocation if row.invocation == invocation.invocation else row for row in state.invocations
@@ -89,3 +98,36 @@ def replace_invocation(state: SessionsState, invocation: Invocation) -> Sessions
     if invocation_row(state, invocation.invocation) is None:
         rows = (*rows, invocation)
     return state.model_copy(update={"invocations": rows})
+
+
+def replace_claim(state: SessionsState, claim: InterruptClaim) -> SessionsState:
+    """*state* with the interruption *claim* stored; a claim that stopped draining drops its wait."""
+    if claim.wait is not None and claim.phase != "draining":
+        claim = claim.model_copy(update={"wait": None})
+    rows = tuple(claim if row.invocation == claim.invocation else row for row in state.interrupts)
+    if all(row.invocation != claim.invocation for row in state.interrupts):
+        rows = (*rows, claim)
+    return state.model_copy(update={"interrupts": rows})
+
+
+def awaiting_checkpoint(
+    state: SessionsState,
+    context: SessionsContext,
+    ref: InvocationRef,
+    *requests: Request | RequestId,
+) -> SessionsState:
+    """*state* with the yield of *ref* and its draining interruption waiting on *requests* too.
+
+    A turn whose yield is unpublished, and a draining interruption of it, wait on the request
+    that retains the turn's checkpoint, or on the inspection of the turn that lets core
+    request one. The transition that sends or confirms that request names it here.
+    """
+    turn = invocation_row(state, ref)
+    if turn is not None and turn.pending_suspension is not None:
+        wait = waiting_on(turn.wait, context, *requests)
+        state = replace_invocation(state, turn.model_copy(update={"wait": wait}))
+    claim = next((row for row in state.interrupts if row.invocation == ref), None)
+    if claim is not None and claim.phase == "draining":
+        wait = waiting_on(claim.wait, context, *requests)
+        state = replace_claim(state, claim.model_copy(update={"wait": wait}))
+    return state

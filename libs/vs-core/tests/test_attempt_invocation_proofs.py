@@ -211,6 +211,7 @@ def invocation_fixture(
         refund=1,
         phase="draining",
         checkpoint_authority=RequestId(root="checkpoint"),
+        wait=None,
     )
     if receipt_kind == "foreign-request-decision":
         request = request.model_copy(update={"decision_id": DecisionId(root="foreign")})

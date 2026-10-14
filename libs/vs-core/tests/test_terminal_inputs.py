@@ -104,6 +104,7 @@ def test_unfinished_interruption_claims_fence_terminal_publication(
         authority=core.RequestId(root="interrupt"),
         refund=0,
         phase=phase,
+        wait=None,
     )
     state = state.model_copy(update={"sessions": core.SessionsState(interrupts=(claim,))})
     result = drain(state)

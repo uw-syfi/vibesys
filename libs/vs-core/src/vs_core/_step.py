@@ -670,9 +670,7 @@ def _stall_entries(
     signals = (
         *(
             CheckpointStalled(invocation=invocation)
-            for invocation in stalled_checkpoint_waits(
-                state.sessions, state.records.records, in_flight
-            )
+            for invocation in stalled_checkpoint_waits(state.sessions, state.records, in_flight)
         ),
         *(
             AcquisitionStalled(invocation=invocation)

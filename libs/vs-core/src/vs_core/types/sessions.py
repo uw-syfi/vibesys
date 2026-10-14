@@ -123,6 +123,11 @@ def turn_acquires(invocation: Invocation) -> bool:
     return invocation.phase == SessionPhase.ACQUIRING and invocation.observation is None
 
 
+def turn_may_wait(invocation: Invocation) -> bool:
+    """Whether a turn may carry a wait: while it acquires, or while its yield is unpublished."""
+    return turn_acquires(invocation) or invocation.pending_suspension is not None
+
+
 def session_waits(phase: SessionPhase) -> bool:
     """Whether a session in this phase waits on a request's result."""
     match phase:
@@ -229,14 +234,17 @@ class Invocation(Value):
     duration. The turn's own requests count it from their dispatch, not from this admission.
     Admission always sets it; None is a turn whose ``until`` is already absolute."""
     wait: WaitOn | None = None
-    """What an acquiring turn waits on: its session, whose acquisition carries it on."""
+    """What the turn waits on. While it acquires: its session, whose acquisition carries it
+    on. While its yield is unpublished: the checkpoint request that retains its workspace, or
+    the inspection of the turn that lets core request one."""
 
     @model_validator(mode="after")
-    def waits_only_while_acquiring(self) -> Invocation:
-        """Only a turn still acquiring waits; the other half holds after each step."""
-        if self.wait is not None and not turn_acquires(self):
+    def waits_only_while_waiting(self) -> Invocation:
+        """Only a turn acquiring or yielding waits; the other half holds after each step."""
+        if self.wait is not None and not turn_may_wait(self):
             raise ContractValidationError(
-                "wait", f"a turn in phase {self.phase.value} with a result acquires nothing"
+                "wait",
+                f"a turn in phase {self.phase.value} acquires nothing and publishes no yield",
             )
         return self
 
@@ -295,6 +303,16 @@ class InterruptClaim(Value):
     phase: Literal["pending", "draining", "checkpointed", "completed", "blocked"] = "pending"
     checkpoint_authority: RequestId | None = None
     refunded_charge: ChargeId | None = None
+    wait: WaitOn | None
+    """What a draining claim waits on once its turn ended: the checkpoint request that
+    retains the interrupted turn's workspace."""
+
+    @model_validator(mode="after")
+    def waits_only_while_draining(self) -> InterruptClaim:
+        """Only a draining claim waits; the other half holds after each step."""
+        if self.wait is not None and self.phase != "draining":
+            raise ContractValidationError("wait", f"a {self.phase} interruption waits on nothing")
+        return self
 
 
 class SessionAcquisitionGroup(Value):
@@ -600,6 +618,21 @@ class AcquisitionStalled(Value):
 
     kind: Literal["acquisition_stalled"] = "acquisition_stalled"
     invocation: InvocationRef
+
+
+class InvocationCheckpointPending(Value):
+    """Internal signal: the checkpoint of a terminal turn is requested as *request_id*.
+
+    The attempt that owns the turn raises it in the step it sends the checkpoint request, or
+    when the request it was asked for is already out. A turn whose yield is unpublished, and a
+    draining interruption of it, then name that request as what they wait on. A checkpoint the
+    attempt declines raises nothing, so the waits it would have carried have nothing to end
+    them and the step ends them by name (``CheckpointStalled``).
+    """
+
+    kind: Literal["invocation_checkpoint_pending"] = "invocation_checkpoint_pending"
+    invocation: InvocationRef
+    request_id: RequestId
 
 
 class SessionWaitLapsed(Value):
@@ -922,7 +955,8 @@ type SessionsEvent = Annotated[
     | RunInvocationCheckpointObserved
     | CheckpointStalled
     | AcquisitionStalled
-    | SessionWaitLapsed,
+    | SessionWaitLapsed
+    | InvocationCheckpointPending,
     Field(discriminator="kind"),
 ]
 type SessionRequest = Annotated[

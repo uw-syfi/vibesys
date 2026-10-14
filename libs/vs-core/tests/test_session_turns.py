@@ -337,7 +337,10 @@ def test_leaf_preserves_input_and_interrupt_authorities() -> None:
         )
     )
     claim = core.InterruptClaim(
-        invocation=prior, authority=core.RequestId(root="interrupt"), refund=1
+        invocation=prior,
+        authority=core.RequestId(root="interrupt"),
+        refund=1,
+        wait=None,
     )
     state = core.initial_state().model_copy(
         update={"sessions": core.SessionsState(inputs=(occurrence,), interrupts=(claim,))}
@@ -1135,6 +1138,7 @@ def interrupted_attempt_state(
             if phase in ("checkpointed", "completed")
             else None,
             "refunded_charge": paid_charge if phase == "completed" else None,
+            "wait": None,
         }
     )
     session = core.SessionView(
@@ -1705,7 +1709,7 @@ def test_declared_cancellation_is_durable_idempotent_and_preserves_refund_author
         waiting_turn_state(spec), core.TurnInputsReserved(invocation=ref, input_ids=())
     )
     authority = core.RequestId(root="declared-interrupt")
-    claim = core.InterruptClaim(invocation=ref, authority=authority, refund=1)
+    claim = core.InterruptClaim(invocation=ref, authority=authority, refund=1, wait=None)
     state = dispatched.state.model_copy(
         update={"sessions": dispatched.state.sessions.model_copy(update={"interrupts": (claim,)})}
     )

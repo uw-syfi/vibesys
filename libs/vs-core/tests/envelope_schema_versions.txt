@@ -2,3 +2,4 @@
 # append-only: a shape change adds a line for the next version. scripts/check_stale_revert.py
 # fails a change that edits or drops a line the base branch has.
 8 6ccc98db52beec5fb6e259faf70fb4d8c710748a2381efcf83e9fda69c13490a
+9 90337f8f744d2b0da07246cd383f29207682ec732e91f1102f0eeb9dbdfd7d8e

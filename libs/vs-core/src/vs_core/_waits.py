@@ -6,10 +6,11 @@ a request the shell still holds, an event committed but not yet applied (the out
 timer. A wait with none of these is an orphan: nothing will ever end it, so the run would sit
 until its deadline. ``orphan_waits`` reports it at the step that created it.
 
-An owned job, a session and an acquiring turn record what they wait on when they start
-waiting (``WaitOn``: a job's poll timer or the poll in flight; the session's ensure, turn,
-inspection or close; the turn's session), so their producers are read from that record and
-nothing is inferred. A waiter may name another waiting entity only as ``MAY_WAIT_ON`` allows
+An owned job, a session, an acquiring turn, a yield and an interruption record what they
+wait on when they start waiting (``WaitOn``: a job's poll timer or the poll in flight; the
+session's ensure, turn, inspection or close; the turn's session; the checkpoint request or
+turn inspection a yield or a draining interruption needs), so their producers are read from
+that record and nothing is inferred. A waiter may name another waiting entity only as ``MAY_WAIT_ON`` allows
 (I1: the graph is acyclic), and the entity carries it while its own recorded wait does. A named request whose
 answer the shell committed but has not applied (a turn's reply rides its session's owner
 event, a step after the turn's own end) still counts. A named request that ends without
@@ -39,7 +40,7 @@ from typing import TYPE_CHECKING, assert_never
 
 from ._dispatch_episode import episode_ended
 from ._proofs import blocked_unnamed, dependency_failed
-from .types.attempts import AttemptPhase, SnapshotAndRetain
+from .types.attempts import AttemptPhase
 from .types.common import (
     ContractValidationError,
     InvocationRef,
@@ -55,10 +56,8 @@ from .types.records import (
     RequestPhase,
 )
 from .types.sessions import (
-    InspectTurn,
     SessionPhase,
     SessionWaitLapsed,
-    SnapshotAndRetainRun,
     session_waits,
     turn_acquires,
 )
@@ -458,6 +457,26 @@ def _turn_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
     )
 
 
+def _checkpoint_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
+    """Every yield's and draining interruption's recorded wait, by the subject naming it."""
+    yields = (
+        (
+            WaitSubject(
+                kind=WaitKind.YIELD_PUBLICATION, identity=row.invocation.invocation_id.root
+            ),
+            row.wait,
+        )
+        for row in core.sessions.invocations
+        if row.pending_suspension is not None and row.wait is not None
+    )
+    claims = (
+        (WaitSubject(kind=WaitKind.INTERRUPT, identity=row.invocation.invocation_id.root), row.wait)
+        for row in core.sessions.interrupts
+        if row.wait is not None
+    )
+    return (*yields, *claims)
+
+
 def _session_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
     """Every waiting session's recorded wait, by the subject that names the session."""
     return tuple(
@@ -473,6 +492,7 @@ def recorded_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
         *((subject, wait) for subject, _, wait in _job_waits(core)),
         *_session_waits(core),
         *_turn_waits(core),
+        *_checkpoint_waits(core),
     )
 
 
@@ -569,41 +589,36 @@ def unmet_waits(before: CoreState, after: CoreState) -> tuple[str, ...]:
         for turn in after.sessions.invocations
         if turn_acquires(turn) and turn.wait is None and turn not in turns
     )
+    named.extend(_unnamed_checkpoint_waits(before, after))
     return tuple(named)
 
 
-def _checkpoint_records(
-    records: Iterable[RequestRecord], invocation: InvocationRef
-) -> list[RequestRecord]:
-    """The records that can still end a yield: its checkpoint, or the inspection of its turn.
+def _unnamed_checkpoint_waits(before: CoreState, after: CoreState) -> list[str]:
+    """A yield or a draining interruption the step left waiting on its checkpoint unnamed.
 
-    An inspection can end it because the turn's acceptance is what lets the checkpoint be
-    requested. Both are about exactly this invocation.
+    The stall ends such a wait in the step that finds it, so one still there at the end is a
+    transition that forgot to name the request.
     """
-    return [
-        row
-        for row in records
-        if isinstance(row.request, SnapshotAndRetain | SnapshotAndRetainRun | InspectTurn)
-        and row.request.invocation == invocation
+    turns = before.sessions.invocations
+    claims = before.sessions.interrupts
+    named = [
+        f"turn {turn.invocation.invocation_id.root} yields without a wait"
+        for turn in after.sessions.invocations
+        if turn.pending_suspension is not None and turn.wait is None and turn not in turns
     ]
-
-
-def _checkpoint_producers(
-    records: Sequence[RequestRecord],
-    in_flight: Sequence[Request],
-    outbox: frozenset[RequestId],
-    invocation: InvocationRef,
-) -> frozenset[Producer]:
-    """What can end a wait on a turn's checkpoint: the checkpoint or turn inspection, live or sent."""
-    found = _from_records(
-        _with_successors(records, _checkpoint_records(records, invocation)), outbox
-    )
-    sent = any(
-        isinstance(request, SnapshotAndRetain | SnapshotAndRetainRun | InspectTurn)
-        and request.invocation == invocation
-        for request in in_flight
-    )
-    return found | {Producer.PENDING_REQUEST} if sent else found
+    for claim in after.sessions.interrupts:
+        turn = next(
+            (row for row in after.sessions.invocations if row.invocation == claim.invocation), None
+        )
+        if (
+            claim.wait is None
+            and draining_without_cancel(after.sessions, claim.invocation)
+            and (claim not in claims or turn not in turns)
+        ):
+            named.append(
+                f"interruption of {claim.invocation.invocation_id.root} drains without a wait"
+            )
+    return named
 
 
 def draining_without_cancel(sessions: SessionsState, invocation: InvocationRef) -> bool:
@@ -648,22 +663,67 @@ def _checkpoint_waiters(sessions: SessionsState) -> tuple[InvocationRef, ...]:
     )
 
 
+def _yield_stalled(
+    records: RecordsState, sessions: SessionsState, turn: Invocation, sent: frozenset[RequestId]
+) -> bool:
+    """Whether *turn*'s unpublished yield names nothing live: no request, or only ended ones."""
+    return turn.pending_suspension is not None and (
+        turn.wait is None or not _live(records, sessions, turn.wait, frozenset(), sent)
+    )
+
+
+def _interrupt_stalled(
+    records: RecordsState, sessions: SessionsState, turn: Invocation, sent: frozenset[RequestId]
+) -> bool:
+    """Whether a draining interruption of *turn* waits on its checkpoint and names nothing live."""
+    claim = next((row for row in sessions.interrupts if row.invocation == turn.invocation), None)
+    return (
+        claim is not None
+        and draining_without_cancel(sessions, turn.invocation)
+        and (claim.wait is None or not _live(records, sessions, claim.wait, frozenset(), sent))
+    )
+
+
+def checkpoint_stalls(
+    sessions: SessionsState,
+    records: RecordsState,
+    invocation: InvocationRef,
+    sent: frozenset[RequestId] = frozenset(),
+) -> tuple[bool, bool]:
+    """Whether the yield of *invocation*, and its interruption, have nothing left to end them.
+
+    The interruption also counts as stalled while it waits on a refund (``awaiting_refund``).
+    *sent* names the requests the step sent and has not recorded yet.
+    """
+    turn = next((row for row in sessions.invocations if row.invocation == invocation), None)
+    if turn is None:
+        return False, False
+    return (
+        _yield_stalled(records, sessions, turn, sent),
+        awaiting_refund(sessions, invocation) or _interrupt_stalled(records, sessions, turn, sent),
+    )
+
+
 def stalled_checkpoint_waits(
-    sessions: SessionsState, records: Sequence[RequestRecord], in_flight: Sequence[Request] = ()
+    sessions: SessionsState, records: RecordsState, in_flight: Sequence[Request] = ()
 ) -> tuple[InvocationRef, ...]:
     """The invocations whose checkpoint wait nothing live or in flight can end.
 
     Two waits hang on a checkpoint: a suspension core promised to publish, and an accepted
-    interruption that must retain the workspace before it refunds. *in_flight* holds the
-    requests a step has produced but not yet recorded as records. An invocation named here
-    would stall the run, so the step ends the waits instead (see ``CheckpointStalled``):
-    this is the resolver every checkpoint wait is guaranteed.
+    interruption that must retain the workspace before it refunds. Each records the request
+    that can end it (``Invocation.wait``, ``InterruptClaim.wait``): the checkpoint request the
+    owning attempt confirmed (``InvocationCheckpointPending``), or the turn inspection that
+    lets core request one. A wait that names nothing, because the checkpoint was declined, or
+    only requests that ended, has nothing left. *in_flight* holds the requests a step has
+    produced but not yet recorded. An invocation named here would stall the run, so the step
+    ends the waits instead (see ``CheckpointStalled``): this is the resolver every checkpoint
+    wait is guaranteed.
     """
+    sent = frozenset(request.request_id for request in in_flight if request.request_id)
     return tuple(
         invocation
         for invocation in _checkpoint_waiters(sessions)
-        if awaiting_refund(sessions, invocation)
-        or not _checkpoint_producers(records, in_flight, frozenset(), invocation)
+        if any(checkpoint_stalls(sessions, records, invocation, sent))
     )
 
 
@@ -794,14 +854,6 @@ def subjects(core: CoreState) -> tuple[WaitSubject, ...]:
     return tuple(WaitSubject(kind=kind, identity=identity) for kind, identity in found)
 
 
-def _invocation(core: CoreState, identity: str) -> InvocationRef:
-    return next(
-        row.invocation
-        for row in core.sessions.invocations
-        if row.invocation.invocation_id.root == identity
-    )
-
-
 def _dispatch_producers(core: CoreState, identity: str) -> frozenset[Producer]:
     """A prepared request is dispatched by the shell, unless core can never allow it."""
     if identity in {row.root for row in undispatchable_requests(core)}:
@@ -850,6 +902,18 @@ def _owned_job_producers(core: CoreState, identity: str) -> frozenset[Producer]:
 
 type _Derivation = Callable[[CoreState, str, frozenset[RequestId]], frozenset[Producer]]
 
+
+def _recorded_wait_producers(kind: WaitKind) -> _Derivation:
+    """What can end a recorded wait of *kind*; a waiter of that kind without one, nothing."""
+
+    def derive(core: CoreState, identity: str, queued: frozenset[RequestId]) -> frozenset[Producer]:
+        subject = WaitSubject(kind=kind, identity=identity)
+        wait = next((wait for named, wait in recorded_waits(core) if named == subject), None)
+        return frozenset() if wait is None else wait_producers(core, wait, queued)
+
+    return derive
+
+
 #: How the producers of each kind of wait are derived, from the waiting entity's identity.
 #: A release recorded after the attempt stopped listening is not re-announced, and a refund is
 #: a signal of the step that retained the checkpoint, so nothing can produce either.
@@ -857,12 +921,8 @@ _DERIVATIONS: Mapping[WaitKind, _Derivation] = MappingProxyType(
     {
         WaitKind.SESSION: _session_wait_producers,
         WaitKind.TURN_ACQUISITION: _turn_wait_producers,
-        WaitKind.YIELD_PUBLICATION: lambda core, identity, outbox: _checkpoint_producers(
-            core.records.records, (), outbox, _invocation(core, identity)
-        ),
-        WaitKind.INTERRUPT: lambda core, identity, outbox: _checkpoint_producers(
-            core.records.records, (), outbox, _invocation(core, identity)
-        ),
+        WaitKind.YIELD_PUBLICATION: _recorded_wait_producers(WaitKind.YIELD_PUBLICATION),
+        WaitKind.INTERRUPT: _recorded_wait_producers(WaitKind.INTERRUPT),
         WaitKind.RECOVERY_CHECK: lambda core, identity, _outbox: _recovery_check_producers(
             core, identity
         ),

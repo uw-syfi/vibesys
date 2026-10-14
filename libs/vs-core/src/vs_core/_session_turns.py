@@ -29,6 +29,7 @@ from ._session_admission import (
 )
 from ._session_checkpoints import turn_source_matches as _turn_proof
 from ._session_rows import awaiting as _awaiting
+from ._session_rows import awaiting_checkpoint as _awaiting_checkpoint
 from ._session_rows import invocation_row as _invocation
 from ._session_rows import replace_invocation as _replace_invocation
 from ._session_rows import replace_session as _replace_session
@@ -1106,6 +1107,10 @@ def _apply_turn_observation(
             named = (*named, inspection)
         session = _awaiting(session, context, *named)
     state = _replace_session(state, session)
+    if inspection is not None:
+        # The inspection settles the acceptance a yield's checkpoint, or an interruption's,
+        # needs before core can request it.
+        state = _awaiting_checkpoint(state, context, event.invocation, inspection)
     if not is_terminal(invocation):
         return AreaChange(state=state, signals=signals, requests=requests)
     signals = (*signals, *_terminal_signals(state, context, invocation, event))

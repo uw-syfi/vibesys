@@ -874,6 +874,7 @@ def checkpoint_state() -> CoreState:
         refund=1,
         phase="draining",
         checkpoint_authority=RequestId(root="checkpoint"),
+        wait=None,
     )
     return canonical_turns(
         state.model_copy(

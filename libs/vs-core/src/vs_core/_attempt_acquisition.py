@@ -108,6 +108,7 @@ from .types.sessions import (
     InvocationChargeRefunded,
     InvocationChargesAuthorized,
     InvocationCheckpointAvailable,
+    InvocationCheckpointPending,
     SessionPhase,
     SessionsAcquireRequested,
 )
@@ -1139,11 +1140,12 @@ def _checkpoint_request(
     ):
         return AreaChange(state=state)
     identity = event.authority
-    if (
-        any(checkpoint.request_id == identity for checkpoint in attempt.checkpoints)
-        or identity in attempt.pending_records
-    ):
+    pending = InvocationCheckpointPending(invocation=event.invocation, request_id=identity)
+    if any(checkpoint.request_id == identity for checkpoint in attempt.checkpoints):
         return AreaChange(state=state)
+    if identity in attempt.pending_records:
+        # The request is already out; whatever newly waits on this checkpoint waits on it.
+        return AreaChange(state=state, signals=(pending,))
     declined = _checkpoint_decline(context, attempt, invocation, identity)
     if declined is not None:
         return _decline_checkpoint(state, attempt, event, declined)
@@ -1156,7 +1158,11 @@ def _checkpoint_request(
         invocation=event.invocation,
     )
     updated = attempt.model_copy(update={"pending_records": (*attempt.pending_records, identity)})
-    return AreaChange(state=_replace(state, updated), requests=(_within_run(context, request),))
+    return AreaChange(
+        state=_replace(state, updated),
+        requests=(_within_run(context, request),),
+        signals=(pending,),
+    )
 
 
 def _checkpoint_acknowledged(

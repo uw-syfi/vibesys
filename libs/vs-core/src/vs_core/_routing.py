@@ -98,6 +98,7 @@ from .types.sessions import (
     InvocationChargeRefunded,
     InvocationChargesAuthorized,
     InvocationCheckpointAvailable,
+    InvocationCheckpointPending,
     RegisteredTurnRequested,
     RunInvocationCheckpointObserved,
     RunInvocationCheckpointRequested,
@@ -190,6 +191,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | CheckpointStalled()
             | AcquisitionStalled()
             | SessionWaitLapsed()
+            | InvocationCheckpointPending()
             | SessionInputReceived()
             | InputReservationRequested()
             | InputAcceptanceObserved()

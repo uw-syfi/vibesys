@@ -18,11 +18,13 @@ from ._proofs import (
     request_matches,
 )
 from ._session_rows import awaiting as _awaiting
+from ._session_rows import awaiting_checkpoint as _awaiting_checkpoint
+from ._session_rows import replace_claim as _replace_claim
 from ._session_rows import replace_invocation as _replace_invocation
 from ._session_rows import replace_session as _replace_session
 from ._session_rows import session_row as _session
 from ._session_scope import attempt_for, proven_invocation, scope_active
-from ._waits import awaiting_refund, draining_without_cancel, stalled_checkpoint_waits
+from ._waits import checkpoint_stalls
 from .types.attempts import SnapshotAndRetain
 from .types.common import (
     AttemptId,
@@ -44,6 +46,7 @@ from .types.sessions import (
     InspectTurn,
     InterruptFailed,
     InvocationCheckpointAvailable,
+    InvocationCheckpointPending,
     ResumeSessionTurn,
     RunInvocationCheckpoint,
     RunInvocationCheckpointObserved,
@@ -267,22 +270,27 @@ def _run_checkpoint_request(
         invocation=event.invocation,
         retention=event.retention,
     )
-    if request.request_id in session.pending_records or any(
+    if any(
         row.invocation == event.invocation and row.retention == event.retention
         for row in state.run_checkpoints
     ):
         return AreaChange(state=state)
-    return AreaChange(
-        state=_replace_session(
-            state,
-            _awaiting(
-                session.model_copy(
-                    update={"pending_records": (*session.pending_records, request.request_id)}
-                ),
-                context,
-                request,
+    if request.request_id in session.pending_records:
+        return AreaChange(
+            state=_awaiting_checkpoint(state, context, event.invocation, request.request_id)
+        )
+    state = _replace_session(
+        state,
+        _awaiting(
+            session.model_copy(
+                update={"pending_records": (*session.pending_records, request.request_id)}
             ),
+            context,
+            request,
         ),
+    )
+    return AreaChange(
+        state=_awaiting_checkpoint(state, context, event.invocation, request),
         requests=(within(request, context.run.limits.reconciliation_bound),),
     )
 
@@ -416,14 +424,7 @@ def _end_interrupt(
         reason, decline = CheckpointFailure.REFUND_UNAPPLIED, None
     else:
         reason, decline = _stall_reason(state, context, invocation)
-    blocked = claim.model_copy(update={"phase": "blocked"})
-    state = state.model_copy(
-        update={
-            "interrupts": tuple(
-                blocked if row.invocation == claim.invocation else row for row in state.interrupts
-            )
-        }
-    )
+    state = _replace_claim(state, claim.model_copy(update={"phase": "blocked"}))
     failed = InterruptFailed(invocation=invocation.invocation, reason=reason, decline=decline)
     return AreaChange(state=state, events=(failed,))
 
@@ -443,19 +444,14 @@ def end_stalled_checkpoint_waits(
     invocation = next(
         (row for row in state.invocations if row.invocation == event.invocation), None
     )
-    if (
-        event.invocation not in stalled_checkpoint_waits(state, context.records.records)
-        or invocation is None
-    ):
+    yielding, interrupted = checkpoint_stalls(state, context.records, event.invocation)
+    if invocation is None or not (yielding or interrupted):
         # The step raises a stall only for an invocation `stalled_checkpoint_waits` names, so
         # this guards a stall submitted from outside against waits that still have a producer.
         return AreaChange(state=state), None
-    interrupted = draining_without_cancel(state, event.invocation) or awaiting_refund(
-        state, event.invocation
-    )
     ended: Invocation | None = None
     change: AreaChange[SessionsState] = AreaChange(state=state)
-    if invocation.pending_suspension is not None:
+    if yielding:
         change, ended = _end_yield(state, context, invocation)
         invocation = ended
     if interrupted:
@@ -479,5 +475,10 @@ def advance(
             return _run_checkpoint_request(state, context, event)
         case RunInvocationCheckpointObserved():
             return _run_checkpoint_observed(state, context, event)
+        case InvocationCheckpointPending():
+            # The owning attempt sent, or already holds, the checkpoint request.
+            return AreaChange(
+                state=_awaiting_checkpoint(state, context, event.invocation, event.request_id)
+            )
         case _:
             raise ContractValidationError("event.kind", "event is not checkpoint authority")
