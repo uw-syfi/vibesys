@@ -19,6 +19,9 @@ Engineering judgment that holds in any well-run codebase.
 
 How to make one kind of change in this repository.
 
+- [build-client-feature](build-client-feature/SKILL.md): add or change a
+  feature in the TypeScript clients: package placement, machines and folds,
+  run-session wiring, cancellation and bounded waits.
 - [change-container-images](change-container-images/SKILL.md): change the
   agent container image or a Dev Container Feature (toolchains, container
   runtime, pip extras) and the mechanism that builds it.
