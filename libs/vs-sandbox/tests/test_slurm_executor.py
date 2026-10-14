@@ -1981,7 +1981,11 @@ async def test_a_cancel_that_proves_sbatch_never_arrived_ends_the_evaluation_dur
     first = executor()
     try:
         await first.submit(_request(), handle_id="eval-never-arrived")
-        await runner.schedule_consumed.wait()
+        # Fails the wait, instead of hanging it, if the dispatch ends some other way.
+        dispatch = asyncio.create_task(_terminal(first, "eval-never-arrived"))
+        await runner.schedule_consumed.wait(dispatch)
+        dispatch.cancel()
+        await asyncio.gather(dispatch, return_exceptions=True)
         await first.cancel("eval-never-arrived")
 
         observed = await first.inspect("eval-never-arrived")
