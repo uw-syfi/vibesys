@@ -51,6 +51,10 @@ class FenceKind(StrEnum):
     """The provider turn of one invocation (DispatchTurn, CancelTurn, InspectTurn)."""
     ATTEMPT_WORKSPACE = "attempt-workspace"
     """The workspace of one attempt generation (EnsureWorkspace, DiscardWorkspace)."""
+    SCOPE_EPISODE = "scope-episode"
+    """The measurement jobs of one scope admission episode (SubmitMeasurement, CloseAttemptScope)."""
+    MEASUREMENT_JOB = "measurement-job"
+    """One measurement job of one scope episode (SubmitMeasurement, CancelOwnedJob)."""
 
 
 @dataclass(frozen=True)
@@ -199,6 +203,11 @@ class EffectFences:
             return stored.with_entry(entry.model_copy(update={"left": True})), None
 
         self._store.modify(_FAMILY, _PART, key.storage_key, _FenceRecord, decide)
+
+    def is_closed(self, key: FenceKey) -> bool:
+        """Whether a release closed the fence of *key*; read under ``ReceiptStore.exclusive``."""
+        record = self._store.load(_FAMILY, _PART, key.storage_key, _FenceRecord)
+        return record is not None and record.closed_by is not None
 
     def close(self, key: FenceKey, *, by: RequestId, host: HostFence) -> Closure:
         """Close the fence so nothing new is created for *key*; say whether anything may be held."""

@@ -4,7 +4,10 @@ Each pair is one executor's create and release requests over real disk and Fakes
 
 * ``session-close``: EnsureSession binds a session, CloseSession releases it;
 * ``turn-cancel``: DispatchTurn calls the provider, CancelTurn stops or withdraws the turn;
-* ``workspace-discard``: EnsureWorkspace creates a worktree, DiscardWorkspace removes it.
+* ``workspace-discard``: EnsureWorkspace creates a worktree, DiscardWorkspace removes it;
+* ``scope-close``: SubmitMeasurement submits an executor job, CloseAttemptScope cancels the
+  scope episode's jobs;
+* ``job-cancel``: SubmitMeasurement submits an executor job, CancelOwnedJob cancels it.
 
 A new executor that creates and releases adds its pair to ``FENCE_PAIRS``.
 """
@@ -36,25 +39,33 @@ from vs_agent.api import AgentSessionState, DurableSessionStore, Pending
 from vs_core.api import (
     AttemptId,
     AttemptRef,
+    CancelOwnedJob,
+    CloseAttemptScope,
     DecisionId,
     DiscardWorkspace,
     EnsureWorkspace,
     RequestId,
+    ResourceId,
     Scope,
+    SubmitMeasurement,
     WorkspaceMode,
     WorkspacePlan,
 )
+from vs_evaluation.api import EvaluationState, ExecutorObservation, ExecutorPoll, PollPhase
 from vs_project.api import Project
 from vs_project.api.testing import world_git
 from vs_runtime.api.core import (
     ExecutionResult,
+    MeasurementRequests,
     ReceiptStore,
     RuntimeWorkspaceRequests,
     SessionBinding,
+    handle_for,
     owner_key,
     revision_ref,
 )
 from vs_runtime.api.executor_contexts import context_for
+from vs_runtime.api.slurm_evaluation_stack import ADMISSION, SCOPE, plan
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -62,6 +73,7 @@ if TYPE_CHECKING:
     from tests.support.session_world import SessionHost
 
     from vs_core.api import RequestBase
+    from vs_evaluation.api import EvaluationRequest
     from vs_project.api import GitRepository, StateNamespace
     from vs_runtime.api.fence_contracts import FenceHost, FenceWorld, HostLife
     from vs_sim.api import BlockingRunner
@@ -248,10 +260,127 @@ class _WorkspacePair:
                     await host.close()
 
 
+# evaluation
+
+
+_SUBMIT_STEPS = 3
+"""Blocking calls a submission spends in flight before it lands."""
+
+
+@dataclass
+class _JobTable:
+    """The executor's jobs, which outlive every host: each submitted handle, and the ended ones."""
+
+    submitted: list[str]
+    ended: set[str]
+
+
+class _HostJobs:
+    """One host's client of the job table; each call runs on the host's blocking runner."""
+
+    def __init__(self, table: _JobTable, blocking: BlockingRunner) -> None:
+        self._table = table
+        self._blocking = blocking
+
+    async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
+        del request
+
+        def submit() -> None:
+            if handle_id not in self._table.submitted:
+                self._table.submitted.append(handle_id)
+
+        # A submission is in flight for longer than a poll or a cancel takes, so those can
+        # run, and answer, before it lands.
+        for _ in range(_SUBMIT_STEPS):
+            await self._blocking.run(lambda: None)
+        await self._blocking.run(submit)
+
+    async def poll(self, handle_id: str) -> ExecutorPoll:
+        def poll() -> ExecutorPoll:
+            if handle_id not in self._table.submitted:
+                return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
+            if handle_id in self._table.ended:
+                cancelled = ExecutorObservation(state=EvaluationState.CANCELED)
+                return ExecutorPoll(phase=PollPhase.ENDED, terminal=cancelled)
+            return ExecutorPoll(phase=PollPhase.QUEUED)
+
+        return await self._blocking.run(poll)
+
+    async def cancel(self, handle_id: str) -> None:
+        def cancel() -> None:
+            if handle_id in self._table.submitted:
+                self._table.ended.add(handle_id)
+
+        await self._blocking.run(cancel)
+
+
+class _EvaluationWorld:
+    def __init__(self, base: Path, *, cancel: bool) -> None:
+        (base / "project").mkdir()
+        self._project = Project.open(base / "project")
+        self._table = _JobTable(submitted=[], ended=set())
+        self._cancel = cancel
+
+    async def prepare(self, host: FenceHost) -> None:
+        del host
+
+    def setup(self, identity: str) -> RequestBase:
+        return SubmitMeasurement(
+            request_id=RequestId(root=f"submit-{identity}"),
+            scope=SCOPE,
+            admission_id=ADMISSION,
+            plan=plan(),
+        )
+
+    def release(self, identity: str) -> RequestBase:
+        if self._cancel:
+            return CancelOwnedJob(
+                request_id=RequestId(root=f"cancel-{identity}"),
+                scope=SCOPE,
+                admission_id=ADMISSION,
+                resource_id=ResourceId(root=handle_for(RequestId(root="submit-a"))),
+            )
+        return CloseAttemptScope(
+            request_id=RequestId(root=f"close-{identity}"),
+            scope=SCOPE,
+            admission_id=ADMISSION,
+            attempt=AttemptRef(attempt_id=AttemptId(root="attempt"), generation=0),
+        )
+
+    def host(self, epoch: int, life: HostLife, blocking: BlockingRunner) -> FenceHost:
+        store = ReceiptStore(life.namespace(self._project.state.state_store_namespace("run")))
+        jobs = _HostJobs(self._table, blocking)
+        return _Host(MeasurementRequests(cast("Any", jobs), store), epoch)
+
+    def _counted(self) -> list[str]:
+        """Every job for a close; for a cancel, only the job it names (a late setup's is not)."""
+        named = handle_for(RequestId(root="submit-a"))
+        return [h for h in self._table.submitted if not self._cancel or h == named]
+
+    def created(self) -> int:
+        return len(self._counted())
+
+    def held(self) -> int:
+        return len(set(self._counted()) - self._table.ended)
+
+
+@dataclass
+class _EvaluationPair:
+    name: str
+    cancel: bool
+
+    @asynccontextmanager
+    async def world(self) -> AsyncIterator[FenceWorld]:
+        with tempfile.TemporaryDirectory() as raw:
+            yield _EvaluationWorld(Path(raw), cancel=self.cancel)
+
+
 FENCE_PAIRS = (
     _SessionPair("session-close", _SessionCloseWorld),
     _SessionPair("turn-cancel", _TurnCancelWorld),
     _WorkspacePair(),
+    _EvaluationPair("scope-close", cancel=False),
+    _EvaluationPair("job-cancel", cancel=True),
 )
 
 __all__ = ["FENCE_PAIRS"]

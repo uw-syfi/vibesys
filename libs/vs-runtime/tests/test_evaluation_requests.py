@@ -206,10 +206,10 @@ def resource_of(result: ExecutionResult) -> ResourceId:
 
 
 async def run(
-    w: World, request: EvaluationRoleRequest, crash_at: int | None = None
+    w: World, request: EvaluationRoleRequest, crash_at: int | None = None, epoch: int = 1
 ) -> ExecutionResult:
     requests, _ = w.requests(crash_at)
-    return await requests.execute(request, context_for(request))
+    return await requests.execute(request, context_for(request, epoch=epoch))
 
 
 class Recorder:
@@ -521,18 +521,19 @@ async def test_close_releases_every_job_however_far_its_submission_got() -> None
                 await requests.execute(sub, context_for(sub))
             if (await w.stack.executor.poll(handle.root)).phase is not PollPhase.UNSUBMITTED:
                 await settled(w, handle)  # the executor's own admission reaches the cluster
+            # The submitting process died: the close runs on the host that replaced it.
             # Core retries a close that could not yet prove release, under a new request.
             for attempt in range(5):
-                closed = await run(w, close_request(f"close-{attempt}"))
+                closed = await run(w, close_request(f"close-{attempt}"), epoch=2)
                 own = closed.observation.observation
                 if own.released:
                     break
             assert own.released, f"write {crash_at}: {own.diagnostic}"
             assert len(own.children) <= 1
             # The released close is sealed, and the retried submission can launch nothing.
-            assert await run(w, close_request(f"close-{attempt}")) == closed
+            assert await run(w, close_request(f"close-{attempt}"), epoch=2) == closed
             before = list(w.cluster.submissions)
-            retried = await run(w, sub)
+            retried = await run(w, sub, epoch=2)
             assert w.cluster.submissions == before
             if not before:
                 assert retried.observation.observation.status is ObservationStatus.REJECTED

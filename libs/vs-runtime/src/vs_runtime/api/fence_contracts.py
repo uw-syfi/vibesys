@@ -13,8 +13,8 @@ crashes at every durable-write boundary followed by a newer host. It checks:
   of any delivery creates anything, and nothing is held at the answer;
 * a host that crashed between creating and answering leaves the creation visible: a later
   release finds it and releases it, so nothing stays held behind a "released" answer;
-* a release delivered on a newer host after every other delivery ends reaches a terminal
-  answer, so the fence never strands a release.
+* a release delivered on a newer host after every other delivery ends answers released, so
+  the fence never strands a release.
 
 A new executor implements ``FencePair`` and gets all of it.
 """
@@ -183,6 +183,12 @@ class HostRun:
 
     deliveries: tuple[DeliveryKind, ...]
     crash_at: int | None = None
+    stagger: tuple[int, ...] = ()
+    """How many blocking calls each delivery makes on the host before it starts (none if absent).
+
+    Deliveries that start together run up to their first await before any other's next step;
+    a stagger lets one start in the middle of another, between its blocking calls.
+    """
 
 
 @dataclass
@@ -202,12 +208,12 @@ class ScheduleReport:
     def ended(self, world: FenceWorld, final: ExecutionResult) -> None:
         """Check the final release's answer and what exists once every delivery ended."""
         observed = final.observation.observation
-        if not observed.terminal:
+        if not (observed.terminal and observed.released):
             self.violations.append(
-                "a release on a newer host after every delivery ended stayed Unknown: "
+                "a release on a newer host after every delivery ended did not release: "
                 f"{observed.diagnostic}"
             )
-        elif observed.released:
+        else:
             self.released(world)
         if not self.created_at_release:
             return
@@ -215,6 +221,10 @@ class ScheduleReport:
             self.violations.append(f"created {late} thing(s) after a release answered released")
         if held := world.held():
             self.violations.append(f"{held} thing(s) held after the release ended")
+
+
+def _idle() -> None:
+    """A blocking call that does nothing: it only lets other calls run first."""
 
 
 def _identity(kind: DeliveryKind) -> str:
@@ -227,10 +237,14 @@ async def run_schedule(
     """Run *runs* in order, one host each with a rising epoch, and check the contract."""
     report = ScheduleReport()
 
-    async def deliver(host: FenceHost, kind: DeliveryKind) -> None:
+    async def deliver(
+        host: FenceHost, runner: BlockingRunner, kind: DeliveryKind, calls: int
+    ) -> None:
         identity = _identity(kind)
         request = world.release(identity) if kind == "release" else world.setup(identity)
         try:
+            for _ in range(calls):
+                await runner.run(_idle)
             result = await host.execute(request)
         except ProcessKilledError:
             return
@@ -241,12 +255,21 @@ async def run_schedule(
     await world.prepare(world.host(0, HostLife(None), blocking))
     lives = [HostLife(run.crash_at) for run in runs]
     for epoch, (run, life) in enumerate(zip(runs, lives, strict=True), start=1):
-        host = world.host(epoch, life, life.runner(blocking))
-        await asyncio.gather(*(deliver(host, kind) for kind in run.deliveries))
+        runner = life.runner(blocking)
+        host = world.host(epoch, life, runner)
+        calls = (*run.stagger, *(0 for _ in run.deliveries))
+        await asyncio.gather(
+            *(
+                deliver(host, runner, kind, wait)
+                for kind, wait in zip(run.deliveries, calls, strict=False)
+            )
+        )
     for life in lives:
         life.reap()
     final = world.host(len(runs) + 1, HostLife(None), blocking)
-    report.ended(world, await final.execute(world.release(_identity("release"))))
+    # A new identity, as core sends once an earlier release sealed an answer that did not
+    # release (a scope close whose jobs had not ended); an Unknown one is resent as is.
+    report.ended(world, await final.execute(world.release("final")))
     return report
 
 

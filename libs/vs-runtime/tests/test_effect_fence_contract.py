@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 _KINDS: tuple[DeliveryKind, ...] = ("setup", "setup", "late-setup", "release")
 _BOUNDARIES = 16
 """Covers the writes of a setup up to its creation and answer, where a crash matters most."""
+_STAGGER = 4
+"""At most this many blocking calls before a delivery starts, so one starts inside another."""
 
 
 def _schedule(random: SeededRandom) -> tuple[HostRun, ...]:
@@ -31,7 +33,8 @@ def _schedule(random: SeededRandom) -> tuple[HostRun, ...]:
     for _ in range(random.randint(1, 4)):
         deliveries = tuple(random.choice(_KINDS) for _ in range(random.randint(1, 3)))
         crash_at = random.randint(0, _BOUNDARIES - 1) if random.random() < 0.5 else None
-        runs.append(HostRun(deliveries, crash_at))
+        stagger = tuple(random.randint(0, _STAGGER) for _ in deliveries)
+        runs.append(HostRun(deliveries, crash_at, stagger))
     if not any("release" in run.deliveries for run in runs):
         runs.insert(random.randint(0, len(runs)), HostRun(("release",)))
     return tuple(runs)
@@ -83,4 +86,54 @@ def test_a_cancel_racing_its_dispatch_never_answers_released_before_the_provider
     stopped at its second entry.
     """
     report = _run(_TURN_CANCEL, runs, schedule_seed)
+    assert not report.violations, report.violations
+
+
+_SCOPE_CLOSE = next(pair for pair in FENCE_PAIRS if pair.name == "scope-close")
+
+
+@pytest.mark.parametrize(
+    ("runs", "schedule_seed"),
+    [
+        ((HostRun(("setup", "release")),), 0),
+        ((HostRun(("release", "setup")),), 2),
+        ((HostRun(("setup", "release"), stagger=(1, 4)),), 3222738317),
+    ],
+)
+def test_a_scope_close_racing_a_submission_never_answers_released_before_the_submit(
+    runs: tuple[HostRun, ...], schedule_seed: int
+) -> None:
+    """The close ran between the submission's executor poll and its submit, on the same host.
+
+    The submission had registered its job and polled it unsubmitted; the close cancelled
+    the job, polled it unsubmitted too, counted it ended and answered released; the
+    submission then submitted it. Now the close closes the scope episode's fence first: a
+    submission still inside it keeps the close unreleased, and one that has not re-entered
+    by then submits nothing. The third schedule starts the close after the submission
+    entered again and before its submit lands: the close must not count the job ended.
+    """
+    report = _run(_SCOPE_CLOSE, runs, schedule_seed)
+    assert not report.violations, report.violations
+
+
+_JOB_CANCEL = next(pair for pair in FENCE_PAIRS if pair.name == "job-cancel")
+
+
+@pytest.mark.parametrize(
+    ("runs", "schedule_seed"),
+    [
+        ((HostRun(("release", "setup"), stagger=(3, 0)),), 1026898881),
+        ((HostRun(("release",)), HostRun(("setup", "setup"))), 3841107728),
+    ],
+)
+def test_a_job_cancel_never_answers_released_before_its_submission_submits(
+    runs: tuple[HostRun, ...], schedule_seed: int
+) -> None:
+    """A cancel of a job whose submission had not registered, or had not landed, yet.
+
+    The cancel rejected the unregistered job as released, or counted the unsubmitted one as
+    ended, and the submission then submitted it. Now the cancel closes the job's fence first:
+    a submission it did not see submits nothing, and one still inside keeps it unreleased.
+    """
+    report = _run(_JOB_CANCEL, runs, schedule_seed)
     assert not report.violations, report.violations
