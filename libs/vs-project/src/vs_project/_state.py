@@ -729,7 +729,8 @@ class StateSlot[ModelT: BaseModel]:
             raise TypeError(message)
         try:
             raw = json.loads(payload)
-        except (UnicodeDecodeError, ValueError) as exc:
+        except (ValueError, RecursionError) as exc:
+            # ``json`` raises ``RecursionError`` past the interpreter's nesting limit.
             raise ProjectStateError.serialized_transition_invalid_json() from exc
         if not isinstance(raw, dict):
             raise ProjectStateError.serialized_transition_not_object()

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 from uuid import UUID
@@ -17,11 +17,14 @@ from vs_project.api import (
     Project,
     ProjectStateError,
     RunEnvironmentRecord,
+    StateDocumentDamagedError,
     StateFile,
+    decode_state_document,
     generate_run_id,
     is_project_state_path,
 )
 from vs_project.api.testing import run_execution_record
+from vs_sim.api.testing import hostile_json_frames
 
 NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 
@@ -135,6 +138,35 @@ def test_list_runs_rejects_stray_file_in_runs_directory(tmp_path: Path) -> None:
 
     with pytest.raises(ProjectStateError, match="Unexpected file in VibeSys runs directory"):
         store.state.list_runs()
+
+
+def test_a_run_manifest_of_any_bytes_is_skipped_not_raised(tmp_path: Path) -> None:
+    """A damaged ``run.json`` is one skipped run: listing the others never crashes.
+
+    ``json`` raised ``RecursionError`` on deep nesting and reading the file as text raised
+    ``UnicodeDecodeError`` on bad bytes; both escaped the ``ProjectStateError`` that
+    ``list_runs`` skips.
+    """
+    store = _store(tmp_path)
+    damaged = _run(store)
+    kept = _new_manifest(store, now=NOW + timedelta(seconds=1))
+    store.state.create_run(kept)
+    valid = _run_json(store, damaged.run_id).read_bytes()
+
+    # A run manifest is about 1 KiB, so a few cuts stand in for every prefix.
+    cuts = [(f"cut-at-{n}", valid[:n]) for n in (1, len(valid) // 2, len(valid.rstrip()) - 1)]
+    for name, frame in (*hostile_json_frames(), *cuts):
+        _run_json(store, damaged.run_id).write_bytes(frame)
+
+        assert [run.run_id for run in store.state.list_runs()] == [kept.run_id], name
+        assert [run_id for run_id, _ in store.state.incompatible_runs()] == [damaged.run_id]
+
+
+def test_a_versioned_state_document_of_any_bytes_is_damaged_not_raised() -> None:
+    """Every decode failure of a versioned document is ``StateDocumentDamagedError``."""
+    for name, frame in hostile_json_frames((b'{"round": 1}',)):
+        with pytest.raises(StateDocumentDamagedError):
+            decode_state_document(_Cursor, frame, source=name, versioned_by=("round", 2))
 
 
 def test_current_run_pointer_read_failure_is_reported(

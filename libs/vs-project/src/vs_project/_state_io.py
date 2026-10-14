@@ -209,12 +209,17 @@ def _atomic_write_text(path: Path, content: str) -> None:
 
 
 def _read_json_object(path: Path) -> dict[str, object]:
-    """Read a JSON object from a metadata path."""
+    """Read a JSON object from a metadata path.
+
+    Bad UTF-8 (a ``UnicodeDecodeError``), truncation and nesting past the interpreter's
+    recursion limit (a ``RecursionError`` from ``json``) are each a
+    ``ProjectStateError``, so a caller that skips damaged metadata skips all of it.
+    """
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise ProjectStateError.metadata_file_missing(path) from exc
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         raise ProjectStateError.metadata_read_failed(path, exc) from exc
     if not isinstance(raw, dict):
         raise ProjectStateError.metadata_not_object(path)
@@ -277,7 +282,9 @@ def _declared_version(data: bytes | str, field: str) -> int | None:
     """The integer version a JSON object declares, or None when it declares none."""
     try:
         document = json.loads(data)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # ``json`` raises ``RecursionError`` past the interpreter's nesting limit; the
+        # model decode that follows reports the damage.
         return None
     if not isinstance(document, dict):
         return None
