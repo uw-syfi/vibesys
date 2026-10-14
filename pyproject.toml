@@ -106,10 +106,10 @@ testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/te
 # flag string CI uses. CI layers on `--cov-report=xml`, `--cov-report=json`,
 # and `--cov-fail-under` on top of this; it does not need its own `--cov=...`
 # flags.
-# Start expensive tests first and keep worker queues short so long tests do not
-# remain queued behind fast tests. CI explicitly selects loadgroup to keep
-# shared native-build fixtures on one worker.
-addopts = "-ra -p no:tach --import-mode=importlib --dist load --maxschedchunk=1 --cov --cov-report=term-missing -m 'not native_build'"
+# Keep worker queues short so long tests do not remain queued behind fast tests.
+# loadgroup keeps each xdist_group (shared native-build fixtures, shared worlds)
+# on one worker, locally as in CI.
+addopts = "-ra -p no:tach --import-mode=importlib --dist loadgroup --maxschedchunk=1 --cov --cov-report=term-missing -m 'not native_build'"
 pythonpath = [".", "packaging", "libs/vs-sim/pytest_plugin"]
 # A test still running after this many seconds dumps every thread's stack to
 # stderr (xdist workers inherit the controller's stderr, so it reaches the CI
