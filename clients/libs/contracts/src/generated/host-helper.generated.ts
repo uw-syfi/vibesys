@@ -289,7 +289,8 @@ export type ChannelEndOutcome =
   | "server_stalled"
   | "client_stalled"
   | "server_failed"
-  | "client_failed";
+  | "client_failed"
+  | "server_unresponsive";
 export type ExitStatus = number;
 export type Detail = string;
 
