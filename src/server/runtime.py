@@ -385,7 +385,9 @@ class ServerRuntime:
         would otherwise let a client see the connection close before the
         terminal status that explains it. The wait is bounded: a client that
         stopped reading cannot hold the server open. A server that already
-        waited for its clients to leave finds no stream to wait for.
+        waited for its clients to leave finds no stream to wait for. The
+        shared tracker closes subscription admission atomically with this
+        wait, so a reconnect cannot arrive outside the drained set.
         """
         transport.wait_until_delivered(self.api.latest_sequence, DETACHED_DRAIN_TIMEOUT_SECONDS)
 

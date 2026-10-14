@@ -38,7 +38,11 @@ from server.transport.discovery import (
     WebInstanceClaim,
     WebInstanceRecord,
 )
-from server.transport.subscriptions import StreamDelivery, SubscriptionTracker
+from server.transport.subscriptions import (
+    StreamDelivery,
+    SubscriptionAdmissionClosedError,
+    SubscriptionTracker,
+)
 from vs_async_ops.api import finish
 from vs_sim.api import ThreadBlockingRunner
 
@@ -1148,15 +1152,18 @@ class WebSocketGateway:
             response = request
         else:
             if isinstance(request, SubscribeRequest):
-                with self.subscriptions.track() as delivery:
-                    try:
-                        await self._stream(websocket, request, delivery)
-                    except _WriteDeadlineError:
-                        raise
-                    # lint-waiver: LW-101018 [BLE001]; the transport boundary converts every replay or serialization failure into the stream protocol's typed error.
-                    # > Enumerating implementation exception classes would make new API or serializer failures escape the protocol contract; a wrapper would only move this same boundary catch.
-                    except Exception as error:  # noqa: BLE001
-                        await self._write_stream_error(websocket, request, error)
+                try:
+                    with self.subscriptions.track() as delivery:
+                        try:
+                            await self._stream(websocket, request, delivery)
+                        except _WriteDeadlineError:
+                            raise
+                        # lint-waiver: LW-101018 [BLE001]; the transport boundary converts every replay or serialization failure into the stream protocol's typed error.
+                        # > Enumerating implementation exception classes would make new API or serializer failures escape the protocol contract; a wrapper would only move this same boundary catch.
+                        except Exception as error:  # noqa: BLE001
+                            await self._write_stream_error(websocket, request, error)
+                except SubscriptionAdmissionClosedError as error:
+                    await self._write_stream_error(websocket, request, error)
                 return True
             try:
                 response = await _run_owned_blocking(
@@ -1282,7 +1289,11 @@ class WebSocketGateway:
         protocol_error = ProtocolErrorMessage.from_exception(
             error,
             operation="Event stream",
-            code="stream_failed",
+            code=(
+                error.diagnostic_code
+                if isinstance(error, SubscriptionAdmissionClosedError)
+                else "stream_failed"
+            ),
             request_id=request.request_id,
         ).model_copy(update={"client_id": request.client_id})
         await self._send(websocket, protocol_error.model_dump_json())

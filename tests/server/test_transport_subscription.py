@@ -1006,3 +1006,34 @@ def _sim_lines(connection: Connection) -> Callable[[], bytes]:
         return line
 
     return read
+
+
+@settings(deadline=None, max_examples=examples(pr=10, nightly=60))
+@given(seed=st.integers(0, 2**32))
+def test_terminal_drain_refuses_a_late_unix_subscription(
+    tmp_path_factory: pytest.TempPathFactory, seed: int
+) -> None:
+    """A subscribe after terminal drain is refused, not acknowledged outside it."""
+    root = tmp_path_factory.mktemp("terminal-drain")
+    threads = SimThreads(schedule_seed=seed)
+
+    def main() -> None:
+        parts = build_server_parts(root / "logs", threads=threads)
+        network = SimNetwork(threads)
+        request = SubscribeRequest(timestamp=REQUEST_TIME, client_id="late-unix")
+        with UnixJsonlServer(
+            root / "control.sock", parts.api, threads=threads, network=network
+        ) as server:
+            assert server.wait_until_delivered(parts.api.latest_sequence, 0.0)
+            client = network.connect(str(root / "control.sock"))
+            client.send(request.model_dump_json().encode() + b"\n")
+            refusal = json.loads(_sim_lines(client)())
+            client.close()
+
+        assert refusal["type"] == "protocol_error"
+        assert refusal["code"] == "subscription_admission_closed"
+        assert refusal["diagnostic"]["code"] == "subscription_admission_closed"
+        assert refusal["request_id"] == request.request_id
+        assert refusal["client_id"] == request.client_id
+
+    threads.run(main)

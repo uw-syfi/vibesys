@@ -23,6 +23,16 @@ if TYPE_CHECKING:
 RECONNECT_SETTLE_SECONDS = 1.0
 
 
+class SubscriptionAdmissionClosedError(RuntimeError):
+    """A terminal drain has closed admission for new subscription streams."""
+
+    diagnostic_code = "subscription_admission_closed"
+
+    def __init__(self) -> None:
+        """Describe the terminal lifecycle transition that refused admission."""
+        super().__init__("The server is closing and no longer accepts event subscriptions")
+
+
 class SettleWindow(Protocol):
     """How a disconnect waiter lets its settle window elapse.
 
@@ -94,6 +104,7 @@ class SubscriptionTracker:
         self._condition = threads.condition()
         self._active = 0
         self._streams: list[StreamDelivery] = []
+        self._accepting = True
 
     @contextmanager
     def track(self) -> Generator[StreamDelivery]:
@@ -104,6 +115,8 @@ class SubscriptionTracker:
         """
         stream = StreamDelivery(self._condition)
         with self._condition:
+            if not self._accepting:
+                raise SubscriptionAdmissionClosedError
             self._active += 1
             self._streams.append(stream)
             # Wake a disconnect waiter sitting in its settle window so the
@@ -119,14 +132,17 @@ class SubscriptionTracker:
                 self._condition.notify_all()
 
     def wait_until_delivered(self, sequence: int, timeout: float) -> bool:
-        """Wait, at most ``timeout``, until every open stream wrote through ``sequence``.
+        """Close admission, then wait until every admitted stream reached ``sequence``.
 
         A server whose run has ended calls this before closing its transport,
         so an attached client reads the terminal status before the connection
-        closes instead of seeing the close first. A stream that closes counts
-        as done. Returns False if the bound elapsed with a stream behind.
+        closes instead of seeing the close first. Closing admission and taking
+        the stream set share one condition lock: a racing stream is either in
+        this drain or refused by ``track``. A stream that closes counts as done.
+        Returns False if the bound elapsed with an admitted stream behind.
         """
         with self._condition:
+            self._accepting = False
             return self._condition.wait_for(
                 lambda: all(stream.sequence >= sequence for stream in self._streams),
                 timeout=timeout,

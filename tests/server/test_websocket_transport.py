@@ -2393,3 +2393,26 @@ def test_a_browser_stream_reports_what_it_delivered_so_a_closing_server_can_wait
     parts.close()
 
     assert caught_up == [True, True]
+
+
+def test_terminal_drain_refuses_a_late_browser_subscription(tmp_path: Path) -> None:
+    """A subscribe after terminal drain is refused, not acknowledged outside it."""
+    parts = build_server_parts(tmp_path / "logs")
+    tracker = SubscriptionTracker()
+    request = SubscribeRequest(timestamp=REQUEST_TIME, client_id="late-browser")
+
+    async def subscribe(gateway: WebSocketGateway) -> dict[str, Any]:
+        async with _gateway_connection(gateway) as websocket:
+            await websocket.send(request.model_dump_json())
+            return cast("dict[str, Any]", json.loads(await websocket.recv()))
+
+    with WebSocketGateway(parts.api, subscriptions=tracker, clock=ManualClock()) as gateway:
+        assert tracker.wait_until_delivered(parts.api.latest_sequence, 0.0)
+        refusal = asyncio.run(subscribe(gateway))
+    parts.close()
+
+    assert refusal["type"] == "protocol_error"
+    assert refusal["code"] == "subscription_admission_closed"
+    assert refusal["diagnostic"]["code"] == "subscription_admission_closed"
+    assert refusal["request_id"] == request.request_id
+    assert refusal["client_id"] == request.client_id

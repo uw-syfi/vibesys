@@ -17,7 +17,10 @@ from server.api.protocol import (
     SubscribedMessage,
     SubscribeRequest,
 )
-from server.transport.subscriptions import SubscriptionTracker
+from server.transport.subscriptions import (
+    SubscriptionAdmissionClosedError,
+    SubscriptionTracker,
+)
 from vs_sim.api import OsThreads, UnixNetwork
 
 if TYPE_CHECKING:
@@ -133,13 +136,16 @@ class _ClientSession:
                 continue
             try:
                 if isinstance(request, SubscribeRequest):
-                    with self._subscriptions.track() as delivery:
-                        try:
-                            self._stream(request, delivery)
-                        except _PeerGoneError:
-                            pass
-                        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010252 [BLE001]; arbitrary event serialization failures are returned as protocol stream errors.
-                            self._write_stream_error(request.request_id, request.client_id, exc)
+                    try:
+                        with self._subscriptions.track() as delivery:
+                            try:
+                                self._stream(request, delivery)
+                            except _PeerGoneError:
+                                pass
+                            except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010252 [BLE001]; arbitrary event serialization failures are returned as protocol stream errors.
+                                self._write_stream_error(request.request_id, request.client_id, exc)
+                    except SubscriptionAdmissionClosedError as exc:
+                        self._write_stream_error(request.request_id, request.client_id, exc)
                     return
                 response = api.execute(request)
             except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010253 [BLE001]; the socket boundary converts request failures into typed protocol responses.
@@ -324,7 +330,14 @@ class _ClientSession:
     def _write_stream_error(self, request_id: str, client_id: str, error: Exception) -> None:
         """Report a replay or stream failure without hiding a live connection."""
         protocol_error = ProtocolErrorMessage.from_exception(
-            error, operation="Event stream", code="stream_failed", request_id=request_id
+            error,
+            operation="Event stream",
+            code=(
+                error.diagnostic_code
+                if isinstance(error, SubscriptionAdmissionClosedError)
+                else "stream_failed"
+            ),
+            request_id=request_id,
         ).model_copy(update={"client_id": client_id})
         with suppress(_PeerGoneError):
             self._write_message(protocol_error)
@@ -460,7 +473,7 @@ class UnixJsonlServer:
         return self._subscriptions.wait_for_subscriber(timeout)
 
     def wait_until_delivered(self, sequence: int, timeout: float) -> bool:
-        """Wait, bounded, until every open stream wrote through ``sequence``."""
+        """Close subscription admission and wait for streams to reach ``sequence``."""
         return self._subscriptions.wait_until_delivered(sequence, timeout)
 
     def wait_for_subscriber_disconnect(self) -> None:
