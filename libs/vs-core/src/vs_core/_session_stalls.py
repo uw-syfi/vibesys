@@ -1,4 +1,4 @@
-"""Ending the turn of a checkpoint wait that nothing can resolve, as any ended turn is cleaned up."""
+"""Ending the waits of sessions and their turns that nothing can carry on any more."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from . import _session_checkpoints
 from ._acquisition_stall import stalled_acquisition
+from ._session_rows import request_ended as _ended
 from ._session_turns import (
     _after_turn_cleanup,
     _invocation,
@@ -25,7 +26,9 @@ from .types.sessions import (
     CheckpointStalled,
     InputReservationReleased,
     SessionPhase,
+    SessionWaitLapsed,
 )
+from .types.waits import WaitOn
 
 if TYPE_CHECKING:
     from .types.kernel import SessionsContext
@@ -90,3 +93,25 @@ def advance_stalled_acquisitions(
         ),
         events=(turn_result(event.invocation, observation),),
     )
+
+
+def advance_lapsed_session_waits(
+    state: SessionsState, context: SessionsContext, event: SessionsEvent
+) -> AreaChange[SessionsState]:
+    """A request the session waits on ended without moving it: wait on the others still open.
+
+    With none left, the session keeps its wait on ended requests. It is then an orphan, and
+    the run halts loudly with it named (``RESOLUTIONS``): a session whose last request ended
+    without proof may hold a lease or a running turn core cannot account for, and nothing yet
+    decides who releases it.
+    """
+    if not isinstance(event, SessionWaitLapsed):
+        raise ContractValidationError("event.kind", "event is not a lapsed session wait")
+    session = _session(state, event.session_id)
+    if session is None or session.wait is None or event.request_id not in session.wait.requests:
+        return AreaChange(state=state)
+    kept = tuple(request for request in session.wait.requests if not _ended(context, request))
+    if not kept or not _ended(context, event.request_id):
+        return AreaChange(state=state)
+    waiting = session.model_copy(update={"wait": WaitOn(requests=kept)})
+    return AreaChange(state=_replace_session(state, waiting))

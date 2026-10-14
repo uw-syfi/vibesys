@@ -6,11 +6,15 @@ a request the shell still holds, an event committed but not yet applied (the out
 timer. A wait with none of these is an orphan: nothing will ever end it, so the run would sit
 until its deadline. ``orphan_waits`` reports it at the step that created it.
 
-An owned job records what it waits on when it starts waiting (``WaitOn``: its poll timer, or
-the poll in flight), so its producers are read from that record and nothing is inferred. A
-request it names that ends without moving it wakes it (``lapsed_job_waits``), and
-``unmet_waits`` refuses a step that records a wait on a request not open. The other kinds are
-still derived, by ``producers``, until each records its own wait (#2428). Either way the
+An owned job and a session record what they wait on when they start waiting (``WaitOn``: a
+job's poll timer or the poll in flight; the session's ensure, turn, inspection or close), so
+their producers are read from that record and nothing is inferred. A named request whose
+answer the shell committed but has not applied (a turn's reply rides its session's owner
+event, a step after the turn's own end) still counts. A named request that ends without
+moving its waiter wakes it (``lapsed_job_waits``, ``lapsed_session_waits``), and
+``unmet_waits`` refuses a step that records a wait on a request not open, or leaves a job or
+session waiting without one. The other kinds are still derived, by ``producers``, until each
+records its own wait (#2428). Either way the
 waits report one answer, and every resolver below ends exactly the entities it finds nothing
 for, so a wait and its resolver cannot disagree about whether something will end it.
 
@@ -56,7 +60,9 @@ from .types.sessions import (
     InspectTurn,
     ResumeSessionTurn,
     SessionPhase,
+    SessionWaitLapsed,
     SnapshotAndRetainRun,
+    session_waits,
 )
 
 if TYPE_CHECKING:
@@ -158,7 +164,9 @@ RESOLUTIONS: Mapping[WaitKind, Resolution] = MappingProxyType(
         ),
         WaitKind.SESSION: Resolution(
             outcome=Outcome.HALTS_THE_RUN,
-            reason="a record blocked by its reconciliation bound is not routed to the session",
+            reason="a request that ends without moving its session wakes it, and it waits on its "
+            "other requests still open; once none is left (its last request blocked, or its "
+            "cancel failed), it may hold a lease or a running turn that nothing releases",
         ),
         WaitKind.RECOVERY_CHECK: Resolution(
             outcome=Outcome.HALTS_THE_RUN,
@@ -185,23 +193,6 @@ def record_waits(phase: RequestPhase) -> bool:
         case RequestPhase.PREPARED | RequestPhase.DISPATCHED | RequestPhase.RECONCILING:
             return True
         case RequestPhase.COMPLETED | RequestPhase.BLOCKED:
-            return False
-        case _:
-            assert_never(phase)
-
-
-def session_waits(phase: SessionPhase) -> bool:
-    """Whether a session in this phase waits on a request's result."""
-    match phase:
-        case SessionPhase.ACQUIRING | SessionPhase.EXECUTING | SessionPhase.CLOSING:
-            return True
-        case (
-            SessionPhase.IDLE
-            | SessionPhase.CHECKPOINTED
-            | SessionPhase.SUSPENDED
-            | SessionPhase.TERMINAL
-            | SessionPhase.UNKNOWN
-        ):
             return False
         case _:
             assert_never(phase)
@@ -434,16 +425,23 @@ def _children_producers(core: CoreState, target: RequestId) -> frozenset[Produce
     return frozenset({next(producer for producer in _SETTLES_LAST if producer in union)})
 
 
-def wait_producers(core: CoreState, wait: WaitOn) -> frozenset[Producer]:
+def wait_producers(
+    core: CoreState, wait: WaitOn, queued: frozenset[RequestId] = frozenset()
+) -> frozenset[Producer]:
     """What can still end a recorded wait: an open request it names, or its timer.
 
     A request is open until core applies its end (its answer, or the block at its bound),
-    so a request whose answer is still on its way counts as open. The shell ticks the clock
-    to every timer a wait names (``CoreView.next_observe_at``), so a timer always fires.
+    so a request whose answer is still on its way counts as open. *queued* names the
+    requests whose answer the shell committed and has not applied yet: a turn's reply
+    travels on its session's owner event, committed with the turn's observation and applied
+    in the next step, so a waiter named on the turn is still moved by it. The shell ticks the
+    clock to every timer a wait names (``CoreView.next_observe_at``), so a timer always fires.
     """
     found: set[Producer] = set()
     if any(_request_open(core, request) for request in wait.requests):
         found.add(Producer.PENDING_REQUEST)
+    if any(request in queued for request in wait.requests):
+        found.add(Producer.OUTBOX_EVENT)
     if wait.timer is not None:
         found.add(Producer.TIMER)
     return frozenset(found)
@@ -468,9 +466,21 @@ def _job_waits(core: CoreState) -> tuple[tuple[WaitSubject, RequestId, WaitOn], 
     return tuple(found)
 
 
+def _session_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
+    """Every waiting session's recorded wait, by the subject that names the session."""
+    return tuple(
+        (WaitSubject(kind=WaitKind.SESSION, identity=session.spec.session_id.root), session.wait)
+        for session in core.sessions.sessions
+        if session.wait is not None
+    )
+
+
 def recorded_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
     """Every wait an entity recorded when it began waiting, by the subject that names it."""
-    return tuple((subject, wait) for subject, _, wait in _job_waits(core))
+    return (
+        *((subject, wait) for subject, _, wait in _job_waits(core)),
+        *_session_waits(core),
+    )
 
 
 def lapsed_job_waits(core: CoreState) -> tuple[JobWaitLapsed, ...]:
@@ -490,6 +500,24 @@ def lapsed_job_waits(core: CoreState) -> tuple[JobWaitLapsed, ...]:
     )
 
 
+def lapsed_session_waits(core: CoreState) -> tuple[SessionWaitLapsed, ...]:
+    """One wake per waiting session whose wait names a request that is over.
+
+    A session's own transition takes each answer of its requests, so a session still naming
+    an ended request is one the answer did not move: the request blocked at its bound, or the
+    session refused what it said. The wake makes the session wait again on what is left
+    (``SessionWaitLapsed``).
+    """
+    if core.run.status == RunStatus.TERMINAL:
+        return ()
+    return tuple(
+        SessionWaitLapsed(session_id=SessionId(root=subject.identity), request_id=request_id)
+        for subject, wait in _session_waits(core)
+        for request_id in wait.requests
+        if _request_ended(core, request_id)
+    )
+
+
 def _request_ended(core: CoreState, request_id: RequestId) -> bool:
     """Whether the ledger holds *request_id* and core applied its end.
 
@@ -504,9 +532,9 @@ def unmet_waits(before: CoreState, after: CoreState) -> tuple[str, ...]:
 
     A wait names what will end it from the moment it is recorded, so every request it names
     exists and is open at the end of the step that recorded it, a request the step itself
-    prepared included. A job live without a wait, or ended with one, is reported too: the
-    job's validator holds that only when a job is built or decoded, not when a transition
-    copies one.
+    prepared included. A job live without a wait, or ended with one, and a session the step
+    left in a waiting phase without a wait, are reported too: their validators hold only when
+    a value is built or decoded, not when a transition copies one.
     """
     earlier = dict(recorded_waits(before))
     named = [
@@ -525,6 +553,12 @@ def unmet_waits(before: CoreState, after: CoreState) -> tuple[str, ...]:
         f"owned-job {job.request_id.root} is live without a wait, or ended with one"
         for job in after.evaluation.registered_jobs
         if job.terminal != (job.wait is None)
+    )
+    unchanged = before.sessions.sessions
+    named.extend(
+        f"session {session.spec.session_id.root} is {session.phase.value} without a wait"
+        for session in after.sessions.sessions
+        if session_waits(session.phase) and session.wait is None and session not in unchanged
     )
     return tuple(named)
 
@@ -724,7 +758,7 @@ def subjects(core: CoreState) -> tuple[WaitSubject, ...]:
             for check in core.records.recovery.checks
             if recovery_waits(core.records.recovery.phase) and check.resolution == "pending"
         ),
-        *((subject.kind, subject.identity) for subject, _ in recorded_waits(core)),
+        *((subject.kind, subject.identity) for subject, _, _ in _job_waits(core)),
         *((WaitKind.RELEASE_DEPENDENCY, identity) for identity in _released_job_edges(core)),
     ]
     for turn in core.sessions.invocations:
@@ -778,6 +812,14 @@ def _recovery_check_producers(core: CoreState, identity: str) -> frozenset[Produ
     return _recovery_producers(core, target)
 
 
+def _session_wait_producers(
+    core: CoreState, identity: str, queued: frozenset[RequestId]
+) -> frozenset[Producer]:
+    """What can end a waiting session's recorded wait; a waiting session without one, nothing."""
+    session = next(row for row in core.sessions.sessions if row.spec.session_id.root == identity)
+    return frozenset() if session.wait is None else wait_producers(core, session.wait, queued)
+
+
 def _owned_job_producers(core: CoreState, identity: str) -> frozenset[Producer]:
     wait = next(
         wait
@@ -794,9 +836,7 @@ type _Derivation = Callable[[CoreState, str, frozenset[RequestId]], frozenset[Pr
 #: a signal of the step that retained the checkpoint, so nothing can produce either.
 _DERIVATIONS: Mapping[WaitKind, _Derivation] = MappingProxyType(
     {
-        WaitKind.SESSION: lambda core, identity, outbox: _session_producers(
-            core.records.records, outbox, SessionId(root=identity)
-        ),
+        WaitKind.SESSION: _session_wait_producers,
         WaitKind.TURN_ACQUISITION: lambda core, identity, outbox: _acquisition_producers(
             core.sessions, core.records.records, (), outbox, _invocation(core, identity)
         ),
@@ -866,6 +906,7 @@ __all__ = [
     "awaiting_refund",
     "draining_without_cancel",
     "lapsed_job_waits",
+    "lapsed_session_waits",
     "orphan_waits",
     "phase_waits",
     "producers",

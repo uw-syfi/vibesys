@@ -17,6 +17,9 @@ from ._proofs import (
     observation_for,
     request_matches,
 )
+from ._session_rows import awaiting as _awaiting
+from ._session_rows import replace_session as _replace_session
+from ._session_rows import session_row as _session
 from ._session_scope import attempt_for, proven_invocation, scope_active
 from ._waits import awaiting_refund, draining_without_cancel, stalled_checkpoint_waits
 from .types.attempts import SnapshotAndRetain
@@ -50,25 +53,10 @@ from .types.sessions import (
 )
 
 if TYPE_CHECKING:
-    from .types.common import InvocationRef, Observation, SessionId
+    from .types.common import InvocationRef, Observation
     from .types.kernel import SessionsContext, Signal
     from .types.records import RequestRecord
-    from .types.sessions import Invocation, SessionsEvent, SessionsState, SessionView
-
-
-def _session(state: SessionsState, identity: SessionId) -> SessionView | None:
-    return next((row for row in state.sessions if row.spec.session_id == identity), None)
-
-
-def _replace_session(state: SessionsState, session: SessionView) -> SessionsState:
-    return state.model_copy(
-        update={
-            "sessions": tuple(
-                session if row.spec.session_id == session.spec.session_id else row
-                for row in state.sessions
-            )
-        }
-    )
+    from .types.sessions import Invocation, SessionsEvent, SessionsState
 
 
 def _replace_invocation(state: SessionsState, invocation: Invocation) -> SessionsState:
@@ -297,10 +285,12 @@ def _run_checkpoint_request(
     return AreaChange(
         state=_replace_session(
             state,
-            session.model_copy(
-                update={
-                    "pending_records": (*session.pending_records, request.request_id),
-                }
+            _awaiting(
+                session.model_copy(
+                    update={"pending_records": (*session.pending_records, request.request_id)}
+                ),
+                context,
+                request,
             ),
         ),
         requests=(within(request, context.run.limits.reconciliation_bound),),

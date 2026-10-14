@@ -13,6 +13,11 @@ from ._proofs import (
     invocation_for,
     request_matches,
 )
+from ._session_rows import awaiting as _awaiting
+from ._session_rows import invocation_row as _invocation
+from ._session_rows import replace_invocation as _replace_invocation
+from ._session_rows import replace_session as _replace_session
+from ._session_rows import session_row as _session
 from ._session_scope import (
     attempt_for,
     encode_identity,
@@ -23,12 +28,8 @@ from ._session_state import (
     _current_invocation,
     _ensure,
     _episode,
-    _invocation,
     _record,
-    _replace_invocation,
-    _replace_session,
     _run_reusable,
-    _session,
 )
 from ._turn_outcomes import (
     acceptance_unresolved,
@@ -476,7 +477,9 @@ def _turn_requested(
             invocation=turn.invocation_id,
         )
         ensure = _ensure(session, context)
-        session = session.model_copy(update={"pending_records": (ensure.request_id,)})
+        session = _awaiting(
+            session.model_copy(update={"pending_records": (ensure.request_id,)}), context, ensure
+        )
         requests = (Outbound(request=ensure, until=_from_dispatch(invocation)),)
     else:
         session = session.model_copy(
@@ -633,12 +636,16 @@ def _dispatch_reserved(
             "reserved_inputs": tuple(item.artifact for item in inputs),
         }
     )
-    session = session.model_copy(
-        update={
-            "phase": SessionPhase.EXECUTING,
-            "pending_records": (*session.pending_records, request.request_id),
-            "continuation_id": invocation.turn.continuation_id,
-        }
+    session = _awaiting(
+        session.model_copy(
+            update={
+                "phase": SessionPhase.EXECUTING,
+                "pending_records": (*session.pending_records, request.request_id),
+                "continuation_id": invocation.turn.continuation_id,
+            }
+        ),
+        context,
+        request,
     )
     state = _replace_session(_replace_invocation(state, invocation), session)
     return AreaChange(

@@ -1075,7 +1075,7 @@ expose = ["ProfilerPreflight", "SessionAgents", "SessionImplementations"]
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
+depends_on = ["vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -1097,7 +1097,16 @@ depends_on = ["vs_core._dispatch_episode", "vs_core._proofs", "vs_core.types", "
 
 [[interfaces]]
 from = ["vs_core._waits"]
-expose = ["Outcome", "Producer", "RESOLUTIONS", "OpenWait", "Resolution", "WaitKind", "WaitSubject", "WaitingPhase", "awaiting_refund", "draining_without_cancel", "lapsed_job_waits", "orphan_waits", "phase_waits", "producers", "recorded_waits", "stalled_acquisitions", "stalled_blocked_records", "stalled_checkpoint_waits", "subjects", "undispatchable_requests", "unmet_waits", "waits"]
+expose = ["Outcome", "Producer", "RESOLUTIONS", "OpenWait", "Resolution", "WaitKind", "WaitSubject", "WaitingPhase", "awaiting_refund", "draining_without_cancel", "lapsed_job_waits", "lapsed_session_waits", "orphan_waits", "phase_waits", "producers", "record_waits", "recorded_waits", "stalled_acquisitions", "stalled_blocked_records", "stalled_checkpoint_waits", "subjects", "undispatchable_requests", "unmet_waits", "waits"]
+
+[[modules]]
+path = "vs_core._session_rows"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._waits", "vs_core.types", "vs_core.types.common"]
+
+[[interfaces]]
+from = ["vs_core._session_rows"]
+expose = ["awaiting", "invocation_row", "replace_invocation", "replace_session", "request_ended", "session_row"]
 
 [[modules]]
 path = "vs_core._dispatch_episode"
@@ -1124,7 +1133,7 @@ depends_on = ["vs_core.types.common", "vs_core._outcomes"]
 
 [[interfaces]]
 from = ["vs_core.types"]
-expose = ["[a-z_]+\\.[A-Z].*", "records\\.request_lifecycle", "records\\.(within|inherit)", "job_observations\\.may_resubmit"]
+expose = ["[a-z_]+\\.[A-Z].*", "sessions\\.session_waits", "records\\.request_lifecycle", "records\\.(within|inherit)", "job_observations\\.may_resubmit"]
 
 [[modules]]
 path = "vs_core.types.common"
@@ -1504,7 +1513,7 @@ expose = ["acceptance_signals", "acceptance_unresolved", "is_terminal", "observe
 [[modules]]
 path = "vs_core._session_checkpoints"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._proofs", "vs_core._session_scope", "vs_core._waits", "vs_core.types", "vs_core.types.common"]
+depends_on = ["vs_core._proofs", "vs_core._session_rows", "vs_core._session_scope", "vs_core._waits", "vs_core.types", "vs_core.types.common"]
 
 [[interfaces]]
 from = ["vs_core._session_checkpoints"]

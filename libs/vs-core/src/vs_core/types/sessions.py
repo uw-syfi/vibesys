@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, assert_never
 
 from pydantic import ConfigDict, Field, model_validator
 
@@ -45,6 +45,7 @@ from .evaluation import Continuation, ResumeAuthorizationReceipt
 from .evaluation_history import EvaluationHistoryCursor
 from .session_inputs import InputRecord, InvocationInputTarget, SessionInput
 from .until import ReplyError, Until
+from .waits import WaitOn
 
 
 class Access(StrEnum):
@@ -107,6 +108,23 @@ class SessionPhase(StrEnum):
     UNKNOWN = "unknown"
 
 
+def session_waits(phase: SessionPhase) -> bool:
+    """Whether a session in this phase waits on a request's result."""
+    match phase:
+        case SessionPhase.ACQUIRING | SessionPhase.EXECUTING | SessionPhase.CLOSING:
+            return True
+        case (
+            SessionPhase.IDLE
+            | SessionPhase.CHECKPOINTED
+            | SessionPhase.SUSPENDED
+            | SessionPhase.TERMINAL
+            | SessionPhase.UNKNOWN
+        ):
+            return False
+        case _:
+            assert_never(phase)
+
+
 class SessionView(Value):
     """Persisted session identity, lease and invocation-acceptance facts.
 
@@ -129,6 +147,22 @@ class SessionView(Value):
     pending_records: tuple[RequestId, ...] = ()
     acceptance_sequence: int | None = Field(default=None, ge=0)
     continuation_id: ContinuationId | None = None
+    wait: WaitOn | None = None
+    """The requests the session waits on while acquiring, executing or closing: the one
+    that acquires, runs or closes it, or the inspection that stands in for one."""
+
+    @model_validator(mode="after")
+    def waits_only_while_waiting(self) -> SessionView:
+        """A session that waits on nothing carries no wait.
+
+        The other half, that a waiting session always carries one, holds at the end of every
+        step (``unmet_waits``): a transition builds the session before it names the request.
+        """
+        if self.wait is not None and not session_waits(self.phase):
+            raise ContractValidationError(
+                "wait", f"a session in phase {self.phase.value} waits on nothing"
+            )
+        return self
 
 
 class SessionProjection(SessionView):
@@ -542,6 +576,21 @@ class AcquisitionStalled(Value):
     invocation: InvocationRef
 
 
+class SessionWaitLapsed(Value):
+    """A request a waiting session names ended without moving the session.
+
+    Internal signal raised once a step's other signals settle, never shell input. The
+    session's own transition takes each answer of its requests, so a session still naming an
+    ended request is one the answer did not move: the request blocked at its bound, or the
+    session refused what it said. The session waits again on the requests it names that are
+    still open, or, with none left, no longer knows what the executor holds (``UNKNOWN``).
+    """
+
+    kind: Literal["session_wait_lapsed"] = "session_wait_lapsed"
+    session_id: SessionId
+    request_id: RequestId
+
+
 class EnsureSession(RequestBase):
     """Acquire a lease or positively reattach required_resource.
 
@@ -846,7 +895,8 @@ type SessionsEvent = Annotated[
     | RunInvocationCheckpointRequested
     | RunInvocationCheckpointObserved
     | CheckpointStalled
-    | AcquisitionStalled,
+    | AcquisitionStalled
+    | SessionWaitLapsed,
     Field(discriminator="kind"),
 ]
 type SessionRequest = Annotated[

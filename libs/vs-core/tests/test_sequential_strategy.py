@@ -42,6 +42,7 @@ from vs_core.api import (
     Observation,
     ObservationStatus,
     ReducerTrace,
+    RequestId,
     RequestTurn,
     RoleId,
     RunDrained,
@@ -76,6 +77,7 @@ from vs_core.api import (
     TurnSpec,
     Until,
     Value,
+    WaitOn,
     Withdraw,
     WorkspaceMode,
     WorkspaceObserved,
@@ -303,12 +305,15 @@ def exercise_item(
     requested = TurnRequested(
         until=Until(at=state.run.now_at + 100.0), scope=decision.scope, turn=decision.turn
     )
+    dispatch_id = RequestId(root=f"dispatch:{index}")
+    dispatch = DispatchTurn(request_id=dispatch_id, scope=decision.scope, turn=decision.turn)
     session = SessionView(
         spec=decision.turn.session,
         scope=Scope(owner=state.run.run_id, generation=0),
         generation=0,
         phase=SessionPhase.EXECUTING,
         invocation=decision.turn.invocation_id,
+        wait=WaitOn(requests=(dispatch_id,)),
     )
     result = consume_trace(
         state,
@@ -318,9 +323,7 @@ def exercise_item(
                 signal=requested,
                 change=SessionsChange(
                     state=SessionsState(sessions=(session,)),
-                    requests=(
-                        core.inherit(DispatchTurn(scope=decision.scope, turn=decision.turn)),
-                    ),
+                    requests=(core.inherit(dispatch),),
                 ),
             )
         ],
@@ -357,7 +360,9 @@ def exercise_item(
                 signal=observed,
                 change=SessionsChange(
                     state=SessionsState(
-                        sessions=(session.model_copy(update={"phase": SessionPhase.IDLE}),)
+                        sessions=(
+                            session.model_copy(update={"phase": SessionPhase.IDLE, "wait": None}),
+                        )
                     ),
                     events=(TurnResult(invocation=invocation, observation=observation),),
                 ),

@@ -125,6 +125,7 @@ EXPECTED_TARGET = {
         ),
         ("vs_core._session_stalls.advance_stalled_checkpoint_waits", ("checkpoint_stalled",)),
         ("vs_core._session_stalls.advance_stalled_acquisitions", ("acquisition_stalled",)),
+        ("vs_core._session_stalls.advance_lapsed_session_waits", ("session_wait_lapsed",)),
         ("vs_core.records._observation", ("request_observed",)),
         (
             "vs_core._settlement.advance",

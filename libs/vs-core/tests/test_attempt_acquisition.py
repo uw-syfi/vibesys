@@ -108,6 +108,7 @@ from vs_core.api import (
     TurnSpec,
     Until,
     Value,
+    WaitOn,
     WorkspaceMode,
     WorkspaceObserved,
     WorkspacePlan,
@@ -338,6 +339,7 @@ def canonical_turns(state: CoreState) -> CoreState:
                     phase=SessionPhase.EXECUTING,
                     invocation=invocation.invocation.invocation_id,
                     resource_id=ResourceId(root=f"lease-{invocation.invocation.session_id.root}"),
+                    wait=WaitOn(requests=(identity,)),
                 )
             )
     return state.model_copy(
@@ -471,6 +473,7 @@ def invocation_state(
         phase=SessionPhase.EXECUTING,
         invocation=invocation.invocation.invocation_id,
         resource_id=ResourceId(root="conversation"),
+        wait=WaitOn(requests=(RequestId(root="dispatch"),)),
     )
     return state.model_copy(
         update={
@@ -1626,7 +1629,16 @@ def failed_group_state() -> CoreState:
     state = state.model_copy(
         update={
             "attempts": AttemptsState(attempts=(owner,)),
-            "sessions": state.sessions.model_copy(update={"acquisition_groups": (group,)}),
+            "sessions": state.sessions.model_copy(
+                update={
+                    "acquisition_groups": (group,),
+                    # The session waited on the member's ensure, which has failed.
+                    "sessions": tuple(
+                        row.model_copy(update={"wait": WaitOn(requests=(request.request_id,))})
+                        for row in state.sessions.sessions
+                    ),
+                }
+            ),
             "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
@@ -2601,6 +2613,7 @@ def interrupted_replacement_state(
         update={
             "phase": SessionPhase.CHECKPOINTED,
             "invocation": replacement_ref.invocation_id,
+            "wait": None,
         }
     )
     return state.model_copy(

@@ -105,6 +105,7 @@ from .types.sessions import (
     SessionInputReceived,
     SessionObserved,
     SessionsAcquireRequested,
+    SessionWaitLapsed,
     SteerReceived,
     TurnInputsReserved,
     TurnObserved,
@@ -187,6 +188,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | InvocationCheckpointAvailable()
             | CheckpointStalled()
             | AcquisitionStalled()
+            | SessionWaitLapsed()
             | SessionInputReceived()
             | InputReservationRequested()
             | InputAcceptanceObserved()

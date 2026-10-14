@@ -365,7 +365,7 @@ def test_reacquisition_readiness_requires_canonical_session_acquisition(
     state, event = retained_reopen(initial_manifest=initial_manifest, source_variant=source_variant)
     prepared = step(state, event).state
     session = prepared.sessions.sessions[0].model_copy(
-        update={"phase": SessionPhase.SUSPENDED, "pending_records": ()}
+        update={"phase": SessionPhase.SUSPENDED, "pending_records": (), "wait": None}
     )
     request_id = RequestId(root="retained-acquisition")
     request = EnsureSession(

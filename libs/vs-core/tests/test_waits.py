@@ -115,6 +115,7 @@ def _executing(turn: RequestRecord, *, phase: RequestPhase) -> CoreState:
         scope=turn.request.scope,
         generation=0,
         phase=SessionPhase.EXECUTING,
+        wait=WaitOn(requests=(turn.request_id,)),
     )
     state = initial_state()
     return state.model_copy(
@@ -157,12 +158,20 @@ def test_an_executing_session_needs_its_turn_in_flight(
     assert bool(orphan_waits(_executing(turn_record(), phase=phase))) is (producer is None)
 
 
-def test_a_committed_reply_awaiting_application_ends_the_wait() -> None:
+@pytest.mark.parametrize("phase", [RequestPhase.DISPATCHED, RequestPhase.COMPLETED])
+def test_a_reply_queued_for_the_named_turn_keeps_the_session_moving(
+    phase: RequestPhase,
+) -> None:
+    """A turn's reply travels on its session's owner event, applied a step after the turn ends.
+
+    The shell commits the turn's observation and the owner event together and applies the
+    event next, so a session naming the turn is moved by the queued reply even once the turn's
+    record completed. Without that reply, a completed turn moves the session no more.
+    """
     turn = turn_record()
-    state = _executing(turn, phase=RequestPhase.COMPLETED)
-    assert orphan_waits(state)
+    state = _executing(turn, phase=phase)
     assert not orphan_waits(state, (_reply(turn),))
-    assert [wait.producer for wait in waits(state, (_reply(turn),))] == [Producer.OUTBOX_EVENT]
+    assert bool(orphan_waits(state)) is (phase == RequestPhase.COMPLETED)
 
 
 def test_a_terminal_run_waits_on_nothing() -> None:
@@ -809,3 +818,81 @@ def test_a_step_that_leaves_a_job_live_without_a_wait_or_ended_with_one_fails_lo
 
     with pytest.raises(ContractError, match="live without a wait, or ended with one"):
         step(state, event, reducers=reducers)
+
+
+@settings(max_examples=examples(pr=30, nightly=1000), deadline=None)
+@given(
+    phases=st.lists(_PHASES, min_size=1, max_size=3),
+    session_phase=st.sampled_from(
+        [SessionPhase.ACQUIRING, SessionPhase.EXECUTING, SessionPhase.CLOSING]
+    ),
+)
+def test_a_session_is_an_orphan_exactly_when_its_recorded_wait_names_nothing_open(
+    phases: list[RequestPhase], session_phase: SessionPhase
+) -> None:
+    """The verdict reads only the requests the session named and their phases."""
+    turn = turn_record()
+    records = tuple(
+        turn.model_copy(update={"request_id": RequestId(root=f"named-{index}"), "phase": phase})
+        for index, phase in enumerate(phases)
+    )
+    state = _executing(turn, phase=RequestPhase.COMPLETED)
+    (session,) = state.sessions.sessions
+    waiting = session.model_copy(
+        update={
+            "phase": session_phase,
+            "wait": WaitOn(requests=tuple(row.request_id for row in records)),
+        }
+    )
+    state = state.model_copy(
+        update={
+            "sessions": SessionsState(sessions=(waiting,)),
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records, *records)}
+            ),
+        }
+    )
+    open_phases = {RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING}
+
+    orphaned = [wait for wait in orphan_waits(state) if wait.waiter == WaitKind.SESSION]
+
+    assert bool(orphaned) == (not open_phases.intersection(phases))
+
+
+@pytest.mark.parametrize("other", [RequestPhase.DISPATCHED, RequestPhase.BLOCKED])
+def test_a_session_whose_request_ended_without_moving_it_waits_on_the_rest(
+    other: RequestPhase,
+) -> None:
+    """A blocked request wakes its session, which waits on its other request still open.
+
+    With none open the session keeps its wait and stays an orphan, so the run halts with it
+    named (``RESOLUTIONS``) instead of the session claiming a release nobody proved.
+    """
+    turn = turn_record()
+    blocked = turn.model_copy(
+        update={"request_id": RequestId(root="blocked"), "phase": RequestPhase.BLOCKED}
+    )
+    rest = turn.model_copy(update={"request_id": RequestId(root="rest"), "phase": other})
+    state = _executing(turn, phase=RequestPhase.COMPLETED)
+    (session,) = state.sessions.sessions
+    waiting = session.model_copy(
+        update={"wait": WaitOn(requests=(blocked.request_id, rest.request_id))}
+    )
+    state = state.model_copy(
+        update={
+            "sessions": SessionsState(sessions=(waiting,)),
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records, blocked, rest)}
+            ),
+        }
+    )
+
+    after = step(state, ClockAdvanced(now_at=state.run.now_at + 1.0)).state
+
+    (woken,) = after.sessions.sessions
+    if other == RequestPhase.DISPATCHED:
+        assert woken.wait == WaitOn(requests=(rest.request_id,))
+        assert not [w for w in orphan_waits(after) if w.waiter == WaitKind.SESSION]
+    else:
+        assert woken.wait == waiting.wait
+        assert [w.waiter for w in orphan_waits(after)] == [WaitKind.SESSION]
