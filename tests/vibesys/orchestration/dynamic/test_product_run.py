@@ -15,7 +15,7 @@ from collections import Counter
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from tests.support.dynamic_world import DynamicWorld
+from tests.vibesys.dynamic_world import DynamicWorld
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,

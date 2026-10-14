@@ -14,8 +14,8 @@ from typing import Literal
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.reply_variables import context_variables
 from tests.vibesys.golden.helpers import assert_exact_text
+from tests.vibesys.reply_variables import context_variables
 
 from vibesys.core_wiring import domain_prompt_sections
 from vibesys.issue_queue_board import IssueQueueTexts

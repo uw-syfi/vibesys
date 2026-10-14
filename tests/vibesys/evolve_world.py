@@ -16,7 +16,7 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 from tests.support.checkpoint_faults import FaultyCheckpoints
-from tests.support.evolve_script import EvolveExecutors, config, harness, mutated, reviewed
+from tests.vibesys.evolve_script import EvolveExecutors, config, harness, mutated, reviewed
 
 from vibesys.orchestration.evolve.search.api import evolve
 from vs_dst.api import RunSetup

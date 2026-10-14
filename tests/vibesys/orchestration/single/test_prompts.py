@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.reply_variables import context_variables
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
+from tests.vibesys.reply_variables import context_variables
 
 import vibesys.orchestration.single.core_policy.prompts as templates
 from vibesys.orchestration.single.core_policy.api import run_prompt_variables

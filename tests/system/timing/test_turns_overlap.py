@@ -3,7 +3,7 @@
 Run with every fake answering at once, a shell that runs one request at a time, one that waits
 for the slowest turn before deciding, and one that lets a lease lapse during a long turn all
 pass. Here each turn lasts a drawn number of virtual seconds (longer than the lease for some),
-so the same properties are read off the timeline (``tests/support/skeleton_timing.py``).
+so the same properties are read off the timeline (``tests/system/skeleton_timing.py``).
 
 Past bugs these guard, and the commits before which they fail:
 
@@ -20,14 +20,14 @@ from __future__ import annotations
 from hypothesis import Phase, example, given, settings
 from hypothesis import strategies as st
 from tests.support.skeleton_strategy import IMPLEMENTER_ROLE
-from tests.support.skeleton_timing import (
+from tests.support.skeleton_world import LEASE
+from tests.system.skeleton_timing import (
     Plan,
     StaggeredConfig,
     StaggeredStrategy,
     Timed,
     run_timed,
 )
-from tests.support.skeleton_world import LEASE
 
 import vs_core.api as core
 from vs_sim.api.testing import Depth, depth, examples

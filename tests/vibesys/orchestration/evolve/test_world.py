@@ -6,7 +6,7 @@ through the real core and shell, ends with what the story says.
 
 from __future__ import annotations
 
-from tests.support.evolve_world import EvolveWorld
+from tests.vibesys.evolve_world import EvolveWorld
 
 from vs_core.api import Finish, Settle, StartAttempt, Wait, Withdraw
 from vs_dst.api import SimulatedRun, simulate

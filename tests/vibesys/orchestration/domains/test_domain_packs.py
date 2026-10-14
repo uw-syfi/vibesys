@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from tests.support.reply_variables import profiler_reply
+from tests.vibesys.reply_variables import profiler_reply
 
 import vibesys.orchestration.multi.core_policy.prompts as multi_templates
 from vibesys.constants import DomainName

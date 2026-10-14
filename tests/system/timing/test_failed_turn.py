@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from hypothesis import Phase, example, given, settings
 from hypothesis import strategies as st
-from tests.support.skeleton_timing import (
+from tests.system.skeleton_timing import (
     Plan,
     StaggeredConfig,
     StaggeredStrategy,

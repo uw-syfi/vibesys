@@ -7,7 +7,7 @@ cancels the loop and closing the evaluation executors cancels every job still on
 Whatever the stop finds in flight, no new turn and no new job starts after it.
 
 Each scenario is the staggered or probing skeleton search on the virtual clock
-(``tests/support/skeleton_timing.py``): a turn lasts virtual seconds, a held job never ends by
+(``tests/system/skeleton_timing.py``): a turn lasts virtual seconds, a held job never ends by
 itself, and the stop arrives at a drawn instant.
 
 Past bug these guard: a stop used to wait for the running turn, then for the host's 60 s grace
@@ -22,7 +22,7 @@ import pytest
 from hypothesis import Phase, example, given, settings
 from hypothesis import strategies as st
 from tests.support.skeleton_strategy import SkeletonStrategy
-from tests.support.skeleton_timing import (
+from tests.system.skeleton_timing import (
     GRACE_S,
     Plan,
     StaggeredConfig,

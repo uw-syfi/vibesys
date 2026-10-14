@@ -20,7 +20,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.loop_invariants import RunRecords, cluster_jobs
-from tests.support.skeleton_chaos import (
+from tests.support.skeleton_strategy import SkeletonConfig
+from tests.system.skeleton_chaos import (
     ROLES,
     ChaosInvariant,
     FaultyCluster,
@@ -31,7 +32,6 @@ from tests.support.skeleton_chaos import (
     run_chaos,
     unexplained_end,
 )
-from tests.support.skeleton_strategy import SkeletonConfig
 
 from vibesys.api import RunStatus, RunStopped
 from vs_agent.api import AgentOutputSchemaError

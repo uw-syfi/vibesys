@@ -34,7 +34,7 @@
 {"path": "libs/vs-sandbox/tests/test_project_path_policy.py", "rule": "private_import", "count": 3}
 {"path": "libs/vs-sandbox/tests/test_sandbox_conformance.py", "rule": "patch", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_sandbox_conformance.py", "rule": "private_import", "count": 4}
-{"path": "libs/vs-sandbox/tests/test_skypilot_bridge.py", "rule": "patch", "count": 2}
+{"path": "libs/vs-sandbox/tests/test_skypilot_bridge.py", "rule": "patch", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_skypilot_evaluator_helper.py", "rule": "patch", "count": 1}
 {"path": "sdk/vs-bench/tests/test_runner.py", "rule": "private_import", "count": 2}
 {"path": "sdk/vs-bench/tests/test_runner.py", "rule": "sleep", "count": 4}
@@ -53,7 +53,6 @@
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "timeout_verdict", "count": 1}
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "patch", "count": 5}
 {"path": "tests/packaging/test_installed_release_verifier.py", "rule": "patch", "count": 14}
-{"path": "tests/vibesys/loops/test_rocprof_compute.py", "rule": "timeout_verdict", "count": 1}
 {"path": "tests/server/test_api_transport.py", "rule": "patch", "count": 1}
 {"path": "tests/server/test_event_store.py", "rule": "patch", "count": 2}
 {"path": "tests/server/test_event_store_index.py", "rule": "patch", "count": 13}
@@ -69,6 +68,7 @@
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "mock", "count": 5}
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "patch", "count": 5}
 {"path": "tests/vibesys/inputs/test_synthesis.py", "rule": "patch", "count": 1}
+{"path": "tests/vibesys/loops/test_rocprof_compute.py", "rule": "timeout_verdict", "count": 1}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "mock", "count": 55}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "patch", "count": 83}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "mock", "count": 7}

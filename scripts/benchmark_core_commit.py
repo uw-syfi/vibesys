@@ -14,8 +14,8 @@ import argparse
 import time
 from typing import TYPE_CHECKING
 
-from tests.support.dynamic_world import DynamicWorld
-from tests.support.evolve_world import EvolveWorld
+from tests.vibesys.dynamic_world import DynamicWorld
+from tests.vibesys.evolve_world import EvolveWorld
 from tests.vibesys.orchestration.issue_queue.world import IssueQueueWorld
 
 from vs_dst.api import simulate
