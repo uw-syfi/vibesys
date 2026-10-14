@@ -1224,9 +1224,9 @@ class WebSocketGateway:
                 bootstrap = await _run_owned_blocking(
                     self._request_runner,
                     self.api.subscription_bootstrap,
-                    request.after_sequence,
+                    cursor,
                     request.tail,
-                    store_id=request.store_id,
+                    store_id=store_id,
                 )
                 cursor, reported_floor, store_id = await self._write_bootstrap(
                     websocket, request, bootstrap, rebootstrap=True
@@ -1242,9 +1242,9 @@ class WebSocketGateway:
                 bootstrap = await _run_owned_blocking(
                     self._request_runner,
                     self.api.subscription_bootstrap,
-                    request.after_sequence,
+                    cursor,
                     request.tail,
-                    store_id=request.store_id,
+                    store_id=store_id,
                 )
                 cursor, reported_floor, store_id = await self._write_bootstrap(
                     websocket, request, bootstrap, rebootstrap=True

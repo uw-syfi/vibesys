@@ -27,6 +27,7 @@ from server.api.protocol import (
     SubscribedMessage,
 )
 from server.transport.subscriptions import SubscriptionTracker
+from server.transport.unix_jsonl import MAX_REQUEST_LINE_BYTES as MAX
 from server.transport.unix_jsonl import UnixJsonlServer
 from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads, examples
 
@@ -51,6 +52,8 @@ _KINDS = sorted(
 # What a subscriber reads before its stream goes quiet: the acknowledgment and
 # the bootstrap batch.
 _SUBSCRIBE_LINES = 2
+# The size of one server read, so lines straddle reads at every offset.
+_RECV_CHUNK = 65536
 
 
 def _frame(kind: str) -> bytes:
@@ -352,6 +355,44 @@ def test_a_frame_nested_past_the_recursion_limit_is_rejected_and_the_session_goe
             assert not rejection.ok
             assert rejection.request_id == "unknown"
             assert Response.model_validate_json(_read_line(client)).ok
+            client.close()
+
+    threads.run(main)
+
+
+@settings(deadline=None, max_examples=examples(pr=6, nightly=200))
+@given(
+    excess=st.sampled_from([0, 1, _RECV_CHUNK - 1, _RECV_CHUNK]) | st.integers(0, 3 * MAX),
+    cuts=st.sets(st.integers(1, 4 * MAX), max_size=4),
+    seed=st.integers(0, 2**32),
+)
+def test_a_request_line_past_the_bound_is_rejected_and_the_session_goes_on(
+    tmp_path_factory: pytest.TempPathFactory, excess: int, cuts: set[int], seed: int
+) -> None:
+    """A line of ``MAX_REQUEST_LINE_BYTES`` or more draws one typed rejection.
+
+    The session once buffered a line until its newline, however long, so one
+    client could grow the server's memory without bound. Now the line is
+    answered ``request_too_large`` once, the rest of it is dropped as it
+    arrives, and the request after it is served.
+    """
+    socket_path: Path = tmp_path_factory.mktemp("sock") / "control.sock"
+    threads = SimThreads(schedule_seed=seed)
+    oversized = b"x" * (MAX + excess) + b"\n"
+
+    def main() -> None:
+        parts = build_server_parts(None, threads=threads)
+        network = SimNetwork(threads)
+        with UnixJsonlServer(socket_path, parts.api, threads=threads, network=network):
+            client = network.connect(str(socket_path))
+            _send(client, oversized + _frame("query.snapshot"), tuple(sorted(cuts)))
+            rejection = Response.model_validate_json(_read_line(client))
+            assert not rejection.ok
+            assert rejection.diagnostic is not None
+            assert rejection.diagnostic.code == "request_too_large"
+            reply = Response.model_validate_json(_read_line(client))
+            assert reply.ok, reply
+            assert reply.request_id == "req-query.snapshot"
             client.close()
 
     threads.run(main)

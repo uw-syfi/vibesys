@@ -9,9 +9,11 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Never, TypedDict, Unpack
+from typing import Literal, Never, TypedDict, Unpack
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from tests.server.support import ServerParts, Task, build_server_parts
 
 from server.api.protocol import (
@@ -34,8 +36,15 @@ from server.events import (
 )
 from server.journal import _BOOTSTRAP_SPINE_TYPES
 from server.transport.unix_jsonl import UnixJsonlServer
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import HANG_GUARD_S, SimThreads, join_or_fail, wait_or_fail
+from vs_sim.api import Connection, OsThreads
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    SimNetwork,
+    SimThreads,
+    examples,
+    join_or_fail,
+    wait_or_fail,
+)
 
 _TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 _ROUND_EVERY = 25
@@ -791,3 +800,71 @@ def test_an_idle_stream_paces_itself_through_the_injected_threads(tmp_path: Path
 
     assert threads.pauses
     assert all(seconds > 0 for seconds in threads.pauses)
+
+
+@settings(deadline=None, max_examples=examples(pr=6, nightly=200))
+@given(
+    after_sequence=st.integers(0, 50),
+    request_store=st.sampled_from(["named", "unnamed"]),
+    tail=st.none() | st.integers(60, 1_000),
+    seed=st.integers(0, 2**32),
+)
+def test_a_store_swap_mid_stream_replays_the_new_store_from_its_start(
+    tmp_path_factory: pytest.TempPathFactory,
+    after_sequence: int,
+    request_store: Literal["named", "unnamed"],
+    tail: int | None,
+    seed: int,
+) -> None:
+    """The in-loop rebootstrap after a store swap starts the live store at sequence 1.
+
+    The subscribe request's cursor numbers the store the stream began on. The
+    rebootstrap once resumed from that cursor, so a subscribe that did not name
+    its store (an old client, or a store-blind resume) had the new store's
+    first events withheld from a batch that supersedes the client's fold.
+    """
+    root = tmp_path_factory.mktemp("swap")
+    threads = SimThreads(schedule_seed=seed)
+
+    def main() -> None:
+        parts = build_server_parts(_write_log(root / "first", _round_log(50)), threads=threads)
+        network = SimNetwork(threads)
+        first_store = parts.journal.store_id_locked()
+        request = SubscribeRequest(
+            after_sequence=after_sequence,
+            tail=tail,
+            store_id=first_store if request_store == "named" else "",
+        )
+        with UnixJsonlServer(root / "control.sock", parts.api, threads=threads, network=network):
+            client = network.connect(str(root / "control.sock"))
+            client.send(request.model_dump_json().encode() + b"\n")
+            read = _sim_lines(client)
+            assert json.loads(read())["type"] == "subscribed"
+            assert json.loads(read())["store_id"] == first_store
+            parts.attach(_write_log(root / "second", _round_log(30)))
+            batch = json.loads(read())
+            client.close()
+        latest = parts.api.latest_sequence
+        assert batch["rebootstrap"] is True
+        assert batch["store_id"] != first_store
+        assert batch["through_sequence"] == latest
+        assert [event["sequence"] for event in batch["events"]] == list(range(1, latest + 1))
+
+    threads.run(main)
+
+
+def _sim_lines(connection: Connection) -> Callable[[], bytes]:
+    """Read ``connection`` one newline-terminated line per call."""
+    buffered = bytearray()
+
+    def read() -> bytes:
+        while b"\n" not in buffered:
+            chunk = connection.recv(65536, HANG_GUARD_S)
+            assert chunk, f"the server hung up mid-line after {bytes(buffered[:200])!r}"
+            buffered.extend(chunk)
+        end = buffered.index(b"\n") + 1
+        line = bytes(buffered[:end])
+        del buffered[:end]
+        return line
+
+    return read

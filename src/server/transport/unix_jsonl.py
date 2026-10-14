@@ -39,6 +39,8 @@ _DISCONNECT_POLL_SECONDS = 0.1
 _IDLE_BACKOFF_SECONDS = 0.05
 MAX_SOCKET_PATH_BYTES = 103 if sys.platform == "darwin" else 107
 _RECV_BYTES = 65536
+MAX_REQUEST_LINE_BYTES = 1024 * 1024
+"""The longest request line a session buffers; the WebSocket gateway's inbound frame cap."""
 
 
 class SocketPathTooLongError(OSError):
@@ -61,6 +63,19 @@ def validate_socket_path(path: Path) -> Path:
     if len(str(path).encode()) > MAX_SOCKET_PATH_BYTES:
         raise SocketPathTooLongError(path, MAX_SOCKET_PATH_BYTES)
     return path
+
+
+class RequestLineTooLongError(ValueError):
+    """A request line ran past ``MAX_REQUEST_LINE_BYTES`` without its newline."""
+
+    diagnostic_code = "request_too_large"
+
+    def __init__(self) -> None:
+        """Name the bound the line exceeded."""
+        super().__init__(
+            f"a request line is longer than {MAX_REQUEST_LINE_BYTES} bytes; "
+            "the rest of it was discarded"
+        )
 
 
 class _PeerGoneError(Exception):
@@ -86,7 +101,11 @@ class _ClientSession:
         """Serve requests until the client hangs up, or until its subscription ends."""
         api = self._api
         for line in self._lines():
-            request = decode_request(line)
+            request = (
+                Response.from_exception("unknown", RequestLineTooLongError())
+                if line is None
+                else decode_request(line)
+            )
             if isinstance(request, Response):
                 self._write_message(request)
                 continue
@@ -109,26 +128,40 @@ class _ClientSession:
                 ).model_copy(update={"client_id": request.client_id})
             self._write_message(response)
 
-    def _lines(self) -> Iterator[bytes]:
+    def _lines(self) -> Iterator[bytes | None]:
         """Yield each newline-terminated request, then any unterminated rest at end of stream.
 
-        A read error ends the stream like an end of file: either way the client
-        can send nothing more.
+        A line that grows past ``MAX_REQUEST_LINE_BYTES`` yields ``None`` once,
+        and its remaining bytes up to the next newline are dropped unbuffered,
+        so a client cannot make a session hold an unbounded line. A read error
+        ends the stream like an end of file: either way the client can send
+        nothing more.
         """
         pending = b""
+        discarding = False
         while True:
             try:
                 chunk = self._connection.recv(_RECV_BYTES)
             except OSError:
                 chunk = b""
             if not chunk:
-                if pending:
+                if pending and not discarding:
                     yield pending
                 return
+            if discarding:
+                newline = chunk.find(b"\n")
+                if newline < 0:
+                    continue
+                discarding = False
+                chunk = chunk[newline + 1 :]
             pending += chunk
             *lines, pending = pending.split(b"\n")
             for line in lines:
-                yield line + b"\n"
+                yield line + b"\n" if len(line) < MAX_REQUEST_LINE_BYTES else None
+            if len(pending) >= MAX_REQUEST_LINE_BYTES:
+                pending = b""
+                discarding = True
+                yield None
 
     def _stream(self, request: SubscribeRequest, delivery: StreamDelivery) -> None:
         api = self._api
@@ -177,7 +210,7 @@ class _ClientSession:
                 # More live output landed in one wait than the tail bound was
                 # willing to replay. Bootstrap again at a fresh tail rather
                 # than deliver a window the bound was meant to exclude.
-                cursor, reported_floor, store_id = self._rebootstrap(request)
+                cursor, reported_floor, store_id = self._rebootstrap(request, cursor, store_id)
                 delivery.delivered(cursor)
                 continue
             # ``wait_for_change`` only tells us that the stream changed. Take
@@ -191,7 +224,7 @@ class _ClientSession:
                 # after it is a continuation of what the client folded, however
                 # the two logs compare in length. Bootstrap against the store
                 # that is live now; the client re-folds from the batch's id.
-                cursor, reported_floor, store_id = self._rebootstrap(request)
+                cursor, reported_floor, store_id = self._rebootstrap(request, cursor, store_id)
                 delivery.delivered(cursor)
                 continue
             self._write_message(
@@ -222,14 +255,18 @@ class _ClientSession:
             pass
         hung_up.set()
 
-    def _rebootstrap(self, request: SubscribeRequest) -> tuple[int, int, str]:
-        """Restart this subscription's replay against the journal's live state."""
-        api = self._api
+    def _rebootstrap(
+        self, request: SubscribeRequest, cursor: int, store_id: str
+    ) -> tuple[int, int, str]:
+        """Restart this subscription's replay against the journal's live state.
+
+        The replay resumes from what this stream delivered (``cursor`` in
+        ``store_id``), not from the subscribe request: a swapped store makes the
+        cursor stale whether or not the request named its store.
+        """
         return self._write_bootstrap(
             request,
-            api.subscription_bootstrap(
-                request.after_sequence, request.tail, store_id=request.store_id
-            ),
+            self._api.subscription_bootstrap(cursor, request.tail, store_id=store_id),
             rebootstrap=True,
         )
 

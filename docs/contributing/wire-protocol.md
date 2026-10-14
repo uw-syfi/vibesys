@@ -87,6 +87,11 @@ message. A message-framed transport does not carry it. One WebSocket text frame 
 no trailing newline. A reader that strips a trailing newline before parsing is correct on both
 transports; a reader that requires one is Unix specific and wrong.
 
+A Unix request line is bounded like a WebSocket frame: the server buffers at most
+`MAX_REQUEST_LINE_BYTES` (1 MiB, the gateway's inbound frame cap) of one line. A longer line draws one
+failed response with diagnostic code `request_too_large`, its remaining bytes are dropped up to the
+next newline, and the session reads on.
+
 ### WP-FRAMER: NewlineFramer is Unix only
 
 `NewlineFramer` (`clients/libs/transport/src/newline-framer.ts`) reassembles messages from a byte
@@ -257,7 +262,9 @@ splits to fit its send cap carries the marker on its first frame only. The first
 remains `rebootstrap: false`, even when a changed `store_id` makes that new connection's first batch a fresh
 fold. A client keys continuation on the dial context, the marker, and `store_id`, not sequence
 contiguity. A transport carries these batches unchanged; the rebootstrap decision is server logic,
-not framing.
+not framing. An in-loop rebootstrap restarts from what the stream itself delivered (its cursor and
+the store that cursor numbers), never from the subscribe request's cursor, so a swapped store is
+replayed from its start whether or not the request named a store.
 
 Rebootstrap is the sole projection transition allowed to adopt a different `run_id`. Within any
 ordinary batch, event identity also guards the batch-level `active_executions`,
