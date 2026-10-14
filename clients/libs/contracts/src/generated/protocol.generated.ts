@@ -1354,7 +1354,6 @@ export interface AgentStatusData {
   elapsed_seconds?: ElapsedSeconds;
   input_tokens?: InputTokens;
   context_window?: ContextWindow;
-  [k: string]: unknown;
 }
 /**
  * Captured output from a managed subprocess.
@@ -1434,7 +1433,6 @@ export interface CommandResultPayload {
   stderr: Stderr;
   exit_code?: ExitCode1;
   duration?: Duration;
-  [k: string]: unknown;
 }
 /**
  * A tool result that is a JSON object or array, already parsed.
@@ -1442,7 +1440,6 @@ export interface CommandResultPayload {
 export interface JsonResultPayload {
   kind: Kind26;
   value: Value1;
-  [k: string]: unknown;
 }
 /**
  * Current todo list reported by an agent.
@@ -1458,7 +1455,6 @@ export interface TodoUpdateData {
 export interface TodoItemData {
   content: Content4;
   status: Status1;
-  [k: string]: unknown;
 }
 /**
  * Token usage reported by the active model.

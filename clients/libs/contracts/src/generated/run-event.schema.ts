@@ -194,6 +194,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "AgentStatusData": {
+      "additionalProperties": false,
       "description": "Structured progress readings for one agent invocation.\n\nCarried on presentation events so renderers can format their own status\nprefix (e.g. ``[Round 3/24 | Implementer | 12.3s | 20k/1.0M]``) without\nthe server baking any layout or styling into the payload.",
       "properties": {
         "progress": {
@@ -370,6 +371,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "string"
     },
     "CommandResultPayload": {
+      "additionalProperties": false,
       "description": "Structured result of a command-style tool execution.",
       "properties": {
         "kind": {
@@ -1048,6 +1050,7 @@ const runEventSchema: Record<string, unknown> = {
       ]
     },
     "JsonResultPayload": {
+      "additionalProperties": false,
       "description": "A tool result that is a JSON object or array, already parsed.",
       "properties": {
         "kind": {
@@ -1948,6 +1951,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "TodoItemData": {
+      "additionalProperties": false,
       "description": "One item in the agent's reported todo list.",
       "properties": {
         "content": {
