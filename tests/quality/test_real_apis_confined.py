@@ -49,6 +49,11 @@ real adapters. Existing uses are recorded with exact counts in
 and when a count shrinks without the baseline being lowered, so the list only gets
 shorter. To shrink it, move the site onto a ``vs_sim`` interface or Fake and lower the
 count in the baseline.
+
+The ``file_io`` rule at the end of this file is separate and has no baseline: product code
+opens, writes, copies or removes files and parses JSON or TOML only in the edge modules
+listed in ``FILE_IO_EDGE_MODULES``, each with its reason; everything else asks the owner of
+the data (see ``test_product_code_touches_files_only_in_edge_modules``).
 """
 
 import ast
@@ -702,4 +707,296 @@ def test_product_code_reaches_real_apis_only_through_vs_sim() -> None:
         "product code takes the vs_sim.api interfaces (Threads, BlockingRunner, "
         "SignalSource, ProcessLauncher) instead of using threading, subprocess, "
         "socket or signal directly.\n" + "\n".join(problems)
+    )
+
+
+# ---- file I/O: product code touches files only in edge modules ------------------------
+
+FILE_IO_NAMES = frozenset(
+    {
+        "json.load",
+        "json.loads",
+        "pydantic_core.from_json",
+        "tomllib.load",
+        "tomllib.loads",
+        "os.open",
+        "io.open",
+        "builtins.open",
+        "tempfile",
+        *(
+            f"shutil.{name}"
+            for name in (
+                *("copy", "copy2", "copyfile", "copyfileobj", "copymode", "copystat"),
+                *("copytree", "rmtree", "move", "make_archive", "unpack_archive", "chown"),
+            )
+        ),
+    }
+)
+# pathlib's file methods, recognised on any receiver by pathlib's own signatures.
+_TEXT_KEYWORDS = frozenset({"encoding", "errors", "newline"})
+_OPEN_KEYWORDS = frozenset({"mode", "buffering", *_TEXT_KEYWORDS})
+_FILE_IO_PREFILTER = re.compile(
+    r"\b(?:json|pydantic_core|tomllib|tempfile|shutil|io|os|builtins)\b"
+    r"|\bopen\s*\(|\.(?:read_text|write_text|read_bytes|write_bytes)\s*\("
+)
+
+# The edge modules: the only product modules that open, write, copy or remove files, or
+# parse JSON or TOML directly. Everything else asks the owner of the data. Keep one line
+# per module saying which kind of edge it is.
+FILE_IO_EDGE_MODULES: dict[str, str] = {
+    "libs/vs-agent/src/vs_agent/cli_common.py": "agent workspace: installs skill trees where the agent CLI reads them",
+    "libs/vs-agent/src/vs_agent/usage_records.py": "log sink: the append-only agent usage log",
+    "libs/vs-decode/src/vs_decode/_decode.py": "the decode function's bounded file read, used by stores and edge adapters",
+    "libs/vs-evaluation/src/vs_evaluation/filesystem_store.py": "store implementation: the file-backed EvaluationStore",
+    "libs/vs-faults/src/vs_faults/connector.py": "fault-injection connector process whose shared state is files",
+    "libs/vs-faults/src/vs_faults/plan.py": "hands the fault plan file to the connector process",
+    "libs/vs-issue-tracker/src/vs_issue_tracker/core.py": "store implementation: the file-backed IssueTracker",
+    "libs/vs-issue-tracker/src/vs_issue_tracker/progress.py": "store implementation: the local progress log",
+    "libs/vs-project/src/vs_project/_cli_git_repository.py": "GitRepository implementation over the git CLI (git state is files)",
+    "libs/vs-project/src/vs_project/_exclude_file.py": "GitRepository implementation detail: the repository's info/exclude file",
+    "libs/vs-project/src/vs_project/_fake_git_repository.py": "GitRepository Fake that keeps a real working tree",
+    "libs/vs-project/src/vs_project/_fake_git_worktree.py": "GitRepository Fake's working tree",
+    "libs/vs-project/src/vs_project/_framework_writes.py": "agent workspace: framework state files in the agent worktree",
+    "libs/vs-project/src/vs_project/_git_tracker.py": "agent workspace: snapshots and restores the agent worktree",
+    "libs/vs-project/src/vs_project/_logger.py": "log sink: the per-run log file",
+    "libs/vs-project/src/vs_project/_pygit2_git_repository.py": "GitRepository implementation over pygit2 (git state is files)",
+    "libs/vs-project/src/vs_project/_run_logs.py": "log reader: the one reader of the run log files RunLogger writes",
+    "libs/vs-project/src/vs_project/_state.py": "store implementation: project and run state namespaces",
+    "libs/vs-project/src/vs_project/_state_io.py": "store implementation: atomic, durable state document writes and reads",
+    "libs/vs-project/src/vs_project/_state_store.py": "store implementation: the local StateStore",
+    "libs/vs-project/src/vs_project/git_contract_scaffold.py": "builds working trees for the GitRepository contract suite",
+    "libs/vs-prompts/src/vs_prompts/contract.py": "packaged resource loader: template sources for static analysis",
+    "libs/vs-runtime/src/vs_runtime/_artifact_store.py": "store implementation: the run's artifact store",
+    "libs/vs-runtime/src/vs_runtime/_docker_evaluator_tools.py": "OS adapter: host ownership marker for a bind mount",
+    "libs/vs-runtime/src/vs_runtime/_evaluator_packages.py": "packaged resource loader: bundled evaluator packages",
+    "libs/vs-runtime/src/vs_runtime/_event_journal.py": "store implementation: the event journal",
+    "libs/vs-runtime/src/vs_runtime/_host_command_bridge.py": "agent workspace: stages the host command client for the agent",
+    "libs/vs-runtime/src/vs_runtime/_input_project.py": "agent workspace: materializes the task's input project",
+    "libs/vs-runtime/src/vs_runtime/_linux_cpu_profiler.py": "OS adapter: /proc and perf output, and the profile report sink",
+    "libs/vs-runtime/src/vs_runtime/_macos_cpu_profiler.py": "OS adapter: the profile report sink",
+    "libs/vs-runtime/src/vs_runtime/_model_artifacts.py": "user input loader: the one reader of a task's meta.json",
+    "libs/vs-runtime/src/vs_runtime/_objective_document.py": "agent workspace: writes the objective document the agent reads",
+    "libs/vs-runtime/src/vs_runtime/_project_materialization.py": "agent workspace: materializes the project tree",
+    "libs/vs-runtime/src/vs_runtime/_receipt_store.py": "store implementation: evaluation receipts",
+    "libs/vs-runtime/src/vs_runtime/_skills.py": "packaged resource loader: skill trees",
+    "libs/vs-runtime/src/vs_runtime/_slot_meter.py": "store implementation: the slot usage meter",
+    "libs/vs-runtime/src/vs_runtime/_workspace_files.py": "agent workspace interface: bounded, contained reads and writes of agent files",
+    "libs/vs-runtime/src/vs_runtime/api/operation_fixtures.py": "scenario fixtures for the runtime's suites: the effect log file",
+    "libs/vs-sandbox/src/vs_sandbox/cuda_backend.py": "OS adapter: device lease record for a GPU",
+    "libs/vs-sandbox/src/vs_sandbox/device_lease.py": "store implementation: device lease records",
+    "libs/vs-sandbox/src/vs_sandbox/evaluator_tools.py": "store implementation: installed evaluator tools and receipts",
+    "libs/vs-sandbox/src/vs_sandbox/fake_docker_engine.py": "Docker engine Fake with real build contexts",
+    "libs/vs-sandbox/src/vs_sandbox/feature_image.py": "packaged devcontainer features loader and docker build context generator",
+    "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py": "log sink: GPU utilization log",
+    "libs/vs-sandbox/src/vs_sandbox/host_command_client.py": "stdlib-only client staged into the container; cannot import pydantic",
+    "libs/vs-sandbox/src/vs_sandbox/landlock.py": "OS adapter: Landlock rules take O_PATH descriptors",
+    "libs/vs-sandbox/src/vs_sandbox/linked_worktree.py": "OS adapter: git worktree pointer files",
+    "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py": "store implementation: Modal deployment lease and lock files",
+    "libs/vs-sandbox/src/vs_sandbox/modal_model_setup.py": "runs inside a Modal function; writes the volume sentinel",
+    "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py": "store implementation: the SkyPilot bridge spool",
+    "libs/vs-sandbox/src/vs_sandbox/skypilot_config.py": "operator config loader: SkyPilot settings",
+    "libs/vs-sandbox/src/vs_sandbox/skypilot_evaluator.py": "store implementation: SkyPilot evaluator state files",
+    "libs/vs-sandbox/src/vs_sandbox/skypilot_runner.py": "edge adapter: the task file the sky CLI reads, and its output",
+    "libs/vs-sandbox/src/vs_sandbox/slurm_capture_plan.py": "store implementation: the Slurm capture plan",
+    "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": "store implementation: durable Slurm evaluation records",
+    "libs/vs-sandbox/src/vs_sandbox/slurm_gpu_alias.py": "operator config loader: the deprecated slurm-gpu file",
+    "libs/vs-sandbox/src/vs_sandbox/slurm_policy.py": "operator config loader: the Slurm operator file",
+    "libs/vs-sandbox/src/vs_sandbox/slurm_settings_toml.py": "operator config writer: the Slurm operator file a run validated",
+    "libs/vs-slurm/src/vs_slurm/cluster_store.py": "store implementation: the cluster state store",
+    "libs/vs-slurm/src/vs_slurm/config.py": "operator config loader: the Slurm cluster file",
+    "libs/vs-slurm/src/vs_slurm/fake_cluster.py": "Slurm cluster Fake whose state is files",
+    "libs/vs-slurm/src/vs_slurm/fake_connector.py": "Slurm connector Fake, a process whose state is files",
+    "libs/vs-slurm/src/vs_slurm/fake_shell.py": "Slurm shell Fake over files",
+    "libs/vs-slurm/src/vs_slurm/identity.py": "packaged resource: the digest of its own source",
+    "libs/vs-slurm/src/vs_slurm/remote_operations.py": "file transfer adapter to the cluster",
+    "libs/vs-slurm/src/vs_slurm/runner.py": "OS adapter: /proc and cgroup files, and the job script directory",
+    "libs/vs-slurm/src/vs_slurm/staging.py": "file transfer adapter: staging to the cluster",
+    "libs/vs-slurm/src/vs_slurm/trace_replay.py": "replay connector over a recorded trace file",
+    "src/entrypoints/cli/config.py": "user input loader: CLI configuration files",
+    "src/entrypoints/cli/inputs.py": "user input loader: task inputs named on the command line",
+    "src/entrypoints/example_catalog.py": "packaged resource loader: the example catalog",
+    "src/entrypoints/examples.py": "generator: scaffolds packaged examples into a user directory",
+    "src/entrypoints/launcher.py": "packaged resource loader: package versions",
+    "src/entrypoints/server.py": "process entrypoint: log file and socket directory",
+    "src/entrypoints/web.py": "static file serving: the web client build",
+    "src/entrypoints/web_assets.py": "static file serving: the web client build manifest",
+    "src/server/api/schema.py": "code generator: protocol schema files",
+    "src/server/chat/transcript.py": "store implementation: chat transcripts",
+    "src/server/event_index.py": "store implementation: the event index",
+    "src/server/events.py": "store implementation: the run's wire event log",
+    "src/server/host_helper_os.py": "OS adapter and project pyproject loader for the host helper",
+    "src/server/registry.py": "store implementation: the server instance registry",
+    "src/server/settings.py": "user input loader: server settings",
+    "src/server/transport/discovery.py": "store implementation: instance records, and a /proc OS adapter",
+    "src/server/transport/websocket.py": "static file serving: the web client",
+    "src/vibesys/config.py": "user input loader: VibeSys configuration",
+    "src/vibesys/domains/rendering.py": "packaged resource loader: role templates",
+    "src/vibesys/inputs/_manifest.py": "user input loader: the task manifest",
+    "src/vibesys/inputs/_objectives.py": "user input loader: task objectives",
+    "src/vibesys/inputs/_synthesis.py": "generator: writes a synthesized task folder",
+    "src/vibesys/orchestration/skill_selection.py": "packaged resource loader: skill sidecar metadata",
+    "src/vibesys/run/evaluation_socket.py": "OS adapter: owns the evaluation socket directory",
+}
+
+
+def _is_class_name(expr: ast.expr) -> bool:
+    return isinstance(expr, ast.Name) and expr.id[:1].isupper() and not expr.id.isupper()
+
+
+def _is_path_io(call: ast.Call) -> bool:
+    """Whether *call* is a ``read_text``/``write_text``/``read_bytes``/``write_bytes``/``open``
+    call shaped like pathlib's (``Project.open(root)`` on a class is a constructor, not I/O)."""
+    func = call.func
+    if not isinstance(func, ast.Attribute) or _is_class_name(func.value):
+        return False
+    keywords = {keyword.arg for keyword in call.keywords}
+    arity = len(call.args)
+    shapes = {
+        "read_bytes": arity == 0 and not keywords,
+        "write_bytes": arity == 1 and not keywords,
+        "read_text": arity <= 2 and keywords <= _TEXT_KEYWORDS,
+        "write_text": 1 <= arity <= 4 and keywords <= _TEXT_KEYWORDS,
+        "open": arity <= 5
+        and keywords <= _OPEN_KEYWORDS
+        and (arity == 0 or _literal(call.args[0]) is not None),
+    }
+    return shapes.get(func.attr, False)
+
+
+def _is_file_io_name(dotted: str) -> bool:
+    parts = dotted.split(".")
+    return any(".".join(parts[:end]) in FILE_IO_NAMES for end in range(1, len(parts) + 1))
+
+
+def file_io_sites(source: str) -> list[str]:
+    """``line:spelling`` of each file access or direct JSON or TOML parse in *source*.
+
+    Counted: a reference to a name in ``FILE_IO_NAMES`` under any import spelling, a call
+    of the builtin ``open``, and a pathlib-shaped ``read_text``/``write_text``/
+    ``read_bytes``/``write_bytes``/``open`` call on any receiver. Not seen: a name built at
+    run time (``getattr(json, name)``), ``from json import *`` and ``eval``/``exec``.
+    """
+    if not _FILE_IO_PREFILTER.search(source):
+        return []
+    nodes = list(walk_nodes(parse_source(source)))
+    aliases = _aliases(nodes)
+    inner = {id(node.value) for node in nodes if isinstance(node, ast.Attribute)}
+    sites: list[str] = []
+    for node in nodes:
+        if isinstance(node, (ast.Name, ast.Attribute)) and id(node) not in inner:
+            if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+                continue
+            dotted = _dotted(node, aliases)
+            if dotted is not None and _is_file_io_name(dotted):
+                sites.append(f"{node.lineno}:{dotted}")
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "open" and "open" not in aliases:
+                sites.append(f"{node.lineno}:open()")
+            elif _is_path_io(node) and isinstance(func, ast.Attribute):
+                sites.append(f"{node.lineno}:.{func.attr}()")
+    return sites
+
+
+FILE_IO_PLANTED = {
+    "json.loads": "import json\n\ndef f(s):\n    return json.loads(s)\n",
+    "json.load alias": "import json as j\n\ndef f(s):\n    return j.load(s)\n",
+    "from json": "from json import loads\n\ndef f(s):\n    return loads(s)\n",
+    "from_json": "import pydantic_core\n\ndef f(s):\n    return pydantic_core.from_json(s)\n",
+    "from from_json": "from pydantic_core import from_json as fj\n\ndef f(s):\n    fj(s)\n",
+    "tomllib": "import tomllib\n\ndef f(s):\n    return tomllib.loads(s)\n",
+    "os.open": "import os\n\ndef f(p):\n    os.open(p, os.O_RDONLY)\n",
+    "io.open": "from io import open as o\n\ndef f(p):\n    o(p)\n",
+    "builtins.open": "import builtins\n\ndef f(p):\n    builtins.open(p)\n",
+    "open": "def f(p):\n    with open(p) as s:\n        return s.read()\n",
+    "tempfile": "import tempfile\n\ndef f():\n    return tempfile.mkdtemp()\n",
+    "from tempfile": "from tempfile import NamedTemporaryFile\n\ndef f():\n    NamedTemporaryFile()\n",
+    "rmtree": "import shutil\n\ndef f(p):\n    shutil.rmtree(p)\n",
+    "copytree": "from shutil import copytree\n\ndef f(a, b):\n    copytree(a, b)\n",
+    "read_text": "def f(path):\n    return path.read_text(encoding='utf-8')\n",
+    "write_text": "def f(path):\n    path.write_text('x', encoding='utf-8')\n",
+    "read_bytes": "def f(path):\n    return path.read_bytes()\n",
+    "write_bytes": "def f(path):\n    path.write_bytes(b'x')\n",
+    "path open": "def f(path):\n    with path.open('rb') as s:\n        return s.read()\n",
+    "attribute receiver": "def f(self):\n    return self.root.joinpath('a').read_text()\n",
+    "constant receiver": "def f():\n    return SOURCE_FILE.read_text()\n",
+}
+FILE_IO_CLEAN = {
+    "json.dumps": "import json\n\ndef f(v):\n    return json.dumps(v)\n",
+    "shutil.which": "import shutil\n\ndef f():\n    return shutil.which('git')\n",
+    "constructor open": "def f(root):\n    return Project.open(root)\n",
+    "pydantic parse": "def f(model, s):\n    return model.model_validate_json(s)\n",
+    "os.path": "import os\n\ndef f(p):\n    return os.path.join(p, 'x')\n",
+    "url open": "def f(browser, url):\n    browser.open(url)\n",
+    "local open": "from vs_project.api import open_git_repository as open\n\ndef f(p):\n    open(p)\n",
+    "read with a size": "def f(stream):\n    return stream.read(10)\n",
+}
+
+
+@pytest.mark.parametrize("source", FILE_IO_PLANTED.values(), ids=FILE_IO_PLANTED.keys())
+def test_a_planted_file_access_is_seen(source: str) -> None:
+    assert len(file_io_sites(source)) == 1, file_io_sites(source)
+
+
+@pytest.mark.parametrize("source", FILE_IO_CLEAN.values(), ids=FILE_IO_CLEAN.keys())
+def test_code_that_touches_no_file_is_not_flagged(source: str) -> None:
+    assert file_io_sites(source) == []
+
+
+@given(name=st.sampled_from(sorted(FILE_IO_NAMES)), data=st.data())
+def test_every_file_io_name_is_seen_under_every_import_spelling(
+    name: str, data: st.DataObject
+) -> None:
+    key = f"{name}.mkdtemp" if name == "tempfile" else name
+    source = data.draw(st.sampled_from(_spellings(key)))
+    assert len(file_io_sites(source)) == 1, source
+
+
+def test_every_edge_module_exists_and_says_why_it_is_an_edge() -> None:
+    for relative, reason in FILE_IO_EDGE_MODULES.items():
+        assert (REPO / relative).is_file(), f"{relative} is listed but does not exist"
+        assert _is_product(relative), f"{relative} is not product code"
+        assert reason.strip(), f"{relative} needs a reason"
+        assert "\n" not in reason, f"{relative} needs a one-line reason"
+
+
+def test_product_code_touches_files_only_in_edge_modules() -> None:
+    """The ``file_io`` rule: most product code does not know how anything is persisted.
+
+    Product code (``src/`` and ``libs/*/src``, ``libs/vs-sim`` exempt) does not open, read,
+    write, copy or remove files, create temporary files, or parse JSON or TOML with
+    ``json``, ``tomllib`` or ``pydantic_core.from_json``. It asks the owner of the data:
+    a store implementation behind a role-named ``Protocol`` (a file backend is one
+    implementation, so another can replace it without touching callers), the agent
+    workspace files module, or a loader of user inputs or packaged resources. Untrusted
+    JSON is parsed by ``vs_decode.api.decode_json`` (bounded size, depth-bounded parse,
+    strict model, typed ``Unreadable`` result) or a pydantic model or ``TypeAdapter``.
+
+    Only the modules in ``FILE_IO_EDGE_MODULES`` touch files, each with its reason: store
+    implementations and log sinks, OS adapters for file-only interfaces (``/proc``,
+    ``/sys``, devices), the agent workspace interface, input and packaged-resource loaders,
+    static file serving and code generators. There is no baseline: a new site goes behind
+    one of those owners, and an edge module that stops touching files leaves the list.
+    """
+    found = {
+        path.relative_to(REPO).as_posix(): sites
+        for path in _python_files(PRODUCT_ROOTS)
+        if not path.relative_to(REPO).as_posix().startswith(EXEMPT_PREFIXES)
+        and (sites := file_io_sites(path.read_text(encoding="utf-8")))
+    }
+    leaks = [
+        f"{relative}: {' '.join(sites)}"
+        for relative, sites in sorted(found.items())
+        if relative not in FILE_IO_EDGE_MODULES
+    ]
+    stale = sorted(set(FILE_IO_EDGE_MODULES) - set(found))
+    assert not leaks, (
+        "product code must not touch files or parse JSON or TOML itself: ask the data's "
+        "owner (a store behind a role-named Protocol, the workspace files module, or an "
+        "input loader), or parse untrusted JSON with vs_decode.api.decode_json or a "
+        "pydantic model.\n" + "\n".join(leaks)
+    )
+    assert not stale, (
+        "these edge modules no longer touch files; remove them from FILE_IO_EDGE_MODULES:\n"
+        + "\n".join(stale)
     )
