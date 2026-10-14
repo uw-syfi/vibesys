@@ -134,7 +134,11 @@ const EVENT_DATA_HANDLERS = {
   workspace_snapshot: ignoredEventData,
   run_configured: ignoredEventData,
   framework_warning: ignoredEventData,
-  winner_selected: ignoredEventData,
+  winner_selected: runEventData(applyWinnerSelectedData),
+  // No client projection consumes either yet; declared so the dispatch table stays exhaustive
+  // over the generated protocol rather than silently forward-compatible with these two.
+  workstream_finished: ignoredEventData,
+  turn_usage_recorded: ignoredEventData,
 } satisfies Record<EventDataKind, EventDataHandlers>;
 
 export function eventDataHandlers(data: RunEvent['data']): EventDataHandlers | null | undefined {
@@ -178,6 +182,18 @@ function applyBenchmarkData(state: CoreState, event: RunEvent, sequence: number)
     : cloneCoreStateWith(state, {benchmarks: [...state.benchmarks, benchmark]});
 }
 
+function applyWinnerSelectedData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'winner_selected') return state;
+  return cloneCoreStateWith(state, {
+    winner: {
+      selection: data.selection,
+      revision: data.revision,
+      settlementId: data.settlement_id ?? null,
+    },
+  });
+}
+
 function applyExperimentsChangedData(
   state: CoreState,
   _event: RunEvent,
@@ -209,12 +225,17 @@ function applyRunStatusData(state: CoreState, event: RunEvent): CoreState {
   return applyRunStatus(state, data.status);
 }
 
-/** The quota state after `event`: a pause sets it, any event that settles the stop clears it. */
+/**
+ * The quota state after `event`: a pause sets it, any event that settles the stop clears it.
+ * `provider_switched` additionally records what it switched, in `lastSwitch`: that fact is
+ * sticky, so every branch carries the previous one forward rather than dropping it.
+ */
 function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): QuotaState {
   const data = event.data;
   switch (data?.kind) {
     case 'quota_paused':
       return {
+        ...quota,
         sequence,
         pause: {
           provider: data.provider,
@@ -231,8 +252,21 @@ function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): Q
       };
     case 'quota_resumed':
     case 'quota_abandoned':
+      return {...quota, sequence, pause: null};
     case 'provider_switched':
-      return {sequence, pause: null};
+      return {
+        ...quota,
+        sequence,
+        pause: null,
+        lastSwitch: {
+          sequence,
+          fromProvider: data.from_provider,
+          toProvider: data.to_provider,
+          toModel: data.to_model,
+          reason: data.reason,
+          detail: data.detail,
+        },
+      };
     default:
       return quota;
   }

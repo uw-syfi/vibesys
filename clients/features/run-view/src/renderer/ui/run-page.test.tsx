@@ -67,6 +67,49 @@ ${'A'.repeat(256)}
   expect(html).not.toContain('<strong>not markup</strong>');
 });
 
+test('names the run result once winner_selected reports it, not before', () => {
+  const pending = renderToStaticMarkup(
+    <RunPage
+      run={initialCoreState()}
+      iterations={initialIterationNavigation()}
+      session={null}
+      replayFailure={null}
+      onReattach={() => undefined}
+      onReconnectControls={() => undefined}
+      onRetryReplay={() => undefined}
+      onCommand={null}
+    />,
+  );
+  expect(pending).toContain('<span>Result</span><strong>Pending</strong>');
+
+  const run = runStep(initialCoreState(), {
+    type: 'events',
+    events: [
+      event(1, 'winner_selected', {
+        data: {
+          kind: 'winner_selected',
+          selection: 'candidate',
+          revision: 'abc1234def',
+          settlement_id: 'settlement-7',
+        },
+      }),
+    ],
+  }).state;
+  const html = renderToStaticMarkup(
+    <RunPage
+      run={run}
+      iterations={initialIterationNavigation()}
+      session={null}
+      replayFailure={null}
+      onReattach={() => undefined}
+      onReconnectControls={() => undefined}
+      onRetryReplay={() => undefined}
+      onCommand={null}
+    />,
+  );
+  expect(html).toContain('<span>Result</span><strong>Candidate abc1234 · settlement-7</strong>');
+});
+
 test('does not present a round budget as a limit on non-round iterations', () => {
   const run = runStep(initialCoreState(), {
     type: 'events',

@@ -504,6 +504,10 @@ function runConfiguredContent(data: RunConfiguredData): string {
   if (data.objective) lines.push(`objective: ${data.objective}`);
   if (data.model) lines.push(`model: ${data.model}`);
   if (data.search_policy) lines.push(`search policy: ${data.search_policy}`);
+  if (data.pareto_objectives) lines.push(`pareto objectives: ${data.pareto_objectives}`);
+  if (data.benchmark_contract) {
+    lines.push('benchmark result contract declared; it owns candidate fitness');
+  }
   return lines.length > 0 ? lines.join('\n') : 'run configured';
 }
 

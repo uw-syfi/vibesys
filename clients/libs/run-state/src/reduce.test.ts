@@ -2068,7 +2068,7 @@ describe('typed framework events', () => {
     ]);
   });
 
-  it('summarizes the run configuration once', () => {
+  it('summarizes the run configuration once, including its Pareto and benchmark-contract facts', () => {
     const state = reduceEvent(
       initialCoreState(),
       frameworkEvent(
@@ -2081,6 +2081,8 @@ describe('typed framework events', () => {
           model: 'claude-sonnet-4-5',
           objective: 'Raise decode throughput',
           search_policy: 'beam',
+          pareto_objectives: 'latency,throughput',
+          benchmark_contract: true,
           source: 'loop',
         },
         {round_label: null},
@@ -2091,7 +2093,9 @@ describe('typed framework events', () => {
       {
         kind: 'status',
         content:
-          'objective: Raise decode throughput\nmodel: claude-sonnet-4-5\nsearch policy: beam',
+          'objective: Raise decode throughput\nmodel: claude-sonnet-4-5\nsearch policy: beam\n' +
+          'pareto objectives: latency,throughput\n' +
+          'benchmark result contract declared; it owns candidate fitness',
         label: 'framework',
       },
     ]);
@@ -2649,7 +2653,7 @@ describe('quota state', () => {
     });
 
   it('starts with no quota fact', () => {
-    expect(initialCoreState().quota).toEqual({sequence: 0, pause: null});
+    expect(initialCoreState().quota).toEqual({sequence: 0, pause: null, lastSwitch: null});
   });
 
   it('records a pause with the provider diagnostic, reset times and fallback', () => {
@@ -2665,10 +2669,11 @@ describe('quota state', () => {
         policy: 'wait',
         fallback: {provider: 'codex', model: 'gpt-5.4'},
       },
+      lastSwitch: null,
     });
   });
 
-  it('settles on resumed, abandoned and switched, each at its own sequence', () => {
+  it('settles on resumed and abandoned, each at its own sequence, without inventing a switch', () => {
     const settle = {
       quota_resumed: {kind: 'quota_resumed', provider: 'claude'},
       quota_abandoned: {
@@ -2678,20 +2683,122 @@ describe('quota state', () => {
         detail: 'too many requests',
         reason: 'wait budget spent',
       },
-      provider_switched: {
-        kind: 'provider_switched',
-        from_provider: 'claude',
-        to_provider: 'codex',
-        to_model: 'gpt-5.4',
-        reason: 'policy',
-        detail: 'too many requests',
-      },
     } as const;
     for (const [type, data] of Object.entries(settle)) {
       let state = reduceEvent(initialCoreState(), pausedEvent(1));
       state = reduceEvent(state, fixtureEvent(2, type as RunEvent['type'], {data}));
-      expect(state.quota).toEqual({sequence: 2, pause: null});
+      expect(state.quota).toEqual({sequence: 2, pause: null, lastSwitch: null});
     }
+  });
+
+  it('settles on a provider switch and retains the switch it made, not just that it happened', () => {
+    let state = reduceEvent(initialCoreState(), pausedEvent(1));
+    state = reduceEvent(
+      state,
+      fixtureEvent(2, 'provider_switched', {
+        data: {
+          kind: 'provider_switched',
+          from_provider: 'claude',
+          to_provider: 'codex',
+          to_model: 'gpt-5.4',
+          reason: 'policy',
+          detail: 'too many requests',
+        },
+      }),
+    );
+    expect(state.quota).toEqual({
+      sequence: 2,
+      pause: null,
+      lastSwitch: {
+        sequence: 2,
+        fromProvider: 'claude',
+        toProvider: 'codex',
+        toModel: 'gpt-5.4',
+        reason: 'policy',
+        detail: 'too many requests',
+      },
+    });
+  });
+
+  it('keeps the last switch sticky across a later pause and resume', () => {
+    let state = reduceEvent(initialCoreState(), pausedEvent(1));
+    state = reduceEvent(
+      state,
+      fixtureEvent(2, 'provider_switched', {
+        data: {
+          kind: 'provider_switched',
+          from_provider: 'claude',
+          to_provider: 'codex',
+          to_model: 'gpt-5.4',
+          reason: 'policy',
+          detail: 'too many requests',
+        },
+      }),
+    );
+    state = reduceEvent(state, pausedEvent(3));
+    expect(state.quota.lastSwitch).toEqual({
+      sequence: 2,
+      fromProvider: 'claude',
+      toProvider: 'codex',
+      toModel: 'gpt-5.4',
+      reason: 'policy',
+      detail: 'too many requests',
+    });
+    state = reduceEvent(
+      state,
+      fixtureEvent(4, 'quota_resumed', {data: {kind: 'quota_resumed', provider: 'codex'}}),
+    );
+    expect(state.quota).toEqual({
+      sequence: 4,
+      pause: null,
+      lastSwitch: {
+        sequence: 2,
+        fromProvider: 'claude',
+        toProvider: 'codex',
+        toModel: 'gpt-5.4',
+        reason: 'policy',
+        detail: 'too many requests',
+      },
+    });
+  });
+});
+
+describe('winner selection state', () => {
+  it('starts with no result', () => {
+    expect(initialCoreState().winner).toBeNull();
+  });
+
+  it('records a candidate winner with its settlement', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'winner_selected', {
+        data: {
+          kind: 'winner_selected',
+          selection: 'candidate',
+          revision: 'abc123def456',
+          settlement_id: 'settlement-9',
+        },
+      }),
+    );
+    expect(state.winner).toEqual({
+      selection: 'candidate',
+      revision: 'abc123def456',
+      settlementId: 'settlement-9',
+    });
+  });
+
+  it('records the baseline kept unchanged, with no settlement to name', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'winner_selected', {
+        data: {kind: 'winner_selected', selection: 'baseline', revision: 'baseline-rev'},
+      }),
+    );
+    expect(state.winner).toEqual({
+      selection: 'baseline',
+      revision: 'baseline-rev',
+      settlementId: null,
+    });
   });
 });
 

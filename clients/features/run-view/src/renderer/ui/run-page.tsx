@@ -18,7 +18,9 @@ import {
   pageHeader,
   REPLAY_SESSION,
 } from '../../state/banners.js';
+import {quotaBanner} from '../../state/quota-banner.js';
 import {Banners} from './banners.js';
+import {QuotaBanner} from './quota-banner.js';
 import {RoundRail} from './round-rail.js';
 import {RunControls} from './run-controls.js';
 import {RunSummary} from './run-summary.js';
@@ -71,6 +73,7 @@ export function RunPage({
         </div>
       </header>
       <Banners banners={banners} replayFailure={replayFailure} {...events} />
+      <QuotaBanner banner={quotaBanner(run)} command={events.onCommand} />
       <RunSummary run={run} iterations={iterations} />
       <div className="run-layout">
         <RoundRail
