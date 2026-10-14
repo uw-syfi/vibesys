@@ -69,9 +69,7 @@ def advance_stalled_acquisitions(
     if not isinstance(event, AcquisitionStalled):
         raise ContractValidationError("event.kind", "event is not an acquisition stall")
     invocation = _invocation(state, event.invocation)
-    if invocation is None or event.invocation not in stalled_acquisitions(
-        state, context.records.records
-    ):
+    if invocation is None or event.invocation not in stalled_acquisitions(state, context.records):
         return AreaChange(state=state)
     observation = stalled_acquisition(invocation, context.run.now_at)
     ended = invocation.model_copy(
@@ -110,8 +108,13 @@ def advance_lapsed_session_waits(
     session = _session(state, event.session_id)
     if session is None or session.wait is None or event.request_id not in session.wait.requests:
         return AreaChange(state=state)
+    if not _ended(context, event.request_id):
+        return AreaChange(state=state)
     kept = tuple(request for request in session.wait.requests if not _ended(context, request))
-    if not kept or not _ended(context, event.request_id):
+    if not kept and session.phase == SessionPhase.UNKNOWN:
+        # An unknown session whose inspection ended unanswered waits on nothing core can name.
+        return AreaChange(state=_replace_session(state, session.model_copy(update={"wait": None})))
+    if not kept:
         return AreaChange(state=state)
     waiting = session.model_copy(update={"wait": WaitOn(requests=kept)})
     return AreaChange(state=_replace_session(state, waiting))

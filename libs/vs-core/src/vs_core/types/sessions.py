@@ -108,6 +108,21 @@ class SessionPhase(StrEnum):
     UNKNOWN = "unknown"
 
 
+def session_may_wait(phase: SessionPhase) -> bool:
+    """Whether a session in this phase may wait: a waiting one, or an unknown one inspected.
+
+    A session whose acquisition or turn core cannot settle is unknown; while the inspection
+    that settles it is out, it waits on that inspection. One with nothing out waits on nothing
+    core can name, and carries no wait.
+    """
+    return session_waits(phase) or phase == SessionPhase.UNKNOWN
+
+
+def turn_acquires(invocation: Invocation) -> bool:
+    """Whether a turn is still acquiring: requested, charged or not, with no result yet."""
+    return invocation.phase == SessionPhase.ACQUIRING and invocation.observation is None
+
+
 def session_waits(phase: SessionPhase) -> bool:
     """Whether a session in this phase waits on a request's result."""
     match phase:
@@ -158,7 +173,7 @@ class SessionView(Value):
         The other half, that a waiting session always carries one, holds at the end of every
         step (``unmet_waits``): a transition builds the session before it names the request.
         """
-        if self.wait is not None and not session_waits(self.phase):
+        if self.wait is not None and not session_may_wait(self.phase):
             raise ContractValidationError(
                 "wait", f"a session in phase {self.phase.value} waits on nothing"
             )
@@ -213,6 +228,17 @@ class Invocation(Value):
     """How long the turn may run once the shell dispatches it: what ``until`` allowed, as a
     duration. The turn's own requests count it from their dispatch, not from this admission.
     Admission always sets it; None is a turn whose ``until`` is already absolute."""
+    wait: WaitOn | None = None
+    """What an acquiring turn waits on: its session, whose acquisition carries it on."""
+
+    @model_validator(mode="after")
+    def waits_only_while_acquiring(self) -> Invocation:
+        """Only a turn still acquiring waits; the other half holds after each step."""
+        if self.wait is not None and not turn_acquires(self):
+            raise ContractValidationError(
+                "wait", f"a turn in phase {self.phase.value} with a result acquires nothing"
+            )
+        return self
 
     @model_validator(mode="after")
     def pending_suspension_identity(self) -> Invocation:

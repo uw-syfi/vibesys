@@ -76,6 +76,7 @@ from .types.sessions import (
 )
 from .types.strategy import Accepted, Operation, Rejected, RequestTurn
 from .types.until import FromDispatch, Until
+from .types.waits import WaitKind, WaitOn, WaitSubject
 
 if TYPE_CHECKING:
     from .types.evaluation_history import EvaluationHistoryCursor
@@ -455,6 +456,11 @@ def _turn_requested(
         evaluation_prefix=_evaluation_prefix(state, context, scope, turn),
         until=event.until,
         limit=from_dispatch(context.run, event.until).limit,
+        # The session's acquisition, or its reservation and dispatch once it holds the
+        # lease, carries the turn on; an idle session already holding it does so this step.
+        wait=WaitOn(
+            subjects=(WaitSubject(kind=WaitKind.SESSION, identity=turn.session.session_id.root),)
+        ),
     )
     state = _replace_invocation(state, invocation)
     signals: list[Signal] = []

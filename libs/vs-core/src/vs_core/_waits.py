@@ -6,9 +6,11 @@ a request the shell still holds, an event committed but not yet applied (the out
 timer. A wait with none of these is an orphan: nothing will ever end it, so the run would sit
 until its deadline. ``orphan_waits`` reports it at the step that created it.
 
-An owned job and a session record what they wait on when they start waiting (``WaitOn``: a
-job's poll timer or the poll in flight; the session's ensure, turn, inspection or close), so
-their producers are read from that record and nothing is inferred. A named request whose
+An owned job, a session and an acquiring turn record what they wait on when they start
+waiting (``WaitOn``: a job's poll timer or the poll in flight; the session's ensure, turn,
+inspection or close; the turn's session), so their producers are read from that record and
+nothing is inferred. A waiter may name another waiting entity only as ``MAY_WAIT_ON`` allows
+(I1: the graph is acyclic), and the entity carries it while its own recorded wait does. A named request whose
 answer the shell committed but has not applied (a turn's reply rides its session's owner
 event, a step after the turn's own end) still counts. A named request that ends without
 moving its waiter wakes it (``lapsed_job_waits``, ``lapsed_session_waits``), and
@@ -39,8 +41,8 @@ from ._dispatch_episode import episode_ended
 from ._proofs import blocked_unnamed, dependency_failed
 from .types.attempts import AttemptPhase, SnapshotAndRetain
 from .types.common import (
+    ContractValidationError,
     InvocationRef,
-    LifecycleClass,
     ObservationStatus,
     RunStatus,
     SessionId,
@@ -48,47 +50,27 @@ from .types.common import (
 )
 from .types.evaluation import ContinuationPhase, JobWaitLapsed
 from .types.records import (
-    ExecuteRegisteredOperation,
     InspectRequest,
     RecoveryPhase,
     RequestPhase,
 )
 from .types.sessions import (
-    CloseSession,
-    DispatchTurn,
-    EnsureSession,
     InspectTurn,
-    ResumeSessionTurn,
     SessionPhase,
     SessionWaitLapsed,
     SnapshotAndRetainRun,
     session_waits,
+    turn_acquires,
 )
+from .types.waits import WaitKind, WaitOn, WaitSubject
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from .types.common import RequestId
     from .types.kernel import CoreEvent, CoreState
-    from .types.records import Request, RequestRecord
+    from .types.records import RecordsState, Request, RequestRecord
     from .types.sessions import Invocation, SessionsState
-    from .types.waits import WaitOn
-
-
-class WaitKind(StrEnum):
-    """What is waiting."""
-
-    SESSION = "session"
-    RECOVERY_CHECK = "recovery-check"
-    OWNED_JOB = "owned-job"
-    RELEASE_DEPENDENCY = "release-dependency"
-    YIELD_PUBLICATION = "yield-publication"
-    INTERRUPT = "interrupt"
-    REFUND = "refund"
-    DISPATCH = "dispatch"
-    RETRY = "retry"
-    TURN_ACQUISITION = "turn-acquisition"
-    BLOCKED_RECORD = "blocked-record"
 
 
 class Producer(StrEnum):
@@ -258,28 +240,6 @@ def _outbox_requests(outbox: Iterable[CoreEvent]) -> frozenset[RequestId]:
     return frozenset(found)
 
 
-def _concerns(request: Request, identity: SessionId, lifecycle: LifecycleClass | None) -> bool:
-    """Whether *request* acquires, runs or closes a turn or lease of the session *identity*."""
-    if isinstance(request, EnsureSession):
-        return request.spec.session_id == identity
-    if isinstance(request, CloseSession):
-        return request.session_id == identity
-    if isinstance(request, DispatchTurn | ResumeSessionTurn):
-        return request.turn.session.session_id == identity
-    if isinstance(request, ExecuteRegisteredOperation):
-        return lifecycle is None or lifecycle == LifecycleClass.SESSION_TURN
-    # Cancelling, inspecting or checkpointing a turn names the invocation it is about.
-    invocation = getattr(request, "invocation", None)
-    return isinstance(invocation, InvocationRef) and invocation.session_id == identity
-
-
-class WaitSubject(Value):
-    """One waiting entity: what kind of wait it is and the identity ``OpenWait.subject`` names."""
-
-    kind: WaitKind
-    identity: str
-
-
 #: Producers from the one that fires last to the one that fires first: a committed event is
 #: applied at the next step, a request is answered when the shell hears back, and a timer
 #: fires only once the clock reaches it. A wait several producers can move reports the first
@@ -325,57 +285,27 @@ def _with_successors(
     ]
 
 
-def _session_producers(
-    records: Sequence[RequestRecord], outbox: frozenset[RequestId], session: SessionId
-) -> frozenset[Producer]:
-    related = [row for row in records if _concerns(row.request, session, row.lifecycle)]
-    return _from_records(_with_successors(records, related), outbox)
-
-
 def _acquiring(sessions: SessionsState) -> tuple[Invocation, ...]:
     """The turns still acquiring: requested and charged or not, but with no result yet."""
-    return tuple(
-        row
-        for row in sessions.invocations
-        if row.phase == SessionPhase.ACQUIRING and row.observation is None
-    )
-
-
-def _acquisition_producers(
-    sessions: SessionsState,
-    records: Sequence[RequestRecord],
-    in_flight: Sequence[Request],
-    outbox: frozenset[RequestId],
-    invocation: InvocationRef,
-) -> frozenset[Producer]:
-    """What can carry an acquiring turn on: a request about its session, or an interruption.
-
-    A turn acquires through its session's lease request, its input reservation and its
-    dispatch, so any request about its session, live, in flight, or inspected, carries it. A
-    replacement turn also waits for the interruption of its predecessor, whose own waits are
-    ended first (see ``stalled_checkpoint_waits``).
-    """
-    carried = any(_concerns(request, invocation.session_id, None) for request in in_flight) or any(
-        claim.invocation.session_id == invocation.session_id
-        and claim.phase in ("pending", "draining", "checkpointed")
-        for claim in sessions.interrupts
-    )
-    found = _session_producers(records, outbox, invocation.session_id)
-    return found | {Producer.PENDING_REQUEST} if carried else found
+    return tuple(row for row in sessions.invocations if turn_acquires(row))
 
 
 def stalled_acquisitions(
-    sessions: SessionsState, records: Sequence[RequestRecord], in_flight: Sequence[Request] = ()
+    sessions: SessionsState, records: RecordsState, in_flight: Sequence[Request] = ()
 ) -> tuple[InvocationRef, ...]:
     """The acquiring turns that nothing can carry forward: each one's wait is an orphan.
 
-    A turn acquiring without a producer, for example because its charge was never granted,
-    would stall the run, so the step ends it (``AcquisitionStalled``).
+    An acquiring turn waits on its session (``Invocation.wait``): the session's acquisition,
+    or its reservation and dispatch once it holds the lease, carries the turn on. A turn whose
+    session no longer waits on anything live, for example because its charge was never granted
+    and the session sat idle, would stall the run, so the step ends it (``AcquisitionStalled``).
+    *in_flight* holds the requests the step sent and has not recorded yet.
     """
+    sent = frozenset(request.request_id for request in in_flight if request.request_id)
     return tuple(
         row.invocation
         for row in _acquiring(sessions)
-        if not _acquisition_producers(sessions, records, in_flight, frozenset(), row.invocation)
+        if row.wait is None or not _live(records, sessions, row.wait, frozenset(), sent)
     )
 
 
@@ -425,6 +355,17 @@ def _children_producers(core: CoreState, target: RequestId) -> frozenset[Produce
     return frozenset({next(producer for producer in _SETTLES_LAST if producer in union)})
 
 
+#: Which kinds of waiter may name which kinds of waiting entity (I1 of #2428). The graph is
+#: acyclic, so following named entities always ends at requests and timers, and a waiter only
+#: names an entity whose progress carries it: an acquiring turn names its session.
+MAY_WAIT_ON: Mapping[WaitKind, frozenset[WaitKind]] = MappingProxyType(
+    {
+        kind: frozenset({WaitKind.SESSION}) if kind == WaitKind.TURN_ACQUISITION else frozenset()
+        for kind in WaitKind
+    }
+)
+
+
 def wait_producers(
     core: CoreState, wait: WaitOn, queued: frozenset[RequestId] = frozenset()
 ) -> frozenset[Producer]:
@@ -437,19 +378,58 @@ def wait_producers(
     in the next step, so a waiter named on the turn is still moved by it. The shell ticks the
     clock to every timer a wait names (``CoreView.next_observe_at``), so a timer always fires.
     """
+    return _live(core.records, core.sessions, wait, queued, frozenset())
+
+
+def _live(
+    records: RecordsState,
+    sessions: SessionsState,
+    wait: WaitOn,
+    queued: frozenset[RequestId],
+    sent: frozenset[RequestId],
+) -> frozenset[Producer]:
+    """The producers of *wait*: its open or just-sent requests, queued answers, entities, timer.
+
+    A named entity carries the waiter while its own recorded wait has a producer; the chain
+    ends because ``MAY_WAIT_ON`` is acyclic.
+    """
     found: set[Producer] = set()
-    if any(_request_open(core, request) for request in wait.requests):
+    if any(_open(records, request) or request in sent for request in wait.requests):
         found.add(Producer.PENDING_REQUEST)
     if any(request in queued for request in wait.requests):
         found.add(Producer.OUTBOX_EVENT)
+    for subject in wait.subjects:
+        found |= _entity_producers(records, sessions, subject, queued, sent)
     if wait.timer is not None:
         found.add(Producer.TIMER)
     return frozenset(found)
 
 
-def _request_open(core: CoreState, request_id: RequestId) -> bool:
-    record = core.records.record(request_id)
+def _entity_producers(
+    records: RecordsState,
+    sessions: SessionsState,
+    subject: WaitSubject,
+    queued: frozenset[RequestId],
+    sent: frozenset[RequestId],
+) -> frozenset[Producer]:
+    """What carries a named session on: its own recorded wait's producers, or nothing."""
+    if subject.kind != WaitKind.SESSION:
+        raise ContractValidationError("wait.subjects", f"a wait cannot name a {subject.kind.value}")
+    session = next(
+        (row for row in sessions.sessions if row.spec.session_id.root == subject.identity), None
+    )
+    if session is None or session.wait is None:
+        return frozenset()
+    return _live(records, sessions, session.wait, queued, sent)
+
+
+def _open(records: RecordsState, request_id: RequestId) -> bool:
+    record = records.record(request_id)
     return record is not None and record_waits(record.phase)
+
+
+def _request_open(core: CoreState, request_id: RequestId) -> bool:
+    return _open(core.records, request_id)
 
 
 def _job_waits(core: CoreState) -> tuple[tuple[WaitSubject, RequestId, WaitOn], ...]:
@@ -466,6 +446,18 @@ def _job_waits(core: CoreState) -> tuple[tuple[WaitSubject, RequestId, WaitOn], 
     return tuple(found)
 
 
+def _turn_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
+    """Every acquiring turn's recorded wait, by the subject that names the turn."""
+    return tuple(
+        (
+            WaitSubject(kind=WaitKind.TURN_ACQUISITION, identity=row.invocation.invocation_id.root),
+            row.wait,
+        )
+        for row in _acquiring(core.sessions)
+        if row.wait is not None
+    )
+
+
 def _session_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
     """Every waiting session's recorded wait, by the subject that names the session."""
     return tuple(
@@ -480,6 +472,7 @@ def recorded_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
     return (
         *((subject, wait) for subject, _, wait in _job_waits(core)),
         *_session_waits(core),
+        *_turn_waits(core),
     )
 
 
@@ -537,13 +530,23 @@ def unmet_waits(before: CoreState, after: CoreState) -> tuple[str, ...]:
     a value is built or decoded, not when a transition copies one.
     """
     earlier = dict(recorded_waits(before))
+    changed = [
+        (subject, wait) for subject, wait in recorded_waits(after) if earlier.get(subject) != wait
+    ]
     named = [
         f"{subject.kind.value} {subject.identity} waits on {request.root}"
-        for subject, wait in recorded_waits(after)
-        if earlier.get(subject) != wait
+        for subject, wait in changed
         for request in wait.requests
         if not _request_open(after, request)
     ]
+    waiting = set(subjects(after))
+    named.extend(
+        f"{subject.kind.value} {subject.identity} waits on {entity.kind.value} "
+        f"{entity.identity}, which it may not name or which is not waiting"
+        for subject, wait in changed
+        for entity in wait.subjects
+        if entity.kind not in MAY_WAIT_ON[subject.kind] or entity not in waiting
+    )
     named.extend(
         f"owned-job {job.resource_id.root} is live without a wait, or ended with one"
         for job in after.evaluation.jobs
@@ -559,6 +562,12 @@ def unmet_waits(before: CoreState, after: CoreState) -> tuple[str, ...]:
         f"session {session.spec.session_id.root} is {session.phase.value} without a wait"
         for session in after.sessions.sessions
         if session_waits(session.phase) and session.wait is None and session not in unchanged
+    )
+    turns = before.sessions.invocations
+    named.extend(
+        f"turn {turn.invocation.invocation_id.root} is acquiring without a wait"
+        for turn in after.sessions.invocations
+        if turn_acquires(turn) and turn.wait is None and turn not in turns
     )
     return tuple(named)
 
@@ -747,7 +756,7 @@ def subjects(core: CoreState) -> tuple[WaitSubject, ...]:
         *(
             (WaitKind.SESSION, session.spec.session_id.root)
             for session in core.sessions.sessions
-            if session_waits(session.phase)
+            if session_waits(session.phase) or session.wait is not None
         ),
         *(
             (WaitKind.TURN_ACQUISITION, row.invocation.invocation_id.root)
@@ -820,6 +829,16 @@ def _session_wait_producers(
     return frozenset() if session.wait is None else wait_producers(core, session.wait, queued)
 
 
+def _turn_wait_producers(
+    core: CoreState, identity: str, queued: frozenset[RequestId]
+) -> frozenset[Producer]:
+    """What can carry an acquiring turn on: its recorded wait; one without a wait, nothing."""
+    turn = next(
+        row for row in _acquiring(core.sessions) if row.invocation.invocation_id.root == identity
+    )
+    return frozenset() if turn.wait is None else wait_producers(core, turn.wait, queued)
+
+
 def _owned_job_producers(core: CoreState, identity: str) -> frozenset[Producer]:
     wait = next(
         wait
@@ -837,9 +856,7 @@ type _Derivation = Callable[[CoreState, str, frozenset[RequestId]], frozenset[Pr
 _DERIVATIONS: Mapping[WaitKind, _Derivation] = MappingProxyType(
     {
         WaitKind.SESSION: _session_wait_producers,
-        WaitKind.TURN_ACQUISITION: lambda core, identity, outbox: _acquisition_producers(
-            core.sessions, core.records.records, (), outbox, _invocation(core, identity)
-        ),
+        WaitKind.TURN_ACQUISITION: _turn_wait_producers,
         WaitKind.YIELD_PUBLICATION: lambda core, identity, outbox: _checkpoint_producers(
             core.records.records, (), outbox, _invocation(core, identity)
         ),
@@ -895,6 +912,7 @@ def orphan_waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[Ope
 
 
 __all__ = [
+    "MAY_WAIT_ON",
     "RESOLUTIONS",
     "OpenWait",
     "Outcome",

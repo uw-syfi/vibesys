@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from ._waits import record_waits
 from .types.common import ContractValidationError, RequestId
-from .types.sessions import session_waits
+from .types.sessions import session_may_wait, turn_acquires
 from .types.waits import WaitOn
 
 if TYPE_CHECKING:
@@ -32,7 +32,7 @@ def invocation_row(state: SessionsState, ref: InvocationRef) -> Invocation | Non
 
 def replace_session(state: SessionsState, session: SessionView) -> SessionsState:
     """*state* with *session* stored; a session that left its waiting phases drops its wait."""
-    if session.wait is not None and not session_waits(session.phase):
+    if session.wait is not None and not session_may_wait(session.phase):
         session = session.model_copy(update={"wait": None})
     rows = tuple(
         session if row.spec.session_id == session.spec.session_id else row for row in state.sessions
@@ -80,7 +80,9 @@ def request_ended(context: SessionsContext, request: RequestId) -> bool:
 
 
 def replace_invocation(state: SessionsState, invocation: Invocation) -> SessionsState:
-    """*state* with *invocation* stored."""
+    """*state* with *invocation* stored; a turn that stopped acquiring drops its wait."""
+    if invocation.wait is not None and not turn_acquires(invocation):
+        invocation = invocation.model_copy(update={"wait": None})
     rows = tuple(
         invocation if row.invocation == invocation.invocation else row for row in state.invocations
     )

@@ -18,6 +18,7 @@ from ._proofs import (
     request_matches,
 )
 from ._session_rows import awaiting as _awaiting
+from ._session_rows import replace_invocation as _replace_invocation
 from ._session_rows import replace_session as _replace_session
 from ._session_rows import session_row as _session
 from ._session_scope import attempt_for, proven_invocation, scope_active
@@ -57,17 +58,6 @@ if TYPE_CHECKING:
     from .types.kernel import SessionsContext, Signal
     from .types.records import RequestRecord
     from .types.sessions import Invocation, SessionsEvent, SessionsState
-
-
-def _replace_invocation(state: SessionsState, invocation: Invocation) -> SessionsState:
-    return state.model_copy(
-        update={
-            "invocations": tuple(
-                invocation if row.invocation == invocation.invocation else row
-                for row in state.invocations
-            )
-        }
-    )
 
 
 def _record(context: SessionsContext, identity: RequestId | None) -> RequestRecord | None:

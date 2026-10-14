@@ -15,6 +15,17 @@ from .test_session_turns import (
 )
 
 
+def _assert_admitted_then_stalled(reached: core.Transition, spec: core.TurnSpec) -> None:
+    """The fence admitted *spec*; with no charge granted on an idle session, nothing carries it.
+
+    The same step ends it as stalled, by name, instead of leaving it acquiring.
+    """
+    assert reached.state.sessions.invocations[-1].turn == spec
+    (ended,) = reached.events
+    assert isinstance(ended, core.TurnResult)
+    assert "acquisition stalled" in ended.detail
+
+
 @pytest.mark.parametrize(
     ("phase", "charge", "variant", "predecessor"),
     # The refusal reads the phase, the predecessor and a resume together; the variant is
@@ -106,11 +117,10 @@ def test_interruption_fence_covers_all_successor_variants(
                 # and the successor invocation starts acquiring.
                 reached = core.step(reload_state(state), event)
                 assert reached.requests == ()
-                assert reached.events == ()
                 assert (
                     reached.state.attempts.attempts[0].charges == state.attempts.attempts[0].charges
                 )
-                assert reached.state.sessions.invocations[-1].phase == core.SessionPhase.ACQUIRING
+                _assert_admitted_then_stalled(reached, spec)
                 continue
         else:
             ref = invocation(spec)

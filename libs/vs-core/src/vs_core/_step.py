@@ -676,7 +676,7 @@ def _stall_entries(
         ),
         *(
             AcquisitionStalled(invocation=invocation)
-            for invocation in stalled_acquisitions(state.sessions, state.records.records, in_flight)
+            for invocation in stalled_acquisitions(state.sessions, state.records, in_flight)
         ),
         *(
             RequestUndispatchable(request_id=request_id)

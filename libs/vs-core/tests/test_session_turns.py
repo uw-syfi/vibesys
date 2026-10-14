@@ -243,19 +243,23 @@ def waiting_turn_state(spec: core.TurnSpec, *, charged: bool = True) -> core.Cor
 
 
 def waiting_for_reservation(spec: core.TurnSpec) -> core.CoreState:
-    """A charged turn awaiting its input reservation, with a live request carrying it.
+    """A charged turn awaiting its input reservation, waiting on a live request carrying it.
 
-    For a test that feeds other events first: the step ends a turn acquiring with no
-    request about its session (`AcquisitionStalled`).
+    For a test that feeds other events first: the step ends a turn acquiring with nothing
+    live in its recorded wait (`AcquisitionStalled`).
     """
     state = waiting_turn_state(spec)
+    carrying = carrying_request(spec.session, scope())
+    turns = tuple(
+        row.model_copy(update={"wait": core.WaitOn(requests=(carrying.request_id,))})
+        for row in state.sessions.invocations
+    )
     return state.model_copy(
         update={
             "records": state.records.model_copy(
-                update={
-                    "records": (*state.records.records, carrying_request(spec.session, scope()))
-                }
-            )
+                update={"records": (*state.records.records, carrying)}
+            ),
+            "sessions": state.sessions.model_copy(update={"invocations": turns}),
         }
     )
 
@@ -1174,10 +1178,14 @@ def test_interrupted_replacement_requires_terminal_checkpoint_and_completed_refu
     if phase == "completed":
         reached = core.step(reload_state(state), event)
         assert reached.requests == ()
-        assert reached.events == ()
         # The interrupted predecessor's paid charge already covers the replacement.
         assert reached.state.attempts.attempts[0].charges == state.attempts.attempts[0].charges
-        assert reached.state.sessions.invocations[-1].phase == core.SessionPhase.ACQUIRING
+        assert reached.state.sessions.invocations[-1].turn == successor
+        # Admitted on an idle session with no charge granted, the replacement has nothing
+        # to carry it, so the same step ends it as stalled, by name, instead of leaving it.
+        (ended,) = reached.events
+        assert isinstance(ended, core.TurnResult)
+        assert "acquisition stalled" in ended.detail
     else:
         with pytest.raises(core.ContractValidationError, match="completed"):
             core.step(reload_state(state), event)

@@ -105,6 +105,7 @@ from vs_core._waitable import (
     turn_reply,
 )
 from vs_core._waits import (
+    MAY_WAIT_ON,
     RESOLUTIONS,
     OpenWait,
     Outcome,
@@ -709,6 +710,7 @@ __all__ = [
     "MAX_REQUEST_RETRIES",
     "MAX_SUBMISSIONS_PER_MEASUREMENT",
     "MAX_TURN_SECONDS",
+    "MAY_WAIT_ON",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
     "RENDER_SUFFIX",
     "REPLY_ERROR_MESSAGE_LIMIT",

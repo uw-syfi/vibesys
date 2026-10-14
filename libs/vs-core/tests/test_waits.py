@@ -9,9 +9,12 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_core.api import (
+    MAY_WAIT_ON,
     RESOLUTIONS,
     Access,
     AreaChange,
+    ArtifactId,
+    ArtifactRef,
     AttemptBudget,
     AttemptId,
     AttemptPhase,
@@ -28,6 +31,7 @@ from vs_core.api import (
     EvaluationEvent,
     EvaluationState,
     EventId,
+    InputId,
     InspectRequest,
     ItemId,
     JobTerminationRequested,
@@ -48,7 +52,12 @@ from vs_core.api import (
     RequestPhase,
     ResourceId,
     RunStatus,
+    ScopeInputTarget,
+    SessionInput,
+    SessionInputReceived,
     SessionPhase,
+    SessionsContext,
+    SessionsEvent,
     SessionsState,
     SessionView,
     TurnFailureKind,
@@ -555,11 +564,17 @@ def test_every_kind_of_wait_declares_how_core_ends_it_when_nothing_else_does() -
 
 
 def _acquiring_without_a_request() -> CoreState:
-    """A charged write turn still acquiring, with no request about its session (#2167)."""
+    """A charged write turn acquiring on an idle session that waits on nothing (#2167)."""
     state, _ = write_turn_world(access=Access.WRITE_CANDIDATE, charged=True)
     [invocation] = state.sessions.invocations
+    session = WaitSubject(kind=WaitKind.SESSION, identity=invocation.invocation.session_id.root)
     acquiring = invocation.model_copy(
-        update={"phase": SessionPhase.ACQUIRING, "observation": None, "output_json": None}
+        update={
+            "phase": SessionPhase.ACQUIRING,
+            "observation": None,
+            "output_json": None,
+            "wait": WaitOn(subjects=(session,)),
+        }
     )
     idle = state.sessions.sessions[0].model_copy(update={"phase": SessionPhase.IDLE})
     return state.model_copy(
@@ -607,30 +622,52 @@ def _inspection(identity: str, target: RequestRecord, phase: RequestPhase) -> Re
     return record.model_copy(update={"request": request})
 
 
-def _acquiring_with(records: tuple[RequestRecord, ...]) -> CoreState:
+def _acquiring_with(
+    records: tuple[RequestRecord, ...],
+    named: tuple[RequestRecord, ...] | None = None,
+    phase: SessionPhase = SessionPhase.ACQUIRING,
+) -> CoreState:
+    """The acquiring turn, its session in *phase* waiting on *named* (default: all *records*)."""
     state = _acquiring_without_a_request()
+    named = records if named is None else named
+    [session] = state.sessions.sessions
+    if named:
+        session = session.model_copy(
+            update={
+                "phase": phase,
+                "wait": WaitOn(requests=tuple(row.request_id for row in named)),
+            }
+        )
     return state.model_copy(
-        update={"records": state.records.model_copy(update={"records": records})}
+        update={
+            "records": state.records.model_copy(update={"records": records}),
+            "sessions": state.sessions.model_copy(update={"sessions": (session,)}),
+        }
     )
 
 
 def test_a_turn_whose_session_lease_is_being_inspected_is_carried_and_not_ended() -> None:
     """The step ends an acquiring turn only when its wait is an orphan, never before.
 
-    The turn's lease request completed and an inspection of it is still in flight: its answer
-    is what moves the session, so the wait has a producer. The step's resolver once read a
-    narrower rule than the wait (requests about the session only, not their inspections) and
-    cancelled the turn while that inspection was out.
+    The turn's lease request completed ambiguously, so its session is unknown and waits on
+    the inspection it sent: its answer is what moves the session, and the turn waits on the
+    session, so the turn's wait has a producer. Once the inspection ended without moving the
+    session, nothing carries the turn and the step ends it.
     """
     lease = _session_record(_acquiring_without_a_request(), "lease", RequestPhase.COMPLETED)
-    inspecting = _acquiring_with((lease, _inspection("inspect", lease, RequestPhase.DISPATCHED)))
+    out = _inspection("inspect", lease, RequestPhase.DISPATCHED)
+    inspecting = _acquiring_with((lease, out), (out,), SessionPhase.UNKNOWN)
 
     assert orphan_waits(inspecting) == ()
     [carried] = step(inspecting, ClockAdvanced(now_at=2.0)).state.sessions.invocations
     assert carried.phase == SessionPhase.ACQUIRING
 
-    answered = _acquiring_with((lease, _inspection("inspect", lease, RequestPhase.COMPLETED)))
-    assert [w.waiter for w in orphan_waits(answered)] == [WaitKind.TURN_ACQUISITION]
+    done = _inspection("inspect", lease, RequestPhase.COMPLETED)
+    answered = _acquiring_with((lease, done), (done,), SessionPhase.UNKNOWN)
+    assert {w.waiter for w in orphan_waits(answered)} == {
+        WaitKind.SESSION,
+        WaitKind.TURN_ACQUISITION,
+    }
     [ended] = step(answered, ClockAdvanced(now_at=2.0)).state.sessions.invocations
     assert ended.phase == SessionPhase.TERMINAL
 
@@ -660,8 +697,9 @@ def test_every_wait_reports_the_one_derivation_and_the_step_ends_exactly_the_orp
     """``waits`` and the step's resolvers read one derivation, ``producers``.
 
     Each wait has a producer exactly when ``producers`` names one, with or without committed
-    answers in the outbox, and the step ends the acquiring turn exactly when its wait is an
-    orphan: never one a live request about its session, or an inspection of one, can carry.
+    answers in the outbox. The acquiring turn waits on its session, which waits on the
+    requests it named: the turn's wait is an orphan exactly when none of them is open, and the
+    step ends the turn exactly then.
     """
     state = _acquiring_with(records)
     outbox = tuple(
@@ -689,6 +727,7 @@ def test_every_wait_reports_the_one_derivation_and_the_step_ends_exactly_the_orp
             assert wait.producer is None or wait.producer in named
 
     orphaned = WaitKind.TURN_ACQUISITION in {w.waiter for w in orphan_waits(state)}
+    assert orphaned == (not any(phase_waits(row.phase) for row in records))
     [turn] = step(state, ClockAdvanced(now_at=2.0)).state.sessions.invocations
     assert (turn.phase == SessionPhase.TERMINAL) == orphaned
 
@@ -896,3 +935,63 @@ def test_a_session_whose_request_ended_without_moving_it_waits_on_the_rest(
     else:
         assert woken.wait == waiting.wait
         assert [w.waiter for w in orphan_waits(after)] == [WaitKind.SESSION]
+
+
+def test_which_kinds_may_name_which_is_acyclic() -> None:
+    """I1 of #2428: following the entities waiters may name always ends at requests and timers."""
+
+    def reachable(kind: WaitKind) -> set[WaitKind]:
+        found: set[WaitKind] = set()
+        frontier = set(MAY_WAIT_ON[kind])
+        while frontier:
+            found |= frontier
+            frontier = {named for each in frontier for named in MAY_WAIT_ON[each]} - found
+        return found
+
+    assert all(kind not in reachable(kind) for kind in WaitKind)
+    assert MAY_WAIT_ON[WaitKind.TURN_ACQUISITION] == {WaitKind.SESSION}
+
+
+def test_a_job_that_names_a_kind_it_may_not_fails_loudly() -> None:
+    """An owned job waits on its polls and timer only; naming a waiting entity is refused (I1)."""
+    state, _ = submitted()
+    (job,) = state.evaluation.jobs
+    session = WaitSubject(kind=WaitKind.SESSION, identity="any")
+    wait = WaitOn(timer=state.run.now_at + 1.0, subjects=(session,))
+    reducers = CoreReducers(evaluation=_rewaiting(wait, terminal=False))
+    event = JobTerminationRequested(resource_id=job.resource_id, cause="deadline")
+
+    with pytest.raises(ContractError, match="which it may not name"):
+        step(state, event, reducers=reducers)
+
+
+def test_a_turn_that_names_a_session_that_is_not_waiting_fails_loudly() -> None:
+    """I2 of #2428 for entities: a named entity exists and waits when the wait is recorded."""
+    lease = _session_record(_acquiring_without_a_request(), "lease", RequestPhase.DISPATCHED)
+    state = _acquiring_with((lease,))
+    ghost = WaitSubject(kind=WaitKind.SESSION, identity="ghost")
+
+    def renaming(
+        sessions: SessionsState, _context: SessionsContext, _event: SessionsEvent
+    ) -> AreaChange[SessionsState]:
+        (turn,) = sessions.invocations
+        assert turn.wait is not None
+        named = turn.wait.model_copy(update={"subjects": (*turn.wait.subjects, ghost)})
+        renamed = turn.model_copy(update={"wait": named})
+        return AreaChange(state=sessions.model_copy(update={"invocations": (renamed,)}))
+
+    (turn,) = state.sessions.invocations
+    item = SessionInput(
+        input_id=InputId(root="input"),
+        target=ScopeInputTarget(scope=turn.scope),
+        artifact=ArtifactRef(artifact_id=ArtifactId(root="artifact"), digest="digest"),
+        received_at=0.0,
+        sequence=0,
+    )
+
+    with pytest.raises(ContractError, match="which it may not name or which is not waiting"):
+        step(
+            state,
+            SessionInputReceived(input=item),
+            reducers=CoreReducers(session_inputs=renaming),
+        )

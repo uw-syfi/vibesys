@@ -117,7 +117,7 @@ from .types.sessions import (
     TurnInputsReserved,
     TurnObserved,
     TurnRequested,
-    session_waits,
+    session_may_wait,
 )
 from .types.strategy import Accepted, RequestTurn
 
@@ -665,11 +665,10 @@ def _ensure_observed(
         session = session.model_copy(
             update={"phase": SessionPhase.UNKNOWN, "acceptance_sequence": observation.sequence}
         )
+        inspection = _inspect_session(session, context, observation.request_id)
         return AreaChange(
-            state=_replace_session(state, session),
-            requests=(
-                _cleanup(context, _inspect_session(session, context, observation.request_id)),
-            ),
+            state=_replace_session(state, _awaiting(session, context, inspection)),
+            requests=(_cleanup(context, inspection),),
         )
     if observation.accepted:
         if (
@@ -702,12 +701,14 @@ def _ensure_observed(
     )
     change = _after_ensure(_replace_session(state, session), context, session, event)
     if phase == SessionPhase.UNKNOWN:
+        inspection = _inspect_session(session, context, observation.request_id)
+        unknown = _session(change.state, session.spec.session_id)
         change = change.model_copy(
             update={
-                "requests": (
-                    *change.requests,
-                    _inspect_session(session, context, observation.request_id),
-                )
+                "state": change.state
+                if unknown is None or unknown.phase != SessionPhase.UNKNOWN
+                else _replace_session(change.state, _awaiting(unknown, context, inspection)),
+                "requests": (*change.requests, inspection),
             }
         )
     return change
@@ -935,13 +936,12 @@ def _late_turn_observed(
             ),
         }
     )
+    inspection = inspect_turn(context, invocation) if acceptance_unresolved(invocation) else None
+    if inspection is not None and session.phase == SessionPhase.UNKNOWN:
+        session = _awaiting(session, context, inspection)
     state = _replace_session(state, session)
     cleanup = _after_turn_cleanup(state, context, invocation, session)
-    requests = (
-        (_reconciling(context, inspect_turn(context, invocation)),)
-        if acceptance_unresolved(invocation)
-        else ()
-    )
+    requests = () if inspection is None else (_reconciling(context, inspection),)
     return cleanup.model_copy(
         update={
             "signals": (*signals, *cleanup.signals),
@@ -1098,7 +1098,7 @@ def _apply_turn_observation(
     if phase == SessionPhase.UNKNOWN or acceptance_unresolved(invocation):
         inspection = inspect_turn(context, invocation)
         requests = (_reconciling(context, inspection),)
-    if session_waits(session.phase):
+    if session_may_wait(session.phase):
         # A turn still running moves the session only by its own next answer, or by the
         # inspection sent here.
         named: tuple[InspectTurn | RequestId, ...] = (observation.request_id,)
