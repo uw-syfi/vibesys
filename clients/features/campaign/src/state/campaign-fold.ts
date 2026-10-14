@@ -19,6 +19,8 @@ export interface FoldState {
   readonly agents: ReadonlyMap<string, FrameAgent>;
   readonly measurements: ReadonlyMap<string, FrameMeasurement>;
   readonly tokenSpend: ReadonlyMap<string, number>;
+  /** Greatest timestamp observed on any applied measurement or workstream frame. */
+  readonly observationHorizon: number;
   readonly status: 'active' | 'completed';
 }
 
@@ -30,6 +32,7 @@ export function initialFoldState(): FoldState {
     agents: new Map(),
     measurements: new Map(),
     tokenSpend: new Map(),
+    observationHorizon: 0,
     status: 'active',
   };
 }
@@ -38,6 +41,13 @@ function withEntry<V>(map: ReadonlyMap<string, V>, key: string, value: V): Reado
   const next = new Map(map);
   next.set(key, value);
   return next;
+}
+
+function workstreamHorizon(workstream: FrameWorkstream): number {
+  const startedAt = Date.parse(workstream.startedAt);
+  return workstream.finishedAt === null
+    ? startedAt
+    : Math.max(startedAt, Date.parse(workstream.finishedAt));
 }
 
 /**
@@ -58,12 +68,17 @@ export function foldCampaignFrame(state: FoldState, frame: CampaignFrame): FoldS
         ...state,
         seq,
         workstreams: withEntry(state.workstreams, frame.workstream.id, frame.workstream),
+        observationHorizon: Math.max(state.observationHorizon, workstreamHorizon(frame.workstream)),
       };
     case 'measurement':
       return {
         ...state,
         seq,
         measurements: withEntry(state.measurements, frame.measurement.id, frame.measurement),
+        observationHorizon: Math.max(
+          state.observationHorizon,
+          Date.parse(frame.measurement.timestamp),
+        ),
       };
     case 'tokens':
       return {
@@ -110,19 +125,12 @@ function projectWorkstream(
   };
 }
 
-/** The live "now" in epoch ms: the latest of every measurement timestamp and
- * every workstream start, else 0. Used to end in-flight workstream bars at the
- * current moment. Must consider workstream starts unconditionally, not only
- * when there are no measurements yet: a workstream can start after the latest
- * measurement elsewhere in the run, and a one-sided fallback would then place
- * "now" before that workstream's own start. */
+/** The live observation horizon in epoch ms: the latest timestamp carried by a
+ * measurement or workstream transition, else 0. Used to end in-flight
+ * workstream bars at the current observed moment and to project the live
+ * cursor independently of measurement selection. */
 export function latestMoment(state: FoldState): number {
-  let moment = 0;
-  for (const measurement of state.measurements.values())
-    moment = Math.max(moment, Date.parse(measurement.timestamp));
-  for (const workstream of state.workstreams.values())
-    moment = Math.max(moment, Date.parse(workstream.startedAt));
-  return moment;
+  return state.observationHorizon;
 }
 
 /**

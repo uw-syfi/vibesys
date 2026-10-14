@@ -4,9 +4,12 @@ import {resolve} from 'node:path';
 import {SimulatedClock} from 'xstate';
 import {
   type CampaignFrame,
+  type CampaignHeader,
   type CampaignRecord,
   type CampaignStream,
   type FrameListener,
+  type FrameMeasurement,
+  type FrameWorkstream,
   framesFromRecord,
   parseReplayScenario,
   type StreamErrorListener,
@@ -25,6 +28,40 @@ const record = parseReplayScenario(
     ),
   ),
 );
+
+const liveHeader: CampaignHeader = {
+  id: record.id,
+  title: record.title,
+  summary: record.summary,
+  provenance: record.provenance,
+  objective: record.objective,
+  benchmarkVersions: record.benchmarkVersions,
+  benchmarkVersionBoundary: record.benchmarkVersionBoundary,
+  trajectories: [],
+};
+
+function liveMeasurement(id: string, sequence: number, timestamp: string): FrameMeasurement {
+  const source = record.measurements[0];
+  if (source === undefined) throw new Error('campaign fixture must contain a measurement');
+  return {...source, id, sequence, timestamp};
+}
+
+function liveWorkstream(overrides: Partial<FrameWorkstream> = {}): FrameWorkstream {
+  return {
+    id: 'live-workstream',
+    title: 'Live workstream',
+    hypothesis: 'Test the live observation horizon',
+    startedAt: '2026-01-01T00:00:00Z',
+    firstSequence: 1,
+    phase: 'implementing',
+    active: true,
+    finishedAt: null,
+    lastSequence: null,
+    outcome: null,
+    outcomeSummary: '',
+    ...overrides,
+  };
+}
 
 class FakeCampaignStream implements CampaignStream {
   #frame: FrameListener | null = null;
@@ -112,6 +149,70 @@ test('a growing stream follows until explicitly paused and ignores events after 
   const closed = store.getState();
   for (const frame of frames) stream.emit(frame);
   expect(store.getState()).toBe(closed);
+});
+
+test('live follow observes a workstream starting after the last measurement while scrub stays historical', () => {
+  const stream = new FakeCampaignStream();
+  const store = createLiveCampaignStore(stream);
+  stream.emit({kind: 'campaign-init', seq: 1, header: liveHeader});
+  stream.emit({
+    kind: 'measurement',
+    seq: 2,
+    measurement: liveMeasurement('early', 1, '2026-01-01T00:00:05Z'),
+  });
+  stream.emit({
+    kind: 'measurement',
+    seq: 3,
+    measurement: liveMeasurement('latest', 2, '2026-01-01T00:00:10Z'),
+  });
+  stream.emit({
+    kind: 'workstream-upsert',
+    seq: 4,
+    workstream: liveWorkstream({startedAt: '2026-01-01T00:00:30Z'}),
+  });
+
+  expect(store.getState().campaign?.latestTimestamp).toBe('2026-01-01T00:00:30.000Z');
+  expect(store.getState().campaign?.visibleWorkstreamCount).toBe(1);
+
+  store.getState().campaign?.setPointIndex(0);
+  expect(store.getState().campaign?.latestTimestamp).toBe('2026-01-01T00:00:05Z');
+  expect(store.getState().campaign?.visibleWorkstreamCount).toBe(0);
+  store.close();
+});
+
+test('live follow observes a workstream settling after the last measurement', () => {
+  const stream = new FakeCampaignStream();
+  const store = createLiveCampaignStore(stream);
+  stream.emit({kind: 'campaign-init', seq: 1, header: liveHeader});
+  stream.emit({kind: 'workstream-upsert', seq: 2, workstream: liveWorkstream()});
+  stream.emit({
+    kind: 'measurement',
+    seq: 3,
+    measurement: liveMeasurement('only', 1, '2026-01-01T00:00:05Z'),
+  });
+  stream.emit({
+    kind: 'workstream-upsert',
+    seq: 4,
+    workstream: liveWorkstream({
+      phase: 'evaluated',
+      active: false,
+      finishedAt: '2026-01-01T00:00:30Z',
+      lastSequence: 2,
+      outcome: 'accepted',
+      outcomeSummary: 'Settled after the last measurement',
+    }),
+  });
+  stream.emit({kind: 'status', seq: 5, status: 'completed'});
+
+  const state = store.getState();
+  expect(state.campaign?.latestTimestamp).toBe('2026-01-01T00:00:30.000Z');
+  expect(state.campaign?.status).toBe('completed');
+  const finishedAt = state.scenario?.workstreams[0]?.finishedAt;
+  expect(finishedAt).toBe('2026-01-01T00:00:30Z');
+  expect(Date.parse(finishedAt ?? '')).toBeLessThanOrEqual(
+    Date.parse(state.campaign?.latestTimestamp ?? ''),
+  );
+  store.close();
 });
 
 test('replay retries a failed load, then validates through the app-injected loader', async () => {

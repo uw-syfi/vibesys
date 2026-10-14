@@ -264,6 +264,50 @@ test('latestMoment also accounts for a workstream that starts after the latest m
   );
 });
 
+test('latestMoment accounts for a workstream that settles after the latest measurement', () => {
+  const state = foldFrames([
+    initFrame,
+    {kind: 'measurement', seq: 2, measurement: measurement(1, 'm1')},
+    {
+      kind: 'workstream-upsert',
+      seq: 3,
+      workstream: workstream({
+        phase: 'evaluated',
+        active: false,
+        finishedAt: '2026-01-01T00:00:30Z',
+        lastSequence: 2,
+        outcome: 'accepted',
+      }),
+    },
+  ]);
+
+  expect(latestMoment(state)).toBe(Date.parse('2026-01-01T00:00:30Z'));
+});
+
+test('latestMoment never rewinds when an upsert replaces a previously observed timestamp', () => {
+  const parked = foldFrames([
+    initFrame,
+    {
+      kind: 'workstream-upsert',
+      seq: 2,
+      workstream: workstream({
+        phase: 'parked',
+        active: false,
+        finishedAt: '2026-01-01T00:00:30Z',
+        lastSequence: 2,
+      }),
+    },
+  ]);
+  const resumed = foldCampaignFrame(parked, {
+    kind: 'workstream-upsert',
+    seq: 3,
+    workstream: workstream(),
+  });
+
+  expect(latestMoment(parked)).toBe(Date.parse('2026-01-01T00:00:30Z'));
+  expect(latestMoment(resumed)).toBe(latestMoment(parked));
+});
+
 test('a repeated workstream upsert merges rather than duplicates', () => {
   const state = foldFrames([
     initFrame,

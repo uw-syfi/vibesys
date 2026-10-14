@@ -1,5 +1,7 @@
 /** Pure projection shared by fixture playback and a live frame stream. */
+
 import {type CampaignContext, campaignRecord, orderedMeasurements} from './campaign.js';
+import {latestMoment} from './campaign-fold.js';
 import type {CampaignRecord} from './campaign-record.js';
 import type {CampaignViewModel} from './campaign-view.js';
 
@@ -44,7 +46,10 @@ export function projectCampaign(context: CampaignContext): {
   const activeMeasurement = measurements[pointIndex];
   const metricId = measurementMetric(activeMeasurement, ui.metricId);
   const timeline = timelineBounds(scenario);
-  const latestTimestamp = activeMeasurement?.timestamp ?? new Date(timeline.end).toISOString();
+  const latestTimestamp =
+    context.mode === 'live' && ui.following
+      ? new Date(latestMoment(context.fold)).toISOString()
+      : (activeMeasurement?.timestamp ?? new Date(timeline.end).toISOString());
   return {
     scenario,
     campaign: {
