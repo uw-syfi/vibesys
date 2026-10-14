@@ -705,7 +705,10 @@ class FakeGitRepository:
                         blocked.append(found.path.rstrip("/"))
                     continue
                 self._stage_found(scope, found.path, updates, overlay, unreadable)
-            missing = specs.unmatched(sorted(candidates))
+            missing = specs.unmatched(
+                sorted(candidates),
+                on_disk=lambda path: (scope.root / path).exists(follow_symlinks=False),
+            )
             if missing:
                 self._staging_failure(
                     command, 128, f"fatal: pathspec '{missing[0]}' did not match any files", ()
