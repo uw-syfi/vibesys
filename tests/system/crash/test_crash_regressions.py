@@ -21,9 +21,11 @@ from tests.support.crash_harness import (
 )
 
 from vs_faults.api import Boundary, Crossing
+from vs_sim.api.testing import Depth, depth
 
-HOLDING = "durable_write:commit#27"
-"""A crash while the skeleton's search holds a workspace."""
+HOLDING = "executor_request:close_session#1"
+"""A crash while the skeleton's search is still alive: its flow's resources are open, the run
+is closing. Named by request, not by a commit's ordinal, which moves when the run's writes do."""
 
 
 def test_a_dead_host_leaves_no_search_generator_to_the_event_loop(
@@ -54,10 +56,14 @@ _REVIEWED = [
     *((_commit(37), _commit(n)) for n in (38, 39, 40)),
     (_commit(49), _commit(52)),
 ]
+# The three pairs below are distinct stalls; the neighbours of (37, 38) differ only in how far
+# into the same recovery the second death falls, which the nightly job runs.
+_PULL_REQUEST = [_REVIEWED[0], _REVIEWED[1], _REVIEWED[4]]
+_PAIRS = _REVIEWED if depth() is Depth.NIGHTLY else _PULL_REQUEST
 
 
 @pytest.mark.parametrize(
-    ("first", "second"), _REVIEWED, ids=[f"{name(a)}+{name(b)}" for a, b in _REVIEWED]
+    ("first", "second"), _PAIRS, ids=[f"{name(a)}+{name(b)}" for a, b in _PAIRS]
 )
 def test_the_pairs_the_review_reproduced_converge(first: Crossing, second: Crossing) -> None:
     converges_after(first, second)

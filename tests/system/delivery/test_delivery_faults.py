@@ -1,7 +1,7 @@
 """C4: unknown, retried, duplicated, reordered and reloaded observations decide the same.
 
 The skeleton search runs on the real core under each delivery fault (`vs_core.testing.drive.Faults`)
-and under all of them at once. The executors' answers are the same; only how and how often core
+and under any combination of them, all at once included. The executors' answers are the same; only how and how often core
 hears them changes. So the search must submit the same decisions (apart from each wait's absolute
 limit, which moves by what a retry costs on the run clock), the run must end with the same
 result, and it must be live.
@@ -26,7 +26,7 @@ from vs_core.testing.drive import Faults, Trace, drive
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_sim.api.testing import examples
 
-_EXAMPLES = examples(pr=4, nightly=12)
+_EXAMPLES = examples(pr=3, nightly=12)
 PURE = settings(
     max_examples=_EXAMPLES,
     deadline=None,
@@ -46,13 +46,6 @@ DELIVERY_FAULTS = {
     "duplicate": Faults(duplicate=True),
     "reorder": Faults(reorder=True),
     "reload": Faults(reload=True),
-    "all": Faults(
-        unknown_first=_NOT_VERIFICATION["unknown_first"],
-        retry_first=lambda _request: True,
-        duplicate=True,
-        reorder=True,
-        reload=True,
-    ),
 }
 
 outcomes = st.builds(
@@ -85,6 +78,7 @@ def _decisions(trace: Trace) -> list[str]:
     return found
 
 
+# Every fault at once is `test_c4_any_combination_of_delivery_faults_...`: it pins that set.
 @pytest.mark.parametrize("fault", sorted(DELIVERY_FAULTS))
 @PURE
 @given(chosen=outcomes)
@@ -98,7 +92,7 @@ def test_c4_delivery_faults_never_change_the_decisions_or_the_liveness(
     assert faulty.core.run.result == plain.core.run.result
 
 
-_FAULT_FLAGS = sorted(DELIVERY_FAULTS.keys() - {"all"})
+_FAULT_FLAGS = sorted(DELIVERY_FAULTS)
 
 
 def _combined(chosen: frozenset[str]) -> Faults:

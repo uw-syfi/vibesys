@@ -13,12 +13,12 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from tests.support.crash_harness import crash_plan, crash_points
+from tests.support.crash_harness import crash_plan, crash_points, run
 from tests.support.skeleton_sim import Simulation, simulate
 
 from vs_faults.api import FaultPlan
 from vs_project.api.testing import GitKind
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import Depth, VirtualClock, depth, run_virtual
 
 
 def _run(plan: FaultPlan, git: GitKind) -> Simulation:
@@ -34,12 +34,16 @@ def _plans() -> dict[str, FaultPlan]:
     }
 
 
-@pytest.mark.parametrize("name", ["straight", "crash-in-the-middle"])
+# The crashed run contains the straight one up to its crash, so a pull request plays only it.
+@pytest.mark.parametrize(
+    "name",
+    ["straight", "crash-in-the-middle"] if depth() is Depth.NIGHTLY else ["crash-in-the-middle"],
+)
 def test_a_run_ends_the_same_on_in_memory_and_real_git(name: str) -> None:
     plan = _plans()[name]
 
     real = _run(plan, GitKind.REAL)
-    fake = _run(plan, GitKind.FAKE)
+    fake = run(plan)  # the run on in-memory Git, shared with the crash tests
 
     assert fake.summary == real.summary
     assert real.summary.adopted_tree is not None

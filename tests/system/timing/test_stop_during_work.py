@@ -162,6 +162,28 @@ def test_a_stop_mid_turn_cancels_the_turn_within_the_bound_and_starts_no_evaluat
 
 
 @pytest.mark.parametrize("mode", list(StopMode))
+def test_a_stop_while_two_turns_overlap_ends_both_and_dispatches_nothing_stale(
+    mode: StopMode,
+) -> None:
+    """The second turn's request is prepared behind the first's when the stop comes.
+
+    Core ends a prepared request of an attempt the stop closed instead of dispatching it: a
+    dispatch would act in an episode that is over, and the contract refuses it.
+    """
+    timed = run_timed(
+        StaggeredStrategy(config=StaggeredConfig(workers=2)),
+        Plan(duration=lambda _worker, _ordinal: 20.0, mode=mode, stop_when=_into_the_turn(5.0)),
+    )
+
+    assert timed.outcome is not None
+    assert timed.outcome.status is RunStatus.TERMINAL
+    assert timed.stopped_at is not None
+    assert timed.ended_at - timed.stopped_at <= STOP_BOUND_S
+    assert timed.cluster.submissions == []
+    _nothing_started_after_the_stop(timed)
+
+
+@pytest.mark.parametrize("mode", list(StopMode))
 def test_a_stuck_turn_ends_at_the_grace_bound_and_starts_no_evaluation(mode: StopMode) -> None:
     """A turn that ignores the cancel never ends: only the host's grace bound ends the run."""
     timed = run_timed(

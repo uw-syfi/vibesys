@@ -37,7 +37,7 @@ from tests.support.skeleton_faults import COMMIT, RECEIPT_BEGUN, RECEIPT_SEALED
 from tests.support.skeleton_sim import Simulation, simulate
 
 from vs_faults.api import Boundary, Crossing, FaultGate, FaultPlan, HostCrashError
-from vs_sim.api.testing import VirtualClock, examples, run_virtual, swept
+from vs_sim.api.testing import Depth, VirtualClock, depth, examples, run_virtual, swept
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -145,8 +145,15 @@ def groups(kind: PointKind) -> dict[LifecycleClass | None, list[Point]]:
 
 
 def sampled(kind: PointKind) -> list[Point]:
-    """The points of ``kind`` this session tries: one per lifecycle class, or all of them."""
-    return [group[i] for group in groups(kind).values() for i in swept(len(group), 1)]
+    """The points of ``kind`` this session tries: one per lifecycle class, or all of them.
+
+    A transition is a commit between two requests: which request is in flight does not change
+    what the crash leaves behind, so a pull request tries one transition, not one per class.
+    """
+    grouped = list(groups(kind).values())
+    if kind == PointKind.TRANSITION and depth() is not Depth.NIGHTLY:
+        grouped = [max(grouped, key=len)]
+    return [group[i] for group in grouped for i in swept(len(group), 1)]
 
 
 _INSPECTION = "inspect_request"

@@ -35,7 +35,7 @@ from vs_runtime.api.testing import (
     drive_shell,
     scripted_host,
 )
-from vs_sim.api.testing import run_virtual, swept
+from vs_sim.api.testing import Depth, depth, run_virtual, swept
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -64,15 +64,38 @@ def _request_count(chosen: Outcomes) -> int:
     return probe.requests
 
 
-def _stops() -> list[object]:
+def _stops(samples: int = 3) -> list[tuple[str, int]]:
     return [
-        pytest.param(variant, at, id=f"{variant}-stop-at-{at}")
+        (variant, at)
         for variant, chosen in VARIANTS.items()
-        for at in swept(_request_count(chosen), 6)
+        for at in swept(_request_count(chosen), samples)
     ]
 
 
-@pytest.mark.parametrize(("variant", "stop_at"), _stops())
+def _stop_params() -> list[object]:
+    return [pytest.param(variant, at, id=f"{variant}-stop-at-{at}") for variant, at in _stops(2)]
+
+
+GRACES: tuple[float | None, ...] = (None, 0.0, 5.0, 60.0)
+
+
+def _drain_params() -> list[object]:
+    """Each stop point with the host's grace: every grace at nightly, one per point on a PR.
+
+    The grace decides only how long the first host waits before it gives up, and the points
+    differ in the request the stop finds in flight, so a pull request pairs them off (every
+    grace meets some point) and the nightly job crosses them.
+    """
+    stops = _stops(4)
+    pairs = [
+        (variant, at, grace)
+        for index, (variant, at) in enumerate(stops)
+        for grace in (GRACES if depth() is Depth.NIGHTLY else (GRACES[index % len(GRACES)],))
+    ]
+    return [pytest.param(v, at, g, id=f"{v}-stop-at-{at}-{g}") for v, at, g in pairs]
+
+
+@pytest.mark.parametrize(("variant", "stop_at"), _stop_params())
 def test_c5_an_operator_stop_at_any_request_ends_the_run_and_leaves_nothing(
     variant: str, stop_at: int
 ) -> None:
@@ -171,8 +194,7 @@ def _jobs(core: CoreState) -> list[OwnedJob | RegisteredOwnedJob]:
     return [*core.evaluation.jobs, *core.evaluation.registered_jobs]
 
 
-@pytest.mark.parametrize("grace", [None, 0.0, 5.0, 60.0])
-@pytest.mark.parametrize(("variant", "stop_at"), _stops())
+@pytest.mark.parametrize(("variant", "stop_at", "grace"), _drain_params())
 def test_a_stop_at_any_request_drains_to_a_terminal_record_and_cancels_every_job(
     variant: str, stop_at: int, grace: float | None
 ) -> None:

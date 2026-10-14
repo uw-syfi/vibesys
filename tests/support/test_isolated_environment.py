@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from tests.support import sharding
 from tests.support.child_pytest import child_pythonpath
 
 pytest_plugins = ["pytester"]
@@ -20,13 +22,72 @@ _VARIABLES = (
 )
 
 
+_DURATIONS = {"test_fast.py": 1.0, "test_slow.py": 100.0}
+_SLOW_FIRST = ["test_slow.py::test_slow", "test_fast.py::test_fast"]
+_COLLECTED = ["test_fast.py::test_fast", "test_slow.py::test_slow"]
+
+
+@dataclass
+class _ControllerNode:
+    """What the sharding plugin reads of xdist's worker controller, and what it hands the worker."""
+
+    config: pytest.Config
+    workerinput: dict[str, object] = field(default_factory=dict)
+
+
+def _sharding_config(pytester: pytest.Pytester, *arguments: str) -> pytest.Config:
+    (pytester.path / "durations.json").write_text(json.dumps(_DURATIONS))
+    return pytester.parseconfig(
+        "-p",
+        "no:tach",
+        "-p",
+        "tests.support.sharding",
+        "--shard-durations",
+        str(pytester.path / "durations.json"),
+        *arguments,
+    )
+
+
 @pytest.mark.parametrize(
-    "case", [("load", 2, "test_slow"), ("loadgroup", 2, "test_fast"), ("load", 0, "test_fast")]
+    ("distribution", "expected"),
+    [("load", _SLOW_FIRST), ("loadgroup", _COLLECTED)],
 )
 def test_duration_order_respects_the_distribution_mode(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, case: tuple[str, int, str]
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    distribution: str,
+    expected: list[str],
 ) -> None:
-    distribution, workers, first = case
+    """The controller forwards duration order only to ``load``; the worker applies what it got."""
+    monkeypatch.delenv("VIBESYS_TEST_SHARD", raising=False)
+    pytester.makepyfile(test_fast="def test_fast(): pass", test_slow="def test_slow(): pass")
+    items, _ = pytester.inline_genitems("-p", "no:tach")
+    controller = _ControllerNode(_sharding_config(pytester, "-n", "2", "--dist", distribution))
+    sharding.pytest_configure_node(controller)  # ty: ignore[invalid-argument-type]
+    worker = _sharding_config(pytester)
+    worker.workerinput = controller.workerinput  # ty: ignore[unresolved-attribute]
+
+    sharding.pytest_collection_modifyitems(worker, items)
+
+    assert [item.nodeid for item in items] == expected
+
+
+def test_a_run_without_workers_keeps_collection_order(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("VIBESYS_TEST_SHARD", raising=False)
+    pytester.makepyfile(test_fast="def test_fast(): pass", test_slow="def test_slow(): pass")
+    items, _ = pytester.inline_genitems("-p", "no:tach")
+
+    sharding.pytest_collection_modifyitems(_sharding_config(pytester), items)
+
+    assert [item.nodeid for item in items] == _COLLECTED
+
+
+def test_duration_order_reaches_real_xdist_workers(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one real-process case: ``-n 2 --dist load`` workers collect the slow file first."""
     repository = Path(__file__).parents[2]
     monkeypatch.setenv("PYTHONPATH", child_pythonpath(repository))
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
@@ -46,25 +107,16 @@ def pytest_collection_finish(session):
     )
     pytester.makepyfile(test_fast="def test_fast(): pass", test_slow="def test_slow(): pass")
     durations = pytester.path / "durations.json"
-    durations.write_text(json.dumps({"test_fast.py": 1.0, "test_slow.py": 100.0}))
+    durations.write_text(json.dumps(_DURATIONS))
 
     result = pytester.runpytest_subprocess(
-        "-n",
-        str(workers),
-        "--dist",
-        distribution,
-        "--maxschedchunk=1",
-        "--shard-durations",
-        str(durations),
+        "-n", "2", "--dist", "load", "--maxschedchunk=1", "--shard-durations", str(durations)
     )
 
     result.assert_outcomes(passed=2)
     collections = [json.loads(path.read_text()) for path in pytester.path.glob("collection-*.json")]
-    assert len(collections) == max(workers, 1)
-    expected = ["test_slow.py::test_slow", "test_fast.py::test_fast"]
-    if first == "test_fast":
-        expected.reverse()
-    assert all(items == expected for items in collections)
+    assert len(collections) == 2
+    assert all(items == _SLOW_FIRST for items in collections)
 
 
 def test_collection_workers_and_children_have_private_state(

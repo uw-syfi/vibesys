@@ -36,6 +36,7 @@ from server.host_api import (
 from server.registry import FileInstanceStore, instance_root
 from server.relay import EXIT_STATUS
 from server.transport.unix_jsonl import UnixJsonlServer
+from vs_sim.api.testing import swept
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -52,6 +53,15 @@ _HELLO = {
     "features": [],
     "app_version": "e2e",
 }
+
+
+def _sampled(group: tuple[str, ...]) -> list[str]:
+    """A pull request replays one scenario of each group through a real process; the nightly all.
+
+    The corpus is replayed in process against the same relay by the server transport tests, so
+    the real process adds only its wiring, which any one scenario exercises.
+    """
+    return [group[i] for i in swept(len(group), 1)]
 
 
 @pytest.fixture
@@ -157,7 +167,7 @@ def _bridged(
             assert connection.finish() == (EXIT_STATUS[ChannelEndOutcome.CLIENT_CLOSED], b"")
 
 
-@pytest.mark.parametrize("scenario_name", runner_group(_RUNNER, "bootstrap"))
+@pytest.mark.parametrize("scenario_name", _sampled(runner_group(_RUNNER, "bootstrap")))
 def test_bootstrap_scenarios_cross_the_bridge(
     env: dict[str, str], tmp_path: Path, socket_dir: Path, scenario_name: str
 ) -> None:
@@ -175,7 +185,7 @@ def test_bootstrap_scenarios_cross_the_bridge(
         parts.close()
 
 
-@pytest.mark.parametrize("scenario_name", runner_group(_RUNNER, "control"))
+@pytest.mark.parametrize("scenario_name", _sampled(runner_group(_RUNNER, "control")))
 def test_control_scenarios_cross_the_bridge(
     env: dict[str, str], tmp_path: Path, socket_dir: Path, scenario_name: str
 ) -> None:

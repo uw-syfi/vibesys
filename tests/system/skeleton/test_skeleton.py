@@ -80,8 +80,28 @@ from vs_runtime.api.core import (
     revision_ref,
 )
 from vs_runtime.api.executor_contexts import context_for
+from vs_sim.api.testing import Depth, depth
 
 LEASE = 100.0
+
+
+def _crashes(pull_request: tuple[CrashPoint | None, ...] = (None,)) -> list[object]:
+    """The restarts a scenario is played with: a pull request tries ``pull_request``.
+
+    The crash sweeps of ``tests/system/crash`` restart this very search at every kind of
+    boundary, so a pull request plays the other scenarios straight through (the cancelled one
+    also with one restart, which the sweeps do not reach); the nightly job restarts each after
+    the dispatch and after the observation as well.
+    """
+    chosen = (
+        (None, CrashPoint.AFTER_DISPATCH, CrashPoint.AFTER_OBSERVATION)
+        if depth() is Depth.NIGHTLY
+        else pull_request
+    )
+    return [
+        pytest.param(crash, id="straight-through" if crash is None else f"crash-{crash.name}")
+        for crash in chosen
+    ]
 
 
 def _start(world: World, host: str, now: float) -> Process:
@@ -102,52 +122,24 @@ def _assert_adopted(process: Process, world: World) -> None:
     assert len(world.cluster.submissions) == (2 if world.strategy.measured else 0)
 
 
-@pytest.mark.parametrize(
-    "crash",
-    [
-        pytest.param(None, id="straight-through"),
-        pytest.param(CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch"),
-        pytest.param(CrashPoint.AFTER_OBSERVATION, id="crash-after-observation"),
-    ],
-)
+@pytest.mark.parametrize("crash", _crashes())
 async def test_skeleton(tmp_path: Path, crash: CrashPoint | None) -> None:
     await _play(tmp_path, crash, SkeletonStrategy())
 
 
-@pytest.mark.parametrize(
-    "crash",
-    [
-        pytest.param(None, id="straight-through"),
-        pytest.param(CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch"),
-        pytest.param(CrashPoint.AFTER_OBSERVATION, id="crash-after-observation"),
-    ],
-)
+@pytest.mark.parametrize("crash", _crashes())
 async def test_skeleton_without_measurements(tmp_path: Path, crash: CrashPoint | None) -> None:
     """The attempt, turn, settle, adopt and stop path, with no evaluation in it."""
     await _play(tmp_path, crash, SkeletonStrategy.unmeasured())
 
 
-@pytest.mark.parametrize(
-    "crash",
-    [
-        pytest.param(None, id="straight-through"),
-        pytest.param(CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch"),
-        pytest.param(CrashPoint.AFTER_OBSERVATION, id="crash-after-observation"),
-    ],
-)
+@pytest.mark.parametrize("crash", _crashes())
 async def test_skeleton_discarded_attempt(tmp_path: Path, crash: CrashPoint | None) -> None:
     """One attempt is discarded and the trusted baseline adopted: no retained revision needed."""
     await _play(tmp_path, crash, SkeletonStrategy.unmeasured(keeps_candidate=False))
 
 
-@pytest.mark.parametrize(
-    "crash",
-    [
-        None,
-        CrashPoint.AFTER_DISPATCH,
-        CrashPoint.AFTER_OBSERVATION,
-    ],
-)
+@pytest.mark.parametrize("crash", _crashes(pull_request=(CrashPoint.AFTER_DISPATCH,)))
 async def test_skeleton_cancelled_attempt(tmp_path: Path, crash: CrashPoint | None) -> None:
     """Start one attempt and cancel the run: workspace acquired, scope closed, workspace discarded."""
     with open_skeleton_world(tmp_path, SkeletonStrategy.cancelled()) as world:

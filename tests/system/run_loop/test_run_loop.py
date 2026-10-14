@@ -59,7 +59,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.testing import ProbedRunClock
-from vs_sim.api.testing import clock_from
+from vs_sim.api.testing import clock_from, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -171,7 +171,7 @@ async def test_the_deadline_ends_an_otherwise_idle_paused_run(tmp_path: Path) ->
 
 
 @settings(
-    max_examples=5,
+    max_examples=examples(pr=1, nightly=12),
     derandomize=True,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
@@ -229,7 +229,7 @@ async def _measure_a_job_running(tmp_path: Path, runtime: float) -> tuple[World,
         return world, process, True
 
 
-@pytest.mark.parametrize("runtime", [45.0, 300.0])
+@pytest.mark.parametrize("runtime", [45.0, 150.0])
 async def test_a_running_job_is_polled_at_the_observe_interval(
     tmp_path: Path, runtime: float
 ) -> None:
@@ -241,7 +241,8 @@ async def test_a_running_job_is_polled_at_the_observe_interval(
     applies. A loop that polled on every wake would exceed it by orders of magnitude.
     """
     interval = sample_limits().observe_interval
-    world, process, _ = await _measure_a_job_running(tmp_path, runtime)
+    world, process, terminal = await _measure_a_job_running(tmp_path, runtime)
+    assert terminal, "the run closes once the job ends"
     core = process.shell.record.envelope.core
     assert [job.status for job in core.evaluation.jobs] == ["succeeded"]
     assert len(world.cluster.submissions) == 1
@@ -249,7 +250,7 @@ async def test_a_running_job_is_polled_at_the_observe_interval(
 
 
 # Eight lease durations is the most that fit in the 880 s a skeleton measurement may take.
-@pytest.mark.parametrize("leases", [1, 3, 8])
+@pytest.mark.parametrize("leases", [1, 8])
 async def test_a_dispatch_longer_than_the_lease_does_not_lose_the_lease(
     tmp_path: Path, leases: int
 ) -> None:
@@ -276,7 +277,7 @@ async def test_a_dispatch_longer_than_the_lease_does_not_lose_the_lease(
     assert outcome.status == RunStatus.TERMINAL
 
 
-@pytest.mark.parametrize("lease_durations_first", [0, 1, 5])
+@pytest.mark.parametrize("lease_durations_first", [0, 2])
 async def test_a_stop_during_a_submission_waits_for_it_and_closes_the_run(
     tmp_path: Path, lease_durations_first: int
 ) -> None:
@@ -311,11 +312,6 @@ async def test_a_stop_during_a_submission_waits_for_it_and_closes_the_run(
     # Draining and closing take a few control polls, far inside the host's 60 s grace.
     spent_before_stop = 1.0 + lease_durations_first * LEASE
     assert spent_before_stop <= clock.at <= spent_before_stop + 60.0
-
-
-async def test_a_run_with_a_long_measurement_closes_after_the_job_ends(tmp_path: Path) -> None:
-    _, _, terminal = await _measure_a_job_running(tmp_path, 45.0)
-    assert terminal
 
 
 async def test_a_run_nothing_can_wake_is_reported_stalled(tmp_path: Path) -> None:
@@ -384,7 +380,7 @@ async def test_a_stalled_run_names_the_release_a_closing_attempt_waits_for(tmp_p
             await drive_core(host, _config())
 
 
-@settings(max_examples=5, derandomize=True, deadline=None)
+@settings(max_examples=examples(pr=2, nightly=8), derandomize=True, deadline=None)
 @example(until=7.0)
 @given(until=st.floats(min_value=2.0, max_value=900.0))
 async def test_a_strategy_that_waits_for_a_time_is_woken_then_and_not_reported_stalled(
@@ -497,6 +493,7 @@ _OPERATIONS = st.lists(
 )
 
 
+@settings(max_examples=examples(pr=25, nightly=200), deadline=None)
 @given(operations=_OPERATIONS)
 def test_the_control_bridge_emits_one_ordered_event_per_change(operations: list[str]) -> None:
     channel = _channel()

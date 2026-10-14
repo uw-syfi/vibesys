@@ -39,7 +39,7 @@ from vs_agent.api.testing import AgentCrashError
 from vs_faults.api import AgentFault, Boundary, ClusterFault, ClusterOperation, FaultPlan, FaultRule
 from vs_runtime.api import RunCleanupError, RuntimeContractError
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
-from vs_sim.api.testing import Depth, depth
+from vs_sim.api.testing import Depth, depth, swept
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -88,6 +88,12 @@ async def test_a_run_without_faults_completes(tmp_path: Path) -> None:
     assert chaos.violations == [], chaos.report()
 
 
+def _sampled[F](faults: dict[F, object], sample: int) -> list[F]:
+    """The fault classes a pull request injects (spread over the table); the nightly job all."""
+    found = list(faults)
+    return [found[i] for i in swept(len(found), sample)]
+
+
 # What each fault class does to a skeleton run: one explicit rule at its first opportunity, so
 # the fault is certain to strike (the sweep above draws them at random).
 _AGENT_ENDINGS = {
@@ -100,7 +106,7 @@ _AGENT_ENDINGS = {
 }
 
 
-@pytest.mark.parametrize("fault", list(_AGENT_ENDINGS), ids=lambda fault: fault.value)
+@pytest.mark.parametrize("fault", _sampled(_AGENT_ENDINGS, 2), ids=lambda fault: fault.value)
 async def test_an_agent_fault_is_injected_and_the_run_ends_as_that_fault_explains(
     tmp_path: Path, fault: AgentFault
 ) -> None:
@@ -125,7 +131,7 @@ _CLUSTER_FAULTS = {
 }
 
 
-@pytest.mark.parametrize("fault", list(_CLUSTER_FAULTS), ids=lambda fault: fault.value)
+@pytest.mark.parametrize("fault", _sampled(_CLUSTER_FAULTS, 3), ids=lambda fault: fault.value)
 async def test_a_cluster_fault_is_injected_and_the_run_ends_as_that_fault_explains(
     tmp_path: Path, fault: ClusterFault
 ) -> None:

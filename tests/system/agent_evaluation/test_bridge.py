@@ -68,7 +68,7 @@ from vs_runtime.api.core import (
     handle_for,
 )
 from vs_runtime.contracts import AgentRole, AgentTool
-from vs_sim.api.testing import VirtualClock, clock_from, run_virtual
+from vs_sim.api.testing import VirtualClock, clock_from, examples, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -310,7 +310,7 @@ async def _synthesized(tmp_path: Path, calls: list[tuple[Any, ...]]) -> None:
 
 
 @settings(
-    max_examples=25,
+    max_examples=examples(pr=6, nightly=40),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
 )

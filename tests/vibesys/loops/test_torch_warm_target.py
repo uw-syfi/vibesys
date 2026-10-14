@@ -34,6 +34,8 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.loops.torch_inject_fixtures import parse_call_log, write_fake_torch
 
+from vs_sim.api.testing import examples
+
 if TYPE_CHECKING:
     from types import ModuleType
 
@@ -41,9 +43,13 @@ _REPO = Path(__file__).resolve().parents[3]
 _TORCH_DIR = _REPO / "resources" / "profilers" / "torch"
 
 # Real subprocesses + signal round-trips: keep example counts small, same
-# rationale as test_torch_inject.py's PROC_SETTINGS.
+# rationale as test_torch_inject.py's PROC_SETTINGS. A pull request samples two target
+# lifetimes (the deterministic tests above pin the one- and two-window cases); the nightly
+# run explores.
 PROC_SETTINGS = settings(
-    max_examples=5, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=2, nightly=10),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 
 
