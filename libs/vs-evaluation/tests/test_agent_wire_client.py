@@ -44,17 +44,24 @@ def _read_request(connection: Connection) -> None:
 
 def _call_against(
     answer: Callable[[Connection, SimThreads], None],
+    *,
+    buffer_bytes: int | None = None,
+    reads: bool = True,
 ) -> tuple[BaseException | str, float]:
     """Run one client call against a service that answers with ``answer``; its outcome and virtual duration."""
     threads = SimThreads(schedule_seed=0)
 
     def main() -> tuple[BaseException | str, float]:
-        network = SimNetwork(threads)
+        network = SimNetwork(threads, buffer_bytes=buffer_bytes)
         listener = network.listen(str(_ADDRESS))
 
         def serve() -> None:
             connection = listener.accept(HANG_GUARD_S)
             try:
+                if not reads:
+                    # A service that stopped reading: it holds the connection, silent.
+                    threads.sleep(_TIMEOUT_S * 10)
+                    return
                 _read_request(connection)
                 with contextlib.suppress(OSError):
                     answer(connection, threads)
@@ -108,6 +115,14 @@ def test_a_trickling_service_cannot_outlast_the_call_deadline(interval_s: float)
 
     assert isinstance(outcome, EvaluationServiceClientError), repr(outcome)
     assert elapsed <= _TIMEOUT_S + interval_s
+
+
+def test_a_service_that_stops_reading_cannot_outlast_the_call_deadline() -> None:
+    """The request does not fit the connection's buffer, and the service never reads it."""
+    outcome, elapsed = _call_against(lambda _c, _t: None, buffer_bytes=4, reads=False)
+
+    assert isinstance(outcome, EvaluationServiceClientError), repr(outcome)
+    assert elapsed <= _TIMEOUT_S
 
 
 def test_a_whole_reply_still_returns() -> None:

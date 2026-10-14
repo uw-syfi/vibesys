@@ -532,6 +532,42 @@ class NetworkContract:
         open_before, closed_after, data, eof, _ = subject.threads.run(program)
         assert (open_before, closed_after, data, eof) == (False, True, b"last words", b"")
 
+    def test_a_send_timeout_bounds_a_send_nobody_reads(self) -> None:
+        """A peer that stops reading cannot hold a timed ``send`` past its timeout.
+
+        The payload exceeds any socket buffer, so the send must wait for room that
+        never comes; it raises ``TimeoutError`` instead.
+        """
+        subject = self.network_under_test(0)
+        payload = b"x" * (8 << 20)
+
+        def program() -> bool:
+            threads = subject.threads.threads
+            address = subject.address("deaf")
+            listener = subject.network.listen(address)
+            done = threads.event()
+
+            def serve() -> None:
+                connection = listener.accept(HANG_GUARD_S)
+                _wait(done, "the client giving up")
+                connection.close()
+
+            server = threads.spawn(serve, name="server")
+            client = subject.network.connect(address, HANG_GUARD_S)
+            try:
+                client.send(payload, 10 * subject.threads.tick)
+            except TimeoutError:
+                timed_out = True
+            else:
+                timed_out = False
+            done.set()
+            _join(server)
+            client.close()
+            listener.close()
+            return timed_out
+
+        assert subject.threads.run(program)
+
     def test_sending_to_a_closed_peer_eventually_fails(self) -> None:
         """Writes to a hung-up peer raise ``OSError`` (broken pipe or reset) within a few attempts."""
         subject = self.network_under_test(0)

@@ -32,14 +32,32 @@ class _SimConnection:
         self._outgoing = outgoing
         self._closed = False
 
-    def send(self, data: bytes) -> None:
-        with self.network.cond:
-            if self._closed:
-                raise OSError(errno.EBADF, "connection closed")
-            if self._outgoing.reader_closed:
-                raise BrokenPipeError(errno.EPIPE, "peer closed")
-            self._outgoing.data += data
-            self.network.cond.notify_all()
+    def send(self, data: bytes, timeout: float | None = None) -> None:
+        network = self.network
+        deadline = None if timeout is None else network.threads.now() + timeout
+        pipe = self._outgoing
+        view = bytes(data)
+        with network.cond:
+            while True:
+                if self._closed:
+                    raise OSError(errno.EBADF, "connection closed")
+                if pipe.reader_closed:
+                    raise BrokenPipeError(errno.EPIPE, "peer closed")
+                room = network.room(pipe)
+                if room > 0:
+                    pipe.data += view[:room]
+                    view = view[room:]
+                    network.cond.notify_all()
+                if not view:
+                    return
+                remaining = None if deadline is None else deadline - network.threads.now()
+                if remaining is not None and remaining <= 0:
+                    message = "no room to send"
+                    raise TimeoutError(message)
+                network.cond.wait_for(
+                    lambda: self._closed or pipe.reader_closed or network.room(pipe) > 0,
+                    remaining,
+                )
 
     def recv(self, max_bytes: int, timeout: float | None = None) -> bytes:
         cond = self.network.cond
@@ -56,6 +74,8 @@ class _SimConnection:
                 raise OSError(errno.EBADF, "connection closed")
             chunk = bytes(pipe.data[:max_bytes])
             del pipe.data[:max_bytes]
+            # A sender may be waiting for the room this read made.
+            cond.notify_all()
             return chunk
 
     def peer_closed(self) -> bool:
@@ -103,10 +123,23 @@ class _SimListener:
 class SimNetwork:
     """Listeners and connections held in memory; addresses are any strings."""
 
-    def __init__(self, threads: Threads) -> None:
-        """Build on ``threads``, whose condition makes blocking calls simulated waits."""
+    def __init__(self, threads: Threads, *, buffer_bytes: int | None = None) -> None:
+        """Build on ``threads``, whose condition makes blocking calls simulated waits.
+
+        ``buffer_bytes`` bounds the unread bytes each direction of a connection holds,
+        as a socket's buffer does: a ``send`` beyond it waits for the peer to read.
+        ``None`` holds any amount, so a ``send`` never waits.
+        """
+        self.threads = threads
         self.cond = threads.condition()
         self.listeners: dict[str, _SimListener] = {}
+        self._buffer_bytes = buffer_bytes
+
+    def room(self, pipe: _Pipe) -> int:
+        """How many more bytes ``pipe`` holds unread."""
+        if self._buffer_bytes is None:
+            return 1 << 62
+        return max(self._buffer_bytes - len(pipe.data), 0)
 
     def listen(self, address: str) -> Listener:
         """Bind ``address``; ``OSError`` (address in use) when a listener holds it."""

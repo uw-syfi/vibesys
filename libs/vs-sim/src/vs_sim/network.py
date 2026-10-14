@@ -16,6 +16,7 @@ import contextlib
 import math
 import select
 import socket
+import time
 from pathlib import Path
 from typing import Protocol
 
@@ -23,8 +24,14 @@ from typing import Protocol
 class Connection(Protocol):
     """One end of an established stream."""
 
-    def send(self, data: bytes) -> None:
-        """Write all of ``data``; ``BrokenPipeError`` when the peer has closed its end."""
+    def send(self, data: bytes, timeout: float | None = None) -> None:
+        """Write all of ``data``; ``BrokenPipeError`` when the peer has closed its end.
+
+        Raises:
+            TimeoutError: a peer that stopped reading left no room for all of ``data``
+                within ``timeout`` seconds (``None`` waits for ever). Part of it may
+                have been written.
+        """
         ...
 
     def recv(self, max_bytes: int, timeout: float | None = None) -> bytes:
@@ -78,8 +85,25 @@ class _UnixConnection:
     def __init__(self, sock: socket.socket) -> None:
         self._sock = sock
 
-    def send(self, data: bytes) -> None:
-        self._sock.sendall(data)
+    def send(self, data: bytes, timeout: float | None = None) -> None:
+        if timeout is None:
+            self._sock.sendall(data)
+            return
+        # As in ``recv``, the socket stays blocking; wait for room instead.
+        deadline = time.monotonic() + timeout
+        view = memoryview(data)
+        poller = select.poll()
+        poller.register(self._sock, select.POLLOUT)
+        while view:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not poller.poll(max(math.ceil(remaining * 1000), 0)):
+                message = f"no room to send within {timeout} s"
+                raise TimeoutError(message)
+            try:
+                sent = self._sock.send(view, socket.MSG_DONTWAIT)
+            except BlockingIOError:
+                continue
+            view = view[sent:]
 
     def recv(self, max_bytes: int, timeout: float | None = None) -> bytes:
         # The socket stays blocking: a socket timeout would also bound a later ``send``

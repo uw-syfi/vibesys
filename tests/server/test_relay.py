@@ -346,7 +346,8 @@ class _NeverSends:
         self._closed = False
         self.unsent = b""
 
-    def send(self, data: bytes) -> None:
+    def send(self, data: bytes, timeout: float | None = None) -> None:
+        del timeout  # this fake holds every send until close
         with self._cond:
             self.unsent = data
             self._cond.wait_for(lambda: self._closed)

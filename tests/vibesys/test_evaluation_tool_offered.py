@@ -29,7 +29,7 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
-from vs_sim.api import MonotonicClock, UnixNetwork
+from vs_sim.api.testing import ManualClock, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from vs_runtime.api import AgentRole
@@ -77,8 +77,8 @@ def test_a_dynamic_role_is_offered_the_evaluation_tool_exactly_when_it_measures(
         tools = build_core_evaluation_tools(
             socket_path=tmp_path / "evaluation.sock",
             token=env["VS_EVALUATION_TOKEN"],
-            network=UnixNetwork(),
-            clock=MonotonicClock(),
+            network=SimNetwork(SimThreads()),
+            clock=ManualClock(),
         )
         assert {tool.name for tool in tools} == {SUBMIT_TOOL, VALIDATE_WAIT_TOOL}
 

@@ -96,13 +96,13 @@ class SocketClient:
         document = request.model_dump_json().encode() + b"\n"
         deadline = self._clock.now() + timeout_s
         try:
-            connection = self._network.connect(str(self._path), timeout_s)
+            connection = self._network.connect(str(self._path), self._remaining(deadline))
             try:
-                connection.send(document)
+                connection.send(document, self._remaining(deadline))
                 response = _read_line(connection, self._clock, deadline)
                 with contextlib.suppress(OSError):
                     # A host that cannot hear the receipt loses nothing but its certainty.
-                    connection.send(RECEIPT_LINE)
+                    connection.send(RECEIPT_LINE, self._remaining(deadline))
             finally:
                 connection.close()
         except OSError as error:
@@ -118,6 +118,14 @@ class SocketClient:
             # A version-skewed or broken service: still the typed tool error.
             raise EvaluationServiceClientError.malformed(error) from error
         return reply.model_dump_json()
+
+    def _remaining(self, deadline: float) -> float:
+        """Seconds left before ``deadline``; ``TimeoutError`` once none are."""
+        remaining = deadline - self._clock.now()
+        if remaining <= 0:
+            message = "no complete reply before the call's deadline"
+            raise TimeoutError(message)
+        return remaining
 
 
 def _read_line(connection: Connection, clock: Clock, deadline: float) -> bytes:

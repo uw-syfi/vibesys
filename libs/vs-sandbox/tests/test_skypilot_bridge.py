@@ -246,8 +246,8 @@ class _BlockedBridgeConnection:
         self.send_started = threads.event()
         self.closed = threads.event()
 
-    def send(self, data: bytes) -> None:
-        del data
+    def send(self, data: bytes, timeout: float | None = None) -> None:
+        del data, timeout
         self.send_started.set()
         if not self.closed.wait(timeout=1):
             raise AssertionError
