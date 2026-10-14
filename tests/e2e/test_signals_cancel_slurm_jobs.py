@@ -108,6 +108,7 @@ class _RealRun:
 
     def finish(self) -> int:
         """Wait for the process to end; its exit status."""
+        # test-isolation: the bound only guards against a hung child; a run that ends in time never reads it.
         return self._process.wait(timeout=HANG_GUARD_S)
 
 

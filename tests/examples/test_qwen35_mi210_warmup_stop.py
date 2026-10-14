@@ -46,6 +46,7 @@ def run(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     # dataclasses resolve string annotations through sys.modules.
+    # test-isolation: registering the script's module name is how a loaded script is made importable; it sets up the input, not a stand-in.
     monkeypatch.setitem(sys.modules, name, module)
     spec.loader.exec_module(module)
     return module
