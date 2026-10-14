@@ -78,10 +78,10 @@ def read_agent_model[ModelT: BaseModel](
 
     ``model`` must forbid unknown keys at every depth (``vs_decode`` refuses it otherwise).
     """
-    path = _contained_regular_file(workspace, relative)
+    path = _contained(workspace, relative)
     if isinstance(path, WorkspaceFileProblem):
         return path
-    decoded = read_json(path, model, max_bytes=max_bytes)
+    decoded = read_json(path, model, max_bytes=max_bytes, follow_symlinks=False)
     return _problem(relative, decoded) if isinstance(decoded, Unreadable) else decoded
 
 
@@ -95,28 +95,25 @@ def read_agent_json(
 
     For a format whose caller validates the shape itself to give its own messages.
     """
-    path = _contained_regular_file(workspace, relative)
+    path = _contained(workspace, relative)
     if isinstance(path, WorkspaceFileProblem):
         return path
-    decoded = read_json(path, _JSON_VALUE, max_bytes=max_bytes)
+    decoded = read_json(path, _JSON_VALUE, max_bytes=max_bytes, follow_symlinks=False)
     return _problem(relative, decoded) if isinstance(decoded, Unreadable) else decoded
 
 
-def _contained_regular_file(workspace: Path, relative: str) -> Path | WorkspaceFileProblem:
-    """The contained path of ``relative``; anything there but a regular file is refused.
+def _contained(workspace: Path, relative: str) -> Path | WorkspaceFileProblem:
+    """The resolved path of ``relative`` inside the workspace, or the problem that it escapes.
 
-    A directory or a FIFO is not readable rather than missing, so the agent is told the
-    file it wrote is wrong instead of being told it wrote nothing (opening a FIFO would
-    also block the host).
+    Its readers pass ``follow_symlinks=False`` to ``read_json``, which checks the file on
+    the descriptor it opened: a directory or a FIFO there is not readable rather than
+    missing (and never blocks the host), and a symlink the agent swaps in for the file after
+    this check is refused instead of followed out of the workspace.
     """
     path = contained_path(workspace, relative)
     if path is None:
         return WorkspaceFileProblem(
             WorkspaceFileProblemKind.ESCAPES, relative, "escapes the workspace"
-        )
-    if path.exists() and not path.is_file():
-        return WorkspaceFileProblem(
-            WorkspaceFileProblemKind.NOT_READABLE, relative, "is not a regular file"
         )
     return path
 
