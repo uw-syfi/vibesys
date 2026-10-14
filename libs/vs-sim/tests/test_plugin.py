@@ -540,21 +540,48 @@ def test_a_failure_found_under_one_salt_is_replayed_first_under_the_next(
     assert (replayed["runs"], replayed["seed"]) == (1, row["seed"])
 
 
-def test_a_missing_replay_file_replays_nothing_and_a_bad_row_is_rejected_by_name(
-    suite: pytest.Pytester,
-) -> None:
+def test_a_missing_replay_file_replays_nothing(suite: pytest.Pytester) -> None:
     suite.makepyfile("async def test_sim(sim):\n    pass\n")
     missing = suite.path / "missing.jsonl"
-    suite.runpytest_inprocess("--sim-explore=2", f"--sim-explore-replay={missing}").assert_outcomes(
-        passed=1
-    )
+
+    result = suite.runpytest_inprocess("--sim-explore=2", f"--sim-explore-replay={missing}")
+
+    result.assert_outcomes(passed=1)
+    assert "replay file ignored" not in result.stdout.str()
+
+
+_TWO_ROWS = (
+    '{"test": "test_x.py::test_sim", "seed": 1}\n{"test": "test_x.py::test_sim", "seed": 2}\n'
+)
+
+
+@pytest.mark.parametrize(
+    "cache",
+    [
+        pytest.param(_TWO_ROWS[:-10], id="cut-short-in-the-last-row"),
+        pytest.param(_TWO_ROWS[:20], id="cut-short-in-the-first-row"),
+        pytest.param('{"test": "test_x.py::test_sim", "seed": 1, "salt": "x"}\n', id="unknown-key"),
+        pytest.param('{"test": "test_x.py::test_sim", "seed": true}\n', id="seed-not-an-integer"),
+        pytest.param("[1, 2]\n", id="not-an-object"),
+        pytest.param("\x00\x00\n", id="garbage"),
+    ],
+)
+def test_an_unreadable_replay_file_is_ignored_with_a_note_so_the_run_rewrites_it(
+    suite: pytest.Pytester, cache: str
+) -> None:
+    suite.makepyfile("async def test_sim(sim):\n    pass\n")
     bad = suite.path / "bad.jsonl"
-    bad.write_text('{"test": "test_x.py::test_sim", "seed": 1, "salt": "x"}\n')
+    bad.write_text(cache)
+    report = suite.path / "report.jsonl"
 
-    result = suite.runpytest_inprocess("--sim-explore=2", f"--sim-explore-replay={bad}")
+    result = suite.runpytest_inprocess(
+        "--sim-explore=2", f"--sim-explore-replay={bad}", f"--sim-explore-report={report}"
+    )
 
-    assert result.ret != 0
-    result.stderr.fnmatch_lines([f"*{bad}:1: a replay row has exactly the keys*"])
+    result.assert_outcomes(passed=1)
+    result.stdout.fnmatch_lines([f"*replay file ignored, replaying nothing: {bad}:*"])
+    [row] = [json.loads(line) for line in report.read_text().splitlines()]
+    assert row["runs"] == 2
 
 
 def _explored(report: Path) -> dict[str, tuple[int, int, str]]:

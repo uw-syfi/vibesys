@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import hypothesis
+import pydantic
 import pytest
 from _pytest.runner import runtestprotocol
 
@@ -109,7 +110,9 @@ class _Exploration:
         self.stopped_by_interrupt = False
         self.outcomes: list[dict[str, object]] = []
         replay: str | None = config.getoption("sim_explore_replay")
-        self.replays = _read_replays(Path(replay)) if replay is not None else {}
+        self.replays, self.replay_ignored = (
+            _read_replays(Path(replay)) if replay is not None else ({}, None)
+        )
 
     def seed(self, test: str, run: int) -> int:
         """The seed of exploration run ``run`` of ``test``: replays first, then the usual seeds."""
@@ -123,27 +126,36 @@ class _Exploration:
         return self.budget is not None and time.monotonic() - self.started >= self.budget
 
 
-_REPLAY_KEYS = frozenset({"test", "seed"})
+class _ReplayRow(pydantic.BaseModel):
+    """One line of a replay file: a failing test and the seed that failed it."""
+
+    model_config = pydantic.ConfigDict(extra="forbid", strict=True)
+
+    test: str
+    seed: int
 
 
-def _read_replays(path: Path) -> dict[str, list[int]]:
-    """Each test's failing seeds from a replay file; unknown keys are rejected by name."""
+def _read_replays(path: Path) -> tuple[dict[str, list[int]], str | None]:
+    """Each test's failing seeds from a replay file, and why the file was ignored (else ``None``).
+
+    The file is a cache that CI restores between pushes and rewrites from each run, so a file
+    that cannot be read (a run killed mid-write truncated it, or an older plugin wrote another
+    shape) is ignored whole: failing on it would keep it from ever being rewritten.
+    """
     if not path.exists():
-        return {}
+        return {}, None
     replays: dict[str, list[int]] = {}
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
             continue
-        row = json.loads(line)
-        if not isinstance(row, dict) or set(row) - _REPLAY_KEYS:
-            message = f"{path}:{number}: a replay row has exactly the keys {sorted(_REPLAY_KEYS)}"
-            raise pytest.UsageError(message)
-        test, seed = row.get("test"), row.get("seed")
-        if not isinstance(test, str) or isinstance(seed, bool) or not isinstance(seed, int):
-            message = f"{path}:{number}: 'test' must be a node id and 'seed' an integer"
-            raise pytest.UsageError(message)
-        replays.setdefault(test, []).append(seed)
-    return replays
+        try:
+            row = _ReplayRow.model_validate_json(line)
+        except pydantic.ValidationError as error:
+            keys = sorted(_ReplayRow.model_fields)
+            why = error.errors()[0]["msg"]
+            return {}, f"{path}:{number}: a replay row has exactly the keys {keys} ({why})"
+        replays.setdefault(row.test, []).append(row.seed)
+    return replays, None
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -534,6 +546,11 @@ def pytest_terminal_summary(
     state = config.stash.get(_EXPLORATION, None)
     if state is None:
         return
+    if state.replay_ignored is not None:
+        terminalreporter.write_line(
+            f"vs-sim exploration: replay file ignored, replaying nothing: {state.replay_ignored}",
+            yellow=True,
+        )
     elapsed = time.monotonic() - state.started
     stop = ", stopped by an interrupt" if state.stopped_by_interrupt else ""
     terminalreporter.write_line(
