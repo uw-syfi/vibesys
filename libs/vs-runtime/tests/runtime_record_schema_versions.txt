@@ -1,0 +1,5 @@
+# envelope-version.runtime-version sha256-of-RuntimeRecord[FlowState]-JSON-schema;
+# see test_runtime_record_schema_version.py
+# append-only: a shape change adds a line for a new version pair. scripts/check_stale_revert.py
+# fails a change that edits or drops a line the base branch has.
+8.1 1dadce9ed2b51d1fa2e20ac4cac45056d32e4b3998d6983161592ebb1a76925f

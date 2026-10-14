@@ -26,6 +26,11 @@ commit <40-character sha>" (what ``git revert`` writes), "Reverts #2071" (what G
 revert button writes, with an optional "owner/repo" before the "#"), "Reland #2071" or
 "Restores #2163" (a file moved back after a rename).
 
+A golden file whose base copy has a line starting with ``# append-only`` records history
+that one checkout cannot recompute (the schema hash pinned for each past version). A change
+may only add lines at its end: one that edits or drops a line the base copy has, or deletes
+the file, is flagged as well.
+
 Stdlib only, so CI's ``changes`` job runs it before any environment is installed.
 """
 
@@ -63,6 +68,9 @@ _DECLARATION = re.compile(
     r"|(?:Reverts|Reland|Restores) (?:[\w.-]+/[\w.-]+)?#(?P<number>\d+)\b)",
     re.MULTILINE,
 )
+APPEND_ONLY_MARKER = "# append-only"
+"""A line of a file that starts with this makes the file append-only."""
+
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
 _BLAME_HEADER = re.compile(r"^([0-9a-f]{40}) \d+ (\d+)")
 
@@ -272,6 +280,28 @@ def stale_files(root: Path, base_ref: str, head: str = "HEAD") -> list[StaleFile
     return sorted(found.values(), key=lambda stale: stale.path)
 
 
+def rewritten_append_only(root: Path, base_ref: str, head: str = "HEAD") -> list[str]:
+    """Every append-only file of the base whose ``head`` copy does not begin with the base copy."""
+    base = _git(root, "merge-base", head, base_ref).strip()
+    changed = _git(
+        root, "diff", "--no-renames", "--name-only", "--diff-filter=MD", base, head
+    ).splitlines()
+    if not changed:
+        return []
+    marked = _run_git(
+        root, "grep", "-l", "-I", "-F", "-e", APPEND_ONLY_MARKER, base, "--", *changed
+    ).stdout.splitlines()
+    found: list[str] = []
+    for path in (line.removeprefix(f"{base}:") for line in marked):
+        before = _git(root, "show", f"{base}:{path}")
+        if not any(line.startswith(APPEND_ONLY_MARKER) for line in before.splitlines()):
+            continue
+        after = _run_git(root, "show", f"{head}:{path}")
+        if after.returncode or not after.stdout.startswith(before):
+            found.append(path)
+    return found
+
+
 def main(argv: list[str] | None = None) -> int:
     """Report each stale file and fail, or pass silently."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -288,7 +318,13 @@ def main(argv: list[str] | None = None) -> int:
             "rebuild the file from the base branch, or declare the undo "
             '("Reverts #N", "Reland #N" or "Restores #N" on its own line of the message)\n'
         )
-    return 1 if found else 0
+    rewritten = rewritten_append_only(root, args.base_ref, args.head)
+    for path in rewritten:
+        sys.stdout.write(
+            f"{path}: append-only, but the change edits or drops a line the base branch has; "
+            "keep every existing line and add new ones at the end\n"
+        )
+    return 1 if found or rewritten else 0
 
 
 if __name__ == "__main__":

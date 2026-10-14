@@ -12,7 +12,7 @@ from pathlib import Path
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from scripts.check_stale_revert import stale_files
+from scripts.check_stale_revert import rewritten_append_only, stale_files
 from tests.support.real_git import REAL_GIT
 
 from vs_sim.api.testing import examples
@@ -267,3 +267,37 @@ def test_loose_declarations_do_not_exempt_a_stale_copy() -> None:
             _commit(root, {"mod.py": before}, f"change: drop it\n\n{text}")
 
             assert [s.path for s in stale_files(root, "main")] == ["mod.py"], text
+
+
+@settings(max_examples=examples(pr=6, nightly=100), deadline=None)
+@given(
+    lines=st.lists(st.sampled_from(["7 aa", "8 bb", "9 cc", "# note"]), min_size=1, max_size=4),
+    appended=st.lists(st.sampled_from(["10 dd", "11 ee"]), max_size=2),
+    edit=st.sampled_from(["append", "edit", "drop", "delete"]),
+    marked=st.booleans(),
+    data=st.data(),
+)
+def test_a_change_to_an_append_only_file_is_flagged_unless_it_only_appends(
+    *, lines: list[str], appended: list[str], edit: str, marked: bool, data: st.DataObject
+) -> None:
+    header = ["# append-only: add lines at the end"] if marked else ["# pinned versions"]
+    before = [*header, *lines]
+    after = [*before, *appended]
+    if edit in {"edit", "drop"}:
+        index = data.draw(st.integers(0, len(before) - 1), label="line index")
+        after[index : index + 1] = [after[index] + " changed"] if edit == "edit" else []
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        _repository(root)
+        _commit(root, {"golden.txt": "\n".join(before) + "\n", "other.txt": "x\n"}, "base")
+        _git(root, "checkout", "-q", "-b", "change")
+        if edit == "delete":
+            _git(root, "rm", "-q", "golden.txt")
+            _commit(root, {"other.txt": "y\n"}, "change: drop the golden")
+        else:
+            golden = "\n".join(after) + "\n"
+            _commit(root, {"golden.txt": golden, "other.txt": "y\n"}, "change: write the golden")
+
+        found = rewritten_append_only(root, "main")
+
+    assert found == (["golden.txt"] if marked and edit != "append" else [])

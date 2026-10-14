@@ -37,6 +37,7 @@ from vs_core.testing.flows import (
     fake_search,
 )
 from vs_core.testing.liveness import Budget, End, Journal, Violation, assert_live, liveness
+from vs_core.testing.schema_versions import assert_schema_pinned, schema_digest
 
 __all__ = [
     "FAKE_OPERATIONS",
@@ -64,10 +65,12 @@ __all__ = [
     "Verify",
     "Violation",
     "assert_live",
+    "assert_schema_pinned",
     "drive",
     "fake_search",
     "liveness",
     "new_run",
     "sample_limits",
     "sample_retries",
+    "schema_digest",
 ]
