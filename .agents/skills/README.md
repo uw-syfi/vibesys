@@ -23,6 +23,8 @@ How to make one kind of change in this repository.
   modules, libraries and packages, and add I/O interfaces and implementations.
 - [enforce-rules](enforce-rules/SKILL.md): enforce a rule with the strongest
   mechanism that holds it, from types and lint rules to marked prose.
+- [write-agent-prompt](write-agent-prompt/SKILL.md): write or change the text
+  sent to agents at the layer that owns it, with its checks and goldens.
 - [write-vibesys-tests](write-vibesys-tests/SKILL.md): this repository's test
   harness: tiers, vs-sim, depth, contract suites, faults, goldens, budgets.
 
