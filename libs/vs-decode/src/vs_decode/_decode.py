@@ -16,6 +16,8 @@ failure and the key path, never echoing the input. Nothing here raises for bad i
 
 from __future__ import annotations
 
+import os
+import stat
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
@@ -197,6 +199,7 @@ def read_json[ModelT: BaseModel](
     *,
     max_bytes: int,
     options: ValidationOptions = DEFAULT_OPTIONS,
+    follow_symlinks: bool = True,
 ) -> ModelT | Unreadable: ...
 
 
@@ -207,6 +210,7 @@ def read_json[ValueT](
     *,
     max_bytes: int,
     options: ValidationOptions = DEFAULT_OPTIONS,
+    follow_symlinks: bool = True,
 ) -> ValueT | Unreadable: ...
 
 
@@ -216,27 +220,59 @@ def read_json(
     *,
     max_bytes: int,
     options: ValidationOptions = DEFAULT_OPTIONS,
+    follow_symlinks: bool = True,
 ) -> object:
-    """Read at most ``max_bytes`` of the file at ``path`` and decode it as ``target``.
+    """Read at most ``max_bytes`` of the regular file at ``path`` and decode it as ``target``.
 
     A missing file, one that cannot be read, one past the cap, and one that is not a
-    valid document each come back as an ``Unreadable`` naming ``path``.
+    valid document each come back as an ``Unreadable`` naming ``path``. Anything at
+    ``path`` but a regular file (a directory, a FIFO, a device) is not readable: the file
+    is opened without blocking and checked on the open descriptor, so a FIFO swapped in
+    after a caller's own check cannot hang the reader. With ``follow_symlinks=False`` a
+    symlink as the last component is not readable either.
     """
     _require_strict(target)
     source = str(path)
-    try:
-        with path.open("rb") as stream:
-            data = stream.read(max_bytes + 1)
-    except FileNotFoundError:
-        return Unreadable(UnreadableKind.MISSING, source, (Problem("", "does not exist"),))
-    except OSError as error:
-        reason = error.strerror or type(error).__name__
-        return Unreadable(UnreadableKind.NOT_READABLE, source, (Problem("", reason),))
+    data = _read_regular_file(path, max_bytes, follow_symlinks=follow_symlinks)
+    if isinstance(data, Unreadable):
+        return data
     if len(data) > max_bytes:
         return _too_large(source, max_bytes)
     if isinstance(target, TypeAdapter):
         return decode_json(data, target, source=source, max_bytes=max_bytes, options=options)
     return decode_json(data, target, source=source, max_bytes=max_bytes, options=options)
+
+
+def _read_regular_file(path: Path, max_bytes: int, *, follow_symlinks: bool) -> bytes | Unreadable:
+    """At most ``max_bytes + 1`` bytes of the regular file at ``path``, or why there are none."""
+    source = str(path)
+    flags = os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | (0 if follow_symlinks else os.O_NOFOLLOW)
+    try:
+        descriptor = os.open(path, flags)
+    except FileNotFoundError:
+        return Unreadable(UnreadableKind.MISSING, source, (Problem("", "does not exist"),))
+    except OSError as error:
+        return _not_readable(source, error)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return Unreadable(
+                UnreadableKind.NOT_READABLE, source, (Problem("", "is not a regular file"),)
+            )
+        chunks: list[bytes] = []
+        remaining = max_bytes + 1
+        while remaining and (chunk := os.read(descriptor, remaining)):
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+    except OSError as error:
+        return _not_readable(source, error)
+    finally:
+        os.close(descriptor)
+
+
+def _not_readable(source: str, error: OSError) -> Unreadable:
+    reason = error.strerror or type(error).__name__
+    return Unreadable(UnreadableKind.NOT_READABLE, source, (Problem("", reason),))
 
 
 __all__ = [

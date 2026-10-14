@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING
 
 import pytest
@@ -171,3 +172,24 @@ def test_read_json_reports_missing_unreadable_and_oversized_files(tmp_path: Path
     assert isinstance(oversized, Unreadable)
     assert oversized.kind is UnreadableKind.TOO_LARGE
     assert read_json(document, TypeAdapter(dict[str, object]), max_bytes=_CAP) == json.loads(_VALID)
+
+
+def test_read_json_refuses_what_is_not_a_regular_file_without_blocking(tmp_path: Path) -> None:
+    # Opening a FIFO for reading blocks until a writer appears; the reader must not wait.
+    fifo = tmp_path / "pipe.json"
+    os.mkfifo(fifo)
+    decoded = read_json(fifo, _Doc, max_bytes=_CAP)
+    assert isinstance(decoded, Unreadable)
+    assert decoded.kind is UnreadableKind.NOT_READABLE
+    assert decoded.source == str(fifo)
+
+
+def test_read_json_without_following_symlinks_refuses_a_symlinked_file(tmp_path: Path) -> None:
+    document = tmp_path / "doc.json"
+    document.write_bytes(_VALID)
+    link = tmp_path / "link.json"
+    link.symlink_to(document)
+    assert read_json(link, _Doc, max_bytes=_CAP) == _Doc(name="n", inner=_Inner(count=1))
+    refused = read_json(link, _Doc, max_bytes=_CAP, follow_symlinks=False)
+    assert isinstance(refused, Unreadable)
+    assert refused.kind is UnreadableKind.NOT_READABLE
