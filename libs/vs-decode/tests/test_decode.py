@@ -39,7 +39,11 @@ class _Lenient(BaseModel):
 _VALID = json.dumps({"name": "n", "inner": {"count": 1}}).encode()
 
 
-@pytest.mark.parametrize(("case", "frame"), hostile_json_frames((_VALID,)))
+_FRAMES = hostile_json_frames((_VALID,))
+
+
+# The case name is the test id: a frame is up to megabytes, too large to print as one.
+@pytest.mark.parametrize(("case", "frame"), _FRAMES, ids=[case for case, _ in _FRAMES])
 def test_every_hostile_frame_is_a_value_or_unreadable(case: str, frame: bytes) -> None:
     decoded = decode_json(frame, _Doc, source=case, max_bytes=_CAP)
     if not isinstance(decoded, _Doc):
