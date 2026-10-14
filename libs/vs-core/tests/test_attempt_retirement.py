@@ -779,6 +779,7 @@ def test_typed_job_manifest_always_fences_unreleased_descendants(
     )
     state = recorded_proof(state, proof)
     job = core.RegisteredOwnedJob(
+        wait=core.WaitOn(timer=0.0),
         operation_id=core.OperationId(root="parent-operation"),
         request_id=proof.request_id,
         scope=proof.scope,

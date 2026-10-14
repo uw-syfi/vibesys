@@ -76,6 +76,7 @@ def _with_running_job(state: core.CoreState) -> tuple[core.CoreState, core.Resou
     """The run holds a measurement job that has not ended."""
     job = core.ResourceId(root="job")
     owned = core.OwnedJob(
+        wait=core.WaitOn(timer=0.0),
         resource_id=job,
         submission_id=core.RequestId(root="submission"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
@@ -90,7 +91,12 @@ def _job_ended(state: core.CoreState, job: core.ResourceId) -> core.CoreState:
     """The owner of the job recorded that it is terminal and released."""
     jobs = tuple(
         row.model_copy(
-            update={"terminal": True, "released": True, "status": core.ObservationStatus.SUCCEEDED}
+            update={
+                "terminal": True,
+                "released": True,
+                "status": core.ObservationStatus.SUCCEEDED,
+                "wait": None,
+            }
         )
         if row.resource_id == job
         else row

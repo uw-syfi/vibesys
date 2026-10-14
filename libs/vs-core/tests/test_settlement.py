@@ -471,7 +471,7 @@ def test_evidence_attribution_corruption_cannot_establish_eligibility(corrupt: s
     if corrupt == "job_evidence":
         job = job.model_copy(update={"evidence": ()})
     if corrupt == "job_terminal":
-        job = job.model_copy(update={"terminal": False})
+        job = job.model_copy(update={"terminal": False, "wait": core.WaitOn(timer=0.0)})
     assessment = value.assessments[0]
     if corrupt == "verdict":
         assessment = assessment.model_copy(update={"verdict": "rejected"})
@@ -1644,7 +1644,13 @@ def test_pending_preserves_requested_eligibility_until_all_proofs_arrive(
         state = state.model_copy(
             update={
                 "evaluation": state.evaluation.model_copy(
-                    update={"jobs": (job.model_copy(update={"terminal": False}),)}
+                    update={
+                        "jobs": (
+                            job.model_copy(
+                                update={"terminal": False, "wait": core.WaitOn(timer=0.0)}
+                            ),
+                        )
+                    }
                 )
             }
         )

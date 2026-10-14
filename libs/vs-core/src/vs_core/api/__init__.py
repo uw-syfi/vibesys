@@ -116,6 +116,7 @@ from vs_core._waits import (
     orphan_waits,
     phase_waits,
     producers,
+    recorded_waits,
     subjects,
     waits,
 )
@@ -345,6 +346,7 @@ from vs_core.types.evaluation import (
     JobObserved,
     JobsDrainRequested,
     JobTerminationRequested,
+    JobWaitLapsed,
     MeasurementIdentity,
     MeasurementPlan,
     MeasurementPlanError,
@@ -627,6 +629,7 @@ from vs_core.types.until import (
     WhileOpen,
     Within,
 )
+from vs_core.types.waits import WaitOn
 
 if TYPE_CHECKING:
     from vs_core.testing.operations import operation_trace
@@ -940,6 +943,7 @@ __all__ = [
     "JobProgress",
     "JobTerminationRequested",
     "JobTimeout",
+    "JobWaitLapsed",
     "JobsDrainRequested",
     "Kept",
     "KernelNotImplementedError",
@@ -1203,6 +1207,7 @@ __all__ = [
     "VerifyParentRevisionBase",
     "Wait",
     "WaitKind",
+    "WaitOn",
     "WaitRefusal",
     "WaitSubject",
     "WaitUnrecorded",
@@ -1259,6 +1264,7 @@ __all__ = [
     "phase_waits",
     "producers",
     "project",
+    "recorded_waits",
     "recover",
     "reply_errors",
     "resource",

@@ -82,6 +82,7 @@ def test_run_drained_waits_for_registered_job_release() -> None:
     state = core.initial_state()
     scope = core.Scope(owner=state.run.run_id, generation=0)
     job = core.RegisteredOwnedJob(
+        wait=core.WaitOn(requests=(core.RequestId(root="request"),)),
         operation_id=core.OperationId(root="job"),
         request_id=core.RequestId(root="request"),
         scope=scope,

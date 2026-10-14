@@ -183,6 +183,7 @@ def test_absent_measurement_normalizer_grants_no_expected_identity() -> None:
     assert codec.normalize_measurement(request) is None
     assert (
         core.RegisteredOwnedJob(
+            wait=core.WaitOn(requests=(core.RequestId(root="submit"),)),
             operation_id=core.OperationId(root="job"),
             request_id=core.RequestId(root="submit"),
             scope=core.Scope(owner=core.RunId(root="run"), generation=0),

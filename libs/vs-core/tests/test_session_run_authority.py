@@ -133,6 +133,7 @@ def test_profiler_yield_checkpoint_authorization_and_one_resumed_dispatch() -> N
             update={
                 "status": core.ObservationStatus.SUCCEEDED,
                 "terminal": True,
+                "wait": None,
                 "observation": previous.observation.model_copy(
                     update={
                         "status": core.ObservationStatus.SUCCEEDED,

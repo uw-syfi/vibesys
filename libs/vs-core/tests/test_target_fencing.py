@@ -377,6 +377,7 @@ def test_missing_root_identity_does_not_let_known_child_masquerade_as_root(manif
         original = original.model_copy(update={"observation": discovered})
     elif manifest in ("job", "job_observation"):
         job = core.RegisteredOwnedJob(
+            wait=core.WaitOn(requests=(original.request_id,)),
             operation_id=core.OperationId(root="alpha"),
             request_id=original.request_id,
             scope=scope,

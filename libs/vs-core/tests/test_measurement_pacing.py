@@ -53,15 +53,18 @@ class World:
     @property
     def due(self) -> float | None:
         """When the job's pacing next asks for a poll; None while a poll is outstanding."""
-        return self.job.pacing.next_at
+        wait = self.job.wait
+        return None if wait is None else wait.timer
 
     def tick(self, now: float) -> list[core.ObserveOwnedJob]:
         self.clock = max(self.clock, now)
         result = core.step(self.state, core.ClockAdvanced(now_at=self.clock))
         self.state = result.state
         issued = polls(result)
+        # A poll that blocked at its limit no longer holds the job, which waits on a timer.
+        wait = self.job.wait
+        self.outstanding = wait is not None and bool(wait.requests)
         if issued:
-            self.outstanding = True
             self.poll_times.extend([self.clock] * len(issued))
         self.check()
         return issued
@@ -167,14 +170,19 @@ def polls_after(world: World) -> list[core.ObserveOwnedJob]:
 
 
 @given(interval=intervals, extra=caps)
-def test_a_poll_that_reached_its_limit_is_polled_anew_once(interval: float, extra: float) -> None:
+def test_a_poll_that_reached_its_limit_is_polled_anew_once_after_its_backoff(
+    interval: float, extra: float
+) -> None:
     world = World(limits(interval, extra))
     assert [p.resource_id for p in world.tick(interval)] == [JOB]
     late = interval + world.limits.reconciliation_bound + QUARTER
-    # The limit blocks the poll in the step that advances the clock, and the next step asks anew.
-    world.tick(late)
-    assert [p.resource_id for p in world.tick(late + QUARTER)] == [JOB]
-    assert world.tick(late + 2 * QUARTER) == []
+    # The limit blocks the poll in the step that advances the clock; the ended poll wakes the
+    # job, which waits on its backoff timer and asks anew when that comes.
+    assert world.tick(late) == []
+    assert world.due is not None
+    assert world.due - world.clock <= world.limits.observe_backoff_cap
+    assert [p.resource_id for p in world.tick(world.due)] == [JOB]
+    assert world.tick(world.clock + QUARTER) == []
 
 
 @settings(max_examples=examples(pr=4, nightly=100))

@@ -65,6 +65,7 @@ from .types.evaluation import (
     JobObserved,
     JobsDrainRequested,
     JobTerminationRequested,
+    JobWaitLapsed,
     MeasurementIdentity,
     MeasurementRequested,
     MeasurementResult,
@@ -90,6 +91,7 @@ from .types.kernel import AreaChange
 from .types.records import Outbound, RequestObserved, RequestPhase, inherit, within
 from .types.strategy import Measure
 from .types.until import Until, Within
+from .types.waits import WaitOn
 
 if TYPE_CHECKING:
     from .types.common import DecisionId, Observation, ResourceId, Seconds
@@ -862,7 +864,7 @@ def _submission_job(
             # A job nobody has polled is due now. Normally the first JobObserved replaces
             # this; after a restart that lost it (the submit ran, its job observation was
             # never committed) this is the only thing that starts the observe cycle.
-            pacing=ObservePacing(next_at=context.run.now_at),
+            wait=WaitOn(timer=context.run.now_at),
         )
         state = state.model_copy(update={"jobs": (*state.jobs, job)})
         return AreaChange(state=state)
@@ -931,6 +933,8 @@ def _registered_requested(
         request_id=request.request_id,
         scope=request.scope,
         resource_pool=event.resource_pool,
+        # Its operation's answer names the job; until then that request is what moves it.
+        wait=WaitOn(requests=(request.request_id,)),
     )
     return AreaChange(
         state=state.model_copy(
@@ -1249,7 +1253,7 @@ def _job_observed(
             "released": observation.released,
             "children": tuple(dict.fromkeys((*job.children, *observation.children))),
             "evidence": tuple(accepted),
-            "pacing": _next_poll(job, observation, context),
+            **_next_poll(job, observation, context),
         }
     )
     state = state.model_copy(
@@ -1365,70 +1369,79 @@ def _ended(
 
 def _next_poll(
     job: OwnedJob | RegisteredOwnedJob, observation: Observation, context: EvaluationContext
-) -> ObservePacing:
-    """Schedule the next poll after an accepted observation of a job.
+) -> dict[str, ObservePacing | WaitOn | None]:
+    """The pacing and wait of *job* after it took *observation*.
 
-    A conclusive observation needs no more polls. A poll the executor could not
-    answer (not accepted) retries after a delay that doubles from ``observe_interval``
-    up to ``observe_backoff_cap``; any other poll waits one ``observe_interval``.
-    Both come from the run limits.
+    An ended job waits on nothing. A poll the executor could not answer (not accepted)
+    is retried after a backoff (``_backed_off``); after any other observation the job
+    waits one ``observe_interval`` from the run limits for its next poll.
+    """
+    if observation.terminal:
+        return {"pacing": ObservePacing(), "wait": None}
+    if not observation.accepted:
+        return _backed_off(job, context)
+    timer = context.run.now_at + context.run.limits.observe_interval
+    return {"pacing": ObservePacing(), "wait": WaitOn(timer=timer)}
+
+
+def _backed_off(
+    job: OwnedJob | RegisteredOwnedJob, context: EvaluationContext
+) -> dict[str, ObservePacing | WaitOn | None]:
+    """The job waits for a poll after a delay that doubles with each poll that did not move it.
+
+    It doubles from ``observe_interval`` up to ``observe_backoff_cap``, both run limits.
     """
     limits = context.run.limits
-    if _conclusive(observation):
-        return ObservePacing()
-    if observation.accepted:
-        return ObservePacing(next_at=context.run.now_at + limits.observe_interval)
     retries = job.pacing.retries + 1
     delay = limits.observe_interval
     for _ in range(retries - 1):
         delay = min(delay * 2, limits.observe_backoff_cap)
         if delay == limits.observe_backoff_cap:
             break
-    return ObservePacing(next_at=context.run.now_at + delay, retries=retries)
+    return {
+        "pacing": ObservePacing(retries=retries),
+        "wait": WaitOn(timer=context.run.now_at + delay),
+    }
 
 
-def _lapsed_polls(context: EvaluationContext, resource: ResourceId) -> int:
-    """How many polls of *resource* blocked, or 0 when one is live (it will answer or block)."""
-    polls = [
-        row
-        for row in context.records.records
-        if isinstance(row.request, ObserveOwnedJob) and row.request.resource_id == resource
-    ]
-    if any(row.phase not in (RequestPhase.COMPLETED, RequestPhase.BLOCKED) for row in polls):
-        return 0
-    return sum(row.phase == RequestPhase.BLOCKED for row in polls)
+def _poll(job: OwnedJob | RegisteredOwnedJob, context: EvaluationContext) -> Outbound:
+    """The next poll of *job*, under an identity no earlier poll used.
+
+    A poll is named by the observation it follows, so a poll that ended without the job
+    taking an answer (blocked at its bound, or refused) would share its successor's name;
+    the successor then counts on from it.
+    """
+    outbound = _job_outbound(ObserveOwnedJob, job, context, "observe")
+    base = outbound.request.request_id
+    if base is None or not context.records.positions(base):
+        return outbound
+    lapsed = 1
+    while context.records.positions(RequestId(root=f"{base.root}:b{lapsed}")):
+        lapsed += 1
+    identity = RequestId(root=f"{base.root}:b{lapsed}")
+    return outbound.model_copy(
+        update={"request": outbound.request.model_copy(update={"request_id": identity})}
+    )
 
 
 def _poll_due(
     state: EvaluationState, context: EvaluationContext, event: ObservationsDue
 ) -> AreaChange[EvaluationState]:
-    """Issue the poll of every job whose scheduled time has come, once each."""
+    """Issue the poll of every job whose wait timer has come, once each; it then waits on it."""
     if context.run.status == RunStatus.TERMINAL:
         return AreaChange(state=state)
     requests: list[Outbound] = []
 
     def release[J: OwnedJob | RegisteredOwnedJob](job: J) -> J:
-        due = job.pacing.next_at
-        if job.resource_id is None or job.terminal:
+        wait = job.wait
+        if wait is None or wait.timer is None or wait.timer > event.now_at:
             return job
-        if due is None:
-            # A poll that reached its reconciliation bound blocked, for example because the host
-            # was down past it. Nothing else will ask again, so the job is polled anew.
-            lapsed = _lapsed_polls(context, job.resource_id)
-            request = _job_request(ObserveOwnedJob, job, context, "observe")
-            if lapsed and request.request_id is not None:
-                identity = RequestId(root=f"{request.request_id.root}:b{lapsed}")
-                requests.append(
-                    within(
-                        request.model_copy(update={"request_id": identity}),
-                        context.run.limits.reconciliation_bound,
-                    )
-                )
-            return job
-        if due > event.now_at:
-            return job
-        requests.append(_job_outbound(ObserveOwnedJob, job, context, "observe"))
-        return job.model_copy(update={"pacing": job.pacing.model_copy(update={"next_at": None})})
+        poll = _poll(job, context)
+        identity = poll.request.request_id
+        if identity is None:
+            raise ContractError(("job", "poll"), "a poll is named by its job")
+        requests.append(poll)
+        return job.model_copy(update={"wait": WaitOn(requests=(identity,))})
 
     state = state.model_copy(
         update={
@@ -1437,6 +1450,62 @@ def _poll_due(
         }
     )
     return AreaChange(state=state, requests=tuple(requests))
+
+
+def _job_wait_ended(
+    state: EvaluationState, context: EvaluationContext, event: ObservationsDue | JobWaitLapsed
+) -> AreaChange[EvaluationState]:
+    """What a job's wait ends with: its poll timer came, or the request it named ended."""
+    if isinstance(event, ObservationsDue):
+        return _poll_due(state, context, event)
+    return _wait_lapsed(state, context, event)
+
+
+def _wait_lapsed(
+    state: EvaluationState, context: EvaluationContext, event: JobWaitLapsed
+) -> AreaChange[EvaluationState]:
+    """A job whose poll ended without moving it polls again after its backoff.
+
+    The poll blocked at its bound (the executor never answered in time, or the host was
+    down past it) or the job refused its answer. A registered job whose operation ended
+    without ever naming a job has nothing to poll: it ends with what that request reported,
+    and its release is proved from that record like any other.
+    """
+
+    def woken[J: OwnedJob | RegisteredOwnedJob](job: J) -> J:
+        if _owner_request(job) != event.job or job.wait is None:
+            return job
+        ended = context.records.record(event.request_id)
+        if event.request_id not in job.wait.requests or ended is None or _open(ended):
+            return job
+        if job.resource_id is not None:
+            return job.model_copy(update=_backed_off(job, context))
+        observation = ended.observation
+        return job.model_copy(
+            update={
+                "status": ObservationStatus.UNKNOWN if observation is None else observation.status,
+                "terminal": True,
+                "released": observation is not None and observation.released,
+                "wait": None,
+            }
+        )
+
+    return AreaChange(
+        state=state.model_copy(
+            update={
+                "jobs": tuple(woken(job) for job in state.jobs),
+                "registered_jobs": tuple(woken(job) for job in state.registered_jobs),
+            }
+        )
+    )
+
+
+def _open(record: RequestRecord) -> bool:
+    return record.phase in (
+        RequestPhase.PREPARED,
+        RequestPhase.DISPATCHED,
+        RequestPhase.RECONCILING,
+    )
 
 
 def _job_budget(
@@ -1821,8 +1890,8 @@ def advance(
             change = _registered_requested(state, context, event)
         case JobObserved() | RegisteredJobObserved():
             change = _cancelled_after_stop(_job_observed(state, context, event), context)
-        case ObservationsDue():
-            change = _cancelled_after_stop(_poll_due(state, context, event), context)
+        case ObservationsDue() | JobWaitLapsed():
+            change = _cancelled_after_stop(_job_wait_ended(state, context, event), context)
         case JobTerminationRequested():
             change = _terminate(state, context, event.resource_id)
         case JobsDrainRequested():

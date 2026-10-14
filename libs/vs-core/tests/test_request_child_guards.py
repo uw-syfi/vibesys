@@ -63,6 +63,7 @@ from vs_core.api import (
     SubmitMeasurement,
     Until,
     Value,
+    WaitOn,
     initial_state,
     step,
 )
@@ -350,6 +351,7 @@ def test_child_transfer_requires_the_same_typed_correspondence_as_reattachment(
     if mismatch in ("builtin-plan", "builtin-owner-kind"):
         plan = request.plan if isinstance(request, SubmitMeasurement) else measurement_plan()
         owner = OwnedJob(
+            wait=WaitOn(timer=0.0),
             resource_id=resource,
             submission_id=submission.request_id,
             scope=scope,
@@ -360,6 +362,7 @@ def test_child_transfer_requires_the_same_typed_correspondence_as_reattachment(
         evaluation = EvaluationState(jobs=(owner,))
     else:
         owner = RegisteredOwnedJob(
+            wait=WaitOn(timer=0.0),
             operation_id=OperationId(root="different")
             if mismatch == "operation"
             else OperationId(root="operation-submission"),
@@ -446,6 +449,7 @@ def test_foreign_source_fact_cannot_transfer_a_retained_child_lease(
         observation=retained,
     )
     owner = RegisteredOwnedJob(
+        wait=WaitOn(timer=0.0),
         operation_id=request.operation_id,
         request_id=submission.request_id,
         resource_pool=PoolId(root="jobs"),
@@ -521,6 +525,7 @@ def test_incomplete_independent_source_history_cannot_transfer_to_a_typed_owner(
         parent_resources=(ResourceId(root="parent-resource"),),
     )
     owner = RegisteredOwnedJob(
+        wait=WaitOn(timer=0.0),
         operation_id=operation_id,
         request_id=submission.request_id,
         resource_pool=PoolId(root="jobs"),
@@ -601,6 +606,7 @@ def test_complete_source_history_transfers_only_after_every_independent_release(
         watermark_history_complete=True,
     )
     owner = RegisteredOwnedJob(
+        wait=WaitOn(timer=0.0),
         operation_id=operation_id,
         request_id=submission.request_id,
         resource_pool=PoolId(root="jobs"),

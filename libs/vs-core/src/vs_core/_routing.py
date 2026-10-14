@@ -42,6 +42,7 @@ from .types.evaluation import (
     JobObserved,
     JobsDrainRequested,
     JobTerminationRequested,
+    JobWaitLapsed,
     MeasurementRequested,
     MeasurementSubmissionObserved,
     ObservationsDue,
@@ -215,6 +216,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | TurnSuspended()
             | DeadlineReached()
             | ObservationsDue()
+            | JobWaitLapsed()
         ):
             return Area.EVALUATION
         case (

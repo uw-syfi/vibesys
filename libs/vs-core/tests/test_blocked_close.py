@@ -218,8 +218,9 @@ def _poll_blocked_by_late_restart(down_for: float) -> core.CoreState:
     """A paced job whose poll was in flight when the host died and came back ``down_for`` late."""
     state, _ = submitted()
     [job] = state.evaluation.jobs
-    assert job.pacing.next_at is not None
-    polled = core.step(state, core.ClockAdvanced(now_at=job.pacing.next_at))
+    assert job.wait is not None
+    assert job.wait.timer is not None
+    polled = core.step(state, core.ClockAdvanced(now_at=job.wait.timer))
     state = polled.state
     for request in polled.requests:
         assert request.request_id is not None
@@ -250,22 +251,21 @@ def _settle_blocks(
 @settings(max_examples=examples(pr=4, nightly=100))
 @given(down_for=st.floats(min_value=0.0, max_value=10_000.0))
 def test_a_job_whose_poll_blocked_while_the_host_was_down_is_polled_again(down_for: float) -> None:
-    """Downtime past any reconciliation bound leaves the job a producer, never an orphan."""
+    """Downtime past any reconciliation bound leaves the job a producer, never an orphan.
+
+    The blocked poll wakes the job, which waits on its backoff timer and polls when it comes.
+    """
     state = _poll_blocked_by_late_restart(down_for)
     assert any(row.phase == core.RequestPhase.BLOCKED for row in state.records.records)
-    now_at = state.run.now_at + 1.0
-    requests: list[core.Request] = []
-    for tick in (now_at, now_at + 1.0):
-        result = core.step(state, core.ClockAdvanced(now_at=tick))
-        state = result.state
-        requests.extend(result.requests)
-    assert any(request.kind == "observe_owned_job" for request in requests) or any(
-        row.request.kind == "observe_owned_job" and row.phase != core.RequestPhase.BLOCKED
-        for row in state.records.records
-    )
     assert [
         wait for wait in core.orphan_waits(state) if wait.waiter == core.WaitKind.OWNED_JOB
     ] == []
+    [job] = state.evaluation.jobs
+    assert job.wait is not None
+    assert job.wait.requests == ()
+    assert job.wait.timer is not None
+    result = core.step(state, core.ClockAdvanced(now_at=max(job.wait.timer, state.run.now_at)))
+    assert "observe_owned_job" in [request.kind for request in result.requests]
 
 
 @settings(max_examples=examples(pr=4, nightly=100))

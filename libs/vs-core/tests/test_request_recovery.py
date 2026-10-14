@@ -106,6 +106,7 @@ from vs_core.api import (
     TurnSpec,
     Until,
     Value,
+    WaitOn,
     WorkspaceMode,
     WorkspacePlan,
     initial_state,
@@ -1697,6 +1698,7 @@ def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: st
         }
     )
     owner = RegisteredOwnedJob(
+        wait=WaitOn(timer=0.0),
         operation_id=operation_id,
         request_id=submission.request_id,
         resource_id=child,
@@ -1927,6 +1929,7 @@ def test_registered_job_can_reattach_to_its_provisional_owner_without_inventing_
     )
     original = original.model_copy(update={"observation": observation})
     owner = RegisteredOwnedJob(
+        wait=WaitOn(requests=(original.request_id,)),
         operation_id=OperationId(root="foreign")
         if case == "foreign-operation"
         else request.operation_id,

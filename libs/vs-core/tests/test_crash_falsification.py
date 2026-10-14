@@ -56,6 +56,7 @@ from vs_core.api import (
     TurnResult,
     TurnSpec,
     Until,
+    WaitOn,
     initial_state,
     step,
 )
@@ -184,6 +185,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
     )
     dispatch = DispatchTurn(request_id=yielded.request_id, scope=scope, turn=original_turn)
     job = OwnedJob(
+        wait=WaitOn(timer=0.0),
         resource_id=resource,
         scope=scope,
         plan=plan,

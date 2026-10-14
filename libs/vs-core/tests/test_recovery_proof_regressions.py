@@ -458,6 +458,7 @@ def registered_measurement_fixture(
     )
     record = _record(execution, core.LifecycleClass.OWNED_JOB)
     job = core.RegisteredOwnedJob(
+        wait=core.WaitOn(requests=(identity,)),
         operation_id=execution.operation_id,
         request_id=identity,
         scope=execution.scope,

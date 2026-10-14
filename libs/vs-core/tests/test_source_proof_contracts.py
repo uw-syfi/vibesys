@@ -122,6 +122,7 @@ def test_evidence_acceptance_receipt_is_frozen_after_later_source_observations(
     )
     later = observed.model_copy(update={"sequence": sequence + 1, "diagnostic": "later cleanup"})
     job = core.RegisteredOwnedJob(
+        wait=core.WaitOn(timer=0.0),
         operation_id=core.OperationId(root="measurement"),
         request_id=observed.request_id,
         scope=observed.scope,

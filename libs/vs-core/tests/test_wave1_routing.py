@@ -97,6 +97,7 @@ EXPECTED_TARGET = {
                 "agent_measurement_requested",
                 "job_observed",
                 "observations_due",
+                "job_wait_lapsed",
                 "job_termination_requested",
                 "jobs_drain_requested",
                 "run_jobs_cancel_requested",

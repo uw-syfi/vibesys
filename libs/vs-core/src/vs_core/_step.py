@@ -34,10 +34,12 @@ from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
 from ._values import digest, share_unchanged
 from ._waits import (
+    lapsed_job_waits,
     stalled_acquisitions,
     stalled_blocked_records,
     stalled_checkpoint_waits,
     undispatchable_requests,
+    unmet_waits,
 )
 from ._watches import watch_deadlines
 from .types.attempts import (
@@ -654,7 +656,8 @@ def _stall_entries(
     The waits are a checkpoint wait without a producer (``CheckpointStalled``), a turn acquiring
     with nothing to carry it (``AcquisitionStalled``) and a prepared
     request that can never be dispatched (``RequestUndispatchable``), and a blocked record a closing
-    run waits on that no live request addresses (``BlockedRecordStalled``). A fired watch
+    run waits on that no live request addresses (``BlockedRecordStalled``), and a job whose
+    recorded wait names a request that ended without moving it (``JobWaitLapsed``). A fired watch
     (``WhileOpen``, ``WhileAlive``) is also raised here, as the deadline of the waits that declared it. A signal already raised
     in this step is not raised again: if its reducer could not end the wait (an ambiguous
     record it refuses to act on), the wait stays visible to the orphan check instead of the
@@ -681,6 +684,7 @@ def _stall_entries(
             BlockedRecordStalled(request_id=request_id)
             for request_id in stalled_blocked_records(state)
         ),
+        *lapsed_job_waits(state),
         *watch_deadlines(state),
     )
     return [
@@ -1568,6 +1572,9 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
             state = state.model_copy(update={"records": credited})
         state = _advance_event_time(state, event)
         result = propagate(state, (event,), dispatch, _event_cause(state, event))
+    unmet = unmet_waits(given, result.state)
+    if unmet:
+        raise ContractError(("wait",), f"a recorded wait breaks its contract: {unmet[0]}")
     advanced = result.state.model_copy(update={"revision": state.revision + 1})
     return result.model_copy(update={"state": share_unchanged(given, advanced)})
 
