@@ -1297,13 +1297,15 @@ def test_a_holder_past_the_exit_grace_lists_as_live_again(*, age: float, listed_
     [0.0, EXIT_GRACE_SECONDS - 0.001, EXIT_GRACE_SECONDS, 3_600.0, TOMBSTONE_RETENTION_SECONDS * 2],
 )
 def test_every_reader_agrees_whether_a_holder_with_its_tombstone_is_running(age: float) -> None:
-    """A listing, ``find`` and an inspection agree, and ``stop`` waits only within the grace.
+    """A listing and an inspection agree, ``find`` never offers it, and ``stop`` waits only within the grace.
 
     A holder still holding its lock ``EXIT_GRACE_SECONDS`` after its tombstone
-    is wedged in its exit and lists as running. ``find`` (what attach uses) and
-    the inspector once reported it not running at any age, and ``stop`` waited
+    is wedged in its exit and lists as running, so an operator can stop it.
+    The inspector once reported it not running at any age, and ``stop`` waited
     out ``STOP_TIMEOUT_SECONDS`` for it to let go even when its tombstone was
-    hours old.
+    hours old. Its run has ended, so ``find`` (what ``run.connect`` and attach
+    use) reports it gone at every age: dialing it answered ``CONNECT_FAILED``,
+    which a client retries, instead of ``RUN_GONE``.
     """
     store = FakeInstanceStore()
     hold = store.hold(IDS[0])
@@ -1319,7 +1321,7 @@ def test_every_reader_agrees_whether_a_holder_with_its_tombstone_is_running(age:
     ).inspect(IDS[0])
 
     assert (listed == [IDS[0]]) is running
-    assert (found is not None) is running
+    assert found is None
     assert (inspection.state is InspectionState.LIVE) is running
 
     signaller = _ExitingSignaller(hold.release)

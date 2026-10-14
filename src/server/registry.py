@@ -334,9 +334,10 @@ def listed_live(observation: InstanceObservation, now: float) -> LiveInstanceRec
     """The record of a server every reader reports as running, else ``None``.
 
     That is a live holder, or one wedged in its exit: still holding its lock
-    ``EXIT_GRACE_SECONDS`` after its tombstone. ``survey``, ``LiveRegistry.find``
-    and ``InstanceInspector`` all decide through here, so a listing, an attach
-    and an inspection agree on whether a server is running.
+    ``EXIT_GRACE_SECONDS`` after its tombstone. ``survey`` and
+    ``InstanceInspector`` decide through here, so a listing and an inspection
+    agree on whether a server is running. ``LiveRegistry.find`` answers a
+    narrower question, whether a client can still reach the server.
     """
     record = observation.record
     if not isinstance(record, LiveInstanceRecord):
@@ -1218,8 +1219,18 @@ class LiveRegistry:
         return survey((self._store.observe(instance_id) for instance_id in self._store.ids()), now)
 
     def find(self, instance_id: str) -> LiveInstanceRecord | None:
-        """Return the record of a server ``listed_live`` reports running, else ``None``."""
-        return listed_live(self._store.observe(instance_id), self._clock.now())
+        """Return the record of a server a client can still reach, else ``None``.
+
+        Only a live holder that has not written its exit record. A server wedged
+        in its exit lists as running (``listed_live``) so an operator can see and
+        stop it, but it is gone for ``run.connect`` and attach: its run has
+        ended and its socket no longer serves, so dialing it would report a
+        connect failure a client retries instead of ``RUN_GONE``.
+        """
+        observation = self._store.observe(instance_id)
+        record = observation.record
+        live = judge(observation, self._clock.now()) is Verdict.LIVE
+        return record if live and isinstance(record, LiveInstanceRecord) else None
 
     @contextmanager
     def register(self, instance_id: str) -> Iterator[InstanceHold]:
