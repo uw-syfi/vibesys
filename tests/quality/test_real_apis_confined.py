@@ -52,8 +52,13 @@ count in the baseline.
 
 The ``file_io`` rule at the end of this file is separate and has no baseline: product code
 opens, writes, copies or removes files and parses JSON or TOML only in the edge modules
-listed in ``FILE_IO_EDGE_MODULES``, each with its reason; everything else asks the owner of
-the data (see ``test_product_code_touches_files_only_in_edge_modules``).
+listed in ``FILE_IO_EDGE_MODULES``, each with its kind and a note; everything else asks the
+owner of the data (see ``test_product_code_touches_files_only_in_edge_modules``).
+
+The ``parse`` rule after it has no baseline either: product code calls pydantic's
+``validate_json`` / ``model_validate_json`` or ``pydantic_core.from_json`` only in the
+modules listed in ``PARSE_EDGE_MODULES``, each with its kind and a note; untrusted JSON goes
+through ``vs_decode.api`` (see ``test_product_code_parses_json_only_through_vs_decode``).
 """
 
 import ast
@@ -61,6 +66,7 @@ import json
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
+from enum import StrEnum
 from pathlib import Path
 
 import pytest
@@ -740,101 +746,307 @@ _FILE_IO_PREFILTER = re.compile(
     r"|\bopen\s*\(|\.(?:read_text|write_text|read_bytes|write_bytes)\s*\("
 )
 
+
+class EdgeKind(StrEnum):
+    """Why a product module may touch files itself: the closed set of file edges."""
+
+    STORE = "store"  # a store implementation; its callers ask it through a Protocol
+    LOG = "log"  # a log sink, or the one reader of the log it writes
+    OS_ADAPTER = "os adapter"  # an interface the OS offers only as files (/proc, devices)
+    AGENT_WORKSPACE = "agent workspace"  # files the agent reads or writes in its workspace
+    INPUT_LOADER = "input loader"  # user inputs: task folders, configuration, manifests
+    OPERATOR_CONFIG = "operator config"  # operator-owned settings files
+    PACKAGED_RESOURCE = "packaged resource"  # files shipped inside the package
+    STATIC_FILES = "static files"  # the web client build the server serves
+    GENERATOR = "generator"  # writes a tree others read: scaffolds, schemas, build contexts
+    TRANSFER = "transfer"  # moves files to or from another host or a CLI that reads files
+    PROCESS_BOUNDARY = "process boundary"  # hands files to, or runs as, another process
+    FAKE = "fake"  # a Fake or contract-suite scaffold whose state is real files
+    DECODER = "decoder"  # vs_decode's own bounded read
+
+
+type Edge = tuple[EdgeKind, str]
+"""An edge module's kind, and a one-line note naming what it reads or writes."""
+
 # The edge modules: the only product modules that open, write, copy or remove files, or
 # parse JSON or TOML directly. Everything else asks the owner of the data. Keep one line
-# per module saying which kind of edge it is.
-FILE_IO_EDGE_MODULES: dict[str, str] = {
-    "libs/vs-agent/src/vs_agent/cli_common.py": "agent workspace: installs skill trees where the agent CLI reads them",
-    "libs/vs-agent/src/vs_agent/images.py": "docker image builder: content-addresses the build context it hands to docker build",
-    "libs/vs-agent/src/vs_agent/usage_records.py": "log sink: the append-only agent usage log",
-    "libs/vs-decode/src/vs_decode/_decode.py": "the decode function's bounded file read, used by stores and edge adapters",
-    "libs/vs-evaluation/src/vs_evaluation/filesystem_store.py": "store implementation: the file-backed EvaluationStore",
-    "libs/vs-faults/src/vs_faults/connector.py": "fault-injection connector process whose shared state is files",
-    "libs/vs-faults/src/vs_faults/plan.py": "hands the fault plan file to the connector process",
-    "libs/vs-issue-tracker/src/vs_issue_tracker/core.py": "store implementation: the file-backed IssueTracker",
-    "libs/vs-issue-tracker/src/vs_issue_tracker/progress.py": "store implementation: the local progress log",
-    "libs/vs-project/src/vs_project/_cli_git_repository.py": "GitRepository implementation over the git CLI (git state is files)",
-    "libs/vs-project/src/vs_project/_exclude_file.py": "GitRepository implementation detail: the repository's info/exclude file",
-    "libs/vs-project/src/vs_project/_fake_git_repository.py": "GitRepository Fake that keeps a real working tree",
-    "libs/vs-project/src/vs_project/_fake_git_worktree.py": "GitRepository Fake's working tree",
-    "libs/vs-project/src/vs_project/_framework_writes.py": "agent workspace: framework state files in the agent worktree",
-    "libs/vs-project/src/vs_project/_git_tracker.py": "agent workspace: snapshots and restores the agent worktree",
-    "libs/vs-project/src/vs_project/_logger.py": "log sink: the per-run log file",
-    "libs/vs-project/src/vs_project/_pygit2_git_repository.py": "GitRepository implementation over pygit2 (git state is files)",
-    "libs/vs-project/src/vs_project/_run_logs.py": "log reader: the one reader of the run log files RunLogger writes",
-    "libs/vs-project/src/vs_project/_state.py": "store implementation: project and run state namespaces",
-    "libs/vs-project/src/vs_project/_state_io.py": "store implementation: atomic, durable state document writes and reads",
-    "libs/vs-project/src/vs_project/_state_store.py": "store implementation: the local StateStore",
-    "libs/vs-project/src/vs_project/git_contract_scaffold.py": "builds working trees for the GitRepository contract suite",
-    "libs/vs-prompts/src/vs_prompts/contract.py": "packaged resource loader: template sources for static analysis",
-    "libs/vs-runtime/src/vs_runtime/_artifact_store.py": "store implementation: the run's artifact store",
-    "libs/vs-runtime/src/vs_runtime/_docker_evaluator_tools.py": "OS adapter: host ownership marker for a bind mount",
-    "libs/vs-runtime/src/vs_runtime/_evaluator_packages.py": "packaged resource loader: bundled evaluator packages",
-    "libs/vs-runtime/src/vs_runtime/_event_journal.py": "store implementation: the event journal",
-    "libs/vs-runtime/src/vs_runtime/_host_command_bridge.py": "agent workspace: stages the host command client for the agent",
-    "libs/vs-runtime/src/vs_runtime/_input_project.py": "agent workspace: materializes the task's input project",
-    "libs/vs-runtime/src/vs_runtime/_linux_cpu_profiler.py": "OS adapter: /proc and perf output, and the profile report sink",
-    "libs/vs-runtime/src/vs_runtime/_macos_cpu_profiler.py": "OS adapter: the profile report sink",
-    "libs/vs-runtime/src/vs_runtime/_objective_document.py": "agent workspace: writes the objective document the agent reads",
-    "libs/vs-runtime/src/vs_runtime/_project_materialization.py": "agent workspace: materializes the project tree",
-    "libs/vs-runtime/src/vs_runtime/_receipt_store.py": "store implementation: evaluation receipts",
-    "libs/vs-runtime/src/vs_runtime/_skills.py": "packaged resource loader: skill trees",
-    "libs/vs-runtime/src/vs_runtime/_slot_meter.py": "store implementation: the slot usage meter",
-    "libs/vs-runtime/src/vs_runtime/_workspace_files.py": "agent workspace interface: bounded, contained reads and writes of agent files",
-    "libs/vs-runtime/src/vs_runtime/api/operation_fixtures.py": "scenario fixtures for the runtime's suites: the effect log file",
-    "libs/vs-sandbox/src/vs_sandbox/cuda_backend.py": "OS adapter: device lease record for a GPU",
-    "libs/vs-sandbox/src/vs_sandbox/device_lease.py": "store implementation: device lease records",
-    "libs/vs-sandbox/src/vs_sandbox/evaluator_tools.py": "store implementation: installed evaluator tools and receipts",
-    "libs/vs-sandbox/src/vs_sandbox/fake_docker_engine.py": "Docker engine Fake with real build contexts",
-    "libs/vs-sandbox/src/vs_sandbox/feature_image.py": "packaged devcontainer features loader and docker build context generator",
-    "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py": "log sink: GPU utilization log",
-    "libs/vs-sandbox/src/vs_sandbox/host_command_client.py": "stdlib-only client staged into the container; cannot import pydantic",
-    "libs/vs-sandbox/src/vs_sandbox/landlock.py": "OS adapter: Landlock rules take O_PATH descriptors",
-    "libs/vs-sandbox/src/vs_sandbox/linked_worktree.py": "OS adapter: git worktree pointer files",
-    "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py": "store implementation: Modal deployment lease and lock files",
-    "libs/vs-sandbox/src/vs_sandbox/modal_model_setup.py": "runs inside a Modal function; writes the volume sentinel",
-    "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py": "store implementation: the SkyPilot bridge spool",
-    "libs/vs-sandbox/src/vs_sandbox/skypilot_config.py": "operator config loader: SkyPilot settings",
-    "libs/vs-sandbox/src/vs_sandbox/skypilot_evaluator.py": "store implementation: SkyPilot evaluator state files",
-    "libs/vs-sandbox/src/vs_sandbox/skypilot_runner.py": "edge adapter: the task file the sky CLI reads, and its output",
-    "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": "store implementation: durable Slurm evaluation records",
-    "libs/vs-sandbox/src/vs_sandbox/slurm_gpu_alias.py": "operator config loader: the deprecated slurm-gpu file",
-    "libs/vs-sandbox/src/vs_sandbox/slurm_policy.py": "operator config loader: the Slurm operator file",
-    "libs/vs-sandbox/src/vs_sandbox/slurm_settings_toml.py": "operator config writer: the Slurm operator file a run validated",
-    "libs/vs-slurm/src/vs_slurm/cluster_store.py": "store implementation: the cluster state store",
-    "libs/vs-slurm/src/vs_slurm/config.py": "operator config loader: the Slurm cluster file",
-    "libs/vs-slurm/src/vs_slurm/fake_cluster.py": "Slurm cluster Fake whose state is files",
-    "libs/vs-slurm/src/vs_slurm/fake_connector.py": "Slurm connector Fake, a process whose state is files",
-    "libs/vs-slurm/src/vs_slurm/fake_shell.py": "Slurm shell Fake over files",
-    "libs/vs-slurm/src/vs_slurm/identity.py": "packaged resource: the digest of its own source",
-    "libs/vs-slurm/src/vs_slurm/remote_operations.py": "file transfer adapter to the cluster",
-    "libs/vs-slurm/src/vs_slurm/runner.py": "OS adapter: /proc and cgroup files, and the job script directory",
-    "libs/vs-slurm/src/vs_slurm/staging.py": "file transfer adapter: staging to the cluster",
-    "libs/vs-slurm/src/vs_slurm/trace_replay.py": "replay connector over a recorded trace file",
-    "src/entrypoints/cli/config.py": "user input loader: CLI configuration files",
-    "src/entrypoints/cli/inputs.py": "user input loader: task inputs named on the command line",
-    "src/entrypoints/example_catalog.py": "packaged resource loader: the example catalog",
-    "src/entrypoints/examples.py": "generator: scaffolds packaged examples into a user directory",
-    "src/entrypoints/launcher.py": "packaged resource loader: package versions",
-    "src/entrypoints/server.py": "process entrypoint: log file and socket directory",
-    "src/entrypoints/web.py": "static file serving: the web client build",
-    "src/entrypoints/web_assets.py": "static file serving: the web client build manifest",
-    "src/server/api/schema.py": "code generator: protocol schema files",
-    "src/server/chat/transcript.py": "store implementation: chat transcripts",
-    "src/server/event_index.py": "store implementation: the event index",
-    "src/server/events.py": "store implementation: the run's wire event log",
-    "src/server/host_helper_os.py": "OS adapter and project pyproject loader for the host helper",
-    "src/server/registry.py": "store implementation: the server instance registry",
-    "src/server/settings.py": "user input loader: server settings",
-    "src/server/transport/discovery.py": "store implementation: instance records, and a /proc OS adapter",
-    "src/server/transport/websocket.py": "static file serving: the web client",
-    "src/vibesys/config.py": "user input loader: VibeSys configuration",
-    "src/vibesys/domains/rendering.py": "packaged resource loader: role templates",
-    "src/vibesys/inputs/_manifest.py": "user input loader: the task manifest",
-    "src/vibesys/inputs/_objectives.py": "user input loader: task objectives",
-    "src/vibesys/inputs/_synthesis.py": "generator: writes a synthesized task folder",
-    "src/vibesys/orchestration/skill_selection.py": "packaged resource loader: skill sidecar metadata",
-    "src/vibesys/run/evaluation_socket.py": "OS adapter: owns the evaluation socket directory",
+# per module: its kind, and a note naming the data.
+FILE_IO_EDGE_MODULES: dict[str, Edge] = {
+    "libs/vs-agent/src/vs_agent/cli_common.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "installs skill trees where the agent CLI reads them",
+    ),
+    "libs/vs-agent/src/vs_agent/images.py": (
+        EdgeKind.GENERATOR,
+        "content-addresses the build context it hands to docker build",
+    ),
+    "libs/vs-agent/src/vs_agent/usage_records.py": (
+        EdgeKind.LOG,
+        "the append-only agent usage log",
+    ),
+    "libs/vs-decode/src/vs_decode/_decode.py": (
+        EdgeKind.DECODER,
+        "the decode function's bounded file read, used by stores and edge adapters",
+    ),
+    "libs/vs-evaluation/src/vs_evaluation/filesystem_store.py": (
+        EdgeKind.STORE,
+        "the file-backed EvaluationStore",
+    ),
+    "libs/vs-faults/src/vs_faults/connector.py": (
+        EdgeKind.PROCESS_BOUNDARY,
+        "fault-injection connector process whose shared state is files",
+    ),
+    "libs/vs-faults/src/vs_faults/plan.py": (
+        EdgeKind.PROCESS_BOUNDARY,
+        "hands the fault plan file to the connector process",
+    ),
+    "libs/vs-issue-tracker/src/vs_issue_tracker/core.py": (
+        EdgeKind.STORE,
+        "the file-backed IssueTracker",
+    ),
+    "libs/vs-issue-tracker/src/vs_issue_tracker/progress.py": (
+        EdgeKind.STORE,
+        "the local progress log",
+    ),
+    "libs/vs-project/src/vs_project/_cli_git_repository.py": (
+        EdgeKind.STORE,
+        "GitRepository implementation over the git CLI (git state is files)",
+    ),
+    "libs/vs-project/src/vs_project/_exclude_file.py": (
+        EdgeKind.STORE,
+        "the repository's info/exclude file",
+    ),
+    "libs/vs-project/src/vs_project/_fake_git_repository.py": (
+        EdgeKind.FAKE,
+        "GitRepository Fake that keeps a real working tree",
+    ),
+    "libs/vs-project/src/vs_project/_fake_git_worktree.py": (
+        EdgeKind.FAKE,
+        "GitRepository Fake's working tree",
+    ),
+    "libs/vs-project/src/vs_project/_framework_writes.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "framework state files in the agent worktree",
+    ),
+    "libs/vs-project/src/vs_project/_git_tracker.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "snapshots and restores the agent worktree",
+    ),
+    "libs/vs-project/src/vs_project/_logger.py": (EdgeKind.LOG, "the per-run log file"),
+    "libs/vs-project/src/vs_project/_pygit2_git_repository.py": (
+        EdgeKind.STORE,
+        "GitRepository implementation over pygit2 (git state is files)",
+    ),
+    "libs/vs-project/src/vs_project/_run_logs.py": (
+        EdgeKind.LOG,
+        "the one reader of the run log files RunLogger writes",
+    ),
+    "libs/vs-project/src/vs_project/_state.py": (
+        EdgeKind.STORE,
+        "project and run state namespaces",
+    ),
+    "libs/vs-project/src/vs_project/_state_io.py": (
+        EdgeKind.STORE,
+        "atomic, durable state document writes and reads",
+    ),
+    "libs/vs-project/src/vs_project/_state_store.py": (EdgeKind.STORE, "the local StateStore"),
+    "libs/vs-project/src/vs_project/git_contract_scaffold.py": (
+        EdgeKind.FAKE,
+        "builds working trees for the GitRepository contract suite",
+    ),
+    "libs/vs-prompts/src/vs_prompts/contract.py": (
+        EdgeKind.PACKAGED_RESOURCE,
+        "template sources for static analysis",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_artifact_store.py": (
+        EdgeKind.STORE,
+        "the run's artifact store",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_docker_evaluator_tools.py": (
+        EdgeKind.OS_ADAPTER,
+        "host ownership marker for a bind mount",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_evaluator_packages.py": (
+        EdgeKind.PACKAGED_RESOURCE,
+        "bundled evaluator packages",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_event_journal.py": (EdgeKind.STORE, "the event journal"),
+    "libs/vs-runtime/src/vs_runtime/_host_command_bridge.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "stages the host command client for the agent",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_input_project.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "materializes the task's input project",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_linux_cpu_profiler.py": (
+        EdgeKind.OS_ADAPTER,
+        "/proc and perf output, and the profile report sink",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_macos_cpu_profiler.py": (
+        EdgeKind.OS_ADAPTER,
+        "the profile report sink",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_objective_document.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "writes the objective document the agent reads",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_project_materialization.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "materializes the project tree",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_receipt_store.py": (EdgeKind.STORE, "evaluation receipts"),
+    "libs/vs-runtime/src/vs_runtime/_skills.py": (EdgeKind.PACKAGED_RESOURCE, "skill trees"),
+    "libs/vs-runtime/src/vs_runtime/_slot_meter.py": (EdgeKind.STORE, "the slot usage meter"),
+    "libs/vs-runtime/src/vs_runtime/_workspace_files.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "bounded, contained reads and writes of agent files",
+    ),
+    "libs/vs-runtime/src/vs_runtime/api/operation_fixtures.py": (
+        EdgeKind.FAKE,
+        "the effect log file",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/cuda_backend.py": (
+        EdgeKind.OS_ADAPTER,
+        "device lease record for a GPU",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/device_lease.py": (EdgeKind.STORE, "device lease records"),
+    "libs/vs-sandbox/src/vs_sandbox/evaluator_tools.py": (
+        EdgeKind.STORE,
+        "installed evaluator tools and receipts",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/fake_docker_engine.py": (
+        EdgeKind.FAKE,
+        "Docker engine Fake with real build contexts",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/feature_image.py": (
+        EdgeKind.GENERATOR,
+        "packaged devcontainer features loader and docker build context generator",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py": (EdgeKind.LOG, "GPU utilization log"),
+    "libs/vs-sandbox/src/vs_sandbox/host_command_client.py": (
+        EdgeKind.PROCESS_BOUNDARY,
+        "stdlib-only client staged into the container; cannot import pydantic",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/landlock.py": (
+        EdgeKind.OS_ADAPTER,
+        "Landlock rules take O_PATH descriptors",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/linked_worktree.py": (
+        EdgeKind.OS_ADAPTER,
+        "git worktree pointer files",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py": (
+        EdgeKind.STORE,
+        "its own deployment lease and lock files, unbounded; and json.loads of"
+        " `modal container list --json` output, unbounded until process output is capped",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/modal_model_setup.py": (
+        EdgeKind.PROCESS_BOUNDARY,
+        "runs inside a Modal function; writes the volume sentinel",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py": (
+        EdgeKind.STORE,
+        "the SkyPilot bridge spool; json.loads only of request lines capped at 4 KiB",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/skypilot_config.py": (
+        EdgeKind.OPERATOR_CONFIG,
+        "SkyPilot settings",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/skypilot_evaluator.py": (
+        EdgeKind.STORE,
+        "its own state files; json.loads only of bridge frames and acks capped at 1 MiB",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/skypilot_runner.py": (
+        EdgeKind.TRANSFER,
+        "the task file the sky CLI reads, and its output",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": (
+        EdgeKind.STORE,
+        "durable Slurm evaluation records",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/slurm_gpu_alias.py": (
+        EdgeKind.OPERATOR_CONFIG,
+        "the deprecated slurm-gpu file",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/slurm_policy.py": (
+        EdgeKind.OPERATOR_CONFIG,
+        "the Slurm operator file",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/slurm_settings_toml.py": (
+        EdgeKind.OPERATOR_CONFIG,
+        "the Slurm operator file a run validated",
+    ),
+    "libs/vs-slurm/src/vs_slurm/cluster_store.py": (EdgeKind.STORE, "the cluster state store"),
+    "libs/vs-slurm/src/vs_slurm/config.py": (EdgeKind.OPERATOR_CONFIG, "the Slurm cluster file"),
+    "libs/vs-slurm/src/vs_slurm/fake_cluster.py": (
+        EdgeKind.FAKE,
+        "Slurm cluster Fake whose state is files",
+    ),
+    "libs/vs-slurm/src/vs_slurm/fake_connector.py": (
+        EdgeKind.FAKE,
+        "Slurm connector Fake, a process whose state is files",
+    ),
+    "libs/vs-slurm/src/vs_slurm/fake_shell.py": (EdgeKind.FAKE, "Slurm shell Fake over files"),
+    "libs/vs-slurm/src/vs_slurm/identity.py": (
+        EdgeKind.PACKAGED_RESOURCE,
+        "the digest of its own source",
+    ),
+    "libs/vs-slurm/src/vs_slurm/remote_operations.py": (
+        EdgeKind.TRANSFER,
+        "file transfer adapter to the cluster",
+    ),
+    "libs/vs-slurm/src/vs_slurm/runner.py": (
+        EdgeKind.OS_ADAPTER,
+        "/proc and cgroup files, and the job script directory",
+    ),
+    "libs/vs-slurm/src/vs_slurm/staging.py": (EdgeKind.TRANSFER, "staging to the cluster"),
+    "libs/vs-slurm/src/vs_slurm/trace_replay.py": (
+        EdgeKind.FAKE,
+        "replay connector over a recorded trace file",
+    ),
+    "src/entrypoints/cli/config.py": (EdgeKind.INPUT_LOADER, "CLI configuration files"),
+    "src/entrypoints/cli/inputs.py": (
+        EdgeKind.INPUT_LOADER,
+        "task inputs named on the command line",
+    ),
+    "src/entrypoints/example_catalog.py": (EdgeKind.PACKAGED_RESOURCE, "the example catalog"),
+    "src/entrypoints/examples.py": (
+        EdgeKind.GENERATOR,
+        "scaffolds packaged examples into a user directory",
+    ),
+    "src/entrypoints/launcher.py": (EdgeKind.PACKAGED_RESOURCE, "package versions"),
+    "src/entrypoints/server.py": (EdgeKind.PROCESS_BOUNDARY, "log file and socket directory"),
+    "src/entrypoints/web.py": (EdgeKind.STATIC_FILES, "the web client build"),
+    "src/entrypoints/web_assets.py": (EdgeKind.STATIC_FILES, "the web client build manifest"),
+    "src/server/api/schema.py": (EdgeKind.GENERATOR, "protocol schema files"),
+    "src/server/chat/transcript.py": (EdgeKind.STORE, "chat transcripts"),
+    "src/server/event_index.py": (EdgeKind.STORE, "the event index"),
+    "src/server/events.py": (EdgeKind.STORE, "the run's wire event log"),
+    "src/server/host_helper_os.py": (
+        EdgeKind.OS_ADAPTER,
+        "OS adapter and project pyproject loader for the host helper",
+    ),
+    "src/server/registry.py": (EdgeKind.STORE, "the server instance registry"),
+    "src/server/settings.py": (EdgeKind.INPUT_LOADER, "server settings"),
+    "src/server/transport/discovery.py": (
+        EdgeKind.STORE,
+        "instance records, and a /proc OS adapter",
+    ),
+    "src/server/transport/websocket.py": (EdgeKind.STATIC_FILES, "the web client"),
+    "src/vibesys/config.py": (EdgeKind.INPUT_LOADER, "VibeSys configuration"),
+    "src/vibesys/domains/rendering.py": (EdgeKind.PACKAGED_RESOURCE, "role templates"),
+    "src/vibesys/inputs/_manifest.py": (EdgeKind.INPUT_LOADER, "the task manifest"),
+    "src/vibesys/inputs/_objectives.py": (EdgeKind.INPUT_LOADER, "task objectives"),
+    "src/vibesys/inputs/_synthesis.py": (EdgeKind.GENERATOR, "writes a synthesized task folder"),
+    "src/vibesys/orchestration/skill_selection.py": (
+        EdgeKind.PACKAGED_RESOURCE,
+        "skill sidecar metadata",
+    ),
+    "src/vibesys/run/evaluation_socket.py": (
+        EdgeKind.OS_ADAPTER,
+        "owns the evaluation socket directory",
+    ),
 }
 
 
@@ -951,12 +1163,27 @@ def test_every_file_io_name_is_seen_under_every_import_spelling(
     assert len(file_io_sites(source)) == 1, source
 
 
-def test_every_edge_module_exists_and_says_why_it_is_an_edge() -> None:
-    for relative, reason in FILE_IO_EDGE_MODULES.items():
+def _check_edges(edges: Mapping[str, tuple[object, str]], kinds: type[StrEnum]) -> None:
+    """Every listed module exists, is product code, and has a known kind and a one-line note."""
+    for relative, (kind, note) in edges.items():
         assert (REPO / relative).is_file(), f"{relative} is listed but does not exist"
         assert _is_product(relative), f"{relative} is not product code"
-        assert reason.strip(), f"{relative} needs a reason"
-        assert "\n" not in reason, f"{relative} needs a one-line reason"
+        assert isinstance(kind, kinds), f"{relative}: {kind!r} is not a {kinds.__name__}"
+        assert note.strip(), f"{relative} needs a note"
+        assert "\n" not in note, f"{relative} needs a one-line note"
+
+
+def test_every_edge_module_exists_and_says_why_it_is_an_edge() -> None:
+    _check_edges(FILE_IO_EDGE_MODULES, EdgeKind)
+
+
+@pytest.mark.parametrize(
+    ("kinds", "kind"),
+    [(EdgeKind, "store implementation"), (EdgeKind, "STORE")],
+)
+def test_an_edge_of_unknown_kind_is_refused(kinds: type[StrEnum], kind: str) -> None:
+    with pytest.raises(AssertionError, match="is not a"):
+        _check_edges({"src/vibesys/config.py": (kind, "a note")}, kinds)
 
 
 def test_product_code_touches_files_only_in_edge_modules() -> None:
@@ -997,5 +1224,218 @@ def test_product_code_touches_files_only_in_edge_modules() -> None:
     )
     assert not stale, (
         "these edge modules no longer touch files; remove them from FILE_IO_EDGE_MODULES:\n"
+        + "\n".join(stale)
+    )
+
+
+# ---- parse: untrusted JSON enters through vs_decode --------------------------------------
+
+PARSE_METHODS = frozenset({"validate_json", "model_validate_json"})
+PARSE_NAMES = frozenset({"pydantic_core.from_json"})
+_PARSE_PREFILTER = re.compile(r"validate_json|from_json")
+
+
+class ParseKind(StrEnum):
+    """Why a product module may parse JSON with pydantic directly: the closed set."""
+
+    OWN_STORE = "own store"  # re-reads what this process's own store or journal wrote
+    ROUND_TRIP = "round trip"  # re-validates a value this process just serialized
+    FAKE = "fake"  # a Fake or test kit validating the values its test scripted
+    MODEL_HOOK = "model hook"  # overrides pydantic's parse method; its callers are scanned
+    DECODER = "decoder"  # vs_decode itself
+
+
+# The only product modules that call pydantic's JSON parsers directly. Everything else
+# decodes through ``vs_decode.api`` (bounded size, depth-bounded parse, strict target, typed
+# ``Unreadable`` result). Keep one line per module: its kind, and a note naming the data.
+PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
+    "libs/vs-agent/src/vs_agent/api/testing.py": (
+        ParseKind.FAKE,
+        "the in-memory invocation store's documents",
+    ),
+    "libs/vs-agent/src/vs_agent/fake_client.py": (
+        ParseKind.FAKE,
+        "a scripted reply value, as the response model",
+    ),
+    "libs/vs-core/src/vs_core/_registry.py": (
+        ParseKind.OWN_STORE,
+        "persisted operation wires and run envelopes, and in-memory re-validation",
+    ),
+    "libs/vs-core/src/vs_core/_settlement.py": (
+        ParseKind.OWN_STORE,
+        "a recorded turn's output: vs_agent's runner decoded it under MAX_AGENT_REPLY_BYTES"
+        " (8 MiB) and vs_runtime recorded it re-serialized",
+    ),
+    "libs/vs-core/src/vs_core/_waitable.py": (
+        ParseKind.MODEL_HOOK,
+        "forwards to pydantic with the waitable registry in context",
+    ),
+    "libs/vs-core/src/vs_core/flows/_agents.py": (
+        ParseKind.OWN_STORE,
+        "a recorded turn's output: vs_agent's runner decoded it under MAX_AGENT_REPLY_BYTES"
+        " (8 MiB) and vs_runtime recorded it re-serialized",
+    ),
+    "libs/vs-core/src/vs_core/flows/_define.py": (
+        ParseKind.OWN_STORE,
+        "the record a flow published into its own state",
+    ),
+    "libs/vs-core/src/vs_core/flows/_run.py": (
+        ParseKind.OWN_STORE,
+        "the flow journal's reads, snapshots and operation results",
+    ),
+    "libs/vs-core/src/vs_core/testing/drive.py": (
+        ParseKind.FAKE,
+        "the test driver's scripted turn outputs",
+    ),
+    "libs/vs-core/src/vs_core/testing/flows.py": (
+        ParseKind.FAKE,
+        "the flow test kit's state round trip",
+    ),
+    "libs/vs-decode/src/vs_decode/_decode.py": (
+        ParseKind.DECODER,
+        "the bounded, strict decode every other module goes through",
+    ),
+    "libs/vs-evaluation/src/vs_evaluation/testing.py": (
+        ParseKind.FAKE,
+        "the in-memory evaluation store's values",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_core_record.py": (
+        ParseKind.OWN_STORE,
+        "core records this runtime persisted",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_receipt_store.py": (
+        ParseKind.OWN_STORE,
+        "evaluation receipts this runtime persisted",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_request_inspection.py": (
+        ParseKind.OWN_STORE,
+        "execution results this runtime recorded",
+    ),
+    "libs/vs-runtime/src/vs_runtime/_shell_kit.py": (
+        ParseKind.FAKE,
+        "the shell test kit's scripted agent answers",
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": (
+        ParseKind.OWN_STORE,
+        "durable Slurm evaluation records this executor wrote",
+    ),
+    "libs/vs-slurm/src/vs_slurm/cluster.py": (
+        ParseKind.OWN_STORE,
+        "operation records the cluster store wrote, and in-memory re-validation",
+    ),
+    "src/server/events.py": (ParseKind.OWN_STORE, "the run's event log this server appends"),
+    "src/vibesys/hypothesis/rounds.py": (ParseKind.OWN_STORE, "the saved hypothesis ledger"),
+    "src/vibesys/issue_queue_board.py": (ParseKind.OWN_STORE, "a recorded progress payload"),
+    "src/vibesys/orchestration/evolve/population/openevolve_selector.py": (
+        ParseKind.OWN_STORE,
+        "the saved OpenEvolve population",
+    ),
+    "src/vibesys/orchestration/issue_queue/core_policy/_projection.py": (
+        ParseKind.OWN_STORE,
+        "recorded round metrics",
+    ),
+    "src/vibesys/plugin_registration.py": (
+        ParseKind.ROUND_TRIP,
+        "an orchestration's options dict, validated as its options model",
+    ),
+    "src/vibesys/run/event_journal.py": (ParseKind.OWN_STORE, "the core event journal's codec"),
+}
+
+
+def parse_sites(source: str) -> list[str]:
+    """``line:spelling`` of each direct pydantic JSON parse in *source*.
+
+    Counted: an attribute named ``validate_json`` or ``model_validate_json`` on any receiver
+    (a ``TypeAdapter``, a model class, ``super()``), and a reference to
+    ``pydantic_core.from_json`` under any import spelling. Not seen: a name built at run time
+    (``getattr(model, name)``) and ``eval``/``exec``.
+    """
+    if not _PARSE_PREFILTER.search(source):
+        return []
+    nodes = list(walk_nodes(parse_source(source)))
+    aliases = _aliases(nodes)
+    inner = {id(node.value) for node in nodes if isinstance(node, ast.Attribute)}
+    sites: list[str] = []
+    for node in nodes:
+        if isinstance(node, ast.Attribute) and node.attr in PARSE_METHODS:
+            sites.append(f"{node.lineno}:.{node.attr}")
+        elif isinstance(node, (ast.Name, ast.Attribute)) and id(node) not in inner:
+            if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+                continue
+            if _dotted(node, aliases) in PARSE_NAMES:
+                sites.append(f"{node.lineno}:from_json")
+    return sites
+
+
+PARSE_PLANTED = {
+    "model method": "def f(model, s):\n    return model.model_validate_json(s)\n",
+    "adapter method": "def f(adapter, s):\n    return adapter.validate_json(s)\n",
+    "class method": "def f(s):\n    return Config.model_validate_json(s, strict=True)\n",
+    "super": "class M:\n    def g(self, s):\n        return super().model_validate_json(s)\n",
+    "bound method": "def f(model):\n    parse = model.model_validate_json\n    return parse\n",
+    "from_json": "import pydantic_core\n\ndef f(s):\n    return pydantic_core.from_json(s)\n",
+    "from from_json": "from pydantic_core import from_json as fj\n\ndef f(s):\n    fj(s)\n",
+}
+PARSE_CLEAN = {
+    "vs_decode": "from vs_decode.api import decode_json\n\ndef f(s, m):\n    decode_json(s, m)\n",
+    "python mode": "def f(model, v):\n    return model.model_validate(v)\n",
+    "dump": "def f(model):\n    return model.model_dump_json()\n",
+    "a method of that name": "class M:\n    def model_validate_json(self, s):\n        return s\n",
+    "local from_json": "def from_json(s):\n    return s\n\ndef f(s):\n    from_json(s)\n",
+}
+
+
+@pytest.mark.parametrize("source", PARSE_PLANTED.values(), ids=PARSE_PLANTED.keys())
+def test_a_planted_parse_is_seen(source: str) -> None:
+    assert len(parse_sites(source)) == 1, parse_sites(source)
+
+
+@pytest.mark.parametrize("source", PARSE_CLEAN.values(), ids=PARSE_CLEAN.keys())
+def test_code_that_parses_through_vs_decode_is_not_flagged(source: str) -> None:
+    assert parse_sites(source) == []
+
+
+@given(name=st.sampled_from(sorted(PARSE_NAMES)), data=st.data())
+def test_every_parse_name_is_seen_under_every_import_spelling(
+    name: str, data: st.DataObject
+) -> None:
+    source = data.draw(st.sampled_from(_spellings(name)))
+    assert len(parse_sites(source)) == 1, source
+
+
+def test_every_parse_edge_module_exists_and_says_why_it_may_parse() -> None:
+    _check_edges(PARSE_EDGE_MODULES, ParseKind)
+
+
+def test_product_code_parses_json_only_through_vs_decode() -> None:
+    """The ``parse`` rule: untrusted JSON enters product code through ``vs_decode``.
+
+    ``vs_decode.api.decode_json`` and ``read_json`` cap the input's size, parse with
+    pydantic's depth-bounded parser, require a strict target, and return a typed
+    ``Unreadable`` instead of raising. Product code (``src/`` and ``libs/*/src``,
+    ``libs/vs-sim`` exempt) calls pydantic's ``validate_json`` / ``model_validate_json`` or
+    ``pydantic_core.from_json`` itself only in the modules in ``PARSE_EDGE_MODULES``: ones
+    that re-read their own store, re-validate a value they just serialized, Fakes, a model
+    hook, and ``vs_decode`` itself. There is no baseline: a new parse of outside input goes
+    through ``vs_decode``, and a listed module that stops parsing leaves the list.
+    """
+    found = {
+        path.relative_to(REPO).as_posix(): sites
+        for path in _python_files(PRODUCT_ROOTS)
+        if not path.relative_to(REPO).as_posix().startswith(EXEMPT_PREFIXES)
+        and (sites := parse_sites(path.read_text(encoding="utf-8")))
+    }
+    leaks = [
+        f"{relative}: {' '.join(sites)}"
+        for relative, sites in sorted(found.items())
+        if relative not in PARSE_EDGE_MODULES
+    ]
+    stale = sorted(set(PARSE_EDGE_MODULES) - set(found))
+    assert not leaks, (
+        "parse JSON from outside this process with vs_decode.api.decode_json or read_json "
+        "(bounded size and depth, strict target, typed Unreadable result):\n" + "\n".join(leaks)
+    )
+    assert not stale, (
+        "these modules no longer parse JSON directly; remove them from PARSE_EDGE_MODULES:\n"
         + "\n".join(stale)
     )
