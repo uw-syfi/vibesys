@@ -337,7 +337,9 @@ def test_a_later_answer_for_a_record_the_close_ended_proves_its_release_or_is_ty
 
     An answer that does not contradict the failure (it did not succeed, or the executor cannot
     tell, with the same acceptance) adds the release facts it proves and leaves the failure as
-    it was. Any other answer raises the typed contradiction, never a bare contract error.
+    it was. An executor that cannot tell and holds no record of the request (unknown,
+    unaccepted) proves nothing, so the record stays as it was. Any other answer raises the
+    typed contradiction, never a bare contract error.
     """
     state = _record(
         core.LifecycleClass.IDEMPOTENT_WRITE, _SILENT_ANSWERS[0], accepted=True, named=False
@@ -357,7 +359,11 @@ def test_a_later_answer_for_a_record_the_close_ended_proves_its_release_or_is_ty
             **later._asdict(),
         }
     )
-    agrees = later.accepted and later.status in {*_DID_NOT_SUCCEED, core.ObservationStatus.UNKNOWN}
+    unknown = later.status == core.ObservationStatus.UNKNOWN
+    if unknown and not later.accepted:
+        assert _original(core.step(run, core.RequestObserved(observation=answer)).state) == closed
+        return
+    agrees = later.accepted and (unknown or later.status in _DID_NOT_SUCCEED)
     if not agrees:
         with pytest.raises(core.ClosedRecordContradictionError):
             core.step(run, core.RequestObserved(observation=answer))

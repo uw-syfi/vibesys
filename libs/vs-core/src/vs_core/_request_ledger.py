@@ -488,6 +488,15 @@ def _refine(
     contradicts the disposition is a typed `ClosedRecordContradictionError`.
     """
     previous = record.observation
+    if (
+        previous is not None
+        and observation.status == ObservationStatus.UNKNOWN
+        and observation.accepted != previous.accepted
+    ):
+        # An executor that cannot say reports itself unaccepted, even of a job it once took
+        # (it lost its record of a submission that never reached the cluster). Such an answer
+        # claims nothing, so it neither contradicts the disposition nor proves a release.
+        return AreaChange(state=state)
     if previous is None or not _agrees(previous, observation):
         raise ClosedRecordContradictionError(record.request_id, previous, observation)
     added = tuple(child for child in observation.children if child not in previous.children)

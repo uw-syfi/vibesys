@@ -376,6 +376,12 @@ class _Run:
         self.sent.extend(asked)
         self.settle_over((1.0,) * 6 if self.no_record else (5.0, 10.0, 70.0))
 
+    def answer_now(self) -> None:
+        """Answer, without the clock moving, whatever core asked and the shell has yet to."""
+        asked: list[core.Request] = []
+        self.state = _settle(self.state, self._unanswered(), self.now, asked, self.executor)
+        self.sent.extend(asked)
+
     def end_jobs(self) -> None:
         """Every job finishes by itself."""
         for resource, job in self.jobs.items():
@@ -464,3 +470,36 @@ def test_polls_stops_and_observations_at_shared_instants_never_conflict(
             run.no_record = False
             run.end_jobs()
             assert run.state.run.status == core.RunStatus.TERMINAL
+
+
+@settings(max_examples=examples(pr=6, nightly=200), deadline=None, database=None)
+@example(count=1, mode=core.StopMode.DRAIN, no_record=True)
+@example(count=1, mode=core.StopMode.DRAIN, no_record=False)
+@given(
+    count=st.integers(1, 3),
+    mode=st.sampled_from((core.StopMode.CANCEL, core.StopMode.DRAIN)),
+    no_record=st.booleans(),
+)
+def test_a_run_past_its_deadline_cancels_its_own_jobs_whatever_the_stop(
+    count: int, mode: core.StopMode, *, no_record: bool
+) -> None:
+    """Chaos seed 2578: a drain waits for the run's own jobs only while the run has time left.
+
+    Each job stays queued for good, or the executor holds no record of it (its sbatch was
+    lost). A drain stop lets such a job be until the run deadline; from then on core
+    inspects it and cancels it, once, as a cancel stop does, and the run closes. Before,
+    a drained run past its deadline polled the job forever.
+    """
+    run = _Run(count, no_record=no_record)
+    for index in range(count):
+        run.observe(index, core.ObservationStatus.PENDING, accepted=True)
+    run.stop(mode)
+    run.answer_now()
+    deadline = run.state.run.deadline_at
+    run.settle_over((5.0, 10.0))
+    if mode == core.StopMode.DRAIN:
+        assert run.state.run.status == core.RunStatus.CLOSING
+        assert all(run.cancels(resource) == 0 for resource in run.resources)
+    run.settle_over((deadline - run.now, *(10.0,) * 4))
+    assert run.state.run.status == core.RunStatus.TERMINAL
+    assert all(run.cancels(resource) == 1 for resource in run.resources)

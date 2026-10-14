@@ -49,6 +49,7 @@ from .types.common import (
     RequestId,
     RevisionRef,
     RunStatus,
+    Scope,
 )
 from .types.evaluation import (
     MEASUREMENT_DIAGNOSTIC_LIMIT,
@@ -91,7 +92,7 @@ from .types.strategy import Measure
 from .types.until import Until, Within
 
 if TYPE_CHECKING:
-    from .types.common import DecisionId, Observation, ResourceId, Scope, Seconds
+    from .types.common import DecisionId, Observation, ResourceId, Seconds
     from .types.evaluation import EvaluationEvent, EvaluationState, EvidenceRef, MeasurementPlan
     from .types.kernel import EvaluationContext, Signal
     from .types.records import Request, RequestRecord
@@ -1339,8 +1340,10 @@ def _ended(
     the job is a fact about the submit request, with the terminal facts the history reads.
     When the submit's own view was taken
     while the job still ran, nothing else completes that record, and a closing run waits
-    for every open one. A submission the ledger already closed needs nothing, and one it
-    never dispatched cannot have been observed.
+    for every open one. A submission the ledger already closed needs only the job's release:
+    one closed while its job still ran (blocked at its bound when the run closed) holds the
+    run closing until that is proved. One the ledger never dispatched cannot have been
+    observed.
     """
     if (
         not isinstance(job, OwnedJob)
@@ -1349,7 +1352,11 @@ def _ended(
     ):
         return ()
     record = context.records.record(job.submission_id)
-    if record is None or record.phase in (RequestPhase.PREPARED, RequestPhase.COMPLETED):
+    if record is None or record.phase == RequestPhase.PREPARED:
+        return ()
+    if record.phase == RequestPhase.COMPLETED and (
+        record.observation is None or record.observation.released or not event.observation.released
+    ):
         return ()
     return (
         RequestObserved(observation=event.observation, evaluation_result=event.evaluation_result),
@@ -1522,6 +1529,16 @@ def _history_signals(
     )
 
 
+#: The step that ends a job the executor has not confirmed: an inspection, before any cancel.
+_TERMINATION_INSPECT = "inspect"
+
+
+def _step_prefix(job: OwnedJob | RegisteredOwnedJob, action: str) -> str:
+    """The request id of *action* on *job*, without the observation sequence it may name."""
+    source = job.submission_id if isinstance(job, OwnedJob) else job.request_id
+    return f"measurement:{source.root}:{action}"
+
+
 def _job_request(
     model: type[ObserveOwnedJob]
     | type[InspectOwnedJob]
@@ -1547,7 +1564,7 @@ def _job_request(
         canonical.request if canonical is not None and model is not CollectEvidence else None
     )
     return model(
-        request_id=RequestId(root=f"measurement:{source.root}:{action}{suffix}"),
+        request_id=RequestId(root=f"{_step_prefix(job, action)}{suffix}"),
         scope=job.scope,
         admission_id=canonical.request.admission_id if canonical is not None else None,
         decision_id=inherited.decision_id if inherited is not None else None,
@@ -1606,7 +1623,7 @@ def _next_step(
         or not job.observation.accepted
     )
     if unconfirmed and not (cancel_unconfirmed and job.observation is not None):
-        return _job_outbound(InspectOwnedJob, job, context, "inspect")
+        return _job_outbound(InspectOwnedJob, job, context, _TERMINATION_INSPECT)
     if job.terminal:
         return _job_outbound(InspectOwnedJob, job, context, "release")
     return _job_outbound(CancelOwnedJob, job, context, "cancel")
@@ -1663,10 +1680,15 @@ def _drain(
 
 
 def _cancelling_scope(context: EvaluationContext) -> Scope | None:
-    """The scope whose jobs a committed cancel stop ends, while the run closes under it."""
+    """The scope whose jobs a closing run cancels: under a cancel stop, or past its deadline.
+
+    A drain lets the run's own jobs finish, but only while the run has time left. From the
+    run deadline on nothing is waited for, as for an attempt's queued episodes (scheduling
+    retires them with a cancel then), so a job that never ends cannot hold the run closing.
+    """
     match committed_stop(context.run):
-        case Proven(value=stop) if (
-            stop.mode == "cancel" and context.run.status == RunStatus.CLOSING
+        case Proven(value=stop) if context.run.status == RunStatus.CLOSING and (
+            stop.mode == "cancel" or context.run.now_at >= context.run.deadline_at
         ):
             return stop.scope
         case _:
@@ -1696,35 +1718,55 @@ def _inspected(context: EvaluationContext, resource: ResourceId) -> bool:
     )
 
 
+def _termination_inspected(context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob) -> bool:
+    """Whether core already asked to end *job* and, finding it unconfirmed, inspected it."""
+    prefix = f"{_step_prefix(job, _TERMINATION_INSPECT)}:"
+    return any(
+        isinstance(row.request, InspectOwnedJob) and row.request_id.root.startswith(prefix)
+        for row in context.records.records
+    )
+
+
+def _closing_scopes(context: EvaluationContext) -> frozenset[Scope]:
+    """The scopes of the attempts whose closure is proved: closing drains their jobs."""
+    return frozenset(
+        Scope(owner=owner.attempt_id, generation=owner.generation)
+        for owner in context.attempts.attempts
+        if owner.closure is not None and isinstance(current_closure(owner, owner.closure), Proven)
+    )
+
+
 def _cancel_scope_jobs(
-    state: EvaluationState,
-    context: EvaluationContext,
-    scope: Scope,
-    *,
-    first_ask: bool = True,
+    state: EvaluationState, context: EvaluationContext, scope: Scope | None
 ) -> AreaChange[EvaluationState]:
-    """Cancel each live job *scope* owns that no cancellation addresses yet.
+    """Move every live job core is ending one step on, at most one cancellation per job.
 
-    Attempt closure drains an attempt's jobs; the run's own jobs (its input baseline) have
-    no attempt to close, so a cancel stop ends them here. Applied when the stop commits
-    (*first_ask*) and again as each job is observed after it, at most one cancellation per job.
+    Core ends every job of an attempt whose closure is proved (the drain asks once, when
+    the closure is requested, and may find the close request not yet on the ledger), every
+    job it already asked to terminate (a continuation's deadline, a retirement), and every
+    job *scope* owns: the run's own jobs (its input baseline) have no attempt to close, so
+    ``_cancelling_scope`` ends them. Applied when a cancel stop commits and again as each
+    job is observed or its poll falls due.
 
-    A job the executor does not confirm cannot be cancelled by name, so the stop inspects it
-    once. If it is still unconfirmed at its next observation, whether the executor holds no
-    record of it or cannot say, the stop cancels it anyway: a cancellation is idempotent, and
-    the executor answers it for a job that never began exactly as for one it ended. Waiting
-    for a confirmation that may never come would hold the run closing until the host gives up.
+    A job the executor does not confirm cannot be cancelled by name, so core inspects it
+    once. If it is still unconfirmed after that, whether the executor holds no record of it
+    or cannot say, core cancels it anyway: a cancellation is idempotent, and the executor
+    answers it for a job that never began exactly as for one it ended. Waiting for a
+    confirmation that may never come would hold the run closing until its budget ran out.
     """
     requests = tuple(
         request
         for job in (*state.jobs, *state.registered_jobs)
-        if job.scope == scope
-        and job.resource_id is not None
+        if job.resource_id is not None
         and not job.terminal
         and not _cancel_requested(context, job.resource_id)
-        and (first_ask or _known(job) or _inspected(context, job.resource_id))
+        and (
+            job.scope == scope
+            or job.scope in _closing_scopes(context)
+            or _termination_inspected(context, job)
+        )
         for request in _terminate(
-            state, context, job.resource_id, cancel_unconfirmed=not first_ask
+            state, context, job.resource_id, cancel_unconfirmed=_inspected(context, job.resource_id)
         ).requests
     )
     return AreaChange(state=state, requests=requests)
@@ -1746,11 +1788,10 @@ def _run_jobs_cancel(
 def _cancelled_after_stop(
     change: AreaChange[EvaluationState], context: EvaluationContext
 ) -> AreaChange[EvaluationState]:
-    """Keep a committed cancel stop applying to run jobs that become known after it."""
-    scope = _cancelling_scope(context)
-    if scope is None:
+    """Keep ending the jobs core is ending as they are observed (see ``_cancel_scope_jobs``)."""
+    if context.run.status == RunStatus.TERMINAL:
         return change
-    cancels = _cancel_scope_jobs(change.state, context, scope, first_ask=False)
+    cancels = _cancel_scope_jobs(change.state, context, _cancelling_scope(context))
     if not cancels.requests:
         return change
     return change.model_copy(update={"requests": (*change.requests, *cancels.requests)})
@@ -1772,7 +1813,7 @@ def advance(
         case JobObserved() | RegisteredJobObserved():
             change = _cancelled_after_stop(_job_observed(state, context, event), context)
         case ObservationsDue():
-            change = _poll_due(state, context, event)
+            change = _cancelled_after_stop(_poll_due(state, context, event), context)
         case JobTerminationRequested():
             change = _terminate(state, context, event.resource_id)
         case JobsDrainRequested():

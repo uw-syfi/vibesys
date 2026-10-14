@@ -296,22 +296,17 @@ def test_the_oracle_verdict_depends_on_the_faults_a_seed_declares_not_on_which_c
 
 
 @pytest.mark.parametrize("fault", list(ClusterFault))
-def test_only_a_fault_that_hides_a_job_explains_a_stop_at_the_run_deadline(
+def test_no_cluster_fault_explains_a_run_that_stopped_without_a_delivered_stop(
     fault: ClusterFault,
 ) -> None:
-    """A deadlock that runs into the deadline must not pass because some cluster fault fired."""
-    hides = fault in {
-        ClusterFault.SSH_DOWN,
-        ClusterFault.PENDING_FOREVER,
-        ClusterFault.ACCOUNTING_GAP,
-        ClusterFault.TRUNCATED,
-    }
+    """A deadlock that runs into the deadline must not pass because some cluster fault fired.
 
-    verdict = unexplained_end(
-        None, RunStatus.STOPPED, Injected(cluster=frozenset({fault})), at_deadline=True
-    )
+    Past its deadline a run cancels every job it still owns, so not even a fault that hides a
+    job's fate (a lost reply, a job that never starts) can hold the run open until then.
+    """
+    verdict = unexplained_end(None, RunStatus.STOPPED, Injected(cluster=frozenset({fault})))
 
-    assert (verdict is None) == hides
+    assert verdict is not None
 
 
 async def test_a_run_past_its_virtual_budget_is_stopped_and_reported_as_a_hang(
@@ -331,18 +326,7 @@ async def test_a_run_past_its_virtual_budget_is_stopped_and_reported_as_a_hang(
 
 @pytest.mark.slow  # about 20 s each: the run waits the lost job out to its deadline
 @pytest.mark.parametrize("scancel", [3, 4])
-@pytest.mark.parametrize(
-    "fault",
-    [
-        ClusterFault.SSH_DOWN,
-        # Seed 479: a definite sbatch failure still makes the run wait the job out to its
-        # deadline, which no fault explains. Reported to the Slurm executor's owner.
-        pytest.param(
-            ClusterFault.COMMAND_ERROR,
-            marks=pytest.mark.xfail(strict=True, reason="definite sbatch failure waited out"),
-        ),
-    ],
-)
+@pytest.mark.parametrize("fault", [ClusterFault.SSH_DOWN, ClusterFault.COMMAND_ERROR])
 async def test_a_measurement_whose_submit_and_cancel_both_fail_still_ends_the_run(
     tmp_path: Path, fault: ClusterFault, scancel: int
 ) -> None:
