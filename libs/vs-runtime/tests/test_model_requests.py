@@ -116,7 +116,7 @@ def test_reconcile_refuses_a_manifest_linked_outside_the_workspace(tmp_path: Pat
     outside = tmp_path / "outside.json"
     outside.write_text(json.dumps([{"id": "org/secret"}]))
     workspace = tmp_path / "workspace"
-    (workspace / ".vibesys").mkdir(parents=True)
+    (workspace / MODEL_MANIFEST_RELPATH).parent.mkdir(parents=True)
     (workspace / MODEL_MANIFEST_RELPATH).symlink_to(outside)
     provisioner = FakeModelVolumeProvisioner()
     reconciler = create_model_request_reconciler(provisioner=provisioner, environment={})
