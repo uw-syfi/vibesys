@@ -193,3 +193,24 @@ def test_read_json_without_following_symlinks_refuses_a_symlinked_file(tmp_path:
     refused = read_json(link, _Doc, max_bytes=_CAP, follow_symlinks=False)
     assert isinstance(refused, Unreadable)
     assert refused.kind is UnreadableKind.NOT_READABLE
+
+
+def test_a_problem_names_its_location_and_error_type() -> None:
+    decoded = decode_json(
+        json.dumps({"name": "n", "inner": {"count": 1, "extra": 2}, "more": [1]}),
+        _Doc,
+        source="s",
+        max_bytes=_CAP,
+    )
+    assert isinstance(decoded, Unreadable)
+    found = {(problem.location, problem.error_type) for problem in decoded.problems}
+    assert found == {(("inner", "extra"), "extra_forbidden"), (("more",), "extra_forbidden")}
+    listed = decode_json(
+        json.dumps([{"count": "x"}]), TypeAdapter(list[_Inner]), source="s", max_bytes=_CAP
+    )
+    assert isinstance(listed, Unreadable)
+    assert listed.problems[0].location == (0, "count")
+    assert listed.key_path == "0.count"
+    too_large = decode_json(b"{}", _Doc, source="s", max_bytes=1)
+    assert isinstance(too_large, Unreadable)
+    assert too_large.problems[0].error_type is None

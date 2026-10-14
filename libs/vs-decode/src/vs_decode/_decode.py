@@ -57,9 +57,19 @@ class UnreadableKind(StrEnum):
 class Problem:
     """One validation failure: where in the document, and what is wrong there."""
 
-    key_path: str
-    """Dotted path of the failing key; empty for the document itself."""
+    location: tuple[str | int, ...]
+    """Keys and list indexes from the document root to the failing value; empty for the
+    document itself."""
     message: str
+    error_type: str | None = None
+    """pydantic's error type (``"missing"``, ``"extra_forbidden"``, or a validator's own),
+    for a caller that maps failures onto its own reason codes; ``None`` for a problem found
+    before validation (a missing, unreadable or oversized input)."""
+
+    @property
+    def key_path(self) -> str:
+        """``location`` as a dotted path; empty for the document itself."""
+        return ".".join(str(part) for part in self.location)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +139,7 @@ def _require_strict(target: type[BaseModel] | TypeAdapter[Any]) -> None:
 def _unreadable(source: str, error: ValidationError) -> Unreadable:
     details = error.errors(include_url=False, include_context=False, include_input=False)
     problems = tuple(
-        Problem(".".join(str(part) for part in detail["loc"]), detail["msg"]) for detail in details
+        Problem(tuple(detail["loc"]), detail["msg"], detail["type"]) for detail in details
     )
     not_json = any(detail["type"] == "json_invalid" for detail in details)
     kind = UnreadableKind.NOT_JSON if not_json else UnreadableKind.INVALID
@@ -138,7 +148,7 @@ def _unreadable(source: str, error: ValidationError) -> Unreadable:
 
 def _too_large(source: str, max_bytes: int) -> Unreadable:
     return Unreadable(
-        UnreadableKind.TOO_LARGE, source, (Problem("", f"is larger than {max_bytes} bytes"),)
+        UnreadableKind.TOO_LARGE, source, (Problem((), f"is larger than {max_bytes} bytes"),)
     )
 
 
@@ -250,13 +260,13 @@ def _read_regular_file(path: Path, max_bytes: int, *, follow_symlinks: bool) -> 
     try:
         descriptor = os.open(path, flags)
     except FileNotFoundError:
-        return Unreadable(UnreadableKind.MISSING, source, (Problem("", "does not exist"),))
+        return Unreadable(UnreadableKind.MISSING, source, (Problem((), "does not exist"),))
     except OSError as error:
         return _not_readable(source, error)
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             return Unreadable(
-                UnreadableKind.NOT_READABLE, source, (Problem("", "is not a regular file"),)
+                UnreadableKind.NOT_READABLE, source, (Problem((), "is not a regular file"),)
             )
         chunks: list[bytes] = []
         remaining = max_bytes + 1
@@ -272,7 +282,7 @@ def _read_regular_file(path: Path, max_bytes: int, *, follow_symlinks: bool) -> 
 
 def _not_readable(source: str, error: OSError) -> Unreadable:
     reason = error.strerror or type(error).__name__
-    return Unreadable(UnreadableKind.NOT_READABLE, source, (Problem("", reason),))
+    return Unreadable(UnreadableKind.NOT_READABLE, source, (Problem((), reason),))
 
 
 __all__ = [
