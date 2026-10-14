@@ -274,7 +274,6 @@ convention = "google"
 "langchain_openai".msg = "langchain was removed; do not reintroduce it."
 "langchain_google_vertexai".msg = "langchain was removed; do not reintroduce it."
 "langgraph".msg = "langgraph was removed; do not reintroduce it."
-"agentshim".msg = "Only vs_agent talks to agentshim; use vs_agent.api (or vs_agent.api.testing in tests)."
 # Real time: product code and deterministic-tier tests take a vs_sim Clock, Sleeper or
 # SleepingClock as a required argument (vs_sim.api.testing has ManualClock and VirtualClock),
 # and yield to the event loop with vs_sim.api.yield_now(). Only libs/vs-sim, the real test
@@ -290,8 +289,7 @@ convention = "google"
 runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope.ProtocolModel", "server.control_envelope.Request", "server.control_envelope.ResponseEnvelope", "vs_core._outcomes.OutcomeValue", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
 
 [tool.ruff.lint.per-file-ignores]
-# agentshim is the agent-CLI library; vs_agent is its only importer. The e2e
-# tests drive the real library and CLIs, so they may name it too.
+# The e2e tests drive the real library and CLIs, so they may use real time.
 "tests/e2e/**" = ["TID251"]
 # The real-time bans exempt the owner of the real clock, the other real test tiers, and code
 # that runs outside the VibeSys process: staged profiler and evaluator resources, the
