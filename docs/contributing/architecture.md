@@ -182,6 +182,7 @@ graph TD
     vs_faults --> vs_sim
     vs_issue_tracker --> vs_core
     vs_issue_tracker --> vs_github
+    vs_issue_tracker --> vs_sim
     vs_runtime --> vs_agent
     vs_runtime --> vs_async_ops
     vs_runtime --> vs_core

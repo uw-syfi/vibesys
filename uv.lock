@@ -3134,6 +3134,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "vs-core" },
     { name = "vs-github" },
+    { name = "vs-sim" },
 ]
 
 [package.metadata]
@@ -3141,6 +3142,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-core", editable = "libs/vs-core" },
     { name = "vs-github", editable = "libs/vs-github" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 
 [[package]]

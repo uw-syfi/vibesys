@@ -7,7 +7,7 @@ name = "vs-issue-tracker"
 version = "0.1.0"
 description = "Issue-tracking and progress-log contracts with local and GitHub implementations"
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2", "vs-core", "vs-github"]
+dependencies = ["pydantic>=2", "vs-core", "vs-github", "vs-sim"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -18,3 +18,4 @@ vs_issue_tracker = ["py.typed"]
 [tool.uv.sources]
 vs-core = { workspace = true }
 vs-github = { workspace = true }
+vs-sim = { workspace = true }

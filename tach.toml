@@ -34,7 +34,8 @@
 # `vs_agent` -> {`vs_sandbox`, `vs_project`, `vs_prompts`}, and
 # `vs_issue_tracker` -> `vs_github` for its
 # GitHub-backed tracker and progress-log implementations, and `vs_issue_tracker` -> `vs_core`
-# for the board operations a strategy declares.
+# for the board operations a strategy declares, and `vs_issue_tracker` -> `vs_sim.api` for
+# the clock that stamps its events.
 # `vs_runtime` owns the run mechanisms and depends only on lower mechanism
 # libraries. Reject any upward lib-to-application edge.
 
@@ -442,7 +443,7 @@ depends_on = []
 [[modules]]
 path = "vs_issue_tracker"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core", "vs_github"]
+depends_on = ["vs_core", "vs_github", "vs_sim.api"]
 
 [[modules]]
 path = "vs_evaluator_protocol"

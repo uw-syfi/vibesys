@@ -25,9 +25,6 @@
 {"path": "libs/vs-github/src/vs_github/cli.py", "rule": "subprocess", "count": 4}
 {"path": "libs/vs-github/tests/test_cli.py", "rule": "subprocess", "count": 4}
 {"path": "libs/vs-issue-tracker/src/vs_issue_tracker/core.py", "rule": "threading", "count": 1}
-{"path": "libs/vs-issue-tracker/src/vs_issue_tracker/core.py", "rule": "wall_clock", "count": 4}
-{"path": "libs/vs-issue-tracker/src/vs_issue_tracker/github.py", "rule": "wall_clock", "count": 2}
-{"path": "libs/vs-issue-tracker/tests/test_issue_board_core.py", "rule": "time", "count": 2}
 {"path": "libs/vs-project/src/vs_project/_cli_git_repository.py", "rule": "subprocess", "count": 5}
 {"path": "libs/vs-project/src/vs_project/_fake_git_state.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-project/src/vs_project/_framework_writes.py", "rule": "threading", "count": 1}

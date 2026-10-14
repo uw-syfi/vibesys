@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 from unittest.mock import Mock
@@ -17,6 +16,7 @@ from vs_issue_tracker.api import (
     IssueStatus,
     IssueType,
 )
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -497,12 +497,12 @@ class TestNextOpen:
         assert third.id == perf.id
 
     def test_next_open_fifo_within_type(self, tmp_path: Path) -> None:
-        store = _make_store(tmp_path)
+        clock = ManualClock()
+        store = IssueBoard(tmp_path / "issues.json", clock=clock)
         a = _create(store, type=IssueType.BUG, title="first bug")
-        # Ensure a strict timestamp gap so created_at sort is stable
-        time.sleep(0.005)
+        clock.advance(1)
         b = _create(store, type=IssueType.BUG, title="second bug")
-        time.sleep(0.005)
+        clock.advance(1)
         c = _create(store, type=IssueType.BUG, title="third bug")
         first = store.next_open()
         assert first is not None

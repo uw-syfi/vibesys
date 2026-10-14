@@ -11,7 +11,6 @@ remain untouched. A run's progress log is a separate issue tagged
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from vs_github.api import GitHubCLI, GitHubClient
@@ -22,13 +21,17 @@ from vs_issue_tracker.core import (
     IssueStatus,
     IssueTracker,
     IssueType,
+    timestamp_at,
 )
 from vs_issue_tracker.errors import IssueTrackerLoadError
+from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     import builtins
     from collections.abc import Callable
     from pathlib import Path
+
+    from vs_sim.api import Clock
 
 _TYPE_PREFIX = "vibesys:type/"
 _STATUS_PREFIX = "vibesys:status/"
@@ -50,9 +53,19 @@ class _InvalidIssuePayloadError(ValueError):
 class GitHubIssueTracker(IssueTracker):
     """Implement the issue-queue tracker contract using a GitHub repository."""
 
-    def __init__(self, repository: str, *, cli: GitHubClient | None = None) -> None:
-        """Authenticate, bind to a repository, and ensure metadata labels exist."""
+    def __init__(
+        self,
+        repository: str,
+        *,
+        cli: GitHubClient | None = None,
+        clock: Clock | None = None,
+    ) -> None:
+        """Authenticate, bind to a repository, and ensure metadata labels exist.
+
+        ``clock`` (epoch seconds) stamps the events this tracker writes.
+        """
         self._cli = cli or GitHubCLI()
+        self._clock = clock or SystemClock()
         self._cli.ensure_authenticated()
         self.repository = repository
         self._ensure_metadata_labels()
@@ -84,7 +97,7 @@ class GitHubIssueTracker(IssueTracker):
             raise
         if _PROGRESS_LABEL in _label_names(raw.get("labels")):
             return None
-        return _to_issue(raw)
+        return _to_issue(raw, observed_at=timestamp_at(self._clock))
 
     def create(  # noqa: PLR0913  # lint-waiver: LW-771008 [PLR0913]; the create contract names independent fields plus the idempotency key.
         self,
@@ -110,6 +123,7 @@ class GitHubIssueTracker(IssueTracker):
             labels=[f"{_TYPE_PREFIX}{issue_type.value}"],
         )
         event = _event(
+            timestamp=timestamp_at(self._clock),
             actor=created_by,
             action="create",
             iteration=iteration,
@@ -141,7 +155,7 @@ class GitHubIssueTracker(IssueTracker):
         """Apply native and label state, then append one transition event."""
         target = status if isinstance(status, IssueStatus) else IssueStatus(status)
         raw = self._cli.view_issue(self.repository, issue_id)
-        current = _to_issue(raw)
+        current = _to_issue(raw, observed_at=timestamp_at(self._clock))
         present_status_labels = _label_names(raw.get("labels")) & {
             f"{_STATUS_PREFIX}in_progress",
             f"{_STATUS_PREFIX}blocked",
@@ -160,6 +174,7 @@ class GitHubIssueTracker(IssueTracker):
         self._write_event(
             issue_id,
             _event(
+                timestamp=timestamp_at(self._clock),
                 actor=actor,
                 action=f"{current.status.value}->{target.value}",
                 iteration=iteration,
@@ -182,6 +197,7 @@ class GitHubIssueTracker(IssueTracker):
             self._write_event(
                 issue.id,
                 _event(
+                    timestamp=timestamp_at(self._clock),
                     actor=actor,
                     action="blocked->open",
                     iteration=iteration,
@@ -206,6 +222,7 @@ class GitHubIssueTracker(IssueTracker):
         self._write_event(
             issue_id,
             _event(
+                timestamp=timestamp_at(self._clock),
                 actor=actor,
                 action="attempt",
                 iteration=iteration,
@@ -228,7 +245,10 @@ class GitHubIssueTracker(IssueTracker):
         )
         type_filter = type if isinstance(type, IssueType) else IssueType(type) if type else None
         result = [
-            _to_issue(self._cli.view_issue(self.repository, _number(item.get("number"))))
+            _to_issue(
+                self._cli.view_issue(self.repository, _number(item.get("number"))),
+                observed_at=timestamp_at(self._clock),
+            )
             for item in self._snapshots()
         ]
         if status_filter is not None:
@@ -286,10 +306,11 @@ def _event(  # noqa: PLR0913  # lint-waiver: LW-771015 [PLR0913]; the fields are
     iteration: int,
     note: str,
     payload: dict[str, Any] | None,
+    timestamp: str,
     key: str | None = None,
 ) -> IssueEvent:
     return IssueEvent(
-        timestamp=datetime.now(UTC).isoformat(),
+        timestamp=timestamp,
         actor=actor,
         action=action,
         iteration=iteration,
@@ -308,7 +329,8 @@ def _split_key(body: str) -> tuple[str, str | None]:
     return body[:start].rstrip("\n"), key
 
 
-def _to_issue(raw: dict[str, object]) -> Issue:
+def _to_issue(raw: dict[str, object], *, observed_at: str) -> Issue:
+    """The issue ``raw`` describes; ``observed_at`` stands in for a missing creation time."""
     labels = _label_names(raw.get("labels"))
     type_value = next(
         (label.removeprefix(_TYPE_PREFIX) for label in labels if label.startswith(_TYPE_PREFIX)),
@@ -329,7 +351,7 @@ def _to_issue(raw: dict[str, object]) -> Issue:
         status = IssueStatus.OPEN
     number = _number(raw["number"])
     description, create_key = _split_key(str(raw.get("body") or ""))
-    created_at = str(raw.get("createdAt") or datetime.now(UTC).isoformat())
+    created_at = str(raw.get("createdAt") or observed_at)
     return Issue(
         id=number,
         type=IssueType(type_value),

@@ -9,6 +9,7 @@ others.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
 import pytest
@@ -24,31 +25,41 @@ from vs_issue_tracker.api import (
     IssueTracker,
     IssueType,
 )
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-type Factory = Callable[[Path], IssueTracker]
+type Factory = Callable[[Path, ManualClock], IssueTracker]
 
 IMPLEMENTATIONS: dict[str, Factory] = {
-    "fake": lambda _path: FakeIssueTracker(),
-    "board": lambda path: IssueBoard(path / "issues.json"),
-    "github": lambda _path: GitHubIssueTracker("owner/repo", cli=FakeGitHubClient()),
+    "fake": lambda _path, clock: FakeIssueTracker(clock=clock),
+    "board": lambda path, clock: IssueBoard(path / "issues.json", clock=clock),
+    "github": lambda _path, clock: GitHubIssueTracker(
+        "owner/repo", cli=FakeGitHubClient(), clock=clock
+    ),
 }
 
 
+@pytest.fixture
+def clock() -> ManualClock:
+    """The clock every tracker the test makes reads, in epoch seconds."""
+    return ManualClock(start=1_800_000_000.0)
+
+
 @pytest.fixture(params=sorted(IMPLEMENTATIONS))
-def make_tracker(request: pytest.FixtureRequest, tmp_path: Path) -> Callable[[], IssueTracker]:
-    """A factory of empty trackers of one implementation."""
+def make_tracker(
+    request: pytest.FixtureRequest, tmp_path: Path, clock: ManualClock
+) -> Callable[[], IssueTracker]:
+    """A factory of empty trackers of one implementation, all on ``clock``."""
     factory = IMPLEMENTATIONS[request.param]
     counter = iter(range(10_000))
 
     def make() -> IssueTracker:
         directory = tmp_path / f"t{next(counter)}"
         directory.mkdir()
-        return factory(directory)
+        return factory(directory, clock)
 
     return make
 
@@ -179,6 +190,27 @@ def test_a_sequence_leaves_what_the_model_says(
     expected_next = min(open_ids, key=lambda i: (_RANK[model.types[i]], i), default=None)
     chosen = tracker.next_open()
     assert (None if chosen is None else chosen.id) == expected_next
+
+
+def test_every_event_is_stamped_with_the_clock_reading_at_its_write(
+    make_tracker: Callable[[], IssueTracker], clock: ManualClock
+) -> None:
+    tracker = make_tracker()
+    stamps: list[str] = []
+    issue = tracker.create(
+        type=IssueType.BUG, title="a", description="d", created_by="t", iteration=1
+    )
+    stamps.append(datetime.fromtimestamp(clock.now(), UTC).isoformat())
+    clock.advance(7.25)
+    tracker.increment_attempts(issue.id, actor="t", iteration=2)
+    stamps.append(datetime.fromtimestamp(clock.now(), UTC).isoformat())
+    clock.advance(60)
+    tracker.update_status(issue.id, IssueStatus.CLOSED, actor="t", iteration=3)
+    stamps.append(datetime.fromtimestamp(clock.now(), UTC).isoformat())
+
+    stored = tracker.get(issue.id)
+    assert stored is not None
+    assert [event.timestamp for event in stored.history] == stamps
 
 
 @pytest.mark.parametrize("kind", ["create", "attempt", "status"])

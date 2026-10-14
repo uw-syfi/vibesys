@@ -18,10 +18,19 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from vs_sim.api import SystemClock
+
 if TYPE_CHECKING:
     import builtins
     from collections.abc import Callable
+
+    from vs_sim.api import Clock
 _STORE_VERSION = 1
+
+
+def timestamp_at(clock: Clock) -> str:
+    """The ISO-8601 UTC timestamp of ``clock``'s current reading, in epoch seconds."""
+    return datetime.fromtimestamp(clock.now(), UTC).isoformat()
 
 
 def _issue_not_found(issue_id: int) -> KeyError:
@@ -211,9 +220,15 @@ class _IssueBoardData(BaseModel):
 class _MemoryBoard:
     """The issue-board logic over an in-memory snapshot; persistence is a subclass hook."""
 
-    def __init__(self, *, on_change: Callable[[], None] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        on_change: Callable[[], None] | None = None,
+        clock: Clock | None = None,
+    ) -> None:
         self._lock = RLock()
         self._on_change = on_change
+        self._clock = clock or SystemClock()
         self._data = _IssueBoardData(version=_STORE_VERSION, next_id=1, issues=[])
 
     def _refresh_locked(self) -> None:
@@ -230,6 +245,9 @@ class _MemoryBoard:
             except Exception:  # noqa: BLE001  # lint-waiver: LW-010100 [BLE001]; callbacks are caller code, and persistence must survive any callback failure.
                 sys.stderr.write("[IssueBoard] on_change callback raised; ignoring:\n")
                 traceback.print_exc(file=sys.stderr)
+
+    def _timestamp(self) -> str:
+        return timestamp_at(self._clock)
 
     def _replace_issue(self, issue: Issue) -> None:
         for idx, stored in enumerate(self._data.issues):
@@ -252,7 +270,7 @@ class _MemoryBoard:
         issue_type = IssueType(type) if not isinstance(type, IssueType) else type
         with self._lock:
             self._refresh_locked()
-            now = datetime.now(UTC).isoformat()
+            now = self._timestamp()
             issue = Issue(
                 id=self._data.next_id,
                 type=issue_type,
@@ -308,7 +326,7 @@ class _MemoryBoard:
             issue = self.get(issue_id)
             if issue is None:
                 raise _issue_not_found(issue_id)
-            now = datetime.now(UTC).isoformat()
+            now = self._timestamp()
             old_status = issue.status
             issue.status = status
             issue.updated_at = now
@@ -343,7 +361,7 @@ class _MemoryBoard:
             for issue in self._data.issues:
                 if issue.status is not IssueStatus.BLOCKED:
                     continue
-                now = datetime.now(UTC).isoformat()
+                now = self._timestamp()
                 issue.status = IssueStatus.OPEN
                 issue.attempts = 0
                 issue.closed_iter = None
@@ -378,7 +396,7 @@ class _MemoryBoard:
             issue = self.get(issue_id)
             if issue is None:
                 raise _issue_not_found(issue_id)
-            now = datetime.now(UTC).isoformat()
+            now = self._timestamp()
             issue.attempts += 1
             issue.updated_at = now
             issue.history.append(
@@ -468,9 +486,10 @@ class IssueBoard(_MemoryBoard):
         path: Path,
         *,
         on_change: Callable[[], None] | None = None,
+        clock: Clock | None = None,
     ) -> None:
-        """Open the JSON issue board with an optional change callback."""
-        super().__init__()
+        """Open the JSON issue board; ``clock`` (epoch seconds) stamps every event."""
+        super().__init__(clock=clock)
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.is_file():

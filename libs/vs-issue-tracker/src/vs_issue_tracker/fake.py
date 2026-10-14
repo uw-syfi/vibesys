@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     import builtins
     from collections.abc import Callable
 
+    from vs_sim.api import Clock
+
 type FaultPhase = Literal["before", "after"]
 type FaultHook = Callable[[str, FaultPhase], None]
 """Called as ``hook(operation, phase)``; raising from it fails the operation at that point."""
@@ -25,17 +27,25 @@ type FaultHook = Callable[[str, FaultPhase], None]
 class FakeIssueTracker(_MemoryBoard):
     """An in-memory `IssueTracker` whose operations can fail on either side of their effect."""
 
-    def __init__(self, *, faults: FaultHook | None = None) -> None:
-        """Open an empty board; ``faults`` is consulted around every operation."""
-        super().__init__()
+    def __init__(self, *, faults: FaultHook | None = None, clock: Clock | None = None) -> None:
+        """Open an empty board; ``faults`` is consulted around every operation.
+
+        ``clock`` (epoch seconds) stamps every event; copies share it.
+        """
+        super().__init__(clock=clock)
         self.faults = faults
 
     def __deepcopy__(self, memo: dict[int, object]) -> FakeIssueTracker:
-        """An independent board with the same issues; the lock is the one thing not copied."""
+        """An independent board with the same issues; the lock is new and the clock shared."""
         clone = type(self).__new__(type(self))
         memo[id(self)] = clone
         for name, value in vars(self).items():
-            setattr(clone, name, type(value)() if name == "_lock" else copy.deepcopy(value, memo))
+            if name == "_lock":
+                setattr(clone, name, type(value)())
+            elif name == "_clock":
+                setattr(clone, name, value)
+            else:
+                setattr(clone, name, copy.deepcopy(value, memo))
         return clone
 
     def _around[T](self, operation: str, perform: Callable[[], T]) -> T:
