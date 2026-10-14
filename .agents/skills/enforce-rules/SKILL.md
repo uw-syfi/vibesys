@@ -129,5 +129,4 @@ untenable, saying so next to the rule.
   with their thresholds.
 - [coding-best-practices.md](../../../docs/contributing/coding-best-practices.md):
   size limits, ratchets, and the lint-waiver format.
-- [AGENTS.md](../../../AGENTS.md): the lint-suppression rule and the checks to
-  run before a PR.
+- [AGENTS.md](../../../AGENTS.md): the lint-suppression rule.

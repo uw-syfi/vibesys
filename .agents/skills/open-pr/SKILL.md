@@ -49,10 +49,8 @@ uv run pytest -k keyword
 uv run pytest
 ```
 
-   - Required last: run `./scripts/check_ci.sh` before opening or updating the
-     PR. It runs CI's Python check groups and stops at the first failure.
-     [AGENTS.md](../../../AGENTS.md) is the source of truth for this
-     requirement; if a check cannot run, say so in the PR body.
+   - Run only the checks the change can affect; CI runs the rest. If a check
+     you need cannot run, say so in the PR body.
 
 6. Commit intentionally:
    - Stage only the PR's files.
