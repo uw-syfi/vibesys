@@ -55,6 +55,7 @@ project root, and both must accept the same repositories.
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
@@ -156,6 +157,14 @@ class Pygit2GitRepository:
             paths.add(delta.old_file.path)
             paths.add(delta.new_file.path)
         return paths
+
+    @staticmethod
+    def _holds_file(repository: pygit2.Repository, path: str) -> bool:
+        """Whether the worktree has something other than a directory at ``path``."""
+        try:
+            return not stat.S_ISDIR(os.lstat(Path(repository.workdir) / path).st_mode)
+        except OSError:
+            return False
 
     # -- location ------------------------------------------------------------
 
@@ -384,18 +393,17 @@ class Pygit2GitRepository:
                 _refuse("bad revision 'HEAD'")
             # ``HEAD`` against the worktree walks the tree and the index together:
             # a path the index drops differs whatever its file holds, a path the
-            # index adds differs whatever its file holds as long as the worktree
-            # has a file or symlink there (Git skips an added path whose file was
-            # deleted or replaced by a directory), and every other path differs
-            # when the worktree file differs from the tree.
-            workdir = Path(repository.workdir)
+            # index adds differs while the worktree still holds a file there (Git
+            # has nothing to compare an added path with once it is gone or has
+            # become a directory), every other path differs when the worktree
+            # file differs from the tree.
             paths = self._changed_paths(tree.diff_to_workdir())
-            paths |= {
-                delta.new_file.path
-                for delta in repository.index.diff_to_tree(tree).deltas
-                if delta.status_char() == "D"
-                or (delta.status_char() == "A" and _is_file_or_link(workdir / delta.new_file.path))
-            }
+            for delta in repository.index.diff_to_tree(tree).deltas:
+                status = delta.status_char()
+                if status == "D" or (
+                    status == "A" and self._holds_file(repository, delta.new_file.path)
+                ):
+                    paths.add(delta.new_file.path)
         except _LIBGIT2_ERRORS as error:
             self._fail("diff --name-only HEAD", error)
         return tuple(sorted(path for path in paths if matcher.matches(path)))
@@ -530,11 +538,6 @@ class Pygit2GitRepository:
 
     def add_excludes(self, patterns: Sequence[str]) -> tuple[str, ...]:
         return append_excludes(self._exclude_file, patterns)
-
-
-def _is_file_or_link(path: Path) -> bool:
-    """Whether ``path`` is a file or a symlink (to anything), not a directory or absent."""
-    return path.is_symlink() or path.is_file()
 
 
 def _write_index(repository: pygit2.Repository, index: pygit2.Index) -> None:
