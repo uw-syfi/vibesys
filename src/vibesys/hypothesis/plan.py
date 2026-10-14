@@ -140,6 +140,8 @@ class OrchestratorPlan(BaseModel):
     orchestrator.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     hypothesis_id: str = Field(
         default="",
         description=(
