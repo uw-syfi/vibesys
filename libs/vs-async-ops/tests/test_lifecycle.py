@@ -6,6 +6,8 @@ import asyncio
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vs_async_ops.api import (
     OperationCancellationTimeoutError,
@@ -26,7 +28,7 @@ from vs_async_ops.api.testing import (
     InMemoryOperationStore,
     ObservingWaiter,
 )
-from vs_sim.api.testing import arrival
+from vs_sim.api.testing import arrival, examples
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -575,3 +577,41 @@ async def test_host_terminal_wait_never_polls_and_does_not_replay(terminal: str)
     assert restarted_runner.started == []
     await restarted.close()
     await coordinator.close()
+
+
+class _SlowUnwindRunner(FakeOperationRunner):
+    """A runner whose task needs several event-loop turns to unwind after cancellation."""
+
+    async def run(self, request: OperationRequest) -> JsonValue:
+        try:
+            return await super().run(request)
+        finally:
+            for _ in range(5):
+                await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+@settings(deadline=None, max_examples=examples(pr=20, nightly=60))
+@given(turns_before_caller_cancelled=st.integers(min_value=0, max_value=16), closing=st.booleans())
+async def test_cancelling_the_canceller_never_strands_a_running_record(
+    turns_before_caller_cancelled: int, *, closing: bool
+) -> None:
+    runner = _SlowUnwindRunner()
+    store = InMemoryOperationStore()
+    coordinator = OperationCoordinator(runner, store)
+    await coordinator.submit(_request("op"))
+    await runner.wait_started("op")
+    stopping = asyncio.create_task(coordinator.close() if closing else coordinator.cancel("op"))
+    for _ in range(turns_before_caller_cancelled):
+        await asyncio.sleep(0)
+    stopping.cancel()
+    await asyncio.gather(stopping, return_exceptions=True)
+
+    for _ in range(50):
+        await asyncio.sleep(0)
+
+    # Either the stop never began (the runner is still live) or it ran to the end: a RUNNING
+    # record with no work behind it would hang every waiter forever.
+    record = await store.get("op")
+    assert record is not None
+    assert record.state.terminal or "op" in runner.active

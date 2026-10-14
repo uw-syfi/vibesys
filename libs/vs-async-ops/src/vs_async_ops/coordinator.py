@@ -19,6 +19,7 @@ from vs_async_ops.models import (
     OperationTimedOut,
 )
 from vs_async_ops.ports import NULL_OPERATION_EVENT_SINK
+from vs_async_ops.settling import finish
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -258,6 +259,9 @@ class OperationCoordinator:
             if self._closed:
                 return
             self._closed = True
+        await finish(asyncio.ensure_future(self._interrupt_everything()))
+
+    async def _interrupt_everything(self) -> None:
         first_error: Exception | None = None
         for record in await self._store.records():
             if record.state.terminal:
@@ -272,6 +276,15 @@ class OperationCoordinator:
             raise first_error
 
     async def _terminate(
+        self, operation_id: str, terminal_state: OperationState
+    ) -> OperationHandle:
+        # A cancelled caller must not strand a record RUNNING after its task was
+        # stopped: nothing else would ever make it terminal.
+        return await finish(
+            asyncio.ensure_future(self._terminate_to_the_end(operation_id, terminal_state))
+        )
+
+    async def _terminate_to_the_end(
         self, operation_id: str, terminal_state: OperationState
     ) -> OperationHandle:
         async with self._operation_locks.hold(operation_id):
