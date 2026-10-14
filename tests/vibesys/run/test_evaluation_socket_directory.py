@@ -19,6 +19,7 @@ from vibesys.run.evaluation_socket import (
     EvaluationSocketDirectoryError,
     evaluation_socket_directory,
     evaluation_socket_mount,
+    prepare_evaluation_socket,
 )
 
 if TYPE_CHECKING:
@@ -108,3 +109,13 @@ def test_another_users_directory_is_refused_and_left_alone(tmp_path: Path, run_i
     with pytest.raises(EvaluationSocketDirectoryError, match=str(directory)):
         evaluation_socket_mount(tmp_path, run_id, owner=os.geteuid() + 1)
     assert stat.S_IMODE(directory.lstat().st_mode) == 0o755
+
+
+def test_the_bridges_socket_is_refused_under_a_planted_symlink(tmp_path: Path, run_id: str) -> None:
+    """The socket path the run's bridge listens on comes from the same checked creation."""
+    target = tmp_path / "theirs"
+    target.mkdir()
+    evaluation_socket_directory(tmp_path, run_id).symlink_to(target)
+
+    with pytest.raises(EvaluationSocketDirectoryError):
+        prepare_evaluation_socket(tmp_path, run_id)

@@ -431,8 +431,12 @@ class AgentEvaluationBridge:
     # socket service
 
     async def serve(self) -> None:
-        """Listen on the socket path; the owner of the path is this bridge."""
-        self._socket_path.parent.mkdir(parents=True, exist_ok=True)
+        """Listen on the socket path, in a directory the caller created private.
+
+        The bridge never creates that directory: a create that accepts an existing
+        path would serve inside one another user planted, who could then replace
+        the socket and answer the agent's evaluation calls.
+        """
         with contextlib.suppress(FileNotFoundError):
             self._socket_path.unlink()
         self._server = await asyncio.start_unix_server(

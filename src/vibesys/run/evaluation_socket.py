@@ -51,10 +51,8 @@ def evaluation_socket_path(project_root: Path, run_id: str) -> Path:
     return evaluation_socket_directory(project_root, run_id) / _SOCKET_NAME
 
 
-def evaluation_socket_mount(
-    project_root: Path, run_id: str, *, owner: int | None = None
-) -> EnvironmentBindMount:
-    """Create the socket directory private and describe the mount that exposes it to a container.
+def prepare_evaluation_socket(project_root: Path, run_id: str, *, owner: int | None = None) -> Path:
+    """Create the socket's directory private and return the socket path to listen on.
 
     ``owner`` is the uid the directory must belong to, this process's by default.
     An existing directory of ``owner``'s (a resumed or crashed run's) is reused
@@ -72,6 +70,14 @@ def evaluation_socket_mount(
         raise EvaluationSocketDirectoryError.planted(directory, owner)
     if stat.S_IMODE(status.st_mode) != _PRIVATE_DIRECTORY:
         directory.chmod(_PRIVATE_DIRECTORY)
+    return directory / _SOCKET_NAME
+
+
+def evaluation_socket_mount(
+    project_root: Path, run_id: str, *, owner: int | None = None
+) -> EnvironmentBindMount:
+    """Prepare the socket's directory (``prepare_evaluation_socket``) and describe its mount."""
+    directory = prepare_evaluation_socket(project_root, run_id, owner=owner).parent
     return EnvironmentBindMount(directory, str(directory), read_only=False)
 
 
@@ -80,4 +86,5 @@ __all__ = [
     "evaluation_socket_directory",
     "evaluation_socket_mount",
     "evaluation_socket_path",
+    "prepare_evaluation_socket",
 ]

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel
 
-from vibesys.run.evaluation_socket import evaluation_socket_path
+from vibesys.run.evaluation_socket import prepare_evaluation_socket
 from vs_agent.api import (
     AgentExecutionPolicy,
     AgentSessionSpec,
@@ -371,7 +371,7 @@ def _agent_bridge(
     if plan.agent_evaluation is None:
         return None
     return AgentEvaluationBridge(
-        evaluation_socket_path(resources.project.root, resources.run_id),
+        prepare_evaluation_socket(resources.project.root, resources.run_id),
         plan.agent_evaluation,
         ScopeWorkspaces(resources.workspaces, StoreWorkspaceReceipts(receipts)),
         AgentEvaluationRecords(OwedSubmissions(receipts), evidence),

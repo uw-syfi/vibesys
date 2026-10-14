@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
 
 
-def _bridge(tmp_path: Path) -> AgentEvaluationBridge:
+def _bridge(tmp_path: Path, socket: Path | None = None) -> AgentEvaluationBridge:
     root = tmp_path / "project"
     write_project(root)
     namespace = Project.open(root).state.state_store_namespace("offer")
@@ -50,7 +50,7 @@ def _bridge(tmp_path: Path) -> AgentEvaluationBridge:
         accuracy_gated=(),
     )
     return AgentEvaluationBridge(
-        tmp_path / "evaluation.sock",
+        socket or tmp_path / "evaluation.sock",
         policy,
         ScopeWorkspaces(
             cast("RuntimeWorkspaces", FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))),
@@ -77,3 +77,19 @@ def test_a_dynamic_role_is_offered_the_evaluation_tool_exactly_when_it_measures(
             socket_path=tmp_path / "evaluation.sock", token=env["VS_EVALUATION_TOKEN"]
         )
         assert {tool.name for tool in tools} == {SUBMIT_TOOL, VALIDATE_WAIT_TOOL}
+
+
+async def test_the_bridge_never_creates_its_sockets_directory(tmp_path: Path) -> None:
+    """Serving refuses a missing directory instead of creating one where the socket is.
+
+    ``serve`` once ran ``mkdir(parents=True, exist_ok=True)``, which also accepts a
+    directory or symlink another user planted at the shared temporary path, and
+    then served inside it. The directory is the caller's to create, through
+    ``prepare_evaluation_socket``'s ownership and mode check.
+    """
+    missing = tmp_path / "absent"
+    bridge = _bridge(tmp_path, missing / "evaluation.sock")
+
+    with pytest.raises(FileNotFoundError):
+        await bridge.serve()
+    assert not missing.exists()
