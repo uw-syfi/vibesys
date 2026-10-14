@@ -42,7 +42,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
         _name: object, *, log_dir: Path, log: object = None, image: str | None = None, clock: object
     ) -> _DaemonBackend:
         del clock  # the fake backend records no timestamps
-        made = _DaemonBackend(log_dir, log=log, image=image)  # ty: ignore[invalid-argument-type]
+        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
         made.engine = engine
         return made
 

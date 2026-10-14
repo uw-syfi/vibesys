@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Threads
 
 
 class ComputeBackend(StrEnum):
@@ -163,13 +163,14 @@ def make_local_shell_sandbox(
     host_workspace: str,
     env: dict[str, str],
     lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
+    threads: Threads,
 ) -> LocalShellRunner:
     """Construct the unconfined local-shell sandbox and run its lifecycle hooks.
 
     Every backend builds the local sandbox the same way, so the construction
     lives here once.
     """
-    sandbox = LocalShellRunner(host_workspace, env=env, inherit_env=True)
+    sandbox = LocalShellRunner(host_workspace, env=env, inherit_env=True, threads=threads)
     SandboxLifecycle(lifecycle_hooks).before_ready(sandbox)
     return sandbox
 
@@ -214,21 +215,23 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
     *,
     log: Callable[[str], None] | None = None,
     image: str | None = None,
-    docker: DockerCli | None = None,
+    docker: DockerCli,
+    threads: Threads,
     clock: Clock,
 ) -> ComputeBackendImpl:
     """Construct the registered implementation for one compute stack.
 
-    A supplied *docker* replaces the built-in Docker CLI for built-in backends.
+    *docker* runs the backend's ``docker`` commands and *threads* is the clock its
+    sandboxes measure command timeouts on.
     ``clock`` counts seconds since the epoch; a backend stamps what it records with it.
     """
     _ensure_defaults()
     if backend not in _REGISTRY:
         message = f"No backend impl registered for {backend!r}"
         raise ValueError(message)
-    if docker is None:
-        return _REGISTRY[backend](log_dir=log_dir, log=log, image=image, clock=clock)
-    return _REGISTRY[backend](log_dir=log_dir, log=log, image=image, docker=docker, clock=clock)
+    return _REGISTRY[backend](
+        log_dir=log_dir, log=log, image=image, docker=docker, threads=threads, clock=clock
+    )
 
 
 def _register_defaults() -> None:

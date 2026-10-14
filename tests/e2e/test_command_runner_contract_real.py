@@ -34,9 +34,9 @@ from tests.support.command_runner_contract import (
 )
 
 from vs_agent.api.images import agent_image
-from vs_sandbox.api import CommandRunner, DockerSandbox, LocalShellRunner
+from vs_sandbox.api import CommandRunner, DockerSandbox, LocalShellRunner, SubprocessDockerCli
 from vs_sandbox.api.testing import FakeDockerEngine
-from vs_sim.api import MonotonicClock, OsThreads, Threads
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, Threads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -128,7 +128,9 @@ class _ShellHarness:
 class TestLocalShellRunner(CommandRunnerContract):
     @pytest.fixture
     def harness(self, tmp_path: Path) -> Iterator[Harness]:
-        harness = _ShellHarness(LocalShellRunner(tmp_path, max_output_chars=CAP), tmp_path)
+        harness = _ShellHarness(
+            LocalShellRunner(tmp_path, max_output_chars=CAP, threads=OsThreads()), tmp_path
+        )
         try:
             yield harness
         finally:
@@ -150,6 +152,7 @@ class TestDockerSandboxOnFakeDaemon(CommandRunnerContract):
             docker=FakeDockerEngine(
                 tmp_path / "engine-state", agent_ids=(os.getuid(), os.getgid())
             ),
+            threads=OsThreads(),
         )
         sandbox.start()
         harness = _ShellHarness(sandbox, workspace)
@@ -177,6 +180,8 @@ class TestDockerSandboxOnRealDaemon(CommandRunnerContract):
                 _DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S, clock=MonotonicClock()
             ),
             max_output_bytes=CAP,
+            docker=SubprocessDockerCli(processes=OsProcesses()),
+            threads=OsThreads(),
         )
         sandbox.start()
         harness = _ShellHarness(sandbox, workspace)

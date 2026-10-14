@@ -37,7 +37,8 @@ from vs_sandbox.api import (
     DockerSandbox,
     SandboxKind,
 )
-from vs_sandbox.api.testing import FakeDockerEngine, FakeGpuTelemetry
+from vs_sandbox.api.testing import FakeDockerEngine, FakeGpuTelemetry, ScriptedDockerCli
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -111,6 +112,7 @@ class _DaemonBackend:
             resources=resources,
             docker=self.engine,
             docker_in_docker=docker_in_docker,
+            threads=OsThreads(),
         )
 
     def ensure_accelerator_available(self) -> None:
@@ -231,7 +233,13 @@ def test_a_host_without_a_gpu_fails_before_any_image_is_built(tmp_path: Path) ->
     """
     engine = _engine(tmp_path, ("runc",))
     runner = _RecordingBuildRunner()
-    backend = CudaBackend(tmp_path, gpu_telemetry=FakeGpuTelemetry(gpus=[]), clock=ManualClock())
+    backend = CudaBackend(
+        tmp_path,
+        gpu_telemetry=FakeGpuTelemetry(gpus=[]),
+        clock=ManualClock(),
+        threads=OsThreads(),
+        docker=ScriptedDockerCli(),
+    )
 
     with pytest.raises(CudaAcceleratorUnavailableError, match="NVIDIA GPU"):
         open_run_environment(_environment(engine, runner), _request(tmp_path, backend))

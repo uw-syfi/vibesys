@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.api import CommandRunner, HostResource
+    from vs_sim.api import Threads
 
 
 class DaemonBackend:
@@ -29,9 +30,10 @@ class DaemonBackend:
     image = "base-image"
     name = ComputeBackend.CUDA
 
-    def __init__(self, engine: FakeDockerEngine) -> None:
-        """Serve the fake daemon ``engine``."""
+    def __init__(self, engine: FakeDockerEngine, *, threads: Threads) -> None:
+        """Serve the fake daemon ``engine``; its exec clients run on ``threads``' clock."""
         self.engine = engine
+        self._threads = threads
         self.attach_accelerator: list[bool] = []
         self.kinds: list[SandboxKind] = []
 
@@ -56,6 +58,7 @@ class DaemonBackend:
             image=container_image or self.image,
             resources=resources,
             docker=self.engine,
+            threads=self._threads,
             docker_in_docker=docker_in_docker,
             same_path_workspace=same_path_workspace,
             env=extra_env,

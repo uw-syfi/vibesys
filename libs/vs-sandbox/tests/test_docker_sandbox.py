@@ -29,6 +29,7 @@ from vs_sandbox.docker_sandbox import (
     _live_containers,
 )
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
+from vs_sim.api import OsThreads
 
 
 class _RecordingHooks(SandboxLifecycleHooks):
@@ -58,6 +59,7 @@ def sandbox(tmp_path: Path, docker: ScriptedDockerCli) -> DockerSandbox:
         host_workspace=str(tmp_path / "workspace"),
         image="nvcr.io/nvidia/pytorch:25.04-py3",
         gpus="all",
+        threads=OsThreads(),
     )
 
 
@@ -72,6 +74,7 @@ def sandbox_with_mounts(tmp_path: Path, docker: ScriptedDockerCli) -> DockerSand
             (str(tmp_path / "model_weights"), "/workspace/reference/model", True),
             (str(tmp_path / "accuracy_checker"), "/workspace/accuracy_checker", True),
         ],
+        threads=OsThreads(),
     )
 
 
@@ -249,6 +252,7 @@ class TestStart:
             agent_uid=1234,
             agent_gid=5678,
             lifecycle_hooks=[_RecordingHooks(invocations)],
+            threads=OsThreads(),
         )
         docker.then(
             docker_result(stdout="abc123\n"),
@@ -282,6 +286,7 @@ class TestAgentUserRemap:
             image="test-image",
             agent_uid=4242,
             agent_gid=4343,
+            threads=OsThreads(),
         )
         docker.then(
             docker_result(stdout="abc123\n"),
@@ -308,6 +313,7 @@ class TestAgentUserRemap:
             image="test-image",
             agent_uid=1000,
             agent_gid=1000,
+            threads=OsThreads(),
         )
         docker.then(
             docker_result(stdout="abc123\n"),
@@ -330,6 +336,7 @@ class TestAgentUserRemap:
             agent_uid=4242,
             agent_gid=4343,
             docker=engine,
+            threads=OsThreads(),
         )
         sandbox.start()
         try:
@@ -353,6 +360,7 @@ class TestAuthFileCopy:
             agent_uid=1000,
             agent_gid=1000,
             auth_files=[("/opt/vibesys-auth/0", "/home/agent/.claude.json")],
+            threads=OsThreads(),
         )
         docker.then(
             docker_result(stdout="abc123\n"),
@@ -393,6 +401,7 @@ class TestExecute:
             agent_uid=os.getuid(),
             agent_gid=os.getgid(),
             docker=engine,
+            threads=OsThreads(),
         )
         sandbox.start()
         return sandbox, engine
@@ -460,6 +469,7 @@ class TestLifecycleHooks:
             host_workspace=str(tmp_path / "workspace"),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
             lifecycle_hooks=[_RecordingHooks(invocations)],
+            threads=OsThreads(),
         )
         s.start()
         assert invocations == [s]
@@ -474,6 +484,7 @@ class TestLifecycleHooks:
             host_workspace=str(tmp_path / "workspace"),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
             lifecycle_hooks=[_RecordingHooks(invocations)],
+            threads=OsThreads(),
         )
         s.start()
         s.start()
@@ -491,6 +502,7 @@ class TestLifecycleHooks:
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
             lifecycle_hooks=[_FailingHooks()],
+            threads=OsThreads(),
         )
 
         try:
@@ -519,6 +531,7 @@ class TestLifecycleHooks:
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
             lifecycle_hooks=[_FailingHooks()],
+            threads=OsThreads(),
         )
 
         try:
@@ -734,7 +747,7 @@ class TestCleanupOnExit:
         docker.calls.clear()
         docker.always(docker_result())
 
-        _cleanup_containers(docker)
+        _cleanup_containers()
 
         assert len(_live_containers) == 0
         # Should have called docker stop + docker rm
@@ -748,12 +761,12 @@ class TestCleanupOnExit:
         self, cleanup_mode: Literal["raises", "nonzero"], docker: ScriptedDockerCli
     ) -> None:
 
-        _live_containers["abc123"] = "vibesys-test"
+        _live_containers["abc123"] = docker
 
         docker.on(("docker", "rm"), _failed_cleanup(cleanup_mode))
         docker.always(docker_result())
 
-        _cleanup_containers(docker)
+        _cleanup_containers()
 
         assert "abc123" in _live_containers
         rm_call = docker.calls[1]
@@ -762,13 +775,13 @@ class TestCleanupOnExit:
 
     def test_cleanup_forces_removal_after_stop_exception(self, docker: ScriptedDockerCli) -> None:
 
-        _live_containers["abc123"] = "vibesys-test"
+        _live_containers["abc123"] = docker
         docker.then(
             OSError("Docker daemon disconnected"),
             docker_result(),
         )
 
-        _cleanup_containers(docker)
+        _cleanup_containers()
 
         assert docker.argvs[1] == ("docker", "rm", "-f", "abc123")
         assert "abc123" not in _live_containers
@@ -807,7 +820,10 @@ class TestCleanupOnExit:
             docker.on(("docker", "rm"), rm)
             docker.always(docker_result(stdout="abc123\n"))
             sandbox = DockerSandbox(
-                docker=docker, host_workspace=str(tmp_path / "workspace"), image="test-image"
+                docker=docker,
+                host_workspace=str(tmp_path / "workspace"),
+                image="test-image",
+                threads=OsThreads(),
             )
             sandbox.start()
             try:
@@ -817,7 +833,7 @@ class TestCleanupOnExit:
                     except RuntimeError:
                         return False
                 else:
-                    _cleanup_containers(docker)
+                    _cleanup_containers()
                 return "abc123" not in _live_containers
             finally:
                 _live_containers.pop("abc123", None)
@@ -834,6 +850,7 @@ class TestEnvVars:
             host_workspace=str(tmp_path / "workspace"),
             image="pytorch:latest",
             env={"MY_KEY": "my_value", "OTHER": "thing"},
+            threads=OsThreads(),
         )
 
         docker.always(docker_result(stdout="abc123\n"))
@@ -862,6 +879,7 @@ class TestEnvVars:
                 "PYTHONPATH": "/opt/vibesys",
             },
             log_path=log_path,
+            threads=OsThreads(),
         )
 
         docker.always(docker_result(stdout="abc123\n"))
@@ -888,6 +906,7 @@ class TestEnvVars:
             host_workspace=str(workspace),
             image="pytorch:latest",
             env={"ANTHROPIC_API_KEY": "sk-secret-key", "PYTHONPATH": "/opt/vibesys"},
+            threads=OsThreads(),
         )
 
         docker.always(docker_result(stdout="abc123\n"))
@@ -906,6 +925,7 @@ class TestEnvVars:
             host_workspace=str(tmp_path / "workspace"),
             image="pytorch:latest",
             env={"ANTHROPIC_AUTH_TOKEN": "sk-secret-token"},
+            threads=OsThreads(),
         )
 
         docker.always(docker_result(returncode=125, stderr="boom"))
@@ -929,6 +949,7 @@ class TestDevicePassthrough:
             image="public.ecr.aws/neuron/pytorch-inference-neuronx:latest",
             gpus=None,  # Neuron uses --device, not --gpus
             devices=["/dev/neuron0", "/dev/neuron1"],
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
 
@@ -957,6 +978,7 @@ class TestDevicePassthrough:
             gpus=None,
             devices=["/dev/kfd", "/dev/dri/renderD128"],
             group_add=["video", "render"],
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
 
@@ -977,6 +999,7 @@ class TestDevicePassthrough:
             docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="img",
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
@@ -988,6 +1011,7 @@ class TestDevicePassthrough:
             docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="img",
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
@@ -1007,7 +1031,8 @@ class TestEntrypointOverride:
             host_workspace=str(workspace),
             image=image,
             gpus=None,
-            entrypoint="",  # clear the DLC's baked-in model-server entrypoint
+            entrypoint="",  # clear the DLC's baked-in model-server entrypoint,
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
@@ -1026,6 +1051,7 @@ class TestEntrypointOverride:
             docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="img",
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
@@ -1042,6 +1068,7 @@ class TestShmSize:
             host_workspace=str(workspace),
             image="img",
             shm_size="16g",
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
@@ -1052,7 +1079,10 @@ class TestShmSize:
 
     def test_no_shm_size_by_default(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         sandbox = DockerSandbox(
-            docker=docker, host_workspace=str(tmp_path / "workspace"), image="img"
+            docker=docker,
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
@@ -1062,7 +1092,11 @@ class TestShmSize:
 class TestAutoRemove:
     def test_auto_remove_emits_rm_flag(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         sandbox = DockerSandbox(
-            docker=docker, host_workspace=str(tmp_path / "workspace"), image="img", auto_remove=True
+            docker=docker,
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            auto_remove=True,
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
@@ -1070,7 +1104,10 @@ class TestAutoRemove:
 
     def test_no_rm_by_default(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         sandbox = DockerSandbox(
-            docker=docker, host_workspace=str(tmp_path / "workspace"), image="img"
+            docker=docker,
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
@@ -1106,6 +1143,7 @@ class TestWritableCredentialMounts:
             docker=engine,
             bind_mounts=bind_mounts,
             auth_files=auth_files,
+            threads=OsThreads(),
         )
         sandbox.start()
         sandbox.stop()
@@ -1168,6 +1206,7 @@ class TestResources:
             resources=(
                 HostResource(tmp_path / "toolchain", HostResourceAccess.READ_ONLY, "toolchain"),
             ),
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
@@ -1182,6 +1221,7 @@ class TestResources:
             host_workspace=str(tmp_path / "workspace"),
             image="img",
             resources=(HostResource(tmp_path / "state", HostResourceAccess.READ_WRITE, "state"),),
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
@@ -1207,6 +1247,7 @@ class TestResources:
                     agent_path="/opt/vibesys-toolchain",
                 ),
             ),
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
@@ -1221,6 +1262,7 @@ class TestResources:
             host_workspace=str(tmp_path / "workspace"),
             image="img",
             resources=(HostResource(tmp_path / "listed", HostResourceAccess.READ_ONLY, "listed"),),
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
@@ -1239,6 +1281,7 @@ class TestResources:
             resources=(
                 HostResource(tmp_path / "declared", HostResourceAccess.READ_ONLY, "declared"),
             ),
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
@@ -1248,7 +1291,10 @@ class TestResources:
 
     def test_no_resources_by_default(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         sandbox = DockerSandbox(
-            docker=docker, host_workspace=str(tmp_path / "workspace"), image="img"
+            docker=docker,
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
@@ -1264,7 +1310,12 @@ class TestAgentPath:
 
     def test_workspace_path_maps_under_the_container_root(self, tmp_path: Path) -> None:
         workspace = tmp_path / "workspace"
-        sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
+        sandbox = DockerSandbox(
+            host_workspace=str(workspace),
+            image="img",
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
+        )
 
         assert sandbox.agent_path(workspace) == "/workspace"
         assert sandbox.agent_path(workspace / "sub" / "file.py") == "/workspace/sub/file.py"
@@ -1275,6 +1326,8 @@ class TestAgentPath:
             host_workspace=str(tmp_path / "workspace"),
             image="img",
             resources=(HostResource(resource_path, HostResourceAccess.READ_ONLY, "toolchain"),),
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
         )
 
         assert sandbox.agent_path(resource_path / "bin" / "rustc") == str(
@@ -1294,6 +1347,8 @@ class TestAgentPath:
                     agent_path="/opt/vibesys-toolchain",
                 ),
             ),
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
         )
 
         assert (
@@ -1317,18 +1372,30 @@ class TestAgentPath:
                     agent_path="/opt/vibesys-vendor",
                 ),
             ),
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
         )
 
         assert sandbox.agent_path(nested_resource / "lib.so") == "/opt/vibesys-vendor/lib.so"
         assert sandbox.agent_path(workspace / "src" / "main.py") == "/workspace/src/main.py"
 
     def test_unrelated_path_is_identity(self, tmp_path: Path) -> None:
-        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
+        )
 
         assert sandbox.agent_path("/etc/passwd") == "/etc/passwd"
 
     def test_normalizes_like_the_host_default(self, tmp_path: Path) -> None:
-        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
+        )
 
         assert sandbox.agent_path("/foo//bar/") == "/foo/bar"
         assert sandbox.agent_path(Path("/foo/./bar")) == "/foo/bar"
@@ -1338,13 +1405,20 @@ class TestWrap:
     """``wrap`` builds the ``docker exec`` prefix a driver's command executor needs."""
 
     def test_wrap_before_start_raises(self, tmp_path: Path) -> None:
-        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
+        )
         with pytest.raises(RuntimeError, match="not started"):
             sandbox.wrap(["echo", "hi"], str(tmp_path / "workspace"))
 
     def test_wrap_shape(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         workspace = tmp_path / "workspace"
-        sandbox = DockerSandbox(docker=docker, host_workspace=str(workspace), image="img")
+        sandbox = DockerSandbox(
+            docker=docker, host_workspace=str(workspace), image="img", threads=OsThreads()
+        )
         docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
 
@@ -1357,7 +1431,9 @@ class TestWrap:
     ) -> None:
         """Omitting cwd matches the base ``WorkspaceSandbox.wrap(argv)`` shape."""
         workspace = tmp_path / "workspace"
-        sandbox = DockerSandbox(docker=docker, host_workspace=str(workspace), image="img")
+        sandbox = DockerSandbox(
+            docker=docker, host_workspace=str(workspace), image="img", threads=OsThreads()
+        )
         docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
 
@@ -1367,7 +1443,9 @@ class TestWrap:
 
     def test_wrap_uses_agent_path_of_cwd(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         workspace = tmp_path / "workspace"
-        sandbox = DockerSandbox(docker=docker, host_workspace=str(workspace), image="img")
+        sandbox = DockerSandbox(
+            docker=docker, host_workspace=str(workspace), image="img", threads=OsThreads()
+        )
         docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
 
@@ -1384,6 +1462,7 @@ class TestWrap:
             host_workspace=str(workspace),
             image="img",
             env={"FOO": "bar"},
+            threads=OsThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
@@ -1399,7 +1478,9 @@ class TestWrap:
     ) -> None:
         """No ``-u`` flag: the container already runs as the remapped agent user."""
         workspace = tmp_path / "workspace"
-        sandbox = DockerSandbox(docker=docker, host_workspace=str(workspace), image="img")
+        sandbox = DockerSandbox(
+            docker=docker, host_workspace=str(workspace), image="img", threads=OsThreads()
+        )
         docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
 
@@ -1412,7 +1493,12 @@ class TestEnv:
     """``env`` reports HOME, the image's own PATH, and any extra env."""
 
     def test_env_before_start_raises(self, tmp_path: Path) -> None:
-        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
+        )
         with pytest.raises(RuntimeError, match="not started"):
             _ = sandbox.env
 
@@ -1425,6 +1511,7 @@ class TestEnv:
             image="img",
             agent_uid=1000,
             agent_gid=1000,
+            threads=OsThreads(),
         )
         docker.then(
             docker_result(stdout="abc123\n"),
@@ -1449,6 +1536,7 @@ class TestEnv:
             image="img",
             agent_uid=1000,
             agent_gid=1000,
+            threads=OsThreads(),
         )
         docker.then(
             docker_result(stdout="abc123\n"),
@@ -1475,6 +1563,7 @@ class TestEnv:
             env={"HOME": "/custom/home", "EXTRA": "1"},
             agent_uid=1000,
             agent_gid=1000,
+            threads=OsThreads(),
         )
         docker.then(
             docker_result(stdout="abc123\n"),
@@ -1498,6 +1587,7 @@ class TestEnv:
             image="img",
             agent_uid=1000,
             agent_gid=1000,
+            threads=OsThreads(),
         )
         docker.then(
             docker_result(stdout="abc123\n"),

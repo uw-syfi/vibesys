@@ -15,6 +15,8 @@ from vs_sandbox.api import (
     SandboxKind,
     create_compute_backend,
 )
+from vs_sandbox.api.testing import ScriptedDockerCli
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -23,7 +25,11 @@ if TYPE_CHECKING:
 
 def _make_backend(tmp_path: Path) -> LocalBackend:
     impl = create_compute_backend(
-        ComputeBackend.METAL, log_dir=tmp_path / "logs", clock=ManualClock()
+        ComputeBackend.METAL,
+        log_dir=tmp_path / "logs",
+        clock=ManualClock(),
+        docker=ScriptedDockerCli(),
+        threads=OsThreads(),
     )
     assert isinstance(impl, LocalBackend)
     return impl
@@ -31,7 +37,13 @@ def _make_backend(tmp_path: Path) -> LocalBackend:
 
 class TestMetalRegistry:
     def test_metal_in_registry(self, tmp_path: Path) -> None:
-        impl = create_compute_backend(ComputeBackend.METAL, log_dir=tmp_path, clock=ManualClock())
+        impl = create_compute_backend(
+            ComputeBackend.METAL,
+            log_dir=tmp_path,
+            clock=ManualClock(),
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
+        )
         assert isinstance(impl, LocalBackend)
         assert impl.name is ComputeBackend.METAL
 

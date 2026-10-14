@@ -26,8 +26,8 @@ from vs_sandbox.api import (
     SandboxLifecycleHooks,
     TrainiumBackend,
 )
-from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api.testing import ManualClock
+from vs_sandbox.api.testing import FakeComputeBackend, ScriptedDockerCli
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -44,7 +44,9 @@ class _RecordingHooks(SandboxLifecycleHooks):
 
 
 _FACTORIES = {
-    "real": partial(CudaBackend, clock=ManualClock()),
+    "real": partial(
+        CudaBackend, clock=ManualClock(), docker=ScriptedDockerCli(), threads=SimThreads()
+    ),
     "fake": FakeComputeBackend,
 }
 

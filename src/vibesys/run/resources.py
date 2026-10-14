@@ -119,7 +119,6 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox.api import (
     ComputeBackendImpl,
     HostResource,
-    create_compute_backend,
 )
 from vs_sim.api import utc_datetime
 
@@ -160,7 +159,7 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
         | None
     ) = None,
-    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    backend_factory: Callable[..., ComputeBackendImpl],
     profiler_preflight: ProfilerPreflight | None = None,
 ) -> "_PreparedRun":
     """Open one project context and register its resources with ``ownership``.
@@ -169,10 +168,10 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
     failure. Product composition chooses every resource; the runtime host owns
     their common lifetime.
 
-    ``backend_factory`` overrides how the compute backend is constructed
-    (default: ``vs_sandbox.api.create_compute_backend``); a test injects
-    ``vs_sandbox.api.testing.FakeComputeBackend`` here instead of monkeypatching
-    the registry or a backend's internal sandbox constructor.
+    ``backend_factory`` constructs the compute backend: launch binds
+    ``vs_sandbox.api.create_compute_backend`` to the run's Docker CLI and threads; a
+    test injects ``vs_sandbox.api.testing.FakeComputeBackend`` here instead of
+    monkeypatching the registry or a backend's internal sandbox constructor.
     """
     return _assemble_run_resources(
         ownership=ownership,
@@ -195,7 +194,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
         | None
     ) = None,
-    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    backend_factory: Callable[..., ComputeBackendImpl],
     profiler_preflight: ProfilerPreflight | None = None,
 ) -> "_PreparedRun":
     validate_run_request(request, git=integration.git)
@@ -310,8 +309,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             )
 
         with boot_trace.span("backend_and_model"):
-            backend_get = create_compute_backend if backend_factory is None else backend_factory
-            backend_impl = backend_get(
+            backend_impl = backend_factory(
                 backend,
                 log_dir=Project.log_directory_for(project_root, run_id),
                 log=buffered_logs.append,

@@ -23,7 +23,7 @@ from vibesys.run.environment import open_run_environment
 from vs_runtime.api.infrastructure import SlurmEnvironment
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api.slurm import BrokeredProcesses, load_slurm_operator_settings
-from vs_sim.api import ProcessOutcome, ProcessSpec, UnixNetwork
+from vs_sim.api import OsThreads, ProcessOutcome, ProcessSpec, UnixNetwork
 
 if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
@@ -102,7 +102,7 @@ def _run(
 
     Every session the run opens (the root's first, then each candidate's) is appended to *opened*.
     """
-    backend = DaemonBackend(daemon_engine(tmp_path))
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
     environment = environment or _environment(tmp_path, backend)
 
     def open_session(request: RunEnvironmentRequest) -> RunEnvironmentSession:
@@ -194,7 +194,7 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
     """The SSH transport's broker of a candidate session is scoped like its GPU broker."""
     config = tmp_path / "ssh.toml"
     config.write_text(_SSH_CONFIG, encoding="utf-8")
-    backend = DaemonBackend(daemon_engine(tmp_path))
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
     environment = SlurmEnvironment(
         load_slurm_operator_settings(config), docker=daemon_docker_config(backend.engine)
     )

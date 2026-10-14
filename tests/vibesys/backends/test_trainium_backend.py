@@ -20,7 +20,8 @@ from vs_sandbox.api import (
     TrainiumBackend,
     create_compute_backend,
 )
-from vs_sandbox.api.testing import FakeAcceleratorDiscovery
+from vs_sandbox.api.testing import FakeAcceleratorDiscovery, ScriptedDockerCli
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -39,15 +40,20 @@ def _make_backend(
         accelerator_discovery=FakeAcceleratorDiscovery(
             trainium=AcceleratorInventory(tuple(devices))
         ),
-        docker=docker,
+        docker=ScriptedDockerCli() if docker is None else docker,
         clock=ManualClock(),
+        threads=OsThreads(),
     )
 
 
 class TestTrainiumRegistry:
     def test_trainium_in_registry(self, tmp_path: Path) -> None:
         impl = create_compute_backend(
-            ComputeBackend.TRAINIUM, log_dir=tmp_path, clock=ManualClock()
+            ComputeBackend.TRAINIUM,
+            log_dir=tmp_path,
+            clock=ManualClock(),
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
         )
         assert isinstance(impl, TrainiumBackend)
         assert impl.name is ComputeBackend.TRAINIUM

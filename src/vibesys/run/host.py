@@ -124,7 +124,7 @@ class _ProductHostFactory:
     open_agent_environment: Callable[..., AgentExecutionEnvironment] | None
     projector: CommittedStateProjector | None
     agent_client_factory: Callable[..., AgentClientProtocol] | None
-    backend_factory: Callable[..., ComputeBackendImpl] | None
+    backend_factory: Callable[..., ComputeBackendImpl]
     plugin: OrchestrationPlugin
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore] | None
     timing: RunTiming
@@ -547,7 +547,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     open_agent_environment: Callable[..., AgentExecutionEnvironment] | None = None,
     projector: CommittedStateProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
-    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    backend_factory: Callable[..., ComputeBackendImpl],
     profiler_preflight: ProfilerPreflight | None = None,
     stop_timer: StopTimer,
     timing: RunTiming,

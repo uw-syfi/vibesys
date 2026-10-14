@@ -27,8 +27,13 @@ from tests.support import run_test_command
 
 from vs_agent.api.images import agent_image
 from vs_runtime.api.infrastructure import image_features
-from vs_sandbox.api import AGENT_HOME, CONTAINER_RUNTIME_TOOLCHAIN, DockerSandbox
-from vs_sim.api import MonotonicClock
+from vs_sandbox.api import (
+    AGENT_HOME,
+    CONTAINER_RUNTIME_TOOLCHAIN,
+    DockerSandbox,
+    SubprocessDockerCli,
+)
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads
 
 if TYPE_CHECKING:
     import subprocess
@@ -94,6 +99,8 @@ def test_hotel_reservation_sandbox_runs_compose_and_containers_on_its_own_daemon
             clock=MonotonicClock(),
         ),
         docker_in_docker=True,
+        docker=SubprocessDockerCli(processes=OsProcesses()),
+        threads=OsThreads(),
     )
 
     def inside(command: str) -> subprocess.CompletedProcess[str]:

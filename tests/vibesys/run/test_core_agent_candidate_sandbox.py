@@ -65,7 +65,7 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
         _name: object, *, log_dir: Path, log: object = None, image: str | None = None, clock: object
     ) -> _DaemonBackend:
         del clock  # the fake backend records no timestamps
-        made = _DaemonBackend(log_dir, log=log, image=image)  # ty: ignore[invalid-argument-type]
+        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
         made.engine = engine
         return made
 
@@ -180,7 +180,7 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
         _name: object, *, log_dir: Path, log: object = None, image: str | None = None, clock: object
     ) -> _DaemonBackend:
         del clock  # the fake backend records no timestamps
-        made = _DaemonBackend(log_dir, log=log, image=image)  # ty: ignore[invalid-argument-type]
+        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
         made.engine = engine
         return made
 

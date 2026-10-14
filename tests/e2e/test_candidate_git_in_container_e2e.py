@@ -30,9 +30,9 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentSpec,
     build_run_environment,
 )
-from vs_sandbox.api import ComputeBackend, ProjectPathPolicy
+from vs_sandbox.api import ComputeBackend, ProjectPathPolicy, SubprocessDockerCli
 from vs_sandbox.local_compute_backend import LocalBackend
-from vs_sim.api import MonotonicClock
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -75,7 +75,13 @@ def candidate(tmp_path: Path) -> Iterator[tuple[RunEnvironmentSession, Path, Pat
         log_dir=log_dir,
         workspace=workspace,
         ref_dir=None,
-        backend=LocalBackend(ComputeBackend.CPU, log_dir, image=_BASE_IMAGE),
+        backend=LocalBackend(
+            ComputeBackend.CPU,
+            log_dir,
+            image=_BASE_IMAGE,
+            docker=SubprocessDockerCli(processes=OsProcesses()),
+            threads=OsThreads(),
+        ),
         agent_backend="stub",
         cli_provider=None,
         run_id="candidate-git-e2e",

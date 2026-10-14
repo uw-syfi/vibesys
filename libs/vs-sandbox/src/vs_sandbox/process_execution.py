@@ -16,13 +16,14 @@ import subprocess
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
-from math import isfinite
 from typing import TYPE_CHECKING, Protocol
 
-from vs_sim.api import OsThreads, ProcessTimeoutError, Threads
+from vs_sim.api import ProcessTimeoutError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+
+    from vs_sim.api import Threads
 
 type _TextProcess = subprocess.Popen[str]
 
@@ -36,8 +37,6 @@ type SignalSender = Callable[[StopSignal], None]
 
 #: Default time a stopped command gets between ``SIGTERM`` and ``SIGKILL``.
 DEFAULT_TERMINATION_GRACE_SECONDS = 30.0
-#: Longest cleanup wait after a synchronous command timeout kills its owned group.
-DEFAULT_PROCESS_SETTLE_SECONDS = 5.0
 # How often a cancellable wait checks the caller's event. The event has no
 # wait-any primitive with process exit, so the wait polls; this bounds the
 # latency of a cancellation, not of a normal exit.
@@ -110,65 +109,6 @@ class StoppableProcess(Protocol):
         ...
 
 
-class CapturedProcess(StoppableProcess, Protocol):
-    """A process whose captured streams can be released after its leader is reaped."""
-
-    @property
-    def timeout_output(self) -> tuple[bytes | None, bytes | None]:
-        """Raw stdout and stderr captured when the first wait timed out."""
-        ...
-
-    def signal_group_if_unreaped(self, signal_number: StopSignal) -> bool:
-        """Signal the group only while the leader's PID still reserves its PGID.
-
-        Return whether the leader was still unreaped and the signal was
-        attempted. Once the leader is reaped, its numeric process-group ID may
-        belong to an unrelated group and must never be signalled.
-        """
-        ...
-
-    def close(self) -> None:
-        """Attempt every pipe close, grouping multiple failures in stream order."""
-        ...
-
-
-@dataclass(frozen=True, slots=True)
-class CapturedProcessRequest:
-    """One synchronous captured command and its unchanged subprocess inputs."""
-
-    argv: Sequence[str]
-    stdin: str | None
-    timeout: float
-    env: Mapping[str, str] | None = None
-    cwd: str | None = None
-    start_new_session: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class CapturedProcessResult:
-    """Complete captured streams and raw subprocess status for one command."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
-
-class CapturedProcessLauncher(Protocol):
-    """Start a captured command as the leader of a locally owned process group."""
-
-    def start(self, request: CapturedProcessRequest) -> CapturedProcess:
-        """Start *request*, raising its launch error unchanged."""
-        ...
-
-
-class CapturedProcessRunner(Protocol):
-    """Run captured commands while owning their whole local process group."""
-
-    def run(self, request: CapturedProcessRequest) -> CapturedProcessResult:
-        """Return a completed command or raise :class:`subprocess.TimeoutExpired`."""
-        ...
-
-
 class PopenProcess:
     """A ``subprocess.Popen`` started with :func:`start_process_group`."""
 
@@ -177,7 +117,6 @@ class PopenProcess:
         self._process = process
         self._stdin = stdin
         self._communication_started = False
-        self._timeout_output: tuple[bytes | None, bytes | None] = (None, None)
 
     @property
     def returncode(self) -> int:
@@ -194,31 +133,13 @@ class PopenProcess:
             stdin = None if self._communication_started else self._stdin
             self._communication_started = True
             return self._process.communicate(input=stdin, timeout=timeout)
-        except ProcessTimeoutError as error:
-            self._timeout_output = (error.output, error.stderr)
+        except ProcessTimeoutError:
             return None
-
-    @property
-    def timeout_output(self) -> tuple[bytes | None, bytes | None]:
-        """Return the raw partial streams reported by ``communicate``."""
-        return self._timeout_output
 
     def signal_group(self, signal_number: StopSignal) -> None:
         """Signal the group; it outlives its leader while any descendant remains in it."""
         with suppress(ProcessLookupError, PermissionError):
             os.killpg(self._process.pid, signal_number)
-
-    def signal_group_if_unreaped(self, signal_number: StopSignal) -> bool:
-        """Signal while this handle still reserves the leader's PID and PGID."""
-        # ``Popen.returncode`` changes only when this owner reaps the child.
-        # A leader that exited in the kernel but remains unreaped is a zombie,
-        # so its PID still reserves the process-group identity and is safe to
-        # signal. Conversely, ``communicate`` can reap before raising a decode
-        # error, in which case signalling the stale numeric PGID is unsafe.
-        if self._process.returncode is not None:
-            return False
-        self.signal_group(signal_number)
-        return True
 
     def close(self) -> None:
         """Release all pipes and reap an already-exited leader without blocking."""
@@ -243,13 +164,6 @@ def raise_pipe_close_failures(failures: list[BaseException]) -> None:
     if failures:
         message = "captured process pipes could not be closed"
         raise BaseExceptionGroup(message, failures)
-
-
-def _cleanup_failure_message(failure: BaseException) -> str:
-    """Describe nested cleanup failures in their deterministic attempt order."""
-    if isinstance(failure, BaseExceptionGroup):
-        return "; ".join(_cleanup_failure_message(item) for item in failure.exceptions)
-    return str(failure) or type(failure).__name__
 
 
 def _open_process(
@@ -288,95 +202,6 @@ def start_process_group(
     return _open_process(argv, env=env, cwd=cwd, stdin=subprocess.DEVNULL)
 
 
-class _SubprocessCapturedProcessLauncher:
-    """Start a real captured process group for :class:`OwnedProcessRunner`."""
-
-    def start(self, request: CapturedProcessRequest) -> CapturedProcess:
-        process = _open_process(
-            request.argv,
-            env=request.env,
-            cwd=request.cwd,
-            stdin=subprocess.PIPE if request.stdin is not None else None,
-            start_new_session=request.start_new_session,
-        )
-        return PopenProcess(process, stdin=request.stdin)
-
-
-class OwnedProcessRunner:
-    """Run a captured command and settle its locally owned group on failure.
-
-    A timeout sends ``SIGKILL`` to the group while its leader remains unreaped,
-    preserving ``subprocess.run``'s immediate-kill policy while extending it to
-    descendants. Other failures do the same only while the leader remains
-    unreaped; after a decode failure has reaped it, cleanup cannot safely signal
-    its potentially reused numeric PGID. Cleanup waits at most
-    *settle_seconds*, then closes the captured pipes and reaps an exited leader
-    without another blocking wait. The original exception remains authoritative.
-    """
-
-    def __init__(
-        self,
-        *,
-        processes: CapturedProcessLauncher | None = None,
-        threads: Threads | None = None,
-        settle_seconds: float = DEFAULT_PROCESS_SETTLE_SECONDS,
-    ) -> None:
-        """Use OS process effects by default with a finite cleanup budget."""
-        if not isfinite(settle_seconds) or settle_seconds < 0:
-            message = "process settle timeout must be finite and nonnegative"
-            raise ValueError(message)
-        self._processes = processes or _SubprocessCapturedProcessLauncher()
-        self._threads = threads or OsThreads()
-        self._settle_seconds = settle_seconds
-
-    def run(self, request: CapturedProcessRequest) -> CapturedProcessResult:
-        """Run *request*, safely settling its owned process group on failure."""
-        process = self._processes.start(request)
-        try:
-            finished = process.wait(request.timeout)
-        except BaseException as failure:
-            self._settle_owned_failure(process, failure)
-            raise
-        if finished is None:
-            error = ProcessTimeoutError(request.argv, request.timeout)
-            self._settle_owned_failure(process, error)
-            error.output, error.stderr = process.timeout_output
-            raise error
-        try:
-            return CapturedProcessResult(process.returncode, *finished)
-        finally:
-            process.close()
-
-    def _settle_owned_failure(
-        self,
-        process: CapturedProcess,
-        failure: BaseException,
-    ) -> tuple[str, str] | None:
-        """Kill and settle a group only while its leader identity is reserved."""
-        settled: tuple[str, str] | None = None
-        deadline = self._threads.now() + self._settle_seconds
-        try:
-            if process.signal_group_if_unreaped(KILL):
-                settled = process.wait(max(0.0, deadline - self._threads.now()))
-                if settled is None:
-                    failure.add_note(
-                        f"process group did not settle within {self._settle_seconds:g} seconds"
-                    )
-        except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-731022 [BLE001]; cleanup must preserve the caller's timeout or interruption while still attempting pipe closure.
-            # > Catching only OS errors would let an injected process adapter replace
-            # > the primary failure; a wrapper around these two steps adds no isolation.
-            detail = _cleanup_failure_message(cleanup_error)
-            failure.add_note(f"process group cleanup also failed: {detail}")
-        try:
-            process.close()
-        except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-731023 [BLE001]; pipe cleanup must preserve the primary process failure, including interpreter-level cancellation.
-            # > Narrow catches cannot guarantee closure after an injected adapter's
-            # > failure, and a generic cleanup helper would obscure ownership here.
-            detail = _cleanup_failure_message(cleanup_error)
-            failure.add_note(f"process pipe cleanup also failed: {detail}")
-        return settled
-
-
 def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the stop policy is five independent keywords (timeout, cancel, grace, remote signal, clock) and bundling them would only rename them.
     process: StoppableProcess,
     *,
@@ -384,7 +209,7 @@ def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the st
     cancel: CancelSignal | None,
     grace_seconds: float = DEFAULT_TERMINATION_GRACE_SECONDS,
     signal_remote: SignalSender | None = None,
-    threads: Threads | None = None,
+    threads: Threads,
 ) -> ProcessOutcome:
     """Wait for a process group leader until it exits, times out, or is cancelled.
 
@@ -397,7 +222,7 @@ def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the st
     killed before the interruption propagates, so nothing outlives the call.
     *threads* supplies the clock the timeout is measured on.
     """
-    clock = (threads or OsThreads()).now
+    clock = threads.now
     deadline = None if timeout is None else clock() + timeout
     try:
         while True:

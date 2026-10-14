@@ -24,7 +24,8 @@ from vs_sandbox.api import (
     SandboxKind,
     create_compute_backend,
 )
-from vs_sandbox.api.testing import FakeAcceleratorDiscovery
+from vs_sandbox.api.testing import FakeAcceleratorDiscovery, ScriptedDockerCli
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
@@ -48,14 +49,21 @@ def _make_backend(
         accelerator_discovery=FakeAcceleratorDiscovery(
             rocm=AcceleratorInventory(tuple(devices), reported_device_count=1)
         ),
-        docker=docker,
+        docker=ScriptedDockerCli() if docker is None else docker,
         clock=ManualClock(),
+        threads=OsThreads(),
     )
 
 
 class TestRocmRegistry:
     def test_rocm_in_registry(self, tmp_path: Path) -> None:
-        impl = create_compute_backend(ComputeBackend.ROCM, log_dir=tmp_path, clock=ManualClock())
+        impl = create_compute_backend(
+            ComputeBackend.ROCM,
+            log_dir=tmp_path,
+            clock=ManualClock(),
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
+        )
         assert isinstance(impl, RocmBackend)
         assert impl.name is ComputeBackend.ROCM
         # rocprofv3 / rocprof-compute is the dedicated system- and

@@ -22,6 +22,8 @@ from vs_core.api import (
     RevisionId,
     RevisionRef,
 )
+from vs_sandbox.api.testing import ScriptedDockerCli
+from vs_sim.api import OsThreads
 
 if __name__ != "packaged_prompt_contract":
     from tests.support import run_test_command
@@ -876,7 +878,13 @@ def container_context(
         host_resource_for_mount(runtime, facts.runtime_container_path, read_only=True),
         host_resource_for_mount(history, "/opt/vibesys-history", read_only=True),
     )
-    sandbox = DockerSandbox(host_workspace=str(workspace), image="fixture", resources=resources)
+    sandbox = DockerSandbox(
+        host_workspace=str(workspace),
+        image="fixture",
+        resources=resources,
+        docker=ScriptedDockerCli(),
+        threads=OsThreads(),
+    )
     assert sandbox.agent_path(runtime) == facts.runtime_container_path
     assert sandbox.agent_path(history / "prior.md") == "/opt/vibesys-history/prior.md"
     context = {

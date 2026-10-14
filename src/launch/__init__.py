@@ -23,7 +23,7 @@ from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState, build_agent_cl
 from vs_github.api import GitHubCLI
 from vs_project.api import Git, generate_run_id
 from vs_runtime.api.wiring import InProcessRuns
-from vs_sandbox.api import create_compute_backend
+from vs_sandbox.api import SubprocessDockerCli, create_compute_backend
 from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
@@ -96,7 +96,13 @@ def create_session(
         else settings.agent_client_factory
     )
     backend_factory = (
-        create_compute_backend if settings.backend_factory is None else settings.backend_factory
+        partial(
+            create_compute_backend,
+            docker=SubprocessDockerCli(processes=settings.processes),
+            threads=timing.threads,
+        )
+        if settings.backend_factory is None
+        else settings.backend_factory
     )
     agents = BuiltInSessionAgents(client_factory) if settings.agents is None else settings.agents
 

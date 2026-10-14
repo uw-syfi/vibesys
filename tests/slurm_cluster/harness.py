@@ -38,9 +38,9 @@ from vs_runtime.api.infrastructure import (
     SlurmEnvironment,
     TrustedEvaluatorRequirements,
 )
-from vs_sandbox.api import ComputeBackend, DockerSandbox, LocalBackend
+from vs_sandbox.api import ComputeBackend, DockerSandbox, LocalBackend, SubprocessDockerCli
 from vs_sandbox.api.slurm import load_slurm_operator_settings
-from vs_sim.api import MonotonicClock
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads
 
 if TYPE_CHECKING:
     import threading
@@ -302,7 +302,12 @@ def make_request(
         workspace=workspace,
         ref_dir=None,
         backend=LocalBackend(
-            ComputeBackend.CPU, log_dir, log=lambda _: None, image="python:3.12-slim"
+            ComputeBackend.CPU,
+            log_dir,
+            log=lambda _: None,
+            image="python:3.12-slim",
+            docker=SubprocessDockerCli(processes=OsProcesses()),
+            threads=OsThreads(),
         ),
         agent_backend="stub",
         cli_provider=None,

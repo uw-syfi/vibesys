@@ -72,7 +72,7 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "threading", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "signal", "count": 3}
-{"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "subprocess", "count": 6}
+{"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "subprocess", "count": 5}
 {"path": "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py", "rule": "fs_sync", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/skypilot_evaluator.py", "rule": "fs_sync", "count": 3}
 {"path": "libs/vs-sandbox/src/vs_sandbox/skypilot_evaluator.py", "rule": "socket", "count": 3}
@@ -83,7 +83,6 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_policy.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_agent_gpu.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_agent_gpu.py", "rule": "threading", "count": 2}
-{"path": "libs/vs-sandbox/tests/test_atomic_metadata.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_docker_sandbox_import.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_docker_workspace.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_host_command_bridge_e2e.py", "rule": "process", "count": 1}

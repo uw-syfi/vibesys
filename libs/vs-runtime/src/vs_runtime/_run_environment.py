@@ -126,6 +126,7 @@ from vs_sandbox.api.symlink_mounts import (
     find_mount_root,
     symlink_lifecycle_hooks,
 )
+from vs_sim.api import OsProcesses
 
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 _RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
@@ -932,7 +933,9 @@ class DockerEnvironment:
         if request.docker_in_docker:
             # Fail before the image build when the host has no Sysbox; nothing
             # falls back to the host socket.
-            require_sysbox_runtime(self.config.docker or SubprocessDockerCli())
+            require_sysbox_runtime(
+                self.config.docker or SubprocessDockerCli(processes=OsProcesses())
+            )
             toolchains.add(CONTAINER_RUNTIME_TOOLCHAIN)
             log(DOCKER_IN_DOCKER_NOTICE)
         # The task image, when a task has a Dockerfile, is built by the
@@ -1012,7 +1015,11 @@ class DockerEnvironment:
             if self.config.orphan_reaper is not None
             else reap_orphaned_agents
         )
-        reaper(run_id, docker=self.config.docker or SubprocessDockerCli(), log=log)
+        reaper(
+            run_id,
+            docker=self.config.docker or SubprocessDockerCli(processes=OsProcesses()),
+            log=log,
+        )
 
     def repair_workspace(
         self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]

@@ -15,6 +15,7 @@ from vibesys.api.request import RunEnvironmentSpec
 from vs_agent.api import reap_orphaned_agents
 from vs_agent.api.testing import FakeConfinement, FakeDockerBuildRunner
 from vs_sandbox.api.testing import FakeDockerEngine, HostExecutedContainerBackend
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -49,4 +50,4 @@ def host_container_backend(
 ) -> HostExecutedContainerBackend:
     """Build the ``backend_factory`` product: a CPU backend with host-executing containers."""
     del clock  # the fake backend records no timestamps
-    return HostExecutedContainerBackend(log_dir, log=log, image=image)
+    return HostExecutedContainerBackend(log_dir, log=log, image=image, threads=OsThreads())

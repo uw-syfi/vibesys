@@ -21,7 +21,7 @@ from vs_sandbox.gpu_monitor import (
     NvidiaSmiTelemetry,
     pick_gpu,
 )
-from vs_sim.api import OsThreads, SubprocessProbe, Threads, utc_datetime
+from vs_sim.api import SubprocessProbe, Threads, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -73,8 +73,8 @@ class CudaBackend:
         log: Callable[[str], None] | None = None,
         image: str | None = None,
         gpu_telemetry: GpuTelemetry | None = None,
-        threads: Threads | None = None,
-        docker: DockerCli | None = None,
+        threads: Threads,
+        docker: DockerCli,
         probe: CommandProbe | None = None,
         clock: Clock,
     ) -> None:
@@ -85,7 +85,7 @@ class CudaBackend:
         self._clock = clock
         self._probe: CommandProbe = probe or SubprocessProbe()
         self._telemetry: GpuTelemetry = gpu_telemetry or NvidiaSmiTelemetry(probe=self._probe)
-        self._threads: Threads = threads or OsThreads()
+        self._threads = threads
         self._docker = docker
         self.log_dir = Path(log_dir)
         self._lprint = log or print
@@ -142,6 +142,7 @@ class CudaBackend:
                 host_workspace=host_workspace,
                 env=env,
                 lifecycle_hooks=lifecycle_hooks,
+                threads=self._threads,
             )
         elif kind is SandboxKind.DOCKER:
             sandbox = docker_sandbox_class(
@@ -155,6 +156,7 @@ class CudaBackend:
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
                 docker=self._docker,
+                threads=self._threads,
                 docker_in_docker=docker_in_docker,
                 same_path_workspace=same_path_workspace,
                 run_id=run_id,

@@ -77,6 +77,7 @@ class _DaemonBackend(HostExecutedContainerBackend):
             resources=resources,
             docker=self.engine,
             run_id=run_id,
+            threads=OsThreads(),
         )
 
 
@@ -205,7 +206,7 @@ def _execute(
         clock: object,
     ) -> _DaemonBackend:
         del clock  # the fake backend records no timestamps
-        backend = _DaemonBackend(log_dir, log=log, image=image)
+        backend = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())
         backend.engine = engine
         return backend
 

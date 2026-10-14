@@ -23,7 +23,8 @@ from vs_sandbox.api import (
     NestedDaemonError,
     workspace_container_root,
 )
-from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sandbox.api.testing import FakeDockerEngine, ScriptedDockerCli
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -71,6 +72,7 @@ def _sysbox_sandbox(tmp_path: Path, engine: FakeDockerEngine) -> tuple[DockerSan
         image=_IMAGE,
         docker=engine,
         docker_in_docker=True,
+        threads=OsThreads(),
     )
     return sandbox, workspace
 
@@ -155,6 +157,8 @@ def test_sysbox_cannot_be_combined_with_accelerators(tmp_path: Path) -> None:
             image=_IMAGE,
             gpus="all",
             docker_in_docker=True,
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
         )
 
 
@@ -162,7 +166,9 @@ def test_an_ordinary_sandbox_is_unchanged(tmp_path: Path) -> None:
     engine = _engine(tmp_path, runtimes=_SYSBOX_RUNTIMES)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    sandbox = DockerSandbox(host_workspace=str(workspace), image=_IMAGE, docker=engine)
+    sandbox = DockerSandbox(
+        host_workspace=str(workspace), image=_IMAGE, docker=engine, threads=OsThreads()
+    )
 
     sandbox.start()
     sandbox.stop()
@@ -181,7 +187,9 @@ def test_an_ordinary_sandbox_argv_and_metadata_are_exactly_the_historical_ones(
     engine = _engine(tmp_path, runtimes=_SYSBOX_RUNTIMES)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    sandbox = DockerSandbox(host_workspace=str(workspace), image=_IMAGE, docker=engine)
+    sandbox = DockerSandbox(
+        host_workspace=str(workspace), image=_IMAGE, docker=engine, threads=OsThreads()
+    )
 
     sandbox.start()
     sandbox.stop()
@@ -236,6 +244,7 @@ def test_every_host_path_under_the_workspace_is_the_same_path_in_the_container(
         image=_IMAGE,
         docker=_engine(tmp_path, runtimes=_SYSBOX_RUNTIMES),
         docker_in_docker=True,
+        threads=OsThreads(),
     )
 
     nested = workspace.joinpath(*relative)
@@ -258,6 +267,7 @@ def test_exec_runs_in_the_agent_cwd_at_the_host_path(
         image=_IMAGE,
         docker=engine,
         docker_in_docker=True,
+        threads=OsThreads(),
     )
     sandbox.start()
     try:
@@ -284,6 +294,7 @@ def test_a_same_path_workspace_needs_no_container_runtime(
         image=_IMAGE,
         docker=engine,
         same_path_workspace=True,
+        threads=OsThreads(),
     )
     sandbox.start()
     try:

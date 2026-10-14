@@ -230,7 +230,10 @@ def _bulky_executor(
     script = tmp_path / "bench.py"
     script.write_text(_BULKY_BENCHMARK, encoding="utf-8")
     sandbox = LocalShellRunner(
-        tmp_path, env={"PATH": os.environ["PATH"]}, max_output_chars=max_output_chars
+        tmp_path,
+        env={"PATH": os.environ["PATH"]},
+        max_output_chars=max_output_chars,
+        threads=OsThreads(),
     )
     return _executor(
         tmp_path,

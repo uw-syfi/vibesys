@@ -66,6 +66,7 @@ class _DaemonBackend(HostExecutedContainerBackend):
             resources=resources,
             docker=self.engine,
             run_id=run_id,
+            threads=OsThreads(),
         )
 
 
@@ -115,7 +116,7 @@ def _candidate_container_counts(
         clock: object,
     ) -> _DaemonBackend:
         del clock  # the fake backend records no timestamps
-        made = _DaemonBackend(log_dir, log=log, image=image)  # ty: ignore[invalid-argument-type]
+        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
         made.engine = engine
         return made
 

@@ -17,7 +17,7 @@ from vs_sandbox.process_execution import PopenProcess, start_process_group
 
 if TYPE_CHECKING:
     from vs_sandbox.execution import CommandResult
-    from vs_sim.api import Event
+    from vs_sim.api import Event, Threads
 
 DEFAULT_EXECUTE_TIMEOUT = 120
 DEFAULT_MAX_OUTPUT_CHARS = 100_000
@@ -28,7 +28,10 @@ _SHELL = "/bin/sh"
 class LocalShellRunner:
     """Run shell commands on the host, in ``root_dir``, with a controlled env."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-261404 [PLR0913]; the working directory, two environment inputs, two limits and the clock are independent inputs of one runner.
+        # > A settings object would group the injected clock with plain limits into a
+        # > carrier only this constructor reads; folding inherit_env into env would make
+        # > every caller copy os.environ itself.
         self,
         root_dir: str | Path,
         *,
@@ -36,8 +39,12 @@ class LocalShellRunner:
         inherit_env: bool = False,
         timeout: int = DEFAULT_EXECUTE_TIMEOUT,
         max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS,
+        threads: Threads,
     ) -> None:
-        """Configure the working directory, environment, and limits."""
+        """Configure the working directory, environment, and limits.
+
+        *threads* is the clock a command's timeout is measured on.
+        """
         if timeout <= 0:
             message = f"timeout must be positive, got {timeout}"
             raise ValueError(message)
@@ -47,6 +54,7 @@ class LocalShellRunner:
         self.env.update(env or {})
         self._default_timeout = timeout
         self._max_output_chars = max_output_chars
+        self._threads = threads
         self._id = f"local-{uuid.uuid4().hex[:8]}"
 
     @property
@@ -81,4 +89,5 @@ class LocalShellRunner:
             launch=lambda: PopenProcess(
                 start_process_group((_SHELL, "-c", command), env=self.env, cwd=str(self.root_dir))
             ),
+            threads=self._threads,
         )
