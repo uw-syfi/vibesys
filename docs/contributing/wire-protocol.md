@@ -69,7 +69,10 @@ JSONL line; `_write_message` serializes one model and appends `\n`
 Batching is not framing. `event_batch` is one protocol message that carries many events in its
 `events` list. The batch is a payload construct (`EventBatchMessage` in `protocol.py`), produced by
 the server coalescing a watermark-consistent snapshot (`unix_jsonl.py:_stream`), and it crosses the
-wire as a single frame on either transport. A transport never splits or merges frames.
+wire as a single frame on either transport. A transport never splits or merges frames. The WebSocket
+gateway may send one batch as several whole `event_batch` messages, one frame each, so no frame
+exceeds its send cap (`protocol.py:EventBatchMessage.split_within`); folding them in order is folding
+the batch.
 
 ### WP-FRAME-TYPE: text frames, UTF-8
 
@@ -247,8 +250,9 @@ a continuation:
 
 In both cases the next `event_batch` sets `rebootstrap: true`, supersedes the client's fold rather
 than extending it, and its `through_sequence` is not the client's cursor plus one. The marker means
-this is a second bootstrap on an already-open subscription. The first batch of a reconnect remains
-`rebootstrap: false`, even when a changed `store_id` makes that new connection's first batch a fresh
+this is a second bootstrap on an already-open subscription. A rebootstrap that the WebSocket gateway
+splits to fit its send cap carries the marker on its first frame only. The first batch of a reconnect
+remains `rebootstrap: false`, even when a changed `store_id` makes that new connection's first batch a fresh
 fold. A client keys continuation on the dial context, the marker, and `store_id`, not sequence
 contiguity. A transport carries these batches unchanged; the rebootstrap decision is server logic,
 not framing.

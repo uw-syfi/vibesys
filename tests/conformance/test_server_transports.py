@@ -21,7 +21,7 @@ from websockets.sync.client import ClientConnection, connect
 
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
-from server.transport.websocket import WebSocketGateway
+from server.transport.websocket import WebSocketGateway, WebSocketLimits
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable, Mapping
@@ -109,6 +109,7 @@ def _running_connection(
     transport: str,
     parts: ServerParts,
     socket_path: Path,
+    limits: WebSocketLimits | None = None,
 ) -> Generator[ScenarioConnection]:
     if transport == "unix":
         with UnixJsonlServer(socket_path, parts.api):
@@ -119,7 +120,7 @@ def _running_connection(
                 connection.close()
         return
     assert transport == "websocket", f"unknown transport: {transport}"
-    with WebSocketGateway(parts.api) as gateway:
+    with WebSocketGateway(parts.api, limits=limits or WebSocketLimits()) as gateway:
         connection = _WebSocketConnection(gateway)
         try:
             yield connection
@@ -179,6 +180,46 @@ def test_tail_overflow_rebootstrap_scenario_marks_only_the_second_bootstrap(
             assert_frame_matches(connection.receive(), steps[3]["expect"])
     finally:
         parts.close()
+
+
+def test_a_rebootstrap_split_across_frames_supersedes_the_fold_once(
+    tmp_path: Path,
+    socket_dir: Path,
+) -> None:
+    """Only the first frame of a chunked rebootstrap carries the marker.
+
+    ``WP-REBOOTSTRAP`` defines the marker as "supersedes the fold". The gateway
+    splits a batch that exceeds its send cap into several ``event_batch``
+    frames, and a client following the definition discards its fold on every
+    marked frame, so a marker on each frame would leave it holding only the
+    last chunk of the replay. The lowered send cap and the long event texts
+    make the tail of ten events span several frames.
+    """
+    parts = build_server_parts(tmp_path / "logs")
+    limits = WebSocketLimits(send_frame_bytes=2048)
+    try:
+        with _running_connection(
+            "websocket", parts, socket_dir / "split-rebootstrap.sock", limits
+        ) as connection:
+            connection.send({"type": "subscribe", "after_sequence": 0, "tail": 10})
+            assert connection.receive()["type"] == "subscribed"
+            assert connection.receive()["type"] == "event_batch"
+            with parts.condition:
+                for index in range(11):
+                    parts.journal.publish_output("stdout", f"overflow-{index}-" + "x" * 400)
+            frames = [connection.receive()]
+            while frames[-1]["through_sequence"] < parts.api.latest_sequence:
+                frames.append(connection.receive())
+    finally:
+        parts.close()
+
+    assert len(frames) > 1
+    assert [frame["rebootstrap"] for frame in frames] == [True] + [False] * (len(frames) - 1)
+    sequences = [event["sequence"] for frame in frames for event in frame["events"]]
+    assert sequences == sorted(set(sequences))
+    assert sequences[-10:] == list(
+        range(parts.api.latest_sequence - 9, parts.api.latest_sequence + 1)
+    )
 
 
 def _acknowledges_the_command(reply: Mapping[str, Any]) -> None:

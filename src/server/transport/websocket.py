@@ -42,7 +42,7 @@ from vs_async_ops.api import finish
 from vs_sim.api import SystemClock, ThreadBlockingRunner
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from websockets.asyncio.server import Server, ServerConnection
     from websockets.http11 import Request
@@ -261,8 +261,8 @@ class WebSocketLimits:
     and is what this gateway refuses to receive. ``send_frame_bytes`` is a
     statement about *peers*: ``max_size`` applies to received messages on each
     side, so naming it here cannot change what a peer accepts, and the send
-    side is bounded by chunking instead (``_event_batch_chunks``). Its value is
-    therefore chosen against the smallest cap a supported client imposes, not
+    side is bounded by chunking instead (``EventBatchMessage.split_within``).
+    Its value is therefore chosen against the smallest cap a supported client imposes, not
     against this gateway's own: browsers impose no receive limit, so the
     binding client is the Python ``websockets`` client, whose default is the
     same 1 MiB.
@@ -607,7 +607,8 @@ class WebSocketGateway:
                 # bounds the opposite direction, frames arriving from the peer, as
                 # does ``max_size``: it is the cap on what this gateway will
                 # *receive*, and says nothing about what a peer will accept from
-                # it. The send side is bounded by ``_event_batch_chunks`` instead.
+                # it. The send side is bounded by chunking instead
+                # (``EventBatchMessage.split_within``).
                 ping_interval=self.limits.ping_interval_seconds,
                 ping_timeout=self.limits.ping_timeout_seconds,
                 close_timeout=self.limits.close_timeout_seconds,
@@ -1310,73 +1311,8 @@ class WebSocketGateway:
         supplies ``tail`` only if it has one, so the batch is otherwise sized by
         the run's entire history.
         """
-        for chunk in _event_batch_chunks(batch, self.limits.send_frame_bytes):
+        for chunk in batch.split_within(self.limits.send_frame_bytes):
             await self._send(websocket, chunk.model_dump_json())
-
-
-def _event_batch_chunks(batch: EventBatchMessage, budget: int) -> Iterator[EventBatchMessage]:
-    """Split *batch* into whole batches that each serialize within *budget* bytes.
-
-    Chunking is on serialized size, not on event count. An event count does not
-    bound bytes: measured on a run of output events the per-event JSON ranges
-    from 282 to 647 bytes, so any count that is safe for the large ones wastes
-    most of the frame on the small ones and any count tuned to the average
-    overflows on a burst of large ones.
-
-    Each chunk is a complete ``event_batch`` message rather than a fragment of
-    one, so no receiver needs a reassembly step and ``WP-GRANULARITY`` still
-    holds: one frame is still exactly one protocol message. What makes that
-    safe is the ``through_sequence`` on each chunk. It is the sequence of the
-    last event that chunk carries, not the batch's, so a consumer that folds
-    batches in order advances its cursor exactly as far as the events it has
-    actually seen. A connection lost mid-replay therefore resumes from a cursor
-    that is true, which is what keeps the client's bootstrap detection correct
-    (``persistent-event-stream.ts`` marks itself bootstrapped on the *first*
-    ``event_batch`` of a fresh dial and resumes from its cursor afterwards). The
-    final chunk keeps the batch's own ``through_sequence``, which may run past
-    its last event when the journal's watermark advanced over events the
-    checkpoint did not return; carrying it on an earlier chunk would claim
-    delivery of events still to come.
-
-    The split is computed from measured byte lengths rather than by serializing
-    candidate chunks, which would be quadratic. The arithmetic is exact because
-    compact JSON renders a list as its items joined by commas: a chunk costs
-    its envelope (measured once, at the batch's own ``through_sequence``, the
-    longest number any chunk carries) plus each event's own serialization plus
-    one separator between neighbors. That identity is a property of the
-    serializer rather than of this function, so it is pinned from the outside:
-    ``test_a_chunked_batch_reaches_the_peer_whole_and_within_the_stated_send_cap``
-    asserts the real frame bytes over generated batches and fails if it ever
-    stops holding.
-
-    A chunk always carries at least one whole event. The recording boundary's
-    per-event serialized-size contract keeps that case below the supported-peer
-    cap; this transport neither truncates nor special-cases event payloads.
-    """
-    if not batch.events:
-        # One frame, so an empty checkpoint still reports its watermark.
-        yield batch
-        return
-    room = budget - len(batch.model_copy(update={"events": []}).model_dump_json().encode())
-    # Boundaries are indices into `batch.events` rather than an accumulated
-    # list, so the chunks are slices of the batch's own field and this function
-    # never needs to name the event type. `server.transport` may not depend on
-    # `server.events`, and the alternative was a `tach.toml` edge for a local
-    # annotation.
-    start = 0
-    used = 0
-    for index, event in enumerate(batch.events):
-        size = len(event.model_dump_json().encode())
-        if index > start and used + 1 + size > room:
-            yield batch.model_copy(
-                update={
-                    "events": batch.events[start:index],
-                    "through_sequence": batch.events[index - 1].sequence,
-                }
-            )
-            start, used = index, 0
-        used += size + (1 if index > start else 0)
-    yield batch.model_copy(update={"events": batch.events[start:]})
 
 
 def browser_origin(value: str) -> str:
