@@ -328,6 +328,28 @@ describe('RunControl over the FakeHelper', () => {
     await w.connection[Symbol.asyncDispose]();
   });
 
+  test('retiring a pending start preserves the run that was already attached', async () => {
+    const w = world();
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+    await w.runs.attach(HOST, RUN_A);
+    const delayed = w.link.helper.deferNext('run.start');
+    const starting = w.runs.start(HOST, '/p', 'spsc', [], {
+      owner: '10:100',
+      sequence: 1,
+    });
+    await delayed.received;
+
+    w.runs.retireStartOwner('10:100');
+    expect(w.runs.attached()?.instanceId).toBe(RUN_A);
+    delayed.release();
+
+    expect(await starting).toBe('cancelled');
+    expect(w.runs.attached()?.instanceId).toBe(RUN_A);
+    expect(w.pages).toMatchObject({opened: 1, closed: 0});
+    expect(w.link.helper.stops).toEqual([{instanceId: '000000000001', force: false}]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
   test('equal start sequences from different owners are independent', async () => {
     const w = world();
     const olderReply = w.link.helper.deferNext('run.start');

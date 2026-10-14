@@ -3,7 +3,7 @@
  * preloads, IPC binders, renderer confinement, and lifecycle wiring. In-memory implementations
  * replace only host/run/settings I/O so the journey needs no subprocess, socket, or user files.
  */
-import {app, BaseWindow, webContents} from 'electron';
+import {app, BaseWindow, ipcMain, webContents} from 'electron';
 
 // Resolve after `test:e2e` builds the package. Keeping this entry outside the production graph
 // gives Playwright control without adding a test-only API to the shipped application.
@@ -11,11 +11,13 @@ const [
   {confineContents, lockDownSession, registerAppScheme, sandboxedView, serveBundledUi},
   {Desktop},
   {WelcomeFeed},
+  {rendererGeneration},
   {AppWindow},
 ] = await Promise.all([
   import(new URL('../dist/main/app-security.js', import.meta.url)),
   import(new URL('../dist/main/desktop.js', import.meta.url)),
   import(new URL('../dist/main/welcome-feed.js', import.meta.url)),
+  import(new URL('../dist/main/welcome-ipc.js', import.meta.url)),
   import(new URL('../dist/main/window.js', import.meta.url)),
 ]);
 
@@ -140,6 +142,7 @@ class FakeRuns {
   }
 
   retry() {}
+  retireStartOwner() {}
   detach() {}
 }
 
@@ -279,6 +282,19 @@ void app.whenReady().then(() => {
     hosts: new FakeHosts(),
     runs,
     settings: new FakeSettings(),
+    welcomeIpc: {
+      handle: (channel, listener) =>
+        ipcMain.handle(channel, (event, ...args) =>
+          listener(
+            {
+              senderId: event.sender.id,
+              senderUrl: event.senderFrame?.url ?? null,
+              rendererGeneration: rendererGeneration(event.senderFrame),
+            },
+            ...args,
+          ),
+        ),
+    },
     log,
   });
   appWindow.openRunPage('This Mac');
