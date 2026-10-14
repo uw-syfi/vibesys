@@ -26,6 +26,11 @@ _GIT = Git(OsProcesses())
 # Each export is reviewed as deterministic value construction or transformation.
 # Approving a module does not approve future exports or its imported dependencies.
 PURE_EXPORTS = {
+    # Decoding bytes already in memory is a pure function of them; ``read_json`` reads a file
+    # and stays out of this list.
+    "vs_decode.api": frozenset(
+        {"Problem", "Unreadable", "UnreadableKind", "ValidationOptions", "decode_json"}
+    ),
     # These canonical frozen receipt values carry no evaluation effects.
     # api.requests would execute the mixed api package initializer and require
     # exempting its transitive services; precise exports keep those forbidden.

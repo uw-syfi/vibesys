@@ -10,6 +10,7 @@ from hypothesis import strategies as st
 
 from vibesys.hypothesis import HypothesisConfig, OrchestratorPlan, rounds
 from vibesys.profile_focus import ProfileAttributionError
+from vibesys.profile_focus.attribution import parse_attribution
 from vibesys.serial_search.api import (
     AttributionConfig,
     accept_plan,
@@ -75,6 +76,13 @@ def test_a_plan_that_updates_itself_twice_or_reuses_an_id_is_refused() -> None:
 def test_attribution_output_that_is_not_the_protocol_is_refused() -> None:
     with pytest.raises(ProfileAttributionError):
         bottlenecks_of("not json")
+
+
+def test_attribution_output_past_the_size_cap_is_refused_before_it_is_parsed() -> None:
+    padding = " " * (16 * 1024 * 1024)
+    framed = f'__VIBESYS_ATTRIBUTION_BEGIN__{{"version": 1,{padding}"components": []}}__VIBESYS_ATTRIBUTION_END__'
+    with pytest.raises(ProfileAttributionError, match="larger than"):
+        parse_attribution(framed)
 
 
 def test_a_plain_run_has_no_focus_policy_and_records_nothing() -> None:

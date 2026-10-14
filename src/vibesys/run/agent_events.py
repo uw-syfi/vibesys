@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic import JsonValue, TypeAdapter
 from pydantic_core import to_jsonable_python
 
 from vibesys.events import (
@@ -28,6 +28,7 @@ from vibesys.events import (
     UsageUpdateData,
     make_core_event,
 )
+from vs_decode.api import Unreadable, decode_json
 from vs_sim.api import Clock, utc_datetime
 
 if TYPE_CHECKING:
@@ -42,6 +43,8 @@ if TYPE_CHECKING:
 
 EventSink = Callable[[CoreEvent], object]
 _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_TOOL_RESULT_BYTES = 8 * 1024 * 1024
+"""A longer tool result is kept as raw text, not parsed."""
 
 
 def _json_safe(args: dict[str, Any]) -> dict[str, Any]:
@@ -52,13 +55,14 @@ def _json_safe(args: dict[str, Any]) -> dict[str, Any]:
 def _classify_tool_result(content: str) -> ToolResultPayload | None:
     """Preserve JSON-shaped tool results alongside their raw text.
 
-    The content is whatever the tool printed, so it is parsed by pydantic's
-    parser, which reports deep nesting as a ``ValueError``; ``json.loads``
-    raised ``RecursionError`` out of the agent's callback.
+    The content is whatever the tool printed, so ``vs_decode`` parses it: bounded in
+    size, with nesting bounded by pydantic's parser, where ``json.loads`` raised
+    ``RecursionError`` out of the agent's callback.
     """
-    try:
-        value = _JSON_VALUE.validate_json(content)
-    except ValidationError:
+    value = decode_json(
+        content, _JSON_VALUE, source="tool result", max_bytes=_MAX_TOOL_RESULT_BYTES
+    )
+    if isinstance(value, Unreadable):
         return None
     if isinstance(value, (dict, list)):
         return JsonResultPayload(value=value)

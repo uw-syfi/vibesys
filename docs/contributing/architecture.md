@@ -132,6 +132,7 @@ graph TD
     entrypoints --> server
     entrypoints --> vibesys
     entrypoints --> vs_agent
+    entrypoints --> vs_decode
     entrypoints --> vs_github
     entrypoints --> vs_issue_tracker
     entrypoints --> vs_mcp
@@ -157,6 +158,7 @@ graph TD
     server --> vs_sim
     vibesys --> vs_agent
     vibesys --> vs_core
+    vibesys --> vs_decode
     vibesys --> vs_evaluation
     vibesys --> vs_evaluator_protocol
     vibesys --> vs_github
