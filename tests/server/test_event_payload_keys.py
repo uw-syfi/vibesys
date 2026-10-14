@@ -13,16 +13,21 @@ from datetime import UTC, datetime
 import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
-from server.events import EventData, EventType, RunEvent
+from server.events import ChatThreadId, EventData, EventType, RunEvent
 from vibesys.api import CoreEvent, CoreEventType
 from vibesys.events import CoreEventData, EventPayload
 from vs_sim.api.testing import examples
 
 _JSON_SCALARS = st.none() | st.booleans() | st.integers() | st.text(max_size=8)
+# Thread ids are drawn from the published schema of the id type itself, so they follow every
+# rule it states (no trailing dot, no reserved device name), not a copy of some of them.
+_THREAD_ID = TypeAdapter(ChatThreadId).json_schema()
 _FIELD_VALUES: dict[str, st.SearchStrategy[object]] = {
-    "thread_id": st.from_regex(r"[a-z0-9][a-z0-9._-]{0,15}", fullmatch=True),
+    "thread_id": st.from_regex(_THREAD_ID["pattern"], fullmatch=True).filter(
+        lambda value: len(value) <= _THREAD_ID["maxLength"]
+    ),
     "value": st.floats(allow_nan=False, allow_infinity=False),
 }
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
