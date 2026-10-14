@@ -300,7 +300,6 @@ export interface HostHelperDocument {
   request: Request;
   message: Message;
   channel_end: ChannelEnd;
-  [k: string]: unknown;
 }
 /**
  * The first message on every channel: which versions and features the client speaks.

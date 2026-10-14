@@ -265,7 +265,10 @@ function activeExecutionsFrom(delivered: RunEventRecord[]): ActiveExecutionCheck
       // The activity event's own payload is the activity, so it replaces the
       // stored one whole rather than being copied field by field.
       if (current !== undefined) {
-        active.set(executionId, {...current, activity: data as ExecutionCheckpoint['activity']});
+        active.set(executionId, {
+          ...current,
+          activity: data as unknown as ExecutionCheckpoint['activity'],
+        });
       }
     }
     if (data['kind'] === 'agent_execution_finished') active.delete(executionId);

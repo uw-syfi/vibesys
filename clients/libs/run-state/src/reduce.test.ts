@@ -2475,7 +2475,9 @@ function executionEvent(
   return {...baseEvent(sequence, type), execution_id: executionId, data};
 }
 
-function startedData(assignment: string): NonNullable<RunEvent['data']> {
+function startedData(
+  assignment: string,
+): Extract<NonNullable<RunEvent['data']>, {kind: 'agent_execution_started'}> {
   return {
     kind: 'agent_execution_started',
     stage: 'implementation',

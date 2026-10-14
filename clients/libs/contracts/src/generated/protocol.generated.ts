@@ -715,7 +715,6 @@ export interface ProtocolDocument {
   event: RunEvent;
   snapshot: RunSnapshot;
   server_message: ServerMessage;
-  [k: string]: unknown;
 }
 /**
  * Request pausing after the active agent call.
@@ -1096,7 +1095,6 @@ export interface AgentExecutionActivityData {
   mode: Mode2;
   summary: Summary1;
   tool?: Tool;
-  [k: string]: unknown;
 }
 /**
  * One reproducible human, control, or invocation event.
@@ -1130,7 +1128,6 @@ export interface ChatData {
   answer: Answer1;
   thread_title?: ThreadTitle;
   invocation_id?: InvocationId1;
-  [k: string]: unknown;
 }
 /**
  * Identity and resolved agent settings for one experiment-chat thread.
@@ -1145,7 +1142,6 @@ export interface ChatThreadCreatedData {
   provider: Provider4;
   model: Model4;
   created_at: CreatedAt;
-  [k: string]: unknown;
 }
 /**
  * Prompts submitted at the start of a model invocation.
@@ -1154,7 +1150,6 @@ export interface InvocationStartedData {
   kind: Kind3;
   system_prompt: SystemPrompt;
   user_prompt: UserPrompt;
-  [k: string]: unknown;
 }
 /**
  * Result or error recorded when a model invocation ends.
@@ -1163,7 +1158,6 @@ export interface InvocationFinishedData {
   kind: Kind4;
   result?: Result;
   error?: Error1;
-  [k: string]: unknown;
 }
 export interface Result {
   [k: string]: unknown;
@@ -1180,7 +1174,6 @@ export interface AgentExecutionStartedData {
   activity: AgentExecutionActivityData;
   provider?: Provider5;
   model?: Model5;
-  [k: string]: unknown;
 }
 /**
  * Terminal result for one agent execution.
@@ -1189,7 +1182,6 @@ export interface AgentExecutionFinishedData {
   kind: Kind6;
   result?: Result1;
   error?: Error2;
-  [k: string]: unknown;
 }
 export interface Result1 {
   [k: string]: unknown;
@@ -1202,7 +1194,6 @@ export interface OutputData {
   stream: Stream;
   source?: Source2;
   content: Content;
-  [k: string]: unknown;
 }
 /**
  * Transport details emitted once the server is ready.
@@ -1210,7 +1201,6 @@ export interface OutputData {
 export interface ServerReadyData {
   kind: Kind8;
   socket_protocol?: SocketProtocol;
-  [k: string]: unknown;
 }
 /**
  * Initial input and loop settings for a run.
@@ -1221,7 +1211,6 @@ export interface RunStartedData {
   input: Input;
   max_rounds?: MaxRounds;
   expected_roles?: ExpectedRoles;
-  [k: string]: unknown;
 }
 /**
  * A starting run reached ``stage``, or progressed within it.
@@ -1234,7 +1223,6 @@ export interface RunStartupProgressData {
   kind: Kind10;
   stage: StartupStage;
   progress?: StartupProgress | null;
-  [k: string]: unknown;
 }
 /**
  * How far a startup stage has come: ``done`` of ``total`` steps, now on ``label``.
@@ -1253,7 +1241,6 @@ export interface StartupProgress {
 export interface RunFailedData {
   kind: Kind11;
   failure: RunFailure;
-  [k: string]: unknown;
 }
 /**
  * What a failed run did and why it stopped, as data; frontends choose the wording.
@@ -1276,7 +1263,6 @@ export interface RunInterruptedData {
   kind: Kind12;
   reason: Reason1;
   signal?: Signal;
-  [k: string]: unknown;
 }
 /**
  * One move of the run through its lifecycle.
@@ -1291,7 +1277,6 @@ export interface RunStatusChangedData {
   kind: Kind13;
   status: RunStatus;
   previous: RunStatus;
-  [k: string]: unknown;
 }
 /**
  * Reason and revision for a changed experiment projection.
@@ -1300,7 +1285,6 @@ export interface ExperimentsChangedData {
   kind: Kind14;
   reason: Reason2;
   revision?: Revision1;
-  [k: string]: unknown;
 }
 /**
  * Semantic revision of the policy-owned iteration projection.
@@ -1308,7 +1292,6 @@ export interface ExperimentsChangedData {
 export interface IterationsChangedData {
   kind: Kind15;
   revision?: Revision2;
-  [k: string]: unknown;
 }
 /**
  * Diagnostic details for configuration-stage failure.
@@ -1320,7 +1303,6 @@ export interface ConfigurationFailedData {
   message: Message;
   usage?: Usage;
   exit_code: ExitCode;
-  [k: string]: unknown;
 }
 /**
  * Name and optional attempt number for a loop phase.
@@ -1329,7 +1311,6 @@ export interface PhaseData {
   kind: Kind17;
   phase: Phase;
   attempt?: Attempt2;
-  [k: string]: unknown;
 }
 /**
  * Incremental output produced during agent execution.
@@ -1339,7 +1320,6 @@ export interface AgentOutputChunkData {
   channel: Channel;
   content: Content1;
   status?: AgentStatusData | null;
-  [k: string]: unknown;
 }
 /**
  * Structured progress readings for one agent invocation.
@@ -1364,7 +1344,6 @@ export interface SubprocessOutputData {
   process_kind: ProcessKind;
   stream: Stream1;
   content: Content2;
-  [k: string]: unknown;
 }
 /**
  * Verdict and feedback returned by the judge.
@@ -1374,7 +1353,6 @@ export interface JudgeResultData {
   verdict: Verdict;
   feedback: Feedback;
   attempt: Attempt3;
-  [k: string]: unknown;
 }
 /**
  * Metric result emitted by a benchmark stage.
@@ -1384,7 +1362,6 @@ export interface BenchmarkResultData {
   metric: Metric;
   value: Value;
   unit: Unit;
-  [k: string]: unknown;
 }
 /**
  * Summary of attempt, judge, and performance outcomes for a round.
@@ -1396,7 +1373,6 @@ export interface RoundFinishedData {
   perf_metric?: PerfMetric;
   perf_unit?: PerfUnit;
   profile_skipped: ProfileSkipped;
-  [k: string]: unknown;
 }
 /**
  * Tool name, call identity, and arguments emitted by an agent.
@@ -1407,7 +1383,6 @@ export interface ToolCallData {
   call_id?: CallId;
   args?: Args;
   status?: AgentStatusData | null;
-  [k: string]: unknown;
 }
 export interface Args {
   [k: string]: unknown;
@@ -1422,7 +1397,6 @@ export interface ToolResultData {
   content: Content3;
   is_error?: IsError;
   payload?: Payload;
-  [k: string]: unknown;
 }
 /**
  * Structured result of a command-style tool execution.
@@ -1447,7 +1421,6 @@ export interface JsonResultPayload {
 export interface TodoUpdateData {
   kind: Kind27;
   todos?: Todos;
-  [k: string]: unknown;
 }
 /**
  * One item in the agent's reported todo list.
@@ -1464,7 +1437,6 @@ export interface UsageUpdateData {
   input_tokens: InputTokens1;
   context_window?: ContextWindow1;
   model?: Model6;
-  [k: string]: unknown;
 }
 /**
  * One rate-limit window a provider reported, as semantic data.
@@ -1482,7 +1454,6 @@ export interface RateLimitUpdateData {
   resets_at?: ResetsAt;
   window_minutes?: WindowMinutes;
   exhausted: Exhausted;
-  [k: string]: unknown;
 }
 /**
  * A turn stopped on a provider capacity limit and the run paused for it.
@@ -1505,7 +1476,6 @@ export interface QuotaPausedData {
   policy?: Policy;
   fallback_provider?: FallbackProvider;
   fallback_model?: FallbackModel;
-  [k: string]: unknown;
 }
 /**
  * A run paused on a capacity limit resumed on the same provider and sent the turn again.
@@ -1514,7 +1484,6 @@ export interface QuotaResumedData {
   kind: Kind31;
   provider: Provider8;
   reason?: Reason3;
-  [k: string]: unknown;
 }
 /**
  * The quota policy ended a turn with the quota error instead of pausing or waiting longer.
@@ -1525,7 +1494,6 @@ export interface QuotaAbandonedData {
   condition: Condition1;
   detail: Detail2;
   reason: Reason4;
-  [k: string]: unknown;
 }
 /**
  * The run replaced a provider by its fallback.
@@ -1541,7 +1509,6 @@ export interface ProviderSwitchedData {
   to_model: ToModel;
   reason: Reason5;
   detail: Detail3;
-  [k: string]: unknown;
 }
 /**
  * One framework gate began evaluating the current candidate.
@@ -1553,7 +1520,6 @@ export interface GateStartedData {
   command?: Command;
   source?: FrameworkSource;
   source_label?: SourceLabel;
-  [k: string]: unknown;
 }
 /**
  * Outcome of one framework gate; envelope status carries pass or fail.
@@ -1574,7 +1540,6 @@ export interface GateFinishedData {
   output_tail?: OutputTail;
   source?: FrameworkSource1;
   source_label?: SourceLabel1;
-  [k: string]: unknown;
 }
 /**
  * A Git tracker outcome: a snapshot, baseline, or exclusion change.
@@ -1591,7 +1556,6 @@ export interface WorkspaceSnapshotData {
   baseline?: Baseline;
   excluded_paths?: ExcludedPaths;
   source?: FrameworkSource2;
-  [k: string]: unknown;
 }
 /**
  * One per run: the resolved configuration a loop starts with.
@@ -1606,7 +1570,6 @@ export interface RunConfiguredData {
   benchmark_contract?: BenchmarkContract;
   pareto_objectives?: ParetoObjectives;
   source?: FrameworkSource3;
-  [k: string]: unknown;
 }
 /**
  * A non-fatal framework fault an operator should see.
@@ -1620,7 +1583,6 @@ export interface FrameworkWarningData {
   detail?: Detail4;
   source?: FrameworkSource4;
   source_label?: SourceLabel2;
-  [k: string]: unknown;
 }
 /**
  * The run's result was chosen: a retained candidate, or the unchanged trusted input.
@@ -1630,7 +1592,6 @@ export interface WinnerSelectedData {
   selection: Selection;
   revision: Revision3;
   settlement_id?: SettlementId;
-  [k: string]: unknown;
 }
 /**
  * One measured performance result in a run.

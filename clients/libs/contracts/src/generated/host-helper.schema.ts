@@ -2028,6 +2028,7 @@ const hostHelperSchema: Record<string, unknown> = {
       "type": "object"
     }
   },
+  "additionalProperties": false,
   "description": "Root schema document for the host helper: what a client sends and what it receives.",
   "properties": {
     "request": {
