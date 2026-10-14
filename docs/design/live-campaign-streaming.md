@@ -19,6 +19,12 @@ The subscriber owns the SSE connection and closes it when released. A closed
 connection or malformed frame surfaces an error; a later valid frame clears it.
 A browser reconnect may replay earlier frames without duplicating state.
 
+The committed campaign record does not contain token usage. `framesFromRecord`
+therefore emits no `tokens` frames, and the preview omits the Tokens column
+rather than deriving plausible-looking totals from workstream order or sequence
+span. The `tokens` frame remains in the preview contract so an authoritative
+producer can supply cumulative per-workstream usage when that data exists.
+
 ## Backend path
 
 The campaign frame types remain a local preview contract. A production campaign

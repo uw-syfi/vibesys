@@ -6,9 +6,9 @@
  * (`foldStateToRecord(foldFrames(framesFromRecord(r))) deep-equals r`).
  *
  * Frames are time-ordered so a client watching them arrive sees workstreams
- * start, measurements stream in, token spend grow, and workstreams finish, in
- * the order they happened. The fold is order-insensitive for final state, so
- * the exact interleaving only affects the live drama, not correctness.
+ * start, measurements stream in, and workstreams finish in the order they
+ * happened. The record has no usage data, so replay preserves that absence;
+ * only an authoritative live producer may emit token frames.
  */
 
 import type {CampaignFrame, CampaignHeader, FrameWorkstream} from './campaign-frames.js';
@@ -67,45 +67,24 @@ interface TimedFrame {
   readonly make: (seq: number) => CampaignFrame;
 }
 
-/** A deterministic, monotonically growing token total for a workstream, so the
- * token-spend lane has something to show while the run is live. */
-function tokenTotal(workstream: CampaignRecord['workstreams'][number], index: number): number {
-  const span = workstream.lastSequence - workstream.firstSequence + 1;
-  return 2000 + index * 600 + span * 150;
-}
-
 export function framesFromRecord(record: CampaignRecord): CampaignFrame[] {
   const makers: Array<(seq: number) => CampaignFrame> = [];
   makers.push(seq => ({kind: 'campaign-init', seq, header: headerOf(record)}));
   for (const agent of record.agents) makers.push(seq => ({kind: 'agent-upsert', seq, agent}));
 
   const timed: TimedFrame[] = [];
-  record.workstreams.forEach((workstream, index) => {
+  for (const workstream of record.workstreams) {
     const started = Date.parse(workstream.startedAt);
     const finished = Date.parse(workstream.finishedAt);
-    const total = tokenTotal(workstream, index);
     timed.push({
       at: started,
       make: seq => ({kind: 'workstream-upsert', seq, workstream: inFlight(workstream)}),
     });
     timed.push({
-      at: started + (finished - started) * 0.3,
-      make: seq => ({
-        kind: 'tokens',
-        seq,
-        workstreamId: workstream.id,
-        tokens: Math.round(total * 0.4),
-      }),
-    });
-    timed.push({
-      at: finished,
-      make: seq => ({kind: 'tokens', seq, workstreamId: workstream.id, tokens: total}),
-    });
-    timed.push({
       at: finished,
       make: seq => ({kind: 'workstream-upsert', seq, workstream: settled(workstream)}),
     });
-  });
+  }
   for (const measurement of record.measurements)
     timed.push({
       at: Date.parse(measurement.timestamp),

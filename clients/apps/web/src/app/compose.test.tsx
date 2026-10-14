@@ -1,7 +1,16 @@
 import {expect, test} from 'bun:test';
+import {readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
+import {framesFromRecord, parseReplayScenario} from '@vibesys/feature-campaign/state';
 import {targetFromCapability} from '@vibesys/feature-gateway-connect/renderer';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {createDemoApp, createLiveCampaignApp} from './compose.js';
+
+const campaignRecord = parseReplayScenario(
+  JSON.parse(
+    readFileSync(resolve(import.meta.dir, '../../dev/fixtures/trajectory-replay.json'), 'utf8'),
+  ),
+);
 
 test('renders an initial capability launch before its exchange settles', () => {
   const target = targetFromCapability(
@@ -56,4 +65,19 @@ test('the page owner releases a preview stream independently of React render lif
   expect(active).toBe(true);
   page.close();
   expect(active).toBe(false);
+});
+
+test('live campaign replay with no usage omits the token column', () => {
+  const frames = framesFromRecord(campaignRecord);
+  const page = createLiveCampaignApp({
+    subscribe: onFrame => {
+      for (const frame of frames) onFrame(frame);
+      return () => undefined;
+    },
+  });
+
+  const html = renderToStaticMarkup(page.view);
+  expect(html).toContain('Work history');
+  expect(html).not.toContain('Sort by Tokens');
+  page.close();
 });

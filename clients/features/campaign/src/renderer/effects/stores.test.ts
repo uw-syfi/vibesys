@@ -79,6 +79,7 @@ test('live follows frames, pins a scrub, recovers errors, and keeps completion i
   for (const frame of frames) stream.emit(frame);
   expect(store.getState().campaign?.pointIndex).toBe(record.measurements.length - 1);
   expect(store.getState().campaign?.status).toBe('completed');
+  expect(store.getState().campaign?.workstreamTokenSpend).toEqual({});
   store.getState().campaign?.setPointIndex(12);
   expect(store.getState().campaign?.status).toBe('completed');
   expect(store.getState().campaign?.playing).toBe(false);

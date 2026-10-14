@@ -130,6 +130,22 @@ test('replaying the log again is idempotent', () => {
   );
 });
 
+test('record replay never invents usage from workstream order or sequence span', () => {
+  const reversed: CampaignRecord = {...record, workstreams: [...record.workstreams].reverse()};
+  const changedSpans: CampaignRecord = {
+    ...record,
+    workstreams: record.workstreams.map((item, index) => ({
+      ...item,
+      firstSequence: item.firstSequence + index,
+      lastSequence: item.lastSequence + index * 100,
+    })),
+  };
+
+  for (const candidate of [record, reversed, changedSpans]) {
+    expect(framesFromRecord(candidate).filter(frame => frame.kind === 'tokens')).toEqual([]);
+  }
+});
+
 test('measurements are projected in sequence order regardless of arrival order', () => {
   const frames: CampaignFrame[] = [
     initFrame,
