@@ -9,6 +9,7 @@ description = "Run a staged workspace command in a remote Slurm job"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2",
+    "vs-decode",
     "vs-sim",
 ]
 
@@ -19,4 +20,5 @@ where = ["src"]
 vs_slurm = ["py.typed"]
 
 [tool.uv.sources]
+vs-decode = { workspace = true }
 vs-sim = { workspace = true }

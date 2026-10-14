@@ -614,7 +614,7 @@ depends_on = []
 [[modules]]
 path = "vs_slurm"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.api", "vs_sim.api.testing"]
+depends_on = ["vs_decode.api", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_slurm.wiring"

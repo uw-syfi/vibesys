@@ -9,7 +9,9 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
+
+from vs_decode.api import Unreadable, ValidationOptions, decode_json
 
 if TYPE_CHECKING:
     from .config import SlurmConfig
@@ -32,6 +34,10 @@ class RemoteOperationError(RuntimeError):
     def invalid_evidence(cls) -> RemoteOperationError:
         """Describe malformed identity evidence without exposing its contents."""
         return cls("remote cluster operation evidence is missing or malformed")
+
+
+MAX_EVIDENCE_BYTES = 16 * 1024 * 1024
+"""The most evidence one operation's records may print; more is invalid evidence."""
 
 
 class RemoteOperationEvidence(BaseModel):
@@ -107,10 +113,16 @@ class RemoteOperations:
             f"printf '%s' ',\"cancelled\":'; if test -f {marker}; then printf true; else printf false; fi; printf '}}'"
         )
         response = self._transport.exec("; ".join(pieces)).stdout
-        try:
-            return RemoteOperationEvidence.model_validate_json(response, strict=True)
-        except ValidationError as exc:
-            raise RemoteOperationError.invalid_evidence() from exc
+        evidence = decode_json(
+            response,
+            RemoteOperationEvidence,
+            source="remote operation evidence",
+            max_bytes=MAX_EVIDENCE_BYTES,
+            options=ValidationOptions(strict=True),
+        )
+        if isinstance(evidence, Unreadable):
+            raise RemoteOperationError.invalid_evidence()
+        return evidence
 
     def accepted(self, operation_id: str, record: str) -> None:
         """Publish the accepted locator separately from cancellation intent."""

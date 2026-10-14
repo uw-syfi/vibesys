@@ -16,8 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from vs_decode.api import Unreadable, decode_json
 from vs_sim.api import (
     ProcessGroupUnreaped,
     ProcessOutcome,
@@ -1353,6 +1354,9 @@ class SlurmJobRunner:
         return match.group(1)
 
 
+_MAX_REPLY = 256 * 1024 * 1024  # bytes a connector may print for one request
+
+
 class _ConnectorResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -1617,10 +1621,12 @@ class _ConnectorTransport(_ProcessTransport):
             operation=operation,
             stdin=json.dumps(request, separators=(",", ":")),
         )
-        try:
-            response = _ConnectorResponse.model_validate_json(result.stdout, strict=True)
-        except ValidationError as exc:
-            raise SlurmError.invalid_connector_response(operation) from exc
+        source = f"connector {operation} response"
+        response = decode_json(
+            result.stdout, _ConnectorResponse, source=source, max_bytes=_MAX_REPLY
+        )
+        if isinstance(response, Unreadable):
+            raise SlurmError.invalid_connector_response(operation)
         if response.version != 1:
             raise SlurmError.invalid_connector_response(operation)
         if response.returncode != 0:

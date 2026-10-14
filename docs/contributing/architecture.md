@@ -213,6 +213,7 @@ graph TD
     vs_sandbox --> vs_project
     vs_sandbox --> vs_sim
     vs_sandbox --> vs_slurm
+    vs_slurm --> vs_decode
     vs_slurm --> vs_sim
 ```
 [//]: # (tach-graph:end)
