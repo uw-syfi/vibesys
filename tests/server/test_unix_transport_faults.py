@@ -137,7 +137,9 @@ def _check_answers(fault: _Fault, lines: list[bytes]) -> None:
     assert all(reply.request_id == f"req-{fault.kind}" for reply in replies), replies
 
 
-@settings(deadline=None, max_examples=examples(pr=15, nightly=600))
+# About 45 ms an example: three servers' worth of simulated threads per draw.
+# Depth lives in the nightly run.
+@settings(deadline=None, max_examples=examples(pr=10, nightly=600))
 @given(faults=st.lists(_faults(), min_size=1, max_size=3), seed=st.integers(0, 2**32))
 def test_a_client_fault_at_any_boundary_costs_only_that_client(
     tmp_path_factory: pytest.TempPathFactory, faults: list[_Fault], seed: int
