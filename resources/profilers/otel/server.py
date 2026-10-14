@@ -1,7 +1,6 @@
 """MCP tools for normalized servicebench OpenTelemetry reports."""
 
 import importlib
-import json
 import math
 import sys
 from datetime import datetime
@@ -10,7 +9,7 @@ from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, model_validator
-from pydantic_core import PydanticCustomError
+from pydantic_core import PydanticCustomError, from_json
 
 _GRAPH_REPORT_MISMATCH = (
     "trace graph and telemetry report must have matching workload identity and windows"
@@ -876,8 +875,10 @@ def _find_artifacts(root: str, *, schema_version: int, model: type[BaseModel]) -
     artifacts = []
     for path in Path(root).rglob("*.json"):
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, RecursionError, ValueError):
+            # pydantic's parser bounds nesting; ``allow_inf_nan`` keeps the NaN and
+            # Infinity that servicebench's reports may carry, as ``json`` read them.
+            payload = from_json(path.read_bytes(), allow_inf_nan=True)
+        except (OSError, ValueError):
             # A candidate controls workspace files. One unreadable, malformed,
             # deeply nested, or oversized JSON artifact must not abort discovery.
             continue

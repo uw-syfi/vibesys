@@ -16,9 +16,12 @@ own promise.
 
 from __future__ import annotations
 
+import functools
+import importlib.util
 import json
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -50,7 +53,7 @@ from vs_sim.api.testing import hostile_json_frames
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
+    from types import ModuleType
 
 _VALID = (
     SubscribeRequest(after_sequence=0).model_dump_json().encode(),
@@ -119,6 +122,26 @@ def _benchmark_result(contract: ProtocolBenchmarkContract | ScalarBenchmarkContr
     return _Decoder(decode)
 
 
+@functools.cache
+def _otel_server() -> ModuleType:
+    """The otel profiler's MCP server, loaded from its file as the profiler bundle runs it."""
+    path = Path(__file__).parents[2] / "resources" / "profilers" / "otel" / "server.py"
+    spec = importlib.util.spec_from_file_location("_hostile_json_otel_server", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _otel_artifacts(frame: bytes, directory: Path) -> None:
+    """A candidate's workspace JSON that the otel profiler scans for reports and graphs."""
+    (directory / "artifact.json").write_bytes(frame)
+    server = _otel_server()
+    assert server.find_reports(str(directory)) == []
+    assert server.find_trace_graphs(str(directory)) == []
+
+
 def _tool_result(frame: bytes, _: Path) -> None:
     payloads: list[object] = []
     CoreAgentEventSink(payloads.append).tool_result("shell", frame.decode("utf-8", "replace"))
@@ -144,6 +167,7 @@ _DECODERS = {
     ),
     "model-manifest": _Decoder(_model_manifest, (ModelRequestError,)),
     "agent-tool-result": _Decoder(_tool_result),
+    "otel-artifact-discovery": _Decoder(_otel_artifacts),
 }
 
 
