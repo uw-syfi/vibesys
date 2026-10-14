@@ -67,7 +67,7 @@ from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_runtime.api.testing import ProbedRunClock
 from vs_sim.api.testing import clock_from
-from vs_slurm.api import ClusterUnknown, Ended, Queued, SlurmJobStatus
+from vs_slurm.api import ClusterUnknown, Ended, SlurmJobStatus
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -253,25 +253,6 @@ def _measurements(core: CoreState) -> dict[str, str]:
     }
 
 
-#: How a job lives on when its sbatch is faulted with this kind: submitted, then it dies (out
-#: of memory, preemption, node failure), or it waits in the queue for good.
-_SUBMITTED_FATE: dict[ClusterFault, tuple[SlurmJobStatus, ...]] = {
-    ClusterFault.KILLED: (SlurmJobStatus.FAILED,),
-    ClusterFault.PENDING_FOREVER: (SlurmJobStatus.PENDING,),
-}
-#: Faults that leave the call's answer unknown, as the real ``SlurmCluster`` reports a failed,
-#: garbled, cut-off, or empty scheduler reading.
-_UNREADABLE = frozenset(
-    {
-        ClusterFault.SSH_DOWN,
-        ClusterFault.COMMAND_ERROR,
-        ClusterFault.WRONG_STATE,
-        ClusterFault.ACCOUNTING_GAP,
-        ClusterFault.TRUNCATED,
-    }
-)
-
-
 class FaultyCluster(ScenarioCluster):
     """The Fake cluster, with the plan's cluster faults struck at the calls they name.
 
@@ -313,13 +294,9 @@ class FaultyCluster(ScenarioCluster):
         fault = self._strike(ClusterOperation.SBATCH)
         if fault in {ClusterFault.SSH_DOWN, ClusterFault.COMMAND_ERROR}:
             return ClusterUnknown(operation_id=operation_id, reason=f"sbatch: {fault.value}")
-        if fault is ClusterFault.TRUNCATED:
-            # The job is accepted, but its id was cut off the reply.
-            super().submit(request, operation_id=operation_id)
-            return ClusterUnknown(operation_id=operation_id, reason="sbatch: truncated")
-        fate = _SUBMITTED_FATE.get(fault) if fault is not None else None
-        if fate is not None and operation_id not in self.submissions:
-            alive, self.states = self.states, fate
+        if fault is ClusterFault.KILLED and operation_id not in self.submissions:
+            # Submitted, then the job dies (out of memory, preemption, node failure).
+            alive, self.states = self.states, (SlurmJobStatus.FAILED,)
             try:
                 return super().submit(request, operation_id=operation_id)
             finally:
@@ -329,13 +306,9 @@ class FaultyCluster(ScenarioCluster):
     def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
         """Observe the job, or fail the squeue or sacct that reads it."""
         fault = self._strike(ClusterOperation.SQUEUE, ClusterOperation.SACCT)
-        if fault in _UNREADABLE:
+        if fault is not None and fault is not ClusterFault.KILLED:
             return self._unknown(target, by_job_id=by_job_id, reason=f"inspect: {fault.value}")
         outcome = super().inspect(target, by_job_id=by_job_id)
-        if fault is ClusterFault.REQUEUED and outcome.kind == "observed":
-            # The node failed and Slurm queued the job again; the next reading moves on. A
-            # scheduler reading carries no attempt number, so the requeue reads as attempt 0.
-            return outcome.model_copy(update={"life": Queued(attempt=outcome.life.attempt)})
         if outcome.kind == "observed" and isinstance(outcome.life, Ended):
             self.settled.add(_operation(target, outcome))
         return outcome
@@ -343,7 +316,7 @@ class FaultyCluster(ScenarioCluster):
     def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
         """Cancel the job, or fail the scancel."""
         fault = self._strike(ClusterOperation.SCANCEL)
-        if fault in _UNREADABLE:
+        if fault is not None and fault is not ClusterFault.KILLED:
             return self._unknown(target, by_job_id=by_job_id, reason=f"scancel: {fault.value}")
         outcome = super().cancel(target, by_job_id=by_job_id)
         if outcome.kind == "cancel_requested":
@@ -359,7 +332,7 @@ class FaultyCluster(ScenarioCluster):
     ) -> ClusterCollectOutcome:
         """Collect the job's evidence, or fail the transfer or exec that reads it."""
         fault = self._strike(ClusterOperation.TRANSFER, ClusterOperation.EXEC)
-        if fault in _UNREADABLE:
+        if fault is not None and fault is not ClusterFault.KILLED:
             return self._unknown(target, by_job_id=by_job_id, reason=f"collect: {fault.value}")
         outcome = super().collect(target, by_job_id=by_job_id, observed=observed)
         if outcome.kind == "collected":

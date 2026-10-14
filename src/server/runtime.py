@@ -79,7 +79,7 @@ if TYPE_CHECKING:
     from server.host_api import RunStatus
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
-    from vs_sim.api import Threads
+    from vs_sim.api import Network, Threads
 
 
 _RunValueT = TypeVar("_RunValueT")
@@ -161,6 +161,7 @@ class ServerRuntime:
         read_only_log: Path | None = None,
         observer: ServerLifecycleObserver | None = None,
         threads: Threads | None = None,
+        network: Network | None = None,
     ) -> None:
         """Compose all server components around one shared condition.
 
@@ -168,9 +169,11 @@ class ServerRuntime:
         first; only a read-only reopen (``read_only_log``) takes it from the
         recorded events instead. ``threads`` supplies every lock, condition,
         event and worker thread the server creates; it defaults to the
-        operating system's.
+        operating system's. ``network`` binds the Unix control socket; it
+        defaults to the operating system's Unix sockets.
         """
         self.threads = threads or OsThreads()
+        self.network = network
         self.runs = runs
         self.socket_path = socket_path
         self.web = web
@@ -290,12 +293,15 @@ class ServerRuntime:
             subscriptions = SubscriptionTracker(threads=self.threads)
             with ExitStack() as transports:
                 transport = transports.enter_context(
-                    UnixJsonlServer(self.socket_path, self.api, subscriptions, self.threads)
+                    UnixJsonlServer(
+                        self.socket_path, self.api, subscriptions, self.threads, self.network
+                    )
                 )
-                if self._ends_with_run:
-                    # Registered after the transport, so it runs before the
-                    # transport closes, on every exit path.
-                    transports.callback(self._drain_subscribers, transport)
+                # Registered after the transport, so it runs before the
+                # transport closes, on every exit path: a run that raised
+                # (a configuration or run failure) or ended leaves its
+                # clients the event that says why before they see the close.
+                transports.callback(self._drain_subscribers, transport)
                 self.transport_listening.set()
                 if self.observer is not None:
                     self.observer.listening()
@@ -348,18 +354,14 @@ class ServerRuntime:
         """Whether the server lifetime is independent of its subscribers."""
         return self.detach or self.read_only_log is not None
 
-    @property
-    def _ends_with_run(self) -> bool:
-        """Whether this server exits as soon as its run ends (detached, no gateway)."""
-        return self.detach and not self.web and self.read_only_log is None
-
     def _drain_subscribers(self, transport: UnixJsonlServer) -> None:
         """Let attached clients read the run's last events before the socket closes.
 
-        A detached server exits with its run, so without this a client could
-        see the connection close before the terminal status that explains it.
-        The wait is bounded: a client that stopped reading cannot hold the
-        server open.
+        A server that exits with its run (detached, or attached and failing)
+        would otherwise let a client see the connection close before the
+        terminal status that explains it. The wait is bounded: a client that
+        stopped reading cannot hold the server open. A server that already
+        waited for its clients to leave finds no stream to wait for.
         """
         transport.wait_until_delivered(self.api.latest_sequence, DETACHED_DRAIN_TIMEOUT_SECONDS)
 

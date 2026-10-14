@@ -506,12 +506,8 @@ def test_the_salt_picks_the_exploration_seeds(suite: pytest.Pytester) -> None:
     salted = seeds("--sim-explore-salt=abc")
     assert salted == seeds("--sim-explore-salt=abc")
     assert len(set(salted)) == 3
-    fixed = 2  # the plugin's FIXED_EXPLORATION_RUNS, a documented part of --sim-explore-salt
-    # The first runs repeat under every salt, so a failing seed is retried on the next push;
-    # the later runs differ by salt.
-    assert salted[:fixed] == unsalted[:fixed] == seeds("--sim-explore-salt=abd")[:fixed]
-    assert not set(salted[fixed:]) & set(seeds("--sim-explore-salt=abd"))
-    assert not set(salted[fixed:]) & set(unsalted)
+    assert not set(salted) & set(seeds("--sim-explore-salt=abd"))
+    assert not set(salted) & set(unsalted)
 
 
 def _explored(report: Path) -> dict[str, tuple[int, int, str]]:

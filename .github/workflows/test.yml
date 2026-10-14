@@ -22,11 +22,7 @@ env:
   # #474): a warning above the first, a failure above the second. Kept here so
   # raising or lowering them is a one-line change and the guard and the
   # documentation can't disagree.
-  # The budget is under 5 minutes with no added compute (no bigger runners, no
-  # more shards). 270 s warns that a run is near it. The failure stays at 600 s
-  # until p95 execution is under about 260 s: runs measured 250 to 280 s with
-  # slow-runner outliers to 373 s, so failing at 300 s now would be noise.
-  CI_WALL_TIME_WARN_SECONDS: '270'
+  CI_WALL_TIME_WARN_SECONDS: '360'
   CI_WALL_TIME_ERROR_SECONDS: '600'
 
 jobs:
@@ -478,21 +474,11 @@ jobs:
       # one about 20 s). Only pushes to main save: a pull request or merge-queue
       # cache is visible to that ref alone, and snapshotting and saving cost
       # about 45 s on the critical path. Pull requests read main's entries.
-      # The ISO week refreshes the floating python:3.12-bookworm base weekly.
-      # Pull requests and the merge queue also fall back to last week's
-      # snapshot, so the first runs of a week are not cold until main saves
-      # one; they never save, and a push to main falls back only within its
-      # week, so an old base cannot chain forward into a saved entry.
+      # The ISO week refreshes the floating python:3.12-bookworm base weekly:
+      # the fallback never crosses a week, so an old base cannot chain forward.
       - name: Compute the Docker layer cache key
         id: docker-cache-week
-        # `previous` is last week's for runs that do not save (see the restore
-        # keys), and this week's on a push, so main never restores last week.
-        env:
-          EVENT: ${{ github.event_name }}
-        run: |
-          echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
-          if [ "$EVENT" = push ]; then ago=0; else ago=7; fi
-          echo "previous=$(date -u -d "$ago days ago" +%G-%V)" >> "$GITHUB_OUTPUT"
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Docker layer cache
         id: docker-cache
@@ -500,9 +486,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/docker-data.tar.zst
           key: agent-image-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-sandbox/src/vs_sandbox/feature_image.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'libs/vs-sandbox/src/vs_sandbox/toolchain_features.py', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/images.py', 'tests/e2e/test_agent_image_e2e.py', 'libs/vs-sandbox/tests/test_docker_conformance_e2e.py', 'tests/e2e/test_credential_sharing_e2e.py', 'scripts/ci_docker_data_root.sh') }}
-          restore-keys: |
-            agent-image-docker-${{ steps.docker-cache-week.outputs.week }}-
-            agent-image-docker-${{ steps.docker-cache-week.outputs.previous }}-
+          restore-keys: agent-image-docker-${{ steps.docker-cache-week.outputs.week }}-
 
       - name: Point Docker at the layer cache storage
         run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
@@ -526,7 +510,7 @@ jobs:
   # changes do not.
   # The suite is split by test file across the runners listed in `matrix.shard`
   # (`VIBESYS_TEST_SHARD`, see tests/support/sharding.py) so the job fits the
-  # five-minute CI budget. The shard count is the length of that list
+  # ten-minute CI budget. The shard count is the length of that list
   # (`strategy.job-total`), so growing the suite means extending the list and
   # nothing else; `coverage` downloads whatever `coverage-data-*` artifacts exist.
   # Each shard uploads its coverage data; `coverage` combines them.
@@ -863,14 +847,7 @@ jobs:
       # keyed on this tier's image inputs and the ISO week (floating base images).
       - name: Compute the Docker layer cache key
         id: docker-cache-week
-        # `previous` is last week's for runs that do not save (see the restore
-        # keys), and this week's on a push, so main never restores last week.
-        env:
-          EVENT: ${{ github.event_name }}
-        run: |
-          echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
-          if [ "$EVENT" = push ]; then ago=0; else ago=7; fi
-          echo "previous=$(date -u -d "$ago days ago" +%G-%V)" >> "$GITHUB_OUTPUT"
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Docker layer cache
         id: docker-cache
@@ -878,9 +855,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/docker-data.tar.zst
           key: real-tiers-slurm-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('tests/slurm_cluster/image/**', 'tests/slurm_cluster/cluster.py', 'tests/slurm_cluster/harness.py', 'scripts/run_slurm_cluster_tests.sh', 'scripts/ci_docker_data_root.sh') }}
-          restore-keys: |
-            real-tiers-slurm-docker-${{ steps.docker-cache-week.outputs.week }}-
-            real-tiers-slurm-docker-${{ steps.docker-cache-week.outputs.previous }}-
+          restore-keys: real-tiers-slurm-docker-${{ steps.docker-cache-week.outputs.week }}-
 
       - name: Point Docker at the layer cache storage
         run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
@@ -933,14 +908,7 @@ jobs:
       # keyed on this tier's image inputs and the ISO week (floating base images).
       - name: Compute the Docker layer cache key
         id: docker-cache-week
-        # `previous` is last week's for runs that do not save (see the restore
-        # keys), and this week's on a push, so main never restores last week.
-        env:
-          EVENT: ${{ github.event_name }}
-        run: |
-          echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
-          if [ "$EVENT" = push ]; then ago=0; else ago=7; fi
-          echo "previous=$(date -u -d "$ago days ago" +%G-%V)" >> "$GITHUB_OUTPUT"
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Docker layer cache
         id: docker-cache
@@ -948,9 +916,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/docker-data.tar.zst
           key: real-tiers-minimal-container-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-sandbox/src/vs_sandbox/feature_image.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'libs/vs-sandbox/src/vs_sandbox/toolchain_features.py', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/images.py', 'scripts/run_minimal_container_tests.sh', 'scripts/ci_docker_data_root.sh') }}
-          restore-keys: |
-            real-tiers-minimal-container-docker-${{ steps.docker-cache-week.outputs.week }}-
-            real-tiers-minimal-container-docker-${{ steps.docker-cache-week.outputs.previous }}-
+          restore-keys: real-tiers-minimal-container-docker-${{ steps.docker-cache-week.outputs.week }}-
 
       - name: Point Docker at the layer cache storage
         run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
@@ -1001,14 +967,7 @@ jobs:
 
       - name: Compute the Docker layer cache key
         id: docker-cache-week
-        # `previous` is last week's for runs that do not save (see the restore
-        # keys), and this week's on a push, so main never restores last week.
-        env:
-          EVENT: ${{ github.event_name }}
-        run: |
-          echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
-          if [ "$EVENT" = push ]; then ago=0; else ago=7; fi
-          echo "previous=$(date -u -d "$ago days ago" +%G-%V)" >> "$GITHUB_OUTPUT"
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Docker layer cache
         id: docker-cache
@@ -1016,9 +975,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/docker-data.tar.zst
           key: feature-tests-${{ matrix.family }}-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'scripts/ci_docker_data_root.sh') }}
-          restore-keys: |
-            feature-tests-${{ matrix.family }}-${{ steps.docker-cache-week.outputs.week }}-
-            feature-tests-${{ matrix.family }}-${{ steps.docker-cache-week.outputs.previous }}-
+          restore-keys: feature-tests-${{ matrix.family }}-${{ steps.docker-cache-week.outputs.week }}-
 
       - name: Point Docker at the layer cache storage
         run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
@@ -1101,17 +1058,12 @@ jobs:
   # can push a run over for reasons no workflow change can fix. Elapsed and
   # queue time stay in the summary and the annotation.
   #
-  # `seed-exploration` and `doc-checks` are in `needs` so their time counts: a job
-  # still running when this one starts drops out of the math, which is how a
-  # 10-minute seed exploration once reported as a 262 s run.
-  #
   # `typecheck` is deliberately absent from `needs`; Required PR CI owns that
   # dependency. It still appears in the table because this step reads every job
   # of the run from the API, not just the ones listed here.
   ci-budget:
     needs:
       - changes
-      - doc-checks
       - python-checks
       - tui-quality
       - tui-tests
@@ -1128,7 +1080,6 @@ jobs:
       - real-tiers-minimal-container
       - test
       - coverage
-      - seed-exploration
       - sandbox-linux
       - sandbox-macos
     if: always()

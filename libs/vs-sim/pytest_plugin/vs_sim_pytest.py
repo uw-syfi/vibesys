@@ -38,11 +38,9 @@ What it does:
   the session's start) stops starting runs, including a test's first exploration run: the
   ordinary suite has already run every test once under its default seed. An interrupt
   (Ctrl-C, or the CI step's hard cap) ends exploration the same way and keeps the results so
-  far. ``--sim-explore-salt=TEXT`` picks which seeds the runs after the first
-  ``FIXED_EXPLORATION_RUNS`` use, and which test each round starts from, so successive
-  commits explore different seeds and, under a tight budget, different tests. The first
-  ``FIXED_EXPLORATION_RUNS`` runs of each test use the same seeds under every salt, so a
-  seed that failed on one push runs again on the next. A test the budget left unexplored is reported as skipped.
+  far. ``--sim-explore-salt=TEXT`` picks which seeds the runs use and which test each round
+  starts from, so successive commits explore different seeds and, under a tight budget,
+  different tests. A test the budget left unexplored is reported as skipped.
   ``--sim-explore-report=PATH`` writes one JSON object per selected test (``test``: node id,
   ``runs``: exploration runs done, ``planned``: runs asked for, ``outcome``: ``passed``,
   ``failed``, ``skipped`` or ``not explored``) for the CI step's job summary. The terminal
@@ -86,8 +84,6 @@ DEFAULT_REAL_TIERS = ["tests/e2e", "tests/slurm_cluster", "tests/minimal_contain
 _RUN = pytest.StashKey[int]()
 """The exploration run (from 0) a sim test is currently in; absent outside exploration."""
 _EXPLORATION = pytest.StashKey["_Exploration"]()
-FIXED_EXPLORATION_RUNS = 2
-"""Each test's first exploration runs use seeds no salt changes, so re-pushing retries them."""
 
 
 class _Exploration:
@@ -279,8 +275,9 @@ def _sim_for(item: pytest.Item) -> Sim:
         seed = seed_for_test(item.nodeid, item.config.getoption("sim_seed"))
         schedule_seed = item.config.getoption("sim_schedule_seed")
     else:
-        offset = 0 if run < FIXED_EXPLORATION_RUNS else item.config.stash[_EXPLORATION].offset
-        seed = schedule_seed = explore_seed(item.nodeid, offset + run)
+        seed = schedule_seed = explore_seed(
+            item.nodeid, item.config.stash[_EXPLORATION].offset + run
+        )
     trace = EventTrace() if item.config.getoption("sim_determinism_check") else None
     sim = Sim(seed=seed, trace=trace, schedule_seed=schedule_seed)
     setattr(item, SIM_ATTRIBUTE, sim)

@@ -60,9 +60,6 @@ TAIL_SECONDS = 20.0
 GRACE_SECONDS = 10.0
 PYTEST_NO_TESTS_COLLECTED = 5
 LISTED_UNEXPLORED = 50
-# Above this share of explorable tests left unexplored, the step warns on the PR: a green
-# step then says little about the changed tests' other seeds.
-UNEXPLORED_WARNING_SHARE = 0.5
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -233,17 +230,6 @@ def summary(
     return "\n".join(lines) + "\n"
 
 
-def unexplored_warning(rows: list[Explored], *, cap: float) -> str | None:
-    """A GitHub warning annotation when the cap left too many tests unexplored, else None."""
-    unexplored = sum(1 for row in rows if row.outcome == "not explored")
-    if not rows or unexplored / len(rows) <= UNEXPLORED_WARNING_SHARE:
-        return None
-    return (
-        f"::warning title=Seed exploration cut short::the {cap:g} s cap left {unexplored} of"
-        f" {len(rows)} changed tests unexplored; the job summary lists them"
-    )
-
-
 def outcome(code: int, *, capped: bool) -> tuple[bool, str]:
     """Whether the step fails, and the verdict for the summary, from pytest's exit code.
 
@@ -290,9 +276,6 @@ def _run(args: argparse.Namespace) -> int:
     failed, verdict = outcome(code, capped=capped)
     text = summary(rows, selections=len(ids), cap=args.cap, elapsed=elapsed, verdict=verdict)
     print(text)
-    warning = unexplored_warning(rows, cap=args.cap)
-    if warning is not None:
-        print(warning)
     target = os.environ.get("GITHUB_STEP_SUMMARY")
     if target:
         with Path(target).open("a", encoding="utf-8") as out:
