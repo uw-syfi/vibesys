@@ -14,6 +14,7 @@ dependencies = [
     "vs-agent",
     "vs-async-ops",
     "vs-core",
+    "vs-decode",
     "vs-evaluation",
     "vs-evaluator-protocol",
     "vs-issue-tracker",
@@ -35,6 +36,7 @@ vs_runtime = ["py.typed", "prompts/*.j2", "features/src/*/*", "features/test/*/*
 vs-agent = { workspace = true }
 vs-async-ops = { workspace = true }
 vs-core = { workspace = true }
+vs-decode = { workspace = true }
 vs-evaluation = { workspace = true }
 vs-evaluator-protocol = { workspace = true }
 vs-issue-tracker = { workspace = true }

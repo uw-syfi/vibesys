@@ -190,6 +190,7 @@ graph TD
     vs_runtime --> vs_agent
     vs_runtime --> vs_async_ops
     vs_runtime --> vs_core
+    vs_runtime --> vs_decode
     vs_runtime --> vs_evaluation
     vs_runtime --> vs_evaluator_protocol
     vs_runtime --> vs_issue_tracker
