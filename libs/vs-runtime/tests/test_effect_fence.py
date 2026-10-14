@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
@@ -20,6 +20,7 @@ from vs_runtime.api.core import (
     FenceKind,
     MayHold,
     NothingHeld,
+    ObservationFacts,
     ReceiptStore,
     StillCreatingError,
 )
@@ -100,3 +101,35 @@ def test_only_the_fence_proves_that_nothing_is_held() -> None:
         NothingHeld(key, _mint=object())
     with pytest.raises(TypeError):
         MayHold(key, live=False, _mint=object())
+
+
+def test_a_proof_copied_or_meant_for_another_fence_proves_nothing() -> None:
+    """A proof cannot be copied, and it holds only for the fence it closed.
+
+    Before, ``dataclasses.replace`` kept the private mint, so a copy with another key, or a
+    live closure copied as finished, passed as the fence's own answer (and facts that hold
+    nothing could be copied the same way); and ``never_held`` accepted a proof without
+    checking whose fence it closed.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        fences = EffectFences(
+            ReceiptStore(Project.open(Path(directory)).state.state_store_namespace("run"))
+        )
+        closed, other = _KEYS
+        proof = fences.close(closed, by=RequestId(root="cancel-r"), host=_host(1))
+        assert isinstance(proof, NothingHeld)
+        fences.enter(other, by=RequestId(root="dispatch-a"), host=_host(1))
+        live = fences.close(other, by=RequestId(root="cancel-r"), host=_host(1))
+        assert isinstance(live, MayHold)
+        assert live.live
+
+        facts = ObservationFacts.never_held(proof, closed, "closed")
+        assert facts.holds_nothing
+        with pytest.raises(TypeError, match="another fence"):
+            ObservationFacts.never_held(proof, other, "not this fence")
+        with pytest.raises((TypeError, ValueError), match="_mint"):
+            replace(proof, key=other)
+        with pytest.raises((TypeError, ValueError), match="_mint"):
+            replace(live, live=False)
+        with pytest.raises(TypeError, match="only from never_held"):
+            replace(facts, diagnostic="copied")

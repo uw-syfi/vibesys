@@ -23,7 +23,7 @@ sequence cannot be chosen without it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING
 
 from vs_core.api import (
@@ -41,7 +41,7 @@ from vs_runtime._receipt_store import ReceiptCorruptError
 
 if TYPE_CHECKING:
     from vs_core.api import RequestBase
-    from vs_runtime._effect_fence import NothingHeld
+    from vs_runtime._effect_fence import FenceKey, NothingHeld
     from vs_runtime._receipt_store import ReceiptStore
 
 
@@ -82,10 +82,11 @@ class ObservationFacts:
     diagnostic: str = ""
     revision: RevisionRef | None = None
     """The revision a snapshot or retain produced; a derived event may carry only this one."""
-    _vouch: object = field(default=None, repr=False, compare=False, kw_only=True)
+    _vouch: InitVar[object] = field(default=None, kw_only=True)
+    """Init-only, so ``dataclasses.replace`` does not carry it over: a copy that holds nothing raises."""
 
-    def __post_init__(self) -> None:
-        if self.holds_nothing and self._vouch is not _VOUCHED:
+    def __post_init__(self, _vouch: object) -> None:
+        if self.holds_nothing and _vouch is not _VOUCHED:
             message = "facts that hold nothing come only from never_held, refused or not_begun"
             raise TypeError(message)
 
@@ -105,16 +106,17 @@ class ObservationFacts:
         return cls(status=ObservationStatus.REJECTED, diagnostic=PAYLOAD_CONFLICT)
 
     @classmethod
-    def never_held(cls, proof: NothingHeld, diagnostic: str) -> ObservationFacts:
+    def never_held(cls, proof: NothingHeld, key: FenceKey, diagnostic: str) -> ObservationFacts:
         """A terminal answer that what the request names holds nothing, now or later.
 
         Only a closed effect fence proves it (``EffectFences.close`` or ``cleared``): a
         cancel, close or discard of something no request entered the fence to create, or
         whose entries the closer removed. Core ends an owning record only on a proven
         release, so a bare rejection there would leave it waiting for an answer that never
-        comes.
+        comes. ``key`` is the fence of what the request names; a proof about another fence,
+        or a copy of a proof, raises ``TypeError``.
         """
-        del proof  # its existence is the proof; core needs only the facts
+        proof.vouch(key)
         return cls._holding_nothing(diagnostic)
 
     @classmethod

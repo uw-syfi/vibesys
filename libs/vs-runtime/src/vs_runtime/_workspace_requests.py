@@ -155,9 +155,11 @@ def _rejected(diagnostic: str) -> _Facts:
     return _holding_nothing(ObservationFacts.refused(diagnostic))
 
 
-def _never_held(proof: NothingHeld, diagnostic: str) -> _Facts:
+def _never_held(proof: NothingHeld, attempt: AttemptRef, diagnostic: str) -> _Facts:
     """The discard's answer that the attempt holds no workspace, now or later (a closed fence)."""
-    return _holding_nothing(ObservationFacts.never_held(proof, diagnostic))
+    return _holding_nothing(
+        ObservationFacts.never_held(proof, workspace_fence(attempt), diagnostic)
+    )
 
 
 def _holding_nothing(facts: ObservationFacts) -> _Facts:
@@ -371,7 +373,7 @@ class RuntimeWorkspaceRequests:
         if bound is not None:
             return await self._discard(request, bound, resumed=resumed)
         if isinstance(closure, NothingHeld):
-            return _never_held(closure, _WITHDRAWN)
+            return _never_held(closure, attempt, _WITHDRAWN)
         return await self._remove_unbound(attempt, closure)
 
     async def _remove_unbound(self, attempt: AttemptRef, closure: MayHold) -> _Facts:
@@ -391,7 +393,7 @@ class RuntimeWorkspaceRequests:
                 await leftover.discard()
             except (OSError, BaseExceptionGroup) as error:
                 return _unknown(f"an unbound worktree of the attempt was not removed: {error}")
-        return _never_held(self._fences.cleared(closure), _WITHDRAWN)
+        return _never_held(self._fences.cleared(closure), attempt, _WITHDRAWN)
 
     async def _attempt_request(
         self,

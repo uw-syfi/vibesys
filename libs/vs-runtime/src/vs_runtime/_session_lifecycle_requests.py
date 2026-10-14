@@ -431,16 +431,19 @@ class SessionLifecycleRequests:
         """Close the invocation's fence, then stop and judge whatever its dispatches began."""
         invocation = request.invocation
         bkey = session_binding_key(request, invocation.session_id)
+        fence = invocation_fence(bkey, invocation.invocation_id.root)
         with self._store.exclusive():
             closure = self._fences.close(
-                invocation_fence(bkey, invocation.invocation_id.root),
+                fence,
                 by=core_identity(request),
                 host=context.fence,
             )
             binding = self._binding(request, invocation.session_id)
         if isinstance(closure, NothingHeld):
             # No dispatch entered the fence, and none can now: no provider call ever begins.
-            return ObservationFacts.never_held(closure, "the invocation was never dispatched")
+            return ObservationFacts.never_held(
+                closure, fence, "the invocation was never dispatched"
+            )
         if binding is None:
             return _unknown("the invocation was dispatched without a session binding", None)
         return self._stop(closure, binding, invocation.invocation_id.root)
@@ -496,10 +499,9 @@ class SessionLifecycleRequests:
     def _close(self, request: CloseSession, context: ExecutionContext) -> ObservationFacts:
         """Close the episode's fence, then release the session an ensure bound, if any."""
         bkey = session_binding_key(request, request.session_id)
+        fence = episode_fence(bkey, request.episode)
         with self._store.exclusive():
-            closure = self._fences.close(
-                episode_fence(bkey, request.episode), by=core_identity(request), host=context.fence
-            )
+            closure = self._fences.close(fence, by=core_identity(request), host=context.fence)
             binding = load_session_binding(self._store, bkey)
         if binding is None:
             # An ensure binds in the same locked step as it enters, so an entered fence
@@ -507,7 +509,7 @@ class SessionLifecycleRequests:
             if isinstance(closure, MayHold) and closure.live:
                 return _unknown("an ensure of the session is in flight")
             proof = closure if isinstance(closure, NothingHeld) else self._fences.cleared(closure)
-            return ObservationFacts.never_held(proof, "no ensured session to close")
+            return ObservationFacts.never_held(proof, fence, "no ensured session to close")
         try:
             self._sessions.release(AgentSessionKey.parse(binding.session_key))
         except InvocationConflictError as error:

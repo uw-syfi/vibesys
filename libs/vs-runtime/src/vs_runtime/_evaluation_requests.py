@@ -432,12 +432,13 @@ class MeasurementRequests:
         request: RequestBase,
         context: ExecutionContext,
         proof: NothingHeld,
+        fence: FenceKey,
         reason: str,
     ) -> ExecutionResult:
         """The job a release names holds nothing, now or later: its fence proves it."""
         observed = self._observations.observe(
             ObservationSubject.of(request),
-            ObservationFacts.never_held(proof, reason),
+            ObservationFacts.never_held(proof, fence, reason),
             observed_at=context.now_at,
         )
         return ExecutionResult(observation=RequestObserved(observation=observed))
@@ -649,9 +650,10 @@ class MeasurementRequests:
 
     async def _cancel(self, request: CancelOwnedJob, context: ExecutionContext) -> ExecutionResult:
         # Fence first: a submission of this job that has not entered by now submits nothing.
+        fence = job_fence(request.scope, request.admission_id, request.resource_id.root)
         with self._store.exclusive():
             closure = self._fences.close(
-                job_fence(request.scope, request.admission_id, request.resource_id.root),
+                fence,
                 by=core_identity(request),
                 host=context.fence,
             )
@@ -663,7 +665,9 @@ class MeasurementRequests:
             if submitting:
                 return self._unknown(request, context, "the job's submission is still running")
             proof = closure if isinstance(closure, NothingHeld) else self._fences.cleared(closure)
-            return self._never_held(request, context, proof, "job is not owned by this scope")
+            return self._never_held(
+                request, context, proof, fence, "job is not owned by this scope"
+            )
         problem = self._authority_problem(request, context)
         if problem is not None:
             return self._unknown(request, context, problem)

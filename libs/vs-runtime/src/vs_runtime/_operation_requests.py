@@ -120,6 +120,7 @@ class RegisteredOperationRequests:
         own_effect: bool = True,
         subject: CoreRequestId | None = None,
         resource_id: ResourceId | None = None,
+        sealed: ResultReceipt | None = None,
     ) -> Observation:
         """Observation of *subject* (default: the request itself), in the request's episode.
 
@@ -132,10 +133,20 @@ class RegisteredOperationRequests:
         "never ran", sealed only with the fence's ``NothingHeld`` (``_seal_never_ran``). A
         cancel names the resource it leaves owned and never claims its release. The sequence
         is per subject, so an Inspect of a target continues the target's own history.
+
+        An answer about another request (``subject``) holds nothing only when it reports that
+        request's ``sealed`` result: an inspection's rejection by itself proves nothing about
+        what its target created.
         """
         terminal = own_effect and status is not ObservationStatus.UNKNOWN
         accepted = terminal and status in (ObservationStatus.SUCCEEDED, ObservationStatus.FAILED)
-        if terminal and status is ObservationStatus.REJECTED and resource_id is None:
+        about_itself = subject is None or (sealed is not None and sealed.request_id == subject.root)
+        if (
+            terminal
+            and status is ObservationStatus.REJECTED
+            and resource_id is None
+            and about_itself
+        ):
             # Each of the three is sealed under the subject's own identity, so it never acts.
             facts = ObservationFacts.refused(detail)
         else:
@@ -459,7 +470,12 @@ class RegisteredOperationRequests:
         )
         return TargetObservation(
             observation=self._observe(
-                request, context, sealed.status, sealed.detail, subject=core_named(target_id)
+                request,
+                context,
+                sealed.status,
+                sealed.detail,
+                subject=core_named(target_id),
+                sealed=sealed,
             ),
             setup_failure=_setup_failure(sealed.status),
             operation_schema=entry.schema if outcome is not None else None,

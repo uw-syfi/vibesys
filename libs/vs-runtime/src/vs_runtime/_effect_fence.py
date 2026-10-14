@@ -27,7 +27,7 @@ epoch's job, not this fence's).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -117,6 +117,9 @@ class Fenced:
 
 type Admission = Entered | Fenced
 
+# The mint is an init-only argument, never a field: an instance does not carry it, so
+# ``dataclasses.replace`` cannot copy it (it raises), and no copy of a proof about one
+# fence becomes a proof about another.
 _MINT = object()
 
 
@@ -124,15 +127,23 @@ _MINT = object()
 class NothingHeld:
     """Proof that nothing is held for ``key``, now or later: its fence is closed and empty.
 
-    Only ``EffectFences`` makes one; constructing it elsewhere raises ``TypeError``.
+    Only ``EffectFences`` makes one; constructing or copying it elsewhere raises.
     """
 
     key: FenceKey
-    _mint: object = field(repr=False, compare=False)
+    _mint: InitVar[object]
 
-    def __post_init__(self) -> None:
-        if self._mint is not _MINT:
+    def __post_init__(self, _mint: object) -> None:
+        if _mint is not _MINT:
             message = "only EffectFences proves that nothing is held"
+            raise TypeError(message)
+
+    def vouch(self, key: FenceKey) -> None:
+        """Raise ``TypeError`` unless this proof is about the fence of ``key``."""
+        if self.key != key:
+            message = (
+                f"a proof for {self.key.storage_key} is about another fence than {key.storage_key}"
+            )
             raise TypeError(message)
 
 
@@ -146,10 +157,10 @@ class MayHold:
 
     key: FenceKey
     live: bool
-    _mint: object = field(repr=False, compare=False)
+    _mint: InitVar[object]
 
-    def __post_init__(self) -> None:
-        if self._mint is not _MINT:
+    def __post_init__(self, _mint: object) -> None:
+        if _mint is not _MINT:
             message = "only EffectFences reports a closed fence"
             raise TypeError(message)
 
