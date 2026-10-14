@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from pydantic import JsonValue, TypeAdapter
 
+from vs_decode.api import Unreadable, read_json
 from vs_sandbox.api import EnvironmentBindMount
 
 if TYPE_CHECKING:
@@ -57,6 +58,8 @@ class PreparedModelArtifacts:
 
 
 _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_METADATA_BYTES = 1024 * 1024
+"""The largest task ``meta.json`` read."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,14 +150,20 @@ def _ensure_primary_model(
     return model_path
 
 
+class ModelMetadataUnreadableError(ValueError):
+    """A ``meta.json`` that cannot be read, is too large, or is not JSON."""
+
+
 def read_model_metadata(path: Path) -> ModelMetadata:
     """Read a task's model metadata file: the one reader of ``meta.json``.
 
-    Raises ``ValueError`` for a file that is not JSON (pydantic's parser, so deep
-    nesting is a ``ValueError`` too) or lacks a usable ``model_id``, and
-    ``TypeError`` for a document that is not an object.
+    Raises ``ValueError`` for a file that cannot be read, is too large, is not JSON (deep
+    nesting included) or lacks a usable ``model_id``, and ``TypeError`` for a document
+    that is not an object.
     """
-    raw = _JSON_VALUE.validate_json(path.read_bytes())
+    raw = read_json(path, _JSON_VALUE, max_bytes=_MAX_METADATA_BYTES)
+    if isinstance(raw, Unreadable):
+        raise ModelMetadataUnreadableError(str(raw))
     if not isinstance(raw, dict):
         message = f"{path.name} at {path} must contain a JSON object"
         raise TypeError(message)

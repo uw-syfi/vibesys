@@ -775,7 +775,6 @@ FILE_IO_EDGE_MODULES: dict[str, str] = {
     "libs/vs-runtime/src/vs_runtime/_input_project.py": "agent workspace: materializes the task's input project",
     "libs/vs-runtime/src/vs_runtime/_linux_cpu_profiler.py": "OS adapter: /proc and perf output, and the profile report sink",
     "libs/vs-runtime/src/vs_runtime/_macos_cpu_profiler.py": "OS adapter: the profile report sink",
-    "libs/vs-runtime/src/vs_runtime/_model_artifacts.py": "user input loader: the one reader of a task's meta.json",
     "libs/vs-runtime/src/vs_runtime/_objective_document.py": "agent workspace: writes the objective document the agent reads",
     "libs/vs-runtime/src/vs_runtime/_project_materialization.py": "agent workspace: materializes the project tree",
     "libs/vs-runtime/src/vs_runtime/_receipt_store.py": "store implementation: evaluation receipts",

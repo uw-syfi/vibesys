@@ -73,7 +73,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 from vs_core.api import (
     AgentCall,
@@ -103,6 +103,7 @@ from vs_core.api import (
     Within,
     suspension_refusal,
 )
+from vs_decode.api import Unreadable, decode_json
 from vs_evaluation.api import (
     RECEIPT_LINE,
     AgentEvaluationCall,
@@ -455,7 +456,12 @@ class AgentEvaluationBridge:
         if not hmac.compare_digest(mac, expected):
             message = "unknown evaluation token"
             raise PermissionError(message)
-        return Scope.model_validate_json(base64.urlsafe_b64decode(body))
+        scope = decode_json(
+            base64.urlsafe_b64decode(body), Scope, source="evaluation token", max_bytes=_FRAME_LIMIT
+        )
+        if isinstance(scope, Unreadable):
+            raise PermissionError(str(scope))
+        return scope
 
     # socket service
 
@@ -564,15 +570,15 @@ class AgentEvaluationBridge:
         """
         acknowledge = _nothing
         try:
-            call = _CALLS.validate_json(frame)
+            call = decode_json(frame, _CALLS, source="evaluation tool call", max_bytes=_FRAME_LIMIT)
+            if isinstance(call, Unreadable):
+                return self._failure(ToolRefusal.MALFORMED), acknowledge
             if isinstance(call, SubmitCall):
                 result, acknowledge = await self._submit(self._scope_of(call.token))
             elif isinstance(call, WaitCall):
                 result = self._validate_wait(self._scope_of(call.token), call.handles)
             else:
                 return self._failure(ToolRefusal.REFUSED), acknowledge
-        except ValidationError:
-            return self._failure(ToolRefusal.MALFORMED), acknowledge
         except PermissionError:
             return self._failure(ToolRefusal.UNKNOWN_CALLER), acknowledge
         except ToolRefusedError as error:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
 
 from vs_core.api import (
     ContractError,
@@ -14,6 +14,7 @@ from vs_core.api import (
     StrategyState,
     validate_startup,
 )
+from vs_decode.api import Unreadable, decode_json
 from vs_project.api import (
     Project,
     ProjectStateError,
@@ -56,18 +57,20 @@ class ResolvedCoreResume[S: StrategyState]:
 
 
 _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_LEGACY_STATE_BYTES = 256 * 1024 * 1024
+"""The largest legacy state file whose declared schema version is read."""
 
 
 def _schema(source: bytes) -> str:
     """The ``schema_version`` a legacy file declares, for the diagnostic.
 
-    Total over any bytes: pydantic's parser reports invalid UTF-8 and deep
-    nesting as a ``ValidationError``, where ``json.loads`` raised
-    ``RecursionError`` past this function.
+    Total over any bytes: invalid UTF-8, deep nesting and oversized input are
+    "unparseable".
     """
-    try:
-        value = _JSON_VALUE.validate_json(source)
-    except ValidationError:
+    value = decode_json(
+        source, _JSON_VALUE, source="legacy state file", max_bytes=_MAX_LEGACY_STATE_BYTES
+    )
+    if isinstance(value, Unreadable):
         return "unparseable"
     if isinstance(value, dict):
         version = value.get("schema_version")

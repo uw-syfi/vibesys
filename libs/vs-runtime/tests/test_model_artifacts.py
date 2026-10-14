@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -273,6 +274,25 @@ def test_model_metadata_must_be_a_json_object(tmp_path: Path) -> None:
     (reference / "meta.json").write_text(json.dumps([{"model_id": "org/model"}]))
 
     with pytest.raises(TypeError, match="must contain a JSON object"):
+        prepare_model_artifacts(
+            _request(tmp_path, reference),
+            isolated=True,
+            materialize_local_weights=True,
+            downloader=_FakeModelDownloader(tmp_path / "downloads"),
+        )
+
+
+@pytest.mark.parametrize("kind", ["fifo", "oversized"])
+def test_model_metadata_that_cannot_be_read_whole_is_refused(tmp_path: Path, kind: str) -> None:
+    # A FIFO blocks a plain read until a writer appears; a huge file would be read whole.
+    reference = tmp_path / "reference"
+    reference.mkdir()
+    if kind == "fifo":
+        os.mkfifo(reference / "meta.json")
+    else:
+        (reference / "meta.json").write_text(json.dumps({"model_id": "m" * 2 * 1024 * 1024}))
+
+    with pytest.raises(ValueError, match=r"meta\.json"):
         prepare_model_artifacts(
             _request(tmp_path, reference),
             isolated=True,

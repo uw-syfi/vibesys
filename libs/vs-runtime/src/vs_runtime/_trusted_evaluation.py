@@ -26,6 +26,7 @@ from pydantic import (
 )
 
 from vs_core.api import EvidenceKind
+from vs_decode.api import Unreadable, decode_json
 from vs_evaluator_protocol.api import (
     ErrorRecord,
     Hello,
@@ -49,6 +50,8 @@ from vs_sandbox.api import CommandResult
 
 # Parses untrusted JSON with nesting bounded, failing as a ValueError.
 _JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_BENCHMARK_RESULT_BYTES = 16 * 1024 * 1024
+"""The largest benchmark result block read out of evaluator output."""
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -835,9 +838,11 @@ def _decode_benchmark_failure(
 
 
 def _parse_scalar(encoded: str, metric: str) -> float:
-    # Evaluator output: pydantic's parser bounds nesting as a ValueError, where
-    # ``json.loads`` raises RecursionError past the callers' handlers.
-    payload = _JSON.validate_json(encoded.strip())
+    payload = decode_json(
+        encoded.strip(), _JSON, source="benchmark result", max_bytes=_MAX_BENCHMARK_RESULT_BYTES
+    )
+    if isinstance(payload, Unreadable):
+        raise _BenchmarkResultError(str(payload))
     values = (
         [payload[metric]]
         if isinstance(payload, dict) and metric in payload
