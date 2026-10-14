@@ -20,6 +20,7 @@ members = [
     "vs-async-ops",
     "vs-bench",
     "vs-core",
+    "vs-decode",
     "vs-dst",
     "vs-evaluation",
     "vs-evaluator-protocol",
@@ -3054,6 +3055,17 @@ dependencies = [
 requires-dist = [{ name = "pydantic", specifier = ">=2" }]
 
 [[package]]
+name = "vs-decode"
+version = "0.1.0"
+source = { editable = "libs/vs-decode" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+
+[[package]]
 name = "vs-dst"
 version = "0.1.0"
 source = { editable = "libs/vs-dst" }
@@ -3173,6 +3185,7 @@ source = { editable = "libs/vs-project" }
 dependencies = [
     { name = "pydantic" },
     { name = "pygit2" },
+    { name = "vs-decode" },
     { name = "vs-sim" },
 ]
 
@@ -3180,6 +3193,7 @@ dependencies = [
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "pygit2", specifier = ">=1.18,<2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 

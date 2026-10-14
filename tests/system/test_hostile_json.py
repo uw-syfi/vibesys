@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from resources.profilers.rocprof import analyze_rocprof, att, counters
 
 from server.api.protocol import Response, SubscribeRequest, decode_request
@@ -44,6 +44,7 @@ from server.host_api import (
 from server.host_helper import ChannelState, Received, Send, step
 from server.transport.discovery import WebInstanceRecord
 from vibesys.run import CoreAgentEventSink
+from vs_decode.api import Unreadable, decode_json, read_json
 from vs_evaluator_protocol.api import ProtocolError, parse_records
 from vs_runtime.api import CommandResult
 from vs_runtime.api.infrastructure import (
@@ -61,7 +62,7 @@ from vs_runtime.api.testing import (
     FakeWorkspace,
     MemoryValidationPasses,
 )
-from vs_sim.api.testing import ManualClock, hostile_json_frames
+from vs_sim.api.testing import OVERSIZED_BYTES, ManualClock, hostile_json_frames
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -252,7 +253,31 @@ def _tool_result(frame: bytes, _: Path) -> None:
     assert len(payloads) == 1
 
 
+class _Hello(BaseModel):
+    """A strict document shaped like one of the valid frames, for the decode function."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: str
+    request_id: str
+    client_versions: list[int]
+    app_version: str
+
+
+def _decode_json_file(frame: bytes, workspace: Path) -> None:
+    """The framework's decode function: a file's value or a typed ``Unreadable``, never a raise."""
+    path = workspace / "document.json"
+    path.write_bytes(frame)
+    decoded = read_json(path, _Hello, max_bytes=OVERSIZED_BYTES - 1)
+    assert isinstance(decoded, _Hello) or (decoded.source == str(path) and decoded.problems)
+    assert isinstance(
+        decode_json(frame, _Hello, source="frame", max_bytes=OVERSIZED_BYTES - 1),
+        _Hello | Unreadable,
+    )
+
+
 _DECODERS = {
+    "decode-json": _Decoder(_decode_json_file),
     "protocol-request": _Decoder(_decode_request),
     "instance-record": _Decoder(_parse_record),
     "helper-channel": _Decoder(_helper_channel),

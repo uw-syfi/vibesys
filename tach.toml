@@ -42,6 +42,7 @@
 source_roots = [
     "src",
     "libs/vs-evaluator-protocol/src",
+    "libs/vs-decode/src",
     "libs/vs-evaluation/src",
     "libs/vs-async-ops/src",
     "libs/vs-github/src",
@@ -438,7 +439,7 @@ depends_on = ["vs_sandbox", "vs_project", "vs_prompts", "vs_mcp", "vs_faults", "
 [[modules]]
 path = "vs_project"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.api"]
+depends_on = ["vs_decode", "vs_sim.api"]
 
 [[modules]]
 path = "vs_issue_tracker"
@@ -447,6 +448,11 @@ depends_on = ["vs_core", "vs_github", "vs_sim.api"]
 
 [[modules]]
 path = "vs_evaluator_protocol"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_decode"
 layer = "prompts_and_lower_libs"
 depends_on = []
 
@@ -819,6 +825,10 @@ from = ["vs_agent"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_evaluator_protocol"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_decode"]
 
 [[interfaces]]
 expose = ["api", "api\\..*"]

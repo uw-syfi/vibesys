@@ -40,6 +40,7 @@ FRAMEWORK_PACKAGES = (
     "vs_agent",
     "vs_async_ops",
     "vs_evaluator_protocol",
+    "vs_decode",
     "vs_evaluation",
     "vs_github",
     "vs_issue_tracker",

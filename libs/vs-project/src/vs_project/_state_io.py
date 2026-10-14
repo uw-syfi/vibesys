@@ -9,8 +9,9 @@ from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project.errors import (
     ProjectStateError,
@@ -20,6 +21,9 @@ from vs_project.errors import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+STATE_DOCUMENT_MAX_BYTES = 256 * 1024 * 1024
+"""The largest state document read; far past any the framework writes."""
 
 
 def _serialize_state_model(model: BaseModel) -> bytes:
@@ -272,21 +276,28 @@ def decode_state_document[ModelT: BaseModel](
         found = _declared_version(data, field)
         if found is not None and found != expected:
             raise StateDocumentDamagedError.unsupported_version(source, found, expected)
-    try:
-        return model_type.model_validate_json(data, strict=True, context=context)
-    except ValidationError as exc:
-        raise StateDocumentDamagedError.invalid(source, _validation_message(exc)) from None
+    decoded = decode_json(
+        data,
+        model_type,
+        source=str(source),
+        max_bytes=STATE_DOCUMENT_MAX_BYTES,
+        options=ValidationOptions(strict=True, context=context),
+    )
+    if isinstance(decoded, Unreadable):
+        raise StateDocumentDamagedError.invalid(source, decoded.details("metadata"))
+    return decoded
+
+
+_JSON_OBJECT = TypeAdapter(dict[str, Any])
 
 
 def _declared_version(data: bytes | str, field: str) -> int | None:
     """The integer version a JSON object declares, or None when it declares none."""
-    try:
-        document = json.loads(data)
-    except (ValueError, RecursionError):
-        # ``json`` raises ``RecursionError`` past the interpreter's nesting limit; the
-        # model decode that follows reports the damage.
-        return None
-    if not isinstance(document, dict):
+    document = decode_json(
+        data, _JSON_OBJECT, source="state document", max_bytes=STATE_DOCUMENT_MAX_BYTES
+    )
+    if isinstance(document, Unreadable):
+        # The model decode that follows reports the damage.
         return None
     value = document.get(field)
     return value if isinstance(value, int) and not isinstance(value, bool) else None

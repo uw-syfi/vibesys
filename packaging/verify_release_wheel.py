@@ -42,6 +42,7 @@ FRAMEWORK_PACKAGES = (
     "vs_agent",
     "vs_async_ops",
     "vs_evaluator_protocol",
+    "vs_decode",
     "vs_evaluation",
     "vs_github",
     "vs_issue_tracker",
@@ -60,6 +61,7 @@ _INTERNAL_DISTRIBUTIONS = frozenset(
         "vs-agent",
         "vs-async-ops",
         "vs-evaluator-protocol",
+        "vs-decode",
         "vs-evaluation",
         "vs-github",
         "vs-issue-tracker",
@@ -85,6 +87,7 @@ _PACKAGE_SOURCE_ROOTS = {
     Path("libs/vs-evaluator-protocol/src/vs_evaluator_protocol"): PurePosixPath(
         "vs_evaluator_protocol"
     ),
+    Path("libs/vs-decode/src/vs_decode"): PurePosixPath("vs_decode"),
     Path("libs/vs-evaluation/src/vs_evaluation"): PurePosixPath("vs_evaluation"),
     Path("libs/vs-github/src/vs_github"): PurePosixPath("vs_github"),
     Path("libs/vs-issue-tracker/src/vs_issue_tracker"): PurePosixPath("vs_issue_tracker"),

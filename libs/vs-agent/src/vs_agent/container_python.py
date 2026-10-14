@@ -32,6 +32,7 @@ CONTAINER_PYTHON_VERSION = "3.12"
 
 CONTAINER_SERVER_PACKAGES: tuple[str, ...] = (
     "vs-async-ops",
+    "vs-decode",
     "vs-evaluation",
     "vs-evaluator-protocol",
     "vs-mcp",

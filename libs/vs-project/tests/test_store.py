@@ -44,6 +44,8 @@ class _Cursor(BaseModel):
 
 
 class _JsonState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     value: Json[Any]
 
 

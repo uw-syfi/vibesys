@@ -49,7 +49,8 @@ _SCENARIOS = tuple(
         )
     )
 )
-_MODULE_CEILING = 330
+# vs_decode (the bounded JSON decode lib vs_project reads state through) adds 3 modules.
+_MODULE_CEILING = 333
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",
