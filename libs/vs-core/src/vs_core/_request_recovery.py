@@ -23,6 +23,8 @@ from ._proofs import (
     submission_budget_for,
 )
 from ._registry import ContractError
+from ._request_forward import turn_of
+from ._session_scope import lost_turn_authority
 from .types.attempts import (
     AttemptPhase,
     CloseAttemptScope,
@@ -74,6 +76,7 @@ from .types.sessions import (
     CloseSession,
     DispatchTurn,
     EnsureSession,
+    InvocationCancellationRequested,
     ResumeSessionTurn,
     SessionPhase,
 )
@@ -81,7 +84,7 @@ from .types.until import Failed, FailureReason, WhileAlive, WhileOpen
 
 if TYPE_CHECKING:
     from .types.common import Observation, ResourceId
-    from .types.kernel import RecordsContext
+    from .types.kernel import RecordsContext, Signal
     from .types.records import RecordsEvent, RecordsState, Request, RequestRecord, TargetObservation
     from .types.sessions import Invocation, SessionView
     from .types.strategy import Operation
@@ -1328,18 +1331,12 @@ def _deadline(
         reason=event.reason,
     )
     requests: list[Outbound] = []
-    events: tuple[Failed, ...] = ()
+    signals = _lost_turn(context, record, first=previous_block is None)
     if previous_block is None:
         requests.append(_probe(block, context))
-    if is_open(record):
-        # Only a record whose result is still owed ends with a failure. One that already
-        # concluded (it is here for its unreleased children) has told its owner already.
-        failed = record.failure or _failure(record, event.reason)
-        if previous_block is None and not _decision_ended(state, record):
-            events = (failed,)
-        state = _replace_record(
-            state, record.model_copy(update={"phase": RequestPhase.BLOCKED, "failure": failed})
-        )
+    state, events = _end_open_record(
+        state, record, event.reason, lost=bool(signals), first=previous_block is None
+    )
     observation = record.observation
     resources = []
     if (
@@ -1386,8 +1383,48 @@ def _deadline(
 
     return AreaChange(
         state=state.model_copy(update={"recovery": barrier}),
+        signals=signals,
         requests=tuple(requests),
         events=events,
+    )
+
+
+def _end_open_record(
+    state: RecordsState, record: RequestRecord, reason: FailureReason, *, lost: bool, first: bool
+) -> tuple[RecordsState, tuple[Failed, ...]]:
+    """Block a record whose result is still owed, and the failure its owner hears of it.
+
+    One that already concluded (it is here for its unreleased children) has told its owner
+    already. A lost turn is answered by its session, once it is cancelled: the ask hears that,
+    not a failure of the record (which would discard that answer as late).
+    """
+    if not is_open(record):
+        return state, ()
+    failed = None if lost else record.failure or _failure(record, reason)
+    heard = (failed,) if failed is not None and first and not _decision_ended(state, record) else ()
+    blocked = record.model_copy(update={"phase": RequestPhase.BLOCKED, "failure": failed})
+    return _replace_record(state, blocked), heard
+
+
+def _lost_turn(
+    context: RecordsContext, record: RequestRecord, *, first: bool
+) -> tuple[Signal, ...]:
+    """The cancellation that ends the turn of a dispatch core just ended, else nothing.
+
+    A dispatch that ends at its limit (or a watch) with no result leaves its session executing
+    with nothing to answer it. The turn is lost like one whose acceptance stayed unknown:
+    Sessions cancels it and answers its invocation as lost, and the search's role decides
+    whether to ask again.
+    """
+    if not first or not is_open(record) or record.phase == RequestPhase.PREPARED:
+        return ()
+    invocation = turn_of(context, record)
+    if invocation is None:
+        return ()
+    return (
+        InvocationCancellationRequested(
+            invocation=invocation, authority=lost_turn_authority(invocation)
+        ),
     )
 
 

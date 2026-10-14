@@ -109,6 +109,17 @@ def reply_owed(observation: Observation, facts: Facts) -> bool:
     )
 
 
+def turn_of(context: RecordsContext, record: RequestRecord) -> InvocationRef | None:
+    """The invocation a turn-dispatching record carries, or None for any other record."""
+    request = record.request
+    if isinstance(request, DispatchTurn | ResumeSessionTurn) or (
+        isinstance(request, ExecuteRegisteredOperation)
+        and record.lifecycle == LifecycleClass.SESSION_TURN
+    ):
+        return _invocation(context, record)
+    return None
+
+
 def _invocation(context: RecordsContext, record: RequestRecord) -> InvocationRef:
     request = record.request
     matches: tuple[Invocation, ...]

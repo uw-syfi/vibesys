@@ -33,6 +33,7 @@ from .common import (
     RunId,
     SchemaRef,
     Scope,
+    Seconds,
     SessionId,
     SetupFailureKind,
     TurnFailureKind,
@@ -174,6 +175,10 @@ class Invocation(Value):
     pending_suspension: Continuation | None = None
     until: Until
     """When core ends this turn, from the ``Within`` its decision was accepted with."""
+    limit: Seconds | None = None
+    """How long the turn may run once the shell dispatches it: what ``until`` allowed, as a
+    duration. The turn's own requests count it from their dispatch, not from this admission.
+    Admission always sets it; None is a turn whose ``until`` is already absolute."""
 
     @model_validator(mode="after")
     def pending_suspension_identity(self) -> Invocation:

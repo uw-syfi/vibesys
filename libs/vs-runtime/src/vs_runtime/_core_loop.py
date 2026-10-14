@@ -910,7 +910,9 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime inactive, busy or commit unconfirmed"
             raise RuntimeCommitError(message)
 
-    def _authorized(self, *, exempt_only: bool = False) -> tuple[RequestRecord, Transition] | None:
+    def _authorized(
+        self, *, now_at: float, exempt_only: bool = False
+    ) -> tuple[RequestRecord, Transition] | None:
         """Ask core for dispatch authority; blocked prerequisites remain pending.
 
         ``exempt_only`` considers only requests that never wait for a free slot.
@@ -923,7 +925,7 @@ class CoreRuntime[S: StrategyState]:
                 continue
             try:
                 transition = self._transitions.step(
-                    core, DispatchAuthorized(request_id=record.request_id)
+                    core, DispatchAuthorized(request_id=record.request_id, now_at=now_at)
                 )
             except ContractError as error:
                 if error.path not in (("dependency",), ("recovery",)):
@@ -969,7 +971,7 @@ class CoreRuntime[S: StrategyState]:
         if self._queue:
             message = "consume queued inputs before dispatch"
             raise RuntimeError(message)
-        authorized = self._authorized(exempt_only=exempt_only)
+        authorized = self._authorized(now_at=now_at, exempt_only=exempt_only)
         if authorized is None:
             return None
         record, transition = authorized
@@ -977,7 +979,9 @@ class CoreRuntime[S: StrategyState]:
         if unbound is not None:
             return unbound
         self._consume(
-            _Input[S](event=DispatchAuthorized(request_id=record.request_id), now_at=now_at),
+            _Input[S](
+                event=DispatchAuthorized(request_id=record.request_id, now_at=now_at), now_at=now_at
+            ),
             transition,
         )
         if self._fence is None or not self._store.verify(
@@ -1007,13 +1011,13 @@ class CoreRuntime[S: StrategyState]:
             fence=self.record.envelope.fence,
             now_at=now_at,
             payload_digest=record.payload_digest,
-            until=record.until,
+            until=authorized_record.until,
             lease=_ShellLease(self),
         )
         self._authorizations += 1
         return _Flight(
             order=self._authorizations,
-            record=record,
+            record=authorized_record,
             now_at=now_at,
             task=asyncio.create_task(
                 self._executors.dispatch(record.request, context),

@@ -1488,7 +1488,7 @@ depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common"]
 
 [[interfaces]]
 from = ["vs_core._session_scope"]
-expose = ["attempt_for", "dispatching_request", "encode_identity", "inspect_turn", "lost_turn_authority", "proven_invocation", "retains_write_turn", "scope_active", "turn_request_id", "write_turn_authority", "yield_authority", "yields_turn"]
+expose = ["attempt_for", "dispatching_request", "encode_identity", "inspect_turn", "lost_turn_authority", "lost_turn_cancellation", "proven_invocation", "retains_write_turn", "scope_active", "turn_request_id", "write_turn_authority", "yield_authority", "yields_turn"]
 
 [[modules]]
 path = "vs_core._turn_outcomes"

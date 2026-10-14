@@ -89,6 +89,11 @@ def lost_turn_authority(ref: InvocationRef) -> RequestId:
     return turn_request_id(ref, "lost")
 
 
+def lost_turn_cancellation(ref: InvocationRef) -> RequestId:
+    """Identity of the cancellation ``lost_turn_authority`` issues for a lost turn."""
+    return turn_request_id(ref, f"cancel:{lost_turn_authority(ref).root}")
+
+
 def write_turn_authority(ref: InvocationRef) -> RequestId:
     """Authority and request identity of the checkpoint a terminal write turn earns.
 

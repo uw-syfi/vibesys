@@ -69,7 +69,10 @@ def test_a_measurement_is_issued_within_the_run_deadline(requested: float) -> No
     submitted = [r for r in result.requests if isinstance(r, core.SubmitMeasurement)]
     assert submitted
     assert all(_until_of(result, r) <= RUN_DEADLINE for r in submitted)
-    assert _until_of(result, submitted[0]) == min(requested, RUN_DEADLINE)
+    # Its limit counts from its dispatch, so until then only the run deadline bounds it.
+    [record] = [r for r in result.state.records.records if r.request_id == submitted[0].request_id]
+    assert record.limit_from_dispatch == min(requested, RUN_DEADLINE)
+    assert record.until.at == RUN_DEADLINE
 
 
 @given(requested=REQUESTED)
@@ -132,7 +135,11 @@ def test_an_operation_is_issued_within_the_run_deadline(requested: float) -> Non
     assert _accepted(result), result.events
     issued = [r for r in result.requests if isinstance(r, core.ExecuteRegisteredOperation)]
     assert issued
-    assert all(_until_of(result, r) == min(requested, RUN_DEADLINE) for r in issued)
+    records = [
+        r for r in result.state.records.records if r.request_id in {i.request_id for i in issued}
+    ]
+    assert all(r.limit_from_dispatch == min(requested, RUN_DEADLINE) for r in records)
+    assert all(r.until.at == RUN_DEADLINE for r in records)
     stored = result.state.run.receipts[-1]
     assert isinstance(stored.decision, core.Operation)
     assert stored.until is not None

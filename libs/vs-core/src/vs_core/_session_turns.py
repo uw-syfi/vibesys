@@ -1120,12 +1120,19 @@ def _cancel(
         and stop.value.scope == invocation.scope
         and event.authority == RequestId(root=f"stop:{stop.value.decision_id.root}")
     )
-    lost = invocation.phase == SessionPhase.UNKNOWN and event.authority == lost_turn_authority(
-        event.invocation
-    )
+    lost = invocation.phase in (
+        SessionPhase.UNKNOWN,
+        SessionPhase.EXECUTING,
+    ) and event.authority == lost_turn_authority(event.invocation)
     if claim is None and not cleanup and not run_cleanup and not lost:
         raise ContractValidationError(
             "authority", "cancellation requires recorded interruption or cleanup record"
+        )
+    if lost and invocation.phase == SessionPhase.EXECUTING:
+        # The turn's dispatch ended without an answer (its limit passed): it is as lost as
+        # one whose acceptance stayed unknown, and its release is told apart by this phase.
+        state = _replace_invocation(
+            state, invocation.model_copy(update={"phase": SessionPhase.UNKNOWN})
         )
     request = CancelTurn(
         request_id=turn_request_id(event.invocation, f"cancel:{event.authority.root}"),

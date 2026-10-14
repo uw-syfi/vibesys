@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from ._adoption import fences_root_mutation
 from ._checkpoint_events import declined, retained
-from ._deadlines import limit_to
+from ._deadlines import from_dispatch, limit_to
 from ._evaluation_history import produce_history
 from ._proofs import (
     Mismatch,
@@ -1776,7 +1776,7 @@ def _revision_request(
     )
     return AreaChange(
         state=_replace(state, updated),
-        requests=(Outbound(request=event.request, until=event.until),),
+        requests=(Outbound(request=event.request, until=from_dispatch(context.run, event.until)),),
     )
 
 

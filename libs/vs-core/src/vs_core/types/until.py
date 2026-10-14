@@ -101,7 +101,8 @@ type Limit = Annotated[float, Field(allow_inf_nan=False)]
 class Within(Value):
     """A duration on the run clock, plus the watches that may end the wait earlier.
 
-    ``limit`` is relative to the time core accepts the wait. A limit of zero or less is
+    ``limit`` is relative to the time core accepts the wait (an agent turn's requests count it
+    from their dispatch instead: see ``FromDispatch``). A limit of zero or less is
     refused by core (``Failed(REFUSED)``); the type does not forbid it so that a bypassed
     value still reaches the runtime check instead of failing on construction.
     """
@@ -116,6 +117,21 @@ class Within(Value):
     def __ror__(self, watch: WhileOpen | WhileAlive) -> Within:
         """Allow ``WhileOpen(workspace) | Within(60)`` as well."""
         return self.model_copy(update={"watches": (watch, *self.watches)})
+
+
+class FromDispatch(Value):
+    """Internal: ``limit`` seconds counted from the instant the shell dispatches the request.
+
+    A request waits for the shell's free slot before it runs, and the time it waits is not
+    the work's. Core therefore keeps the request open until the run deadline while it is
+    queued, and stamps ``Until(at=dispatch time + limit)`` when ``DispatchAuthorized``
+    arrives with the time the shell dispatched it (that time is journaled with the event, so
+    replay stamps the same instant).
+    """
+
+    kind: Literal["from_dispatch"] = "from_dispatch"
+    limit: Limit
+    watches: tuple[Watch, ...] = ()
 
 
 class Inherited(Value):
