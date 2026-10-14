@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Never, TypedDict
 from unittest.mock import patch
@@ -12,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from entrypoints import launcher as cli
+from vs_sim.api import SystemClock
 from vs_sim.api.testing import (
     FakeForegroundLauncher,
     FakeProcessLauncher,
@@ -223,7 +223,7 @@ def test_interactive_execs_launcher_with_python_env(
     # measurements to when the user ran the command, not just when the
     # frontend process started. cli.main marks it through the runtime boot trace.
     launch_start_ms = int(env["VIBESYS_LAUNCH_START_MS"])
-    assert abs(launch_start_ms - int(time.time() * 1000)) < 5_000
+    assert abs(launch_start_ms - int(SystemClock().now() * 1000)) < 5_000
     # Quiet by default: the frontend traces only when asked to.
     assert "VIBESYS_BOOT_TRACE" not in env
 
@@ -348,7 +348,7 @@ def test_source_checkout_builds_and_runs_launcher_from_callers_directory(
     assert env is not None
     assert env["VIBESYS_PYTHON"] == sys.executable
     launch_start_ms = int(env["VIBESYS_LAUNCH_START_MS"])
-    assert abs(launch_start_ms - int(time.time() * 1000)) < 5_000
+    assert abs(launch_start_ms - int(SystemClock().now() * 1000)) < 5_000
     assert "VIBESYS_BOOT_TRACE" not in env
 
 

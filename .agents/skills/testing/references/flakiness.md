@@ -10,10 +10,11 @@ make it pass", mark it as an expected failure to hide it, or tolerate it
 
 A test's result must never depend on timing, and every wait needs a bound that
 only guards against hangs. In the deterministic tiers this is enforced, not
-advised: `tests/quality/test_real_apis_confined.py` fails a test that uses
-`time`, `threading`, `subprocess`, `socket`, `signal` (or a process launch, executor,
-network, file-lock or wall-clock spelling of the same), a nonzero
-`asyncio.sleep`, a bare wait, join or get, or a signal to its own process
+advised: Ruff's `TID251` rejects `time`, `datetime.now`/`utcnow`/`today`,
+`date.today` and `asyncio.sleep`, and `tests/quality/test_real_apis_confined.py`
+fails a test that uses `threading`, `subprocess`, `socket`, `signal` (or a process
+launch, executor, network or file-lock spelling of the same), a bare wait, join
+or get, or a signal to its own process
 (`vs_sim` interfaces, the virtual loop and Fakes cover each). Rewrite a flagged
 test as follows.
 

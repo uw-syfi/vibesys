@@ -274,6 +274,16 @@ convention = "google"
 "langchain_google_vertexai".msg = "langchain was removed; do not reintroduce it."
 "langgraph".msg = "langgraph was removed; do not reintroduce it."
 "agentshim".msg = "Only vs_agent talks to agentshim; use vs_agent.api (or vs_agent.api.testing in tests)."
+# Real time: product code and deterministic-tier tests take a vs_sim Clock, Sleeper or
+# SleepingClock as a required argument (vs_sim.api.testing has ManualClock and VirtualClock),
+# and yield to the event loop with vs_sim.api.yield_now(). Only libs/vs-sim, the real test
+# tiers and code that runs outside the VibeSys process are exempt (per-file-ignores below).
+"time".msg = "Take a vs_sim.api Clock or Sleeper as a required argument instead of reading real time."
+"datetime.datetime.now".msg = "Stamp times from a vs_sim.api Clock (vs_sim.api.utc_datetime(clock))."
+"datetime.datetime.utcnow".msg = "Stamp times from a vs_sim.api Clock (vs_sim.api.utc_datetime(clock))."
+"datetime.datetime.today".msg = "Stamp times from a vs_sim.api Clock (vs_sim.api.utc_datetime(clock))."
+"datetime.date.today".msg = "Stamp times from a vs_sim.api Clock (vs_sim.api.utc_datetime(clock))."
+"asyncio.sleep".msg = "Wait on a vs_sim.api Sleeper; yield to the loop with vs_sim.api.yield_now()."
 
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope.ProtocolModel", "server.control_envelope.Request", "server.control_envelope.ResponseEnvelope", "vs_core._outcomes.OutcomeValue", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
@@ -281,8 +291,19 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 [tool.ruff.lint.per-file-ignores]
 # agentshim is the agent-CLI library; vs_agent is its only importer. The e2e
 # tests drive the real library and CLIs, so they may name it too.
-"libs/vs-agent/**" = ["TID251"]
 "tests/e2e/**" = ["TID251"]
+# The real-time bans exempt the owner of the real clock, the other real test tiers, and code
+# that runs outside the VibeSys process: staged profiler and evaluator resources, the
+# stdlib-only Modal evaluator helper, CI and release scripts, and the vs-bench SDK.
+"libs/vs-sim/**" = ["TID251"]
+"tests/slurm_cluster/**" = ["TID251"]
+"tests/minimal_container/**" = ["TID251"]
+"resources/**" = ["TID251"]
+"libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py" = ["TID251"]
+"sdk/vs-bench/**" = ["TID251"]
+# The protocol's request and response timestamps still default to the wall clock; moving them
+# onto the API service's clock changes the published protocol schema and is its own change.
+"src/server/control_envelope.py" = ["TID251"]
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "libs/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "sdk/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
@@ -301,11 +322,11 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 # scripts/ holds standalone CI helper tools whose job is to report diagnostics
 # on stdout, so `print` is the intended output mechanism rather than a stray
 # debug statement. Same categorical treatment as S101 in tests/.
-"scripts/**" = ["T201"]
+"scripts/**" = ["T201", "TID251"]
 # packaging/ holds top-level build modules with no __init__.py on purpose (a
 # `packaging` package would shadow the PyPA `packaging` library), and release
 # tools that report on stdout/stderr like scripts/.
-"packaging/*.py" = ["INP001", "T201"]
+"packaging/*.py" = ["INP001", "T201", "TID251"]
 # This file unit-tests resources/profilers/torch/analyze_torch_profile.py, a
 # standalone script (no public library API) loaded by file path. Exercising
 # its trace-indexing, correlation, and shape/roofline math directly means

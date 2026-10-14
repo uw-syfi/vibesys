@@ -90,7 +90,6 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "socket_io", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "subprocess", "count": 8}
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "threading", "count": 2}
-{"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "time", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "signal", "count": 3}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "subprocess", "count": 6}
@@ -165,7 +164,6 @@
 {"path": "src/entrypoints/web.py", "rule": "process", "count": 1}
 {"path": "src/entrypoints/web.py", "rule": "socket_io", "count": 1}
 {"path": "src/server/chat/manager.py", "rule": "threading", "count": 1}
-{"path": "src/server/control_envelope.py", "rule": "wall_clock", "count": 2}
 {"path": "src/server/event_index.py", "rule": "fs_sync", "count": 2}
 {"path": "src/server/execution.py", "rule": "threading", "count": 2}
 {"path": "src/server/registry.py", "rule": "fs_sync", "count": 2}
@@ -184,7 +182,6 @@
 {"path": "tests/conformance/test_server_transports.py", "rule": "socket_io", "count": 1}
 {"path": "tests/conformance/test_server_transports.py", "rule": "threading", "count": 4}
 {"path": "tests/entrypoints/test_launcher.py", "rule": "process", "count": 7}
-{"path": "tests/entrypoints/test_launcher.py", "rule": "time", "count": 2}
 {"path": "tests/entrypoints/test_launcher_signals.py", "rule": "signal", "count": 11}
 {"path": "tests/entrypoints/test_server.py", "rule": "process", "count": 2}
 {"path": "tests/entrypoints/test_server.py", "rule": "subprocess", "count": 4}
@@ -198,7 +195,6 @@
 {"path": "tests/examples/request_factory_cpu_smoke.py", "rule": "socket_io", "count": 1}
 {"path": "tests/examples/request_factory_cpu_smoke.py", "rule": "threading", "count": 2}
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "process", "count": 2}
-{"path": "tests/examples/test_differential_dataflow_example.py", "rule": "time", "count": 2}
 {"path": "tests/examples/test_engine_free_image.py", "rule": "process", "count": 1}
 {"path": "tests/examples/test_llama3_8b_request_factory.py", "rule": "process", "count": 2}
 {"path": "tests/examples/test_llama3_8b_request_factory.py", "rule": "subprocess", "count": 1}
@@ -220,10 +216,8 @@
 {"path": "tests/vibesys/loops/test_profiler_teardown.py", "rule": "subprocess", "count": 3}
 {"path": "tests/vibesys/loops/test_rocprof_capture.py", "rule": "process", "count": 2}
 {"path": "tests/vibesys/loops/test_rocprof_capture.py", "rule": "socket", "count": 3}
-{"path": "tests/vibesys/loops/test_rocprof_capture.py", "rule": "time", "count": 2}
 {"path": "tests/vibesys/loops/test_rocprof_compute.py", "rule": "process", "count": 8}
 {"path": "tests/vibesys/loops/test_rocprof_compute.py", "rule": "subprocess", "count": 2}
-{"path": "tests/vibesys/loops/test_rocprof_compute.py", "rule": "time", "count": 2}
 {"path": "tests/vibesys/loops/test_rocprof_remote_bridge.py", "rule": "threading", "count": 2}
 {"path": "tests/vibesys/loops/test_torch_inject_state_machine.py", "rule": "signal", "count": 1}
 {"path": "tests/quality/test_check_file_length.py", "rule": "process", "count": 1}

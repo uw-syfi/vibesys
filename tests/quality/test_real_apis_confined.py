@@ -1,4 +1,4 @@
-"""Real time, threads, processes, sockets and signals stay behind ``vs_sim`` (roadmap #1636, #1639).
+"""Real threads, processes, sockets and signals stay behind ``vs_sim`` (roadmap #1636, #1639).
 
 Two tiers exist. The deterministic tiers (unit and composition tests: every test
 directory except ``sim_real_tiers`` in ``pyproject.toml``) run on the virtual loop and
@@ -8,14 +8,19 @@ anything. Product code reaches the real clock, threads, processes, sockets and s
 only through the ``vs_sim.api`` interfaces, whose real implementations live in
 ``libs/vs-sim``.
 
+Real time is not counted here: Ruff's ``TID251`` bans ``time``, ``datetime.now``,
+``utcnow``, ``today``, ``date.today`` and ``asyncio.sleep`` outright (see
+``[tool.ruff.lint.flake8-tidy-imports.banned-api]`` in ``pyproject.toml``), with the
+real tiers and ``libs/vs-sim`` exempt there.
+
 This check counts, per file and rule, each use of the real APIs below. Names are resolved
 through the file's import table (``import x as y``, ``from x import y``, ``from x import *``),
-so ``from time import monotonic`` and ``import subprocess as sp`` count like the plain
+so ``from threading import Event`` and ``import subprocess as sp`` count like the plain
 spelling, and a dotted chain is counted once. ``getattr(x, "name")`` and
 ``importlib.import_module("x")`` / ``__import__("x")`` with a literal count as the name they
 reach.
 
-* ``time``, ``threading``, ``subprocess``, ``socket``, ``signal`` (every reference to the
+* ``threading``, ``subprocess``, ``socket``, ``signal`` (every reference to the
   module or to a name imported from it);
 * ``process``: anything that starts or reaps a process or interpreter: ``multiprocessing``,
   ``pty``, ``os.fork``/``exec*``/``spawn*``/``posix_spawn*``/``system``/``popen``/``wait*``/
@@ -30,8 +35,6 @@ reach.
   ``asyncio.open_connection``/``start_server`` family and the loop's ``create_connection``/
   ``create_server``/``sock_*``; ``signal`` also counts the loop's ``add_signal_handler``;
 * ``fs_sync``: ``os.fsync``/``fdatasync``/``sync`` and ``fcntl`` (locks);
-* ``wall_clock``: ``datetime.now``/``utcnow``/``today`` and ``date.today``;
-* ``asyncio.sleep`` with an argument other than literal ``0``;
 * tests only: a bare ``.wait()``, ``.join()``, ``.get()`` or ``.communicate()`` with no
   argument (not awaited, and not handed to ``create_task``-style wrappers, which build a
   coroutine and park nothing), and a signal sent to the test's own process
@@ -84,7 +87,6 @@ _EXEC_FAMILY = tuple(
 # Dotted name -> rule. A chain is classified by its longest entry that is a dotted prefix of
 # it, so ``subprocess`` covers ``subprocess.run`` and ``os.fork`` covers only ``os.fork``.
 REAL_NAMES: dict[str, str] = {
-    **_names("time", "time"),
     **_names("threading", "threading"),
     **_names("subprocess", "subprocess"),
     **_names("socket", "socket"),
@@ -173,13 +175,6 @@ REAL_NAMES: dict[str, str] = {
         "fcntl.fcntl",
         "fcntl.ioctl",
     ),
-    **_names(
-        "wall_clock",
-        "datetime.datetime.now",
-        "datetime.datetime.utcnow",
-        "datetime.datetime.today",
-        "datetime.date.today",
-    ),
 }
 # Method names that reach a real facility from any object (an event loop is the usual one).
 REAL_METHODS: dict[str, str] = {
@@ -200,8 +195,7 @@ REAL_METHODS: dict[str, str] = {
         "sock_sendall",
     ),
 }
-PRODUCT_RULES = (*sorted(set(REAL_NAMES.values()) | set(REAL_METHODS.values())), "asyncio_sleep")
-PRODUCT_RULES = (*sorted(set(REAL_NAMES.values()) | set(REAL_METHODS.values())), "asyncio_sleep")
+PRODUCT_RULES = tuple(sorted(set(REAL_NAMES.values()) | set(REAL_METHODS.values())))
 TEST_RULES = (*PRODUCT_RULES, "bare_wait", "self_signal")
 WAIT_ATTRS = frozenset({"wait", "join", "get", "communicate"})
 # Calls whose coroutine argument runs on the loop, where it is cancellable.
@@ -212,7 +206,7 @@ SIGNAL_SENDERS = frozenset({"os.kill", "os.killpg", "signal.raise_signal", "sign
 
 Key = tuple[str, str]
 
-_SHARED_ROOTS = ("os", "sys", "asyncio", "datetime")
+_SHARED_ROOTS = ("os", "sys", "asyncio")
 _OWN_ROOTS = sorted({key.split(".")[0] for key in REAL_NAMES} - set(_SHARED_ROOTS))
 _LEAVES = sorted({key.split(".")[-1] for key in REAL_NAMES if key.split(".")[0] in _SHARED_ROOTS})
 # A cheap superset of the sources `violations` can count, so most files are never parsed: an
@@ -220,10 +214,10 @@ _LEAVES = sorted({key.split(".")[-1] for key in REAL_NAMES if key.split(".")[0] 
 # with harmless code, a method name that reaches a real facility, or a dynamic spelling.
 _MAYBE = re.compile(
     rf"\b(?:import|from)\b[^\n]*\b(?:{'|'.join(_OWN_ROOTS)})\b"
-    rf"|\b(?:{'|'.join(_SHARED_ROOTS)})\.(?:{'|'.join(_LEAVES)}|date\b)"
+    rf"|\b(?:{'|'.join(_SHARED_ROOTS)})\.(?:{'|'.join(_LEAVES)})"
     rf"|\bfrom (?:{'|'.join(_SHARED_ROOTS)})\b|\bimport (?:{'|'.join(_SHARED_ROOTS)})\s+as\b"
     rf"|\.(?:{'|'.join(REAL_METHODS)})\b|\bfrom\s+\S+\s+import\s+\*"
-    r"|\bsleep\b|raise_signal|pthread_kill|getpid|import_module|__import__"
+    r"|raise_signal|pthread_kill|getpid|import_module|__import__"
     r"|getattr\(\s*[\w.]+\s*,\s*[\"']"
     r"|\.(?:wait|join|get|communicate)\(\s*\)"
 )
@@ -255,17 +249,6 @@ def _dotted(expr: ast.expr, aliases: Mapping[str, str]) -> str | None:
     if not isinstance(expr, ast.Name) or expr.id not in aliases:
         return None
     return ".".join([aliases[expr.id], *reversed(parts)])
-
-
-def _is_zero(expr: ast.expr) -> bool:
-    return isinstance(expr, ast.Constant) and expr.value == 0 and not isinstance(expr.value, bool)
-
-
-def _nonzero_sleep(call: ast.Call, aliases: Mapping[str, str]) -> bool:
-    if _dotted(call.func, aliases) != "asyncio.sleep":
-        return False
-    argument = call.args[0] if call.args else next((k.value for k in call.keywords), None)
-    return argument is None or not _is_zero(argument)
 
 
 def _parked_calls(nodes: Iterable[ast.AST]) -> set[int]:
@@ -378,7 +361,6 @@ def violations(source: str, rules: Iterable[str]) -> Counter[str]:
             found[REAL_METHODS[node.attr]] += 1
         elif isinstance(node, ast.Call):
             found[_dynamic_rule(node, aliases)] += 1
-            found["asyncio_sleep"] += _nonzero_sleep(node, aliases)
             found["self_signal"] += _sends_to_self(node, aliases, pids)
             found["bare_wait"] += _is_bare_wait(node, safe)
     return Counter(
@@ -443,21 +425,10 @@ def load_baseline(path: Path) -> dict[Key, int]:
 # ---- the checker itself ---------------------------------------------------------------
 
 PLANTED = {
-    "time.sleep": ("import time\n\ndef test_a():\n    time.sleep(1)\n", "time"),
-    "time-alias": ("import time as t\n\ndef test_a():\n    t.monotonic()\n", "time"),
-    "from-time": ("from time import sleep\n\ndef test_a():\n    sleep(1)\n", "time"),
     "threading": ("import threading\n\ndef test_a():\n    threading.Event()\n", "threading"),
     "subprocess": ("import subprocess\n\ndef test_a():\n    subprocess.run(['x'])\n", "subprocess"),
     "socket": ("import socket\n\ndef test_a():\n    socket.socket()\n", "socket"),
     "signal": ("import signal\n\ndef test_a():\n    signal.SIGTERM\n", "signal"),
-    "asyncio.sleep": (
-        "import asyncio\n\nasync def test_a():\n    await asyncio.sleep(5)\n",
-        "asyncio_sleep",
-    ),
-    "asyncio-from": (
-        "from asyncio import sleep\n\nasync def test_a():\n    await sleep(0.1)\n",
-        "asyncio_sleep",
-    ),
     "bare wait": ("def test_a(event):\n    event.wait()\n", "bare_wait"),
     "bare join": ("def test_a(thread):\n    thread.join()\n", "bare_wait"),
     "bare get": ("def test_a(queue):\n    queue.get()\n", "bare_wait"),
@@ -549,18 +520,6 @@ PLANTED = {
     ),
     "flock": ("import fcntl\n\ndef test_a(fd):\n    fcntl.flock(fd, 1)\n", "fs_sync"),
     "fsync": ("import os\n\ndef test_a(fd):\n    os.fsync(fd)\n", "fs_sync"),
-    "datetime now": (
-        "from datetime import datetime\n\ndef test_a():\n    datetime.now()\n",
-        "wall_clock",
-    ),
-    "datetime alias": (
-        "import datetime as dt\n\ndef test_a():\n    dt.datetime.utcnow()\n",
-        "wall_clock",
-    ),
-    "date today": (
-        "from datetime import date\n\ndef test_a():\n    date.today()\n",
-        "wall_clock",
-    ),
     "signal handler": (
         "async def test_a(loop, h):\n    loop.add_signal_handler(15, h)\n",
         "signal",
@@ -580,15 +539,11 @@ PLANTED = {
     "__import__": ("def test_a():\n    __import__('socket')\n", "socket"),
 }
 CLEAN = {
-    "zero sleep": "import asyncio\n\nasync def test_a():\n    await asyncio.sleep(0)\n",
     "awaited wait": "async def test_a(event):\n    await event.wait()\n",
     "bounded wait": "def test_a(event, t):\n    event.wait(timeout=1)\n    t.join(1)\n",
     "str join": "def test_a(parts):\n    ','.join(parts)\n    parts.get('k')\n",
     "coroutine handed to the loop": (
         "import asyncio\n\nasync def test_a(q):\n    task = asyncio.create_task(q.get())\n"
-    ),
-    "datetime arithmetic": (
-        "from datetime import UTC, datetime\n\ndef test_a():\n    datetime(2020, 1, 1, tzinfo=UTC)\n"
     ),
     "os without a process": "import os\n\ndef test_a(p):\n    os.path.join(p, 'x')\n    os.getpid()\n",
     "getattr off a real name": "def test_a(o):\n    getattr(o, 'fork')\n",
@@ -626,7 +581,6 @@ def test_every_planted_site_is_counted_once(copies: int, case: str) -> None:
 
 STARS = {
     "subprocess": "subprocess",
-    "time": "time",
     "multiprocessing": "process",
     "select": "socket_io",
 }
@@ -674,7 +628,7 @@ def test_the_prefilter_never_hides_a_countable_source() -> None:
 def test_product_rules_leave_out_test_only_rules() -> None:
     source, _ = PLANTED["bare wait"]
     assert not violations(source, PRODUCT_RULES)
-    assert violations(PLANTED["time.sleep"][0], PRODUCT_RULES) == Counter(time=1)
+    assert violations(PLANTED["subprocess"][0], PRODUCT_RULES) == Counter(subprocess=1)
 
 
 keys = st.tuples(st.sampled_from(["a.py", "b.py", "c.py"]), st.sampled_from(TEST_RULES))
@@ -735,7 +689,7 @@ def test_deterministic_tests_use_no_real_time_threads_processes_or_sockets(
     found = scan(_python_files(TEST_ROOTS), TEST_RULES, tiers)
     problems = ratchet_problems(found, _baseline(product=False))
     assert not problems, (
-        "a deterministic-tier test must not depend on real time, threads, processes, sockets "
+        "a deterministic-tier test must not depend on real threads, processes, sockets "
         "or signals: use vs_sim.api.testing (VirtualClock, Gate, Fakes) instead, or move a "
         "test of a real system into a real tier (sim_real_tiers).\n" + "\n".join(problems)
     )
@@ -745,7 +699,7 @@ def test_product_code_reaches_real_apis_only_through_vs_sim() -> None:
     found = scan(_python_files(PRODUCT_ROOTS), PRODUCT_RULES, ())
     problems = ratchet_problems(found, _baseline(product=True))
     assert not problems, (
-        "product code takes the vs_sim.api interfaces (Clock, Sleeper, BlockingRunner, "
-        "SignalSource, ProcessLauncher) instead of using time, threading, subprocess, "
+        "product code takes the vs_sim.api interfaces (Threads, BlockingRunner, "
+        "SignalSource, ProcessLauncher) instead of using threading, subprocess, "
         "socket or signal directly.\n" + "\n".join(problems)
     )

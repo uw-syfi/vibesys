@@ -67,9 +67,12 @@ a per-language reference; read the one for the language you are editing:
    Fakes). Only `tests/e2e`, `tests/slurm_cluster` and `tests/minimal_container`
    (the `sim_real_tiers` ini key) drive real systems. Product code takes the
    `vs_sim.api` interfaces instead of the real APIs.
-   `tests/quality/test_real_apis_confined.py` enforces both with an exact-count
-   baseline that only shrinks: when you remove a use, lower its count in
-   `tests/quality/real_api_baseline.jsonl`; never raise one.
+   Ruff's `TID251` bans real time (`time`, `datetime.now`/`utcnow`/`today`,
+   `date.today`, `asyncio.sleep`; yield with `vs_sim.api.yield_now()`) outside
+   `libs/vs-sim` and the real tiers. `tests/quality/test_real_apis_confined.py`
+   enforces the rest with an exact-count baseline that only shrinks: when you
+   remove a use, lower its count in `tests/quality/real_api_baseline.jsonl`;
+   never raise one.
 6. **Bug fixes.** Add a regression test at the lowest layer that reproduces the
    symptom, through the public API, that fails at the merge base. Then add a
    property test that generalizes the pattern, so the whole class of bug is

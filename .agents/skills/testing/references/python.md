@@ -86,11 +86,13 @@ uv run python scripts/check_test_isolation.py      # ratchet; --write only lower
 uv run pytest path/to/test.py -n auto --no-cov -q  # parallel
 ```
 
+Ruff's `TID251` rejects real time (`time`, `datetime.now`/`utcnow`/`today`,
+`date.today`, `asyncio.sleep`) outside `libs/vs-sim` and the real tiers.
 `tests/quality/test_real_apis_confined.py` fails a deterministic-tier test (or product
-code outside `libs/vs-sim`) that uses real time, threads, processes, sockets or signals
+code outside `libs/vs-sim`) that uses real threads, processes, sockets or signals
 under any spelling (aliased and from-imports, `os.fork`/`exec*`/`spawn*`, `sys.executable`
 command lines, executors, `asyncio.to_thread`, event-loop process and socket methods,
-`select`, `websockets`, `fcntl`/`fsync`, `datetime.now`), against the exact-count baseline
+`select`, `websockets`, `fcntl`/`fsync`), against the exact-count baseline
 `tests/quality/real_api_baseline.jsonl`; counts only go down.
 
 `scripts/check_test_isolation.py` counts patching, mocking, sleeps

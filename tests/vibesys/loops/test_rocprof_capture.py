@@ -35,7 +35,7 @@ import socket
 import sys
 import tempfile
 import textwrap
-import time
+import time  # noqa: TID251  # lint-waiver: LW-731411 [TID251]; plants an instant on the CLOCK_MONOTONIC timeline that the staged capture script reads; no vs_sim clock names that clock.
 from pathlib import Path
 from typing import TYPE_CHECKING
 
