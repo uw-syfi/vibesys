@@ -336,6 +336,75 @@ def test_subscription_bootstrap_captures_one_atomic_state(tmp_path: Path) -> Non
     assert [event.sequence for event in full.events] == list(range(1, latest + 1))
 
 
+@pytest.mark.parametrize("tail", [None, 40])
+def test_future_resume_cursor_restarts_from_the_live_store(
+    tmp_path: Path, tail: int | None
+) -> None:
+    parts = _attach(tmp_path, _round_log(200))
+    try:
+        latest = parts.api.latest_sequence
+
+        bootstrap = parts.api.subscription_bootstrap(latest + 100, tail)
+
+        expected_floor = 0 if tail is None else max(0, latest - tail)
+        assert bootstrap.floor == expected_floor
+        assert bootstrap.through_sequence == latest
+        assert [
+            event.sequence for event in bootstrap.events if event.sequence > bootstrap.floor
+        ] == list(range(expected_floor + 1, latest + 1))
+    finally:
+        parts.close()
+
+
+@settings(deadline=None, max_examples=examples(pr=6, nightly=200))
+@given(
+    event_count=st.integers(1, 80),
+    after_sequence=st.integers(0, 160),
+    request_store=st.sampled_from(["matching", "mismatched", "unnamed"]),
+    tail=st.none() | st.integers(1, 100),
+)
+@example(
+    event_count=8,
+    after_sequence=100,
+    request_store="unnamed",
+    tail=None,
+)
+def test_subscription_bootstrap_floor_never_exceeds_its_watermark(
+    tmp_path_factory: pytest.TempPathFactory,
+    event_count: int,
+    after_sequence: int,
+    request_store: Literal["matching", "mismatched", "unnamed"],
+    tail: int | None,
+) -> None:
+    parts = _attach(tmp_path_factory.mktemp("bootstrap-cursor"), _round_log(event_count))
+    try:
+        latest = parts.api.latest_sequence
+        current_store = parts.journal.store_id_locked()
+        requested_store = {
+            "matching": current_store,
+            "mismatched": "retired-store",
+            "unnamed": "",
+        }[request_store]
+
+        bootstrap = parts.api.subscription_bootstrap(
+            after_sequence,
+            tail,
+            store_id=requested_store,
+        )
+
+        usable_cursor = (
+            after_sequence if request_store != "mismatched" and after_sequence <= latest else 0
+        )
+        expected_floor = usable_cursor if tail is None else max(usable_cursor, latest - tail)
+        assert bootstrap.floor == expected_floor
+        assert 0 <= bootstrap.floor <= bootstrap.through_sequence == latest
+        assert [
+            event.sequence for event in bootstrap.events if event.sequence > bootstrap.floor
+        ] == list(range(expected_floor + 1, latest + 1))
+    finally:
+        parts.close()
+
+
 def test_bootstrap_tail_stays_bounded_under_concurrent_appends(tmp_path: Path) -> None:
     tail = 10
     parts = _attach(tmp_path, _round_log(200))

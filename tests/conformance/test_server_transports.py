@@ -154,6 +154,38 @@ def test_shared_bootstrap_scenarios_run_against_each_transport(
         parts.close()
 
 
+@pytest.mark.parametrize("tail", [None, 20])
+@pytest.mark.parametrize("transport", ["unix", "websocket"])
+def test_future_resume_cursor_replays_the_live_store_on_each_transport(
+    tmp_path: Path,
+    socket_dir: Path,
+    tail: int | None,
+    transport: str,
+) -> None:
+    parts = _parts_with_history(tmp_path)
+    latest = parts.api.latest_sequence
+    request = {
+        "type": "subscribe",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "after_sequence": latest + 100,
+        **({} if tail is None else {"tail": tail}),
+    }
+    try:
+        with _running_connection(transport, parts, socket_dir / "future-cursor.sock") as connection:
+            connection.send(request)
+            assert connection.receive()["type"] == "subscribed"
+            batch = connection.receive()
+
+        expected_floor = 0 if tail is None else max(0, latest - tail)
+        assert batch["history_after_sequence"] == expected_floor
+        assert batch["through_sequence"] == latest
+        assert [
+            event["sequence"] for event in batch["events"] if event["sequence"] > expected_floor
+        ] == list(range(expected_floor + 1, latest + 1))
+    finally:
+        parts.close()
+
+
 @pytest.mark.parametrize("scenario_name", runner_group("server", "tail-overflow"))
 @pytest.mark.parametrize("transport", ["unix", "websocket"])
 def test_tail_overflow_rebootstrap_scenario_marks_only_the_second_bootstrap(

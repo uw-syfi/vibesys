@@ -560,13 +560,17 @@ class RunApi:
         since attached a different one, that cursor numbers a log that is gone,
         so it is dropped and the live store is replayed from its floor: the
         client re-folds from the batch's identity rather than extending a stale
-        fold. An empty or matching id resumes the cursor as before, which is
-        also what a fresh dial (no store seen yet) and old clients get.
+        fold. A cursor beyond the live store's watermark cannot belong to its
+        append-only sequence space either, so it is dropped even when the store
+        is unnamed or matching. Every other empty or matching id resumes the
+        cursor as before, which is also what a fresh dial (no store seen yet)
+        and old clients get.
         """
         with self._condition:
-            if store_id and store_id != self._journal.store_id_locked():
-                after_sequence = 0
+            current_store_id = self._journal.store_id_locked()
             latest = self._journal.latest_sequence_locked()
+            if (store_id and store_id != current_store_id) or after_sequence > latest:
+                after_sequence = 0
             floor = after_sequence if tail is None else max(after_sequence, latest - tail)
             through_sequence, events = self._journal.checkpoint_locked(
                 floor, bootstrap_spine=tail is not None
