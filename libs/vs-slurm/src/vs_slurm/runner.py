@@ -795,11 +795,10 @@ class SlurmJobRunner:
         running. A stage that is running has not written its exit code yet.
         """
         root = PurePosixPath(handle.job.remote_workspace) / _BATCH_RESULT_ROOT
-        output = self._transport.exec(
-            f"ls -1 {shlex.quote(root.as_posix())}/*/exit-code.txt 2>/dev/null | wc -l"
-        ).stdout
+        listing = f"ls -1 {shlex.quote(root.as_posix())}/*/exit-code.txt 2>/dev/null | wc -l"
+        output = self._whole_reading(listing)  # wc always counts; empty means lost, not zero
         try:
-            return max(0, int(output.strip() or "0"))
+            return max(0, int(output))
         except ValueError as error:
             raise SlurmError.malformed_result() from error
 

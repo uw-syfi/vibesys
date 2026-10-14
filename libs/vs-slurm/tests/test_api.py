@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
+    SCHEDULER_READ_END,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchStage,
@@ -856,6 +857,64 @@ def test_nonzero_job_skips_output_artifact_collection(tmp_path: Path) -> None:
 
     assert result.exit_code == 2
     assert not output.exists()
+
+
+class _ProgressAnswer(_FakeConnector):
+    """Answers the batch progress count with ``raw``, exactly as it arrived."""
+
+    def __init__(self, raw: str) -> None:
+        super().__init__()
+        self.raw = raw
+
+    def _execute(self, framed: str) -> str:
+        if "wc -l" in framed:
+            return self.raw
+        return super()._execute(framed)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["", "\n", "2\n", "2", f"2\n{SCHEDULER_READ_END}", f"{SCHEDULER_READ_END}\n"],
+)
+def test_a_lost_or_cut_progress_count_is_unknown_not_zero(tmp_path: Path, raw: str) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    clock = ManualClock()
+    runner = SlurmJobRunner(
+        _config(),
+        process=_ProgressAnswer(raw),
+        invocation_id=lambda: "batch_01",
+        clock=clock,
+        pause=clock.advance,
+    )
+    handle = runner.submit_batch(
+        SlurmBatchRequest(
+            workspace=workspace, stages=(SlurmBatchStage(name="s", command=("true",)),)
+        )
+    )
+
+    with pytest.raises(SlurmError):
+        runner.completed_stages(handle)
+
+
+def test_a_whole_progress_count_is_read(tmp_path: Path) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    clock = ManualClock()
+    runner = SlurmJobRunner(
+        _config(),
+        process=_ProgressAnswer(f"2\n{SCHEDULER_READ_END}\n"),
+        invocation_id=lambda: "batch_01",
+        clock=clock,
+        pause=clock.advance,
+    )
+    handle = runner.submit_batch(
+        SlurmBatchRequest(
+            workspace=workspace, stages=(SlurmBatchStage(name="s", command=("true",)),)
+        )
+    )
+
+    assert runner.completed_stages(handle) == 2
 
 
 def test_batch_runs_ordered_stages_in_one_allocation_and_stops_after_failure(
