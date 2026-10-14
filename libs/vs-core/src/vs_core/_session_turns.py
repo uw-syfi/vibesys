@@ -1005,7 +1005,7 @@ def _turn_observed(
         return AreaChange(state=state)
     previous = invocation.observation
     if _unresolved_after_inspection(context, invocation, event):
-        return _release_unknown(state, context, event)
+        return _release_lost_turn(state, context, event.invocation)
     event, inspected = _correlated_turn_observation(context, invocation, event)
     if is_terminal(invocation):
         return _late_turn_observed(state, context, invocation, event, inspected=inspected)
@@ -1029,20 +1029,19 @@ def _unresolved_after_inspection(
     )
 
 
-def _release_unknown(
-    state: SessionsState, context: SessionsContext, event: TurnObserved
+def _release_lost_turn(
+    state: SessionsState, context: SessionsContext, ref: InvocationRef
 ) -> AreaChange[SessionsState]:
     """Cancel a turn whose acceptance the executor's own inspection could not settle.
 
-    The cancellation releases the executor's record of the unfinished dispatch, so a
-    successor turn can continue the conversation; its result ends this turn as lost.
+    The inspection either answered unknown or ended without an answer. The cancellation
+    releases the executor's record of the unfinished dispatch, so a successor turn can
+    continue the conversation; its result ends this turn as lost.
     """
     return _cancel(
         state,
         context,
-        InvocationCancellationRequested(
-            invocation=event.invocation, authority=lost_turn_authority(event.invocation)
-        ),
+        InvocationCancellationRequested(invocation=ref, authority=lost_turn_authority(ref)),
     )
 
 

@@ -11,15 +11,14 @@ from ._session_turns import (
     _after_turn_cleanup,
     _invocation,
     _prepared_completion,
+    _release_lost_turn,
     _replace_invocation,
     _replace_session,
     _session,
 )
 from ._turn_outcomes import turn_result
 from ._waits import stalled_acquisitions
-from .types.common import (
-    ContractValidationError,
-)
+from .types.common import ContractValidationError, InvocationRef
 from .types.kernel import AreaChange
 from .types.sessions import (
     AcquisitionStalled,
@@ -98,10 +97,12 @@ def advance_lapsed_session_waits(
 ) -> AreaChange[SessionsState]:
     """A request the session waits on ended without moving it: wait on the others still open.
 
-    With none left, the session keeps its wait on ended requests. It is then an orphan, and
-    the run halts loudly with it named (``RESOLUTIONS``): a session whose last request ended
-    without proof may hold a lease or a running turn core cannot account for, and nothing yet
-    decides who releases it.
+    With none left, an unknown session whose turn's acceptance is unsettled releases that
+    turn as lost, as when its inspection answers unknown, and waits on the cancellation. Any
+    other session keeps its wait on ended requests. It is then an orphan, and the run halts
+    loudly with it named (``RESOLUTIONS``): a session whose last request ended without proof
+    may hold a lease or a running turn core cannot account for, and nothing yet decides who
+    releases it.
     """
     if not isinstance(event, SessionWaitLapsed):
         raise ContractValidationError("event.kind", "event is not a lapsed session wait")
@@ -112,6 +113,20 @@ def advance_lapsed_session_waits(
         return AreaChange(state=state)
     kept = tuple(request for request in session.wait.requests if not _ended(context, request))
     if not kept and session.phase == SessionPhase.UNKNOWN:
+        turn = (
+            None
+            if session.invocation is None
+            else _invocation(
+                state,
+                InvocationRef(
+                    session_id=session.spec.session_id,
+                    invocation_id=session.invocation,
+                    generation=session.generation,
+                ),
+            )
+        )
+        if turn is not None and turn.phase == SessionPhase.UNKNOWN:
+            return _release_lost_turn(state, context, turn.invocation)
         # An unknown session whose inspection ended unanswered waits on nothing core can name.
         return AreaChange(state=_replace_session(state, session.model_copy(update={"wait": None})))
     if not kept:
