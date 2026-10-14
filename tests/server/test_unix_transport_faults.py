@@ -9,6 +9,7 @@ leave no subscription counted, and must answer the next client.
 
 from __future__ import annotations
 
+import errno
 import json
 import typing
 from contextlib import suppress
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
 
     import pytest
 
-    from vs_sim.api import Connection
+    from vs_sim.api import Connection, Listener
 
 # The fields a request kind cannot default, so every kind has one valid frame.
 _REQUIRED: dict[str, dict[str, Any]] = {
@@ -394,5 +395,141 @@ def test_a_request_line_past_the_bound_is_rejected_and_the_session_goes_on(
             assert reply.ok, reply
             assert reply.request_id == "req-query.snapshot"
             client.close()
+
+    threads.run(main)
+
+
+class _AcceptFaultListener:
+    """Wrap a listener, raising ``error`` instead of delegating on chosen ``accept()`` calls.
+
+    Models a transient ``accept()`` failure (``EMFILE``/``ENFILE`` under
+    file-descriptor pressure): the wrapped listener is never closed, so once
+    the faulty calls are behind it, ``accept()`` works exactly as it did.
+    """
+
+    def __init__(self, inner: Listener, fail_at: frozenset[int], error: OSError) -> None:
+        self._inner = inner
+        self._fail_at = fail_at
+        self._error = error
+        self.calls = 0
+
+    def accept(self, timeout: float | None = None) -> Connection:
+        self.calls += 1
+        if self.calls in self._fail_at:
+            raise self._error
+        return self._inner.accept(timeout)
+
+    def close(self) -> None:
+        self._inner.close()
+
+
+class _RelabeledErrorListener:
+    """Wrap a listener, reporting any ``accept()`` ``OSError`` it raises as ``error`` instead.
+
+    A deliberate close must end the accept loop whatever errno the platform
+    happens to surface for it; this lets a test drive a real close through
+    ``Listener.close()`` while making that errno look exactly like a transient
+    failure (``EMFILE``), to prove the loop's branch comes from ``_closing``
+    and not from guessing at the exception.
+    """
+
+    def __init__(self, inner: Listener, error: OSError) -> None:
+        self._inner = inner
+        self._error = error
+        self.calls = 0
+
+    def accept(self, timeout: float | None = None) -> Connection:
+        self.calls += 1
+        try:
+            return self._inner.accept(timeout)
+        except OSError:
+            raise self._error from None
+
+    def close(self) -> None:
+        self._inner.close()
+
+
+class _ListenerSwapNetwork:
+    """A ``Network`` that passes every listener it binds through ``wrap``."""
+
+    def __init__(self, inner: SimNetwork, wrap: typing.Callable[[Listener], Listener]) -> None:
+        self._inner = inner
+        self._wrap = wrap
+        self.listener: Listener | None = None
+
+    def listen(self, address: str) -> Listener:
+        self.listener = self._wrap(self._inner.listen(address))
+        return self.listener
+
+    def connect(self, address: str, timeout: float | None = None) -> Connection:
+        return self._inner.connect(address, timeout)
+
+
+def test_a_transient_accept_failure_is_logged_and_retried_not_treated_as_a_close(
+    tmp_path: Path,
+) -> None:
+    """``EMFILE``/``ENFILE`` from ``accept()`` costs one retry, not the accept loop.
+
+    Regression test for #2486: ``_accept_loop`` used to treat every
+    ``OSError`` from ``accept()`` as proof the listener was closed and
+    returned for good, so one transient failure permanently stopped the
+    server from accepting any later connection. Here the very first
+    ``accept()`` fails with ``EMFILE`` while the server is not closing; the
+    next client must still be served, and ``accept()`` must have been called
+    again.
+    """
+    threads = SimThreads(schedule_seed=0)
+    socket_path = tmp_path / "control.sock"
+    error = OSError(errno.EMFILE, "Too many open files")
+    network = _ListenerSwapNetwork(
+        SimNetwork(threads),
+        lambda inner: _AcceptFaultListener(inner, frozenset({1}), error),
+    )
+
+    def main() -> None:
+        parts = build_server_parts(None, threads=threads)
+        with UnixJsonlServer(socket_path, parts.api, threads=threads, network=network):
+            client = network.connect(str(socket_path))
+            client.send(_frame("query.snapshot"))
+            reply = Response.model_validate_json(_read_line(client))
+            assert reply.ok, reply
+            client.close()
+        assert isinstance(network.listener, _AcceptFaultListener)
+        assert network.listener.calls >= 2, "accept() was not retried after the transient failure"
+
+    threads.run(main)
+
+
+def test_closing_the_server_ends_the_accept_loop_even_through_an_emfile_shaped_oserror(
+    tmp_path: Path,
+) -> None:
+    """A deliberate close ends the accept loop whatever errno it surfaces as.
+
+    Companion regression test for #2486: a deliberate close must still win
+    even when the ``OSError`` it produces happens to look exactly like the
+    transient failure the other branch now tolerates. The real
+    ``listener.close()`` runs (through ``UnixJsonlServer.close``, which sets
+    ``_closing`` before it), so the accept loop's choice of branch is proven
+    to come from ``_closing``, not from the exception's errno.
+    """
+    threads = SimThreads(schedule_seed=0)
+    socket_path = tmp_path / "control.sock"
+    error = OSError(errno.EMFILE, "Too many open files")
+    network = _ListenerSwapNetwork(
+        SimNetwork(threads), lambda inner: _RelabeledErrorListener(inner, error)
+    )
+
+    def main() -> None:
+        parts = build_server_parts(None, threads=threads)
+        server = UnixJsonlServer(socket_path, parts.api, threads=threads, network=network)
+        server.start()
+        server.close()
+        assert isinstance(network.listener, _RelabeledErrorListener)
+        # Exactly the one accept() that was blocked when ``close`` ran: a loop
+        # that mistook the close for a transient failure would have retried
+        # (after its backoff sleep) against an already-closed listener, which
+        # keeps raising, so this would be well over 1 by the time the bounded
+        # ``join`` inside ``close`` gave up.
+        assert network.listener.calls == 1
 
     threads.run(main)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import logging
 import sys
 from contextlib import suppress
 from functools import partial
@@ -37,10 +38,16 @@ if TYPE_CHECKING:
 _DISCONNECT_POLL_SECONDS = 0.1
 # Pause between idle checks of a stream whose cursor has not moved.
 _IDLE_BACKOFF_SECONDS = 0.05
+# Pause before retrying `accept()` after a transient failure (e.g. the process
+# or system file-descriptor table is exhausted), so a sustained shortage does
+# not spin the accept loop instead of giving fds a chance to free up.
+_ACCEPT_RETRY_BACKOFF_SECONDS = 0.1
 MAX_SOCKET_PATH_BYTES = 103 if sys.platform == "darwin" else 107
 _RECV_BYTES = 65536
 MAX_REQUEST_LINE_BYTES = 1024 * 1024
 """The longest request line a session buffers; the WebSocket gateway's inbound frame cap."""
+
+_LOG = logging.getLogger(__name__)
 
 
 class SocketPathTooLongError(OSError):
@@ -367,8 +374,18 @@ class UnixJsonlServer:
         while True:
             try:
                 connection = listener.accept()
-            except OSError:
-                return  # the listener was closed
+            except OSError as exc:
+                with self._guard:
+                    closing = self._closing
+                if closing:
+                    return  # the listener was closed deliberately
+                # A transient failure, e.g. EMFILE/ENFILE while the process or
+                # system file-descriptor table is exhausted. The listener is
+                # still open: log it and keep accepting once the pressure
+                # eases, rather than permanently killing the accept loop.
+                _LOG.warning("accept() failed (errno=%s): %s; retrying", exc.errno, exc)
+                self._threads.sleep(_ACCEPT_RETRY_BACKOFF_SECONDS)
+                continue
             with self._guard:
                 if self._closing:
                     connection.close()
