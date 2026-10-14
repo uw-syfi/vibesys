@@ -124,6 +124,8 @@ def _close_after(
     state = _settle(result.state, result.requests, late)
     record = _original(state)
     if restart:
+        # The restart moved the record's limit past the downtime: the deadline comes then.
+        late = max(late, record.until.at)
         result = core.step(
             state, core.ReconciliationDeadline(request_id=record.request_id, now_at=late)
         )

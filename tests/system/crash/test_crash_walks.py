@@ -7,12 +7,13 @@ the first few crossings of that host, which is its recovery. A death inside a re
 itself follows a death inside a recovery is reachable only this way.
 
 The skeleton walk keeps what no death may change: the run ends, and each job and each agent turn
-ran once. Several deaths can keep the run down past its time limit, so its outcome may differ from
-the straight run's; when it does not, the run adopted the same tree.
+ran once. A request's limit counts only time a host was alive (each restart moves it by the
+downtime), but the run's own deadline does not move, so several deaths can keep the run down past
+it and its outcome may differ from the straight run's; when it does not, the run adopted the same
+tree.
 The flow walks run real searches (dynamic and evolve) through `vs_dst`, whose crash cases start
 from a copy of the world instead of running the prefix again. For them a death may change the
-result (a request whose time limit passed while no host was alive ends as timed out, and the
-attempt with it), so a walk holds what no death may change: the run ends, it owes nothing
+result, so a walk holds what no death may change: the run ends, it owes nothing
 (`liveness_violations`), no effect ran twice, and one more host started after its last commit
 finds nothing to do.
 

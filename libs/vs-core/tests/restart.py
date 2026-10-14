@@ -6,9 +6,39 @@ A rule's own test therefore steps live at pull-request depth and reloads between
 nightly depth, where the whole suite is a restart sweep.
 """
 
+from vs_core.api import (
+    BlockRequest,
+    CancelOwnedResource,
+    InspectRequest,
+    RequestPhase,
+    RequestRecord,
+    RunState,
+    initial_state,
+)
 from vs_sim.api.testing import Depth, depth
 
 
 def restarts() -> bool:
     """Whether tests reload the state between steps (nightly depth)."""
     return depth() is Depth.NIGHTLY
+
+
+def restarted(
+    record: RequestRecord, now_at: float, persisted: RunState | None = None
+) -> RequestRecord:
+    """``record`` as a host restarting at ``now_at`` finds it, after the last commit of ``persisted``.
+
+    An open record's limit moves later by the downtime, no further than the run deadline;
+    recovery's own commands (inspect, cancel, block) keep theirs. ``persisted`` defaults to
+    the run of ``initial_state()``.
+    """
+    run = persisted or initial_state().run
+    if isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest) or (
+        record.phase
+        not in (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
+    ):
+        return record
+    at = record.until.at + max(now_at - run.now_at, 0.0)
+    if record.until.at <= run.deadline_at:
+        at = min(at, run.deadline_at)
+    return record.model_copy(update={"until": record.until.model_copy(update={"at": at})})

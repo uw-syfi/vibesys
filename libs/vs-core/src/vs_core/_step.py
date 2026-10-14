@@ -107,6 +107,7 @@ from .types.records import (
     RecordsEvent,
     RecoveryPhase,
     RecoveryReady,
+    RecoveryStarted,
     Request,
     RequestObserved,
     RequestPhase,
@@ -1561,6 +1562,10 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
     elif isinstance(event, RunControlEvent):
         result = _control(state, event, dispatch)
     else:
+        if isinstance(event, RecoveryStarted):
+            # Before the clock moves, while ``run.now_at`` is still the dead host's last commit.
+            credited = records.credit_downtime(state.records, state.run, event)
+            state = state.model_copy(update={"records": credited})
         state = _advance_event_time(state, event)
         result = propagate(state, (event,), dispatch, _event_cause(state, event))
     advanced = result.state.model_copy(update={"revision": state.revision + 1})

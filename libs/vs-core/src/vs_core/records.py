@@ -22,7 +22,7 @@ from .types.records import (
 )
 
 if TYPE_CHECKING:
-    from .types.kernel import RecordsContext
+    from .types.kernel import RecordsContext, RunState
     from .types.records import RecordsEvent, RecordsState
 
 
@@ -88,3 +88,8 @@ def recover(
     recovery-only entry point also permits independent Records B adoption.
     """
     return _request_recovery.advance(state, context, event)
+
+
+def credit_downtime(state: RecordsState, run: RunState, event: RecoveryStarted) -> RecordsState:
+    """Open records' limits moved past the downtime ``event`` ends (before the clock moves)."""
+    return _request_recovery.credit_downtime(state, run, event)

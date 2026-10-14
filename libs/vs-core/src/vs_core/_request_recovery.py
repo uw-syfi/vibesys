@@ -85,7 +85,7 @@ from .types.until import Failed, FailureReason, WhileAlive, WhileOpen
 
 if TYPE_CHECKING:
     from .types.common import Observation, ResourceId
-    from .types.kernel import RecordsContext, Signal
+    from .types.kernel import RecordsContext, RunState, Signal
     from .types.records import RecordsEvent, RecordsState, Request, RequestRecord, TargetObservation
     from .types.sessions import Invocation, SessionView
     from .types.strategy import Operation
@@ -802,14 +802,47 @@ def _requeue_lost_inspection(
     )
 
 
+def _opens_epoch(barrier: RecoveryBarrier, event: RecoveryStarted) -> bool:
+    """Whether ``event`` starts a recovery not yet started (a repeat of one changes nothing)."""
+    return event.epoch > barrier.epoch or (
+        event.epoch == barrier.epoch and barrier.phase == RecoveryPhase.REQUIRED
+    )
+
+
+def credit_downtime(state: RecordsState, run: RunState, event: RecoveryStarted) -> RecordsState:
+    """Every open record's limit, moved later by the time no host was alive to wait on it.
+
+    A limit says how long core waits for the far side, and while no host runs nothing waits:
+    a request prepared but never sent, or sent and never begun, would otherwise end at the
+    restart without ever having had its time. The downtime runs from ``run.now_at``, the
+    dead host's last commit (the kernel calls this before ``event`` moves the clock), to the
+    restart. The run deadline caps the moved limit as ``resolve_until`` caps a new one; a
+    limit already past the deadline (core's own cleanup budget) keeps its full length.
+    """
+    downtime = event.now_at - run.now_at
+    if downtime <= 0 or run.status == RunStatus.TERMINAL or not _opens_epoch(state.recovery, event):
+        return state
+
+    def moved(record: RequestRecord) -> RequestRecord:
+        at = record.until.at + downtime
+        if record.until.at <= run.deadline_at:
+            at = min(at, run.deadline_at)
+        if not is_open(record) or at == record.until.at:
+            return record
+        return record.model_copy(update={"until": record.until.model_copy(update={"at": at})})
+
+    records = tuple(moved(record) for record in state.records)
+    if records == state.records:
+        return state
+    return state.model_copy(update={"records": records})
+
+
 def _start(
     state: RecordsState, context: RecordsContext, event: RecoveryStarted
 ) -> AreaChange[RecordsState]:
     barrier = state.recovery
     _validate_children(state)
-    if event.epoch < barrier.epoch or (
-        event.epoch == barrier.epoch and barrier.phase != RecoveryPhase.REQUIRED
-    ):
+    if not _opens_epoch(barrier, event):
         return AreaChange(state=state)
     if context.run.status == RunStatus.TERMINAL:
         # The run ended, so its closure already proved every owner released: there is nothing

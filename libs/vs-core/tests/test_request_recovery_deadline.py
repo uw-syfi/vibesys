@@ -243,9 +243,11 @@ def test_a_passed_limit_ends_an_owed_root_even_when_reattached_and_cleans_its_ch
         )
     else:
         state = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0)).state
+    # The restart moved the limit past its downtime; the deadline comes at or after it.
+    limit = next(row for row in state.records.records if row.request_id == original.request_id)
     result = step(
         reload(state),
-        ReconciliationDeadline(request_id=original.request_id, now_at=100.0 + elapsed),
+        ReconciliationDeadline(request_id=original.request_id, now_at=limit.until.at + elapsed),
     )
     cancellations = {
         value.resource_id for value in result.requests if isinstance(value, CancelOwnedResource)

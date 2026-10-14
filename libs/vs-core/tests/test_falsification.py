@@ -578,7 +578,7 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
     )
     unknown = step(query, RequestObserved(observation=observation))
     blocked = step(
-        unknown.state, ReconciliationDeadline(request_id=request.request_id, now_at=100.0)
+        unknown.state, ReconciliationDeadline(request_id=request.request_id, now_at=200.0)
     )
     block = next(value for value in blocked.requests if isinstance(value, BlockRequest))
     assert all(value.kind != "execute_registered_operation" for value in blocked.requests)

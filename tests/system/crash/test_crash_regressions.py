@@ -13,13 +13,17 @@ import pytest
 from tests.support.crash_harness import (
     BLOCKED_ENDINGS,
     all_crossings,
+    assert_converges,
     converges_after,
     ends_as_it_must,
     following,
     name,
+    rule,
+    run,
 )
+from tests.support.skeleton_faults import RECEIPT_BEGUN
 
-from vs_faults.api import Boundary, Crossing
+from vs_faults.api import Boundary, Crossing, FaultPlan
 from vs_sim.api.testing import Depth, depth
 
 HOLDING = "executor_request:close_session#1"
@@ -79,3 +83,22 @@ def test_a_crash_recovery_cannot_tell_ends_the_run_blocked() -> None:
     for crossing in all_crossings():
         if name(crossing) in BLOCKED_ENDINGS:
             ends_as_it_must(crossing)
+
+
+@pytest.mark.slow
+def test_a_turn_whose_limit_passed_while_no_host_was_alive_still_runs() -> None:
+    """The walk that found it: the turn's dispatch began and never reached the agent, then three
+    more hosts died within their first commits, until the turn's limit had passed in downtime.
+
+    A limit counts only time a host was alive to wait, so the restart gives the turn its time
+    back: Sessions learns the turn never started and sends it again, and the run ends as the
+    straight run does.
+    """
+    plan = FaultPlan(
+        seed=4,
+        rules=(
+            rule(Crossing(Boundary.DURABLE_WRITE, RECEIPT_BEGUN, 6)),
+            *(rule(_commit(n)) for n in (41, 42, 45)),
+        ),
+    )
+    assert_converges(run(plan).summary, f"replay with {plan.model_dump_json()}", crashes=4)

@@ -8,6 +8,8 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .restart import restarted
+
 
 class CommandFields(TypedDict):
     request_id: core.RequestId
@@ -186,5 +188,5 @@ def test_prepared_query_remains_safe_without_live_mutation_admission(generation:
         isinstance(row, core.InspectRequest) and row.target == record.request_id
         for row in result.requests
     )
-    assert result.state.records.records[:2] == (root, record)
+    assert result.state.records.records[:2] == (restarted(root, 10.0, state.run), record)
     assert result.state.run.receipts == state.run.receipts

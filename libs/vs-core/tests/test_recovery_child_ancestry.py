@@ -7,6 +7,7 @@ from hypothesis import strategies as st
 import vs_core.api as core
 from vs_sim.api.testing import examples
 
+from .restart import restarted
 from .test_request_recovery import (
     observed,
     pending_record,
@@ -106,7 +107,7 @@ def test_prepared_source_with_descendants_cannot_be_safe_to_dispatch(count: int)
     event = core.RecoveryStarted(epoch=1, now_at=11.0)
     result = core.step(reload(state), event)
     assert result.state.records.children == children
-    assert result.state.records.records[0] == original
+    assert result.state.records.records[0] == restarted(original, 11.0, state.run)
     assert result.state.records.recovery.phase == core.RecoveryPhase.RECOVERING
     assert result.state.records.recovery.checks[0].resolution == "pending"
     assert len(result.requests) == count + 1
@@ -265,4 +266,4 @@ def test_workspace_reattachment_requires_the_owners_pending_request(*, pending: 
     assert len(result.requests) == (1 if pending else 2)
     assert result.state.attempts == state.attempts
     assert result.state.sessions == state.sessions
-    assert result.state.records.records[0] == original
+    assert result.state.records.records[0] == restarted(original, 11.0, state.run)
