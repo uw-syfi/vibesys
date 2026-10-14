@@ -214,6 +214,9 @@ from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
+    BaselineEntry,
+    RootBaseline,
+    RootBaselineDrift,
     RootGrant,
     RootRelease,
     StoreWorkspaceReceipts,
@@ -249,6 +252,7 @@ __all__ = [
     "AgentWorkspaces",
     "Applied",
     "AttemptBinding",
+    "BaselineEntry",
     "BegunUnsealed",
     "BlockDiagnostic",
     "BoardTexts",
@@ -345,6 +349,8 @@ __all__ = [
     "ResultReceipt",
     "ResumeDiagnostic",
     "RetainRevisionOwner",
+    "RootBaseline",
+    "RootBaselineDrift",
     "RootGrant",
     "RootRelease",
     "RunControlBridge",

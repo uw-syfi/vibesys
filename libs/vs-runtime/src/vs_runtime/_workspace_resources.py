@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
@@ -15,6 +16,7 @@ from vs_runtime._trusted_evaluation import (
     TrustedEvaluationPlan,
     create_trusted_evaluation_executor,
 )
+from vs_runtime._workspace_receipts import BaselineEntry, RootBaselineDrift
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
 from vs_sandbox.api import HostResource, HostResourceAccess
 
@@ -42,8 +44,26 @@ class WorkspaceRestoreFailed:
     revision: str
 
 
-type WorkspaceResourceEvent = WorkspaceRestoreFailed
+@dataclass(frozen=True, slots=True)
+class RootBaselineDrifted:
+    """An attempt's hold of the exclusive root ended having left a pre-run path changed or gone.
+
+    See ``vs_runtime._workspace_receipts.RootBaselineDrift``, whose fields this mirrors.
+    """
+
+    modified: tuple[str, ...]
+    removed: tuple[str, ...]
+
+
+type WorkspaceResourceEvent = WorkspaceRestoreFailed | RootBaselineDrifted
 type WorkspaceResourceEventSink = Callable[[WorkspaceResourceEvent], object]
+
+
+def _file_fingerprint(path: Path) -> str | None:
+    """Return a content hash of *path*, or ``None`` if it is not a regular file."""
+    if not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 class ModelRequestReconciler(Protocol):
@@ -324,6 +344,45 @@ class RuntimeWorkspaceResource:
     def unversioned_paths(self) -> tuple[str, ...]:
         """The untracked and ignored paths present now (directories collapsed)."""
         return self._project.git.unversioned_paths()
+
+    def baseline_entries(self, paths: tuple[str, ...]) -> tuple[BaselineEntry, ...]:
+        """Fingerprint *paths* (from :meth:`unversioned_paths`) as they are now.
+
+        A path with a trailing ``/`` is a directory and gets no fingerprint (see
+        ``BaselineEntry``); any other path is fingerprinted as a file.
+        """
+        return tuple(
+            BaselineEntry(
+                path=path,
+                fingerprint=None if path.endswith("/") else _file_fingerprint(self.path / path),
+            )
+            for path in paths
+        )
+
+    def baseline_drift(self, entries: tuple[BaselineEntry, ...]) -> RootBaselineDrift:
+        """Compare the tree now to *entries*, a recorded pre-run baseline.
+
+        A directory entry is checked only for removal. A file entry is removed if it is no
+        longer a regular file, modified if its content fingerprint no longer matches. Any
+        drift is reported through this resource's event sink.
+        """
+        modified: list[str] = []
+        removed: list[str] = []
+        for entry in entries:
+            target = self.path / entry.path
+            if entry.fingerprint is None:
+                if not target.is_dir():
+                    removed.append(entry.path)
+                continue
+            fingerprint = _file_fingerprint(target)
+            if fingerprint is None:
+                removed.append(entry.path)
+            elif fingerprint != entry.fingerprint:
+                modified.append(entry.path)
+        drift = RootBaselineDrift(modified=tuple(modified), removed=tuple(removed))
+        if not drift.is_empty:
+            self._events(RootBaselineDrifted(modified=drift.modified, removed=drift.removed))
+        return drift
 
     def find_snapshot(self, label: str) -> str | None:
         """Return the newest commit whose subject is exactly *label*, if any."""

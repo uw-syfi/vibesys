@@ -251,6 +251,7 @@ from vs_runtime._trusted_evaluation_preparation import (
 )
 from vs_runtime._validation_passes import StateValidationPasses, ValidationPasses
 from vs_runtime._workspace_resources import (
+    RootBaselineDrifted,
     WorkspaceResourceEvent,
     WorkspaceResourceEventSink,
     WorkspaceResourceFactory,
@@ -512,6 +513,7 @@ __all__ = [
     "QuotaPolicy",
     "RecordState",
     "ResolvedEvaluatorPackage",
+    "RootBaselineDrifted",
     "RunControlChannel",
     "RunControlEventSink",
     "RunControlTransition",

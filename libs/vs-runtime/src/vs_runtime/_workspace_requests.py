@@ -490,7 +490,8 @@ class RuntimeWorkspaceRequests:
             # included, so the grant is exactly base plus the preserved artifact dirs plus
             # what the root held before the run, which is never touched. The baseline is
             # recorded before the first restore and replayed afterwards, never re-scanned.
-            keeping = await self._root_baseline(root)
+            baseline = await self._root_baseline(root)
+            keeping = baseline.paths
             if not await root.matches_revision(base, exact_keeping=keeping):
                 failure = await self._materialize(
                     root, base, resource_id=resource_id, exact_keeping=keeping
@@ -507,14 +508,21 @@ class RuntimeWorkspaceRequests:
             revision=request.plan.base,
         )
 
-    async def _root_baseline(self, root: RuntimeWorkspace) -> tuple[str, ...]:
+    async def _root_baseline(self, root: RuntimeWorkspace) -> RootBaseline:
         """The paths the root held before the run, recorded on the first root grant."""
         stored = self._receipts.root_baseline()
         if stored is None:
+            paths = await root.unversioned_paths()
             stored = self._receipts.record_root_baseline(
-                RootBaseline(paths=await root.unversioned_paths())
+                RootBaseline(entries=await root.baseline_entries(paths))
             )
-        return stored.paths
+        return stored
+
+    async def _check_root_baseline_drift(self) -> None:
+        """Warn (through the root resource's event sink) of a changed or missing baseline path."""
+        baseline = self._receipts.root_baseline()
+        if baseline is not None:
+            await self._workspaces.root.baseline_drift(baseline.entries)
 
     async def _ensure_candidate(
         self,
@@ -665,7 +673,12 @@ class RuntimeWorkspaceRequests:
     ) -> _Facts:
         if binding.workspace_id is None:
             # The root is run-owned and stays; ending the attempt ends only its hold. A
-            # stale generation is not the holder, so its discard changes nothing.
+            # stale generation is not the holder, so its discard changes nothing. Whether or
+            # not this generation is the one releasing, this is the moment an attempt's view
+            # of the root ends, so it is also when a baseline change becomes visible: check
+            # before releasing, so a crash between release and the check still re-checks on
+            # the inevitable replay (release is effect-once and would otherwise skip it).
+            await self._check_root_baseline_drift()
             match self._receipts.release_root(request.attempt):
                 case RootRelease.NOT_HOLDER:
                     return _rejected(

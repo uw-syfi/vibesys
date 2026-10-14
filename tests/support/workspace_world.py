@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
         AgentExecutionConfiguration,
         RunEnvironmentSession,
+        WorkspaceResourceEventSink,
         WorkspaceResourceProvider,
     )
     from vs_sandbox.api import CommandRunner, ComputeBackendImpl
@@ -137,6 +138,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     owns_candidate_worktrees: bool = False,
     memory_paths: tuple[str, ...] = (),
     wrap_git: Callable[[GitRepository], GitRepository] | None = None,
+    events: WorkspaceResourceEventSink | None = None,
 ) -> Iterator[WorkspaceEnv]:
     """A fresh run with one started host. The caller closes ``env.hosts`` (async) before exit.
 
@@ -147,6 +149,8 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     the run's candidate worktrees directory in the request's ``run_owned_roots``, as a
     product run does. ``wrap_git`` wraps every Fake repository (not with real Git), so a
     case can stand between the run and Git, for example to kill the host at a Git step.
+    ``events`` observes workspace resource events (for example a reported baseline drift);
+    the default discards them.
     """
     disk = FakeGitRepositories() if git is GitKind.FAKE else None
     root = tmp_path / "project"
@@ -206,7 +210,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                 skill_source_dirs=(),
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
-                events=lambda _event: None,
+                events=events or (lambda _event: None),
             )
             env = WorkspaceEnv(project.project, factory, git_disk=disk)
             env.start_host()

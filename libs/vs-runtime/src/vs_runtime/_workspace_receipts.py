@@ -52,6 +52,20 @@ class RootRelease(StrEnum):
     """The generation never ended its hold and does not hold the root (a newer one took it)."""
 
 
+class BaselineEntry(BaseModel):
+    """One path the exclusive root held before the run, with a file's content fingerprint.
+
+    ``fingerprint`` is a file's content hash, set when *path* names a file. It is ``None``
+    for a directory (a path recorded with a trailing ``/``): fingerprinting its contents
+    would need the walk PR #2011 chose not to pay for (a ``.venv`` can hold 100k files), so
+    a directory is only ever checked for removal, never for a change inside it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    path: str
+    fingerprint: str | None = None
+
+
 class RootBaseline(BaseModel):
     """The untracked and ignored paths the root held before any attempt ran.
 
@@ -60,7 +74,31 @@ class RootBaseline(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    paths: tuple[str, ...]
+    entries: tuple[BaselineEntry, ...]
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        """The recorded paths alone: ``git clean``'s keep list and the exact-tree exemption."""
+        return tuple(entry.path for entry in self.entries)
+
+
+class RootBaselineDrift(BaseModel):
+    """Pre-run paths found changed or gone when an attempt's hold of the root ended.
+
+    Empty when the root holds every baseline path exactly as the first grant found it.
+    This is reported to the operator, never acted on: the restore already decided (see
+    ``RootBaseline``) to leave baseline paths untouched, whether or not an attempt changed
+    them.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    modified: tuple[str, ...] = ()
+    removed: tuple[str, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        """Return whether the root matches the baseline exactly."""
+        return not self.modified and not self.removed
 
 
 class WorkspaceReceipts(Protocol):

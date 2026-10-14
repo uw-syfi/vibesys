@@ -30,6 +30,7 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionLifecycleEvent,
     AgentExecutionStarted,
     AgentExecutionStatus,
+    RootBaselineDrifted,
     RunControlTransition,
     WorkspaceResourceEvent,
     WorkspaceRestoreFailed,
@@ -252,6 +253,16 @@ def _emit_winner_selected(
     )
 
 
+def _baseline_drift_detail(event: RootBaselineDrifted) -> str:
+    """Describe which pre-run paths an attempt changed or removed."""
+    parts = []
+    if event.modified:
+        parts.append(f"modified: {', '.join(event.modified)}")
+    if event.removed:
+        parts.append(f"removed: {', '.join(event.removed)}")
+    return "; ".join(parts)
+
+
 class _CoreCommitObserver:
     """Publish a confirmed core commit: the committed-view hint, then its semantic events."""
 
@@ -412,6 +423,16 @@ class LocalRunIntegration:
                     ),
                     source=FrameworkSource.GIT_TRACKING,
                     source_label="rollback",
+                ),
+            )
+        if isinstance(event, RootBaselineDrifted):
+            return self.events.emit(
+                CoreEventType.FRAMEWORK_WARNING,
+                data=FrameworkWarningData(
+                    summary="an attempt changed files that existed in the project before the run",
+                    detail=_baseline_drift_detail(event),
+                    source=FrameworkSource.GIT_TRACKING,
+                    source_label="exclusive-root baseline",
                 ),
             )
         raise AssertionError(event)

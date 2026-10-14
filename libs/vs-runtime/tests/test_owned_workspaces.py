@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_runtime.api import RuntimeContractError
+from vs_runtime.api.core import BaselineEntry, RootBaselineDrift
 from vs_runtime.api.infrastructure import (
     AgentExecutionScope,
     BlockingOperations,
@@ -79,6 +80,13 @@ class _Resource:
 
     def unversioned_paths(self) -> tuple[str, ...]:
         return ()
+
+    def baseline_entries(self, paths: tuple[str, ...]) -> tuple[BaselineEntry, ...]:
+        return tuple(BaselineEntry(path=path) for path in paths)
+
+    def baseline_drift(self, entries: tuple[BaselineEntry, ...]) -> RootBaselineDrift:
+        del entries
+        return RootBaselineDrift()
 
     def matches_revision(
         self, revision: str, *, exact_keeping: tuple[str, ...] | None = None
