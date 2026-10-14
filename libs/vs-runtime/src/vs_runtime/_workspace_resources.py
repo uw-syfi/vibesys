@@ -305,6 +305,12 @@ class RuntimeWorkspaceResource:
     def has_revision(self, revision: str) -> bool:
         return self._root_project.git.has_revision(revision)
 
+    def matches_snapshot(self, revision: str) -> bool:
+        """Compare the source a snapshot records, without reading ignored build outputs."""
+        return self._project.git.matches_tree(
+            revision, exempt_paths=self._memory_paths, include_ignored=False
+        )
+
     def matches_revision(
         self, revision: str, *, exact_keeping: tuple[str, ...] | None = None
     ) -> bool:

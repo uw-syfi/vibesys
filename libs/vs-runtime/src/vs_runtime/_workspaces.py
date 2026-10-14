@@ -63,6 +63,8 @@ class WorkspaceResource(Protocol):
 
     def has_revision(self, revision: str) -> bool: ...
 
+    def matches_snapshot(self, revision: str) -> bool: ...
+
     def matches_revision(
         self, revision: str, *, exact_keeping: tuple[str, ...] | None = None
     ) -> bool: ...
@@ -260,6 +262,11 @@ class RuntimeWorkspace:
     async def has_revision(self, revision: str) -> bool:
         self._ensure_open()
         return await run_sync(self._owner.runner, self._resource.has_revision, revision)
+
+    async def matches_snapshot(self, revision: str) -> bool:
+        self._ensure_open()
+        async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-980301 [SLF001]; the workspace delegates locking to its owning collection; exposing the lock would leak lifecycle internals.
+            return await run_sync(self._owner.runner, self._resource.matches_snapshot, revision)
 
     async def matches_revision(
         self, revision: str, *, exact_keeping: tuple[str, ...] | None = None

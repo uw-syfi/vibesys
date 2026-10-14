@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from contextlib import closing
+from contextlib import ExitStack, closing
 from dataclasses import dataclass, replace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vs_agent.api import NULL_SKILL_SELECTION, AgentBackend, AgentSpec
 from vs_project.api import (
@@ -284,3 +287,64 @@ def test_candidate_environment_uses_the_runs_verified_objective(
                     )
             finally:
                 candidate.close()
+
+
+@given(artifact=st.binary(max_size=2048))
+def test_snapshot_identity_ignores_build_outputs_but_exact_restore_checks_them(
+    artifact: bytes,
+) -> None:
+    with TemporaryDirectory() as scratch, ExitStack() as ownership:
+        root = Path(scratch) / "project"
+        root.mkdir()
+        (root / "candidate.py").write_text("VALUE = 1\n")
+        (root / ".gitignore").write_text("target/\n")
+        project = ownership.enter_context(
+            open_project_run_resources(
+                _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
+            )
+        )
+        environment = ownership.enter_context(
+            closing(
+                open_run_environment_resources(
+                    RunEnvironmentRequest(
+                        log_dir=project.logger.log_dir,
+                        workspace=root,
+                        ref_dir=None,
+                        backend=FakeComputeBackend(),
+                        agent_backend="stub",
+                        cli_provider="codex",
+                        run_id="workspace-resource-test",
+                        framework_root=root,
+                        project_path_policy=ProjectPathPolicy(),
+                    ),
+                    lambda _request: _Session(
+                        FakeCommandRunner(),
+                        RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True),
+                    ),
+                )
+            )
+        )
+        factory = WorkspaceResourceFactory(
+            project,
+            environment,
+            evaluation_plan=TrustedEvaluationPlan(),
+            memory_paths=("MEMORY.md",),
+            skill_source_dirs=(),
+            skill_selection=NULL_SKILL_SELECTION,
+            host_resources=(),
+            events=lambda _event: None,
+        )
+        revision = factory.root.revision
+        assert revision is not None
+        candidate = factory.create_candidate("candidate-1", revision)
+        ownership.callback(candidate.close)
+        (candidate.path / "target").mkdir()
+        (candidate.path / "target" / "binary").write_bytes(artifact)
+        (candidate.path / "MEMORY.md").write_text("agent planning notes")
+        assert candidate.matches_snapshot(revision)
+        assert not candidate.matches_revision(revision)
+        (candidate.path / "new_source.py").write_text("VALUE = 2\n")
+        assert not candidate.matches_snapshot(revision)
+        (candidate.path / "new_source.py").unlink()
+        (candidate.path / "candidate.py").write_text("VALUE = 3\n")
+        assert not candidate.matches_snapshot(revision)

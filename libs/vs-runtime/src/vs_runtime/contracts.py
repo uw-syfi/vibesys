@@ -232,6 +232,14 @@ class Workspace(Protocol):
         """Return whether this run's repository can materialize the revision."""
         ...
 
+    async def matches_snapshot(self, revision: str) -> bool:
+        """Whether snapshot-eligible source equals a revision, excluding ignored outputs.
+
+        Tracked files still count even when an ignore rule matches them.
+        Preserved framework memory is exempt, as in revision comparisons.
+        """
+        ...
+
     async def matches_revision(self, revision: str) -> bool:
         """Return whether the materialized tree equals the revision's tree.
 

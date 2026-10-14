@@ -270,8 +270,8 @@ class SnapshotWorkspace(Protocol):
         """Commit the workspace's content and keep it reachable; the commit id."""
         ...
 
-    async def matches_revision(self, revision: str) -> bool:
-        """Whether the workspace's content is exactly ``revision``."""
+    async def matches_snapshot(self, revision: str) -> bool:
+        """Whether snapshot-eligible source equals ``revision``, ignoring build outputs."""
         ...
 
 
@@ -659,7 +659,7 @@ class AgentEvaluationBridge:
         would give every call a fresh identity and its own budget.
         """
         last = scoped.last_revision
-        if last is not None and await workspace.matches_revision(last):
+        if last is not None and await workspace.matches_snapshot(last):
             return last
         revision = await workspace.snapshot_and_retain(
             _SNAPSHOT_LABEL, retention_label=_SNAPSHOT_LABEL

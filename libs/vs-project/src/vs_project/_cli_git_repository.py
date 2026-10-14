@@ -351,17 +351,21 @@ class CliGitRepository:
         *,
         include_ignored: bool,
     ) -> bool:
-        # Compare through a scratch index: stage every file into a copy of the
-        # revision's tree, then ask Git whether anything differs. A plain
-        # ``git diff <revision>`` cannot see files that are untracked here.
+        # Compare against the revision in a scratch index without staging files.
+        # Staging writes blobs even for a read-only comparison and can hash gigabytes
+        # of ignored build outputs. Untracked paths prove inequality by presence;
+        # only tracked paths need content comparison.
         with tempfile.TemporaryDirectory() as scratch:
             index = Path(scratch) / "index"
             if self._run(["read-tree", revision], index_file=index).returncode != 0:
                 return False
-            add = ["add", "--all", *(["--force"] if include_ignored else []), "--", *pathspecs]
-            if self._run(add, index_file=index).returncode != 0:
+            others = ["ls-files", "--others", "--directory", "--no-empty-directory", "-z"]
+            if not include_ignored:
+                others.append("--exclude-standard")
+            listing = self._run([*others, "--", *pathspecs], index_file=index)
+            if listing.returncode != 0 or listing.stdout:
                 return False
-            diff = ["diff", "--cached", "--quiet", revision, "--", *pathspecs]
+            diff = ["diff", "--quiet", "--", *pathspecs]
             return self._run(diff, index_file=index).returncode == 0
 
     # -- index and commits ---------------------------------------------------

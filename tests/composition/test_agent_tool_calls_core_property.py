@@ -194,7 +194,7 @@ class Workspace:
         await self._slow.pass_through()
         return _commit(f"snapshot:{self._edits[-1]}")
 
-    async def matches_revision(self, revision: str) -> bool:
+    async def matches_snapshot(self, revision: str) -> bool:
         """Whether nothing changed since the snapshot ``revision``."""
         return revision == _commit(f"snapshot:{self._edits[-1]}")
 

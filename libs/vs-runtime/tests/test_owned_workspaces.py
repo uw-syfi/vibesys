@@ -79,6 +79,9 @@ class _Resource:
     def unversioned_paths(self) -> tuple[str, ...]:
         return ()
 
+    def matches_snapshot(self, revision: str) -> bool:
+        return self.revision == revision
+
     def matches_revision(
         self, revision: str, *, exact_keeping: tuple[str, ...] | None = None
     ) -> bool:

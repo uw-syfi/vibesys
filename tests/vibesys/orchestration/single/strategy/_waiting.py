@@ -52,7 +52,7 @@ class _Workspace:
         del label, retention_label
         return self._revision
 
-    async def matches_revision(self, revision: str) -> bool:
+    async def matches_snapshot(self, revision: str) -> bool:
         return revision == self._revision
 
 
