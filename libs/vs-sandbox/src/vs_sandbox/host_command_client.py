@@ -179,7 +179,9 @@ def _request(call: dict[str, object], *, stop: Stop, dial: Callable[[str], Wire]
         # The broker cancels the job when the connection closes.
         stop.on_stop = wire.close
         try:
-            status = _relay(wire, call)
+            # A stop that arrived while dialing found no connection to close;
+            # sending the request now would start a job nobody stops.
+            status = None if stop.event.is_set() else _relay(wire, call)
         except ConnectionError:
             # A reset or broken pipe is a dropped connection, like a clean close
             # without an exit status.

@@ -104,6 +104,10 @@ def _gpu(launcher: _RecordingLauncher, host_env: Mapping[str, str] | None = None
     return GpuCommands(_config(), _PrefixConfinement(), host_env or {}, launcher=launcher)
 
 
+#: SIGINT's number; the test only hands it to the client's handler, no signal is raised.
+_SIGINT = 2
+
+
 @dataclass(frozen=True)
 class _Network:
     """The simulated network the broker listens on and the clients dial."""
@@ -494,6 +498,31 @@ class TestClient:
                 )
             )
         assert status == 1
+
+    def test_a_stop_while_dialing_starts_no_job(
+        self, sim: Sim, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A signal before the connection opened still stops the run: no request goes out."""
+
+        def program(net: _Network) -> tuple[int, int]:
+            launcher = _RecordingLauncher(net.threads, block=True)
+            with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
+                _point_at(monkeypatch, broker)
+                monkeypatch.chdir(workspace)
+                stop = Stop()
+
+                def dial_then_interrupt(address: str) -> Connection:
+                    connection = net.dial(address)
+                    stop.handle(_SIGINT, None)
+                    return connection
+
+                status = execute(["--", "true"], stop=stop, dial=dial_then_interrupt)
+                return status, len(launcher.commands)
+
+        status, launched = _simulate(sim, program)
+
+        assert status == 128 + _SIGINT
+        assert launched == 0
 
     def test_the_client_imports_only_the_standard_library(self) -> None:
         """It runs as one file under the agent image's python3, with no VibeSys packages."""
