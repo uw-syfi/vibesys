@@ -133,13 +133,15 @@ def emit_gate_finished(
     )
 
 
-class _LocalValidationEvents:
+class CoreLocalValidationEvents:
     """Translate policy-neutral recipe observations to VibeSys gate events."""
 
     def __init__(self, events: CoreEventWriter) -> None:
+        """Write every translated recipe observation to *events*."""
         self._events = events
 
     def started(self, recipe: ValidationRecipe) -> None:
+        """Publish one ``GATE_STARTED`` for a validation recipe about to run."""
         emit_gate_started(
             self._events,
             GateKind.VALIDATION,
@@ -148,6 +150,7 @@ class _LocalValidationEvents:
         )
 
     def finished(self, result: FrameworkValidationResult) -> None:
+        """Publish one ``GATE_FINISHED`` for a validation recipe's settled result."""
         failure = None if result.passed else (result.error or result.output or "unknown failure")
         emit_gate_finished(
             self._events,
@@ -185,7 +188,7 @@ async def _validate_local(
             workspace,
             recipe_artifact=recipe_artifact,
             report_location=report_location,
-            events=_LocalValidationEvents(events),
+            events=CoreLocalValidationEvents(events),
         )
     except LocalValidationRecipeError as error:
         # The recipe reference came from the agent's own reply, so this is an
@@ -528,4 +531,4 @@ def create_evaluation(
     return _EvaluationAdapter(run_id, request, runtime, events, log)
 
 
-__all__ = ["create_evaluation", "trusted_evaluation_plan"]
+__all__ = ["CoreLocalValidationEvents", "create_evaluation", "trusted_evaluation_plan"]

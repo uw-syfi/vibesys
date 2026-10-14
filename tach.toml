@@ -875,7 +875,7 @@ expose = ["api", "api\\..*"]
 from = ["vs_dst"]
 
 [[interfaces]]
-expose = ["IterationKind", "IterationMetric", "IterationProjection", "IterationStatus", "IterationSummary", "IterationSupport", "IterationTree", "IterationUnavailable", "IterationUnavailableReason", "PluginProjection", "ProfilerKind", "ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
+expose = ["IterationKind", "IterationMetric", "IterationProjection", "IterationStatus", "IterationSummary", "IterationSupport", "IterationTree", "IterationUnavailable", "IterationUnavailableReason", "PluginProjection", "ProfilerKind", "ResumeRef", "RoundFailureSummary", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
 from = ["vibesys.run.contracts"]
 
 [[interfaces]]
@@ -939,7 +939,7 @@ expose = ["OrchestrationResumeDecision", "skills"]
 from = ["vibesys.orchestration"]
 
 [[interfaces]]
-expose = ["create_evaluation", "trusted_evaluation_plan"]
+expose = ["CoreLocalValidationEvents", "create_evaluation", "trusted_evaluation_plan"]
 from = ["vibesys.run.evaluation"]
 
 [[interfaces]]

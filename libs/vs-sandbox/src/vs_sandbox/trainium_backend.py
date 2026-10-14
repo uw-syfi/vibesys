@@ -71,7 +71,7 @@ class TrainiumBackend:
 
     name = ComputeBackend.TRAINIUM
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692105 [PLR0913]; the backend's independent construction seams mirror the registry's uniform call; a config object would only rename them.
         self,
         log_dir: Path,
         *,
@@ -79,8 +79,10 @@ class TrainiumBackend:
         image: str | None = None,
         accelerator_discovery: AcceleratorDiscovery | None = None,
         docker: DockerCli | None = None,
+        events: object | None = None,
     ) -> None:
         """Configure Trainium execution with its log directory and image override."""
+        del events  # Trainium contention monitoring is not implemented yet
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image or _DEFAULT_IMAGE

@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._core_requests import RequestExecutors
     from vs_runtime._evidence_ledger import EvidenceLookup
+    from vs_runtime._local_validation import LocalValidationEvents
     from vs_runtime._operation_catalog import OperationOwner
     from vs_runtime.contracts import Commands, RevisionLedger, Workspaces
 
@@ -133,6 +134,7 @@ class OperationPorts:
     variables: Mapping[str, object] = field(default_factory=dict)
     commands: Commands | None = None
     replies: Mapping[SchemaRef, type[BaseModel]] = field(default_factory=dict)
+    local_validation_events: LocalValidationEvents | None = None
 
 
 def _command_owner(role: OperationRole, ports: OperationPorts) -> OperationOwner | None:
@@ -144,7 +146,12 @@ def _command_owner(role: OperationRole, ports: OperationPorts) -> OperationOwner
     if not ports.workspaces.supports_parallel_candidates:
         return None
     return ValidateLocalOwner(
-        ports.workspaces, ports.commands, ports.ledger, ports.commit_of, ports.artifacts
+        ports.workspaces,
+        ports.commands,
+        ports.ledger,
+        ports.commit_of,
+        ports.artifacts,
+        events=ports.local_validation_events,
     )
 
 

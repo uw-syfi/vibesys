@@ -47,6 +47,7 @@ from vibesys.run.evaluation import trusted_evaluation_plan
 from vibesys.run.evaluation_socket import evaluation_socket_mount
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
+from vibesys.run.gpu_events import CoreGpuContentionEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
 from vibesys.run.profilers import (
     ProfilerPreflight,
@@ -311,13 +312,24 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             )
 
         with boot_trace.span("backend_and_model"):
-            backend_get = create_compute_backend if backend_factory is None else backend_factory
-            backend_impl = backend_get(
-                backend,
-                log_dir=Project.log_directory_for(project_root, run_id),
-                log=buffered_logs.append,
-                image=environment.backend_image,
-            )
+            backend_log_dir = Project.log_directory_for(project_root, run_id)
+            if backend_factory is None:
+                # A caller-supplied backend factory (tests, mainly) builds its
+                # own double and does not take this production-only seam.
+                backend_impl = create_compute_backend(
+                    backend,
+                    log_dir=backend_log_dir,
+                    log=buffered_logs.append,
+                    image=environment.backend_image,
+                    events=CoreGpuContentionEvents(integration.events),
+                )
+            else:
+                backend_impl = backend_factory(
+                    backend,
+                    log_dir=backend_log_dir,
+                    log=buffered_logs.append,
+                    image=environment.backend_image,
+                )
             model_name = config.model.name
         with boot_trace.span("execution_record"):
             skill_source_paths = resolve_skill_source_paths(skills_dirs)

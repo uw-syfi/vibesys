@@ -161,8 +161,10 @@ def metal_backend(
     log: Callable[[str], None] | None = None,
     image: str | None = None,
     docker: DockerCli | None = None,
+    events: object | None = None,
 ) -> LocalBackend:
     """Apple Silicon / Metal backend (local execution only)."""
+    del events  # no device to watch for contention
     return LocalBackend(
         ComputeBackend.METAL,
         log_dir,
@@ -178,8 +180,10 @@ def cpu_backend(
     log: Callable[[str], None] | None = None,
     image: str | None = None,
     docker: DockerCli | None = None,
+    events: object | None = None,
 ) -> LocalBackend:
     """CPU-only backend (no GPU; CPU-bound targets like KV stores / servers)."""
+    del events  # no device to watch for contention
     return LocalBackend(
         ComputeBackend.CPU,
         log_dir,

@@ -513,6 +513,7 @@ class AgentClient:
             self._write_usage_record(
                 kind=spec.role,
                 round_label=turn.label,
+                invocation_id=turn.invocation_id,
                 model=spec.model,
                 reasoning_effort=spec.reasoning_effort,
                 result=result,
@@ -522,19 +523,26 @@ class AgentClient:
             raise AssertionError(message)
         return result, logger
 
-    def _write_usage_record(
+    def _write_usage_record(  # noqa: PLR0913  # lint-waiver: LW-011218 [PLR0913]; the audit row and the settled-usage event need the same independent facts about one finished turn.
         self,
         *,
         kind: str,
         round_label: str | None,
+        invocation_id: str | None,
         model: str | None,
         reasoning_effort: str | None,
         result: AgentTurnResult | None,
     ) -> None:
-        if self._log_dir is None:
-            return
         usage = result.usage if result is not None else AgentUsage()
         skills = result.skills if result is not None else AgentSkillUse()
+        self._sink.turn_usage_recorded(
+            usage,
+            agent_kind=kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+        )
+        if self._log_dir is None:
+            return
         try:
             append_usage_record(
                 self._log_dir,

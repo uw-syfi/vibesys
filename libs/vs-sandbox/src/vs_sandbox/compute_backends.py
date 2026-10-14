@@ -194,25 +194,29 @@ def backend_is_host_only(backend: ComputeBackend) -> bool:
     return backend in _HOST_ONLY
 
 
-def create_compute_backend(
+def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-692103 [PLR0913]; the registry call forwards each backend's independent construction seams uniformly; a config object would only rename them.
     backend: ComputeBackend,
     log_dir: Path,
     *,
     log: Callable[[str], None] | None = None,
     image: str | None = None,
     docker: DockerCli | None = None,
+    events: object | None = None,
 ) -> ComputeBackendImpl:
     """Construct the registered implementation for one compute stack.
 
     A supplied *docker* replaces the built-in Docker CLI for built-in backends.
+    ``events`` is a backend-specific contention-events seam (only the CUDA
+    backend reads it today); every registered factory accepts and may ignore
+    it so this call stays uniform across backends.
     """
     _ensure_defaults()
     if backend not in _REGISTRY:
         message = f"No backend impl registered for {backend!r}"
         raise ValueError(message)
     if docker is None:
-        return _REGISTRY[backend](log_dir=log_dir, log=log, image=image)
-    return _REGISTRY[backend](log_dir=log_dir, log=log, image=image, docker=docker)
+        return _REGISTRY[backend](log_dir=log_dir, log=log, image=image, events=events)
+    return _REGISTRY[backend](log_dir=log_dir, log=log, image=image, docker=docker, events=events)
 
 
 def _register_defaults() -> None:

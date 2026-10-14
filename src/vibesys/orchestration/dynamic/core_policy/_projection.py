@@ -27,11 +27,13 @@ from vibesys.run.contracts import (
     IterationSummary,
     IterationTree,
     PluginProjection,
+    RoundFailureSummary,
     RoundSummary,
 )
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.search.api import (
+        Failure,
         FinishedWork,
         HypothesisRecord,
         MetricRow,
@@ -188,6 +190,19 @@ def _round_view(record: RoundRecord) -> RoundView:
     )
 
 
+def _round_failure_summary(failure: Failure | None) -> RoundFailureSummary | None:
+    """The round's typed failure, in the strategy-neutral shape ``WORKSTREAM_FINISHED`` reads."""
+    if failure is None:
+        return None
+    return RoundFailureSummary(
+        kind=failure.kind.value,
+        role=failure.role.value if failure.role is not None else None,
+        turns=failure.turns,
+        limit=failure.limit,
+        text=failure.output,
+    )
+
+
 def _summary(view: RoundView, record: RoundRecord) -> RoundSummary:
     """The round as a run event: failed when the review failed it or the workstream did.
 
@@ -205,6 +220,9 @@ def _summary(view: RoundView, record: RoundRecord) -> RoundSummary:
         perf_metric=view.perf_metric,
         perf_unit=view.perf_unit,
         profile_skipped=view.profile_skipped,
+        last_error=_round_failure_summary(record.failure),
+        repeated_error=record.failure is not None
+        and record.failure.kind is FailureKind.REPEATED_TURN,
     )
 
 

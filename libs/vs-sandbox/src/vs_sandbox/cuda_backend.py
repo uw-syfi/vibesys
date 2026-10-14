@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from vs_sandbox.docker_cli import DockerCli
     from vs_sandbox.docker_sandbox import DockerSandbox as DockerSandboxType
     from vs_sandbox.execution import CommandRunner
+    from vs_sandbox.gpu_monitor import GpuContentionEvents
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
     from vs_sandbox.local_shell import LocalShellRunner
@@ -49,7 +50,7 @@ class CudaBackend:
 
     name = ComputeBackend.CUDA
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692102 [PLR0913]; the backend's four collaborators (GPU telemetry, threads, Docker CLI, command probe) are keyword-only seams on top of its three settings; bundling them in a holder object would only rename the same parameters.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692102 [PLR0913]; the backend's five collaborators (GPU telemetry, threads, Docker CLI, command probe, contention events) are keyword-only seams on top of its three settings; bundling them in a holder object would only rename the same parameters.
         self,
         log_dir: Path,
         *,
@@ -59,12 +60,14 @@ class CudaBackend:
         threads: Threads | None = None,
         docker: DockerCli | None = None,
         probe: CommandProbe | None = None,
+        events: GpuContentionEvents | None = None,
     ) -> None:
         """Configure CUDA execution with its log directory, image override and GPU telemetry."""
         self._probe: CommandProbe = probe or SubprocessProbe()
         self._telemetry: GpuTelemetry = gpu_telemetry or NvidiaSmiTelemetry(probe=self._probe)
         self._threads: Threads = threads or OsThreads()
         self._docker = docker
+        self._events = events
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image or _DEFAULT_IMAGE
@@ -154,6 +157,7 @@ class CudaBackend:
             gpu_uuid=self.selected_device.uuid,
             telemetry=self._telemetry,
             threads=self._threads,
+            events=self._events,
         )
         return self._monitor
 
@@ -207,6 +211,7 @@ class CudaBackend:
             gpu_uuid=new_gpu.uuid,
             telemetry=self._telemetry,
             threads=self._threads,
+            events=self._events,
         )
         self._monitor.start()
 
