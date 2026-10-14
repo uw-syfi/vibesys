@@ -1,12 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {describe, it} from 'node:test';
-import type {
-  BackendClientError,
-  EventBatchMessage,
-  ProtocolResponse,
-  RequestInput,
-} from '@vibesys/contracts';
-import {parseProtocolResponse, ServerError} from '@vibesys/contracts';
+import type {EventBatchMessage, ProtocolResponse, RequestInput} from '@vibesys/contracts';
+import {BackendClientError, parseProtocolResponse, ServerError} from '@vibesys/contracts';
 import type {AbortSignalLike, ControlChannelState} from './index.js';
 import {REQUEST_POLICIES} from './index.js';
 import {expect} from './test-support/expect.js';
@@ -1382,6 +1377,158 @@ describe('WebSocketTransport', () => {
     // nothing will ever answer.
     expect(await rejected).toMatchObject({kind: 'disconnected'});
     expect(sockets[0]?.sent).toEqual([]);
+    await transport.close();
+  });
+
+  it('rejects sockets returned in a terminal state without waiting for a handshake', async () => {
+    const observations: Array<Record<string, unknown>> = [];
+
+    for (const readyState of [2, 3]) {
+      const scheduler = new FakeClock();
+      const socket = new FakeSocket();
+      socket.readyState = readyState;
+      const transport = new WebSocketTransport(URL, {
+        closeGraceMs: 0,
+        scheduleTimeout: scheduler.schedule,
+        webSocket: () => socket,
+      });
+      let failure: BackendClientError | undefined;
+      const rejected = rejection(transport.request({type: 'query.chat', text: 'must not send'}));
+      void rejected.then(error => {
+        failure = error;
+      });
+
+      await tick();
+      observations.push({
+        readyState,
+        kind: failure?.kind,
+        sent: socket.sent,
+        pendingDelays: scheduler.pendingDelays(),
+      });
+
+      // Drain a pre-fix handshake deadline so this test cleans up without
+      // waiting on real time. The observation above is what proves no
+      // connection deadline was needed to learn the socket was terminal.
+      scheduler.runPending();
+      await rejected;
+      await transport.close();
+      expect(scheduler.pending).toBe(0);
+    }
+
+    expect(observations).toEqual([
+      {readyState: 2, kind: 'disconnected', sent: [], pendingDelays: []},
+      {readyState: 3, kind: 'disconnected', sent: [], pendingDelays: []},
+    ]);
+  });
+
+  it('rejects invalid socket ready states at the factory boundary', async () => {
+    const observations: Array<Record<string, unknown>> = [];
+
+    for (const readyState of [-1, 4, Number.NaN]) {
+      const scheduler = new FakeClock();
+      const socket = new FakeSocket();
+      socket.readyState = readyState;
+      const transport = new WebSocketTransport(URL, {
+        closeGraceMs: 0,
+        scheduleTimeout: scheduler.schedule,
+        webSocket: () => socket,
+      });
+      let failure: BackendClientError | undefined;
+      const rejected = rejection(transport.request({type: 'query.chat', text: 'must not send'}));
+      void rejected.then(error => {
+        failure = error;
+      });
+
+      await tick();
+      observations.push({
+        readyState: String(readyState),
+        kind: failure?.kind,
+        message: failure?.message,
+        retryable: failure?.retryable,
+        sent: socket.sent,
+        pendingDelays: scheduler.pendingDelays(),
+      });
+
+      scheduler.runPending();
+      await rejected;
+      await transport.close();
+      expect(scheduler.pending).toBe(0);
+    }
+
+    expect(observations).toEqual(
+      [-1, 4, Number.NaN].map(readyState => ({
+        readyState: String(readyState),
+        kind: 'disconnected',
+        message: `WebSocket factory returned invalid readyState ${String(readyState)}`,
+        retryable: false,
+        sent: [],
+        pendingDelays: [],
+      })),
+    );
+  });
+
+  it('does not redial an invalid socket returned to the control channel', async () => {
+    const scheduler = new FakeClock();
+    const sockets: FakeSocket[] = [];
+    const states: ControlChannelState[] = [];
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 0,
+      reconnectDelaysMs: [25],
+      scheduleTimeout: scheduler.schedule,
+      onConnectionState: state => states.push(state),
+      webSocket: () => {
+        const socket = new FakeSocket();
+        socket.readyState = 4;
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    let failure: BackendClientError | undefined;
+    const rejected = rejection(transport.request({type: 'query.snapshot'}));
+    void rejected.then(error => {
+      failure = error;
+    });
+
+    await tick();
+    const beforeRetry = {
+      sockets: sockets.length,
+      kind: failure?.kind,
+      message: failure?.message,
+      retryable: failure?.retryable,
+      state: states.map(trace),
+      sent: sockets.flatMap(socket => socket.sent),
+      pendingDelays: scheduler.pendingDelays(),
+    };
+
+    scheduler.runPending();
+    await tick();
+    await rejected;
+    await transport.close();
+
+    expect(beforeRetry).toEqual({
+      sockets: 1,
+      kind: 'disconnected',
+      message: 'WebSocket factory returned invalid readyState 4',
+      retryable: false,
+      state: ['down:cold'],
+      sent: [],
+      pendingDelays: [],
+    });
+  });
+
+  it('preserves a typed failure thrown by the socket factory', async () => {
+    const expected = new BackendClientError('disconnected', 'desktop bridge rejected the dial', {
+      retryable: false,
+    });
+    const transport = new WebSocketTransport(URL, {
+      webSocket: () => {
+        throw expected;
+      },
+    });
+
+    await expect(transport.request({type: 'query.chat', text: 'must not send'})).rejects.toBe(
+      expected,
+    );
     await transport.close();
   });
 

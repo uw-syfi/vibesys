@@ -163,6 +163,70 @@ function channelWith(
 }
 
 describe('ControlChannel', () => {
+  it('fails owed work with a permanent dial error without redialing', async () => {
+    const scheduler = new FakeClock();
+    const permanent = new BackendClientError('disconnected', 'bridge is unavailable', {
+      retryable: false,
+    });
+    let opens = 0;
+    let reported: ControlChannelState | undefined;
+    const firstReport = deferred();
+    const channel = new ControlChannel(
+      {
+        open: async () => {
+          opens += 1;
+          throw permanent;
+        },
+        runDedicated: async (): Promise<ProtocolResponse> => {
+          throw new Error('This scenario opens only a control connection');
+        },
+      },
+      {
+        clientId: 'test-client',
+        reconnectDelaysMs: [10],
+        scheduleTimeout: scheduler.schedule,
+        onConnectionState: state => {
+          reported = state;
+          firstReport.resolve();
+        },
+      },
+    );
+    let failure: unknown;
+    const request = channel.request({type: 'query.snapshot'}).catch(error => {
+      failure = error;
+      throw error;
+    });
+    // Observe the rejection immediately so a pre-fix held request cannot
+    // become an unhandled rejection when its deterministic retry is drained.
+    void request.catch(() => undefined);
+
+    await firstReport.promise;
+    await Promise.resolve();
+    const beforeRetry = {
+      opens,
+      failureIsOriginal: failure === permanent,
+      pendingDelays: scheduler.pendingDelays(),
+      reportedErrorIsOriginal: reported?.status === 'disconnected' && reported.error === permanent,
+      retrying: reported?.status === 'disconnected' && reported.retrying,
+    };
+
+    // A pre-fix channel schedules this retry and keeps the idempotent request.
+    // Drain it after recording the protected behavior so the regression fails
+    // by value rather than waiting for an operation the fake clock still owns.
+    scheduler.runPending();
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    await request.catch(() => undefined);
+    await channel.close();
+
+    expect(beforeRetry).toEqual({
+      opens: 1,
+      failureIsOriginal: true,
+      pendingDelays: [],
+      reportedErrorIsOriginal: true,
+      retrying: false,
+    });
+  });
+
   for (const behavior of ['dispatch', 'silent'] as const) {
     it(`does not send when abort ${behavior === 'dispatch' ? 'dispatches' : 'changes state'} during listener registration`, async () => {
       const connector = new FakeConnector([]);
