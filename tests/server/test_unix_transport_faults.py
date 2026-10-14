@@ -326,3 +326,30 @@ def test_a_subscriber_that_wrote_after_subscribing_is_seen_hanging_up_on_an_idle
             assert settled.wait(HANG_GUARD_S), "the stream outlived its client"
 
     threads.run(main)
+
+
+def test_a_frame_nested_past_the_recursion_limit_is_rejected_and_the_session_goes_on(
+    tmp_path: Path,
+) -> None:
+    """The rejection is an answer like any other; the client's next request is served.
+
+    Decoding once recursed per nesting level, so a frame of ``[`` deeper than
+    Python's recursion limit raised ``RecursionError`` out of the session and
+    ended it with no answer.
+    """
+    threads = SimThreads(schedule_seed=0)
+    socket_path = tmp_path / "control.sock"
+
+    def main() -> None:
+        parts = build_server_parts(None, threads=threads)
+        network = SimNetwork(threads)
+        with UnixJsonlServer(socket_path, parts.api, threads=threads, network=network):
+            client = network.connect(str(socket_path))
+            client.send(b"[" * 100_000 + b"\n" + _frame("query.snapshot"))
+            rejection = Response.model_validate_json(_read_line(client))
+            assert not rejection.ok
+            assert rejection.request_id == "unknown"
+            assert Response.model_validate_json(_read_line(client)).ok
+            client.close()
+
+    threads.run(main)

@@ -34,7 +34,6 @@ changes only behind a ``HelperFeature`` that ``hello`` returned.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -55,6 +54,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import from_json
 
 PROTOCOL_VERSION = 1
 """The run protocol version a server speaks on its control socket.
@@ -325,7 +325,7 @@ def parse_record(instance_id: str, raw: str) -> LiveInstanceRecord | UnreadableR
     report no phase this reader could stand behind.
     """
     try:
-        document = json.loads(raw)
+        document = from_json(raw)
     except ValueError:
         return UnreadableRecord(id=instance_id, version=None)
     version = document.get("version") if isinstance(document, dict) else None

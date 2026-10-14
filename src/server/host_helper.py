@@ -32,11 +32,11 @@ Public surface: ``step``, ``ChannelState``, ``ChannelEvent`` and its members,
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Final, assert_never
 
 from pydantic import ValidationError
+from pydantic_core import from_json
 
 from server.host_api import (
     HELPER_REQUEST_FEATURES,
@@ -359,7 +359,7 @@ def _error(request_id: str | None, code: HelperErrorCode, message: str) -> Helpe
 def _request_id_of(line: bytes) -> str | None:
     """The ``request_id`` of a line that is not a valid request, when it carries a usable one."""
     try:
-        document = json.loads(line)
+        document = from_json(line)
     except ValueError:
         return None
     value = document.get("request_id") if isinstance(document, dict) else None

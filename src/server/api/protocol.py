@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAliasType
 
 from pydantic import Field, FiniteFloat, TypeAdapter
+from pydantic_core import from_json
 
 from server.api.iterations import MAX_ITERATION_PAGE_SIZE, IterationSlice
 from server.chat.options import ChatOptions
@@ -547,9 +547,15 @@ def decode_request(frame: str | bytes) -> ProtocolRequest | Response:
 
     Every transport decodes through here, so a malformed frame (invalid JSON or
     UTF-8, a JSON value that is not an object, a missing or unknown ``type``,
-    unknown keys) draws the same typed response on each of them. The rejection
-    echoes the frame's ``request_id`` and ``client_id`` when it carries them as
-    an object, so a client can match it to what it sent.
+    unknown keys, nesting deeper than the JSON parser's depth limit) draws the
+    same typed response on each of them. The rejection echoes the frame's
+    ``request_id`` and ``client_id`` when it carries them as an object, so a
+    client can match it to what it sent.
+
+    Total: no frame makes this raise. A frame is parsed only by pydantic's JSON
+    parser, which bounds nesting and reports it as a ``ValueError``; Python's
+    ``json`` recurses per level and raises ``RecursionError`` instead, which
+    escaped to the transport and ended the client's session.
     """
     try:
         return _REQUEST_ADAPTER.validate_json(frame)
@@ -562,7 +568,7 @@ def decode_request(frame: str | bytes) -> ProtocolRequest | Response:
 
 def _frame_ids(frame: str | bytes) -> tuple[str, str]:
     try:
-        value = json.loads(frame)
+        value = from_json(frame)
     except ValueError:
         return "unknown", ""
     if not isinstance(value, dict):

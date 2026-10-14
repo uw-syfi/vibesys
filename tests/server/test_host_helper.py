@@ -1534,3 +1534,16 @@ def test_a_failed_watch_acknowledgement_stops_the_installed_watch(seed: int) -> 
     reads_at_exit, reads_after = threads.run(main)
     assert reads_at_exit <= 1
     assert reads_after == reads_at_exit
+
+
+def test_a_line_nested_past_the_recursion_limit_is_refused_as_an_invalid_request() -> None:
+    """Reading the refused line's ``request_id`` recursed per level and crashed the helper."""
+    _, outputs = step(ChannelState(), Received(b"[" * 100_000 + b"\n", 0.0), "v")
+
+    (output,) = outputs
+    assert isinstance(output, Send)
+    assert isinstance(output.message, HelperError)
+    assert (output.message.code, output.message.request_id) == (
+        HelperErrorCode.INVALID_REQUEST,
+        None,
+    )

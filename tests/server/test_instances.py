@@ -1182,3 +1182,10 @@ def test_socket_paths_fit_the_unix_limit_with_room_to_spare() -> None:
     assert len(str(instance_socket_path(root, new_instance_id())).encode()) <= (
         MAX_SOCKET_PATH_BYTES - 40
     )
+
+
+@pytest.mark.parametrize("opening", ["[", '{"version":'])
+def test_a_record_nested_past_the_recursion_limit_is_unreadable_not_a_crash(opening: str) -> None:
+    """``json.loads`` recursed per level and raised ``RecursionError`` out of a listing."""
+    raw = opening * 100_000
+    assert parse_record(IDS[0], raw) == UnreadableRecord(id=IDS[0], version=None)
