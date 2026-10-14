@@ -120,7 +120,7 @@ PRs are squash-merged, so the PR title becomes the commit subject on `main`. Use
 ```
 
 - `type`: one of `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`. Lowercase.
-- `scope`: optional, lowercase. Omit it for `src/vibesys` (the core package) and for cross-cutting changes. For documentation under `docs/`, use the scope of the area it describes (e.g. `docs(ui): ...`), or none for general guides. Otherwise use: `ui` for client-side code under `clients/` (its packages, features, and apps), `client` for the backend client crate, `server` for `src/server`, `example` for `examples/`, `website` for `website/` (the docs site build, theme, and deploy), and the library directory name for `libs/` (e.g. `vs-sandbox`, `vs-project`).
+- `scope`: optional, lowercase. Omit it for the core `vibesys` product package and for cross-cutting changes. For documentation, use the scope of the area it describes (e.g. `docs(ui): ...`), or none for general guides. Otherwise use: `ui` for client-side code (its packages, features, and apps), `client` for the backend client crate, `server` for the server package, `example` for example bundles, `website` for the docs site (build, theme, and deploy), and the library's package name for a library (e.g. `vs-sandbox`, `vs-project`).
 - Summary: imperative mood, lowercase first word, no trailing period, about 72 characters or fewer, describing the behavior change rather than the files touched.
 - Do not add the PR number; GitHub appends it on squash merge.
 - Each PR in a stack gets its own type based on what that PR does.
@@ -134,7 +134,7 @@ Avoid generic summaries such as "update files" or "fix tests."
 - Mention changes to external contracts: manifests, metadata, feature flags, CLI flags, evaluator interfaces, model-serving example bundle shape, prompt output, or skill routing.
 - For prompt changes, include the snapshot diff or state that snapshots were not applicable.
 - For config, metadata, feature flags, and persisted state, verify both valid input and failure cases when touched.
-- For `resources/skills/serving-systems/`, confirm the subtree authoring guide was followed.
+- For the bundled serving-systems product skill, confirm its authoring guide was followed.
 - Do not include unrelated refactors, broad cleanup, or reverted user work in the PR.
 
 ## Handoff

@@ -62,8 +62,8 @@ repository's contracts, architecture, tests, and affected callers.
    - Use only the language and surface sections relevant to the diff, plus the
      cross-cutting checks.
    - Review new code placement explicitly. Favor an existing canonical owner;
-     extract a standalone reusable capability into `libs/` only when it has a
-     real interface and reuse boundary. Flag both misplaced shared behavior and
+     extract a standalone reusable capability into its own library package only
+     when it has a real interface and reuse boundary. Flag both misplaced shared behavior and
      abstractions that add indirection without protecting a boundary.
 
    - Run a design pass for any diff that adds or moves modules, interfaces,
@@ -102,7 +102,7 @@ repository's contracts, architecture, tests, and affected callers.
      tests against the base source (they must fail there and pass at the
      head), write a throwaway test or script from the issue's steps, or for
      TUI rendering fixes render the affected view at a fixed width with the
-     `clients/tui` test harness. Drive the live TUI through the
+     terminal UI client's test harness. Drive the live TUI through the
      `hunt-client-bugs` harness only when no cheaper reproduction exists and the
      cost is justified.
    - Report the reproduction as evidence: the command, the observed failure

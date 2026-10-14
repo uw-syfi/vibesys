@@ -51,7 +51,7 @@ CODEBASE_BODY = """# Change thing
 
 ## Steps
 
-1. Add the thing; `tests/test_thing.py` checks it.
+1. Add the thing; `test_thing` checks it.
 2. Name the thing well. Unenforced: needs judgment.
 
 ## Testing
@@ -60,7 +60,7 @@ CODEBASE_BODY = """# Change thing
 
 ## Known failure modes
 
-- Forgetting the check: `scripts/check_thing.py:main` catches it.
+- Forgetting the check: `check_thing` catches it.
 
 ## Sources of truth
 
@@ -77,6 +77,13 @@ BASE_FILES = {
     "clients/libs/run-state/src/fold.test.ts": "test('folds', () => {});\n",
     "clients/apps/web/e2e/flow.spec.ts": "test('flows', () => {});\n",
     "clients/libs/run-state/src/fold.ts": "export const fold = 1;\n",
+    "clients/package.json": '{"scripts": {"check:ts": "tsc"}}\n',
+    "clients/tools/lint-rules/ui-no-timers.grit": "`setTimeout($x)`\n",
+    "clients/.dependency-cruiser.mjs": 'export default { forbidden: [{ name: "no-circular" }] };\n',
+    "tach.toml": 'source_roots = ["src"]\n',
+    "src/pkg/__init__.py": "",
+    "src/pkg/api.py": "def run() -> None:\n    pass\n",
+    "docs/guide.md": "# Guide\n",
 }
 
 
@@ -362,21 +369,20 @@ def test_codebase_sections_out_of_order_are_reported(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("item", "enforced"),
     [
-        ("Do it; `tests/test_thing.py` checks it.", True),
-        ("Do it; `scripts/check_thing.py:main` checks it.", True),
-        ("Do it; `libs/vs-thing/tests/test_store.py` checks it.", True),
-        ("Do it; `src/pkg/parse_test.py:test_parse` checks it.", True),
-        ("Do it; `clients/libs/run-state/src/fold.test.ts` checks it.", True),
-        ("Do it; `clients/apps/web/e2e/flow.spec.ts` checks it.", True),
-        ("Do it; `clients/libs/run-state/src/fold.ts` holds it.", False),
-        ("Do it; `src/pkg/parse.py:parse` holds it.", False),
-        ("Do it; `clients/libs/run-state/src/gone.test.ts` checks it.", False),
+        ("Do it; `test_thing` checks it.", True),
+        ("Do it; `test_store` checks it.", True),
+        ("Do it; `test_parse` checks it.", True),
+        ("Do it; `check_thing` checks it.", True),
+        ("Do it; `pnpm check:ts` checks it.", True),
+        ("Do it; `ui-no-timers` bans it.", True),
+        ("Do it; `no-circular` bans it.", True),
+        ("Do it; `./scripts/check_ci.sh` fails otherwise.", True),
         ("Do it. Unenforced: needs judgment.", True),
         ("Do it; `TID251` bans the rest.", True),
         ("Do it; `E501` would catch it.", False),
         ("Do it; `ARG001` would catch it.", False),
-        ("Do it; `tests/test_gone.py` checks it.", False),
-        ("Do it; `pyproject.toml` says so.", False),
+        ("Do it; `fold` holds it.", False),
+        ("Do it; `pnpm install` sets it up.", False),
         ("Just do it.", False),
     ],
 )
@@ -450,3 +456,120 @@ def test_a_well_formed_allowlist_loads() -> None:
     text = '[{"path": "a", "rule": "layout", "count": 2, "reason": "r"}]'
 
     assert load_allowlist(text) == [AllowlistEntry("a", Rule.LAYOUT, 2, "r")]
+
+
+def _workflow_rules(tmp_path: Path, line: str) -> list[Rule]:
+    """The rules a workflow skill whose body is ``line`` breaks."""
+    body = f"# Skill\n\n{line}\n\nRead [the guide](references/guide.md) when guiding.\n"
+    tracked = _repo(
+        tmp_path,
+        {"open-pr": "workflow", "testing": "workflow"},
+        {
+            ".agents/skills/open-pr/SKILL.md": _skill_md("open-pr", "workflow", body),
+            ".agents/skills/open-pr/references/guide.md": "x\n",
+        },
+    )
+    return _rules(tmp_path, tracked)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Edit `src/pkg/parse.py`.",
+        "Edit `src/pkg/parse.py:parse`.",
+        "Edit `src/pkg/parse_test.py::test_parse`.",
+        "Edit `parse.py`.",
+        "Edit `fold.test.ts`.",
+        "Edit `pkg/parse.py`.",
+        "Edit `run-state/src`.",
+        "Edit the files under `clients/`.",
+        "Edit src/pkg/ by hand.",
+        "Read [the parser](../../../src/pkg/parse.py).",
+        "Read https://github.com/uw-syfi/vibesys/blob/main/src/pkg/parse.py first.",
+        "Import `pkg.parse`.",
+    ],
+)
+def test_a_path_like_token_in_a_skill_is_reported(tmp_path: Path, line: str) -> None:
+    assert Rule.REPO_PATH in _workflow_rules(tmp_path, line)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Use `@vibesys/run-state` through its entry point.",
+        "Import `pkg.api` and call `pkg.api.run`.",
+        "Read [the testing skill](../testing/SKILL.md) and [the guide](references/guide.md).",
+        "Read [the docs guide](../../../docs/guide.md) and `docs/guide.md`.",
+        "Read [the agent rules](../../../AGENTS.md).",
+        "Run `./scripts/check_ci.sh` and `./scripts/check_lint.sh`.",
+        "Add the key to `pyproject.toml` and `package.json`, and the edge to `tach.toml`.",
+        "Put depth in `references/`, and read guide.md when guiding.",
+        "Check input/output and and/or cases, or `ok` and `<repo>/.venv`.",
+        "Skills live in `.agents/skills/`, one directory each.",
+    ],
+)
+def test_names_a_skill_may_use_are_not_path_tokens(tmp_path: Path, line: str) -> None:
+    assert _workflow_rules(tmp_path, line) == []
+
+
+SEGMENTS = st.lists(st.from_regex(r"\A[a-z][a-z0-9_]{2,8}\Z"), min_size=1, max_size=3)
+
+
+@settings(suppress_health_check=TMP, max_examples=25)
+@given(segments=SEGMENTS, cited_by_name=st.booleans())
+def test_every_tracked_source_file_is_a_path_token_by_path_and_by_name(
+    tmp_path: Path, segments: list[str], *, cited_by_name: bool
+) -> None:
+    source = "/".join(["src", *segments]) + "_mod.py"
+    cited = source.rsplit("/", 1)[-1] if cited_by_name else source
+    body = f"# Skill\n\nEdit `{cited}`.\n"
+    tracked = _repo(
+        tmp_path,
+        {"open-pr": "workflow"},
+        {
+            source: "X = 1\n",
+            ".agents/skills/open-pr/SKILL.md": _skill_md("open-pr", "workflow", body),
+        },
+    )
+
+    found = [v for v in check_tree(tmp_path, tracked) if v.rule is Rule.REPO_PATH]
+
+    assert [v.line for v in found] == [10]
+    assert f"`{cited}`" in found[0].message
+    assert "instead" in found[0].message or "name what the file is for" in found[0].message
+
+
+@pytest.mark.parametrize(
+    ("line", "reported"),
+    [
+        ("Fixed in #123.", True),
+        ("See https://github.com/uw-syfi/vibesys/pull/12 for history.", True),
+        ("See https://github.com/uw-syfi/vibesys/issues/7.", True),
+        ("Escape it as &#123; in HTML.", False),
+        ("File it with the bug issue form.", False),
+    ],
+)
+def test_issue_and_pull_request_numbers_are_reported(
+    tmp_path: Path, line: str, *, reported: bool
+) -> None:
+    assert (Rule.ISSUE_NUMBER in _workflow_rules(tmp_path, line)) == reported
+
+
+@pytest.mark.parametrize(
+    ("span", "exists"),
+    [
+        ("test_thing", True),
+        ("test_gone", False),
+        ("check_thing", True),
+        ("check_gone", False),
+        ("pnpm check:ts", True),
+        ("pnpm check:gone", False),
+        ("pnpm install", True),
+        ("lint/style/noGone", False),
+        ("thing", True),
+    ],
+)
+def test_a_cited_check_identifier_must_exist(tmp_path: Path, span: str, *, exists: bool) -> None:
+    found = _workflow_rules(tmp_path, f"`{span}` fails when the thing breaks.")
+
+    assert (Rule.UNRESOLVED_CHECK not in found) == exists

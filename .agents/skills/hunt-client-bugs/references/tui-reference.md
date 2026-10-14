@@ -1,17 +1,16 @@
 # VibeSys TUI — bug-hunt reference
 
-Distilled from the TUI source (`clients/tui/src/**`) and the repo's issue
-conventions. Line numbers drift; re-grep if a detail matters. Cross-check every
-suspected bug against `clients/tui/README.md` and
-`docs/contributing/tui-architecture.md` (intended behavior) before filing.
+Distilled from the TUI source and the repo's issue conventions. Line numbers drift; re-grep if a detail matters. Cross-check every
+suspected bug against the TUI client's README and
+[TUI architecture](../../../../docs/contributing/tui-architecture.md) (intended behavior) before filing.
 
 ## Launch & environment
 
-- Bins: `vs`, `vibesys` → `clients/tui/dist/launcher.js`. Launcher (Node) starts
+- Bins: `vs`, `vibesys` → the built TUI launcher. Launcher (Node) starts
   the Python backend headless over a Unix socket, then runs the frontend under
   **Bun**.
 - From source: build once with `pnpm build:clients`; run
-  `node clients/tui/dist/launcher.js <args>` or `uv run vibesys <args>` (a TTY is
+  the built launcher with `node` or `uv run vibesys <args>` (a TTY is
   required for the TUI; non-TTY / `--headless` / `validate` / `-h` go headless).
 - Backend Python resolves from `VIBESYS_PYTHON`, else `python3`/`python`. Set
   `VIBESYS_PYTHON=<repo>/.venv/bin/python`.
@@ -19,7 +18,7 @@ suspected bug against `clients/tui/README.md` and
   `/tmp/vibesys-session-XXXXXX/`. Holds `control.sock` and **`backend.log`**
   (backend stdout+stderr). The dir is `rm -rf`'d on exit, so read `backend.log`
   while the run is live.
-- Timeouts: readiness 30s (`READY_TIMEOUT_MS`), shutdown SIGTERM→SIGKILL 10s,
+- Timeouts: readiness 30s, shutdown SIGTERM→SIGKILL 10s,
   backend-exit grace 2s. On startup failure the launcher prints the last 20
   lines of `backend.log`.
 
@@ -167,19 +166,19 @@ is documented here only for context and is not used for finding bugs.
 ## Reporting: labels, forms, conventions
 
 - **No `tui`/`frontend`/`ui` label exists.** TUI issues are labeled `bug` or
-  `enhancement` and parented under roadmap **#284 "Improve VibeSys TUI"**. Do
-  not invent a TUI label; do not clone/modify #284.
-- **Bug → form `.github/ISSUE_TEMPLATE/01-bug.yml`.** Required sections, in
+  `enhancement` and parented under the TUI roadmap issue ("Improve VibeSys TUI"). Do
+  not invent a TUI label; do not clone or modify the roadmap issue.
+- **Bug → the bug issue form.** Required sections, in
   order: Observed behavior; Expected behavior; Reproduction (numbered);
   **Affected subsystem** (dropdown, no TUI option → pick `CLI and packaging` or
   `Unsure`); Environment (add terminal emulator + **terminal size** + **theme** +
   commit + OS); **Impact** (`Blocks normal use` / `Major functionality is
   impaired` / `Workaround exists` / `Minor or cosmetic`); Relevant logs
   (optional, `render: shell`); Related issues; Pre-submission checks.
-- **Enhancement / feature / refactor → form `02-engineering-change.yml`.**
+- **Enhancement / feature / refactor → the engineering-change issue form.**
   Sections: **Workstream** (dropdown → `CLI/DX` for TUI); Problem; Desired
   outcome; Acceptance criteria (checkboxes); Scope and non-goals; Constraints;
-  Verification approach; Parent (`#284`).
+  Verification approach; Parent (the TUI roadmap issue).
 - **Titles:** specific, outcome-oriented; no `[Bug]`/`[Feature]` type prefix; a
   topic prefix `TUI:` is allowed. One issue = one independently closable
   outcome. Do not set Priority/Effort/assignee/milestone.
@@ -187,19 +186,19 @@ is documented here only for context and is not used for finding bugs.
   code + merged PRs to confirm it isn't already done, redact secrets. Use the
   repo-local `create-issue` skill.
 
-## Real issues to model against (by category)
+## Bug patterns seen before (by category)
 
-- **Display/render:** #418 (streaming chunks per-line), #427 (composer hides
-  long input), #440 (banner not dismissable), #256 (typed input not echoed),
-  #255 (rounds strip hides >8 rounds), #410 (theme not honored on launch).
-- **Interaction/glitches:** #433 (focus indicator inconsistent), #399 (arrow
-  keys don't move suggestion), #400 (no theme live-preview), #331 (picker keys
-  leak to view), #442 (non-slash text sent to chat), #259 (agent tabs not
-  clickable), #429 (Ctrl+C exits instead of copy), #420 (resumed hypothesis
-  shows empty), #425 (chat fails after Omnigent, event-loop reentry), #276
-  (stale invalid-owner error).
-- **Backend/protocol affecting TUI:** #444 (package boundaries
-  transport←core-state←tui), #282 (chat wired to real agent), #329 (stub
-  launch time), #267 (Bun worker EACCES in CI).
-- **Features/UX:** #194 (multi-turn chat), #260 (themes), #283 (split-pane viz),
-  #285 (hypothesis-log landing), #396 (agent graph), #432 (F4 zoom).
+- **Display/render:** streaming chunks per-line, composer hides
+  long input, banner not dismissable, typed input not echoed,
+  rounds strip hides >8 rounds, theme not honored on launch.
+- **Interaction/glitches:** focus indicator inconsistent, arrow
+  keys don't move suggestion, no theme live-preview, picker keys
+  leak to view, non-slash text sent to chat, agent tabs not
+  clickable, Ctrl+C exits instead of copy, resumed hypothesis
+  shows empty, chat fails after a tool run (event-loop reentry),
+  stale invalid-owner error.
+- **Backend/protocol affecting TUI:** package boundaries
+  transport←core-state←tui, chat wired to real agent, stub
+  launch time, Bun worker EACCES in CI.
+- **Features/UX:** multi-turn chat, themes, split-pane viz,
+  hypothesis-log landing, agent graph, F4 zoom.

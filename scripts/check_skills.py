@@ -40,12 +40,21 @@ Rules (the `Rule` enum):
         A `codebase` skill's `##` sections are exactly `CODEBASE_SECTIONS`, in order.
     rule-without-enforcement
         In a `codebase` skill, every top-level list item under
-        `ENFORCED_SECTIONS` carries `Unenforced:` or a resolving enforcement
-        reference: a tracked path in the enforcement area (`ENFORCEMENT_PREFIXES`,
-        `ENFORCEMENT_FILES`, any path with a `tests` segment, or a test file
-        anywhere by its runner's naming convention, `TEST_FILE`), alone or as
-        the path of a `path:symbol` citation, or a lint rule code that the
-        repository's Ruff or Biome configuration enables.
+        `ENFORCED_SECTIONS` carries `Unenforced:` or cites, in a code span, a
+        check that exists by its identifier (`CheckIndex.cites_check` in
+        `scripts/skill_tokens.py`): a test name, a check script name, a
+        package script, an enabled lint rule, or a stable command. Never by
+        its file: the check's own failure message carries the location.
+    path-token
+        No skill Markdown, and not the index, names a repository path, a
+        repository file, a module path past a package's `api` facade
+        (`scripts/skill_tokens.py`, `path_tokens`).
+    issue-number
+        No skill Markdown names an issue or pull request number.
+    unresolved-check
+        Every code span shaped like a check citation (`test_<name>`,
+        `check_<name>`, `pnpm <scope>:<name>`, `lint/<group>/<rule>`) names a
+        check that exists, wherever it appears in a skill.
     index
         `.agents/skills/README.md` lists every skill exactly once, under the
         `##` heading of its kind, as a `[name](name/SKILL.md)` link, and lists
@@ -80,17 +89,13 @@ from enum import StrEnum
 from pathlib import Path
 
 from scripts.check_doc_citations import (
-    CITATION,
-    Citation,
     RepoIndex,
     check_references,
-    is_repo_path,
     repo_index,
     tracked_paths,
-    unresolved_reason,
-    unresolved_repo_path_reason,
 )
 from scripts.check_doc_links import extract_links, iter_code_spans, run_git
+from scripts.skill_tokens import CheckIndex, PathIndex, TokenKind, describe, path_tokens
 
 SKILLS_DIR = ".agents/skills"
 INDEX = f"{SKILLS_DIR}/README.md"
@@ -113,20 +118,10 @@ CODEBASE_SECTIONS = (
 )
 ENFORCED_SECTIONS = frozenset({"Steps", "Testing", "Known failure modes"})
 UNENFORCED_MARK = "Unenforced:"
-ENFORCEMENT_PREFIXES = ("scripts/", "clients/tools/", ".github/workflows/")
-ENFORCEMENT_FILES = frozenset({"tach.toml", ".repoctl/checks.toml", "clients/.dependency-cruiser.mjs"})
-# A test file wherever it lives, by the runners' naming conventions: pytest's
-# `test_*.py` and `*_test.py` (and `conftest.py`), and the `*.test.*` and
-# `*.spec.*` files that bun and Playwright collect beside client code.
-TEST_FILE = re.compile(
-    r"(?:^|/)(?:test_[^/]*\.py|[^/]+_test\.py|conftest\.py|[^/]+\.(?:test|spec)\.(?:[cm]?[jt]sx?))$"
-)
 RUNNER_ROOTS = ("tests/", ".github/", ".repoctl/")
 # Root files that name this repository's own setup rather than a language idiom.
 REPO_FILES = ("AGENTS.md", "CLAUDE.md", "tach.toml")
 
-RUFF_CODE = re.compile(r"^[A-Z]{1,4}[0-9]{1,4}$")
-BIOME_RULE = re.compile(r"^(?:lint/)?[a-z]+/(?P<rule>[a-z][A-Za-z]+)$")
 LIST_ITEM = re.compile(r"^(?:[-*]|\d+\.)\s")
 HEADING = re.compile(r"^##\s+(?P<title>.+?)\s*$")
 INDEX_ENTRY = re.compile(r"\]\((?P<name>[\w.-]+)/SKILL\.md\)")
@@ -162,6 +157,9 @@ class Rule(StrEnum):
     CITES_CODEBASE_SKILL = "cites-codebase-skill"
     CODEBASE_SECTIONS = "codebase-sections"
     RULE_WITHOUT_ENFORCEMENT = "rule-without-enforcement"
+    REPO_PATH = "path-token"
+    ISSUE_NUMBER = "issue-number"
+    UNRESOLVED_CHECK = "unresolved-check"
     INDEX = "index"
 
 
@@ -216,33 +214,17 @@ class AllowlistEntry:
     reason: str
 
 
-@dataclass(frozen=True)
-class LintIndex:
-    """The lint rules the repository enables, for resolving rule codes."""
-
-    ruff_select: tuple[str, ...]
-    ruff_ignore: frozenset[str]
-    biome_text: str
-
-    def enables(self, code: str) -> bool:
-        """Whether ``code`` names a Ruff code or Biome rule the configuration enables."""
-        if RUFF_CODE.match(code):
-            return code not in self.ruff_ignore and any(code.startswith(p) for p in self.ruff_select)
-        biome = BIOME_RULE.match(code)
-        return biome is not None and f'"{biome.group("rule")}"' in self.biome_text
-
-
-def lint_index(root: Path, tracked: tuple[str, ...]) -> LintIndex:
-    """Read the enabled Ruff selection and the Biome configuration under ``root``."""
-    pyproject = root / "pyproject.toml"
+def check_index(index: RepoIndex) -> CheckIndex:
+    """The citable checks under ``index``: tests, check scripts, package scripts and lint rules."""
+    pyproject = index.root / "pyproject.toml"
     lint: dict[str, list[str]] = {}
     if pyproject.is_file():
         config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
         lint = config.get("tool", {}).get("ruff", {}).get("lint", {})
-    biome = [path for path in tracked if path.startswith("clients/") and "/biome" in f"/{path}"]
-    biome_text = "\n".join((root / path).read_text(encoding="utf-8") for path in biome)
+    biome = [p for p in index.tracked if p.startswith("clients/") and "/biome" in f"/{p}"]
+    biome_text = "\n".join((index.root / p).read_text(encoding="utf-8") for p in biome)
     select = tuple(lint.get("select", ())) + tuple(lint.get("extend-select", ()))
-    return LintIndex(select, frozenset(lint.get("ignore", ())), biome_text)
+    return CheckIndex(index, select, frozenset(lint.get("ignore", ())), biome_text)
 
 
 def _scalar(value: str) -> str:
@@ -390,7 +372,9 @@ def layout_violations(skill: Skill, root: Path) -> list[Violation]:
         return [*found, Violation(skill_md, Rule.LAYOUT, 1, "a skill directory needs a SKILL.md")]
     lines = _line_count(root / skill_md)
     if lines > MAX_SKILL_LINES:
-        message = f"{lines} lines; SKILL.md holds at most {MAX_SKILL_LINES}: move depth to references/"
+        message = (
+            f"{lines} lines; SKILL.md holds at most {MAX_SKILL_LINES}: move depth to references/"
+        )
         found.append(Violation(skill_md, Rule.SKILL_LINES, 1, message, lines))
     linked = {_link_path(link.target) for link in extract_links(root / skill_md)}
     for relative in skill.files:
@@ -486,31 +470,21 @@ def list_items(body: list[str], first_line: int) -> list[tuple[int, str]]:
     return [(lineno, "\n".join(lines)) for lineno, lines in items]
 
 
-def is_enforcement_reference(span: str, index: RepoIndex, lint: LintIndex) -> bool:
-    """Whether a code span names a check that exists: a tracked check path or an enabled lint rule."""
-    citation = CITATION.match(span)
-    path = citation.group("path") if citation else span
-    if lint.enables(span):
-        return True
-    if not (_in_enforcement_area(path) and (is_repo_path(path, index) or path in index.tracked)):
-        return False
-    if citation is None:
-        return unresolved_repo_path_reason(path, index) is None
-    cited = Citation(Path(), 0, span, citation.group("path"), citation.group("locator"))
-    return unresolved_reason(cited, index.tracked, index.root) is None
+def token_violations(path: str, text: str, paths: PathIndex, checks: CheckIndex) -> list[Violation]:
+    """Path tokens, issue numbers and citations of checks that do not exist, in one Markdown file."""
+    found: list[Violation] = []
+    for token in path_tokens(text, path, paths):
+        rule = Rule.ISSUE_NUMBER if token.kind is TokenKind.ISSUE else Rule.REPO_PATH
+        found.append(Violation(path, rule, token.line, describe(token)))
+    for span in iter_code_spans(text):
+        reason = checks.unresolved_check(span.text)
+        if reason is not None:
+            message = f"{reason}: cite a check that exists, by its identifier, or drop the citation"
+            found.append(Violation(path, Rule.UNRESOLVED_CHECK, span.line, message))
+    return found
 
 
-def _in_enforcement_area(path: str) -> bool:
-    """Whether ``path`` is where checks live: tests (in a tests tree or named as one), check scripts, lint rules, CI, graphs."""
-    return (
-        path in ENFORCEMENT_FILES
-        or path.startswith(ENFORCEMENT_PREFIXES)
-        or "tests" in path.split("/")
-        or TEST_FILE.search(path) is not None
-    )
-
-
-def codebase_violations(skill: Skill, root: Path, index: RepoIndex, lint: LintIndex) -> list[Violation]:
+def codebase_violations(skill: Skill, root: Path, checks: CheckIndex) -> list[Violation]:
     """Section order, and list items in rule sections with no enforcement or `Unenforced:`."""
     path = f"{skill.directory}/SKILL.md"
     found_sections = sections((root / path).read_text(encoding="utf-8"))
@@ -518,18 +492,21 @@ def codebase_violations(skill: Skill, root: Path, index: RepoIndex, lint: LintIn
     found: list[Violation] = []
     if titles != CODEBASE_SECTIONS:
         expected = ", ".join(CODEBASE_SECTIONS)
-        message = f"sections are {', '.join(titles) or 'none'}; a codebase skill has exactly: {expected}"
+        message = (
+            f"sections are {', '.join(titles) or 'none'}; a codebase skill has exactly: {expected}"
+        )
         found.append(Violation(path, Rule.CODEBASE_SECTIONS, 1, message))
     for title, heading_line, body in found_sections:
         if title not in ENFORCED_SECTIONS:
             continue
         for lineno, item in list_items(body, heading_line + 1):
             spans = [span.text for span in iter_code_spans(item)]
-            if UNENFORCED_MARK in item or any(is_enforcement_reference(s, index, lint) for s in spans):
+            if UNENFORCED_MARK in item or any(checks.cites_check(span) for span in spans):
                 continue
             message = (
-                f"this `{title}` item names no check that exists; cite the test, script, lint "
-                f"rule or graph check that enforces it, or write `{UNENFORCED_MARK} <reason>`"
+                f"this `{title}` item names no check that exists; cite the check that enforces it "
+                f"by its identifier (a test name, check script name, `pnpm` script, lint rule ID or "
+                f"stable command), or write `{UNENFORCED_MARK} <reason>`"
             )
             found.append(Violation(path, Rule.RULE_WITHOUT_ENFORCEMENT, lineno, message))
     return found
@@ -550,7 +527,9 @@ def index_violations(root: Path, kinds: dict[str, SkillKind]) -> list[Violation]
     for name, kind in sorted(kinds.items()):
         heading = kind.value.capitalize()
         if listed[(heading, name)] != 1:
-            message = f"list `{name}` exactly once under `## {heading}`, as `[{name}]({name}/SKILL.md)`"
+            message = (
+                f"list `{name}` exactly once under `## {heading}`, as `[{name}]({name}/SKILL.md)`"
+            )
             found.append(Violation(INDEX, Rule.INDEX, lines.get(name, 1), message))
     for title, name in sorted(listed):
         if name not in kinds:
@@ -574,7 +553,8 @@ def frontmatter_of(skill: Skill, root: Path) -> Frontmatter | Violation:
 def check_tree(root: Path, tracked: tuple[str, ...]) -> list[Violation]:
     """Every violation of the skill convention in the skills under ``root``."""
     index = repo_index(root, tracked)
-    lint = lint_index(root, tracked)
+    checks = check_index(index)
+    paths = PathIndex(index)
     skills = discover_skills(tracked)
     kinds: dict[str, SkillKind] = {}
     found: list[Violation] = []
@@ -584,13 +564,18 @@ def check_tree(root: Path, tracked: tuple[str, ...]) -> list[Violation]:
             found.append(frontmatter)
         else:
             kinds[skill.name] = frontmatter.kind
-    runners = runner_text(root, tracked) if any("scripts/" in f for s in skills for f in s.files) else ""
+    runners = (
+        runner_text(root, tracked) if any("scripts/" in f for s in skills for f in s.files) else ""
+    )
     pattern = repo_specific_pattern(index)
     codebase = frozenset(name for name, kind in kinds.items() if kind is SkillKind.CODEBASE)
     for skill in skills:
         found += layout_violations(skill, root)
         found += script_violations(skill, runners)
         markdown = [root / skill.directory / f for f in skill.files if f.endswith(".md")]
+        for file in markdown:
+            relative = file.relative_to(root).as_posix()
+            found += token_violations(relative, file.read_text(encoding="utf-8"), paths, checks)
         for finding in check_references(markdown, index, base=skill.directory):
             path = finding.source.relative_to(root).as_posix()
             message = f"`{finding.text}`: {finding.reason}"
@@ -598,7 +583,9 @@ def check_tree(root: Path, tracked: tuple[str, ...]) -> list[Violation]:
         if kinds.get(skill.name) is SkillKind.GENERIC:
             found += generic_violations(skill, root, pattern, codebase)
         elif kinds.get(skill.name) is SkillKind.CODEBASE:
-            found += codebase_violations(skill, root, index, lint)
+            found += codebase_violations(skill, root, checks)
+    if (root / INDEX).is_file():
+        found += token_violations(INDEX, (root / INDEX).read_text(encoding="utf-8"), paths, checks)
     return found + index_violations(root, kinds)
 
 
@@ -612,7 +599,9 @@ def load_allowlist(text: str) -> list[AllowlistEntry]:
     for position, raw in enumerate(json.loads(text)):
         keys = set(raw)
         if keys != {"path", "rule", "count", "reason"}:
-            message = f"entry {position}: keys must be path, rule, count, reason; got {sorted(keys)}"
+            message = (
+                f"entry {position}: keys must be path, rule, count, reason; got {sorted(keys)}"
+            )
             raise AllowlistError(message)
         try:
             rule = Rule(raw["rule"])
@@ -646,14 +635,18 @@ def ratchet(violations: list[Violation], allowlist: list[AllowlistEntry]) -> lis
             )
         elif current < count:
             fix = f"lower its count to {current}" if current else "delete its entry"
-            errors.append(f"{path}: [{rule}] shrank from {count} to {current}; {fix} in {ALLOWLIST}")
+            errors.append(
+                f"{path}: [{rule}] shrank from {count} to {current}; {fix} in {ALLOWLIST}"
+            )
     return errors
 
 
 def main(argv: list[str] | None = None) -> int:
     """Check every skill and print what breaks the convention beyond the allowlist."""
     parser = argparse.ArgumentParser(description="Check the agent skills in .agents/skills/.")
-    parser.add_argument("--survey", action="store_true", help="Print every violation, allowlisted or not.")
+    parser.add_argument(
+        "--survey", action="store_true", help="Print every violation, allowlisted or not."
+    )
     args = parser.parse_args(argv)
     if sys.version_info < MIN_PYTHON:
         # Resolving a dotted name parses the repository's modules, which use 3.12 syntax.
@@ -674,9 +667,13 @@ def main(argv: list[str] | None = None) -> int:
     for error in errors:
         print(error)
     if errors:
-        print(f"\n{len(errors)} skill convention failure(s); the convention is in the write-skills skill.")
+        print(
+            f"\n{len(errors)} skill convention failure(s); the convention is in the write-skills skill."
+        )
         return EXIT_VIOLATIONS
-    print(f"Checked {len(discover_skills(tracked_paths(root)))} skill(s); every one follows the convention.")
+    print(
+        f"Checked {len(discover_skills(tracked_paths(root)))} skill(s); every one follows the convention."
+    )
     return EXIT_OK
 
 

@@ -1,10 +1,10 @@
 # Agent skills
 
 Skills for agents developing VibeSys. `.claude/skills` is a symlink to this
-directory. These are not the product skills in `resources/skills/`, which ship
-to optimization agents. The convention for writing and changing skills here is
-the [write-skills](write-skills/SKILL.md) skill, and `scripts/check_skills.py`
-checks it, including that this index lists every skill under its kind.
+directory. These are not the bundled product skills, which ship to
+optimization agents. The convention for writing and changing skills here is
+the [write-skills](write-skills/SKILL.md) skill, and the `check_skills` check
+enforces it, including that this index lists every skill under its kind.
 
 ## Generic
 

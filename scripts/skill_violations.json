@@ -2,7 +2,7 @@
   {
     "path": ".agents/skills/hunt-client-bugs/SKILL.md",
     "rule": "skill-lines",
-    "count": 435,
+    "count": 434,
     "reason": "Over the SKILL.md line limit since before the convention; move depth to references/."
   },
   {
@@ -16,6 +16,12 @@
     "rule": "skill-lines",
     "count": 169,
     "reason": "Over the SKILL.md line limit since before the convention; move depth to references/."
+  },
+  {
+    "path": ".agents/skills/software-design/SKILL.md",
+    "rule": "path-token",
+    "count": 3,
+    "reason": "Names repository paths from before the path-token rule; rewritten in a later PR of the skills stack."
   },
   {
     "path": ".agents/skills/software-design/SKILL.md",
@@ -37,9 +43,21 @@
   },
   {
     "path": ".agents/skills/software-design/references/boundaries.md",
+    "rule": "path-token",
+    "count": 6,
+    "reason": "Names repository paths from before the path-token rule; rewritten in a later PR of the skills stack."
+  },
+  {
+    "path": ".agents/skills/software-design/references/boundaries.md",
     "rule": "repo-specific-name",
     "count": 7,
     "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/software-design/references/functional-core.md",
+    "rule": "path-token",
+    "count": 3,
+    "reason": "Names repository paths from before the path-token rule; rewritten in a later PR of the skills stack."
   },
   {
     "path": ".agents/skills/software-design/references/functional-core.md",
@@ -49,9 +67,21 @@
   },
   {
     "path": ".agents/skills/software-design/references/python.md",
+    "rule": "path-token",
+    "count": 16,
+    "reason": "Names repository paths from before the path-token rule; rewritten in a later PR of the skills stack."
+  },
+  {
+    "path": ".agents/skills/software-design/references/python.md",
     "rule": "repo-specific-name",
     "count": 37,
     "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/software-design/references/typescript.md",
+    "rule": "path-token",
+    "count": 11,
+    "reason": "Names repository paths from before the path-token rule; rewritten in a later PR of the skills stack."
   },
   {
     "path": ".agents/skills/software-design/references/typescript.md",
@@ -61,8 +91,14 @@
   },
   {
     "path": ".agents/skills/testing/SKILL.md",
+    "rule": "path-token",
+    "count": 6,
+    "reason": "Names repository paths from before the path-token rule; rewritten in a later PR of the skills stack."
+  },
+  {
+    "path": ".agents/skills/testing/SKILL.md",
     "rule": "repo-specific-name",
-    "count": 8,
+    "count": 11,
     "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
   },
   {
@@ -79,9 +115,21 @@
   },
   {
     "path": ".agents/skills/testing/references/fault-injection.md",
+    "rule": "path-token",
+    "count": 4,
+    "reason": "Names repository paths from before the path-token rule; rewritten in a later PR of the skills stack."
+  },
+  {
+    "path": ".agents/skills/testing/references/fault-injection.md",
     "rule": "repo-specific-name",
     "count": 7,
     "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/testing/references/flakiness.md",
+    "rule": "path-token",
+    "count": 2,
+    "reason": "Names repository paths from before the path-token rule; rewritten in a later PR of the skills stack."
   },
   {
     "path": ".agents/skills/testing/references/flakiness.md",
@@ -91,9 +139,21 @@
   },
   {
     "path": ".agents/skills/testing/references/python.md",
+    "rule": "path-token",
+    "count": 17,
+    "reason": "Names repository paths from before the path-token rule; rewritten in a later PR of the skills stack."
+  },
+  {
+    "path": ".agents/skills/testing/references/python.md",
     "rule": "repo-specific-name",
-    "count": 39,
+    "count": 41,
     "reason": "Generic skill still holds this repository's specifics; the next PR splits them into codebase skills (write-vibesys-tests and others)."
+  },
+  {
+    "path": ".agents/skills/testing/references/typescript.md",
+    "rule": "path-token",
+    "count": 4,
+    "reason": "Names repository paths from before the path-token rule; rewritten in a later PR of the skills stack."
   },
   {
     "path": ".agents/skills/testing/references/typescript.md",

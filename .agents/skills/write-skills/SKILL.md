@@ -1,6 +1,6 @@
 ---
 name: write-skills
-description: The convention for agent skills in .agents/skills/ (kinds, placement, shape, enforcement, maintenance) and how to apply it. Use when adding, updating, splitting, reorganizing or deleting a skill in .agents/skills/ or .claude/skills/, or when deciding whether a lesson belongs in a skill, AGENTS.md, docs/, or a README.
+description: The convention for the developer agent skills in this repository (kinds, placement, shape, content, enforcement, maintenance) and how to apply it. Use when adding, updating, splitting, reorganizing or deleting a developer agent skill, or when deciding whether a lesson belongs in a skill, AGENTS.md, the docs, or a README.
 metadata:
   kind: workflow
 ---
@@ -8,14 +8,13 @@ metadata:
 # Write skills
 
 Skills in `.agents/skills/` (`.claude/skills` is a symlink to it) guide agents
-that develop VibeSys. They are not the product skills in `resources/skills/`,
-which ship to optimization agents and follow
+that develop VibeSys. They are not the bundled product skills, which ship to
+optimization agents and follow
 [skill-metadata.md](../../../docs/contributing/skill-metadata.md) instead.
 
-Use this skill, not a personal skill-maintenance skill, for anything under
-`.agents/skills/`. `scripts/check_skills.py` checks the rules marked as checked
-below; run `uv run python -m scripts.check_skills` after every change, and
-`--survey` to list allowlisted violations too.
+Use this skill, not a personal skill-maintenance skill, for developer skills.
+`check_skills` enforces the rules marked checked; run
+`uv run python -m scripts.check_skills` (`--survey` lists allowlisted ones too).
 
 ## Kinds
 
@@ -27,10 +26,10 @@ Set the kind in the frontmatter as `metadata.kind` (checked).
   layout makes recognizable; numbers are Unenforced: they cannot be told apart
   from rule numbers and counts in prose). A `references/<language>.md` covers
   that language's idioms, not this repository's setup.
-- **codebase**: how to make one kind of change here, concretely. Named
-  verb-object (`change-wire-protocol`, `add-domain`, `write-vibesys-tests`).
-  Its `##` sections are exactly, in order (checked): Builds on (the generic
-  skills it applies), When this applies (change kinds and paths), Steps,
+- **codebase**: how to make one kind of change here. Named verb-object
+  (`change-wire-protocol`, `add-domain`, `write-vibesys-tests`). Its `##`
+  sections are exactly, in order (checked): Builds on (the generic skills it
+  applies), When this applies (the change kinds, described by task), Steps,
   Testing, Known failure modes, Sources of truth. Each codebase skill owns a
   disjoint set of change kinds; a task spanning two loads both.
   Unenforced: disjointness of change kinds needs judgment.
@@ -48,18 +47,44 @@ Unenforced: placement is judgment; reviewers apply this table.
 | Knowledge | Home |
 | --- | --- |
 | A one-line rule that is always true | `AGENTS.md`, linking to the skill or doc that explains it |
-| Why the system is shaped as it is | `docs/` |
+| Why the system is shaped as it is | A page under `docs/` |
 | How to make one kind of change here | A codebase skill |
 | How to think about a problem anywhere | A generic skill |
 | What a module is and holds | A README beside the code |
-| Numbers, thresholds and lists | The config or code that enforces them; skills link to it and never restate it |
-| Plans, decision logs, research notes | Issues and PRs |
+| Where things are, numbers, thresholds and lists | The code, config or check that owns them; the check's failure message names the location |
+| Plans, decision logs, research notes, bug history | Issues and PRs |
+
+## Content
+
+A skill teaches how to think about a kind of change; the code and the checks
+say where things are. A skill that points at files breaks whenever the code
+moves, and a stale pointer reads exactly like a live one.
+
+- Keep: architectural principles (layers, one-way dependencies, the facade
+  rule that product code is reached through `vibesys.api`, pure core and thin
+  shell); library and package names (`vs-core`, `agentshim`,
+  `@vibesys/run-session`); the codebase's concept names (flow, search, Role,
+  provider, registry); the public entry points an agent starts from
+  (`vs_agent.api`, `pnpm new:package`); stable commands
+  (`./scripts/check_ci.sh`); the identifiers of the checks that enforce a rule;
+  links to pages under `docs/` and to other skills.
+- Remove: file and directory paths, `<file>:<symbol>` and `<test>::<name>`
+  pointers, bare repository file names, and module paths past a package's
+  `api` facade (checked: the `path-token` rule, in every skill Markdown file,
+  frontmatter and fenced blocks included, and in the index); issue and pull
+  request numbers (checked: `issue-number`).
+- Remove internal constant, function and class names and enumerations of
+  today's members (every provider, every option value); say how to find the
+  current set instead ("the provider registry lists them"). Unenforced: an
+  internal name cannot be told from a concept name without judgment.
+- Describe triggers by task ("adding or changing an agent CLI provider"),
+  never by path (checked by `path-token`, which covers the description).
 
 ## Shape
 
 - `name` equals the directory name (checked).
 - `description` says what the skill does, then "Use when ..." with the change
-  kinds and file areas that should trigger it (checked: "Use when" present;
+  kinds that should trigger it (checked: "Use when" present;
   Unenforced: trigger quality needs judgment).
 - The frontmatter holds only `name`, `description` and `metadata.kind`
   (checked). Codex display metadata goes in `agents/openai.yaml`.
@@ -74,24 +99,30 @@ Unenforced: placement is judgment; reviewers apply this table.
   file at most 300 lines, and every file linked from `SKILL.md` (checked).
 - `scripts/` holds only deterministic steps that a test or CI runs; a script
   no test, workflow or check group names fails (checked).
-- Examples cite real code as `path:symbol`, never invented snippets. Every
-  citation, dotted package name and repo path must resolve (checked).
-  Unenforced: an invented snippet in a fenced block cannot be told apart from
-  a real one.
+- Never invent snippets. Docs links and dotted `<package>.api` names must
+  resolve (checked). Unenforced: an invented snippet cannot be spotted.
 - List the skill in [README.md](../README.md) under its kind (checked).
 
 ## Enforcement
 
-Every rule in a skill names its enforcing check (a test, a script, a lint rule
-code, a graph rule) or carries `Unenforced: <reason>`. In codebase skills this
-is checked for every top-level item under Steps, Testing and Known failure
-modes: the item must contain, in backticks, a tracked check (a file under a
-`tests` directory, any test file named by its runner's convention such as
-`test_*.py`, `*_test.py`, `*.test.ts` or `*.spec.ts`, anything under
-`scripts/`, `clients/tools/` or `.github/workflows/`, or `tach.toml`,
-`.repoctl/checks.toml` or `clients/.dependency-cruiser.mjs`), alone or as
-`path:symbol`, or a Ruff or Biome rule the configuration enables. To add enforcement for a rule, follow the `enforce-rules` skill; do not
-restate it here.
+Every rule in a skill names its enforcing check or carries
+`Unenforced: <reason>`. Cite a check by its stable identifier, in backticks,
+never by its file: the check's own failure message carries the specifics. A
+citation is one of:
+
+- a Python test function name, or a check script name (`check_tach`);
+- a namespaced client package script (`pnpm check:ts-architecture`);
+- an enabled Ruff code (`TID251`) or Biome rule (`lint/security/noGlobalEval`), a Grit
+  lint rule or a dependency-cruiser rule by its configured name;
+- a stable command (`./scripts/check_ci.sh`), for "check_ci fails if ...".
+
+In codebase skills every top-level item under Steps, Testing and Known
+failure modes must hold one that exists (checked). Anywhere in a skill, a
+span shaped like a test name, check script name, package script or Biome rule
+must name one that exists (checked: `unresolved-check`). If a check's failure
+message does not say what is wrong and how to fix it, fix the message rather
+than restating the location in the skill. To add enforcement for a rule,
+follow the `enforce-rules` skill.
 
 ## Maintenance
 
@@ -99,21 +130,21 @@ restate it here.
   PR. Unenforced: no check maps code areas to skills yet.
 - A bug fix in a codebase skill's area first tries to add a check through
   `enforce-rules`. If enforcement is untenable, add a Known failure modes line
-  naming the PR number and marked `Unenforced: <reason>`.
+  stating the bug class, marked `Unenforced: <reason>`.
 - Past about 15 Known failure modes entries, look for the structural cause
   behind them and fix that instead. Unenforced: needs judgment.
-- Add a new skill only for a recurring kind of change or bug class that no
-  skill covers. Unenforced: needs judgment.
-- Existing violations live in the shrink-only allowlist
-  `scripts/skill_violations.json`. Never add an entry; when you fix a
-  violation, lower or delete its entry in the same PR (checked: any count
-  change fails until the record matches).
+- Add a skill only for a recurring change kind or bug class no skill covers.
+  Unenforced: needs judgment.
+- Existing violations live in the shrink-only skill-violation allowlist that
+  `check_skills` reads. Never add an entry; when you fix a violation, lower or
+  delete its entry in the same PR (checked: any count change fails until the
+  record matches, and the failure names the file).
 
 ## Steps
 
 1. Decide the home with the placement table. If it is not a skill, stop.
 2. Pick the kind, then extend the skill that owns the change kind, or create
-   `.agents/skills/<name>/SKILL.md` with the frontmatter above.
+   a new skill directory with the frontmatter above.
 3. Write rules with their enforcement or `Unenforced:` reason.
 4. Add or update the entry in [README.md](../README.md).
-5. Run `uv run python -m scripts.check_skills` and `python3 scripts/check_doc_links.py`.
+5. Run `uv run python -m scripts.check_skills` and `-m scripts.check_doc_links`.
