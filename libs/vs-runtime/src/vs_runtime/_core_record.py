@@ -21,6 +21,7 @@ from vs_core.api import (
     RunEnvelope,
     StrategyEvent,
     StrategyState,
+    check_envelope_version,
 )
 from vs_project.api import StoreFence
 from vs_runtime._core_requests import ExecutionLease, OwnerEvent
@@ -120,6 +121,7 @@ class RuntimeRecord[S: StrategyState](BaseModel):
         """Validate the runtime schema and canonical core codecs before replay."""
         if stored.schema_version != RUNTIME_SCHEMA_VERSION:
             raise ContractError(("runtime", "schema_version"), "unsupported record schema")
+        check_envelope_version(stored.payload, ("envelope", "schema_version"))
         record = cls.model_validate_json(
             stored.payload, context={"operation_registry": registry, "persisted_operation": True}
         )

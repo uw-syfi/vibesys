@@ -156,6 +156,35 @@ def test_invalid_new_record_rejects_before_acquiring_a_lease(tmp_path: Path, mut
     assert store.acquire("next", now=1, duration=1) is not None
 
 
+@pytest.mark.parametrize(
+    ("offset", "origin"), [(-3, "older"), (-1, "older"), (1, "newer")], ids=["old", "last", "new"]
+)
+def test_an_envelope_of_another_version_names_the_vibesys_that_wrote_it(
+    tmp_path: Path, offset: int, origin: str
+) -> None:
+    """The version is checked before the shape, which an envelope of another version breaks."""
+    project, run_id = project_run(tmp_path)
+    version = ENVELOPE_SCHEMA_VERSION + offset
+    current = f'"envelope":{{"schema_version":{ENVELOPE_SCHEMA_VERSION},'
+    source = record(run_id).model_dump_json()
+    assert current in source
+    # A field this version does not have, as an envelope of another shape would carry.
+    source = source.replace(current, f'"envelope":{{"schema_version":{version},"moved":1,')
+    store = project.state_store(run_id)
+    fence = store.acquire("writer", now=0, duration=1)
+    assert fence is not None
+    store.commit(
+        None, StoredEnvelope(revision=0, schema_version=1, payload=source.encode()), fence, now=0
+    )
+    with pytest.raises(CoreResumeError) as failure:
+        resolve_core_resume(project, driver())
+    message = failure.value.diagnostic.message
+    assert f"envelope version {version} is not supported" in message
+    assert (
+        f"written by an {origin} VibeSys" in message or f"written by a {origin} VibeSys" in message
+    )
+
+
 def test_resume_factory_enforces_legacy_preflight_before_start(tmp_path: Path) -> None:
     project, run_id = project_run(tmp_path)
     namespace = project.state.portable_namespace(run_id, "dynamic")

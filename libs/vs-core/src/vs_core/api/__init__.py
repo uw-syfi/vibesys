@@ -47,6 +47,7 @@ from vs_core._registry import (
     OperationRegistration,
     OperationRegistry,
     UnexpectedEvent,
+    check_envelope_version,
     operation_result,
     validate_startup,
 )
@@ -1250,6 +1251,7 @@ __all__ = [
     "attempt_view",
     "begin",
     "check_decisions",
+    "check_envelope_version",
     "component",
     "decision_of_operation",
     "encode_json",

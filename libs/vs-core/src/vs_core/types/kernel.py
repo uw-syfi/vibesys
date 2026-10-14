@@ -386,9 +386,10 @@ class Transition(Value):
 class RunEnvelope[S: StrategyState](Value):
     """Atomic core, strategy, fence and cursor envelope with explicit versioning.
 
-    Version 4 stores each request's ``until`` on its ``RequestRecord`` and no deadline on
-    the request. Decoding an envelope of any other version is refused with an error that
-    names the version; there is no migration from the strategy-API envelopes.
+    ``schema_version`` is ``ENVELOPE_SCHEMA_VERSION`` when written; the shape each version
+    names is pinned in vs-core's ``tests/envelope_schema_versions.txt``. Decoding an envelope
+    of any other version is refused, before its shape is validated, with an error that names
+    the version and says whether an older or a newer VibeSys wrote it; there is no migration.
     """
 
     schema_version: int = Field(ge=1)
