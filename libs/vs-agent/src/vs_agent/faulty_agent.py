@@ -28,6 +28,7 @@ from vs_agent.contracts import (
 )
 from vs_agent.runner import schema_error
 from vs_agent.sessions import AgentTurnExecutor
+from vs_decode.api import decode_json
 from vs_faults.api import AgentFault, Boundary, FaultPlan, ReplyGenerator, prompt_vocabulary
 
 if TYPE_CHECKING:
@@ -55,6 +56,8 @@ _NO_JSON = "the reply contained no JSON object"
 
 
 _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_REPLY_BYTES = 8 * 1024 * 1024
+"""The largest reply text read as JSON to plant an extra key in."""
 """Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
 
 
@@ -349,9 +352,6 @@ class FaultyAgentClient:
             # The reply is right and carries a key the schema forbids. Text that
             # is not one JSON object (prose around it, say) has no place for a
             # key: the reply is unusable, as a malformed one is.
-            try:
-                body = _ANY_JSON.validate_json(text)
-            except ValidationError:
-                body = None
+            body = decode_json(text, _ANY_JSON, source="agent reply", max_bytes=_MAX_REPLY_BYTES)
             return json.dumps({**body, "notes": "extra"}) if isinstance(body, dict) else _NO_JSON
         return _NO_JSON

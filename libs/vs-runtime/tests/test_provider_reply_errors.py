@@ -14,7 +14,7 @@ from pathlib import Path
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from tests.support.session_world import (
     SCHEMA,
     SessionHost,
@@ -35,6 +35,8 @@ from vs_sim.api.testing import ManualClock, examples
 
 class Named(BaseModel):
     """A reply that carries one id an agent chose."""
+
+    model_config = ConfigDict(extra="forbid")
 
     hypothesis_id: AgentId
 

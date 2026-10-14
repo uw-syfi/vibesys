@@ -2988,6 +2988,7 @@ source = { editable = "libs/vs-agent" }
 dependencies = [
     { name = "agentshim" },
     { name = "pydantic" },
+    { name = "vs-decode" },
     { name = "vs-faults" },
     { name = "vs-mcp" },
     { name = "vs-project" },
@@ -3000,6 +3001,7 @@ dependencies = [
 requires-dist = [
     { name = "agentshim", specifier = ">=0.15.7,<0.16" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-faults", editable = "libs/vs-faults" },
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },

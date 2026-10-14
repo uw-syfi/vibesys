@@ -168,6 +168,7 @@ graph TD
     vibesys --> vs_sandbox
     vibesys --> vs_sim
     vibesys --> vs_slurm
+    vs_agent --> vs_decode
     vs_agent --> vs_faults
     vs_agent --> vs_mcp
     vs_agent --> vs_project

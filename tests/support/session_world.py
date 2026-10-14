@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from vs_agent.api import (
     AgentClient,
@@ -76,6 +76,8 @@ SESSION = SessionId(root="session-1")
 
 class Reply(BaseModel):
     """The structured reply the Fake driver returns."""
+
+    model_config = ConfigDict(extra="forbid")
 
     value: int
 

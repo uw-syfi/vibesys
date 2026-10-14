@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.api import CoreAgentEventSink
 from vibesys.events import (
@@ -47,6 +47,8 @@ from vs_sim.api.testing import ManualClock, examples, wait_or_fail, wait_until_s
 
 
 class _Response(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     answer: str
 
 
@@ -874,6 +876,8 @@ def test_invoke_reports_an_invalid_reply_as_a_schema_error_naming_its_fields(
 
 
 class _Plan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str = Field(max_length=8)
     count: int
 

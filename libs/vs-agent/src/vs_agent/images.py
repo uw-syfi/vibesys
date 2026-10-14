@@ -28,9 +28,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic import JsonValue, TypeAdapter
 
 from vs_agent.agent_feature import AGENT_USER, AGENT_WORKDIR, agent_feature
+from vs_decode.api import decode_json
 from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
 from vs_sim.api import (
     Clock,
@@ -1428,7 +1429,8 @@ def _cached_repo_digest(
 
 
 _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
-"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
+_MAX_INSPECT_BYTES = 1024 * 1024
+"""The largest ``RepoDigests`` listing read from ``docker image inspect``."""
 
 
 def _repo_digest_for(repo_digests_json: str, repository: str) -> str | None:
@@ -1436,10 +1438,12 @@ def _repo_digest_for(repo_digests_json: str, repository: str) -> str | None:
 
     Absent, malformed, or non-list output resolves to ``None``.
     """
-    try:
-        digests = _ANY_JSON.validate_json(repo_digests_json.strip() or "null")
-    except ValidationError:
-        return None
+    digests = decode_json(
+        repo_digests_json.strip() or "null",
+        _ANY_JSON,
+        source="docker image inspect RepoDigests",
+        max_bytes=_MAX_INSPECT_BYTES,
+    )
     if not isinstance(digests, list):
         return None
     prefix = f"{repository}@sha256:"

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TypeVar
 
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from vs_agent.contracts import AgentOutputSchemaError, SchemaViolation
+from vs_decode.api import Unreadable, decode_json
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -17,6 +19,8 @@ _NO_JSON_OBJECT = "the reply contained no JSON object"
 _DECODE_BUDGET_FACTOR = 32
 _DECODE_BUDGET_FLOOR = 4096
 _RECURSION_COST = 100_000
+MAX_AGENT_REPLY_BYTES = 8 * 1024 * 1024
+"""The largest JSON value read out of an agent's reply text."""
 
 
 def describe_validation_error(error: ValidationError) -> str:
@@ -61,13 +65,18 @@ def parse_typed_response(text: str, response_cls: type[T]) -> T:
     ``AgentOutputSchemaError`` naming the offending fields of the closest
     candidate, or saying that the reply held no JSON object at all.
     """
-    failures: list[ValidationError | TypeError] = []
+    failures: list[_Failure] = []
     fallback: T | None = None
     for candidate in _candidates(text):
         try:
-            parsed = response_cls.model_validate_json(candidate)
-        except (ValidationError, TypeError) as error:
-            failures.append(error)
+            parsed = decode_json(
+                candidate, response_cls, source="agent reply", max_bytes=MAX_AGENT_REPLY_BYTES
+            )
+        except TypeError as error:
+            failures.append(_Failure(str(error), (), empty=False))
+            continue
+        if isinstance(parsed, Unreadable):
+            failures.append(_Failure.of(parsed, empty=_is_empty_object(candidate)))
             continue
         if parsed.model_fields_set:
             return parsed
@@ -79,24 +88,42 @@ def parse_typed_response(text: str, response_cls: type[T]) -> T:
     raise _closest_failure(failures)
 
 
-def _closest_failure(failures: list[ValidationError | TypeError]) -> AgentOutputSchemaError:
+@dataclass(frozen=True, slots=True)
+class _Failure:
+    """Why one candidate is not a reply: the text an agent is shown, and the errors by field."""
+
+    detail: str
+    violations: tuple[SchemaViolation, ...]
+    empty: bool
+    """An empty object missing required fields (prose such as "replaced {} with a list"):
+    it never stands in for the agent's own reply."""
+
+    @classmethod
+    def of(cls, unreadable: Unreadable, *, empty: bool) -> _Failure:
+        violations = tuple(
+            SchemaViolation(path=problem.location, message=problem.message)
+            for problem in unreadable.problems
+        )
+        missing_only = all(problem.error_type == "missing" for problem in unreadable.problems)
+        return cls(unreadable.details("root"), violations, empty=empty and missing_only)
+
+
+def _closest_failure(failures: list[_Failure]) -> AgentOutputSchemaError:
     """Describe the failure nearest to valid: fewest errors, later wins ties, ``{}`` last."""
     if not failures:
         return AgentOutputSchemaError(_NO_JSON_OBJECT)
+    closest = min(
+        reversed(failures),
+        key=lambda failure: (not failure.violations or failure.empty, len(failure.violations)),
+    )
+    return AgentOutputSchemaError(closest.detail, closest.violations)
 
-    def distance(failure: ValidationError | TypeError) -> tuple[bool, int]:
-        if isinstance(failure, TypeError):
-            return (True, 0)
-        errors = failure.errors(include_url=False)
-        # An empty object (prose such as "replaced {} with a list") misses every
-        # required field, so it never stands in for the agent's own reply.
-        empty = all(item["type"] == "missing" and item["input"] == {} for item in errors)
-        return (empty, len(errors))
 
-    closest = min(reversed(failures), key=distance)
-    if isinstance(closest, TypeError):
-        return AgentOutputSchemaError(str(closest))
-    return schema_error(closest)
+def _is_empty_object(candidate: str) -> bool:
+    decoded = decode_json(
+        candidate, _ANY_JSON, source="agent reply", max_bytes=MAX_AGENT_REPLY_BYTES
+    )
+    return decoded == {}
 
 
 def _candidates(text: str) -> list[str]:
@@ -140,8 +167,5 @@ _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 def _is_json(text: str) -> bool:
-    try:
-        _ANY_JSON.validate_json(text)
-    except ValidationError:
-        return False
-    return True
+    decoded = decode_json(text, _ANY_JSON, source="agent reply", max_bytes=MAX_AGENT_REPLY_BYTES)
+    return not isinstance(decoded, Unreadable)

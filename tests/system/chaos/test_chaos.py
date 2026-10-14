@@ -103,8 +103,8 @@ _AGENT_ENDINGS = {
     AgentFault.TIMEOUT: "failed",
     AgentFault.MALFORMED: "failed",
     AgentFault.SCHEMA_INVALID: "failed",
-    # A reply with a key the schema forbids is trimmed to the reply it was, so the turn succeeds.
-    AgentFault.EXTRA_KEYS: "completed",
+    # Every reply schema forbids unknown keys, so a reply with one is a schema error.
+    AgentFault.EXTRA_KEYS: "failed",
 }
 
 

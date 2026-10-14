@@ -7,7 +7,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict
 
-from vs_agent.api import parse_typed_response
+from vs_agent.api import AgentOutputSchemaError, parse_typed_response
 
 
 class StrictReply(BaseModel):
@@ -50,3 +50,15 @@ def test_a_valid_reply_object_is_recovered_beside_other_braced_prose(
     reply = StrictReply(evidence=tuple(evidence))
     text = before + reply.model_dump_json() + after
     assert parse_typed_response(text, StrictReply) == reply
+
+
+def test_a_reply_past_the_size_cap_is_a_schema_error_not_a_whole_parse() -> None:
+    oversized = '{"evidence": ["' + "x" * (8 * 1024 * 1024) + '"]}'
+    with pytest.raises(AgentOutputSchemaError, match="larger than"):
+        parse_typed_response(oversized, StrictReply)
+
+
+def test_a_failure_names_list_indexes_as_integers() -> None:
+    with pytest.raises(AgentOutputSchemaError) as raised:
+        parse_typed_response('{"evidence": ["a", 2]}', StrictReply)
+    assert [violation.path for violation in raised.value.violations] == [("evidence", 1)]
