@@ -217,7 +217,10 @@ def _apply_to(repo: GitRepository, root: Path, op: _Op, step: int) -> None:
 
 def _recreate(repo: GitRepository, root: Path, op: _Op) -> None:
     """Stage the deletion of a path, then write it again (status lists it twice in Git)."""
-    (root / op.path).unlink(missing_ok=True)
+    try:
+        (root / op.path).unlink(missing_ok=True)
+    except IsADirectoryError:
+        return  # a directory holds the path; there is no file to recreate, on either side
     repo.stage_all(["."])
     _apply_to_files(root, replace(op, kind="write"))
 
