@@ -17,15 +17,11 @@ import pytest
 from packaging.requirements import Requirement
 from scripts.example_repositories import is_example_repository_path
 from tests.support import run_test_command
-from tests.support.distribution_build import (
-    BuiltWheel,
-    PrivatePackagingSource,
-    build_distribution,
-    copy_private_packaging_source,
-)
 
 if TYPE_CHECKING:
     from types import ModuleType
+
+    from tests.support.distribution_build import BuiltDistributions, BuiltWheel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INTERNAL_DISTRIBUTIONS = {
@@ -56,15 +52,6 @@ INTERNAL_IMPORT_PACKAGES = {
     "vs_slurm",
     "vs_mcp",
 }
-
-
-@pytest.fixture(scope="module")
-def distribution_source(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> PrivatePackagingSource:
-    """Snapshot source once; packaging backends may mutate only this private tree."""
-    scratch = tmp_path_factory.mktemp("distribution-source")
-    return copy_private_packaging_source(PROJECT_ROOT, scratch / "checkout")
 
 
 def test_headless_readme_examples_select_a_run_collection() -> None:
@@ -424,19 +411,17 @@ def test_built_distribution_caps_dependencies_without_current_intel_macos_wheels
     assert str(requirements["mcp"].specifier) == "<2,>=1.0"
 
 
+@pytest.mark.xdist_group("built_wheel")
 def test_sdist_contains_evaluator_packages_without_local_build_outputs(
-    tmp_path: Path,
-    distribution_source: PrivatePackagingSource,
+    built_distributions: BuiltDistributions,
 ) -> None:
-    source_root = distribution_source.root
+    source_root = built_distributions.source.root
     manifest = (source_root / "MANIFEST.in").read_text().splitlines()
     assert "graft resources/evaluators" in manifest
     assert "prune resources/evaluators/*/native_runner/target" in manifest
     assert "graft clients" not in manifest
 
-    build_distribution(distribution_source, tmp_path, artifact="sdist")
-    sdist = next(tmp_path.glob("vibesys-*.tar.gz"))
-    with tarfile.open(sdist, mode="r:gz") as archive:
+    with tarfile.open(built_distributions.sdist, mode="r:gz") as archive:
         members = {
             member.name.partition("/")[2] for member in archive.getmembers() if member.isfile()
         }

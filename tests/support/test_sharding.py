@@ -11,7 +11,7 @@ import pytest
 import yaml
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.child_pytest import child_pythonpath
+from tests.support.child_pytest import BARE_PYTEST
 from tests.support.sharding import (
     DEFAULT_DURATIONS,
     HEAVY_SHARE,
@@ -309,17 +309,21 @@ def test_a_file_is_spread_only_when_it_outweighs_a_shard(
 def test_a_shard_that_owns_no_test_under_the_given_path_passes(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    repository = Path(__file__).parents[2]
-    monkeypatch.setenv("PYTHONPATH", child_pythonpath(repository))
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
-    pytester.makeconftest((repository / "conftest.py").read_text(encoding="utf-8"))
     pytester.makepyfile(test_only="def test_only(): pass")
     durations = pytester.path / "durations.json"
     durations.write_text(json.dumps({"test_only.py": 1.0}))
 
     results = [
-        pytester.runpytest_subprocess(
-            "-n", "2", "--shard", f"{index}/2", "--shard-durations", str(durations), "test_only.py"
+        pytester.runpytest(
+            *BARE_PYTEST,
+            "-p",
+            "tests.support.sharding",
+            "--shard",
+            f"{index}/2",
+            "--shard-durations",
+            str(durations),
+            "test_only.py",
         )
         for index in (1, 2)
     ]

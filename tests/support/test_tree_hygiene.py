@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.child_pytest import BARE_PYTEST
 from tests.support.tree_hygiene import top_level_entries
 
 pytest_plugins = ["pytester"]
@@ -36,8 +37,11 @@ def pytest_sessionfinish(session):
 """
 
 
-@pytest.mark.parametrize("workers", [[], ["-n", "2"]])
-@pytest.mark.parametrize("leaks", [True, False])
+@pytest.mark.parametrize(
+    ("leaks", "workers"),
+    [(True, []), (False, []), (True, ["-n", "1"])],
+    ids=["leak", "clean", "xdist"],
+)
 def test_a_session_that_writes_into_its_root_fails(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, *, leaks: bool, workers: list[str]
 ) -> None:
@@ -46,14 +50,17 @@ def test_a_session_that_writes_into_its_root_fails(
         "PYTHONPATH", os.pathsep.join((str(repository), os.environ.get("PYTHONPATH", "")))
     )
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
+    for variable in tuple(os.environ):
+        if variable.startswith(("COV_CORE_", "COVERAGE_")):
+            monkeypatch.delenv(variable)
     body = 'Path("candidate-1").mkdir()' if leaks else "pass"
     pytester.makepyfile(test_leak=f"from pathlib import Path\n\ndef test_it():\n    {body}\n")
     # Output that tooling writes at session finish is not a test's leak.
     pytester.makeconftest(_FINISH_TOOLING)
 
-    result = pytester.runpytest_subprocess(
-        "-p", "no:cacheprovider", "-p", "tests.support.tree_hygiene", *workers
-    )
+    # Workers need real processes; a single process runs in this one.
+    run = pytester.runpytest_subprocess if workers else pytester.runpytest
+    result = run(*BARE_PYTEST, "-p", "tests.support.tree_hygiene", *workers)
 
     assert (int(result.ret) != 0) is leaks
     if leaks:

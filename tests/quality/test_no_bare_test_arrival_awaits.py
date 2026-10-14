@@ -14,6 +14,11 @@ test, with no handle in the test; counts are exact so the list only shrinks.
 import ast
 from pathlib import Path
 
+import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
+
 REPO = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = (REPO / "tests", *sorted((REPO / "libs").glob("*/tests")))
 NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
@@ -46,9 +51,12 @@ def _own_nodes(function: ast.AsyncFunctionDef) -> list[ast.AST]:
 
 def bare_arrival_awaits(source: str) -> list[int]:
     """Line numbers of bare ``await x.wait()`` / ``await x.get()`` in async test bodies."""
+    # A rule names what it looks for, so a source that never spells it cannot violate it.
+    if "await" not in source:
+        return []
     return sorted(
         node.lineno
-        for function in ast.walk(ast.parse(source))
+        for function in walk_nodes(parse_source(source))
         if isinstance(function, ast.AsyncFunctionDef) and function.name.startswith("test_")
         for node in _own_nodes(function)
         if isinstance(node, ast.Await)

@@ -40,6 +40,7 @@ from server.events import (
 )
 from server.host_api import FailureReason
 from server.runtime import failure_reason
+from vs_sim.api.testing import examples
 
 
 def _events(path: Path) -> list[dict[str, object]]:
@@ -455,7 +456,10 @@ def test_replayed_nonportable_chat_thread_identity_fails_before_attachment(
     assert list(tmp_path.rglob("conversation.jsonl")) == []
 
 
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=25)
+@settings(
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    max_examples=examples(pr=10, nightly=25),
+)
 @given(driver=st.one_of(st.none(), st.text(max_size=12)))
 def test_journal_recorded_with_the_removed_driver_field_still_replays(
     tmp_path_factory: pytest.TempPathFactory, driver: str | None
@@ -508,7 +512,10 @@ def test_journal_recorded_with_the_removed_driver_field_still_replays(
 _EXAMPLES = itertools.count()
 
 
-@settings(max_examples=25, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=10, nightly=25),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(
     socket_parent=st.sampled_from(["runs", "T", "tmp", "vibesys-session-x"]),
     early_events=st.integers(min_value=0, max_value=4),

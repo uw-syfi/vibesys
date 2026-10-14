@@ -8,6 +8,11 @@ second route lets live turns and resumed turns disagree about the same text.
 import ast
 from pathlib import Path
 
+import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
+
 REPO = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = (REPO / "src", *sorted((REPO / "libs").glob("*/src")))
 PARSER = REPO / "libs/vs-agent/src/vs_agent/runner.py"
@@ -19,15 +24,18 @@ def reads_reply_text(call: ast.Call) -> bool:
     return any(
         isinstance(node, ast.Attribute) and node.attr == "text"
         for argument in arguments
-        for node in ast.walk(argument)
+        for node in walk_nodes(argument)
     )
 
 
 def validates_reply_text(source: str) -> list[int]:
     """Line numbers of JSON validation calls whose arguments read a ``.text``."""
+    # A rule names what it looks for, so a source that never spells it cannot violate it.
+    if not any(name in source for name in JSON_VALIDATORS):
+        return []
     return [
         node.lineno
-        for node in ast.walk(ast.parse(source))
+        for node in walk_nodes(parse_source(source))
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr in JSON_VALIDATORS

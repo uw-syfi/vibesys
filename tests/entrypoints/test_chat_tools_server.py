@@ -160,6 +160,16 @@ def _tools(tmp_path: Path) -> tuple[tuple[ToolSpec, ...], str]:
     return build_tools(store, project, run_id), run_id
 
 
+@pytest.fixture(scope="module")
+def seeded(tmp_path_factory: pytest.TempPathFactory) -> tuple[FastMCP, tuple[ToolSpec, ...], str]:
+    """One seeded run served by one server: the tools only read, so every test shares it."""
+    tools, run_id = _tools(tmp_path_factory.mktemp("chat-tools"))
+    return _server(tools), tools, run_id
+
+
+pytestmark = pytest.mark.xdist_group("chat_tools_server")
+
+
 class TestArgparse:
     def test_help_uses_the_subprocess_module_name(self, capsys: pytest.CaptureFixture[str]) -> None:
         with pytest.raises(SystemExit) as exc_info:
@@ -180,8 +190,10 @@ class TestArgparse:
 
 
 class TestToolRegistration:
-    def test_build_tools_registers_the_six_read_only_tools(self, tmp_path: Path) -> None:
-        tools, _run_id = _tools(tmp_path)
+    def test_build_tools_registers_the_six_read_only_tools(
+        self, seeded: tuple[FastMCP, tuple[ToolSpec, ...], str]
+    ) -> None:
+        _server_unused, tools, _run_id = seeded
 
         assert {tool.name for tool in tools} == {
             "run_summary",
@@ -226,9 +238,10 @@ class TestEndToEnd:
             == "(no hypothesis 'H-01'; see list_hypotheses)"
         )
 
-    def test_run_summary_reports_top_level_status(self, tmp_path: Path) -> None:
-        tools, run_id = _tools(tmp_path)
-        server = _server(tools)
+    def test_run_summary_reports_top_level_status(
+        self, seeded: tuple[FastMCP, tuple[ToolSpec, ...], str]
+    ) -> None:
+        server, _tools_unused, run_id = seeded
 
         out = asyncio.run(_call(server, "run_summary"))
 
@@ -238,9 +251,10 @@ class TestEndToEnd:
         assert "hypothesis_count: 1" in out
         assert "round_count: 1" in out
 
-    def test_list_hypotheses_marks_the_active_one(self, tmp_path: Path) -> None:
-        tools, _run_id = _tools(tmp_path)
-        server = _server(tools)
+    def test_list_hypotheses_marks_the_active_one(
+        self, seeded: tuple[FastMCP, tuple[ToolSpec, ...], str]
+    ) -> None:
+        server, _tools_unused, _run_id = seeded
 
         out = asyncio.run(_call(server, "list_hypotheses"))
 
@@ -248,9 +262,10 @@ class TestEndToEnd:
         assert "Batch decode requests" in out
         assert "rounds 1-1" in out
 
-    def test_get_hypothesis_returns_the_full_record(self, tmp_path: Path) -> None:
-        tools, _run_id = _tools(tmp_path)
-        server = _server(tools)
+    def test_get_hypothesis_returns_the_full_record(
+        self, seeded: tuple[FastMCP, tuple[ToolSpec, ...], str]
+    ) -> None:
+        server, _tools_unused, _run_id = seeded
 
         out = asyncio.run(_call(server, "get_hypothesis", hypothesis_id="H-01"))
 
@@ -258,17 +273,19 @@ class TestEndToEnd:
         assert "action: Add request batching." in out
         assert "round 1: passed=True" in out
 
-    def test_get_hypothesis_reports_an_unknown_id(self, tmp_path: Path) -> None:
-        tools, _run_id = _tools(tmp_path)
-        server = _server(tools)
+    def test_get_hypothesis_reports_an_unknown_id(
+        self, seeded: tuple[FastMCP, tuple[ToolSpec, ...], str]
+    ) -> None:
+        server, _tools_unused, _run_id = seeded
 
         out = asyncio.run(_call(server, "get_hypothesis", hypothesis_id="nope"))
 
         assert out == "(no hypothesis 'nope'; see list_hypotheses)"
 
-    def test_list_rounds_is_run_wide(self, tmp_path: Path) -> None:
-        tools, _run_id = _tools(tmp_path)
-        server = _server(tools)
+    def test_list_rounds_is_run_wide(
+        self, seeded: tuple[FastMCP, tuple[ToolSpec, ...], str]
+    ) -> None:
+        server, _tools_unused, _run_id = seeded
 
         out = asyncio.run(_call(server, "list_rounds"))
 
@@ -276,27 +293,28 @@ class TestEndToEnd:
         assert "commit=c1" in out
 
     def test_list_state_files_includes_the_manifest_and_the_core_record(
-        self, tmp_path: Path
+        self, seeded: tuple[FastMCP, tuple[ToolSpec, ...], str]
     ) -> None:
-        tools, _run_id = _tools(tmp_path)
-        server = _server(tools)
+        server, _tools_unused, _run_id = seeded
 
         out = asyncio.run(_call(server, "list_state_files"))
 
         assert "run.json" in out
         assert "core-store/store.json" in out
 
-    def test_read_state_file_returns_the_run_manifest_contents(self, tmp_path: Path) -> None:
-        tools, run_id = _tools(tmp_path)
-        server = _server(tools)
+    def test_read_state_file_returns_the_run_manifest_contents(
+        self, seeded: tuple[FastMCP, tuple[ToolSpec, ...], str]
+    ) -> None:
+        server, _tools_unused, run_id = seeded
 
         out = asyncio.run(_call(server, "read_state_file", relative_path="run.json"))
 
         assert run_id in out
 
-    def test_read_state_file_reports_an_unknown_path(self, tmp_path: Path) -> None:
-        tools, _run_id = _tools(tmp_path)
-        server = _server(tools)
+    def test_read_state_file_reports_an_unknown_path(
+        self, seeded: tuple[FastMCP, tuple[ToolSpec, ...], str]
+    ) -> None:
+        server, _tools_unused, _run_id = seeded
 
         out = asyncio.run(_call(server, "read_state_file", relative_path="nope.json"))
 

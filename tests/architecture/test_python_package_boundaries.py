@@ -4,6 +4,11 @@ import ast
 import importlib.util
 from pathlib import Path
 
+import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
+
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _DYNAMIC_LOADERS = {"importlib.import_module", "importlib.util.find_spec"}
 
@@ -16,7 +21,7 @@ def test_old_nested_server_package_is_absent() -> None:
 def _dynamic_import_aliases(tree: ast.AST) -> tuple[dict[str, str], set[str]]:
     module_aliases: dict[str, str] = {}
     loader_aliases = {"__import__"}
-    for imported in ast.walk(tree):
+    for imported in walk_nodes(tree):
         if isinstance(imported, ast.Import):
             for alias in imported.names:
                 if alias.name in {"importlib", "importlib.util"}:
@@ -47,7 +52,7 @@ def _qualified_name(expression: ast.expr, module_aliases: dict[str, str]) -> str
 
 def _dynamically_loads_vibesys(tree: ast.AST) -> bool:
     module_aliases, loader_aliases = _dynamic_import_aliases(tree)
-    for node in ast.walk(tree):
+    for node in walk_nodes(tree):
         if not isinstance(node, ast.Call):
             continue
         target = _qualified_name(node.func, module_aliases)
@@ -73,8 +78,8 @@ def test_dynamic_product_discovery_guard_recognizes_supported_import_forms() -> 
         '__import__("vibesys")',
     )
 
-    assert all(_dynamically_loads_vibesys(ast.parse(source)) for source in discovery_forms)
-    assert not _dynamically_loads_vibesys(ast.parse('registry.find_spec("vibesys")'))
+    assert all(_dynamically_loads_vibesys(parse_source(source)) for source in discovery_forms)
+    assert not _dynamically_loads_vibesys(parse_source('registry.find_spec("vibesys")'))
 
 
 def test_lower_libraries_do_not_discover_the_vibesys_product_dynamically() -> None:
@@ -82,7 +87,10 @@ def test_lower_libraries_do_not_discover_the_vibesys_product_dynamically() -> No
     violations: list[str] = []
     libraries = _REPOSITORY_ROOT / "libs"
     for path in libraries.glob("*/src/**/*.py"):
-        tree = ast.parse(path.read_text(), filename=str(path))
+        text = path.read_text()
+        if "vibesys" not in text:
+            continue
+        tree = parse_source(text, filename=str(path))
         if _dynamically_loads_vibesys(tree):
             violations.append(str(path.relative_to(_REPOSITORY_ROOT)))
 

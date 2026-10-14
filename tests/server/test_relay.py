@@ -39,7 +39,7 @@ from server.relay import (
     next_deadline,
     run_bridge,
 )
-from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
+from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads, examples
 
 if TYPE_CHECKING:
     from vs_sim.api import Connection, Listener
@@ -228,7 +228,7 @@ _cuts = st.lists(st.integers(0, 10_000), max_size=8)
 _seeds = st.integers(0, 2**16)
 
 
-@settings(max_examples=40, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=40), deadline=None)
 @given(_frames, _cuts, _frames, _cuts, _seeds)
 def test_bytes_cross_unchanged_both_ways_and_a_client_close_closes_the_socket(
     upstream: bytes, up_cuts: list[int], downstream: bytes, down_cuts: list[int], seed: int
@@ -263,7 +263,7 @@ def test_bytes_cross_unchanged_both_ways_and_a_client_close_closes_the_socket(
     assert bytes(stdout.data) == downstream
 
 
-@settings(max_examples=40, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=40), deadline=None)
 @given(_frames, _cuts, _seeds)
 def test_a_server_close_is_reported_only_after_its_last_frame_reaches_stdout(
     final: bytes, cuts: list[int], seed: int

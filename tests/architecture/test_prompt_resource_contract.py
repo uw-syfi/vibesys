@@ -431,7 +431,7 @@ def render_packaged_prompts(installed: Path) -> int:
             resource_roots,
             frozenset(),
         )
-    selected_workspaces = stage_backend_workspaces(installed)
+    stage_pruned_backend_workspace(installed)
     environment = Environment(autoescape=True)
     templates = sorted(
         path
@@ -470,13 +470,8 @@ def render_packaged_prompts(installed: Path) -> int:
         values = template_context(path, template_inputs, mounted_context, free)
         rendered = render_template(path.relative_to(root).as_posix(), template_dir=root, **values)
         assert not re.search(r"{{|{%|{#", rendered), path
-        citation_workspace, citation_resources = workspace, resource_roots
-        if path.is_relative_to(common / "backend"):
-            backend = ComputeBackend(path.relative_to(common / "backend").parts[0])
-            citation_workspace, citation_resources = selected_workspaces[backend]
-        assert_resource_citations(
-            rendered, path, citation_workspace, citation_resources, runtime_paths
-        )
+        assert_resource_citations(rendered, path, workspace, resource_roots, runtime_paths)
+        assert_citations_survive_pruning(rendered, path, common)
         assert_mounted_citations(rendered, path, mounts, sandbox)
         for masked in hidden:
             assert str(masked.path) not in rendered, path
@@ -832,6 +827,24 @@ def assert_resource_citations(
             assert_workspace_path(reference.rstrip("."), template, workspace)
 
 
+def assert_citations_survive_pruning(rendered: str, template: Path, common: Path) -> None:
+    """A backend's template must not cite a ``serving-systems`` path its workspace prunes."""
+    if not template.is_relative_to(common / "backend"):
+        return
+    backend = ComputeBackend(template.relative_to(common / "backend").parts[0])
+    excluded = tuple(Path(item) for item in platform_skill_excluded_paths(backend))
+    for citation in re.findall(
+        r"(?:resources/skills/|\.agents/skills/)?serving-systems/[\w./-]+", rendered
+    ):
+        inside = Path(citation.rstrip(".")).parts
+        inside = inside[inside.index("serving-systems") + 1 :]
+        assert not any(Path(*inside).is_relative_to(item) for item in excluded), (
+            template,
+            citation,
+            "missing workspace input",
+        )
+
+
 def runtime_path_context(context: dict[str, object]) -> frozenset[str]:
     """Collect known existing paths from actual artifact writers and typed receipts."""
     names = ("objective_location", "reference_path", "session_state_dir")
@@ -935,18 +948,22 @@ def assert_confinement_negative_controls(workspace: Path) -> None:
             assert_workspace_path(reference, Path("negative-control"), workspace)
 
 
-def stage_backend_workspaces(installed: Path) -> dict[ComputeBackend, tuple[Path, dict[str, Path]]]:
-    """Verify citations after the same foreign-platform pruning a real run applies."""
-    selected = {}
-    for backend in ComputeBackend:
-        workspace, resources = stage_prompt_workspace(installed, backend)
-        platforms = workspace / "serving-systems" / Path(*PLATFORMS_PARENT)
-        for filename in PLATFORM_SKELETON:
-            assert (platforms / backend.value / filename).is_file(), (backend, filename)
-        for excluded in platform_skill_excluded_paths(backend):
-            assert not (workspace / "serving-systems" / excluded).exists(), (backend, excluded)
-        selected[backend] = (workspace, resources)
-    return selected
+def stage_pruned_backend_workspace(installed: Path) -> tuple[ComputeBackend, Path]:
+    """Stage one backend's workspace with the real pruning, as proof the exclusions apply.
+
+    Staging copies the whole skill tree, which dominates this contract's cost, so only
+    one backend is staged for real. Every backend's exclusions come from the same product
+    function, and ``assert_resource_citations`` applies them to the citations of the
+    backend's own templates against the shared workspace.
+    """
+    backend = next(item for item in ComputeBackend if platform_skill_excluded_paths(item))
+    workspace, _ = stage_prompt_workspace(installed, backend)
+    platforms = workspace / "serving-systems" / Path(*PLATFORMS_PARENT)
+    for filename in PLATFORM_SKELETON:
+        assert (platforms / backend.value / filename).is_file(), (backend, filename)
+    for excluded in platform_skill_excluded_paths(backend):
+        assert not (workspace / "serving-systems" / excluded).exists(), (backend, excluded)
+    return backend, workspace
 
 
 def assert_mounted_negative_controls(

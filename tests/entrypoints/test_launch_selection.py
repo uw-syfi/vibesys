@@ -21,6 +21,7 @@ from vibesys.api import AuxiliaryAgentLaunch, OrchestrationRegistry, RunReady
 from vs_agent.api import AgentCapabilities, AgentSessionKey
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_project.api import Project
+from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
@@ -115,6 +116,7 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
         agent_client_factory=agents_factory,
         backend_factory=backend_factory,
         agents=agents,
+        git_repository=FakeGitRepositories().repository,
     )
     validate_descriptor(request.orchestration, registry=registry)
     validate_run_request(request, registry=registry)
@@ -185,6 +187,7 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool
                 capabilities=AgentCapabilities(provider_session_resume=True)
             ),
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            git_repository=FakeGitRepositories().repository,
             invocation_store_factory=factory if injected else None,
         )
     )

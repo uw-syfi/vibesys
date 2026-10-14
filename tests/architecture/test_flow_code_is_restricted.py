@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 from scripts.flow_code import async_allowed_paths
 from scripts.flow_code import flow_modules as shared_flow_modules
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 ROOT = Path(__file__).resolve().parents[2]
 BANNED_MODULES = frozenset(
@@ -16,7 +19,7 @@ BANNED_MODULES = frozenset(
 
 
 def _parsed(path: Path) -> ast.Module:
-    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return parse_source(path.read_text(encoding="utf-8"), filename=str(path))
 
 
 def flow_modules() -> list[Path]:
@@ -27,7 +30,7 @@ def flow_modules() -> list[Path]:
 def violations(tree: ast.Module) -> list[str]:
     """What a flow module does that flow code may not: banned imports and blind ``except``."""
     found: list[str] = []
-    for node in ast.walk(tree):
+    for node in walk_nodes(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             names = (
                 [alias.name for alias in node.names]
@@ -63,11 +66,11 @@ def test_flow_modules_use_only_ctx_for_the_outside_world(path: Path) -> None:
     ],
 )
 def test_the_scan_catches_what_it_bans(source: str) -> None:
-    assert violations(ast.parse(source)) != []
+    assert violations(parse_source(source)) != []
 
 
 def test_the_scan_allows_typed_except() -> None:
-    assert violations(ast.parse("try:\n  pass\nexcept ValueError:\n  pass")) == []
+    assert violations(parse_source("try:\n  pass\nexcept ValueError:\n  pass")) == []
 
 
 def test_the_purity_ratchet_and_this_scan_share_one_definition_of_flow_code() -> None:

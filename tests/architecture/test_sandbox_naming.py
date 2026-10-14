@@ -13,6 +13,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
+
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 _CONFINEMENT = "agent confinement"
@@ -41,7 +46,9 @@ ALLOWED: dict[str, str] = {
 def sandbox_type_names(source: str) -> set[str]:
     """Return the names of classes and type aliases in *source* containing "Sandbox"."""
     names: set[str] = set()
-    for node in ast.walk(ast.parse(source)):
+    if "Sandbox" not in source:
+        return names
+    for node in walk_nodes(parse_source(source)):
         if isinstance(node, ast.ClassDef):
             names.add(node.name)
         elif isinstance(node, ast.TypeAlias) and isinstance(node.name, ast.Name):

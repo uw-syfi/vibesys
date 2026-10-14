@@ -26,6 +26,8 @@ from scripts.check_test_isolation import (
     measure,
 )
 
+from vs_sim.api.testing import examples
+
 BASELINE = "test_isolation_baseline.jsonl"
 CONFIG = (
     "[tool.vibesys.test_isolation]\n"
@@ -34,7 +36,7 @@ CONFIG = (
 )
 PATCH_SITE = 'monkeypatch.setattr("os.getcwd", None)'
 SLEEP_SITE = "time.sleep(1)"
-CHEAP = settings(deadline=None, max_examples=40)
+CHEAP = settings(deadline=None, max_examples=examples(pr=10, nightly=40))
 
 
 def make_repo(root: Path, files: dict[str, str]) -> None:

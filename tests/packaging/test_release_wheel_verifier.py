@@ -14,7 +14,7 @@ import packaging_support
 import pytest
 import verify_release_wheel as verifier
 from tests.support import run_test_command
-from tests.support.distribution_build import build_distribution, copy_private_packaging_source
+from tests.support.distribution_build import BuiltDistributions, build_distribution
 from wheel_targets import TARGETS
 
 FRAMEWORK_PACKAGES = (
@@ -642,7 +642,10 @@ def test_rejects_symlinks_and_source_maps(release_fixture: tuple[Path, Path]) ->
         _verify(source_root, wheel)
 
 
-def test_bdist_wheel_revalidates_the_native_host(tmp_path: Path) -> None:
+@pytest.mark.xdist_group("built_wheel")
+def test_bdist_wheel_revalidates_the_native_host(
+    built_distributions: BuiltDistributions, tmp_path: Path
+) -> None:
     # The guard can only fire for a target the build host is not, so pick one
     # rather than naming a fixed target that happens to be foreign to CI. In
     # reverse declaration order the first non-native target is ``macos-arm64``
@@ -653,9 +656,10 @@ def test_bdist_wheel_revalidates_the_native_host(tmp_path: Path) -> None:
     )
     env = {**os.environ, "VIBESYS_WHEEL_TARGET": target_key}
 
-    source = copy_private_packaging_source(Path(__file__).resolve().parents[2], tmp_path / "source")
+    # The shared snapshot is only read by the wheel build, which fails before it writes
+    # into the tree, so this reuses it instead of copying the checkout again.
     result = build_distribution(
-        source,
+        built_distributions.source,
         tmp_path / "dist",
         artifact="wheel",
         environment=env,

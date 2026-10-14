@@ -31,6 +31,14 @@ pytest_plugins = [
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
+# NumPy's BLAS starts one busy-waiting thread per core when it loads, and the product loads
+# NumPy at import (through the evolve search's dependencies). On a many-core host that
+# doubles the CPU a worker spends on its imports (12 CPU-s against 5 for the same 6 s of
+# wall time) and takes cores from the other workers; no test depends on threaded linear
+# algebra. Set before collection imports the product, inherited by every child process.
+for _variable in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_variable, "1")
+
 
 @pytest.fixture
 def sandbox_tmp_path() -> Iterator[Path]:

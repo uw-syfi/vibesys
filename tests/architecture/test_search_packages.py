@@ -18,9 +18,12 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 from vibesys.dynamic_roles import CORE_ROLES
 from vibesys.orchestration.dynamic.search.api import ROLES, dynamic
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 ROOT = Path(__file__).resolve().parents[2]
 ORCHESTRATION = ROOT / "src" / "vibesys" / "orchestration"
@@ -37,7 +40,7 @@ def search_packages() -> list[Path]:
 def vs_core_imports(source: str) -> list[str]:
     """The ``vs_core`` modules ``source`` imports, spelled absolutely."""
     found: list[str] = []
-    for node in ast.walk(ast.parse(source)):
+    for node in walk_nodes(parse_source(source)):
         if isinstance(node, ast.Import):
             found.extend(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
@@ -53,7 +56,9 @@ def outside_api(imports: list[str]) -> list[str]:
 def private_imports(source: str, package: str, current: str | None = None) -> list[str]:
     """The private modules (``package._x``) that ``source`` imports from ``package``."""
     found: list[str] = []
-    for node in ast.walk(ast.parse(source)):
+    if package.rpartition(".")[2] not in source:
+        return found
+    for node in walk_nodes(parse_source(source)):
         if isinstance(node, ast.Import):
             found.extend(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
@@ -94,7 +99,7 @@ def test_a_search_package_imports_vs_core_only_through_the_search_facade(package
 def test_a_search_package_declares_its_public_surface(package: Path) -> None:
     api = package / "api.py"
     assert api.is_file(), f"{_relative(package)} needs an api.py"
-    tree = ast.parse(api.read_text("utf-8"))
+    tree = parse_source(api.read_text("utf-8"))
     names = {
         target.id
         for node in tree.body

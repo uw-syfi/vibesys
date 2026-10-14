@@ -16,7 +16,7 @@ from tests.support.example_materializer import (
 from entrypoints import launcher
 from entrypoints.example_catalog import ExampleList, ExampleSummary
 from entrypoints.examples import run
-from vs_sim.api.testing import FakeForegroundLauncher, ForegroundScript
+from vs_sim.api.testing import FakeForegroundLauncher, ForegroundScript, examples
 
 _NAMES = st.from_regex(r"[a-z][a-z0-9-]{0,10}", fullmatch=True)
 
@@ -66,7 +66,10 @@ def _pinned() -> dict[PurePosixPath, dict[str, str]]:
 # --- list -----------------------------------------------------------------------
 
 
-@settings(max_examples=25, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=10, nightly=25),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(
     examples=st.dictionaries(
         st.tuples(_NAMES, _NAMES).map("/".join),
@@ -218,7 +221,10 @@ def test_new_into_an_existing_empty_directory_is_allowed(checkout: Path, tmp_pat
     assert (destination / "src.txt").is_file()
 
 
-@settings(max_examples=25, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=10, nightly=25),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(existing=st.sets(_NAMES, min_size=1, max_size=4))
 def test_new_refuses_a_non_empty_destination_and_leaves_it_untouched(
     tmp_path_factory: pytest.TempPathFactory, existing: set[str]
@@ -287,7 +293,10 @@ def test_an_ambiguous_short_name_lists_the_candidates(tmp_path: Path) -> None:
     assert "a/stack, b/stack" in stderr
 
 
-@settings(max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=10, nightly=20),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(fail_after=st.integers(min_value=0, max_value=4), preexisting=st.booleans())
 def test_a_failed_copy_leaves_the_destination_as_it_was(
     tmp_path_factory: pytest.TempPathFactory, fail_after: int, *, preexisting: bool

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from tests.support import sharding
-from tests.support.child_pytest import child_pythonpath
+from tests.support.child_pytest import BARE_PYTEST, child_pythonpath, root_conftest_plugins
 
 pytest_plugins = ["pytester"]
 
@@ -33,6 +33,19 @@ class _ControllerNode:
 
     config: pytest.Config
     workerinput: dict[str, object] = field(default_factory=dict)
+
+
+def test_the_root_conftest_loads_every_support_plugin() -> None:
+    """The child runs below load one plugin each, which is the suite's wiring only if declared."""
+    declared = set(root_conftest_plugins(Path(__file__).parents[2]))
+
+    assert {
+        "tests.support.isolated_environment",
+        "tests.support.cwd_hygiene",
+        "tests.support.tree_hygiene",
+        "tests.support.path_hygiene",
+        "tests.support.sharding",
+    } <= declared
 
 
 def _sharding_config(pytester: pytest.Pytester, *arguments: str) -> pytest.Config:
@@ -93,8 +106,7 @@ def test_duration_order_reaches_real_xdist_workers(
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     monkeypatch.delenv("VIBESYS_TEST_SHARD", raising=False)
     pytester.makeconftest(
-        (repository / "conftest.py").read_text(encoding="utf-8")
-        + """
+        """
 import json
 import os
 from pathlib import Path
@@ -110,7 +122,16 @@ def pytest_collection_finish(session):
     durations.write_text(json.dumps(_DURATIONS))
 
     result = pytester.runpytest_subprocess(
-        "-n", "2", "--dist", "load", "--maxschedchunk=1", "--shard-durations", str(durations)
+        *BARE_PYTEST,
+        "-p",
+        "tests.support.sharding",
+        "-n",
+        "2",
+        "--dist",
+        "load",
+        "--maxschedchunk=1",
+        "--shard-durations",
+        str(durations),
     )
 
     result.assert_outcomes(passed=2)
@@ -136,7 +157,6 @@ def test_collection_workers_and_children_have_private_state(
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     # The nested suite checks both workers even when its parent is a CI shard.
     monkeypatch.delenv("VIBESYS_TEST_SHARD", raising=False)
-    pytester.makeconftest((repository / "conftest.py").read_text(encoding="utf-8"))
     pytester.makepyfile(
         test_environment="""
 import json
@@ -185,7 +205,14 @@ def test_another_item(tmp_path_factory):
     )
 
     result = pytester.runpytest_subprocess(
-        "-n", "2", "-q", "--basetemp", str(pytester.path / "tmp")
+        *BARE_PYTEST,
+        "-p",
+        "tests.support.isolated_environment",
+        "-n",
+        "2",
+        "-q",
+        "--basetemp",
+        str(pytester.path / "tmp"),
     )
     result.assert_outcomes(passed=2)
 

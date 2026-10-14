@@ -243,7 +243,6 @@
 {"path": "tests/quality/test_check_file_length.py", "rule": "process", "count": 1}
 {"path": "tests/quality/test_check_file_length.py", "rule": "subprocess", "count": 1}
 {"path": "tests/quality/test_check_tach.py", "rule": "process", "count": 1}
-{"path": "tests/quality/test_check_tach.py", "rule": "subprocess", "count": 1}
 {"path": "tests/quality/test_smoke_dynamic_loop_script.py", "rule": "subprocess", "count": 2}
 {"path": "tests/server/support.py", "rule": "threading", "count": 4}
 {"path": "tests/server/test_api_transport.py", "rule": "socket", "count": 15}
