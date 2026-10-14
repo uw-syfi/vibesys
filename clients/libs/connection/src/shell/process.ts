@@ -119,20 +119,35 @@ export function retireProcess(
 
 /** A real child process spawned with three pipes. */
 export function fromChild(child: ChildProcess): SpawnedProcess {
-  let running = true;
-  const exit = new Promise<number | null>(resolve => {
-    child.once('error', () => {
-      running = false;
-      resolve(null);
-    });
-    child.once('exit', () => {
-      running = false;
-    });
-    child.once('close', code => {
-      running = false;
-      resolve(code);
-    });
-  });
+  const alreadyExited = child.exitCode !== null || child.signalCode !== null;
+  let running = !alreadyExited;
+  const exit = alreadyExited
+    ? Promise.resolve(child.exitCode)
+    : new Promise<number | null>(resolve => {
+        // `error` is not an exit event: Node also emits it when `kill()` cannot signal a process
+        // that is still live. Only the pre-spawn form proves there is no child whose exit remains
+        // to be observed. `pid` covers a successful spawn whose `spawn` event preceded adaptation;
+        // the event covers structural implementations that publish the two in the other order.
+        let spawned = child.pid !== undefined;
+        child.once('spawn', () => {
+          spawned = true;
+        });
+        // Keep observing after a post-spawn error. Retirement can try TERM and then KILL, and each
+        // failed signal may emit its own error; removing this listener after the first would turn
+        // the second owned failure into an uncaught EventEmitter error.
+        child.on('error', () => {
+          if (spawned || child.pid !== undefined) return;
+          running = false;
+          resolve(null);
+        });
+        child.once('exit', () => {
+          running = false;
+        });
+        child.once('close', code => {
+          running = false;
+          resolve(code);
+        });
+      });
   // A process that exits before reading its input makes a later write fail with EPIPE; the exit
   // code reports that outcome, so the write error carries nothing more.
   child.stdin?.on('error', () => {});
