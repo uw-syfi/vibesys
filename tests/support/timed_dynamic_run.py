@@ -441,7 +441,7 @@ def _run(
     )
     channel = RuntimeRunControlChannel(_ignore, threads=OsThreads())
     controls = RunControlBridge(channel, _Steers())
-    host = CoreRunHost(shell, FakePublicationDelivery(store), clock, controls)
+    host = CoreRunHost(shell, FakePublicationDelivery(), clock, controls)
     # Production polls controls every second of run time. A stop does not wait for the
     # poll (the loop watches the channel), so a coarser poll does not change what the
     # properties observe.

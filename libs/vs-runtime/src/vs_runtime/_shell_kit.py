@@ -569,7 +569,7 @@ def scripted_host[C](  # noqa: PLR0913  # lint-waiver: LW-994707 [PLR0913]; a re
         else None
     )
     host = CoreRunHost(
-        shell, FakePublicationDelivery(store) if delivery is None else delivery, clock, controls
+        shell, FakePublicationDelivery() if delivery is None else delivery, clock, controls
     )
     config = RunLoopConfig(
         host_id="scenario",

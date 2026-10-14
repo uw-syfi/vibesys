@@ -145,7 +145,7 @@ def _hosts_until_ended(world: Faulted, grace: float | None) -> CoreState:
     """
     store = FakeStateStore()
     effects = Effects()
-    delivery = FakePublicationDelivery(store)
+    delivery = FakePublicationDelivery()
     clock_at = 1.0
 
     def translator(

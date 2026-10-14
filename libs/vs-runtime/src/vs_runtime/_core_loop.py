@@ -70,7 +70,7 @@ from vs_runtime._core_requests import (
 from vs_runtime._evaluation_jobs import awaits_submissions
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from vs_core.api import OpenWait, Request
     from vs_project.api import Project
@@ -274,6 +274,9 @@ class _ShellLease:
 
     def verify(self, *, now_at: float) -> bool:
         return self.shell.holds_lease(now_at=now_at)
+
+    def write_if_held(self, mutation: Callable[[], None]) -> bool:
+        return self.shell.write_if_held(mutation)
 
 
 def _task_failure(task: asyncio.Task[Any]) -> BaseException | None:
@@ -638,6 +641,17 @@ class CoreRuntime[S: StrategyState]:
             return False
         self._time_floor = max(self._time_floor, now_at)
         return self._store.verify(self._fence, now=max(now_at, self._time_floor))
+
+    def write_if_held(self, mutation: Callable[[], None]) -> bool:
+        """Run *mutation* under the store's fence check, at the latest time this shell has seen.
+
+        A renewal while a publication awaits stamps the store with a later time than the
+        publication started at; judging the write at that start would refuse a host that
+        still owns the run.
+        """
+        if self._halted or self._fence is None:
+            return False
+        return self._store.mutate_if_fenced(self._fence, self._time_floor, mutation)
 
     def submit(self, event: CoreEvent, *, now_at: float) -> None:
         """Queue validated input. Redeliver durable occurrences after precommit crashes."""
@@ -1120,13 +1134,11 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime fence lost before publication"
             raise RuntimeCommitError(message)
         publication = self.record.pending_publications[0]
+        self._time_floor = max(self._time_floor, now_at)
         self._busy = True
         try:
             await delivery.publish(
-                publication,
-                PublicationContext(
-                    fence=self._fence, now_at=max(now_at, self._time_floor), lease=_ShellLease(self)
-                ),
+                publication, PublicationContext(now_at=self._time_floor, lease=_ShellLease(self))
             )
             self._commit(
                 self.record.model_copy(

@@ -237,7 +237,7 @@ def simulate(world: World) -> SimulatedRun:
     setup = world.setup
     options = HostOptions(max_concurrent=setup.max_concurrent, controlled=setup.controlled)
     store = RecordingStore()
-    outside = OutsideWorld(store, FakePublicationDelivery(store), Effects(), world)
+    outside = OutsideWorld(store, FakePublicationDelivery(), Effects(), world)
     pristine = outside.copy()  # also fails now, naming the world, if it cannot be copied
     run = _run_host(outside, options, FIRST_HOST_STARTS_AT, None)
     return SimulatedRun(run, outside, options, pristine)

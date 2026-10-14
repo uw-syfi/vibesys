@@ -68,7 +68,7 @@ def run_with_crash(new_world: Callable[[], World], point: CrashPoint) -> Survive
     world = new_world()
     store = CrashingStore(point)
     effects = Effects()
-    delivery = FakePublicationDelivery(store)
+    delivery = FakePublicationDelivery()
     options = HostOptions(
         translator=lambda script, core, registry, schemas, journal: RecoverableExecutors(
             script, core, registry, schemas, journal, effects

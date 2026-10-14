@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol, Self
 
 from pydantic import (
     BaseModel,
@@ -23,10 +23,11 @@ from vs_core.api import (
     StrategyState,
     check_envelope_version,
 )
-from vs_project.api import StoreFence
 from vs_runtime._core_requests import ExecutionLease, OwnerEvent
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_project.api import StoredEnvelope
 
 RUNTIME_SCHEMA_VERSION = 1
@@ -131,15 +132,29 @@ class RuntimeRecord[S: StrategyState](BaseModel):
         return record.model_copy(update={"envelope": envelope})
 
 
+class PublicationLease(ExecutionLease, Protocol):
+    """The host's lease, as a publication delivery uses it to write."""
+
+    def write_if_held(self, mutation: Callable[[], None]) -> bool:
+        """Run *mutation* in the store transaction that checks this host still owns the run.
+
+        Ownership is judged at the latest time the host has seen, with its current fence,
+        not at the time the publication started: a renewal while a delivery awaits moves
+        the store's time watermark past that start, and the host still owns the run.
+        Returns False, without running *mutation*, when the host no longer does.
+        """
+        ...
+
+
 class PublicationContext(BaseModel):
     """Publication execution epoch, separate from its stable identity."""
 
     model_config = ConfigDict(
         extra="forbid", frozen=True, strict=True, arbitrary_types_allowed=True
     )
-    fence: StoreFence
     now_at: float = Field(ge=0, allow_inf_nan=False)
-    lease: SkipValidation[ExecutionLease | None] = Field(default=None, exclude=True, repr=False)
+    """When the publication started; ownership at the write is the lease's to judge."""
+    lease: SkipValidation[PublicationLease] = Field(exclude=True, repr=False)
 
 
 class PublicationAcknowledgement(BaseModel):

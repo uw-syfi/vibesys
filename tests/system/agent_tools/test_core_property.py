@@ -629,7 +629,7 @@ def _play(
         bridge.attach(views[-1], clock)
         return bridge
 
-    delivery = FakePublicationDelivery(store)  # the subscribers outlive the host
+    delivery = FakePublicationDelivery()  # the subscribers outlive the host
     mortality = Mortality()
     agent = Agent(turns, workspaces, make_bridge, diagnostics=diagnostics, mortality=mortality)
     executors = AgentExecutors(

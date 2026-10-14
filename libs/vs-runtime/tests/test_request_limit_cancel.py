@@ -114,7 +114,7 @@ async def test_a_request_that_never_finishes_is_cancelled_at_its_limit_and_faile
         ),
     )
     shell.start("host", now_at=0, lease_duration=1e9)
-    delivery = FakePublicationDelivery(store)
+    delivery = FakePublicationDelivery()
 
     # The request starts and is still running before its limit.
     await shell.settle(delivery, now_at=1)

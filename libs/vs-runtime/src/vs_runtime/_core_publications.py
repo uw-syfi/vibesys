@@ -16,13 +16,13 @@ from vs_runtime._core_record import (
 )
 
 if TYPE_CHECKING:
-    from vs_project.api import StateNamespace, StateStore
+    from vs_project.api import StateNamespace
 
 
 class JournalPublicationDelivery:
     """Atomic durable journal, with conflict detection on ID and sequence.
 
-    The host's StateStore fence and the journal mutation share one transaction,
+    The host's fence check and the journal mutation share one store transaction,
     so takeover cannot interleave between ownership validation and replacement.
     A returned publication is durable before acknowledgement; replay after
     append-before-ack verifies exact payload equality and does not append a
@@ -30,12 +30,9 @@ class JournalPublicationDelivery:
     through Project.portable_namespace.
     """
 
-    def __init__(
-        self, namespace: StateNamespace, registry: OperationRegistry, store: StateStore
-    ) -> None:
+    def __init__(self, namespace: StateNamespace, registry: OperationRegistry) -> None:
         self._namespace = namespace
         self._registry = registry
-        self._store = store
 
     def read(self) -> tuple[Publication, ...]:
         """Read strictly validated durable history, including registered callbacks."""
@@ -65,7 +62,7 @@ class JournalPublicationDelivery:
             )
             self._namespace.write_bytes("publications.json", journal.model_dump_json().encode())
 
-        if not self._store.mutate_if_fenced(context.fence, context.now_at, append):
+        if not context.lease.write_if_held(append):
             raise ContractError(("fence",), "publication host no longer owns the run")
         return PublicationAcknowledgement(
             publication_id=publication.publication_id, sequence=publication.sequence

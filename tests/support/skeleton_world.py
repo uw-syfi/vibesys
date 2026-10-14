@@ -329,7 +329,6 @@ class World:
         delivery = JournalPublicationDelivery(
             self.env.project.state.portable_namespace(RUN_ID, "publications"),
             bindings.registry,
-            store,
         )
         return Process(shell, delivery)
 

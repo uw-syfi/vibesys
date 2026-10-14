@@ -204,6 +204,31 @@ async def test_lease_is_renewable_while_a_publication_is_in_flight() -> None:
     assert rivals == [True]
 
 
+@pytest.mark.asyncio
+async def test_a_publication_written_after_a_renewal_is_judged_at_the_renewal() -> None:
+    """A delivery that awaits while the host renews still writes while the host owns the run.
+
+    Before, the write was judged at the time the publication started. The renewal had
+    already stamped the store with a later time, so the store refused the write as stale
+    and the delivery raised "publication host no longer owns the run".
+    """
+    store = FakeStateStore()
+    shell = make_shell(store)
+    await prepared(shell, store)
+    ledger = FakePublicationDelivery()
+
+    class RenewsThenWrites:
+        async def publish(
+            self, publication: Publication, context: PublicationContext
+        ) -> PublicationAcknowledgement:
+            context.lease.renew(now_at=90, lease_duration=100)
+            return await ledger.publish(publication, context)
+
+    first = shell.record.pending_publications[0]
+    assert await shell.publish_one(RenewsThenWrites(), now_at=1)
+    assert ledger.read() == (first,)
+
+
 # P2-1 ---------------------------------------------------------------------------------
 
 
@@ -254,7 +279,7 @@ async def test_failed_execution_halts_and_restart_inspects_the_stranded_record(
     with pytest.raises(RuntimeCommitError):
         await shell.dispatch_one(now_at=2)
     with pytest.raises(RuntimeCommitError):
-        await shell.run_until_idle(FakePublicationDelivery(store), now_at=2)
+        await shell.run_until_idle(FakePublicationDelivery(), now_at=2)
 
     restarted = make_shell(store)
     restarted.start("second", now_at=100, lease_duration=100)
@@ -493,7 +518,7 @@ async def test_an_observation_core_rejects_halts_the_shell_naming_the_request() 
     )
     await prepared(shell, store)
     (record,) = shell.record.envelope.core.records.records
-    delivery = FakePublicationDelivery(store)
+    delivery = FakePublicationDelivery()
     with pytest.raises(RuntimeExecutionError) as raised:
         await shell.run_until_idle(delivery, now_at=1)
     assert isinstance(raised.value, ObservationRejectedError)

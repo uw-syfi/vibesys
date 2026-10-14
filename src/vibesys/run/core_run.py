@@ -130,9 +130,7 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         config=services.config,
         bindings=services.bindings,
     )
-    delivery = JournalPublicationDelivery(
-        services.publications, services.bindings.registry, services.store
-    )
+    delivery = JournalPublicationDelivery(services.publications, services.bindings.registry)
     controls = RunControlBridge(
         integration.control,
         _SteerTexts(services.artifacts),
