@@ -701,6 +701,12 @@ def _record(
             outcome_json=facts.outcome_json,
             outcome=facts.outcome,
         )
+        if facts.outcome_is_registered:
+            # The record carries the proof its decoded copy gets from the registry, so a
+            # host that keeps running decides as one that reloaded the record does.
+            return prove_outcome(
+                record.model_copy(update=update), facts.outcome, facts.operation_schema
+            )
     return record.model_copy(update=update)
 
 
