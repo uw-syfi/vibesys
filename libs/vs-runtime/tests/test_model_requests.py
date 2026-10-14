@@ -175,3 +175,15 @@ def test_reconcile_propagates_provisioner_failure(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="volume unavailable"):
         reconciler.reconcile(tmp_path)
+
+
+def test_a_manifest_that_is_not_a_regular_file_is_refused_not_treated_as_absent(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / MODEL_MANIFEST_RELPATH).mkdir(parents=True)
+    provisioner = FakeModelVolumeProvisioner()
+    reconciler = create_model_request_reconciler(provisioner=provisioner, environment={})
+
+    with pytest.raises(ModelRequestError, match="is not a regular file"):
+        reconciler.reconcile(tmp_path)
+    assert provisioner.requests == ()

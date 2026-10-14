@@ -293,3 +293,54 @@ def test_candidate_environment_uses_the_runs_verified_objective(
                     )
             finally:
                 candidate.close()
+
+
+def test_a_baseline_never_fingerprints_a_file_outside_the_workspace(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (root / "weights.bin").write_bytes(b"w" * 3_000_000)
+    (root / "cache").mkdir()
+    outside = tmp_path / "host-secret"
+    outside.write_text("secret", encoding="utf-8")
+    (root / "planted").symlink_to(outside)
+    project = open_project_run_resources(
+        _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
+    )
+    environment = open_run_environment_resources(
+        RunEnvironmentRequest(
+            log_dir=project.logger.log_dir,
+            workspace=root,
+            ref_dir=None,
+            backend=FakeComputeBackend(),
+            agent_backend="stub",
+            cli_provider="codex",
+            run_id="workspace-resource-test",
+            framework_root=tmp_path,
+            clock=ManualClock(),
+        ),
+        lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
+        clock=ManualClock(),
+    )
+    factory = WorkspaceResourceFactory(
+        project,
+        environment,
+        evaluation_plan=TrustedEvaluationPlan(),
+        memory_paths=(),
+        skill_source_dirs=(),
+        skill_selection=NULL_SKILL_SELECTION,
+        host_resources=(),
+        events=lambda _event: None,
+    )
+
+    entries = factory.root.baseline_entries(("weights.bin", "planted", "cache"))
+
+    fingerprints = {entry.path: entry.fingerprint for entry in entries}
+    assert fingerprints["weights.bin"] is not None
+    assert fingerprints["planted"] is None
+    assert fingerprints["cache"] is None
+    (root / "weights.bin").unlink()
+    (root / "weights.bin").symlink_to(outside)
+    assert "weights.bin" in factory.root.baseline_drift(entries).removed
+    environment.close()
+    project.close()

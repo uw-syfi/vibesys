@@ -347,7 +347,7 @@ class RuntimeWorkspaceResource:
         return tuple(
             BaselineEntry(
                 path=path,
-                fingerprint=None if path.endswith("/") else file_fingerprint(self.path / path),
+                fingerprint=None if path.endswith("/") else file_fingerprint(self.path, path),
             )
             for path in paths
         )
@@ -367,7 +367,7 @@ class RuntimeWorkspaceResource:
                 if not target.is_dir():
                     removed.append(entry.path)
                 continue
-            fingerprint = file_fingerprint(target)
+            fingerprint = file_fingerprint(self.path, entry.path)
             if fingerprint is None:
                 removed.append(entry.path)
             elif fingerprint != entry.fingerprint:

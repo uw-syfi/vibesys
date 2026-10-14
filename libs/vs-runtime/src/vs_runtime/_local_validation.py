@@ -255,6 +255,8 @@ def _recipe_problem(problem: WorkspaceFileProblem) -> str:
             return "validation recipe artifact escapes the workspace"
         case WorkspaceFileProblemKind.MISSING:
             return f"validation recipe artifact does not exist: {problem.relative_path}"
+        case WorkspaceFileProblemKind.NOT_READABLE:
+            return f"validation recipe artifact cannot be read: {problem.detail}"
         case WorkspaceFileProblemKind.TOO_LARGE:
             return f"validation recipe artifact {problem.detail}"
         case WorkspaceFileProblemKind.NOT_JSON:

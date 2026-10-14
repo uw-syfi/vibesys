@@ -145,7 +145,11 @@ def _read_model_requests(workspace: Path) -> tuple[_ModelRequest, ...]:
                 return ()
             case WorkspaceFileProblemKind.NOT_JSON | WorkspaceFileProblemKind.INVALID:
                 raise ModelRequestError.invalid_json(raw.detail)
-            case WorkspaceFileProblemKind.ESCAPES | WorkspaceFileProblemKind.TOO_LARGE:
+            case (
+                WorkspaceFileProblemKind.ESCAPES
+                | WorkspaceFileProblemKind.NOT_READABLE
+                | WorkspaceFileProblemKind.TOO_LARGE
+            ):
                 raise ModelRequestError.unreadable(raw.detail)
 
     entries = raw.get("models") if isinstance(raw, dict) else raw

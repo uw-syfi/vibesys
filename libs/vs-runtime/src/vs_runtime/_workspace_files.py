@@ -12,12 +12,15 @@ runtime-owned store outside the workspace, and no trust decision reads the works
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
+from vs_decode.api import Unreadable, read_json
 from vs_project.api import atomic_write_bytes
 
 if TYPE_CHECKING:
@@ -27,14 +30,21 @@ if TYPE_CHECKING:
 MAX_AGENT_DOCUMENT_BYTES = 1024 * 1024
 """The largest agent-written JSON document the runtime reads."""
 
+_FINGERPRINT_CHUNK_BYTES = 1024 * 1024
+
 _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 class WorkspaceFileProblemKind(StrEnum):
-    """Why an agent-written file could not become a model."""
+    """Why an agent-written file could not become a model.
+
+    ``ESCAPES`` is this module's own; every other member carries the value of the
+    ``vs_decode`` ``UnreadableKind`` it reports.
+    """
 
     ESCAPES = "escapes"
     MISSING = "missing"
+    NOT_READABLE = "not_readable"
     TOO_LARGE = "too_large"
     NOT_JSON = "not_json"
     INVALID = "invalid"
@@ -64,14 +74,15 @@ def read_agent_model[ModelT: BaseModel](
     *,
     max_bytes: int = MAX_AGENT_DOCUMENT_BYTES,
 ) -> ModelT | WorkspaceFileProblem:
-    """Read the agent's JSON file at ``relative`` as ``model``, or say why it is not one."""
-    content = _read_contained(workspace, relative, max_bytes)
-    if isinstance(content, WorkspaceFileProblem):
-        return content
-    try:
-        return model.model_validate_json(content)
-    except ValidationError as error:
-        return _problem(relative, error)
+    """Read the agent's JSON file at ``relative`` as ``model``, or say why it is not one.
+
+    ``model`` must forbid unknown keys at every depth (``vs_decode`` refuses it otherwise).
+    """
+    path = _contained_regular_file(workspace, relative)
+    if isinstance(path, WorkspaceFileProblem):
+        return path
+    decoded = read_json(path, model, max_bytes=max_bytes)
+    return _problem(relative, decoded) if isinstance(decoded, Unreadable) else decoded
 
 
 def read_agent_json(
@@ -84,44 +95,36 @@ def read_agent_json(
 
     For a format whose caller validates the shape itself to give its own messages.
     """
-    content = _read_contained(workspace, relative, max_bytes)
-    if isinstance(content, WorkspaceFileProblem):
-        return content
-    try:
-        return _JSON_VALUE.validate_json(content)
-    except ValidationError as error:
-        return _problem(relative, error)
+    path = _contained_regular_file(workspace, relative)
+    if isinstance(path, WorkspaceFileProblem):
+        return path
+    decoded = read_json(path, _JSON_VALUE, max_bytes=max_bytes)
+    return _problem(relative, decoded) if isinstance(decoded, Unreadable) else decoded
 
 
-def _read_contained(workspace: Path, relative: str, max_bytes: int) -> bytes | WorkspaceFileProblem:
+def _contained_regular_file(workspace: Path, relative: str) -> Path | WorkspaceFileProblem:
+    """The contained path of ``relative``; anything there but a regular file is refused.
+
+    A directory or a FIFO is not readable rather than missing, so the agent is told the
+    file it wrote is wrong instead of being told it wrote nothing (opening a FIFO would
+    also block the host).
+    """
     path = contained_path(workspace, relative)
     if path is None:
         return WorkspaceFileProblem(
             WorkspaceFileProblemKind.ESCAPES, relative, "escapes the workspace"
         )
-    if not path.is_file():
-        return WorkspaceFileProblem(WorkspaceFileProblemKind.MISSING, relative, "does not exist")
-    try:
-        with path.open("rb") as stream:
-            content = stream.read(max_bytes + 1)
-    except OSError as error:
-        return WorkspaceFileProblem(WorkspaceFileProblemKind.MISSING, relative, str(error))
-    if len(content) > max_bytes:
+    if path.exists() and not path.is_file():
         return WorkspaceFileProblem(
-            WorkspaceFileProblemKind.TOO_LARGE, relative, f"is larger than {max_bytes} bytes"
+            WorkspaceFileProblemKind.NOT_READABLE, relative, "is not a regular file"
         )
-    return content
+    return path
 
 
-def _problem(relative: str, error: ValidationError) -> WorkspaceFileProblem:
-    details = error.errors(include_url=False, include_context=False, include_input=False)
-    if any(detail["type"] == "json_invalid" for detail in details):
-        return WorkspaceFileProblem(WorkspaceFileProblemKind.NOT_JSON, relative, details[0]["msg"])
-    reasons = "; ".join(
-        f"{'.'.join(str(part) for part in detail['loc']) or '<document>'}: {detail['msg']}"
-        for detail in details
+def _problem(relative: str, unreadable: Unreadable) -> WorkspaceFileProblem:
+    return WorkspaceFileProblem(
+        WorkspaceFileProblemKind(unreadable.kind.value), relative, unreadable.details()
     )
-    return WorkspaceFileProblem(WorkspaceFileProblemKind.INVALID, relative, reasons)
 
 
 def write_for_agent(workspace: Path, relative: str, contents: bytes) -> None:
@@ -137,11 +140,28 @@ def write_for_agent(workspace: Path, relative: str, contents: bytes) -> None:
     atomic_write_bytes(path, contents)
 
 
-def file_fingerprint(path: Path) -> str | None:
-    """Return a SHA-256 of the regular file at *path*, or ``None`` if it is not one."""
-    if not path.is_file():
+def file_fingerprint(workspace: Path, relative: str) -> str | None:
+    """A SHA-256 of the regular file at ``relative``, or ``None`` if there is none.
+
+    The file is hashed in fixed-size chunks, so its size costs time, not memory. A path
+    that resolves outside ``workspace`` (through a symlink the agent planted, say), or
+    whose last component becomes a symlink before it is opened, has no fingerprint.
+    """
+    path = contained_path(workspace, relative)
+    if path is None:
         return None
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        return None
+    with os.fdopen(descriptor, "rb") as stream:
+        digest = hashlib.sha256()
+        while chunk := stream.read(_FINGERPRINT_CHUNK_BYTES):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def hash_inputs(
