@@ -76,8 +76,10 @@ def _load(path: str) -> dict[str, Any]:
         payload = json.loads(Path(path).read_text())
     except FileNotFoundError:
         sys.exit(f"headroom report not found: {path}")
-    except json.JSONDecodeError as exc:
-        sys.exit(f"not valid JSON: {path} ({exc})")
+    except (ValueError, RecursionError) as exc:
+        # Not UTF-8 is a ``UnicodeDecodeError``; nesting past the interpreter's limit
+        # is a ``RecursionError``. Both are as invalid as a ``JSONDecodeError``.
+        sys.exit(f"not valid JSON: {path} ({type(exc).__name__}: {exc})")
     if not isinstance(payload, dict) or not isinstance(payload.get("kernels"), list):
         sys.exit(f"not a headroom report (missing top-level 'kernels' list): {path}")
     return payload

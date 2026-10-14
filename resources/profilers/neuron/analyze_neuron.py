@@ -235,7 +235,8 @@ def cmd_operators(ns: argparse.Namespace) -> None:
         raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     try:
         data = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
+    except (ValueError, RecursionError) as exc:
+        # ``json`` raises ``RecursionError`` past the interpreter's nesting limit.
         diagnostic = f"show-session returned invalid JSON: {exc}"
         raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
     _print(json.dumps(data, indent=2)[:20000])

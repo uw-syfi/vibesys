@@ -16,16 +16,19 @@ own promise.
 
 from __future__ import annotations
 
+import argparse
 import functools
 import importlib.util
+import io
 import json
-from contextlib import suppress
+from contextlib import redirect_stdout, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
+from resources.profilers.rocprof import analyze_rocprof, att, counters
 
 from server.api.protocol import Response, SubscribeRequest, decode_request
 from server.control_envelope import ResponseEnvelopeReader
@@ -142,6 +145,51 @@ def _otel_artifacts(frame: bytes, directory: Path) -> None:
     assert server.find_trace_graphs(str(directory)) == []
 
 
+_capture_runtime = analyze_rocprof.capture_runtime
+"""The profilers' stdlib-only capture runtime, as the analyzers load it."""
+_KERNEL_TRACE = "Kernel_Name,Start_Timestamp,End_Timestamp\nkernel,0,100\n"
+
+
+def _capture_manifest(frame: bytes, capture: Path) -> None:
+    (capture / "manifest.json").write_bytes(frame)
+    _capture_runtime.load_manifest(capture)
+
+
+def _capture_listing(frame: bytes, root: Path) -> None:
+    """A capture whose manifest is hostile is listed, with no kind or status from it."""
+    capture = root / "capture"
+    capture.mkdir(exist_ok=True)
+    (capture / "manifest.json").write_bytes(frame)
+    [listed] = _capture_runtime.list_captures(root=root)
+    assert isinstance(listed.kind, str | None)
+    assert isinstance(listed.status, str | None)
+
+
+def _rocprof_capture_manifest(frame: bytes, report: Path) -> None:
+    """A kernel report beside a hostile capture manifest still analyzes, unwindowed."""
+    (report / "out_kernel_trace.csv").write_text(_KERNEL_TRACE)
+    (report / "manifest.json").write_bytes(frame)
+    with redirect_stdout(io.StringIO()):
+        analyze_rocprof.cmd_kernels(argparse.Namespace(report=str(report), top=15, window="load"))
+
+
+def _rocprof_json_report(frame: bytes, report: Path) -> None:
+    (report / "results.json").write_bytes(frame)
+    with redirect_stdout(io.StringIO()):
+        analyze_rocprof.cmd_kernels(argparse.Namespace(report=str(report), top=15, window="all"))
+
+
+def _rocprof_counters(frame: bytes, report: Path) -> None:
+    (report / "out_counter_collection.json").write_bytes(frame)
+    with redirect_stdout(io.StringIO()):
+        counters.cmd_report(argparse.Namespace(dirs=[str(report)], kernel=None, arch=None, top=15))
+
+
+def _rocprof_thread_trace(frame: bytes, dispatch: Path) -> None:
+    (dispatch / att.CODE_JSON_NAME).write_bytes(frame)
+    att.load_instructions(dispatch)
+
+
 def _tool_result(frame: bytes, _: Path) -> None:
     payloads: list[object] = []
     CoreAgentEventSink(payloads.append).tool_result("shell", frame.decode("utf-8", "replace"))
@@ -168,6 +216,12 @@ _DECODERS = {
     "model-manifest": _Decoder(_model_manifest, (ModelRequestError,)),
     "agent-tool-result": _Decoder(_tool_result),
     "otel-artifact-discovery": _Decoder(_otel_artifacts),
+    "capture-manifest": _Decoder(_capture_manifest, (ValueError,)),
+    "capture-listing": _Decoder(_capture_listing),
+    "rocprof-capture-manifest": _Decoder(_rocprof_capture_manifest),
+    "rocprof-json-report": _Decoder(_rocprof_json_report, (_capture_runtime.CaptureFailedError,)),
+    "rocprof-counters": _Decoder(_rocprof_counters, (_capture_runtime.CaptureFailedError,)),
+    "rocprof-thread-trace": _Decoder(_rocprof_thread_trace, (att.AttOutputNotFoundError,)),
 }
 
 

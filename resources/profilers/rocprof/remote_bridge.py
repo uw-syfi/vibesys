@@ -364,8 +364,8 @@ class RemoteCaptureBridge:
 
 def _load_result(path: Path) -> _CaptureResult:
     try:
-        envelope = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        envelope = capture_runtime.read_json_file(path)
+    except (OSError, ValueError) as exc:
         raise RemoteCaptureError.malformed_result() from exc
     if not isinstance(envelope, dict) or not isinstance(envelope.get("output"), str):
         raise RemoteCaptureError.malformed_result()

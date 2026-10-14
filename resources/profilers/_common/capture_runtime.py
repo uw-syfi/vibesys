@@ -101,6 +101,7 @@ __all__ = [
     "new_capture",
     "owned_process_ids",
     "profiles_root",
+    "read_json_file",
     "read_process_identity",
     "release_capture_slot",
     "require_profile",
@@ -1005,23 +1006,47 @@ def resolve(capture_id_or_path: str) -> Path:
     )
 
 
+def read_json_file(path: Path) -> object:
+    """Decode the JSON file at *path*, whatever bytes a workload left in it.
+
+    Python's ``json`` recurses once per nesting level and raises ``RecursionError``
+    past the interpreter's limit, and invalid UTF-8 is a ``UnicodeDecodeError``
+    rather than a ``JSONDecodeError``; both become ``ValueError`` here, so a caller
+    handles every undecodable file with one ``except (OSError, ValueError)``.
+
+    Raises:
+        OSError: the file cannot be read.
+        ValueError: the file is not UTF-8 JSON, or nests deeper than ``json`` reads.
+    """
+    data = path.read_bytes()
+    try:
+        return json.loads(data)
+    except RecursionError as exc:
+        message = f"{path} nests deeper than the JSON decoder reads"
+        raise ValueError(message) from exc
+
+
 def load_manifest(capture_dir: Path) -> dict[str, Any]:
     """Load ``manifest.json`` from *capture_dir*, raising a clear error if absent/malformed."""
     path = Path(capture_dir) / _MANIFEST_NAME
     if not path.is_file():
         raise FileNotFoundError(f"no manifest.json under {capture_dir}")  # noqa: TRY003  # LW-920003; this is a boundary error that deliberately embeds the offending value for the operator to act on
     try:
-        data = json.loads(path.read_text())
-    except json.JSONDecodeError as exc:
+        data = read_json_file(path)
+    except ValueError as exc:
         raise ValueError(f"malformed manifest.json under {capture_dir}: {exc}") from exc  # noqa: TRY003  # LW-920004; this is a boundary error that deliberately embeds the offending value for the operator to act on
     if isinstance(data, dict):
         return data
     raise ValueError(f"manifest.json under {capture_dir} is not a JSON object")  # noqa: TRY003  # LW-920005; this is a boundary error that deliberately embeds the offending value for the operator to act on
 
 
-def list_captures(limit: int = 20) -> list[CaptureSummary]:
-    """Return the most recently modified captures, newest first."""
-    root = _profiles_root()
+def list_captures(limit: int = 20, *, root: Path | None = None) -> list[CaptureSummary]:
+    """Return the most recently modified captures under *root*, newest first.
+
+    *root* defaults to ``$VIBESYS_PROFILE_DIR``. A capture whose manifest is unreadable,
+    not JSON, or not an object is still listed, with no kind or status.
+    """
+    root = _profiles_root() if root is None else root
     if not root.is_dir():
         return []
     entries = [p for p in root.iterdir() if p.is_dir()]
@@ -1032,12 +1057,17 @@ def list_captures(limit: int = 20) -> list[CaptureSummary]:
         status: str | None = None
         manifest_path = entry / _MANIFEST_NAME
         if manifest_path.is_file():
-            with contextlib.suppress(json.JSONDecodeError, OSError):
-                data = json.loads(manifest_path.read_text())
-                kind = data.get("kind")
-                status = data.get("status")
+            with contextlib.suppress(OSError, ValueError):
+                data = read_json_file(manifest_path)
+                if isinstance(data, dict):
+                    kind = _text_or_none(data.get("kind"))
+                    status = _text_or_none(data.get("status"))
         summaries.append(CaptureSummary(capture_id=entry.name, dir=entry, kind=kind, status=status))
     return summaries
+
+
+def _text_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
 
 
 def format_result(result: CaptureResult, *, max_log_chars: int = 800) -> str:

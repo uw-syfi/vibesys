@@ -56,7 +56,9 @@ def run(request_json: str, profiles: Path) -> int:
             return code
         try:
             summary, _capture_ids = _load_result(result_path)
-        except (OSError, UnicodeError, ValueError, KeyError, json.JSONDecodeError):
+        except (OSError, ValueError, KeyError, TypeError, RecursionError):
+            # A result that is not an object indexes as a ``TypeError``, and ``json``
+            # raises ``RecursionError`` past the interpreter's nesting limit.
             sys.stderr.write("configured profile capture returned a malformed result\n")
             return 1
         summary = bounded_summary(summary)
