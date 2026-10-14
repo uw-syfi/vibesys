@@ -82,8 +82,8 @@ class ValidationRecipe(BaseModel):
         min_length=1,
         max_length=64,
         description=(
-            "Workspace-relative source, test, lock, or configuration paths that "
-            "fully determine whether a prior passing result can be reused."
+            "Workspace-relative source, test, lock, or configuration paths the "
+            "command reads; they must exist and are hashed into the result."
         ),
     )
     timeout_seconds: int = Field(
@@ -263,7 +263,14 @@ def _recipe_problem(problem: WorkspaceFileProblem) -> str:
             return f"validation recipe artifact does not match version 1: {problem.detail}"
 
 
-def _input_digest(workspace: Path, recipe: ValidationRecipe) -> str:
+def _input_digest(workspace: Path, recipe: ValidationRecipe, revision: str) -> str:
+    """Identify what a pass vouches for: the whole tree at ``revision``, not the declared inputs.
+
+    The agent chooses ``recipe.input_paths``, so they cannot bound what a pass covers: a
+    candidate that edited a file it left undeclared would otherwise reuse another's pass.
+    The runtime's own snapshot revision names the whole tree; the declared inputs are
+    still hashed so an unreadable or oversized input fails the recipe.
+    """
     inputs = hash_inputs(
         workspace,
         recipe.input_paths,
@@ -271,6 +278,8 @@ def _input_digest(workspace: Path, recipe: ValidationRecipe) -> str:
         max_bytes=_MAX_INPUT_BYTES,
     )
     digest = hashlib.sha256(inputs.encode())
+    digest.update(b"\0")
+    digest.update(revision.encode())
     digest.update(b"\0")
     digest.update(recipe.command.encode())
     digest.update(b"\0")
@@ -351,8 +360,9 @@ class LocalValidator:
         """Parse, execute, isolate and report the recipes the agent wrote.
 
         A recipe is skipped only when the pass store holds a pass of exactly it over
-        exactly its current inputs; every new pass is recorded there. The report written
-        at ``report_location`` is for the agent to read and is never read back.
+        the same workspace revision (the whole tree, whatever the recipe declares); every new
+        pass is recorded there. The report written at ``report_location`` is for the agent to
+        read and is never read back.
         """
         recipes = _load_recipes(workspace.path, recipe_artifact)
         if contained_path(workspace.path, report_location) is None:
@@ -368,7 +378,7 @@ class LocalValidator:
         try:
             for recipe in recipes:
                 try:
-                    digest = _input_digest(workspace.path, recipe)
+                    digest = _input_digest(workspace.path, recipe, entry_revision)
                 except (OSError, ValueError) as error:
                     results.append(
                         FrameworkValidationResult(

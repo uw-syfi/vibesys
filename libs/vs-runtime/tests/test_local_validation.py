@@ -62,7 +62,7 @@ def test_executes_trusted_recipe_and_reuses_exact_pass(tmp_path: Path) -> None:
         )
         reused_commands = FakeCommands()
         second = await LocalValidator(reused_commands, passes).run(
-            workspace,
+            FakeWorkspace(path=tmp_path),
             recipe_artifact="validation/recipes.json",
             report_location="validation/report-2.json",
         )

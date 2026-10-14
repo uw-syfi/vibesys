@@ -194,3 +194,67 @@ async def test_inspection_never_runs_a_recipe(tmp_path: Path) -> None:
     )
     assert isinstance(await owner.inspect(_request(), context), NotApplied)
     assert not commands.trusted_shell_calls
+
+
+def _prepare(root: Path, undeclared: str = "") -> None:
+    """A workspace whose recipe declares ``src.py`` only; ``undeclared`` is a file it omits."""
+    (root / "validation").mkdir(parents=True, exist_ok=True)
+    (root / "src.py").write_text("X = 1\n")
+    (root / "undeclared.txt").write_text(undeclared)
+    recipe = {
+        "name": "unit",
+        "command": "echo unit",
+        "input_paths": ["src.py"],
+        "timeout_seconds": 30,
+        "purpose": "check the contract",
+    }
+    (root / "validation" / "recipes.json").write_text(
+        json.dumps({"version": 1, "recipes": [recipe]})
+    )
+
+
+async def _ran(
+    validator: LocalValidator, commands: FakeCommands, workspace_id: str, root: Path
+) -> bool:
+    """Validate the workspace; whether the recipe command actually ran."""
+    commands.script(CommandResult(output="ok", exit_code=0))
+    before = len(commands.trusted_shell_calls)
+    results = await validator.run(
+        FakeWorkspace(path=root, workspace_id=workspace_id),
+        recipe_artifact="validation/recipes.json",
+        report_location="report.json",
+    )
+    assert all(item.passed for item in results)
+    return len(commands.trusted_shell_calls) > before
+
+
+@settings(max_examples=15, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(
+    edited=st.text(alphabet="abc", max_size=6),
+    ids=st.lists(st.sampled_from(["w1", "w2", "w3"]), min_size=2, max_size=2, unique=True),
+)
+async def test_a_pass_is_never_reused_by_a_workspace_at_another_revision(
+    tmp_path: Path, edited: str, ids: list[str]
+) -> None:
+    """Candidates differing only in an undeclared file must each run the recipe.
+
+    The agent declares ``input_paths``; a pass keyed by them alone would let a candidate
+    that edited anything else skip validation by reusing another candidate's pass.
+    """
+    base = tmp_path / f"{ids[0]}-{ids[1]}-{edited or 'none'}"
+    first, second = base / "a", base / "b"
+    _prepare(first)
+    _prepare(second, undeclared=edited)
+    commands = FakeCommands()
+    validator = LocalValidator(commands, MemoryValidationPasses())
+    assert await _ran(validator, commands, ids[0], first)
+    assert await _ran(validator, commands, ids[1], second)
+
+
+async def test_a_pass_is_reused_by_the_same_revision(tmp_path: Path) -> None:
+    _prepare(tmp_path / "a")
+    _prepare(tmp_path / "b")
+    commands = FakeCommands()
+    validator = LocalValidator(commands, MemoryValidationPasses())
+    assert await _ran(validator, commands, "w1", tmp_path / "a")
+    assert not await _ran(validator, commands, "w1", tmp_path / "b")
