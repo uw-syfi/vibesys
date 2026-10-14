@@ -204,14 +204,16 @@ def _resource_released(context: AttemptsContext, scope: Scope, resource: Resourc
         for child in context.records.children
         if child.resource_id == resource and child.scope == scope
     )
-    if children:
-        return all(_child_released(context, child) for child in children)
     jobs = tuple(
         job
         for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs)
         if job.resource_id == resource and job.scope == scope
     )
-    return bool(jobs) and all(_typed_job_released(context, job) for job in jobs)
+    # Either party that tracks the resource can prove it released: the child leases a close
+    # left, or the job's own ledger.
+    return (bool(children) and all(_child_released(context, child) for child in children)) or (
+        bool(jobs) and all(_typed_job_released(context, job) for job in jobs)
+    )
 
 
 def _session_released(owner: AttemptView, context: AttemptsContext, identity: SessionId) -> bool:
@@ -370,7 +372,7 @@ def _child_dependencies(
     for child in context.records.children:
         edge = ReleaseDependency(kind="job", identity=child.resource_id)
         if child.scope == scope:
-            if not _child_released(context, child) and edge not in edges:
+            if not _resource_released(context, scope, child.resource_id) and edge not in edges:
                 edges.append(edge)
             edges = list(
                 _manifest_dependencies(
@@ -1044,14 +1046,17 @@ def _job_proof(
     observation = event.observation
     if event.dependency.identity != observation.resource_id or not _released(observation):
         return False
+    # Two parties can prove the job ended: the child lease a close left, and the job's own
+    # ledger. Either one's proof releases the dependency.
     for child in context.records.children:
-        if child.resource_id == observation.resource_id:
-            return (
-                child.scope == _scope(owner)
-                and _known_child_observation(owner, context, observation)
-                and observation.request_id in child.source_requests
-                and _child_released(context, child)
-            )
+        if (
+            child.resource_id == observation.resource_id
+            and child.scope == _scope(owner)
+            and _known_child_observation(owner, context, observation)
+            and observation.request_id in child.source_requests
+            and _child_released(context, child)
+        ):
+            return True
     for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs):
         if job.resource_id == observation.resource_id:
             source = job.request_id if hasattr(job, "request_id") else job.submission_id

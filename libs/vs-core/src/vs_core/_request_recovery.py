@@ -1146,6 +1146,10 @@ def _pending_probes(
     return tuple(checks), tuple(requests)
 
 
+def _sourced(state: RecordsState, target: RequestId) -> bool:
+    return any(target in child.source_requests for child in state.children)
+
+
 def _observe(
     state: RecordsState, context: RecordsContext, event: RequestObserved
 ) -> AreaChange[RecordsState]:
@@ -1186,9 +1190,12 @@ def _observe(
                 else expected_child == event.observation.request_id
             )
         )
+        # A child its typed job ledger took over (``_transfer_children``) is that ledger's to
+        # settle, so the check that waited on it re-resolves without the child.
+        handed_over = _sourced(state, check.target) and not _sourced(updated, check.target)
         resolution = (
             _aggregate_resolution(record, context, updated)
-            if matches and record is not None
+            if (matches or handed_over) and record is not None
             else check.resolution
         )
         checks.append(_with_resolution(check, resolution))

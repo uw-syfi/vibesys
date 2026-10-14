@@ -40,6 +40,7 @@ from .types.evaluation import (
 )
 from .types.records import (
     ExecuteRegisteredOperation,
+    InspectRequest,
     RecoveryPhase,
     RequestPhase,
 )
@@ -404,12 +405,20 @@ def _recovery_waits(core: CoreState) -> list[OpenWait]:
     if not recovery_waits(barrier.phase):
         return []
     live = {row.request_id for row in _live(core)}
+    # Besides the target and the check's own inspection, any live inspection of the target
+    # re-resolves the check when it answers: the deadline's, or a child inspection of a
+    # resource the target left behind.
+    inspected = {
+        row.request.target for row in _live(core) if isinstance(row.request, InspectRequest)
+    }
     return [
         OpenWait(
             waiter=WaitKind.RECOVERY_CHECK,
             subject=check.target.root,
             producer=Producer.PENDING_REQUEST
-            if check.target in live or check.inspection in live
+            if check.target in live or check.inspection in live or check.target in inspected
+            else Producer.TIMER
+            if _children_polled(core, check.target)
             else None,
         )
         for check in barrier.checks
@@ -428,6 +437,20 @@ def _with_successors(core: CoreState, related: list[RequestRecord]) -> list[Requ
         *related,
         *(row for row in core.records.records if any(_addresses(row, item) for item in related)),
     ]
+
+
+def _children_polled(core: CoreState, target: RequestId) -> bool:
+    """Whether every child resource *target* left is a live job its own ledger still polls.
+
+    The job ledger is the other party that can settle such a child: once it observes the job
+    ended, recovery hands the child to it and re-resolves the check.
+    """
+    children = [child for child in core.records.children if target in child.source_requests]
+    jobs = [job for job in core.evaluation.jobs if not job.terminal]
+    return bool(children) and all(
+        any(job.resource_id == child.resource_id and job.scope == child.scope for job in jobs)
+        for child in children
+    )
 
 
 def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[OpenWait]:

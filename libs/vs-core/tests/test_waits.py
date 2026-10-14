@@ -14,10 +14,12 @@ from vs_core.api import (
     AttemptPhase,
     AttemptsState,
     AttemptView,
+    ChildLease,
     ClockAdvanced,
     ContinuationPhase,
     DispatchTurn,
     EventId,
+    InspectRequest,
     ItemId,
     Observation,
     ObservationStatus,
@@ -189,6 +191,74 @@ def test_a_pending_recovery_check_with_its_inspection_in_flight_is_not_an_orphan
         }
     )
     assert orphan_waits(state) == ()
+
+
+def _left_a_child(*, inspecting: bool, job_terminal: bool | None) -> CoreState:
+    """A completed target whose observation named a child resource, its check still pending.
+
+    *inspecting*: a child inspection of that resource is in flight. *job_terminal*: the job
+    ledger tracks the resource as a job (ended or not); ``None``: no job holds it.
+    """
+    jobs, _ = submitted()
+    job = jobs.evaluation.jobs[0]
+    target = pending_record(identity="target", phase=RequestPhase.COMPLETED)
+    target = target.model_copy(
+        update={"request": target.request.model_copy(update={"scope": job.scope})}
+    )
+    state = _recovering(target)
+    records = (target,)
+    if inspecting:
+        child = pending_record(identity="child", phase=RequestPhase.PREPARED)
+        records += (
+            child.model_copy(
+                update={
+                    "request": InspectRequest(
+                        request_id=child.request_id,
+                        scope=job.scope,
+                        target=target.request_id,
+                        resource_id=job.resource_id,
+                    )
+                }
+            ),
+        )
+    lease = ChildLease(
+        resource_id=job.resource_id, scope=job.scope, source_requests=(target.request_id,)
+    )
+    evaluation = state.evaluation
+    if job_terminal is not None:
+        evaluation = jobs.evaluation.model_copy(
+            update={"jobs": (job.model_copy(update={"terminal": job_terminal}),)}
+        )
+    return state.model_copy(
+        update={
+            "evaluation": evaluation,
+            "records": state.records.model_copy(update={"records": records, "children": (lease,)}),
+        }
+    )
+
+
+@pytest.mark.parametrize("job_terminal", [None, False, True])
+@pytest.mark.parametrize("inspecting", [True, False])
+def test_a_recovery_check_waits_on_every_party_that_can_settle_the_child_its_target_left(
+    *, inspecting: bool, job_terminal: bool | None
+) -> None:
+    """Chaos seeds 268 and 479: a close left a job it could not end, as a child of the close.
+
+    Either a child inspection still in flight or the job's own ledger, still polling the job,
+    can settle that child, so the check is an orphan only when neither is left.
+    """
+    state = _left_a_child(inspecting=inspecting, job_terminal=job_terminal)
+
+    found = [(wait.waiter, wait.producer) for wait in waits(state)]
+
+    expected = (
+        Producer.PENDING_REQUEST
+        if inspecting
+        else Producer.TIMER
+        if job_terminal is False
+        else None
+    )
+    assert (WaitKind.RECOVERY_CHECK, expected) in found
 
 
 def test_a_fresh_run_has_no_waits() -> None:

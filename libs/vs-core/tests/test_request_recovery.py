@@ -1736,6 +1736,34 @@ def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: st
         assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
         assert result.events == ()
         state = reload(result.state)
+    if case in ("unknown", "unaccepted"):
+        assert_handover_resolves(state, owner.model_copy(update={"observation": proof}), parent)
+
+
+def assert_handover_resolves(
+    state: CoreState, owner: RegisteredOwnedJob, parent: RequestRecord
+) -> None:
+    """Chaos seeds 268 and 479: the ledger later proves it owns the job.
+
+    The next observation hands the child over, and the check that waited on the child
+    re-resolves with it, instead of waiting on a lease no inspection will ever settle.
+    """
+    assert owner.observation is not None
+    learned = owner.model_copy(
+        update={
+            "observation": owner.observation.model_copy(
+                update={"status": ObservationStatus.PENDING, "accepted": True}
+            )
+        }
+    )
+    state = state.model_copy(update={"evaluation": EvaluationState(registered_jobs=(learned,))})
+    anchor = state.records.records[2]
+    result = step(reload(state), RequestObserved(observation=observed(anchor)))
+    check = next(
+        check for check in result.state.records.recovery.checks if check.target == parent.request_id
+    )
+    assert result.state.records.children == ()
+    assert check.resolution == "terminal"
 
 
 @given(admission=st.sampled_from(["unknown", "closed", "reopened"]))

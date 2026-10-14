@@ -147,13 +147,21 @@ _FAILS_A_RUN = _TRANSPORT_FAULTS | _OUTPUT_FAULTS | frozenset(ClusterFault)
 
 
 def unexplained_end(
-    error: BaseException | None, status: RunStatus | None, injected: Injected
+    error: BaseException | None,
+    status: RunStatus | None,
+    injected: Injected,
+    *,
+    at_deadline: bool = False,
 ) -> str | None:
     """Return why a run's ending is none ``injected`` can explain (``None``: it is explained).
 
     ``status`` is how the run reported when it did not raise (``error`` is then ``None``).
+    ``at_deadline``: the run stopped itself at its deadline. A cluster fault can hide a job's
+    fate, and core then waits the job out to its allowance, so such a stop is that fault's doing.
     """
     if error is None:
+        if status is RunStatus.STOPPED and at_deadline and injected.cluster:
+            return None
         return _unexplained_report(status, injected)
     if isinstance(error, RunStopped):
         return _unexplained_stop(injected)
@@ -556,7 +564,8 @@ async def run_chaos(
     end_error, status = ending_of(outcome, error)
     reason = outcome.result.reason if outcome is not None and outcome.result is not None else ""
     ended = repr(end_error) if end_error is not None else f"{status} ({reason})"
-    if (why := unexplained_end(end_error, status, suffered)) is not None:
+    at_deadline = reason.startswith("deadline")
+    if (why := unexplained_end(end_error, status, suffered, at_deadline=at_deadline)) is not None:
         violations.append((ChaosInvariant.UNEXPLAINED_END, f"{why}: {ended}"))
     violations += _record_violations(core, cluster, end_error, status)
     chaos = ChaosRun(seed, plan, ended, violations, injected, suffered, stop_at)

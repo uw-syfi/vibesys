@@ -803,6 +803,49 @@ def test_typed_job_manifest_always_fences_unreleased_descendants(
     assert not any(isinstance(request, core.DiscardWorkspace) for request in result.requests)
 
 
+@pytest.mark.parametrize("job_released", [True, False])
+def test_a_job_ledger_release_proves_a_job_a_close_left_as_an_unsettled_child(
+    *, job_released: bool
+) -> None:
+    """Chaos seeds 268 and 479: a close left a job behind as a child it could not settle.
+
+    The job's own ledger later proved it released. That proof releases the job edge even
+    though the close's child lease never settles; without it the attempt never retires.
+    """
+    state, ref = closing_fixture()
+    job, job_record = released_job(state.attempts.attempts[0])
+    if not job_released:
+        job = changed(job, observation=None)
+    resource = job.resource_id
+    assert resource is not None
+    left = core.ChildLease(
+        resource_id=resource,
+        scope=job.scope,
+        source_requests=(core.RequestId(root="close"),),
+    )
+    proof = observation(ref, core.RequestId(root="withdraw"))
+    state = recorded_proof(state, proof)
+    state = changed(
+        state,
+        evaluation=core.EvaluationState(registered_jobs=(job,)),
+        records=changed(
+            state.records, records=(*state.records.records, job_record), children=(left,)
+        ),
+    )
+
+    result = checked_step(
+        state,
+        core.ReleaseDependencyObserved(
+            attempt=ref,
+            dependency=state.attempts.attempts[0].release_dependencies[0],
+            observation=proof,
+        ),
+    )
+
+    edge = core.ReleaseDependency(kind="job", identity=resource)
+    assert (edge in result.state.attempts.attempts[0].release_dependencies) != job_released
+
+
 def test_an_outstanding_job_edge_blocks_disposal_after_a_positive_scope_fence() -> None:
     state, ref = undisposed_fixture()
     owner = state.attempts.attempts[0]
