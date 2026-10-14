@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import type {CampaignMetricAnalytics} from '../../state/campaign-analytics.js';
 import type {CampaignRecord, TurnMessage} from '../../state/campaign-record.js';
 import type {CampaignViewModel} from '../../state/campaign-view.js';
 import brandMark from './assets/brand-mark.svg';
@@ -111,9 +112,7 @@ function CampaignHeader({
   readonly headerAction?: ReactNode;
   readonly previewLabel: 'Preview' | 'Stream preview' | undefined;
 }): JSX.Element {
-  const best = bestMeasurement(scenario, campaign.metricId, campaign.cursorSequence)?.values.find(
-    value => value.metricId === campaign.metricId,
-  )?.value;
+  const best = campaign.metricAnalytics.incumbent?.value;
   return (
     <>
       <header className="campaign-header">
@@ -249,6 +248,7 @@ function PerformancePanel({
       </div>
       <PerformanceChart
         scenario={scenario}
+        analytics={campaign.metricAnalytics}
         measurements={campaign.orderedMeasurements}
         throughIndex={campaign.pointIndex}
         metricId={campaign.metric?.id ?? ''}
@@ -564,6 +564,7 @@ function ObjectiveDetails({scenario}: {readonly scenario: CampaignRecord}): JSX.
 
 interface PerformanceChartProps {
   readonly scenario: CampaignRecord;
+  readonly analytics: CampaignMetricAnalytics;
   readonly measurements: CampaignRecord['measurements'];
   readonly throughIndex: number;
   readonly metricId: string;
@@ -743,25 +744,12 @@ function ChartSeries({
 }
 
 function runningBestPath(props: PerformanceChartProps & {readonly model: ChartModel}): string {
-  let best: number | undefined;
-  let path = '';
-  for (const {measurement, index} of props.model.points) {
-    const value = measurement.values.find(item => item.metricId === props.metricId)?.value;
-    if (value === undefined) continue;
-    const pointX = props.model.x(index);
-    if (best === undefined) {
-      best = value;
-      path = `M ${pointX} ${props.model.y(best)}`;
-      continue;
-    }
-    path += ` H ${pointX}`;
-    const better = props.model.metric?.direction === 'minimize' ? value < best : value > best;
-    if (better) {
-      best = value;
-      path += ` V ${props.model.y(best)}`;
-    }
-  }
-  if (best !== undefined) path += ` H ${props.model.x(props.throughIndex)}`;
+  const [first, ...improvements] = props.analytics.runningBestSteps;
+  if (first === undefined) return '';
+  let path = `M ${props.model.x(first.measurementIndex)} ${props.model.y(first.value)}`;
+  for (const improvement of improvements)
+    path += ` H ${props.model.x(improvement.measurementIndex)} V ${props.model.y(improvement.value)}`;
+  path += ` H ${props.model.x(props.throughIndex)}`;
   return path;
 }
 
@@ -1407,26 +1395,6 @@ function TurnMessageView({message}: {readonly message: TurnMessage}): JSX.Elemen
       <p>{message.content}</p>
     </article>
   );
-}
-
-function bestMeasurement(
-  scenario: CampaignRecord,
-  metricId: string,
-  throughSequence: number,
-): CampaignRecord['measurements'][number] | undefined {
-  const metric = scenario.objective.metrics.find(item => item.id === metricId);
-  return [...scenario.measurements]
-    .filter(
-      item =>
-        item.sequence <= throughSequence &&
-        item.disposition === 'accepted' &&
-        item.values.some(value => value.metricId === metricId),
-    )
-    .sort((a, b) => {
-      const aValue = a.values.find(value => value.metricId === metricId)?.value ?? 0;
-      const bValue = b.values.find(value => value.metricId === metricId)?.value ?? 0;
-      return metric?.direction === 'minimize' ? aValue - bValue : bValue - aValue;
-    })[0];
 }
 
 function workstreamName(scenario: CampaignRecord, id: string | undefined): string {

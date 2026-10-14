@@ -6,6 +6,7 @@ import {
   defaultMetricId,
   orderedMeasurements,
 } from './campaign.js';
+import {projectCampaignMetric} from './campaign-analytics.js';
 import {latestMoment} from './campaign-fold.js';
 import type {CampaignRecord} from './campaign-record.js';
 import type {CampaignViewModel} from './campaign-view.js';
@@ -54,6 +55,7 @@ export function projectCampaign(context: CampaignContext): {
   const pointIndex = context.mode === 'live' && ui.following ? tail : Math.min(ui.pointIndex, tail);
   const activeMeasurement = measurements[pointIndex];
   const metricId = measurementMetric(activeMeasurement, requestedMetricId(scenario, ui.metricId));
+  const cursorSequence = activeMeasurement?.sequence ?? Number.POSITIVE_INFINITY;
   const timeline = timelineBounds(scenario);
   const latestTimestamp =
     context.mode === 'live' && ui.following
@@ -63,11 +65,12 @@ export function projectCampaign(context: CampaignContext): {
     scenario,
     campaign: {
       activeMeasurement,
-      cursorSequence: activeMeasurement?.sequence ?? Number.POSITIVE_INFINITY,
+      cursorSequence,
       latestTimestamp,
       metric:
         scenario.objective.metrics.find(item => item.id === metricId) ??
         scenario.objective.metrics[0],
+      metricAnalytics: projectCampaignMetric(scenario, metricId, pointIndex),
       metricId,
       orderedMeasurements: measurements,
       playing: context.mode === 'live' ? ui.following : ui.playing,

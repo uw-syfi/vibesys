@@ -42,6 +42,12 @@ function trajectoryAnalytics(markup: string): {readonly axis: string; readonly c
   return {axis, changed: markup.includes('Benchmark changed mid-run')};
 }
 
+function runningBestPath(markup: string): string {
+  const path = /<path class="performance-best-line" d="([^"]*)"/.exec(markup)?.[1];
+  if (path === undefined) throw new Error('Campaign running-best path did not render');
+  return path;
+}
+
 test('renders an initial capability launch before its exchange settles', () => {
   const target = targetFromCapability(
     'http://127.0.0.1:5173/',
@@ -147,6 +153,50 @@ test('historical trajectory analytics depend only on measurements through the cu
   expect(firstAnalytics?.axis).toContain('13.8 tok/s');
   expect(firstAnalytics?.changed).toBe(false);
   expect(boundaryAnalytics?.changed).toBe(true);
+});
+
+test('ineligible leading observations stay selectable without establishing a running best', () => {
+  const record = {
+    ...campaignRecord,
+    measurements: campaignRecord.measurements.map((measurement, index) =>
+      index === 0
+        ? {...measurement, disposition: 'rejected' as const}
+        : index === 1
+          ? {...measurement, disposition: 'inconclusive' as const}
+          : measurement,
+    ),
+  };
+  const beforeAccepted = renderCampaignAt(record, 1);
+
+  expect(runningBestPath(beforeAccepted)).toBe('');
+  expect(beforeAccepted.match(/class="chart-point-button"/g)).toHaveLength(2);
+  expect(beforeAccepted).toContain('33.1 tok/s, inconclusive. Select measurement.');
+  expect(beforeAccepted).toContain('<strong>—</strong>');
+
+  const afterAccepted = renderCampaignAt(record, 2);
+  expect(runningBestPath(afterAccepted)).not.toBe('');
+  expect(afterAccepted.match(/class="chart-point-button"/g)).toHaveLength(3);
+  expect(afterAccepted).toContain('<strong>55.6 tok/s</strong>');
+});
+
+test('a later measurement with the same sequence stays outside the selected index prefix', () => {
+  const repeated = campaignRecord.measurements[1]?.sequence;
+  if (repeated === undefined) throw new Error('campaign fixture needs three measurements');
+  const repeatedSequence = parseReplayScenario({
+    ...campaignRecord,
+    measurements: campaignRecord.measurements.map((measurement, index) =>
+      index === 2 ? {...measurement, sequence: repeated} : measurement,
+    ),
+  });
+
+  const beforeLaterMeasurement = renderCampaignAt(repeatedSequence, 1);
+  expect(beforeLaterMeasurement).toContain('<strong>12.8 tok/s</strong>');
+  expect(beforeLaterMeasurement).not.toContain('<strong>55.6 tok/s</strong>');
+  expect(beforeLaterMeasurement.match(/class="chart-point-button"/g)).toHaveLength(2);
+
+  const afterLaterMeasurement = renderCampaignAt(repeatedSequence, 2);
+  expect(afterLaterMeasurement).toContain('<strong>55.6 tok/s</strong>');
+  expect(afterLaterMeasurement.match(/class="chart-point-button"/g)).toHaveLength(3);
 });
 
 test('a future multi-metric suffix cannot change the implicit historical metric', () => {

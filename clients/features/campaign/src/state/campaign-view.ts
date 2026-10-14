@@ -1,3 +1,4 @@
+import type {CampaignMetricAnalytics} from './campaign-analytics.js';
 import type {CampaignRecord} from './campaign-record.js';
 
 export type CampaignView = 'dashboard' | 'objective';
@@ -26,6 +27,7 @@ export interface CampaignViewModel {
   readonly cursorSequence: number;
   readonly latestTimestamp: string;
   readonly metric: CampaignRecord['objective']['metrics'][number] | undefined;
+  readonly metricAnalytics: CampaignMetricAnalytics;
   readonly metricId: string;
   readonly orderedMeasurements: CampaignRecord['measurements'];
   readonly playing: boolean;

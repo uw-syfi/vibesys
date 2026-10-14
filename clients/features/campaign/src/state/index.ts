@@ -10,6 +10,11 @@ export {
   orderedMeasurements,
 } from './campaign.js';
 export {
+  type CampaignIncumbent,
+  type CampaignMetricAnalytics,
+  projectCampaignMetric,
+} from './campaign-analytics.js';
+export {
   type CampaignFoldError,
   type CampaignFoldOutcome,
   campaignFoldErrorMessage,
