@@ -485,14 +485,7 @@ jobs:
       # week, so an old base cannot chain forward into a saved entry.
       - name: Compute the Docker layer cache key
         id: docker-cache-week
-        # `previous` is last week's for runs that do not save (see the restore
-        # keys), and this week's on a push, so main never restores last week.
-        env:
-          EVENT: ${{ github.event_name }}
-        run: |
-          echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
-          if [ "$EVENT" = push ]; then ago=0; else ago=7; fi
-          echo "previous=$(date -u -d "$ago days ago" +%G-%V)" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/docker-cache-week
 
       - name: Restore Docker layer cache
         id: docker-cache
@@ -863,14 +856,7 @@ jobs:
       # keyed on this tier's image inputs and the ISO week (floating base images).
       - name: Compute the Docker layer cache key
         id: docker-cache-week
-        # `previous` is last week's for runs that do not save (see the restore
-        # keys), and this week's on a push, so main never restores last week.
-        env:
-          EVENT: ${{ github.event_name }}
-        run: |
-          echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
-          if [ "$EVENT" = push ]; then ago=0; else ago=7; fi
-          echo "previous=$(date -u -d "$ago days ago" +%G-%V)" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/docker-cache-week
 
       - name: Restore Docker layer cache
         id: docker-cache
@@ -933,14 +919,7 @@ jobs:
       # keyed on this tier's image inputs and the ISO week (floating base images).
       - name: Compute the Docker layer cache key
         id: docker-cache-week
-        # `previous` is last week's for runs that do not save (see the restore
-        # keys), and this week's on a push, so main never restores last week.
-        env:
-          EVENT: ${{ github.event_name }}
-        run: |
-          echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
-          if [ "$EVENT" = push ]; then ago=0; else ago=7; fi
-          echo "previous=$(date -u -d "$ago days ago" +%G-%V)" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/docker-cache-week
 
       - name: Restore Docker layer cache
         id: docker-cache
@@ -1001,14 +980,7 @@ jobs:
 
       - name: Compute the Docker layer cache key
         id: docker-cache-week
-        # `previous` is last week's for runs that do not save (see the restore
-        # keys), and this week's on a push, so main never restores last week.
-        env:
-          EVENT: ${{ github.event_name }}
-        run: |
-          echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
-          if [ "$EVENT" = push ]; then ago=0; else ago=7; fi
-          echo "previous=$(date -u -d "$ago days ago" +%G-%V)" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/docker-cache-week
 
       - name: Restore Docker layer cache
         id: docker-cache
