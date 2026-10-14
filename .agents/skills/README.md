@@ -19,8 +19,12 @@ Engineering judgment that holds in any well-run codebase.
 
 How to make one kind of change in this repository.
 
+- [change-module-graph](change-module-graph/SKILL.md): add, split or connect
+  modules, libraries and packages, and add I/O interfaces and implementations.
 - [enforce-rules](enforce-rules/SKILL.md): enforce a rule with the strongest
   mechanism that holds it, from types and lint rules to marked prose.
+- [write-vibesys-tests](write-vibesys-tests/SKILL.md): this repository's test
+  harness: tiers, vs-sim, depth, contract suites, faults, goldens, budgets.
 
 ## Workflow
 

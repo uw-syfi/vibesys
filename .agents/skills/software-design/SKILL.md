@@ -1,6 +1,6 @@
 ---
 name: software-design
-description: Design, structure, or change code in any language in this repository. Use when making any code change, especially adding or moving modules, interfaces, dependencies, data flow, config, resource handling, or calls to agents, clusters, or subprocesses, to every bug fix, and to any refactor, split, migration, or contract change.
+description: Design, structure, or change code in any language. Use when making any code change, especially adding or moving modules, interfaces, dependencies, data flow, config, resource handling, or calls to agents, clusters, or subprocesses, to every bug fix, and to any refactor, split, migration, or contract change.
 metadata:
   kind: generic
 ---
@@ -12,8 +12,10 @@ implementation that may be as complex as it needs to be. The rest of the system
 depends on the guarantees of the interface and never has to think about what
 is behind it. Loose coupling and clear ownership follow from that.
 
-These rules are language-independent. Tools, thresholds, and idioms live in a
-per-language reference; read the one for the language you are editing:
+These rules are language-independent and codebase-independent. Language
+idioms live in a per-language reference; read the one for the language you are
+editing. A codebase's own tools, thresholds and module graph belong in that
+codebase's own skill; load it too.
 
 - [references/python.md](references/python.md)
 - [references/typescript.md](references/typescript.md)
@@ -57,8 +59,7 @@ section.
 2. **Declare the public interface.** Every module has a declared, enforced
    surface with a short contract (what it guarantees, why, how it fails).
    Callers use only that surface. Distinguish published (external callers
-   depend on it) from internal (free to change). New and split modules must
-   declare theirs.
+   depend on it) from internal (free to change); new modules declare theirs.
 3. **An interface promises substitutability.** Share one only if a caller can
    be written once and stay correct for every implementation, failures
    included. Red flags: methods some implementations skip or reject, `supports_x`
@@ -74,12 +75,10 @@ section.
 5. **Factor when callers need internals.** Size is the cue to check, not the
    reason to split. When a unit grows until callers must know how it works,
    make it a unit the dependency tooling can track, with a clear interface.
-6. **Policy versus mechanism.** Follow the package layout and placement rule
-   in [architecture.md](../../../docs/contributing/architecture.md). Defaults
-   and selected values live in
+6. **Policy versus mechanism.** Defaults and selected values live in
    configuration; implementations apply what they are given; wiring connects
    them. A new case changes configuration, not a per-type branch in every
-   implementation.
+   implementation. Follow the codebase's package layout and placement rule.
 7. **Parse at boundaries, typed inside, fail loudly.** Validate external input
    once, at the edge, into typed values; reject unknown keys and name the
    offender. Define an error away only where the semantics are well defined,
@@ -94,20 +93,16 @@ section.
    through (return, exception, cancellation, signal, stop request), not a
    handler per exit path. A parent process forwards signals to the owner and
    never kills it before its cleanup runs. Put I/O (processes, network, clock,
-   filesystem) behind the owning library's interface. Keep resource lifecycle
-   decisions in the pure core (rule 14); see the `testing` skill.
+   filesystem) behind the owning library's interface, with lifecycle
+   decisions in the pure core (rule 14).
 10. **Distrust external boundaries.** Agents, agent CLIs, clusters, MCP
     clients, and subprocesses delay, fail, and misbehave; design for it at
     the boundary, once. Read
     [references/boundaries.md](references/boundaries.md) when you add or
-    change a call across one, or an agent tool server (its own module,
-    library, or standalone server under `resources/`). In short: agent output is untrusted input, and
-    an option the run does not offer is absent from the schema, not rejected
-    after the fact; every call has a deadline derived from the caller's
-    limit; failures are typed (transient, permanent, unsupported);
-    operations are idempotent so retry and cancel are safe; transport retries
-    are bounded and only for transient failures of idempotent operations; what
-    the system offers is derived from what the executor reports it supports.
+    change a call across one, or an agent tool server. In short: agent output
+    is untrusted input; an option the run does not offer is absent from the
+    schema; every call has a deadline derived from the caller's limit;
+    failures are typed; operations are idempotent; retries are bounded.
 11. **Fit the change to the design.** Make the change as if the design had
     anticipated it, not the smallest diff that works. Prepare first: refactor
     to make the change easy, then make it. Never extend an existing violating
@@ -117,17 +112,14 @@ section.
     land the contract step. Read
     [references/evolving.md](references/evolving.md) when you refactor, split,
     migrate, or change a contract.
-12. **Agent-bound text is a template.** Prompts, system prompts, and the
-    fragments inside them are rendered by `vs_prompts` from `.j2` files.
-    Python passes data; the template owns the wording, conditionals, and loops.
-    Never build prompt text with `+`, f-strings, `.format`, or `.join`, and
-    never append to rendered output. `tests/architecture/test_prompt_templates.py`
-    enforces this. Text agents read later (progress files, tool results) is
-    agent-bound too: take it as a `RenderedPrompt` parameter, which makes the
-    call a checked sink. A template names a reply field only as `{{ reply.<field> }}`,
-    derived from that turn's capability-trimmed reply schema, so the schema stays
-    the source of truth for names and a dangling reference fails the render;
-    `tests/architecture/test_prompt_reply_fields.py` enforces this.
+12. **Agent-bound text is a template.** Prompts and the fragments inside them,
+    and text agents read later (progress files, tool results), are rendered
+    from template files. Code passes data; the template owns the wording,
+    conditionals, and loops. Never build prompt text by concatenation,
+    formatting or joining, and never append to rendered output. Take
+    agent-bound text as a rendered-text type, so each call is a checkable
+    sink. A template names reply fields only through the turn's reply schema,
+    so a dangling name fails the render.
 13. **Lint suppressions are explicit opt-outs.** First consider reasonable
     lint-compliant fixes. Suppress only when those fixes would make the design
     more hacky than retaining the current code. In the source rationale, list
@@ -141,27 +133,18 @@ section.
     Persist intent before I/O and recover unfinished transitions. This keeps
     decisions modular and makes exhaustive stress testing practical. Read
     [references/functional-core.md](references/functional-core.md) for contracts,
-    placement, recovery, and naming.
-    For boundary robustness (one event per fact, monotone observations,
-    outcome unions, no orphan waits, fencing epochs), read the Crash
-    consistency and Outcomes sections of that reference.
-    In prose, say "interface" and "implementation"; an interface is a
-    `typing.Protocol` in its owning library's `.api`, named by role with no
-    suffix (`Cluster`, `StateStore`, `AgentSessions`). Implementations are
-    `<Variant><Role>` (`SlurmCluster`, `FakeCluster`, `DockerSandbox`,
-    `ModalSandbox`); each interface has several substitutable implementations
-    that all pass one contract test suite shipped by the owning library.
+    placement, recovery, crash consistency, outcomes and naming. In short: an
+    interface is named by role with no suffix (`Cluster`), an implementation
+    is `<Variant><Role>` (`FakeCluster`), and every implementation passes the
+    one contract suite the owning library ships.
 
-Encode invariants in types and checks rather than conventions. A rule that
-lives only in prose, a comment, or reviewers' memory holds until the first
-author who never read it. Prefer, strongest first: a type that cannot represent
-the invalid state (a closed set, a value only its parser constructs, a schema
-that rejects unknown keys); a lint or dependency-graph rule; a test or check
-that scans the whole codebase. Write a rule down only when none of these is
-tenable, and say why.
+Encode invariants in types and checks, not conventions: a rule in prose holds
+until the first author who never read it. Prefer, strongest first, a type that
+cannot represent the invalid state, a lint or dependency-graph rule, then a
+check over the whole codebase; write a rule down only when none is tenable.
 
 ## Before handing back
 
 - Re-read the checkpoint answers against the diff; update the `Design` section.
-- Run the language's boundary and lint checks (see its reference).
+- Run the codebase's boundary and lint checks.
 - Do not refactor unrelated code. Apply these rules to code you add or change.

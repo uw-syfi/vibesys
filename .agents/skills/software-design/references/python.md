@@ -1,93 +1,43 @@
 # Python
 
-Boundary tool: tach (`tach.toml`). Lint: ruff. Types: ty.
-
-## Size cues
-
-| Cue | Value | Enforced by |
-| --- | --- | --- |
-| Package size | About 10k non-test lines, a cue to ask rule 5, not a rule | Nothing. Measure with `find <pkg> -name '*.py' -not -path '*/tests/*' \| xargs wc -l` |
-| File length | 2000 lines; two files are allowlisted at their recorded counts and may not grow | `scripts/check_file_length.py`, `[tool.vibesys.file_length]` |
-| Function | Complexity 10 (`C901`); ruff `PLR` defaults of 12 branches, 50 statements, 5 arguments | ruff, `scripts/check_lint.sh` |
-
-Crossing the package cue means: split into separately declared tach modules,
-each with a narrow interface, or state in the PR's `Design` section why the
-package stays whole.
+Python idioms for the design rules.
 
 ## Declaring and enforcing a public interface
 
-Tach is module-granular: each `[[modules]]` entry lists its allowed
-`depends_on` edges, and `uv run python scripts/check_tach.py` fails on an undeclared edge or a
-cycle (`forbid_circular_dependencies`).
+- Give each package one public module (an `api` module or the package
+  `__init__`) and keep everything else underscore-private or unexported.
+- Python cannot hide a module, so enforce the surface with a module-boundary
+  tool (such as tach or import-linter) that declares each module's allowed
+  dependencies and exposed interface and fails on an undeclared edge or a
+  cycle.
+- Declare a new or split module's interface the same way existing ones are
+  declared; a module that lacks a declaration is not license for the next.
+- Add a dependency edge in the same change as the import, and prefer
+  removing one to adding one.
 
-- **Libraries.** Each `libs/*` package exposes only `<pkg>.api` through an
-  `[[interfaces]]` entry (`expose = ["api", "api\\..*"]`). Import a library
-  only through its `api`.
-- **Modules under `src/`.** These have no `[[interfaces]]` entries today, so
-  their internals are reachable by any module with the edge. A new module, or
-  one split under rule 5, must add an `[[interfaces]]` entry the same way the
-  libraries do. Do not treat an existing module's lack of one as license.
-- **Facades.** `vibesys.api` is the only core module other packages import.
-  `server`, `headless`, and `entrypoints` reach core through it.
+## Size cues
 
-## Adding an edge
-
-1. Add the import.
-2. Add the target to the importer's `depends_on` in `tach.toml`, in the same PR.
-   Prefer removing an edge to adding one. Never add an upward edge or a cycle;
-   move the shared code down.
-3. `uv run python scripts/check_tach.py`
-4. `uv run python scripts/check_tach_graph.py --write`, then commit the updated
-   graph in `docs/contributing/architecture.md`.
-
-A new module also needs its `[[modules]]` entry (and `[[interfaces]]`), and a
-new library needs its `source_roots` entry.
+A size limit is a cue to ask rule 5, not a reason to split. Configure file
+length, function complexity (`C901`), branches, statements and arguments
+(Ruff's `PLR` rules) in the linter, so the numbers live in one place.
 
 ## Idioms
 
 - **Boundary types.** Pydantic models for external contracts, with
   `model_config = ConfigDict(extra="forbid")` so unknown keys are rejected.
-  `tests/quality/test_models_reject_unknown_keys.py` holds every product
-  model, and every dataclass or TypedDict Pydantic decodes, to that; a model
-  that must accept unknown keys sets `extra` explicitly and declares
-  `unknown_keys_reason: ClassVar[str]`.
+  A model that must accept unknown keys sets `extra` explicitly and says why.
 - **Closed sets.** `StrEnum` or `Literal`, never raw strings. Look up
   implementations in a registry keyed by the enum. Match exhaustively.
-- **Errors.** Typed errors that name the offending key or path
-  (`vibesys.errors.ConfigurationError` carries a diagnostic).
+- **Errors.** Typed errors that name the offending key or path.
 - **Proof types.** Parse an external response once into a frozen type that
   only the parser constructs, and make guards take that type, not raw fields
-  the caller supplies. Outcome unions end in `assert_never`.
+  the caller supplies. Outcome unions end in `assert_never`, so the type
+  checker flags an unhandled variant.
 - **Resources.** Context managers or an explicit `close()`; cleanup must be
   idempotent.
 - **I/O.** Declare role-named `typing.Protocol` interfaces in the owning
-  library's `.api`. Inject them into the shell, never the pure core. Ship a
-  Fake and shared contract suite with each interface. See
+  library's public module. Inject them into the shell, never the pure core.
+  Ship a Fake and shared contract suite with each interface. See
   [functional-core.md](functional-core.md).
-
-## Golden examples
-
-Named by symbol; read them before writing something similar.
-
-| Rule | Look at |
-| --- | --- |
-| 1, 2 | `vibesys.api` (facade with a documented contract); `vs_agent.api` |
-| 3 | `vs_agent.api.AgentSessions` (a role-named interface with real and Fake implementations) |
-| 4 | The `tach.toml` module graph; `entrypoints` reaching core only through `vibesys.api` |
-| 5 | The `libs/` packages, each a separately declared unit behind `<pkg>.api` |
-| 6 | `vibesys.plugin_catalog.OrchestrationRegistry` (stable ids to registrations) and `vibesys.domains.registry.DOMAINS` keyed by enums |
-| 7 | The `server.api.protocol` models (`extra="forbid"`) |
-| 8 | `server.api.protocol` to `protocol.schema.json` to generated TypeScript types (`pnpm generate:protocol`); `vs_project.api.Project.open` as the only way to reach the `.vibesys` layout |
-| 9 | `vs_agent.api.testing` (`FakeAgentClient`) |
-| 10 | `vs_sim.api.testing.hostile_json_frames` (the shared hostile-input corpus every untrusted JSON decoder runs against) |
-| 14 | `vs_core.api.step` (`state + event -> new state + requests`) and the property tests in `libs/vs-core/tests/` |
-
-## Commands
-
-```bash
-uv run python scripts/check_tach.py
-uv run python scripts/check_tach_graph.py --check   # --write after editing tach.toml
-uv run python scripts/check_file_length.py
-./scripts/check_lint.sh
-./scripts/check_types.sh
-```
+- **Generated contracts.** Generate downstream types (JSON Schema,
+  TypeScript) from the authoritative Pydantic models; never hand-copy them.

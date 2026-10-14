@@ -9,36 +9,31 @@ make it pass", mark it as an expected failure to hide it, or tolerate it
 "because it usually passes".
 
 A test's result must never depend on timing, and every wait needs a bound that
-only guards against hangs. In the deterministic tiers this is enforced, not
-advised: Ruff's `TID251` rejects `time`, `datetime.now`/`utcnow`/`today`,
-`date.today` and `asyncio.sleep`, and `tests/quality/test_real_apis_confined.py`
-fails a test that uses `threading`, `subprocess`, `socket`, `signal` (or a process
-launch, executor, network or file-lock spelling of the same), a bare wait, join
-or get, or a signal to its own process
-(`vs_sim` interfaces, the virtual loop and Fakes cover each). Rewrite a flagged
-test as follows.
+only guards against hangs. In the deterministic tiers, enforce this with a
+check rather than advice: fail a test that uses real time, threads,
+processes, sockets or signals (under any spelling, including process
+launches, executors, file locks and wall-clock reads), a nonzero sleep, an
+unbounded wait, join or get, or a signal to its own process. Each has a
+deterministic replacement:
 
-| Flagged use | Rewrite as |
+| Real use | Rewrite as |
 | --- | --- |
-| `time.sleep`, `asyncio.sleep(n)`, `time.monotonic` | An injected `vs_sim.api.Clock`/`Sleeper`; run on the virtual loop (`sim`, or an unmarked `async def` test) and advance `VirtualClock`. |
-| `threading.Thread`, `Event`, `Lock` | A `Gate`, `start_thread` and `join_or_fail`, or run the code through a Fake `BlockingRunner`. |
-| `subprocess`, `asyncio.create_subprocess_*` | A Fake `ProcessLauncher` or command runner from the owning library. |
-| `socket` | The library's in-memory Fake transport; a real socket is a real-tier test. |
-| `signal.signal`, `os.kill(os.getpid(), ...)` | A Fake `SignalSource`; anything that must change real signal state goes through `run_in_child`. |
-| bare `.wait()`, `.join()`, `.get()` | `wait_or_fail`, `join_or_fail`, `get_or_fail`, `arrival(awaitable, task)` or a `timeout=`. |
-| A test of a real system | Move it to a real tier (`sim_real_tiers`). |
+| Sleep, monotonic or wall-clock reads | An injected clock and sleeper; run on a virtual event loop and advance the virtual clock. |
+| Threads, events, locks | A gate the test opens, a joined thread with a hang guard, or a Fake blocking runner. |
+| Subprocesses | A Fake process launcher or command runner from the owning library. |
+| Sockets | The owning library's in-memory Fake transport; a real socket belongs in a real tier. |
+| Installing signal handlers, signalling yourself | A Fake signal source; code that must change real signal state runs in a child the simulator manages. |
+| Bare wait, join, get | A bounded wait that fails the test on timeout, or an explicit `timeout=`. |
+| A test of a real system | A real tier. |
 
-The baseline of existing uses has exact counts and only shrinks.
-
-The suite has a hard per-test bound (`timeout` in `pyproject.toml`, 300 s) so a
-hung test fails alone instead of stalling its shard. It is a backstop, not a
-synchronization tool: a test must pass without ever reaching it.
+Give the suite a hard per-test bound so a hung test fails alone instead of
+stalling its run. It is a backstop, not a synchronization tool: a test must
+pass without ever reaching it.
 
 A wait on a thread, process or socket the test does not control carries a hang
-guard from `vs_sim.api.testing` (`join_or_fail`, `wait_or_fail`,
-`get_or_fail`, `accept_or_fail`, `stop_process`, `HANG_GUARD_S`) or a `timeout=` argument, so a stuck peer fails that test with a
-message. The guard sits far above any passing run and is never what a test
-synchronizes on. `tests/quality/test_no_unbounded_blocking_waits.py` enforces it.
+guard (a bounded wait helper or a `timeout=` argument), so a stuck peer fails
+that test with a message. The guard sits far above any passing run and is
+never what a test synchronizes on.
 
 ## Sources and fixes
 

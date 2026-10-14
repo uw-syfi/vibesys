@@ -10,12 +10,14 @@ Skills (load them, in every language):
 - Before writing or changing any code, use the `software-design` skill
   (`.agents/skills/software-design/`): deep modules with declared public
   interfaces, one-way dependencies and data flow, and fitting a change to the
-  existing design instead of extending a violating pattern.
+  existing design instead of extending a violating pattern. For modules,
+  imports, interfaces and packages here, also use `change-module-graph`.
 - Before writing, changing, or reviewing any test, use the `testing` skill
   (`.agents/skills/testing/`). Tests exercise public APIs only, use Fakes
   instead of patching or mocks, favor property-based tests, and are never flaky
   (a test's result must never depend on timing; every wait needs a bound that
-  only guards against hangs). Deterministic-tier tests and product code use no
+  only guards against hangs). Also use `write-vibesys-tests` for this
+  repository's harness. Deterministic-tier tests and product code use no
   real time, threads, processes, sockets, or signals outside `vs_sim`. Ruff
   `TID251` bans time; `tests/quality/test_real_apis_confined.py` covers
   threads, processes, sockets, and signals. Only the real tiers

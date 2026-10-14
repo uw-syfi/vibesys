@@ -1,6 +1,6 @@
 ---
 name: testing
-description: Write, change, review, or fix tests in any language in this repository. Use when adding or editing any test, fixing a bug (regression test), tempted to patch or mock, adding or changing a Fake, writing property-based, golden-fixture, or fault-injection tests, testing code that calls agents, clusters, or subprocesses, or diagnosing a flaky test.
+description: Write, change, review, or fix tests in any language. Use when adding or editing any test, fixing a bug (regression test), tempted to patch or mock, adding or changing a Fake, writing property-based, golden-fixture, or fault-injection tests, testing code that calls agents, clusters, or subprocesses, or diagnosing a flaky test.
 metadata:
   kind: generic
 ---
@@ -11,8 +11,10 @@ Write high-value tests: tests that keep passing through refactors and fail only
 when observable behavior changes. A test is low value if renaming a private
 function, splitting a module, or swapping an implementation detail breaks it.
 
-These rules are language-independent. Tool names, commands, and syntax live in
-a per-language reference; read the one for the language you are editing:
+These rules are language-independent and codebase-independent. Language
+idioms live in a per-language reference; read the one for the language you are
+editing. A codebase's own harness (its tiers, simulation library, checks and
+commands) belongs in that codebase's own skill; load it too.
 
 - [references/python.md](references/python.md)
 - [references/typescript.md](references/typescript.md)
@@ -62,19 +64,13 @@ a per-language reference; read the one for the language you are editing:
    then rebase your current PR on top of it. See
    [references/flakiness.md](references/flakiness.md).
    **Tiers.** Unit and composition tests are the deterministic tiers: they use
-   no `time`, `threading`, `subprocess`, `socket` or `signal`, no nonzero
-   `asyncio.sleep`, no bare `.wait()`/`.join()`/`.get()`/`.communicate()`, and
-   never signal their own process, except through `vs_sim`
-   (`vs_sim.api.testing`: `VirtualClock`, `Gate`, `arrival`, `run_in_child`,
-   Fakes). Only `tests/e2e`, `tests/slurm_cluster` and `tests/minimal_container`
-   (the `sim_real_tiers` ini key) drive real systems. Product code takes the
-   `vs_sim.api` interfaces instead of the real APIs.
-   Ruff's `TID251` bans real time (`time`, `datetime.now`/`utcnow`/`today`,
-   `date.today`, `asyncio.sleep`; yield with `vs_sim.api.yield_now()`) outside
-   `libs/vs-sim` and the real tiers. `tests/quality/test_real_apis_confined.py`
-   enforces the rest with an exact-count baseline that only shrinks: when you
-   remove a use, lower its count in `tests/quality/real_api_baseline.jsonl`;
-   never raise one.
+   no real time, threads, processes, sockets or signals, no nonzero sleeps, no
+   unbounded waits or joins, and never signal their own process, except
+   through a deterministic simulation layer (a virtual clock, gates, an
+   in-process child runner, Fakes). Only a few named real tiers drive real
+   systems. Product code takes the simulation layer's interfaces instead of
+   the real APIs, so tests can substitute them. Enforce this with a check
+   whose baseline of existing uses only shrinks.
 6. **Bug fixes.** Add a regression test at the lowest layer that reproduces the
    symptom, through the public API, that fails at the merge base. Then add a
    property test that generalizes the pattern, so the whole class of bug is
@@ -108,8 +104,8 @@ a per-language reference; read the one for the language you are editing:
 
 ## Before handing back
 
-- Run the narrowest test target first, then broaden (commands per language).
-- Run the language's test-isolation check if one exists (see its reference).
+- Run the narrowest test target first, then broaden.
+- Run the codebase's test-isolation check if one exists.
   It is a shrink-only ratchet: existing violations are baselined, new ones
   fail, and removing sites from a baselined file means lowering its recorded
   counts.
