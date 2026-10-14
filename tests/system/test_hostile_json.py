@@ -17,6 +17,7 @@ own promise.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import functools
 import importlib.util
 import io
@@ -44,14 +45,17 @@ from server.host_helper import ChannelState, Received, Send, step
 from server.transport.discovery import WebInstanceRecord
 from vibesys.run import CoreAgentEventSink
 from vs_evaluator_protocol.api import ProtocolError, parse_records
+from vs_runtime.api import CommandResult
 from vs_runtime.api.infrastructure import (
+    LocalValidationRecipeError,
     ModelRequestError,
     ProtocolBenchmarkContract,
     ScalarBenchmarkContract,
     create_model_request_reconciler,
     decode_trusted_benchmark_run,
+    run_local_validation,
 )
-from vs_runtime.api.testing import FakeModelVolumeProvisioner
+from vs_runtime.api.testing import FakeCommands, FakeModelVolumeProvisioner, FakeWorkspace
 from vs_sim.api.testing import hostile_json_frames
 
 if TYPE_CHECKING:
@@ -190,6 +194,52 @@ def _rocprof_thread_trace(frame: bytes, dispatch: Path) -> None:
     att.load_instructions(dispatch)
 
 
+_RECIPES = {
+    "version": 1,
+    "recipes": [
+        {
+            "name": "focused",
+            "command": "pytest -q",
+            "input_paths": ["queue.py"],
+            "timeout_seconds": 30,
+            "purpose": "exercise the candidate",
+        }
+    ],
+}
+
+
+def _local_validation(workspace: Path) -> tuple[object, ...]:
+    commands = FakeCommands()
+    commands.script(CommandResult(output="passed\n", exit_code=0))
+    return asyncio.run(
+        run_local_validation(
+            commands,
+            FakeWorkspace(path=workspace),
+            recipe_artifact="validation/recipes.json",
+            report_location="validation/report.json",
+        )
+    )
+
+
+def _validation_report(frame: bytes, workspace: Path) -> None:
+    """A file the candidate left beside the validation report is not reused, and runs anew."""
+    recipes = workspace / "validation" / "recipes.json"
+    if not recipes.exists():
+        recipes.parent.mkdir()
+        (workspace / "queue.py").write_text("VALUE = 1\n")
+        recipes.write_text(json.dumps(_RECIPES))
+    (workspace / "validation" / "planted.json").write_bytes(frame)
+    [result] = _local_validation(workspace)
+    assert getattr(result, "passed", None) is True
+    assert getattr(result, "reused", None) is False
+
+
+def _validation_recipes(frame: bytes, workspace: Path) -> None:
+    (workspace / "validation").mkdir(exist_ok=True)
+    (workspace / "validation" / "recipes.json").write_bytes(frame)
+    _local_validation(workspace)
+
+
 def _tool_result(frame: bytes, _: Path) -> None:
     payloads: list[object] = []
     CoreAgentEventSink(payloads.append).tool_result("shell", frame.decode("utf-8", "replace"))
@@ -215,6 +265,8 @@ _DECODERS = {
     ),
     "model-manifest": _Decoder(_model_manifest, (ModelRequestError,)),
     "agent-tool-result": _Decoder(_tool_result),
+    "local-validation-report": _Decoder(_validation_report),
+    "local-validation-recipes": _Decoder(_validation_recipes, (LocalValidationRecipeError,)),
     "otel-artifact-discovery": _Decoder(_otel_artifacts),
     "capture-manifest": _Decoder(_capture_manifest, (ValueError,)),
     "capture-listing": _Decoder(_capture_listing),

@@ -6,7 +6,7 @@ import hashlib
 import json
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol
 
 from pydantic import (
     BaseModel,
@@ -44,6 +44,11 @@ ValidationRecipeArtifactPath = Annotated[
 
 
 _RECIPE_PATH_ADAPTER = TypeAdapter(ValidationRecipeArtifactPath)
+_ANY_JSON: TypeAdapter[Any] = TypeAdapter(Any)
+"""Pydantic's depth-bounded JSON parser: bad UTF-8, truncation and nesting past its bound
+are each a ``ValidationError`` (a ``ValueError``), where ``json`` would raise
+``RecursionError`` on deep nesting. The recipe and report files are in the candidate's
+workspace, so they may hold anything."""
 
 
 class ValidationRecipe(BaseModel):
@@ -236,8 +241,8 @@ def _load_recipes(workspace: Path, artifact: str) -> tuple[ValidationRecipe, ...
             f"validation recipe artifact does not exist: {artifact}",
         )
     try:
-        payload = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
+        payload = _ANY_JSON.validate_json(path.read_bytes())
+    except (OSError, ValueError) as exc:
         raise LocalValidationRecipeError(
             LocalValidationRecipeErrorKind.INVALID_ARTIFACT,
             f"validation recipe artifact is not valid JSON: {exc}",
@@ -309,10 +314,14 @@ def _reusable_result(
     for artifact in sorted(report.parent.glob("*.json"), reverse=True):
         if artifact == report:
             continue
+        # The report directory is in the candidate's workspace, so any file here may
+        # hold anything; one that is not a report is skipped, never raised.
         try:
-            payload = json.loads(artifact.read_text())
-            raw_results = payload.get("results", [])
-        except (OSError, json.JSONDecodeError, AttributeError):
+            payload = _ANY_JSON.validate_json(artifact.read_bytes())
+        except (OSError, ValueError):
+            continue
+        raw_results = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(raw_results, list):
             continue
         for raw in reversed(raw_results):
             try:
