@@ -9,6 +9,7 @@ from ._acquisition_stall import stalled_acquisition
 from ._session_rows import request_ended as _ended
 from ._session_turns import (
     _after_turn_cleanup,
+    _drain_lease,
     _invocation,
     _prepared_completion,
     _release_lost_turn,
@@ -98,11 +99,11 @@ def advance_lapsed_session_waits(
     """A request the session waits on ended without moving it: wait on the others still open.
 
     With none left, an unknown session whose turn's acceptance is unsettled releases that
-    turn as lost, as when its inspection answers unknown, and waits on the cancellation. Any
-    other session keeps its wait on ended requests. It is then an orphan, and the run halts
-    loudly with it named (``RESOLUTIONS``): a session whose last request ended without proof
-    may hold a lease or a running turn core cannot account for, and nothing yet decides who
-    releases it.
+    turn as lost, as when its inspection answers unknown, and waits on the cancellation. An
+    unknown session with no unsettled turn and a known lease closes that lease as lost and
+    waits on the close. Any other session (an ambiguous ensure, whose lease core does not
+    know) keeps its wait on ended requests. It is then an orphan, and the run halts loudly
+    with it named (``RESOLUTIONS``).
     """
     if not isinstance(event, SessionWaitLapsed):
         raise ContractValidationError("event.kind", "event is not a lapsed session wait")
@@ -127,6 +128,11 @@ def advance_lapsed_session_waits(
         )
         if turn is not None and turn.phase == SessionPhase.UNKNOWN:
             return _release_lost_turn(state, context, turn.invocation)
+        if session.resource_id is not None:
+            # Its turn ended but whether it accepted its inputs is unknown, and nothing will
+            # ask again: close the known lease as lost and wait on the close. Only the
+            # close's answer releases the lease, never the absence of an answer.
+            return _drain_lease(state, context, session, event.request_id)
     if not kept:
         return AreaChange(state=state)
     waiting = session.model_copy(update={"wait": WaitOn(requests=kept)})

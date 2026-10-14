@@ -82,25 +82,63 @@ def _turn_ended(state: core.CoreState) -> core.CoreState:
 @pytest.mark.parametrize(
     "inspection_phase", [core.RequestPhase.BLOCKED, core.RequestPhase.COMPLETED]
 )
-def test_an_unknown_session_with_no_unknown_turn_keeps_its_wait_and_is_reported(
+def test_an_unknown_session_whose_turn_ended_closes_as_lost_and_waits_on_the_close(
     inspection_phase: core.RequestPhase,
 ) -> None:
-    """With no turn to release, the session keeps naming the ended requests: a loud orphan.
+    """The turn succeeded but its inputs' acceptance is unknown, and the inspection ended unanswered.
 
-    Before, it dropped its wait, so no orphan check named it and the run stalled unreported.
+    The session closes its lease as lost and waits on the close; it is no orphan. Before,
+    it kept a wait on the ended requests: the completed inspection was all it would ever
+    have, nothing inspected again, it refused every later turn, and the run halted.
     """
     unknown = _unknown_turn()
     [session] = unknown.state.sessions.sessions
     assert session.wait is not None
-    waited = session.wait.requests
-    ended = _ended(_turn_ended(unknown.state), dict.fromkeys(waited, inspection_phase))
+    assert session.resource_id is not None
+    ended = _ended(
+        _turn_ended(unknown.state), dict.fromkeys(session.wait.requests, inspection_phase)
+    )
 
     result = reload_step(ended, core.ClockAdvanced(now_at=2.0))
+
+    [close] = [request for request in result.requests if isinstance(request, core.CloseSession)]
+    assert close.session_id == session.spec.session_id
+    assert close.resource_id == session.resource_id
+    [session] = result.state.sessions.sessions
+    assert session.phase == core.SessionPhase.CLOSING
+    assert session.wait is not None
+    assert close.request_id in session.wait.requests
+    assert core.orphan_waits(result.state) == ()
+
+
+@pytest.mark.parametrize(
+    "inspection_phase", [core.RequestPhase.BLOCKED, core.RequestPhase.COMPLETED]
+)
+def test_an_unknown_session_with_no_known_lease_keeps_its_wait_and_is_reported(
+    inspection_phase: core.RequestPhase,
+) -> None:
+    """With no lease to close, the session keeps naming the ended requests: a loud orphan.
+
+    Releasing it on the absence of an answer would free a lease core cannot account for.
+    """
+    unknown = _unknown_turn()
+    state = _turn_ended(unknown.state)
+    [session] = state.sessions.sessions
+    assert session.wait is not None
+    waited = session.wait.requests
+    leaseless = session.model_copy(update={"resource_id": None})
+    state = state.model_copy(
+        update={"sessions": state.sessions.model_copy(update={"sessions": (leaseless,)})}
+    )
+
+    result = reload_step(
+        _ended(state, dict.fromkeys(waited, inspection_phase)), core.ClockAdvanced(now_at=2.0)
+    )
 
     [session] = result.state.sessions.sessions
     assert session.phase == core.SessionPhase.UNKNOWN
     assert session.wait is not None
     assert set(session.wait.requests) == set(waited)
+    assert not [request for request in result.requests if isinstance(request, core.CloseSession)]
     orphans = core.orphan_waits(result.state)
     assert [wait.waiter for wait in orphans] == [core.WaitKind.SESSION], orphans
-    assert session.spec.session_id.root in orphans[0].subject
