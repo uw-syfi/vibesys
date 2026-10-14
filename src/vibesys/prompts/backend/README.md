@@ -37,30 +37,15 @@ Explicit kwargs passed to `prompt.render(...)` override auto-injected fragments 
    no full document headers; the parent template owns structure.
 4. Reference it from a parent template with a simple
    `{{ stem }}`. Don't use `{% include %}` for backend-specific
-   fragments — let `Prompt` handle the resolution.
+   fragments — let `BackendPromptRenderer` handle the resolution.
 
-## Conventions for adding a new backend
+## Adding a new backend
 
-1. Add the variant to `ComputeBackend` in
-   `vibesys/constants.py`.
-2. Create `vibesys/prompts/backend/<new>/` and mirror every
-   name in `ComputeBackendFragment.NAMES` (currently: `device_dtype.j2`,
-   `judge_device_correctness.j2`, `profiling_workflow.j2`). Use an
-   empty file for a deliberate skip, or short placeholder prose for
-   a soft skip — don't leave the file out, validation will fail.
-3. Add a concrete `ComputeBackendFragment` subclass in
-	   `vibesys/prompts/renderer.py`:
-   ```python
-   class RocmComputeBackendFragment(ComputeBackendFragment):
-       backend = ComputeBackend.ROCM
-   ```
-   …and register it in `_FRAGMENT_IMPLS`.
-4. Wire up the backend's runtime impl and register it in
-   `_register_defaults` in `vibesys/backends/__init__.py`. A backend with
-   device logic gets its own subpackage `vibesys/backends/<new>/` (see
-   `cuda/`, `rocm/`, `trainium/`). A local-only backend with no accelerator
-   (`metal`, `cpu`) registers `LocalBackend` from `backends/local.py`
-   bound to the new variant instead.
+Follow the `add-compute-backend` agent skill (`.agents/skills/add-compute-backend/`).
+For this directory: create `backend/<new>/` with every name in
+`ComputeBackendFragment.NAMES`, and add a `ComputeBackendFragment` subclass for
+the backend in `vibesys/prompts/renderer.py`, registered in `_FRAGMENT_IMPLS`.
+`tests/vibesys/test_backend_fragments.py` fails until both exist.
 
 ## Python contract
 
@@ -71,7 +56,7 @@ The canonical list of fragment names lives on `ComputeBackendFragment.NAMES` (in
    (empty file = hard skip; placeholder prose = soft skip).
 3. Reference `{{ <name> }}` from the parent template that needs it.
 
-`Prompt.__init__` calls `ComputeBackendFragment.validate()` which checks that every name in `NAMES` has a corresponding `.j2` file under the bound backend's directory. A missing file fails fast with a clear error naming the path — silent empty-string rendering is no longer a failure mode.
+`BackendPromptRenderer` calls `ComputeBackendFragment.validate()` at construction, which checks that every name in `NAMES` has a corresponding `.j2` file under the bound backend's directory. A missing file fails fast with a clear error naming the path — silent empty-string rendering is no longer a failure mode.
 
 ### Skip flavors
 

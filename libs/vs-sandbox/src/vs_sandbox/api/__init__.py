@@ -27,6 +27,7 @@ if TYPE_CHECKING:
         backend_is_host_only,
         create_compute_backend,
         register_compute_backend,
+        registered_compute_backends,
     )
     from vs_sandbox.container_runtime import (
         ContainerRuntimeUnavailableError,
@@ -231,6 +232,7 @@ __all__ = [
     "pick_gpu",
     "plan_feature_build",
     "register_compute_backend",
+    "registered_compute_backends",
     "relay_signals",
     "released",
     "require_sysbox_runtime",
@@ -283,6 +285,7 @@ _LAZY_EXPORTS = {
     "backend_is_host_only": ("compute_backends", "backend_is_host_only"),
     "create_compute_backend": ("compute_backends", "create_compute_backend"),
     "register_compute_backend": ("compute_backends", "register_compute_backend"),
+    "registered_compute_backends": ("compute_backends", "registered_compute_backends"),
     "ContainerRuntimeUnavailableError": (
         "container_runtime",
         "ContainerRuntimeUnavailableError",

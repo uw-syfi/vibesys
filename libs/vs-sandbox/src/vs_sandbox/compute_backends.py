@@ -205,6 +205,16 @@ def backend_is_host_only(backend: ComputeBackend) -> bool:
     return backend in _HOST_ONLY
 
 
+def registered_compute_backends() -> frozenset[ComputeBackend]:
+    """Return the backends that have a registered factory.
+
+    A completeness test compares this with ``ComputeBackend``, so a new enum
+    member without a registration fails CI instead of the first run that names it.
+    """
+    _ensure_defaults()
+    return frozenset(_REGISTRY)
+
+
 def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]; one keyword per construction input every registered backend shares.
     # > A settings object would only rename these keywords for the one caller and the
     # > registered factories; splitting the factory per backend would branch on a
@@ -262,4 +272,5 @@ __all__ = [
     "backend_is_host_only",
     "create_compute_backend",
     "register_compute_backend",
+    "registered_compute_backends",
 ]

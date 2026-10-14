@@ -29,12 +29,10 @@ domain = "llm-serving"
 Each domain owns its Python definition and prompt assets under
 `vibesys/domains/<domain>/`. Shared rendering and templates live in
 `vibesys/prompts/`; strategy-specific templates live with their strategy.
-Domain-specific environment setup/teardown code stays next to the definition.
 
 ```text
 src/vibesys/domains/my_domain/
   __init__.py       # exports DEFINITION
-  hooks.py          # optional domain-specific EnvironmentHooks implementation
 
   prompts/
     README.md        # optional human documentation
@@ -105,27 +103,30 @@ Example (inside `judge.md`):
 
 ## How to add a domain
 
-1. Copy `src/vibesys/domains/generic/` to a new in-repo
+The `add-domain` agent skill (`.agents/skills/add-domain/`) is the checklist, and
+`tests/vibesys/orchestration/domains/test_domain_registry_complete.py` fails until
+the pieces below agree.
+
+1. Add the domain name to `DomainName` in `src/vibesys/constants.py`.
+2. Copy `src/vibesys/domains/generic/` to a new in-repo
    `src/vibesys/domains/<module_name>/` package, using underscores for the
    Python module name when the CLI domain name contains hyphens.
-2. Edit the copied package's `prompts/README.md` with its title and scope.
-3. Add `implementer.md` (what to read / what "done" means here) and `judge.md`
+3. Edit the copied package's `prompts/README.md` with its title and scope.
+4. Add `implementer.md` (what to read / what "done" means here) and `judge.md`
    (what to check) under the package's `prompts/` directory. Leave a file out to
    inject nothing for that role.
-4. Optionally add `single_agent.md` for the `--inner-loop single-agent`
+5. Optionally add `single_agent.md` for the `--inner-loop single-agent`
    ablation; omit it to derive it from the other two.
-5. Optionally add `orchestrator.md` and `profiler.md` when the neutral planning
+6. Optionally add `orchestrator.md` and `profiler.md` when the neutral planning
    or profiling skeleton needs domain-specific examples or capture commands.
-6. Export a `DEFINITION` from the domain package's `__init__.py`, with
-   `prompt_dir=Path(__file__).resolve().parent / "prompts"`. If the domain
-   needs setup/teardown behavior such as mounts or copy exclusions, implement
-   `EnvironmentHooks` in that package and attach it to the definition.
-7. Register the definition in `vibesys.domains.registry.DOMAINS`.
-8. Add `[agent].domain = "<name>"` to the input manifest and run either
+7. Export a `DEFINITION` from the domain package's `__init__.py`, with
+   `prompt_dir=Path(__file__).resolve().parent / "prompts"`.
+8. Register the definition in `vibesys.domains.registry.DOMAINS`.
+9. Add `[agent].domain = "<name>"` to the input manifest and run either
    `uv run vibesys --outer-loop agent ...` or `uv run vibesys --outer-loop evolve ...` from the
    repository root.
 
-Domains are registered explicitly so prompt context, environment hooks, and tests
+Domains are registered explicitly so prompt context and tests
 stay tied to the same domain identity.
 
 ## Kernel-writing tasks and skills
