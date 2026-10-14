@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import http.server
 import os
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
+from functools import partial
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,6 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_sim.api import (
+    HttpReply,
     InheritedStdioLauncher,
     LoopSignalSource,
     MonotonicClock,
@@ -26,6 +30,7 @@ from vs_sim.api import (
     SubprocessProbe,
     SystemClock,
     ThreadBlockingRunner,
+    UrllibLoopbackHttp,
     run_foreground,
 )
 from vs_sim.api.testing import (
@@ -35,6 +40,7 @@ from vs_sim.api.testing import (
     ClockUnderTest,
     CommandProbeContract,
     FakeForegroundLauncher,
+    FakeLoopbackHttp,
     FakeProcesses,
     FakeProcessLauncher,
     FakeProcessSignaller,
@@ -44,6 +50,8 @@ from vs_sim.api.testing import (
     ForegroundUnderTest,
     GatedBlockingRunner,
     InlineBlockingRunner,
+    LoopbackHttpContract,
+    LoopbackHttpUnderTest,
     ManualClock,
     ProbeUnderTest,
     ProcessesContract,
@@ -73,6 +81,7 @@ from vs_sim.api.testing import (
 from vs_sim.processes import _start_piped_process
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import IO
 
     from vs_sim.api import ProcessSpec
@@ -593,3 +602,55 @@ class TestScriptedStreamingCommand(StreamingCommandContract):
             blocks_forever=("block",),
             missing_program=("no-such-program",),
         )
+
+
+class _Reply(http.server.BaseHTTPRequestHandler):
+    reply: HttpReply
+
+    def do_GET(self) -> None:
+        self.send_response(self.reply.status)
+        self.send_header("Content-Length", str(len(self.reply.body)))
+        self.end_headers()
+        self.wfile.write(self.reply.body)
+
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002  # LW-257801 [A002]; the standard library names this parameter, and an override must keep its name.
+        del format, args
+
+
+def _serve_real(reply: HttpReply) -> tuple[int, Callable[[], None]]:
+    handler = type("_Handler", (_Reply,), {"reply": reply})
+    server = http.server.HTTPServer(("127.0.0.1", 0), handler)
+    # A short poll lets ``shutdown`` return at once instead of after the default half second.
+    worker = OsThreads().spawn(partial(server.serve_forever, 0.005), name="http-contract")
+
+    def stop() -> None:
+        server.shutdown()
+        server.server_close()
+        worker.join(HANG_GUARD_S)
+
+    return server.server_address[1], stop
+
+
+def _unused_port() -> int:
+    with socket.socket() as probe:
+        probe.settimeout(HANG_GUARD_S)
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+class TestUrllibLoopbackHttp(LoopbackHttpContract):
+    def loopback_http_under_test(self) -> LoopbackHttpUnderTest:
+        return LoopbackHttpUnderTest(UrllibLoopbackHttp(), _serve_real, _unused_port)
+
+
+class TestFakeLoopbackHttp(LoopbackHttpContract):
+    def loopback_http_under_test(self) -> LoopbackHttpUnderTest:
+        http_client = FakeLoopbackHttp()
+        ports = iter(range(40_000, 41_000))
+
+        def serve(reply: HttpReply) -> tuple[int, Callable[[], None]]:
+            port = next(ports)
+            http_client.serve(port, lambda _target: reply)
+            return port, lambda: http_client.stop(port)
+
+        return LoopbackHttpUnderTest(http_client, serve, lambda: 39_999)

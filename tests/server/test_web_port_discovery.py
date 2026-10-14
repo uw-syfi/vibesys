@@ -93,7 +93,9 @@ def test_inspector_identifies_a_gateway_even_when_its_record_is_missing(tmp_path
     _write_tcp_table(process_table, (_PORT, _INODE))
     _write_process(process_table, instance)
 
-    observation = WebPortInspector(process_table).inspect(_PORT)
+    observation = WebPortInspector(
+        process_table, process_signaller=FakeProcessSignaller({_PID})
+    ).inspect(_PORT)
 
     assert observation.state is WebPortState.VIBESYS_GATEWAY
     assert observation.holder_pids == (_PID,)
@@ -118,7 +120,9 @@ def test_inspector_never_identifies_a_process_without_both_command_and_claim(
         holds_claim=missing_identity != "claim",
     )
 
-    observation = WebPortInspector(process_table).inspect(_PORT)
+    observation = WebPortInspector(
+        process_table, process_signaller=FakeProcessSignaller({_PID})
+    ).inspect(_PORT)
 
     assert observation.state is WebPortState.OTHER
     assert observation.gateway is None
@@ -129,7 +133,9 @@ def test_inspector_reports_an_unmappable_listener_as_unknown(tmp_path: Path) -> 
     process_table = tmp_path / "proc"
     _write_tcp_table(process_table, (_PORT, _INODE))
 
-    observation = WebPortInspector(process_table).inspect(_PORT)
+    observation = WebPortInspector(
+        process_table, process_signaller=FakeProcessSignaller({_PID})
+    ).inspect(_PORT)
 
     assert observation.state is WebPortState.UNKNOWN
     assert observation.gateway is None
@@ -143,7 +149,9 @@ def test_inspector_classifies_an_ipv4_mapped_ipv6_loopback_listener(tmp_path: Pa
     _write_mapped_tcp6_listener(process_table, _PORT, _INODE)
     _write_process(process_table, instance, gateway=False)
 
-    observation = WebPortInspector(process_table).inspect(_PORT)
+    observation = WebPortInspector(
+        process_table, process_signaller=FakeProcessSignaller({_PID})
+    ).inspect(_PORT)
 
     assert observation.state is WebPortState.OTHER
     assert observation.gateway is None
@@ -163,7 +171,9 @@ def test_inspector_refuses_an_ambiguous_listener_shared_by_two_processes(tmp_pat
         pid=_PID + 1,
     )
 
-    observation = WebPortInspector(process_table).inspect(_PORT)
+    observation = WebPortInspector(
+        process_table, process_signaller=FakeProcessSignaller({_PID})
+    ).inspect(_PORT)
 
     assert observation.state is WebPortState.UNKNOWN
     assert observation.gateway is None
@@ -179,13 +189,17 @@ def test_inspector_selects_only_the_requested_listening_port(
     process_table = tmp_path / "proc"
     _write_tcp_table(process_table, (other_port, _INODE))
 
-    observation = WebPortInspector(process_table).inspect(_PORT)
+    observation = WebPortInspector(
+        process_table, process_signaller=FakeProcessSignaller({_PID})
+    ).inspect(_PORT)
 
     assert observation.state is WebPortState.FREE
 
 
 def test_inspector_fails_closed_without_a_linux_process_table(tmp_path: Path) -> None:
-    observation = WebPortInspector(tmp_path / "missing-proc").inspect(_PORT)
+    observation = WebPortInspector(
+        tmp_path / "missing-proc", process_signaller=FakeProcessSignaller({_PID})
+    ).inspect(_PORT)
 
     assert observation.state is WebPortState.UNKNOWN
 

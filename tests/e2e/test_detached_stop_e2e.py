@@ -45,7 +45,7 @@ from server.registry import (
 from server.runtime import ServerRuntime
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_sim.api import OsThreads, Platform, SystemClock, UnixNetwork
+from vs_sim.api import OsThreads, PidfdProcessSignaller, Platform, SystemClock, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -57,6 +57,9 @@ if TYPE_CHECKING:
 
 class _NoSignal:
     """A host that cannot signal: the only way to stop is the control socket."""
+
+    def exists(self, pid: int) -> bool:
+        return PidfdProcessSignaller().exists(pid)
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         del pid, current

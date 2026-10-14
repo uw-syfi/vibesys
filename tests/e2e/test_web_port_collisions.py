@@ -15,7 +15,7 @@ from tests.server.support import build_server_parts
 from entrypoints.server import main
 from server.runtime import WebPortInspector, WebPortState
 from server.transport.websocket import WebSocketBindError, WebSocketGateway
-from vs_sim.api import MonotonicClock, OsThreads, ThreadBlockingRunner
+from vs_sim.api import MonotonicClock, OsThreads, PidfdProcessSignaller, ThreadBlockingRunner
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -56,7 +56,7 @@ def test_server_main_prints_the_bind_authority_and_reason_on_its_first_line(
 def test_inspector_maps_a_real_same_user_non_gateway_listener() -> None:
     with socket.create_server(("127.0.0.1", 0)) as server:
         port = server.getsockname()[1]
-        observation = WebPortInspector().inspect(port)
+        observation = WebPortInspector(process_signaller=PidfdProcessSignaller()).inspect(port)
 
     assert observation.state is WebPortState.OTHER
     assert observation.gateway is None

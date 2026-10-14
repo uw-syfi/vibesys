@@ -30,6 +30,7 @@ from tests.entrypoints.support import (
     PORT_LISTENER,
     FakeDetachedGateway,
     FakePortGateway,
+    FakeWebInstanceFinder,
     gateway_record,
 )
 
@@ -396,7 +397,7 @@ def test_second_web_launch_reuses_live_instance(
     )
     opened: list[str] = []
     # test-isolation: inject the discovered live gateway to exercise reuse without a real launcher
-    monkeypatch.setattr(server_entrypoint, "_discover_web_instance", lambda _path: record)
+    monkeypatch.setattr(server_entrypoint, "_discover_web_instance", lambda _path, _finder: record)
     # test-isolation: capture browser opening so the test remains headless and deterministic
     monkeypatch.setattr(
         server_entrypoint.webbrowser, "open", lambda url, **_kwargs: opened.append(url)
@@ -886,21 +887,20 @@ def test_discover_web_instance_waits_for_a_claimed_gateway(
     record = _claimed_gateway_record(tmp_path)
     polls = 0
 
-    def discover(*_args: object, **_kwargs: object) -> WebInstanceRecord | None:
+    def discover(_path: Path, *, cleanup_stale: bool) -> WebInstanceRecord | None:
+        del cleanup_stale
         nonlocal polls
         polls += 1
         return record if polls > polls_before_publication else None
 
     threads = SimThreads()
     with pytest.MonkeyPatch.context() as monkeypatch:
-        # test-isolation: replace discovery with a deterministic bind-to-record race
-        monkeypatch.setattr(server_entrypoint.WebInstanceRecord, "discover", discover)
         # test-isolation: hold the startup claim while the competing gateway publishes its record
         monkeypatch.setattr(server_entrypoint.WebInstanceClaim, "is_held", lambda _path: True)
 
         found = threads.run(
             lambda: server_entrypoint._discover_web_instance(  # noqa: SLF001  # lint-waiver: LW-101066 [SLF001]; exercise the launch race helper directly
-                tmp_path / ".vibesys" / "web-gateway.json", threads
+                tmp_path / ".vibesys" / "web-gateway.json", FakeWebInstanceFinder(discover), threads
             )
         )
 
@@ -911,20 +911,18 @@ def test_discover_web_instance_waits_for_a_claimed_gateway(
 def test_discover_web_instance_falls_back_after_claim_timeout(tmp_path: Path) -> None:
     record = _claimed_gateway_record(tmp_path)
 
-    def discover(*_args: object, cleanup_stale: bool = True) -> WebInstanceRecord | None:
+    def discover(_path: Path, *, cleanup_stale: bool) -> WebInstanceRecord | None:
         # The polling reads (`cleanup_stale=False`) never see the record; the final read does.
         return None if not cleanup_stale else record
 
     threads = SimThreads()
     with pytest.MonkeyPatch.context() as monkeypatch:
-        # test-isolation: replace discovery with a deterministic timeout fallback
-        monkeypatch.setattr(server_entrypoint.WebInstanceRecord, "discover", discover)
         # test-isolation: keep the competing startup claim held until the deadline
         monkeypatch.setattr(server_entrypoint.WebInstanceClaim, "is_held", lambda _path: True)
 
         found = threads.run(
             lambda: server_entrypoint._discover_web_instance(  # noqa: SLF001  # lint-waiver: LW-101067 [SLF001]; exercise the launch timeout fallback directly
-                tmp_path / ".vibesys" / "web-gateway.json", threads
+                tmp_path / ".vibesys" / "web-gateway.json", FakeWebInstanceFinder(discover), threads
             )
         )
 

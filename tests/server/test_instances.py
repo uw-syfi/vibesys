@@ -977,6 +977,9 @@ class _ExitingSignaller:
         self.supported = supported
         self.signalled: list[int] = []
 
+    def exists(self, pid: int) -> bool:
+        return pid not in self.signalled
+
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         if not self.supported:
             raise NotImplementedError

@@ -36,6 +36,12 @@ from server.transport.discovery import (
     CAPABILITY_ROTATION_HEADER as CAPABILITY_ROTATION_HEADER,  # noqa: PLC0414  # lint-waiver: LW-936006 [PLC0414]; re-export the lifecycle HTTP contract through the runtime composition boundary; a wrapper would duplicate a constant and a direct entrypoint-to-transport import would bypass the boundary.
 )
 from server.transport.discovery import (
+    UrlWebHealthProbe as UrlWebHealthProbe,  # noqa: PLC0414  # lint-waiver: LW-257802 [PLC0414]; re-export the gateway health probe through the runtime composition boundary so the entrypoint that builds the real one does not import the transport directly
+)
+from server.transport.discovery import (
+    WebDiscovery as WebDiscovery,  # noqa: PLC0414  # lint-waiver: LW-257803 [PLC0414]; re-export gateway discovery through the runtime composition boundary so entrypoints build it with real roles and tests with Fakes
+)
+from server.transport.discovery import (
     WebGatewayListener as WebGatewayListener,  # noqa: PLC0414  # lint-waiver: LW-102902 [PLC0414]; re-export verified port identity through the runtime composition boundary for operator entrypoints
 )
 from server.transport.discovery import (

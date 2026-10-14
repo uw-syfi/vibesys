@@ -18,10 +18,15 @@ from entrypoints.production import production_runs
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
 from server.events import EventType
 from server.runtime import ServerRuntime
-from server.transport.discovery import WebHealthProbe, WebInstanceHold, WebInstanceRecord
+from server.transport.discovery import (
+    WebDiscovery,
+    WebHealthProbe,
+    WebInstanceHold,
+    WebInstanceRecord,
+)
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vs_sim.api import Platform
-from vs_sim.api.testing import ManualClock, stop_process
+from vs_sim.api.testing import FakeProcessSignaller, ManualClock, stop_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -239,7 +244,8 @@ def test_stale_instance_record_is_removed(tmp_path: Path) -> None:
     )
     record.write(path)
 
-    assert WebInstanceRecord.discover(path) is None
+    discovery = WebDiscovery(FakeProcessSignaller(set()), FakeWebHealthProbe(healthy=False))
+    assert discovery.discover(path) is None
     assert not path.exists()
 
 
@@ -268,7 +274,8 @@ def test_an_unavailable_gateway_with_a_live_owner_keeps_its_record(tmp_path: Pat
     record.write(path)
     probe = FakeWebHealthProbe(healthy=False)
 
-    assert WebInstanceRecord.discover(path, probe=probe) is None
+    discovery = WebDiscovery(FakeProcessSignaller({record.pid}), probe)
+    assert discovery.discover(path) is None
 
     assert probe.records == [record]
     assert WebInstanceRecord.read(path) == record

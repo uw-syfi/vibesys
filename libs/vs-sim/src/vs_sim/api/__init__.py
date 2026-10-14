@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         utc_datetime,
     )
     from vs_sim.concurrency import Condition, Event, Lock, OsThreads, ThreadLocal, Threads, Worker
+    from vs_sim.loopback_http import HttpReply, LoopbackHttp, UrllibLoopbackHttp
     from vs_sim.network import Connection, Listener, Network, UnixNetwork
     from vs_sim.os_platform import Platform
     from vs_sim.probes import CommandProbe, ProbeResult, SubprocessProbe
@@ -124,6 +125,9 @@ _MODULES: dict[str, str] = {
     "SignalMainThreadWake": "vs_sim.signal_relay",
     "SignalRelay": "vs_sim.signal_relay",
     "WakeupFdSignalRelay": "vs_sim.signal_relay",
+    "HttpReply": "vs_sim.loopback_http",
+    "LoopbackHttp": "vs_sim.loopback_http",
+    "UrllibLoopbackHttp": "vs_sim.loopback_http",
     "PidfdProcessSignaller": "vs_sim.signals",
     "ProcessSignaller": "vs_sim.signals",
     "SignalSource": "vs_sim.signals",
@@ -160,10 +164,12 @@ __all__ = [
     "Event",
     "ForegroundChild",
     "ForegroundLauncher",
+    "HttpReply",
     "InheritedStdioLauncher",
     "Listener",
     "Lock",
     "LoopSignalSource",
+    "LoopbackHttp",
     "MainThreadWake",
     "MergedOutputProcess",
     "MergedOutputProcessLauncher",
@@ -207,6 +213,7 @@ __all__ = [
     "ThreadLocal",
     "Threads",
     "UnixNetwork",
+    "UrllibLoopbackHttp",
     "WakeupFdSignalRelay",
     "Worker",
     "derive_seed",

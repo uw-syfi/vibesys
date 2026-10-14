@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from vs_sim.gate import arrival
+from vs_sim.loopback_http import HttpReply
 from vs_sim.processes import (
     ForegroundChild,
     MergedOutputProcess,
@@ -158,6 +159,10 @@ class FakeProcessSignaller:
         self.live_pids = set(live_pids)
         self.opened: list[int] = []
         self.terminated: list[int] = []
+
+    def exists(self, pid: int) -> bool:
+        """Whether ``pid`` is one of the live ids."""
+        return pid in self.live_pids
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Open ``pid``, evaluate ``current``, and record a permitted termination."""
@@ -471,3 +476,38 @@ class ScriptedStreamingCommand:
         if scripted.blocks:
             raise subprocess.TimeoutExpired(command, timeout_seconds, scripted.stdout, stderr)
         return subprocess.CompletedProcess(command, scripted.returncode, scripted.stdout, stderr)
+
+
+class FakeLoopbackHttp:
+    """Loopback HTTP whose servers are ports a test serves by hand."""
+
+    def __init__(self) -> None:
+        """Start with nothing listening."""
+        self._served: dict[int, Callable[[str], HttpReply]] = {}
+        self.requests: list[tuple[int, str, dict[str, str]]] = []
+
+    def serve(self, port: int, answer: Callable[[str], HttpReply]) -> None:
+        """Answer requests to ``port`` with ``answer(target)``."""
+        self._served[port] = answer
+
+    def stop(self, port: int) -> None:
+        """Stop answering on ``port``, as if its server went away."""
+        self._served.pop(port, None)
+
+    def get(
+        self,
+        port: int,
+        target: str,
+        *,
+        timeout: float,
+        max_bytes: int,
+        headers: Mapping[str, str] | None = None,
+    ) -> HttpReply | None:
+        """Record the request and its headers; the served answer cut to ``max_bytes``, or ``None``."""
+        del timeout
+        self.requests.append((port, target, dict(headers or {})))
+        answer = self._served.get(port)
+        if answer is None:
+            return None
+        reply = answer(target)
+        return HttpReply(reply.status, reply.body[:max_bytes])

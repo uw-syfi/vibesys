@@ -34,6 +34,7 @@ from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, Inv
 from websockets.protocol import State
 
 from entrypoints import web as web_entrypoint
+from entrypoints.production import production_web_discovery
 from server.api.protocol import (
     ChatQuery,
     EventBatchMessage,
@@ -110,6 +111,8 @@ if TYPE_CHECKING:
 _SEND_CEILING_PATH = Path("/proc/sys/net/ipv4/tcp_wmem")
 _SEND_CEILING_FALLBACK_BYTES = 4 * 1024 * 1024
 _BURST_CEILING_MULTIPLE = 2
+_DISCOVERY = production_web_discovery()
+"""Finds the real gateways these tests start on this host."""
 _BURST_PAYLOAD_BUDGET_BYTES = 64 * 1024 * 1024
 _STALL_EVENT_BYTES = 64 * 1024
 # Capping the peer's receive buffer takes the second, receive-side absorber out
@@ -1485,7 +1488,7 @@ def test_gateway_timeout_retires_stalled_publication_before_immediate_retry(
             retry_record = WebInstanceRecord.read(instance_path)
             assert retry_record is not None
             assert retry_record.port == gateway.bound_port
-            assert WebInstanceRecord.discover(instance_path) == retry_record
+            assert _DISCOVERY.discover(instance_path) == retry_record
         finally:
             startup.timeout.set()
             startup.release.set()
@@ -1493,7 +1496,7 @@ def test_gateway_timeout_retires_stalled_publication_before_immediate_retry(
             startup.join_first_worker()
             if retry_record is not None:
                 assert WebInstanceRecord.read(instance_path) == retry_record
-                assert WebInstanceRecord.discover(instance_path) == retry_record
+                assert _DISCOVERY.discover(instance_path) == retry_record
             gateway.close()
             parts.close()
 
@@ -1525,7 +1528,7 @@ def test_gateway_publication_uses_capability_rotated_while_its_record_was_staged
             assert record is not None
             assert record.token == rotated_token
             assert record.url == gateway.url
-            assert WebInstanceRecord.discover(instance_path) == record
+            assert _DISCOVERY.discover(instance_path) == record
         finally:
             startup.release.set()
             gateway.close()
@@ -2364,7 +2367,7 @@ def test_gateway_publishes_and_cleans_project_instance_record(tmp_path: Path) ->
         threads=OsThreads(),
         request_runner=ThreadBlockingRunner(),
     ) as gateway:
-        record = WebInstanceRecord.discover(instance_path)
+        record = _DISCOVERY.discover(instance_path)
         assert record is not None
         assert record.url == gateway.url
         health_url = f"http://127.0.0.1:{gateway.bound_port}/health?token={gateway.token}"
@@ -2434,7 +2437,7 @@ def test_browser_session_survives_launch_capability_rotation(
 
         asyncio.run(rotate_with_an_attached_socket())
 
-        replacement = WebInstanceRecord.discover(instance_path)
+        replacement = _DISCOVERY.discover(instance_path)
         assert replacement is not None
         assert replacement.token == gateway.token
         assert replacement.token != old_token

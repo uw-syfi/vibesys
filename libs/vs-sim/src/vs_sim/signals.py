@@ -67,6 +67,14 @@ class LoopSignalSource:
 class ProcessSignaller(Protocol):
     """Terminate an existing process only after validating a stable identity for it."""
 
+    def exists(self, pid: int) -> bool:
+        """Whether a process with id ``pid`` exists now, whoever owns it.
+
+        Only a definite absence is false: a process another user owns exists. The answer
+        names no stable identity, so an id the kernel reused also exists.
+        """
+        ...
+
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Send SIGTERM to stable ``pid`` iff ``current`` remains true; whether it was sent.
 
@@ -87,6 +95,16 @@ class PidfdProcessSignaller:
     def __init__(self, *, direct_syscalls: bool = False) -> None:
         """Choose the interpreter wrappers (default) or force direct system calls."""
         self._direct_syscalls = direct_syscalls
+
+    def exists(self, pid: int) -> bool:
+        """Probe ``pid`` with signal 0, which checks for the process and delivers nothing."""
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Open ``pid``, revalidate caller identity, and send SIGTERM through its pidfd."""

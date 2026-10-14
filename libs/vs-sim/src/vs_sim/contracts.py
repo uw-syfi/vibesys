@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from vs_sim.child import run_in_child
 from vs_sim.gate import Gate
+from vs_sim.loopback_http import HttpReply
 from vs_sim.processes import ProcessGroupUnreaped, ProcessOutcome, ProcessSpec, ProcessTimedOut
 from vs_sim.randomness import SeededRandom
 from vs_sim.waits import HANG_GUARD_S
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
 
     from vs_sim.blocking import BlockingRunner
     from vs_sim.clock import Clock, Sleeper
+    from vs_sim.loopback_http import LoopbackHttp
     from vs_sim.probes import CommandProbe
     from vs_sim.processes import ForegroundLauncher, Processes, ProcessLauncher
     from vs_sim.signals import ProcessSignaller, SignalSource
@@ -387,6 +389,17 @@ class ProcessSignallerContract:
         def case(subject: ProcessSignallerUnderTest) -> None:
             assert subject.signaller.terminate_if_current(subject.pid, lambda: True) is True
             subject.assert_terminated()
+
+        self._case(case)
+
+    def test_a_process_exists_until_it_is_terminated(self) -> None:
+        """The live process exists; once terminated and gone, it does not."""
+
+        def case(subject: ProcessSignallerUnderTest) -> None:
+            assert subject.signaller.exists(subject.pid)
+            assert subject.signaller.terminate_if_current(subject.pid, lambda: True) is True
+            subject.assert_terminated()
+            assert not subject.signaller.exists(subject.pid)
 
         self._case(case)
 
@@ -860,3 +873,48 @@ class StreamingCommandContract:
             raised = error
         assert raised is not None, "a command past its timeout did not raise TimeoutExpired"
         assert (raised.cmd, raised.timeout) == (subject.blocks_forever, 0.2)
+
+
+@dataclass(frozen=True)
+class LoopbackHttpUnderTest:
+    """A loopback HTTP client and the way a test puts a server behind a port."""
+
+    http: LoopbackHttp
+    serve: Callable[[HttpReply], tuple[int, Callable[[], None]]]
+    """Start a server answering every GET with the reply; its port and how to stop it."""
+    unused_port: Callable[[], int]
+    """A port nothing listens on."""
+
+
+class LoopbackHttpContract:
+    """Cases for :class:`~vs_sim.loopback_http.LoopbackHttp`. Implement one factory."""
+
+    def loopback_http_under_test(self) -> LoopbackHttpUnderTest:
+        """A fresh client with its harness."""
+        raise NotImplementedError
+
+    def test_a_served_reply_comes_back_with_its_status_and_body(self) -> None:
+        """Success and error statuses both count as an answer."""
+        subject = self.loopback_http_under_test()
+        for reply in (HttpReply(200, b"vibesys-ok\n"), HttpReply(404, b"missing")):
+            port, stop = subject.serve(reply)
+            try:
+                got = subject.http.get(port, "/health?token=t", timeout=HANG_GUARD_S, max_bytes=64)
+            finally:
+                stop()
+            assert got == reply
+
+    def test_the_body_is_read_up_to_its_bound(self) -> None:
+        """A longer body is cut at ``max_bytes``."""
+        subject = self.loopback_http_under_test()
+        port, stop = subject.serve(HttpReply(200, b"x" * 100))
+        try:
+            got = subject.http.get(port, "/", timeout=HANG_GUARD_S, max_bytes=10)
+        finally:
+            stop()
+        assert got == HttpReply(200, b"x" * 10)
+
+    def test_a_port_with_no_server_answers_nothing(self) -> None:
+        """No listener is ``None``, not an error."""
+        subject = self.loopback_http_under_test()
+        assert subject.http.get(subject.unused_port(), "/", timeout=1.0, max_bytes=64) is None

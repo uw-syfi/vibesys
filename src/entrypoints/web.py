@@ -8,17 +8,18 @@ import os
 import shutil
 import sys
 from http import HTTPStatus
-from http.client import HTTPConnection
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
+from entrypoints.production import production_web_discovery
 from entrypoints.server import (
     GATEWAY_STOP_TIMEOUT_SECONDS,
     GatewayPortStopOutcome,
     GatewayPortStopResult,
     GatewayStopOutcome,
     GatewayStopResult,
+    WebInstanceFinder,
     stop_detached_gateway,
     stop_web_gateway_on_port,
 )
@@ -31,18 +32,19 @@ from server.runtime import (
     WebPortState,
 )
 from vs_project.api import Project
-from vs_sim.api import InheritedStdioLauncher, OsThreads, run_foreground
+from vs_sim.api import InheritedStdioLauncher, OsThreads, UrllibLoopbackHttp, run_foreground
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from entrypoints.server import WebGatewayPortEffects, WebGatewayStopEffects
-    from vs_sim.api import ForegroundLauncher, Threads
+    from vs_sim.api import ForegroundLauncher, LoopbackHttp, Threads
 
 _LIVE_PORT = 8765
 _DEV_PORT = 5173
 _MAX_PORT = 65_535
 _RECORD_WAIT_SECONDS = 10.0
+_ROTATE_REPLY_BYTES = 64 * 1024
 _DEMO_LOG = Path("clients/tui/dev/fixtures/framework-events.jsonl")
 _DEMO_RUNTIME = Path("clients/apps/web/.vibesys-demo")
 
@@ -199,12 +201,14 @@ def _live_command(  # noqa: PLR0913  # lint-waiver: LW-101077 [PLR0913]; keep in
     return command
 
 
-def _wait_for_record(path: Path, threads: Threads | None = None) -> WebInstanceRecord:
-    """Poll for the gateway's record on *threads*' clock (the real one by default)."""
+def _wait_for_record(
+    path: Path, finder: WebInstanceFinder, threads: Threads | None = None
+) -> WebInstanceRecord:
+    """Poll *finder* for the gateway's record on *threads*' clock (the real one by default)."""
     clock = OsThreads() if threads is None else threads
     deadline = clock.now() + _RECORD_WAIT_SECONDS
     while clock.now() < deadline:
-        record = WebInstanceRecord.discover(path, cleanup_stale=False)
+        record = finder.discover(path, cleanup_stale=False)
         if record is not None:
             return record
         clock.sleep(0.05)
@@ -228,10 +232,16 @@ class WebLiveEffects(Protocol):
 
 
 class _DefaultWebLiveEffects:
-    """Builds and launches on the terminal, through *children* (the real system by default)."""
+    """Builds and launches on the terminal, through *children* (the real system by default).
 
-    def __init__(self, children: ForegroundLauncher | None = None) -> None:
+    *finder* finds the launched gateway (this host's discovery by default).
+    """
+
+    def __init__(
+        self, children: ForegroundLauncher | None = None, finder: WebInstanceFinder | None = None
+    ) -> None:
         self._children = children
+        self._finder = finder
 
     def build(self, root: Path) -> None:
         status = _run_foreground(
@@ -244,7 +254,8 @@ class _DefaultWebLiveEffects:
         return _run_foreground(self._children, command, cwd=root, env=environment)
 
     def wait_for_record(self, instance: Path) -> WebInstanceRecord:
-        return _wait_for_record(instance)
+        finder = production_web_discovery() if self._finder is None else self._finder
+        return _wait_for_record(instance, finder)
 
 
 _LIVE_EFFECTS = _DefaultWebLiveEffects()
@@ -369,14 +380,15 @@ class WebPortStatusInspector(Protocol):
 
 def _run_status(
     args: argparse.Namespace,
-    inspector: WebPortStatusInspector | None = None,
+    inspector: WebPortStatusInspector,
+    finder: WebInstanceFinder,
 ) -> int:
     port = getattr(args, "port", None)
     if port is not None:
-        observation = (inspector or WebPortInspector()).inspect(port)
+        observation = inspector.inspect(port)
         print(_port_status_message(observation), flush=True)  # noqa: T201  # lint-waiver: LW-102906 [T201]; port status is the requested operator-facing result
         return 0 if observation.state is WebPortState.VIBESYS_GATEWAY else 1
-    record = WebInstanceRecord.discover(args.instance, cleanup_stale=False)
+    record = finder.discover(args.instance, cleanup_stale=False)
     if record is None:
         print("No VibeSys web gateway is running.", flush=True)  # noqa: T201  # lint-waiver: LW-101096 [T201]; report lifecycle status to the operator
         return 1
@@ -404,30 +416,26 @@ def _port_status_message(observation: WebPortObservation) -> str:
     return f"Cannot safely identify the listener on {authority}.{owners}"
 
 
-def _run_rotate(args: argparse.Namespace) -> int:
-    record = WebInstanceRecord.discover(args.instance, cleanup_stale=False)
+def _run_rotate(args: argparse.Namespace, finder: WebInstanceFinder, http: LoopbackHttp) -> int:
+    record = finder.discover(args.instance, cleanup_stale=False)
     if record is None:
         print("No VibeSys web gateway is running.", flush=True)  # noqa: T201  # lint-waiver: LW-936001 [T201]; this command's stdout is its user-facing result; routing it through logging would make normal lifecycle status depend on log configuration.
         return 1
     endpoint = urlsplit(record.capability_rotation_url)
-    connection = HTTPConnection("127.0.0.1", record.port, timeout=2)
-    try:
-        connection.request(
-            "GET",
-            urlunsplit(("", "", endpoint.path, endpoint.query, "")),
-            headers={CAPABILITY_ROTATION_HEADER: "1"},
-        )
-        response = connection.getresponse()
-        response.read()
-    except OSError as error:
-        print(f"Unable to rotate VibeSys web capability: {error}", flush=True)  # noqa: T201  # lint-waiver: LW-936002 [T201]; this command's stdout is its user-facing result; logging would make an actionable transport failure depend on log configuration.
+    response = http.get(
+        record.port,
+        urlunsplit(("", "", endpoint.path, endpoint.query, "")),
+        timeout=2,
+        max_bytes=_ROTATE_REPLY_BYTES,
+        headers={CAPABILITY_ROTATION_HEADER: "1"},
+    )
+    if response is None:
+        print(f"Unable to rotate VibeSys web capability: no answer on {record.port}", flush=True)  # noqa: T201  # lint-waiver: LW-936002 [T201]; this command's stdout is its user-facing result; logging would make an actionable transport failure depend on log configuration.
         return 1
-    finally:
-        connection.close()
     if response.status != HTTPStatus.OK:
         print(f"Unable to rotate VibeSys web capability: HTTP {response.status}", flush=True)  # noqa: T201  # lint-waiver: LW-936003 [T201]; this command's stdout is its user-facing result; logging would make an actionable HTTP rejection depend on log configuration.
         return 1
-    replacement = WebInstanceRecord.discover(args.instance, cleanup_stale=False)
+    replacement = finder.discover(args.instance, cleanup_stale=False)
     if replacement is None or replacement.token == record.token:
         print("Gateway did not publish a replacement capability.", flush=True)  # noqa: T201  # lint-waiver: LW-936004 [T201]; this command's stdout is its user-facing result; logging would hide an incomplete rotation behind log configuration.
         return 1
@@ -540,9 +548,11 @@ def main(argv: list[str] | None = None, children: ForegroundLauncher | None = No
     if args.command == "tunnel":
         return _run_tunnel(args, children)
     if args.command == "status":
-        return _run_status(args)
+        discovery = production_web_discovery()
+        inspector = WebPortInspector(process_signaller=discovery.processes)
+        return _run_status(args, inspector, discovery)
     if args.command == "rotate":
-        return _run_rotate(args)
+        return _run_rotate(args, production_web_discovery(), UrllibLoopbackHttp())
     if args.command == "stop":
         return _run_stop(args)
     raise AssertionError(f"Unhandled web command: {args.command}")  # noqa: TRY003  # lint-waiver: LW-101101 [TRY003]; guard parser dispatch exhaustiveness

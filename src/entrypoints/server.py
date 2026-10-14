@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from entrypoints import cli
 from entrypoints.main_thread_interrupt import MainThreadInterrupt
-from entrypoints.production import production_runs
+from entrypoints.production import production_runs, production_web_discovery
 from entrypoints.web_assets import WebAssetBundle
 from server.host_api import (
     DetachedLaunchErrorCode,
@@ -38,6 +38,7 @@ from server.registry import (
 )
 from server.runtime import (
     WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
+    WebDiscovery,
     WebGatewayListener,
     WebInstanceClaim,
     WebInstanceHold,
@@ -360,11 +361,15 @@ class _DetachedGatewayEffects:
     One class covers launching and stopping because both act on the same
     gateway through the same mechanisms. `stop_detached_gateway` reaches it
     through the narrower `WebGatewayStopEffects` Protocol, which omits `spawn`
-    and `discover`. Time passes on *threads* (the real clock by default).
+    and `discover`. Time passes on *threads* (the real clock by default), and
+    *discovery* finds the gateway and identifies processes (this host's by default).
     """
 
-    def __init__(self, threads: Threads | None = None) -> None:
+    def __init__(
+        self, threads: Threads | None = None, discovery: WebDiscovery | None = None
+    ) -> None:
         self._threads = OsThreads() if threads is None else threads
+        self._discovery = production_web_discovery() if discovery is None else discovery
 
     def spawn(
         self,
@@ -383,7 +388,7 @@ class _DetachedGatewayEffects:
         )
 
     def discover(self, instance_path: Path) -> WebInstanceRecord | None:
-        return WebInstanceRecord.discover(instance_path, cleanup_stale=False)
+        return self._discovery.discover(instance_path, cleanup_stale=False)
 
     def read_record(self, instance_path: Path) -> WebInstanceRecord | None:
         return WebInstanceRecord.read(instance_path)
@@ -395,10 +400,10 @@ class _DetachedGatewayEffects:
         os.kill(pid, signal.SIGTERM)
 
     def inspect_port(self, port: int) -> WebPortObservation:
-        return WebPortInspector().inspect(port)
+        return WebPortInspector(process_signaller=self._discovery.processes).inspect(port)
 
     def terminate_listener(self, listener: WebGatewayListener) -> None:
-        WebPortInspector().terminate(listener)
+        WebPortInspector(process_signaller=self._discovery.processes).terminate(listener)
 
     def monotonic(self) -> float:
         return self._threads.now()
@@ -829,18 +834,28 @@ def _detached_failure(summary: str, log_path: Path, output: BinaryIO) -> str:
     return f"{tail}\n{message}" if tail else message
 
 
-def _discover_web_instance(path: Path, threads: Threads | None = None) -> WebInstanceRecord | None:
+class WebInstanceFinder(Protocol):
+    """Finds the live gateway that an instance record names."""
+
+    def discover(self, path: Path, *, cleanup_stale: bool = True) -> WebInstanceRecord | None:
+        """Return the record at *path* when its gateway answers, else None."""
+        ...
+
+
+def _discover_web_instance(
+    path: Path, finder: WebInstanceFinder, threads: Threads | None = None
+) -> WebInstanceRecord | None:
     """Wait through the bind-to-record race before deciding to launch again."""
     clock = OsThreads() if threads is None else threads
     deadline = clock.now() + 2
     while True:
-        record = WebInstanceRecord.discover(path, cleanup_stale=False)
+        record = finder.discover(path, cleanup_stale=False)
         if record is not None:
             return record
         if not WebInstanceClaim.is_held(path):
-            return WebInstanceRecord.discover(path)
+            return finder.discover(path)
         if clock.now() >= deadline:
-            return WebInstanceRecord.discover(path)
+            return finder.discover(path)
         clock.sleep(0.05)
 
 
@@ -1007,7 +1022,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
     if web and not detached_child:
         if instance_path is None:  # pragma: no cover - web always supplies a path.
             raise RuntimeError("Web instance path was not resolved")  # noqa: TRY003  # lint-waiver: LW-101038 [TRY003]; guard an impossible parser/launcher invariant
-        existing = _discover_web_instance(instance_path)
+        existing = _discover_web_instance(instance_path, production_web_discovery())
         if existing is not None:
             if web_bundle is not None and existing.web_build_id != web_bundle.build_id:
                 cli.configuration_error(
