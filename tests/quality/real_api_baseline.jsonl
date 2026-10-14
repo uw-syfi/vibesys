@@ -68,8 +68,8 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/host_sandbox.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/landlock.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "fs_sync", "count": 2}
-{"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "socket_io", "count": 2}
-{"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "subprocess", "count": 8}
+{"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "socket_io", "count": 1}
+{"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "threading", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "signal", "count": 3}
