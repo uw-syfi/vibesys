@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from pydantic import BaseModel, ConfigDict, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from vs_decode.api import Unreadable, UnreadableKind, decode_json, read_json
 from vs_sim.api.testing import examples, hostile_json_frames
@@ -122,6 +122,19 @@ def test_read_json_refuses_a_lenient_target_before_reading(
 ) -> None:
     with pytest.raises(TypeError, match="_Lenient must set extra='forbid'"):
         read_json(tmp_path / "absent.json", target, max_bytes=_CAP)
+
+
+class _OpaqueSlot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    resolved: BaseModel | None = Field(default=None, exclude=True)
+
+
+def test_an_opaque_model_slot_resolved_by_its_owner_is_not_a_lenient_shape() -> None:
+    assert decode_json(b'{"name": "n"}', _OpaqueSlot, source="s", max_bytes=_CAP) == _OpaqueSlot(
+        name="n"
+    )
 
 
 def test_a_type_adapter_decodes_values_that_are_not_models() -> None:

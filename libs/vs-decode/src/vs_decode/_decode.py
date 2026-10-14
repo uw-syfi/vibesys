@@ -84,10 +84,15 @@ class Unreadable:
 
 
 def _lenient_classes(schema: object) -> list[str]:
-    """Every model, dataclass and TypedDict a core schema decodes that keeps unknown keys."""
+    """Every model, dataclass and TypedDict a core schema decodes that keeps unknown keys.
+
+    Root models decode no keys of their own. Pydantic's ``BaseModel`` itself declares no
+    fields: a field typed with it is an opaque slot that its owner resolves in a validator
+    (for example through a registry), not a document shape, so it is not counted.
+    """
     found: list[str] = []
     if isinstance(schema, dict):
-        decodes_keys = not schema.get("root_model")
+        decodes_keys = not schema.get("root_model") and schema.get("cls") is not BaseModel
         if decodes_keys and schema.get("type") in ("model", "dataclass", "typed-dict"):
             config = schema.get("config") or {}
             extra = schema.get("extra_behavior") or config.get("extra_fields_behavior")
