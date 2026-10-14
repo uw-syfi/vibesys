@@ -75,6 +75,10 @@ _HELD = 100_000
 """Observations a held job reports RUNNING for: longer than any run lasts."""
 
 
+class TurnDiedError(RuntimeError):
+    """An executor error: the process of an agent turn died."""
+
+
 @dataclass(frozen=True)
 class TurnSpan:
     """One agent turn on the virtual timeline."""
@@ -96,7 +100,11 @@ class TurnTimeline:
     clock: VirtualClock
     duration: Callable[[int, int], float]
     obeys_cancel: bool = True
+    fails: Callable[[int, int], bool] = field(default=lambda _worker, _ordinal: False)
+    """Whether that worker's ``ordinal``-th turn dies (its executor raises) when its time is up."""
     spans: list[TurnSpan] = field(default_factory=list)
+    returned: list[str] = field(default_factory=list)
+    """The request ids of the turns that ended and handed their observation back."""
     starts: list[float] = field(default_factory=list)
     """When each turn began, in order (a turn is in ``spans`` only once it ended)."""
     _workers: dict[str, int] = field(default_factory=dict)
@@ -107,11 +115,11 @@ class TurnTimeline:
         """The worker number of a session, assigned at its first turn."""
         return self._workers.setdefault(session, len(self._workers))
 
-    def next_duration(self, worker: int) -> float:
-        """How long this worker's next turn lasts."""
+    def next_turn(self, worker: int) -> tuple[float, bool]:
+        """How long this worker's next turn lasts, and whether it then dies."""
         ordinal = self._ordinals.get(worker, 0)
         self._ordinals[worker] = ordinal + 1
-        return self.duration(worker, ordinal)
+        return self.duration(worker, ordinal), self.fails(worker, ordinal)
 
     def cancel_event(self, invocation: str) -> asyncio.Event:
         """Set when the invocation's turn was asked to cancel."""
@@ -163,8 +171,16 @@ class TimedTurns(RequestExecutors):
             start = timeline.clock.now()
             cancel = timeline.cancel_event(request.turn.invocation_id.root)
             timeline.starts.append(start)
-            cancelled = await self._last(timeline.next_duration(worker), cancel)
+            seconds, dies = timeline.next_turn(worker)
+            cancelled = await self._last(seconds, cancel)
             timeline.spans.append(TurnSpan(worker, start, timeline.clock.now(), cancelled))
+            if dies and not cancelled:
+                message = f"the turn of worker {worker} died"
+                raise TurnDiedError(message)
+            outcome = await RequestExecutors.dispatch(self, request, context)
+            assert request.request_id is not None
+            timeline.returned.append(request.request_id.root)
+            return outcome
         return await RequestExecutors.dispatch(self, request, context)
 
     async def _last(self, seconds: float, cancel: asyncio.Event) -> bool:
@@ -334,6 +350,8 @@ class Timed:
     """Whether the loop's host still held the run's lease when the loop returned."""
     core: CoreState
     """The run's state when the loop returned."""
+    failure: Exception | None = None
+    """What the loop raised (halting the run); None when it returned or was cancelled."""
 
     @property
     def wall_s(self) -> float:
@@ -347,6 +365,7 @@ class Plan:
 
     duration: Callable[[int, int], float] = field(default=lambda _worker, _ordinal: 1.0)
     obeys_cancel: bool = True
+    fails: Callable[[int, int], bool] = field(default=lambda _worker, _ordinal: False)
     hold_from: int | None = None
     max_parallel: int = 1
     max_turns: int = 8
@@ -406,7 +425,7 @@ class _Operator:
 
 
 async def _play(path: Path, clock: VirtualClock, strategy: SkeletonStrategy, plan: Plan) -> Timed:
-    timeline = TurnTimeline(clock, plan.duration, plan.obeys_cancel)
+    timeline = TurnTimeline(clock, plan.duration, plan.obeys_cancel, plan.fails)
     cluster = HoldingCluster(clock, plan.hold_from)
     observed = Observed(clock)
     with open_timed_world(path, strategy, timeline, cluster) as world:
@@ -434,6 +453,7 @@ async def _play(path: Path, clock: VirtualClock, strategy: SkeletonStrategy, pla
         running = asyncio.ensure_future(drive_core(host, config))
         watching = asyncio.ensure_future(operator.run())
         outcome: RunOutcome | None = None
+        failure: BaseException | None = None
         gave_up = False
         try:
             await asyncio.wait({running, watching}, return_when=asyncio.FIRST_COMPLETED)
@@ -443,9 +463,11 @@ async def _play(path: Path, clock: VirtualClock, strategy: SkeletonStrategy, pla
                 if not running.done():
                     running.cancel()
                     gave_up = True
-            await asyncio.gather(running, return_exceptions=gave_up)
-            if not gave_up:
+            await asyncio.gather(running, return_exceptions=True)
+            if not gave_up and running.exception() is None:
                 outcome = running.result()
+            elif not gave_up:
+                failure = running.exception()
         finally:
             watching.cancel()
             await asyncio.gather(watching, return_exceptions=True)
@@ -468,6 +490,7 @@ async def _play(path: Path, clock: VirtualClock, strategy: SkeletonStrategy, pla
             tuple(job for job in cluster.cancelled if job not in before),
             holds,
             process.shell.record.envelope.core,
+            failure if isinstance(failure, Exception) else None,
         )
 
 
