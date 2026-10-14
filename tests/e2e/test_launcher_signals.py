@@ -51,6 +51,8 @@ sys.exit({_ENGINE_STATUS})
 """
 _BOOT_TRACE_STUB = """
 class boot_trace:
+    BootTrace = staticmethod(lambda **_clocks: None)
+    install = staticmethod(lambda _trace: None)
     mark_launch = staticmethod(lambda: None)
     child_env = staticmethod(dict)
 """

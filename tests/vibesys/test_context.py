@@ -95,6 +95,14 @@ class _CreateContextOptions(TypedDict, total=False):
     run_environment: RunEnvironmentSpec
 
 
+@pytest.fixture(autouse=True)
+def _boot_trace_on_virtual_clocks() -> Iterator[None]:
+    """Install the boot trace the entrypoint would, on clocks that only a test moves."""
+    boot_trace.install(boot_trace.BootTrace(wall=ManualClock(), elapsed=ManualClock()))
+    yield
+    boot_trace.install(None)
+
+
 def _write_project(root: Path, *, evaluator_name: str = "checker") -> Path:
     """Write a one-task project; return the task's evaluator source directory."""
     root.mkdir()

@@ -954,6 +954,7 @@ def main(
     has no structured channel to reach a frontend on, and stderr is inherited
     by the TUI launcher and redirected onto the detached startup log.
     """
+    cli.start_boot_trace()
     try:
         _serve(sys.argv[1:] if argv is None else argv, observer, runs)
     except ConfigurationError as exc:

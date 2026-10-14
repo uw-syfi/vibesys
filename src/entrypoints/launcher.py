@@ -56,6 +56,7 @@ from vs_sim.api import (
     MonotonicClock,
     ProcessSpec,
     SubprocessLauncher,
+    SystemClock,
 )
 
 if TYPE_CHECKING:
@@ -614,6 +615,7 @@ def _launch_trace_env() -> dict[str, str]:
     # > routing decision across two files without removing this deferred import.
     from vibesys.api import boot_trace  # noqa: PLC0415
 
+    boot_trace.install(boot_trace.BootTrace(wall=SystemClock(), elapsed=MonotonicClock()))
     boot_trace.mark_launch()
     return boot_trace.child_env()
 
