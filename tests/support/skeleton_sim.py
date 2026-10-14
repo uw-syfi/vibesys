@@ -27,6 +27,7 @@ from vs_core.api import RequestPhase, RunStatus
 from vs_faults.api import FaultGate, FaultPlan, HostCrashError
 from vs_project.api.testing import GitKind
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
+from vs_sim.api.testing import current_virtual_clock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -108,7 +109,8 @@ async def simulate(
                 )
             except HostCrashError:
                 crashes += 1
-                now += LEASE + 2.0
+                # The next host starts once the lease the dead one last renewed (or took) expires.
+                now = max(now, current_virtual_clock().at) + LEASE + 2.0
                 continue
             assert refusal is None, refusal
             summary = _summary(world, cluster, process, crashes, None)
