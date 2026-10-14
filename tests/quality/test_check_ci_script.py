@@ -104,3 +104,26 @@ def test_check_shell_scripts_never_invoke_a_bare_python() -> None:
     ]
 
     assert offenders == [], offenders
+
+
+def coverage_groups() -> list[str]:
+    match = re.search(r"^COVERAGE_GROUPS=\(([^)]*)\)", SCRIPT, re.MULTILINE)
+    assert match, "check_ci.sh must declare COVERAGE_GROUPS=(...)"
+    return match.group(1).split()
+
+
+def test_patch_coverage_gate_runs_the_groups_ci_runs_in_the_order_ci_runs_them() -> None:
+    """Regression: check_ci.sh skipped the patch-coverage gate, so it failed only in CI.
+
+    The script names the CI groups that produce coverage data (the test run, the combine step)
+    and apply the gate, in workflow order, and carries none of their thresholds or commands.
+    """
+    policy_groups = {g["name"] for g in POLICY["check_groups"]}
+    ci_order = re.findall(r"repoctl run-checks --group (\w+)", WORKFLOW)
+    groups = coverage_groups()
+
+    assert groups == ["python_ci_tests_shard", "python_ci_coverage", "patch_coverage"]
+    assert set(groups) <= policy_groups
+    assert [ci_order.index(name) for name in groups] == sorted(ci_order.index(n) for n in groups)
+    assert "fail-under" not in SCRIPT
+    assert "diff-cover" not in SCRIPT
