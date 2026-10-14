@@ -24,10 +24,6 @@ module-level ``TypeAdapter``. Those default to ignoring unknown keys too, so the
 covers every one of them that a product model or adapter reaches (a dataclass sets
 ``__pydantic_config__ = ConfigDict(extra="forbid")``; a TypedDict sets
 ``__pydantic_config__`` with ``with_config``).
-
-``_PENDING`` lists the models that still accept unknown keys without a reason, in code other
-owners are changing. The check fails on a model missing from it, and on an entry that now
-complies or no longer exists, so the list only gets shorter.
 """
 
 from __future__ import annotations
@@ -43,17 +39,6 @@ from server.events import ChatData, EventPayload
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 REASON = "unknown_keys_reason"
-
-_PENDING = frozenset(
-    {
-        # libs/vs-agent: payloads nested in persisted event payloads.
-        "vs_agent.events.AgentStatusData",
-        "vs_agent.events.CommandResultPayload",
-        "vs_agent.events.EventPayload",
-        "vs_agent.events.JsonResultPayload",
-        "vs_agent.events.TodoItemData",
-    }
-)
 
 
 def _product_modules() -> list[str]:
@@ -148,21 +133,15 @@ def _declared_reason(model: type) -> str | None:
 
 
 def test_every_model_forbids_unknown_keys_or_declares_why_not() -> None:
-    lenient = {
-        _name(model): model
+    lenient = sorted(
+        _name(model)
         for model in _product_models()
         if model.model_config.get("extra") != "forbid" and _declared_reason(model) is None
-    }
-    unlisted = sorted(set(lenient) - _PENDING)
-    stale = sorted(_PENDING - set(lenient))
-    assert not unlisted, (
+    )
+    assert not lenient, (
         "These models accept unknown keys without saying why. Set "
         "model_config = ConfigDict(extra='forbid'), or declare "
-        f"`{REASON}: ClassVar[str]` with the reason they must accept them:\n" + "\n".join(unlisted)
-    )
-    assert not stale, (
-        "These models no longer accept unknown keys without a reason (or no longer exist); "
-        "remove them from _PENDING:\n" + "\n".join(stale)
+        f"`{REASON}: ClassVar[str]` with the reason they must accept them:\n" + "\n".join(lenient)
     )
 
 
