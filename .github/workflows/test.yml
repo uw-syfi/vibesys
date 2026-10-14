@@ -22,7 +22,11 @@ env:
   # #474): a warning above the first, a failure above the second. Kept here so
   # raising or lowering them is a one-line change and the guard and the
   # documentation can't disagree.
-  CI_WALL_TIME_WARN_SECONDS: '360'
+  # The budget is under 5 minutes with no added compute (no bigger runners, no
+  # more shards). 270 s warns that a run is near it. The failure stays at 600 s
+  # until p95 execution is under about 260 s: runs measured 250 to 280 s with
+  # slow-runner outliers to 373 s, so failing at 300 s now would be noise.
+  CI_WALL_TIME_WARN_SECONDS: '270'
   CI_WALL_TIME_ERROR_SECONDS: '600'
 
 jobs:
@@ -510,7 +514,7 @@ jobs:
   # changes do not.
   # The suite is split by test file across the runners listed in `matrix.shard`
   # (`VIBESYS_TEST_SHARD`, see tests/support/sharding.py) so the job fits the
-  # ten-minute CI budget. The shard count is the length of that list
+  # five-minute CI budget. The shard count is the length of that list
   # (`strategy.job-total`), so growing the suite means extending the list and
   # nothing else; `coverage` downloads whatever `coverage-data-*` artifacts exist.
   # Each shard uploads its coverage data; `coverage` combines them.
@@ -1058,12 +1062,17 @@ jobs:
   # can push a run over for reasons no workflow change can fix. Elapsed and
   # queue time stay in the summary and the annotation.
   #
+  # `seed-exploration` and `doc-checks` are in `needs` so their time counts: a job
+  # still running when this one starts drops out of the math, which is how a
+  # 10-minute seed exploration once reported as a 262 s run.
+  #
   # `typecheck` is deliberately absent from `needs`; Required PR CI owns that
   # dependency. It still appears in the table because this step reads every job
   # of the run from the API, not just the ones listed here.
   ci-budget:
     needs:
       - changes
+      - doc-checks
       - python-checks
       - tui-quality
       - tui-tests
@@ -1080,6 +1089,7 @@ jobs:
       - real-tiers-minimal-container
       - test
       - coverage
+      - seed-exploration
       - sandbox-linux
       - sandbox-macos
     if: always()
