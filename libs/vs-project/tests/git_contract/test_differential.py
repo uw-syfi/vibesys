@@ -319,8 +319,25 @@ _EXAMPLES = examples(pr=2, nightly=12)
     # status lines but one path in ``uncommitted_paths``.
     operations=[_Op(kind="delete"), _Op(kind="stage"), _Op(kind="write")]
 )
+@example(
+    # Regression (#2302): a file replaced a tracked file's directory-turned-file path; staging
+    # that and restoring HEAD over it is accepted by Git.
+    operations=[
+        _Op(kind="write"),
+        _Op(kind="write"),
+        _Op(kind="file_over_dir"),
+        _Op(kind="stage"),
+        _Op(kind="restore"),
+    ]
+)
 @given(operations=st.lists(_OPS, min_size=1, max_size=12))
 def test_wide_sequences_agree_with_the_oracle(
+    factory: RepositoryFactory, oracle_factory: RepositoryFactory, operations: list[_Op]
+) -> None:
+    _agree_with_the_oracle(factory, oracle_factory, operations)
+
+
+def _agree_with_the_oracle(
     factory: RepositoryFactory, oracle_factory: RepositoryFactory, operations: list[_Op]
 ) -> None:
     with tempfile.TemporaryDirectory() as scratch:
@@ -334,3 +351,52 @@ def test_wide_sequences_agree_with_the_oracle(
             assert outcome == _attempt(oracle, roots[1], operation, step), trace
             seen, expected = _observe(subject, roots[0]), _observe(oracle, roots[1])
             assert seen == expected, (trace, [key for key in seen if seen[key] != expected[key]])
+
+
+_REPLACEABLE = ("a.txt", "dir", "dir/c.txt", "dir/sub", "dir/sub/d.txt")
+_REPLACEMENT_OPS = st.builds(
+    _Op,
+    kind=st.sampled_from(
+        [
+            "write",
+            "file_over_dir",
+            "file_over_dir",
+            "delete",
+            "stage",
+            "stage_force",
+            "unstage",
+            "restore",
+            "commit",
+            "reset_index",
+            "switch_new",
+        ]
+    ),
+    path=st.sampled_from(_REPLACEABLE),
+    text=st.sampled_from(_TEXTS),
+    specs=st.sampled_from([0, 1, 2, 4]),
+    ordinal=st.integers(min_value=0, max_value=1),
+    branch=st.sampled_from(_BRANCHES),
+)
+
+
+@settings(max_examples=_EXAMPLES, deadline=None)
+@example(operations=[_Op(kind="file_over_dir"), _Op(kind="stage"), _Op(kind="restore")])
+@example(
+    operations=[
+        _Op(kind="file_over_dir", path="dir"),
+        _Op(kind="stage"),
+        _Op(kind="restore"),
+        _Op(kind="file_over_dir", path="dir"),
+        _Op(kind="stage"),
+    ]
+)
+@given(operations=st.lists(_REPLACEMENT_OPS, min_size=2, max_size=10))
+def test_file_and_directory_replacement_agrees_with_the_oracle(
+    factory: RepositoryFactory, oracle_factory: RepositoryFactory, operations: list[_Op]
+) -> None:
+    """A file replacing a directory (and back), then staged, restored or committed.
+
+    Restoring a revision over a path whose type changed removes whatever is in the way, and
+    an index entry whose file is gone or became a directory is not a change since HEAD.
+    """
+    _agree_with_the_oracle(factory, oracle_factory, operations)

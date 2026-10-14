@@ -383,13 +383,18 @@ class Pygit2GitRepository:
             if tree is None:
                 _refuse("bad revision 'HEAD'")
             # ``HEAD`` against the worktree walks the tree and the index together:
-            # a path the index adds or drops differs whatever its file holds,
-            # every other path differs when the worktree file differs from the tree.
+            # a path the index drops differs whatever its file holds, a path the
+            # index adds differs whatever its file holds as long as the worktree
+            # has a file or symlink there (Git skips an added path whose file was
+            # deleted or replaced by a directory), and every other path differs
+            # when the worktree file differs from the tree.
+            workdir = Path(repository.workdir)
             paths = self._changed_paths(tree.diff_to_workdir())
             paths |= {
                 delta.new_file.path
                 for delta in repository.index.diff_to_tree(tree).deltas
-                if delta.status_char() in {"A", "D"}
+                if delta.status_char() == "D"
+                or (delta.status_char() == "A" and _is_file_or_link(workdir / delta.new_file.path))
             }
         except _LIBGIT2_ERRORS as error:
             self._fail("diff --name-only HEAD", error)
@@ -525,6 +530,11 @@ class Pygit2GitRepository:
 
     def add_excludes(self, patterns: Sequence[str]) -> tuple[str, ...]:
         return append_excludes(self._exclude_file, patterns)
+
+
+def _is_file_or_link(path: Path) -> bool:
+    """Whether ``path`` is a file or a symlink (to anything), not a directory or absent."""
+    return path.is_symlink() or path.is_file()
 
 
 def _write_index(repository: pygit2.Repository, index: pygit2.Index) -> None:
