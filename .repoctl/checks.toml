@@ -41,7 +41,7 @@ commands = [
 
 # The fast repo-policy guards (real-API ratchet, isolation baseline, wait bans, CI wall-time, ...).
 # CI also runs them inside the sharded suite; this group runs them on their own, in the quality job
-# that runs beside the shards, so `scripts/check_ci.sh` catches a ratchet failure before the PR.
+# that runs beside the shards.
 [[check_groups]]
 name = "python_guards"
 language = "python"

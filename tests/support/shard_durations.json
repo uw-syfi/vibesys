@@ -593,7 +593,6 @@
  "tests/quality/test_agent_text_parsing.py": 0.34,
  "tests/quality/test_ast_identity.py": 0.01,
  "tests/quality/test_biome_quality_rules.py": 0.0,
- "tests/quality/test_check_ci_script.py": 0.03,
  "tests/quality/test_check_file_length.py": 0.58,
  "tests/quality/test_check_lint_waivers.py": 0.02,
  "tests/quality/test_check_member_dependencies.py": 0.07,
