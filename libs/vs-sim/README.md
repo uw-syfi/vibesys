@@ -49,6 +49,9 @@ test (`--sim-seed=N` replays it) and, with `--sim-determinism-check`, runs each 
 twice and compares their event traces. `--sim-explore=N` runs each selected sim test under
 N different seeds, each also breaking scheduling ties (ready callbacks, equal-time timers)
 in its own seeded order via `run_virtual(schedule_seed=...)`; a failure prints
-`--sim-seed=S --sim-schedule-seed=S` to replay it. The pull-request job `seed-exploration`
-uses it on the tests a PR adds or changes (`scripts/explore_changed_tests.py`). Domain fakes register with
+`--sim-seed=S --sim-schedule-seed=S` to replay it. Exploration runs in rounds (every test
+once, then every test again), so `--sim-explore-budget=SECONDS` or an interrupt that ends it
+early leaves the tests explored about equally; `--sim-explore-salt=TEXT` varies the seeds
+and the test each round starts from. The pull-request job `seed-exploration` uses it, under
+a hard wall-clock cap, on the tests a PR adds or changes (`scripts/explore_changed_tests.py`). Domain fakes register with
 `vs_sim.api.testing.WORLDS` and are built per test by `sim.world(name)`.

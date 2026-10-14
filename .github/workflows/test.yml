@@ -687,19 +687,26 @@ jobs:
 
   # Reruns the tests a pull request adds or changes across many seeds and schedule
   # orderings (issue #1640), so a test that only passes in one scheduling order fails its
-  # own PR. A job of its own, beside the shards: it adds no time to the critical path, and
-  # a PR that touches no test pays for the checkout and a stdlib-only diff scan only (no
-  # environment setup). Pull requests only; the merge queue has already seen the result.
+  # own PR. A job of its own, beside the shards, and off the critical path at any PR size:
+  # the exploration step has a hard wall-clock cap (scripts/explore_changed_tests.py,
+  # DEFAULT_CAP_SECONDS) that ends it at least 30 s before the shards and coverage do. The
+  # head commit salts the seeds and where each round of tests starts, so a PR too large
+  # for one push's cap gets its other tests explored on later pushes; the job summary lists
+  # what the cap left out. A PR that touches no test pays for the checkout and a
+  # stdlib-only diff scan only (no environment setup). Pull requests only; the merge queue
+  # has already seen the result.
   seed-exploration:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # A backstop only: the cap ends the exploration step after 150 s.
+    timeout-minutes: 6
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          filter: blob:none
 
       - name: Select the tests this pull request adds or changes
         id: select
@@ -722,7 +729,9 @@ jobs:
 
       - name: Explore the changed tests across seeds and schedules
         if: steps.select.outputs.selected == 'true'
-        run: uv run --no-sync python scripts/explore_changed_tests.py run --ids-file "$RUNNER_TEMP/changed-tests.txt"
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: uv run --no-sync python scripts/explore_changed_tests.py run --ids-file "$RUNNER_TEMP/changed-tests.txt" --salt "$HEAD_SHA"
 
   # Exercises the real Linux workspace-confinement boundary (issue #149). The
   # main `test` job skips these (no bubblewrap), so this job installs it and

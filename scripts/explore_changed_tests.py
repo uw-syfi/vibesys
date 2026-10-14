@@ -13,23 +13,32 @@ runs only what the PR touched, so the cost follows the size of the change:
 * `run` hands the selection to pytest with the vs-sim plugin's exploration options: sim tests
   run under `--sim-explore` different seeds, each with its own schedule seed; other tests
   outside the real-system tiers run `--sim-repeat` times; real-system tiers are not run.
-  A budget stops extra runs, never a test's first run. The elapsed time lands in the job
-  summary.
+  The step has a hard wall-clock cap, so it ends before the test shards and coverage
+  whatever the size of the PR: pytest stops starting runs `TAIL_SECONDS` before the cap,
+  and at the cap this script interrupts it, which ends exploration with the results so
+  far. The cap may cut a test's first exploration run too, since the shards already run
+  every changed test once. Exploration runs in rounds (every test once, then every test
+  again), and the PR's head commit salts the seeds and the test each round starts from, so
+  a large PR's pushes still cover all its tests over time. The job summary lists what ran
+  and what the cap left unexplored.
 
 Usage:
     python3 scripts/explore_changed_tests.py select --base origin/main --ids-file ids.txt
-    uv run python scripts/explore_changed_tests.py run --ids-file ids.txt
+    uv run python scripts/explore_changed_tests.py run --ids-file ids.txt --salt "$HEAD_SHA"
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from dataclasses import dataclass
@@ -41,8 +50,16 @@ if TYPE_CHECKING:
 
 DEFAULT_SEEDS = 24
 DEFAULT_REPEATS = 3
-DEFAULT_BUDGET_SECONDS = 240.0
+# The cap keeps the job (about 25 s of checkout and environment setup plus this step) at
+# least 30 s ahead of the critical path: the test shards then coverage, about 4 to 4.5
+# minutes after the run starts, against this job's start at about 0.5 minutes.
+DEFAULT_CAP_SECONDS = 150.0
+# Pytest starts no run this close to the cap, so the interrupt at the cap normally finds it
+# finished; an interrupted pytest gets `GRACE_SECONDS` to report before it is killed.
+TAIL_SECONDS = 20.0
+GRACE_SECONDS = 10.0
 PYTEST_NO_TESTS_COLLECTED = 5
+LISTED_UNEXPLORED = 50
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -169,33 +186,101 @@ def _github_output(key: str, value: str) -> None:
             out.write(f"{key}={value}\n")
 
 
+@dataclass(frozen=True)
+class Explored:
+    """One selected test's exploration, as the vs-sim plugin's ``--sim-explore-report`` writes it."""
+
+    test: str
+    runs: int
+    planned: int
+    outcome: str
+
+
+def read_report(text: str) -> list[Explored]:
+    """The rows of an exploration report (JSON lines)."""
+    return [Explored(**json.loads(line)) for line in text.splitlines() if line.strip()]
+
+
+def summary(
+    rows: list[Explored], *, selections: int, cap: float, elapsed: float, verdict: str
+) -> str:
+    """The job summary: what exploration ran, and what the cap left unexplored."""
+    unexplored = [row.test for row in rows if row.outcome == "not explored"]
+    explored = len(rows) - len(unexplored)
+    lines = [
+        "### Seed exploration",
+        "",
+        f"{selections} changed test selections; {len(rows)} explorable tests, {explored} explored."
+        f" {sum(row.runs for row in rows)} of {sum(row.planned for row in rows)} planned runs"
+        f" in {elapsed:.1f} s: {verdict}.",
+    ]
+    failed = [row.test for row in rows if row.outcome == "failed"]
+    if failed:
+        lines += ["", "Failed (the log prints the seed that replays each):"]
+        lines += [f"- `{test}`" for test in failed]
+    if unexplored:
+        lines += [
+            "",
+            f"The {cap:g} s cap left {len(unexplored)} tests unexplored this push"
+            " (the next push's commit starts the rounds elsewhere; the shards ran each once):",
+        ]
+        lines += [f"- `{test}`" for test in unexplored[:LISTED_UNEXPLORED]]
+        if len(unexplored) > LISTED_UNEXPLORED:
+            lines.append(f"- and {len(unexplored) - LISTED_UNEXPLORED} more")
+    return "\n".join(lines) + "\n"
+
+
+def outcome(code: int, *, capped: bool) -> tuple[bool, str]:
+    """Whether the step fails, and the verdict for the summary, from pytest's exit code.
+
+    Only a test failure (exit code 1) fails a capped run: the interrupt at the cap makes
+    pytest exit 2 when it lands outside a test run (during collection), or the process dies
+    to the kill after the grace period, and neither is the PR's fault.
+    """
+    if code == 0 or (capped and code != 1):
+        return False, "passed, stopped at the cap" if capped else "passed"
+    if code == PYTEST_NO_TESTS_COLLECTED:
+        return False, "no explorable tests selected"
+    return True, "FAILED"
+
+
+def _pytest_within(command: list[str], cap: float) -> tuple[int, bool]:
+    """Run pytest; interrupt it at ``cap`` seconds. Returns its exit code and whether the cap hit."""
+    # lint-waiver: LW-164002 [S603]; The command is this interpreter running pytest with fixed options and ids this script wrote. There is no shell, and a wrapper would only forward the same argv.
+    process = subprocess.Popen(command)  # noqa: S603
+    try:
+        return process.wait(timeout=cap), False
+    except subprocess.TimeoutExpired:
+        process.send_signal(signal.SIGINT)
+    try:
+        return process.wait(timeout=GRACE_SECONDS), True
+    except subprocess.TimeoutExpired:
+        process.kill()
+        return process.wait(), True
+
+
 def _run(args: argparse.Namespace) -> int:
     ids = [line for line in Path(args.ids_file).read_text(encoding="utf-8").split("\n") if line]
-    command = [
-        sys.executable, "-m", "pytest", "-q", "--no-cov", "-p", "no:cacheprovider",
-        f"--sim-explore={args.seeds}", f"--sim-repeat={args.repeats}",
-        f"--sim-explore-budget={args.budget}", *ids,
-    ]  # fmt: skip
-    started = time.monotonic()
-    # lint-waiver: LW-164002 [S603]; The command is this interpreter running pytest with fixed options and ids this script wrote. There is no shell, and a wrapper would only forward the same argv.
-    code = subprocess.run(command, check=False).returncode  # noqa: S603
-    elapsed = time.monotonic() - started
-    outcome = (
-        "no explorable tests selected"
-        if code == PYTEST_NO_TESTS_COLLECTED
-        else ("passed" if code == 0 else "FAILED")
-    )
-    summary = (
-        f"### Seed exploration\n\n{len(ids)} changed test selections, {args.seeds} seeds and "
-        f"schedules per simulated test, {args.repeats} repeats per other test, budget "
-        f"{args.budget:g} s.\n\nExploration took {elapsed:.1f} s: {outcome}.\n"
-    )
-    print(summary)
+    with tempfile.TemporaryDirectory() as scratch:
+        report = Path(scratch) / "explored.jsonl"
+        command = [
+            sys.executable, "-m", "pytest", "-q", "--no-cov", "-p", "no:cacheprovider",
+            f"--sim-explore={args.seeds}", f"--sim-repeat={args.repeats}",
+            f"--sim-explore-budget={max(args.cap - TAIL_SECONDS, 0.0):g}",
+            f"--sim-explore-salt={args.salt}", f"--sim-explore-report={report}", *ids,
+        ]  # fmt: skip
+        started = time.monotonic()
+        code, capped = _pytest_within(command, args.cap)
+        elapsed = time.monotonic() - started
+        rows = read_report(report.read_text(encoding="utf-8")) if report.exists() else []
+    failed, verdict = outcome(code, capped=capped)
+    text = summary(rows, selections=len(ids), cap=args.cap, elapsed=elapsed, verdict=verdict)
+    print(text)
     target = os.environ.get("GITHUB_STEP_SUMMARY")
     if target:
         with Path(target).open("a", encoding="utf-8") as out:
-            out.write(summary)
-    return 0 if code in {0, PYTEST_NO_TESTS_COLLECTED} else code
+            out.write(text)
+    return code if failed else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -211,7 +296,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--ids-file", required=True)
     run.add_argument("--seeds", type=int, default=DEFAULT_SEEDS)
     run.add_argument("--repeats", type=int, default=DEFAULT_REPEATS)
-    run.add_argument("--budget", type=float, default=DEFAULT_BUDGET_SECONDS)
+    run.add_argument("--cap", type=float, default=DEFAULT_CAP_SECONDS, help="wall seconds")
+    run.add_argument("--salt", default="", help="varies seeds and order (CI: the head commit)")
     args = parser.parse_args(argv)
     return _select(args) if args.command == "select" else _run(args)
 

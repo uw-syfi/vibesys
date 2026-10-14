@@ -32,15 +32,27 @@ What it does:
   ``run_virtual``). A test that passes only in the default order fails here, and the failure
   prints ``--sim-seed=S --sim-schedule-seed=S`` to replay that exact run. Other tests (not
   sim, not in a real-system tier) run ``--sim-repeat=K`` times to expose flakiness; real-system
-  tiers are deselected. ``--sim-explore-budget=SECONDS`` stops starting extra runs once that
-  much wall time has passed (the first run of every test always happens), and the terminal
+  tiers are deselected. Exploration runs in rounds: round ``r`` runs every test that has runs
+  left once, so a budget that ends early leaves the tests explored about equally rather than
+  the first few deeply and the rest not at all. ``--sim-explore-budget=SECONDS`` (counted from
+  the session's start) stops starting runs, including a test's first exploration run: the
+  ordinary suite has already run every test once under its default seed. An interrupt
+  (Ctrl-C, or the CI step's hard cap) ends exploration the same way and keeps the results so
+  far. ``--sim-explore-salt=TEXT`` picks which seeds the runs use and which test each round
+  starts from, so successive commits explore different seeds and, under a tight budget,
+  different tests. A test the budget left unexplored is reported as skipped.
+  ``--sim-explore-report=PATH`` writes one JSON object per selected test (``test``: node id,
+  ``runs``: exploration runs done, ``planned``: runs asked for, ``outcome``: ``passed``,
+  ``failed``, ``skipped`` or ``not explored``) for the CI step's job summary. The terminal
   summary reports how many runs happened and how long they took.
 """
 
 from __future__ import annotations
 
 import inspect
+import json
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import hypothesis
@@ -77,12 +89,16 @@ _EXPLORATION = pytest.StashKey["_Exploration"]()
 class _Exploration:
     """What exploration planned, did and skipped, for the terminal summary and the budget."""
 
-    def __init__(self, budget: float | None) -> None:
+    def __init__(self, config: pytest.Config) -> None:
         self.started = time.monotonic()
-        self.budget = budget
+        self.budget: float | None = config.getoption("sim_explore_budget")
+        salt: str | None = config.getoption("sim_explore_salt")
+        self.offset = 0 if salt is None else seed_for_test(f"explore-salt:{salt}")
         self.planned = 0
         self.done = 0
         self.skipped = 0
+        self.stopped_by_interrupt = False
+        self.outcomes: list[dict[str, object]] = []
 
     def out_of_budget(self) -> bool:
         return self.budget is not None and time.monotonic() - self.started >= self.budget
@@ -134,7 +150,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type=float,
         default=None,
         metavar="SECONDS",
-        help="with --sim-explore, start no extra run after this many wall seconds",
+        help="with --sim-explore, start no run after this many wall seconds from the session start",
+    )
+    group.addoption(
+        "--sim-explore-salt",
+        default=None,
+        metavar="TEXT",
+        help="with --sim-explore, vary the seeds and the round order by this text (CI: the commit)",
+    )
+    group.addoption(
+        "--sim-explore-report",
+        default=None,
+        metavar="PATH",
+        help="with --sim-explore, write each test's exploration runs and outcome as JSON lines",
     )
     parser.addini(
         "sim_real_tiers",
@@ -147,6 +175,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     """Declare the marker and make the chosen depth the session's one setting."""
     set_depth(Depth(config.getoption("depth")))
+    if config.getoption("sim_explore") > 0:
+        config.stash[_EXPLORATION] = _Exploration(config)
     config.addinivalue_line(
         "markers", "sim: run this test as a simulation even when it is not an async test"
     )
@@ -245,7 +275,9 @@ def _sim_for(item: pytest.Item) -> Sim:
         seed = seed_for_test(item.nodeid, item.config.getoption("sim_seed"))
         schedule_seed = item.config.getoption("sim_schedule_seed")
     else:
-        seed = schedule_seed = explore_seed(item.nodeid, run)
+        seed = schedule_seed = explore_seed(
+            item.nodeid, item.config.stash[_EXPLORATION].offset + run
+        )
     trace = EventTrace() if item.config.getoption("sim_determinism_check") else None
     sim = Sim(seed=seed, trace=trace, schedule_seed=schedule_seed)
     setattr(item, SIM_ATTRIBUTE, sim)
@@ -314,9 +346,7 @@ def pytest_runtest_makereport(
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> bool | None:
-    """Run a sim test twice and compare traces (``--sim-determinism-check``), or explore it (``--sim-explore``)."""
-    if item.config.getoption("sim_explore") > 0 and isinstance(item, pytest.Function):
-        return _explore(item, nextitem)
+    """Run a sim test twice and compare traces (``--sim-determinism-check``)."""
     if not item.config.getoption("sim_determinism_check") or not _is_sim_test(item):
         return None
     item.ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
@@ -340,40 +370,104 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     return True
 
 
-def _exploration(config: pytest.Config) -> _Exploration:
-    state = config.stash.get(_EXPLORATION, None)
-    if state is None:
-        state = _Exploration(config.getoption("sim_explore_budget"))
-        config.stash[_EXPLORATION] = state
-    return state
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtestloop(session: pytest.Session) -> bool | None:
+    """With ``--sim-explore``, run the selected tests in rounds until their runs or the budget end."""
+    state = session.config.stash.get(_EXPLORATION, None)
+    if state is None or session.config.option.collectonly:
+        return None
+    if session.testsfailed and not session.config.option.continue_on_collection_errors:
+        return None  # pytest's own loop reports the collection errors
+    items = [item for item in session.items if isinstance(item, pytest.Function)]
+    if items:
+        start = state.offset % len(items)
+        items = items[start:] + items[:start]
+    _explore_in_rounds(session, state, items)
+    report_path = session.config.getoption("sim_explore_report")
+    if report_path is not None:
+        Path(report_path).write_text(
+            "".join(f"{json.dumps(outcome)}\n" for outcome in state.outcomes), encoding="utf-8"
+        )
+    return True
 
 
-def _explore(item: pytest.Function, nextitem: pytest.Item | None) -> bool:
-    """Run the test ``N`` (sim) or ``K`` (other) times, stopping at the first failure or the budget."""
-    config = item.config
-    state = _exploration(config)
-    is_sim = _is_sim_test(item)
-    runs = config.getoption("sim_explore" if is_sim else "sim_repeat")
-    state.planned += runs
+def _explore_in_rounds(
+    session: pytest.Session, state: _Exploration, items: list[pytest.Function]
+) -> None:
+    """Run round after round; log each test once, when it fails or when exploration ends."""
+    config = session.config
+    runs = {
+        item: config.getoption("sim_explore" if _is_sim_test(item) else "sim_repeat")
+        for item in items
+    }
+    state.planned = sum(runs.values())
+    done = dict.fromkeys(items, 0)
+    reports: dict[pytest.Function, list[pytest.TestReport]] = {}
+    unlogged = list(items)
+    try:
+        for round_index in range(max(runs.values(), default=0)):
+            queue = [item for item in unlogged if round_index < runs[item]]
+            for position, item in enumerate(queue):
+                if state.out_of_budget():
+                    return
+                following = queue[position + 1] if position + 1 < len(queue) else None
+                reports[item] = _run_once(item, round_index, following)
+                done[item] += 1
+                state.done += 1
+                if not all(report.passed or report.skipped for report in reports[item]):
+                    _log_exploration(state, item, (done[item], runs[item]), reports[item])
+                    unlogged.remove(item)
+                if session.shouldfail or session.shouldstop:
+                    return
+    except KeyboardInterrupt:
+        state.stopped_by_interrupt = True
+    finally:
+        for item in unlogged:
+            _log_exploration(state, item, (done[item], runs[item]), reports.get(item))
+        state.skipped = state.planned - state.done
+
+
+def _run_once(
+    item: pytest.Function, round_index: int, following: pytest.Item | None
+) -> list[pytest.TestReport]:
+    """One exploration run: a sim test under its ``round_index``-th exploration seed."""
+    if _is_sim_test(item):
+        item.stash[_RUN] = round_index
+    reports = runtestprotocol(item, nextitem=following, log=False)
+    if getattr(item, SIM_ATTRIBUTE, None) is not None:
+        delattr(item, SIM_ATTRIBUTE)
+    return reports
+
+
+def _log_exploration(
+    state: _Exploration,
+    item: pytest.Function,
+    runs: tuple[int, int],
+    reports: list[pytest.TestReport] | None,
+) -> None:
+    """Log a test's last run (``runs`` is done and planned), or a skip when it never ran."""
+    if reports is None:
+        outcome = "not explored"
+        reason = "not explored: the budget or an interrupt ended exploration first"
+        reports = [
+            item.ihook.pytest_runtest_makereport(
+                item=item, call=pytest.CallInfo.from_call(lambda: pytest.skip(reason), when="setup")
+            ),
+            item.ihook.pytest_runtest_makereport(
+                item=item, call=pytest.CallInfo.from_call(lambda: None, when="teardown")
+            ),
+        ]
+    elif any(report.failed for report in reports):
+        outcome = "failed"
+    else:
+        outcome = "skipped" if any(report.skipped for report in reports) else "passed"
+    done, planned = runs
+    state.outcomes.append(
+        {"test": item.nodeid, "runs": done, "planned": planned, "outcome": outcome}
+    )
     item.ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
-    reports: list[pytest.TestReport] = []
-    for run in range(runs):
-        # The first run of a test always happens: a budget bounds the extra work, not coverage.
-        if run > 0 and state.out_of_budget():
-            state.skipped += runs - run
-            break
-        if is_sim:
-            item.stash[_RUN] = run
-        reports = runtestprotocol(item, nextitem=nextitem, log=False)
-        state.done += 1
-        if not all(report.passed or report.skipped for report in reports):
-            state.skipped += runs - run - 1
-            break
-        if getattr(item, SIM_ATTRIBUTE, None) is not None:
-            delattr(item, SIM_ATTRIBUTE)
     _log(item, reports)
     item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
-    return True
 
 
 def pytest_terminal_summary(
@@ -384,9 +478,10 @@ def pytest_terminal_summary(
     if state is None:
         return
     elapsed = time.monotonic() - state.started
+    stop = ", stopped by an interrupt" if state.stopped_by_interrupt else ""
     terminalreporter.write_line(
         f"vs-sim exploration: {state.done} of {state.planned} planned runs in {elapsed:.1f} s"
-        f" ({state.skipped} not run: budget or an earlier failure)"
+        f" ({state.skipped} not run: budget, interrupt or an earlier failure{stop})"
     )
 
 

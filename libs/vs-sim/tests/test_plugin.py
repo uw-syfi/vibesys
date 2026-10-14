@@ -8,6 +8,7 @@ and the plugin's one global, the session depth, is put back after every case.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import signal
 import threading
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from vs_sim.api.testing import (
@@ -26,6 +27,7 @@ from vs_sim.api.testing import (
     VirtualDeadlockError,
     WorldRegistry,
     depth,
+    explore_seed,
     run_in_child,
     run_virtual,
     using_depth,
@@ -393,11 +395,122 @@ def test_explore_deselects_real_tiers_and_other_tests_unless_repeated(
     )
 
 
-def test_explore_budget_stops_extra_runs_but_never_the_first(suite: pytest.Pytester) -> None:
+def test_a_spent_budget_cuts_even_a_tests_first_exploration_run(suite: pytest.Pytester) -> None:
     suite.makepyfile("async def test_sim():\n    pass\n")
-    result = suite.runpytest_inprocess("--sim-explore=50", "--sim-explore-budget=0")
-    result.assert_outcomes(passed=1)
-    result.stdout.fnmatch_lines(["vs-sim exploration: 1 of 50 planned runs in *"])
+    result = suite.runpytest_inprocess(
+        "--sim-explore=50", "--sim-explore-budget=0", "--sim-explore-report=explored.jsonl", "-rs"
+    )
+    result.assert_outcomes(skipped=1)
+    result.stdout.fnmatch_lines(
+        [
+            "vs-sim exploration: 0 of 50 *",
+            "*not explored: the budget or an interrupt ended exploration first*",
+        ]
+    )
+    assert _explored(suite.path / "explored.jsonl") == {
+        "test_a_spent_budget_cuts_even_a_tests_first_exploration_run.py::test_sim": (
+            0,
+            50,
+            "not explored",
+        )
+    }
+
+
+COUNTING_SUITE = """
+from pathlib import Path
+
+def _run(name):
+    counter = Path({example!r}) / name
+    count = int(counter.read_text()) if counter.exists() else 0
+    if name == {interrupter!r} and count == {interrupt_run}:
+        raise KeyboardInterrupt
+    counter.write_text(str(count + 1))
+
+{tests}
+"""
+
+
+@settings(
+    max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(
+    tests=st.integers(1, 4),
+    data=st.data(),
+    interrupt_run=st.integers(0, 3),
+    salt=st.text("0123456789abcdef", min_size=1, max_size=8),
+)
+def test_an_interrupt_leaves_every_test_explored_within_one_run_of_the_others(
+    suite: pytest.Pytester, tests: int, data: st.DataObject, interrupt_run: int, salt: str
+) -> None:
+    """Exploration runs in rounds, so a cut (budget or interrupt) never starves later tests."""
+    names = [f"test_{index}" for index in range(tests)]
+    interrupter = data.draw(st.sampled_from(names))
+    # A new module and counter directory per example: a rewritten module of the same size
+    # and second would otherwise load from its stale bytecode cache.
+    example = suite.mkdir(f"example_{len(list(suite.path.glob('example_*')))}")
+    module = example / "test_counting.py"
+    module.write_text(
+        COUNTING_SUITE.format(
+            example=str(example),
+            interrupter=interrupter,
+            interrupt_run=interrupt_run,
+            tests="\n".join(f"def {name}():\n    _run({name!r})\n" for name in names),
+        )
+    )
+    report = example / "explored.jsonl"
+    result = suite.runpytest_inprocess(
+        str(module),
+        "--sim-explore=1",
+        "--sim-repeat=5",
+        f"--sim-explore-salt={salt}",
+        f"--sim-explore-report={report}",
+    )
+
+    explored = {test.rpartition("::")[2]: row for test, row in _explored(report).items()}
+    runs = {name: row[0] for name, row in explored.items()}
+    counted = {
+        name: int((example / name).read_text()) if (example / name).exists() else 0
+        for name in names
+    }
+    assert runs == counted
+    assert {row[2] for row in explored.values() if row[0] == 0} <= {"not explored"}
+    assert {row[2] for row in explored.values() if row[0] > 0} <= {"passed"}
+    assert runs[interrupter] == interrupt_run
+    assert set(runs.values()) <= {interrupt_run, interrupt_run + 1}
+    ran = sum(1 for count in runs.values() if count)
+    result.assert_outcomes(passed=ran, skipped=tests - ran)
+    result.stdout.fnmatch_lines(["vs-sim exploration: * stopped by an interrupt)"])
+
+
+def test_the_salt_picks_the_exploration_seeds(suite: pytest.Pytester) -> None:
+    suite.makepyfile(
+        test_seeds="""
+        from pathlib import Path
+
+        async def test_sim(sim):
+            with Path("seeds").open("a") as out:
+                out.write(f"{sim.seed}\\n")
+        """
+    )
+
+    def seeds(*salt: str) -> list[int]:
+        (suite.path / "seeds").unlink(missing_ok=True)
+        suite.runpytest_inprocess("--sim-explore=3", *salt).assert_outcomes(passed=1)
+        return [int(line) for line in (suite.path / "seeds").read_text().split()]
+
+    unsalted = seeds()
+    assert unsalted == [explore_seed("test_seeds.py::test_sim", run) for run in range(3)]
+    salted = seeds("--sim-explore-salt=abc")
+    assert salted == seeds("--sim-explore-salt=abc")
+    assert len(set(salted)) == 3
+    assert not set(salted) & set(seeds("--sim-explore-salt=abd"))
+    assert not set(salted) & set(unsalted)
+
+
+def _explored(report: Path) -> dict[str, tuple[int, int, str]]:
+    """Each test's exploration runs, planned runs and outcome, from ``--sim-explore-report``."""
+    rows = [json.loads(line) for line in report.read_text().splitlines()]
+    return {row["test"]: (row["runs"], row["planned"], row["outcome"]) for row in rows}
 
 
 @pytest.mark.parametrize(
