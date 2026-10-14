@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import contextlib
 import json
 import os
@@ -46,6 +47,11 @@ _RECV_BYTES = 65_536
 _MAX_FRAME_BYTES = 16 * 1024 * 1024
 _STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 _CONNECTION_CLOSED = "the command broker closed the connection"
+_PROTOCOL_ERROR_STATUS = 1
+
+
+class BrokerProtocolError(ValueError):
+    """The broker sent something that is not a frame of its protocol."""
 
 
 class Wire(Protocol):
@@ -92,15 +98,61 @@ class _SocketWire:
 
 
 def _lines(wire: Wire) -> Iterator[bytes]:
-    """Yield each newline-terminated line the broker sends, then a final unterminated one."""
-    buffer = b""
+    """Yield each newline-terminated line the broker sends, then a final unterminated one.
+
+    Raises:
+        BrokerProtocolError: a line outgrew ``_MAX_FRAME_BYTES``, ended or not; nothing
+            past that bound is buffered.
+    """
+    buffer = bytearray()
     while chunk := wire.recv(_RECV_BYTES):
         buffer += chunk
         while (end := buffer.find(b"\n") + 1) > 0:
-            yield buffer[:end]
-            buffer = buffer[end:]
+            _within_bound(end)
+            yield bytes(buffer[:end])
+            del buffer[:end]
+        _within_bound(len(buffer))
     if buffer:
-        yield buffer
+        yield bytes(buffer)
+
+
+def _within_bound(size: int) -> None:
+    if size > _MAX_FRAME_BYTES:
+        message = f"a frame longer than {_MAX_FRAME_BYTES} bytes"
+        raise BrokerProtocolError(message)
+
+
+def _frame(line: bytes) -> dict[str, object]:
+    """The JSON object *line* holds; ``BrokerProtocolError`` for anything else."""
+    try:
+        frame = json.loads(line)
+    except (ValueError, RecursionError) as error:
+        # ``json`` recurses per nesting level, so a deeply nested line is a
+        # ``RecursionError``; invalid UTF-8 is a ``UnicodeDecodeError``.
+        message = f"a frame that is not JSON ({type(error).__name__})"
+        raise BrokerProtocolError(message) from error
+    if not isinstance(frame, dict):
+        message = f"a frame that is not a JSON object ({type(frame).__name__})"
+        raise BrokerProtocolError(message)
+    return frame
+
+
+def _output(value: object) -> bytes:
+    if not isinstance(value, str):
+        message = "an output frame whose data is not a string"
+        raise BrokerProtocolError(message)
+    try:
+        return base64.b64decode(value, validate=True)
+    except binascii.Error as error:
+        message = "an output frame whose data is not base64"
+        raise BrokerProtocolError(message) from error
+
+
+def _exit_status(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        message = "an exit frame whose status is not an integer"
+        raise BrokerProtocolError(message)
+    return value
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -158,13 +210,11 @@ def _relay(wire: Wire, call: dict[str, object]) -> int | None:
     # after the send, so it takes the same exit.
     wire.send(json.dumps(call, separators=(",", ":")).encode() + b"\n")
     for line in _lines(wire):
-        if len(line) > _MAX_FRAME_BYTES:
-            return None
-        frame = json.loads(line)
+        frame = _frame(line)
         if "output" in frame:
-            _write(base64.b64decode(frame["output"]))
+            _write(_output(frame["output"]))
         elif "exit" in frame:
-            return int(frame["exit"])
+            return _exit_status(frame["exit"])
         elif "error" in frame:
             _error(str(frame["error"]))
             return _USAGE_ERROR
@@ -182,6 +232,10 @@ def _request(call: dict[str, object], *, stop: Stop, dial: Callable[[str], Wire]
             # A stop that arrived while dialing found no connection to close;
             # sending the request now would start a job nobody stops.
             status = None if stop.event.is_set() else _relay(wire, call)
+        except BrokerProtocolError as error:
+            # Closing the connection below cancels the job; its output is unreadable.
+            _error(f"the command broker sent {error}")
+            return _PROTOCOL_ERROR_STATUS
         except ConnectionError:
             # A reset or broken pipe is a dropped connection, like a clean close
             # without an exit status.
