@@ -42,12 +42,10 @@ from vs_agent.api import (
     SteerOutcome,
 )
 from vs_sandbox.api.testing import FakeDockerConfinement
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_until_started_sync
+from vs_sim.api.testing import HANG_GUARD_S, start_thread
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from concurrent.futures import Future
     from pathlib import Path
 
     from agentshim.execution.process import SpawnRequest
@@ -56,7 +54,6 @@ if TYPE_CHECKING:
     # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
     from vs_agent.shim_turns import LaunchedSession
     from vs_sandbox.api import DockerSandbox
-    from vs_sim.api import Event, Threads
 
 STREAM_PROVIDERS = tuple(agentshim.stream_provider_names())
 ONE_SHOT_PROVIDERS = tuple(
@@ -111,20 +108,13 @@ def test_every_stream_provider_has_a_script() -> None:
 @dataclass
 class _Observer:
     events: list[AgentEvent] = field(default_factory=list)
-    seen: dict[AgentEventKind, Event] = field(default_factory=dict)
-    threads: Threads = field(default_factory=OsThreads)
+    react: dict[AgentEventKind, Callable[[], None]] = field(default_factory=dict)
+    """What to do, once, on the turn's own thread when an event of a kind first arrives."""
 
     def on_event(self, event: AgentEvent) -> None:
         self.events.append(event)
-        self._seen(event.kind).set()
-
-    def _seen(self, kind: AgentEventKind) -> Event:
-        # setdefault is atomic, and the observer is called from the turn's thread.
-        return self.seen.setdefault(kind, self.threads.event())
-
-    def wait_for(self, kind: AgentEventKind, turn: Future[None]) -> None:
-        """Return once an event of *kind* arrived; surface the turn's outcome if it ends first."""
-        wait_until_started_sync(self._seen(kind), turn)
+        if (action := self.react.pop(event.kind, None)) is not None:
+            action()
 
     def kinds(self) -> list[AgentEventKind]:
         return [event.kind for event in self.events]
@@ -244,26 +234,21 @@ def test_a_rate_limit_report_precedes_the_turns_close(tmp_path: Path, provider: 
 def test_a_rate_limit_report_reaches_the_observer_while_the_turn_still_runs(
     tmp_path: Path, provider: str
 ) -> None:
+    """The report arrives over the live process, before the turn ends.
+
+    The observer runs on the turn's thread, so a report it receives arrived while the
+    turn ran, and it cancels the turn right there. A check from another thread raced the
+    stalled turn's hang guard, which a simulated silent process reaches at once.
+    """
     sandbox = FakeDockerConfinement(workspace=tmp_path)
     executor = FakeExecutor([], peers=STALLING[provider]())
     session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
-    observer = _Observer()
-    failures: list[BaseException] = []
+    observer = _Observer(react={AgentEventKind.RATE_LIMIT: session.cancel})
 
-    def turn() -> None:
-        try:
-            session.run_turn(AgentTurnRequest(message="work"), observer)
-        except agentshim.TurnCancelledError as error:
-            failures.append(error)
+    with pytest.raises(agentshim.TurnCancelledError):
+        session.run_turn(AgentTurnRequest(message="work"), observer)
 
-    worker = start_thread(turn)
-    observer.wait_for(AgentEventKind.RATE_LIMIT, worker)
-    # The turn has not ended: the report arrived over the live process.
-    assert not worker.done()
-    session.cancel()
-    worker.result()
-
-    assert isinstance(failures[0], agentshim.TurnCancelledError)
+    assert AgentEventKind.RATE_LIMIT in observer.kinds()
 
 
 @pytest.mark.parametrize("provider", STREAM_PROVIDERS)
