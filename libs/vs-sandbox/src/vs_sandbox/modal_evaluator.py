@@ -43,10 +43,10 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Sequence
+    from collections.abc import Callable, Generator, Sequence
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _MODAL_WEB_URL = re.compile(r"https://[a-zA-Z0-9.-]+\.modal\.run")
@@ -76,6 +76,9 @@ _B64_CHUNK_CHARS = 60_000
 _MAX_ENCODED_SETUP_COMMAND_CHARS = 60_000
 _MAX_STAGE_ARCHIVE_BYTES = 8 * 1024 * 1024
 _CONTAINER_DISCOVERY_TIMEOUT_SECONDS = 90.0
+_CONTAINER_POLL_SECONDS = 5.0
+_HEALTH_POLL_SECONDS = 2.0
+_HEALTH_PROBE_TIMEOUT_SECONDS = 10.0
 _KEEPWARM_INTERVAL_SECONDS = 30.0
 
 
@@ -284,20 +287,63 @@ def recent_modal_logs(app_identifier: str, *, workspace: str) -> str:
     return output
 
 
-def wait_for_health(base_url: str, *, timeout_seconds: float) -> None:
-    """Wait until the deployed candidate returns HTTP 200 from ``/health``."""
-    deadline = time.monotonic() + timeout_seconds
+class WaitClock(Protocol):
+    """The time a wait loop reads and sleeps on; ``vs_sim``'s threads and clocks fit it."""
+
+    def now(self) -> float:
+        """Seconds on a timeline that never runs backwards."""
+        ...
+
+    def sleep(self, seconds: float) -> None:
+        """Block for ``seconds``."""
+        ...
+
+
+class MonotonicWaits:
+    """The operating system's monotonic clock and real sleeping."""
+
+    def now(self) -> float:
+        """Monotonic seconds."""
+        return time.monotonic()
+
+    def sleep(self, seconds: float) -> None:
+        """Sleep for real."""
+        time.sleep(seconds)
+
+
+def _health_status(health_url: str, timeout_seconds: float) -> int:
+    """The HTTP status ``/health`` answers within ``timeout_seconds``; ``OSError`` otherwise."""
+    with urllib.request.urlopen(health_url, timeout=timeout_seconds) as response:  # noqa: S310  # lint-waiver: LW-010210 [S310]; the endpoint is restricted to a verified Modal HTTPS host.
+        return response.status
+
+
+def wait_for_health(
+    base_url: str,
+    *,
+    timeout_seconds: float,
+    clock: WaitClock | None = None,
+    probe: Callable[[str, float], int] = _health_status,
+) -> None:
+    """Wait until the deployed candidate returns HTTP 200 from ``/health``.
+
+    Gives up once ``timeout_seconds`` pass on ``clock``: no probe or pause runs past that
+    deadline. ``probe(url, timeout)`` returns the status or raises ``OSError``.
+    """
+    clock = clock or MonotonicWaits()
+    deadline = clock.now() + timeout_seconds
     health_url = _modal_health_url(base_url)
     last_error = "no response"
-    while time.monotonic() < deadline:
+    while (remaining := deadline - clock.now()) > 0:
         try:
-            with urllib.request.urlopen(health_url, timeout=10) as response:  # noqa: S310  # lint-waiver: LW-010210 [S310]; the endpoint is restricted to a verified Modal HTTPS host.
-                if health_ready(response.status):
-                    return
-                last_error = f"HTTP {response.status}"
+            status = probe(health_url, min(_HEALTH_PROBE_TIMEOUT_SECONDS, remaining))
         except (OSError, urllib.error.URLError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
-        time.sleep(2)
+        else:
+            if health_ready(status):
+                return
+            last_error = f"HTTP {status}"
+        if (remaining := deadline - clock.now()) > 0:
+            clock.sleep(min(_HEALTH_POLL_SECONDS, remaining))
     message = f"{health_url} did not become ready: {last_error}"
     raise TimeoutError(message)
 
@@ -674,34 +720,45 @@ def health_ready(http_status: int) -> bool:
     return http_status == _HTTP_OK_STATUS
 
 
-def _find_app_container(
+def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; the app, where to list it, the bound, and the three effects the wait performs.
+    # > The clock, listing and warm-up are the loop's effects; bundling them into one
+    # > object would add a type to this stdlib-only helper that only its tests construct.
     app_identifier: str,
     *,
     workspace: str,
     base_url: str,
     timeout_seconds: float = _CONTAINER_DISCOVERY_TIMEOUT_SECONDS,
+    clock: WaitClock | None = None,
+    list_containers: Callable[[str], ContainerListing | ListingFailed] | None = None,
+    warm: Callable[[str], bool] | None = None,
 ) -> str:
     """Return the id of a running container for the deployed app.
 
     Health probes double as warm-up: if the app scaled to zero between
     readiness and discovery, probing the public endpoint starts a container.
+    Gives up once ``timeout_seconds`` pass on ``clock``, after a last listing at that
+    deadline; no pause runs past it.
     """
-    deadline = time.monotonic() + timeout_seconds
+    clock = clock or MonotonicWaits()
+    list_containers = list_containers or _list_containers
+    warm = warm or _healthy_now
+    deadline = clock.now() + timeout_seconds
     life: ContainerLife = ContainerUnknown()
     last_error = "no container listed"
     while True:
-        listing = _list_containers(workspace)
+        listing = list_containers(workspace)
         reading = container_reading(listing, app_identifier)
         if isinstance(reading, ContainerUnknown):
             last_error = reading.raw or last_error
         life = advance_container(life, reading)
         if isinstance(life, ContainerRunning):
             return life.container_id
-        if time.monotonic() >= deadline:
+        if clock.now() >= deadline:
             message = f"no running container found for Modal app {app_identifier}: {last_error}"
             raise TimeoutError(message)
-        _healthy_now(base_url)
-        time.sleep(5)
+        warm(base_url)
+        if (remaining := deadline - clock.now()) > 0:
+            clock.sleep(min(_CONTAINER_POLL_SECONDS, remaining))
 
 
 def _list_containers(workspace: str) -> ContainerListing | ListingFailed:
@@ -881,7 +938,7 @@ def _execute_colocated(
         encoded[offset : offset + _B64_CHUNK_CHARS]
         for offset in range(0, len(encoded), _B64_CHUNK_CHARS)
     ] or [""]
-    container_id = _find_app_container(
+    container_id = find_app_container(
         app_identifier,
         workspace=workspace,
         base_url=base_url,

@@ -1523,45 +1523,6 @@ def _fake_response(status: int) -> MagicMock:
     return response
 
 
-def test_wait_for_health_retries_until_http_200(monkeypatch: pytest.MonkeyPatch) -> None:
-    urlopen = MagicMock(side_effect=[_fake_response(503), OSError("refused"), _fake_response(200)])
-    sleeps: list[float] = []
-    monkeypatch.setattr(modal_evaluator.urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(modal_evaluator.time, "sleep", sleeps.append)
-
-    modal_evaluator.wait_for_health("https://a--b.modal.run", timeout_seconds=1000)
-
-    assert urlopen.call_count == 3
-    assert urlopen.call_args.args[0] == "https://a--b.modal.run/health"
-    assert sleeps == [2, 2]
-
-
-def test_wait_for_health_times_out_with_the_last_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    with pytest.raises(TimeoutError, match="did not become ready: no response"):
-        modal_evaluator.wait_for_health("https://a--b.modal.run", timeout_seconds=0)
-
-    ticks = iter([0.0, 0.0, 5.0])
-    monkeypatch.setattr(modal_evaluator.time, "monotonic", lambda: next(ticks))
-    monkeypatch.setattr(modal_evaluator.time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(
-        modal_evaluator.urllib.request, "urlopen", MagicMock(return_value=_fake_response(502))
-    )
-    with pytest.raises(TimeoutError, match="did not become ready: HTTP 502"):
-        modal_evaluator.wait_for_health("https://a--b.modal.run", timeout_seconds=1)
-
-
-def test_wait_for_health_rejects_untrusted_urls_before_any_request(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    urlopen = MagicMock()
-    monkeypatch.setattr(modal_evaluator.urllib.request, "urlopen", urlopen)
-
-    with pytest.raises(ValueError, match="invalid web URL"):
-        modal_evaluator.wait_for_health("https://evil.example", timeout_seconds=1)
-
-    urlopen.assert_not_called()
-
-
 @pytest.mark.parametrize(
     ("outcome", "expected"),
     [

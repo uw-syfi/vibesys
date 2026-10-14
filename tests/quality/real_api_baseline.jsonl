@@ -104,7 +104,7 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "socket_io", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "subprocess", "count": 8}
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "threading", "count": 2}
-{"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "time", "count": 6}
+{"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "time", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "signal", "count": 3}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "subprocess", "count": 6}
