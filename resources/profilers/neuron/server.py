@@ -14,6 +14,7 @@ Launch (typically spawned by the agent runner via ``MCPServerSpec``):
 from __future__ import annotations
 
 import argparse
+import importlib
 import sys
 import tempfile
 from pathlib import Path
@@ -32,6 +33,16 @@ import analyze_neuron  # noqa: E402
 def _capture(fn: Callable[..., None], **kwargs: object) -> str:
     """Run the shared textual-analysis boundary."""
     return analyze_neuron.capture_runtime.run_analysis(fn, **kwargs)
+
+
+# The same common runtime is staged beside each standalone profiler bundle.
+for _common_name in ("_common", "profilers_common"):
+    _common_path = Path(__file__).resolve().parent.parent / _common_name
+    if (_common_path / "strict_arguments.py").is_file():
+        sys.path.insert(0, str(_common_path))
+        break
+
+strict_arguments = importlib.import_module("strict_arguments").strict_arguments
 
 
 def build_server() -> FastMCP:
@@ -91,7 +102,7 @@ def build_server() -> FastMCP:
         """
         return _capture(analyze_neuron.cmd_view, report=report, output_format=output_format)
 
-    return mcp
+    return strict_arguments(mcp)
 
 
 def main(argv: list[str] | None = None) -> None:

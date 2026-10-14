@@ -15,6 +15,7 @@ Launch (typically spawned by the agent runner via ``MCPServerSpec``):
 from __future__ import annotations
 
 import argparse
+import importlib
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -38,6 +39,16 @@ def _capture(fn: Callable[..., None], **kwargs: object) -> str:
     return analyze_nsys.capture_runtime.run_analysis(fn, **kwargs)
 
 
+# The same common runtime is staged beside each standalone profiler bundle.
+for _common_name in ("_common", "profilers_common"):
+    _common_path = Path(__file__).resolve().parent.parent / _common_name
+    if (_common_path / "strict_arguments.py").is_file():
+        sys.path.insert(0, str(_common_path))
+        break
+
+strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+
+
 def build_server() -> FastMCP:
     """Construct the FastMCP instance with nsys analysis tools.
 
@@ -48,7 +59,7 @@ def build_server() -> FastMCP:
     _register_report_tools(mcp)
     _register_timing_tools(mcp)
     _register_detail_tools(mcp)
-    return mcp
+    return strict_arguments(mcp)
 
 
 def _register_report_tools(mcp: FastMCP) -> None:

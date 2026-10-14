@@ -1,7 +1,9 @@
 """MCP tools for normalized servicebench OpenTelemetry reports."""
 
+import importlib
 import json
 import math
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -889,6 +891,16 @@ def _find_artifacts(root: str, *, schema_version: int, model: type[BaseModel]) -
     return sorted(artifacts)
 
 
+# The same common runtime is staged beside each standalone profiler bundle.
+for _common_name in ("_common", "profilers_common"):
+    _common_path = Path(__file__).resolve().parent.parent / _common_name
+    if (_common_path / "strict_arguments.py").is_file():
+        sys.path.insert(0, str(_common_path))
+        break
+
+strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+
+
 def build_server() -> FastMCP:
     """Build the profiler MCP server."""
     mcp = FastMCP("vibesys-otel-profiler")
@@ -923,7 +935,7 @@ def build_server() -> FastMCP:
         """Return a graph's call structure and representative request waterfall."""
         return summarize_trace_breakdown(path, telemetry_path, top=top)
 
-    return mcp
+    return strict_arguments(mcp)
 
 
 if __name__ == "__main__":

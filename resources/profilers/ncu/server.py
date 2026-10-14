@@ -77,6 +77,9 @@ def _invoke(
     }
 
 
+strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+
+
 def build_server(
     *,
     runner: capture_runtime.CommandRunner = subprocess.run,
@@ -160,7 +163,7 @@ def build_server(
     for name in sorted(withheld):
         mcp.remove_tool(name)  # a name the server lacks raises: a stale list must not pass silently
 
-    return mcp
+    return strict_arguments(mcp)
 
 
 def main(argv: list[str] | None = None) -> None:

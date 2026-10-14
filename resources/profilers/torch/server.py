@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import contextlib
+import importlib
 import sys
 import threading
 from pathlib import Path
@@ -74,6 +75,9 @@ def _resolve_report(report: str) -> str:
             "(manifest.json missing 'primary_trace'); pass an explicit trace file path instead."
         )
     return str(capture_dir / primary)
+
+
+strict_arguments = importlib.import_module("strict_arguments").strict_arguments
 
 
 def build_server() -> FastMCP:  # noqa: C901  # LW-910137; this function implements one cohesive parsing/validation routine that resists a clean split
@@ -406,7 +410,7 @@ def build_server() -> FastMCP:  # noqa: C901  # LW-910137; this function impleme
             top=top,
         )
 
-    return mcp
+    return strict_arguments(mcp)
 
 
 def main(argv: list[str] | None = None) -> None:

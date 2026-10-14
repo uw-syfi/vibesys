@@ -1,5 +1,7 @@
 """MCP tools for collecting a separate Linux native CPU profile."""
 
+import importlib
+import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -10,6 +12,15 @@ from vs_runtime.cpu_profilers import (
     parse_profile_command,
     summarize_linux_profile,
 )
+
+# The same common runtime is staged beside each standalone profiler bundle.
+for _common_name in ("_common", "profilers_common"):
+    _common_path = Path(__file__).resolve().parent.parent / _common_name
+    if (_common_path / "strict_arguments.py").is_file():
+        sys.path.insert(0, str(_common_path))
+        break
+
+strict_arguments = importlib.import_module("strict_arguments").strict_arguments
 
 
 def build_server() -> FastMCP:
@@ -64,7 +75,7 @@ def build_server() -> FastMCP:
         """Summarize a previously collected Linux CPU profile directory."""
         return summarize_linux_profile(Path(output_dir))
 
-    return mcp
+    return strict_arguments(mcp)
 
 
 if __name__ == "__main__":

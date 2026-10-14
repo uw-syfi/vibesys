@@ -46,6 +46,9 @@ def _capture(fn: Callable[..., None], **kwargs: object) -> str:
     return capture_runtime.run_analysis(fn, **kwargs)
 
 
+strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+
+
 def build_server() -> FastMCP:
     """Construct the FastMCP instance with headroom-report analysis tools."""
     mcp = FastMCP("vibesys-headroom-profiler")
@@ -110,7 +113,7 @@ def build_server() -> FastMCP:
         """
         return _capture(analyze_headroom.cmd_summary, report=report, top=top, klass=None)
 
-    return mcp
+    return strict_arguments(mcp)
 
 
 def main(argv: list[str] | None = None) -> None:

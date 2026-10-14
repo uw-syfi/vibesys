@@ -90,6 +90,9 @@ import kernel_bench  # noqa: E402  # LW-920177; the sys.path setup directly abov
 _capture_cli = capture.run_cli
 
 
+strict_arguments = importlib.import_module("strict_arguments").strict_arguments
+
+
 def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements one cohesive parsing/validation routine that resists a clean split
     *,
     run_worker: Callable[..., Awaitable[str]] = mcp_async.run_cancellable,
@@ -1076,7 +1079,7 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
 
     for name in sorted(withheld):
         mcp.remove_tool(name)  # a name the server lacks raises: a stale list must not pass silently
-    return mcp
+    return strict_arguments(mcp)
 
 
 def main(argv: list[str] | None = None) -> None:  # noqa: D103  # LW-910106; this is a small standalone-script helper whose name and body are self-explanatory
