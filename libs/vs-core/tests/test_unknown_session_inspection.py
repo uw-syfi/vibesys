@@ -65,3 +65,42 @@ def test_an_unknown_turn_whose_inspection_ended_unanswered_is_released_as_lost(
     [session] = result.state.sessions.sessions
     assert session.wait is not None
     assert cancel.request_id in session.wait.requests
+
+
+def _turn_ended(state: core.CoreState) -> core.CoreState:
+    """The unknown session's turn already ended, so only the session's acceptance is unknown."""
+    sessions = state.sessions
+    invocations = tuple(
+        invocation.model_copy(update={"phase": core.SessionPhase.TERMINAL})
+        for invocation in sessions.invocations
+    )
+    return state.model_copy(
+        update={"sessions": sessions.model_copy(update={"invocations": invocations})}
+    )
+
+
+@pytest.mark.parametrize(
+    "inspection_phase", [core.RequestPhase.BLOCKED, core.RequestPhase.COMPLETED]
+)
+def test_an_unknown_session_with_no_unknown_turn_keeps_its_wait_and_is_reported(
+    inspection_phase: core.RequestPhase,
+) -> None:
+    """With no turn to release, the session keeps naming the ended requests: a loud orphan.
+
+    Before, it dropped its wait, so no orphan check named it and the run stalled unreported.
+    """
+    unknown = _unknown_turn()
+    [session] = unknown.state.sessions.sessions
+    assert session.wait is not None
+    waited = session.wait.requests
+    ended = _ended(_turn_ended(unknown.state), dict.fromkeys(waited, inspection_phase))
+
+    result = reload_step(ended, core.ClockAdvanced(now_at=2.0))
+
+    [session] = result.state.sessions.sessions
+    assert session.phase == core.SessionPhase.UNKNOWN
+    assert session.wait is not None
+    assert set(session.wait.requests) == set(waited)
+    orphans = core.orphan_waits(result.state)
+    assert [wait.waiter for wait in orphans] == [core.WaitKind.SESSION], orphans
+    assert session.spec.session_id.root in orphans[0].subject

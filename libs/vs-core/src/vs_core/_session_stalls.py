@@ -127,8 +127,6 @@ def advance_lapsed_session_waits(
         )
         if turn is not None and turn.phase == SessionPhase.UNKNOWN:
             return _release_lost_turn(state, context, turn.invocation)
-        # An unknown session whose inspection ended unanswered waits on nothing core can name.
-        return AreaChange(state=_replace_session(state, session.model_copy(update={"wait": None})))
     if not kept:
         return AreaChange(state=state)
     waiting = session.model_copy(update={"wait": WaitOn(requests=kept)})
