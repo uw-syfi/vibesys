@@ -2,24 +2,25 @@
 
 How the `testing` rules map onto this repository's Python suite: pytest run
 through `uv`, Hypothesis, and the `vs-sim` simulator. Numbers (example counts,
-shard counts, timeouts, budgets) live in the files named here; read them
-there.
+shard counts, timeouts, budgets) live in the configuration that owns them; read
+them there.
 
 ## Mapping the rules
 
 | Rule | Here |
 | --- | --- |
-| Public API | `<pkg>.api` for a `libs/` package (`tach.toml` enforces it); the module API siblings already import inside `vibesys`; `vibesys.api` at the top |
-| No patching | The banned and allowed spellings are counted by `scripts/check_test_isolation.py` (see the `testing` skill's Python reference for the list) |
-| Fakes | Exemplar: `vs_agent.api.testing.FakeAgentClient` |
+| Public API | `<pkg>.api` for a library (tach enforces it); the module API siblings already import inside `vibesys`; `vibesys.api` at the top |
+| No patching | `check_test_isolation` counts the banned and allowed spellings (see the `testing` skill's Python reference for the list) |
+| Fakes | Exemplar: the `FakeAgentClient` in `vs_agent.api.testing` |
 | Exemption | `# test-isolation: <reason>` on the site's line or the line above |
 
 ## Contract suites
 
 A production parameter that needs real services carries the `real_contract`
-marker (registered in `pyproject.toml`), opt-in with `VIBESYS_REAL_CONTRACTS=1`.
-CI does not set it; run it by hand when you change an interface, a production
-implementation or its Fake, and report the result in the PR.
+marker (registered in the pytest configuration), opt-in with
+`VIBESYS_REAL_CONTRACTS=1`. CI does not set it; run it by hand when you change
+an interface, a production implementation or its Fake, and report the result
+in the PR.
 
 ## Depth and Hypothesis profiles
 
@@ -27,27 +28,26 @@ The root `conftest.py` registers the Hypothesis profiles and their example
 counts; nothing else restates them. All profiles set `deadline=None`, so never
 set a deadline on a property.
 
-- `--depth=pr|nightly` (owned by the vs-sim pytest plugin,
-  `libs/vs-sim/pytest_plugin/vs_sim_pytest.py`) picks the profile: `pr`, the
-  default, loads the derandomized `ci` profile; `nightly` loads `nightly`.
-  `.github/workflows/nightly.yml` runs the nightly depth.
+- `--depth=pr|nightly` (owned by the vs-sim pytest plugin) picks the profile:
+  `pr`, the default, loads the derandomized `ci` profile; `nightly` loads
+  `nightly`. The nightly CI workflow runs the nightly depth.
 - `HYPOTHESIS_PROFILE` overrides by hand: `dev` is randomized at the PR count;
   `explore` is the larger randomized run for hunting new bugs.
 - State a non-default count as `vs_sim.api.testing.examples(pr=..., nightly=...)`
   and a crash sweep as `vs_sim.api.testing.swept`. Never read an environment
   variable or define a per-file depth constant.
 - Tests marked `slow` are deselected at PR depth, except one case of each under
-  the `sim_smoke_slow` directories in `pyproject.toml`.
+  the smoke-slow directories the pytest configuration lists.
 
 ## Deterministic simulation (`vs-sim`)
 
-`libs/vs-sim` owns time, scheduling, seeds, signals, child processes and
+The `vs-sim` library owns time, scheduling, seeds, signals, child processes and
 blocking calls: `vs_sim.api` holds the interfaces product code takes, and
 `vs_sim.api.testing` the simulator, Fakes, waits and contract suites. Its
 pytest plugin, registered by the root `conftest.py`, makes the simulator the
 default:
 
-- An `async def` test outside the `sim_real_tiers` directories that has no
+- An `async def` test outside the real-tier directories that has no
   `pytest.mark.asyncio` runs on a virtual clock: sleeping costs no wall time,
   and a test that waits on nothing raises `VirtualDeadlockError` at once. A
   test marked `asyncio` stays on pytest-asyncio; do not combine that marker
@@ -60,10 +60,14 @@ default:
   `--sim-determinism-check` runs each sim test twice with one seed and fails if
   the event traces differ.
 
-`tests/quality/test_real_apis_confined.py` fails a deterministic-tier test, or
-product code outside `libs/vs-sim`, that uses a real API, against the
-exact-count baseline `tests/quality/real_api_baseline.jsonl`. Rewrite a flagged
-use as follows:
+Ruff's `TID251` rejects real time (`time`, `datetime.now`/`utcnow`/`today`,
+`date.today`, `asyncio.sleep`) outside `vs-sim` and the real tiers.
+`test_deterministic_tests_use_no_real_time_threads_processes_or_sockets` and
+`test_product_code_reaches_real_apis_only_through_vs_sim` fail a
+deterministic-tier test, or product code outside `vs-sim`, that uses real
+threads, processes, sockets or signals, against an exact-count baseline that
+only shrinks. Rewrite a flagged use
+as follows:
 
 | Flagged use | Rewrite as |
 | --- | --- |
@@ -73,50 +77,48 @@ use as follows:
 | `socket` | The owning library's in-memory Fake transport; a real socket is a real-tier test |
 | `signal.signal`, `os.kill(os.getpid(), ...)` | A Fake `vs_sim.api.SignalSource`; real signal state changes go through `run_in_child` |
 | bare `.wait()`, `.join()`, `.get()` | `wait_or_fail`, `join_or_fail`, `get_or_fail`, `vs_sim.api.testing.arrival`, or a `timeout=` |
-| A test of a real system | Move it to a `sim_real_tiers` directory |
+| A test of a real system | Move it to a real-tier directory |
 
 A wait on something the test does not control carries a hang guard from
 `vs_sim.api.testing` (`join_or_fail`, `wait_or_fail`, `get_or_fail`,
 `HANG_GUARD_S`) or a `timeout=` argument;
-`tests/quality/test_no_unbounded_blocking_waits.py` enforces it. The suite-wide
-per-test `timeout` in `pyproject.toml` is only a backstop.
+`test_no_test_blocks_without_a_bound_on_a_thread_process_or_socket` enforces
+it. The suite-wide per-test `timeout` in the pytest configuration is only a
+backstop.
 
 ## Fault injection
 
-`libs/vs-faults` (import `vs_faults.api`) owns the one fault mechanism: a
-`vs_faults.api.FaultPlan` (a seed plus rules naming a boundary, a target, the
+The `vs-faults` library (import `vs_faults.api`) owns the one fault mechanism:
+a `vs_faults.api.FaultPlan` (a seed plus rules naming a boundary, a target, the
 ordinal of the matching call, and the fault) drives
 `vs_agent.api.testing.FaultyAgentClient` (any agent client),
 `vs_faults.api.FaultyToolDispatch` (a tool dispatcher keyed by tool name), and
-`python -m vs_faults.connector PLAN STATE -- INNER...` (any Slurm connector
-command). `vs_agent.api.testing.generated_replies` answers a Fake agent client
-from each turn's declared schema. The chaos sweep
-(`tests/system/chaos/test_chaos.py`, `scripts/chaos_loop.sh N`) shows how to
-compose them.
+the fault-injecting Slurm connector wrapper, which wraps any Slurm connector
+command. `vs_agent.api.testing.generated_replies` answers a Fake agent client
+from each turn's declared schema. The chaos sweep in the system test layer
+shows how to compose them.
 
 The untrusted-input corpus every JSON decoder runs against is
 `vs_sim.api.testing.hostile_json_frames`.
 
 ## Golden fixtures
 
-Prompt and text goldens live in a `fixtures/` (or `*_goldens/`) directory
-beside each covering test. Byte-exact ones compare through
-`tests/vibesys/golden/helpers.py:assert_exact_text`, which rewrites the
-fixture instead of comparing when `UPDATE_PROMPT_SNAPSHOTS=1` is set; the
-domain packs pin a SHA-256 per rendered role instead. Run the test without the
-variable first and read the diff, then regenerate, then rerun without it. The
-full table of goldens is in the `write-agent-prompt` skill.
+Prompt and text goldens live beside each covering test. Byte-exact ones
+compare through the shared golden helper, which rewrites the fixture instead
+of comparing when `UPDATE_PROMPT_SNAPSHOTS=1` is set; the domain packs pin a
+SHA-256 per rendered role instead. Run the test without the variable first and
+read the diff, then regenerate, then rerun without it. The full table of
+goldens is in the `write-agent-prompt` skill.
 
-`tests/vibesys/golden/snapshots/` is read by no test (nothing calls
-`assert_prompt_snapshot` since #2032 and #2044), so regenerating it checks
-nothing.
+An old directory of prompt snapshots is read by no test, so regenerating it
+checks nothing; do not update it.
 
 ## Isolation and timeout verdicts
 
-`scripts/check_test_isolation.py` counts patching, mocking, sleeps
-(`time.sleep`, `asyncio.sleep` other than `asyncio.sleep(0)`), timeout
-verdicts, and non-`api` imports of a library inside its own tests, against
-`tests/quality/isolation_baseline.jsonl`; `--write` only lowers counts.
+`check_test_isolation` counts patching, mocking, sleeps (`time.sleep`,
+`asyncio.sleep` other than `asyncio.sleep(0)`), timeout verdicts, and non-`api`
+imports of a library inside its own tests, against a recorded baseline; its
+`--write` option only lowers counts.
 
 A timeout verdict is a timeout or clock reading that decides the outcome
 rather than only failing a hung test: `assert not ev.wait(timeout=T)`,
@@ -128,19 +130,18 @@ script's docstring states the criterion and what it deliberately misses.
 ## Sharding and parallelism
 
 CI runs with `-n auto --dist loadgroup`; the `serial` marker is a last resort
-for a host-wide resource. The Python test job splits the suite over its
-`matrix.shard` in `.github/workflows/test.yml` (`--shard=I/N` or
-`VIBESYS_TEST_SHARD=I/N`), balanced by recorded seconds per file
-(`tests/support/sharding.py`). A test must not depend on running beside
-another test of its file. Every green run on main caches its measured
-seconds; `tests/support/shard_durations.json` is only the cold start,
-refreshed with `python -m scripts.refresh_shard_durations`.
+for a host-wide resource. The Python test job splits the suite over the CI
+workflow's shard matrix (`--shard=I/N` or `VIBESYS_TEST_SHARD=I/N`), balanced
+by recorded seconds per file. A test must not depend on running beside another
+test of its file. Every green run on main caches its measured seconds; a
+checked-in duration table is only the cold start, refreshed with
+`python -m scripts.refresh_shard_durations`.
 
 ## Commands
 
 ```bash
-uv run pytest path/to/test.py -k name              # narrowest first
-uv run pytest path/to/test.py -n auto --no-cov -q  # parallel
-uv run python scripts/check_test_isolation.py      # ratchet
-uv run pytest libs tests/system tests/vibesys --depth=nightly -n 16 --no-cov
+uv run pytest <test file> -k <name>               # narrowest first
+uv run pytest <test file> -n auto --no-cov -q     # parallel
+uv run python -m scripts.check_test_isolation     # ratchet
+uv run pytest --depth=nightly -n 16 --no-cov       # the nightly depth, all tiers
 ```

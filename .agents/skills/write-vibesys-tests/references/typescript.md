@@ -1,13 +1,13 @@
 # TypeScript test harness
 
-How the `testing` rules map onto the clients under `clients/`: `bun:test`,
-driven through pnpm workspaces, linted by Biome.
+How the `testing` rules map onto the TypeScript clients: `bun:test`, driven
+through pnpm workspaces, linted by Biome.
 
 ## Mapping the rules
 
 | Rule | Here |
 | --- | --- |
-| Public API | A package's exported entry points (`clients/libs/transport`, `clients/libs/run-state`), and published protocol event data as the frontend contract |
+| Public API | A package's exported entry points (for example `@vibesys/transport`, `@vibesys/run-state`), and published protocol event data as the frontend contract |
 | No patching | No mechanical check yet; reviewers reject `mock`, `mock.module` and `spyOn` |
 | Fakes | An in-memory implementation beside the interface, shared by consumers |
 | Exemption | `// test-isolation: <reason>` on the site's line or the line above |
@@ -27,17 +27,15 @@ example.
 
 ## Wire-protocol conformance
 
-The shared corpus in `tests/conformance/` pins framing and connection
-semantics for every transport ([README](../../../../tests/conformance/README.md),
-[wire-protocol.md](../../../../docs/contributing/wire-protocol.md)):
+The shared conformance corpus pins framing and connection semantics for every
+transport ([wire-protocol.md](../../../../docs/contributing/wire-protocol.md)):
 
-- `events/` holds one fixture per `EventType`, `scenarios/` the connection
-  exchanges, and `runners/` the executable inventory each runner registers.
-- `clients/tools/scripts/check_conformance_corpus.mjs` gates coverage,
-  structure and which scenarios each runner executes.
-- `clients/libs/run-state/src/conformance.test.ts` folds every event fixture;
-  `tests/conformance/test_server_transports.py` replays scenarios on every
-  server transport.
+- It holds one fixture per event type, the connection-exchange scenarios, and
+  an inventory each runner registers to say which scenarios it executes.
+- `pnpm check:conformance` gates coverage, structure and which scenarios each
+  runner executes.
+- The run-state package folds every event fixture in a test, and a Python test
+  replays the scenarios on every server transport.
 
 Extend the corpus for a protocol change instead of adding a per-client
 snapshot, and register the scenario in a runner so it executes.

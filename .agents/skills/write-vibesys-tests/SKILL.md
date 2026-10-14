@@ -1,6 +1,6 @@
 ---
 name: write-vibesys-tests
-description: Write or change tests in this repository with its own harness (test tiers and where a test goes, vs-sim deterministic simulation and real-API confinement, --depth and the Hypothesis profiles, contract suites, vs-faults, goldens, the wire-protocol conformance corpus, sharding and CI budgets). Use when adding or editing a test under tests/, libs/*/tests/ or clients/, fixing a bug that needs a regression test, a test fails under vs-sim or a ratchet in tests/quality/, or a CI shard or budget overruns.
+description: Write or change tests in this repository with its own harness (test tiers and where a test goes, vs-sim deterministic simulation and real-API confinement, --depth and the Hypothesis profiles, contract suites, vs-faults, goldens, the wire-protocol conformance corpus, sharding and CI budgets). Use when adding or editing a Python or TypeScript client test, fixing a bug that needs a regression test, a test fails under vs-sim or a test-quality ratchet, or a CI shard or time budget overruns.
 metadata:
   kind: codebase
 ---
@@ -23,71 +23,75 @@ conformance corpus.
 
 ## When this applies
 
-- Adding or changing a test under `tests/`, `libs/*/tests/`, or a `*.test.ts`
-  under `clients/`.
+- Adding or changing a Python test in a package, in the cross-package layers,
+  or a TypeScript test in a client package.
 - Fixing a bug: the regression test and its generalizing property.
-- A test fails under the simulator, or a ratchet in `tests/quality/` fails.
-- Changing `conftest.py`, `libs/vs-sim/pytest_plugin/`, the
-  `[tool.pytest.ini_options]` settings in `pyproject.toml`, or the test jobs in `.github/workflows/test.yml`.
+- A test fails under the simulator, or a test-quality ratchet fails.
+- Changing the pytest configuration, the root `conftest.py`, the vs-sim pytest
+  plugin, or the CI test jobs.
 
 ## Steps
 
 1. **Place the test in the cheapest layer that can observe the guarantee.**
    The layers, what each guarantees, and the decision list for a new test are
    in [testing-map.md](../../../docs/contributing/testing-map.md). New tests go
-   beside the package they test; the top-level `tests/` holds only
-   cross-package layers and does not grow, and nothing test-shaped goes under
-   `resources/`, which ships. Unenforced: choosing a layer needs judgment.
-2. **Keep deterministic tiers on the simulator.** Everything outside the
-   `sim_real_tiers` directories in `pyproject.toml` uses no real time, threads,
-   processes, sockets or signals except through `vs_sim.api`;
-   `tests/quality/test_real_apis_confined.py` enforces it for tests and for
-   product code, against a baseline that only shrinks. Rewrites for each
-   flagged use are in [references/python.md](references/python.md).
-3. **Bound every wait you do not control with a hang guard** from
-   `vs_sim.api.testing`, never a sleep or a timeout verdict
-   (`tests/quality/test_no_unbounded_blocking_waits.py`,
-   `scripts/check_test_isolation.py`).
+   beside the package they test; the cross-package test layers do not grow,
+   and nothing test-shaped goes into the shipped resources.
+   Unenforced: choosing a layer needs judgment.
+2. **Keep deterministic tiers on the simulator.** Every test outside the real
+   tiers (the directories the pytest configuration lists as `sim_real_tiers`)
+   uses no real time, threads, processes, sockets or signals except through
+   `vs_sim.api`. Ruff's `TID251` bans real time;
+   `test_deterministic_tests_use_no_real_time_threads_processes_or_sockets` and
+   `test_product_code_reaches_real_apis_only_through_vs_sim` fail on any other
+   real API outside a baseline that only shrinks. Rewrites for each flagged use are in
+   [references/python.md](references/python.md).
+3. **Bound every wait you do not control with a hang guard** from the vs-sim
+   testing API, never a sleep or a timeout verdict.
+   `test_no_test_blocks_without_a_bound_on_a_thread_process_or_socket` fails
+   on an unbounded wait, and `check_test_isolation` counts sleeps and timeout
+   verdicts.
 4. **No patching or mocking; use the owning library's Fake** and register
-   every implementation in its contract suite.
-   `scripts/check_test_isolation.py` counts patches, mocks and non-`api`
-   imports against `tests/quality/isolation_baseline.jsonl`.
+   every implementation in its contract suite. `check_test_isolation` fails
+   when the count of patches, mocks and non-`api` imports rises above its
+   recorded baseline.
 5. **Scale generated checks with `--depth`, never by hand.** State a
-   non-default example count with `vs_sim.api.testing.examples` and a crash
-   sweep with `vs_sim.api.testing.swept`; the profiles and counts live only in
-   the root `conftest.py`. Unenforced: a per-file depth constant or an
-   environment read is easy to spot in review and rare enough that a check
-   would cost more than it saves.
-6. **Inject faults through `vs_faults.api.FaultPlan`** and the wrappers built
-   on it; do not write a faulty Fake per test.
-   Unenforced: a second fault mechanism is a design choice a check cannot
-   tell from a legitimate Fake failure knob.
+   non-default example count with the vs-sim testing helper `examples` and a
+   crash sweep with `swept`; the profiles and counts live only in the root
+   `conftest.py`. Unenforced: a per-file depth constant or an environment
+   read is easy to spot in review and rare enough that a check would cost more
+   than it saves.
+6. **Inject faults through the vs-faults `FaultPlan`** (reached through
+   `vs_faults.api`) and the wrappers built on it; do not write a faulty Fake
+   per test. Unenforced: a second fault mechanism is a design choice a check
+   cannot tell from a legitimate Fake failure knob.
 7. **Pin goldens and protocol behavior in the shared fixtures.** Each prompt
-   golden lives beside the test that covers it; byte-exact ones compare
-   through `tests/vibesys/golden/helpers.py:assert_exact_text`. Which golden
-   covers which prompt, and how to update one, is in the `write-agent-prompt`
-   skill's goldens reference. Protocol changes extend `tests/conformance/`,
-   which
-   `clients/tools/scripts/check_conformance_corpus.mjs` gates for coverage.
-8. **Stay inside the CI budgets.** The whole-run wall-time thresholds are the
-   `CI_WALL_TIME_*` values in `.github/workflows/test.yml`, checked by
-   `scripts/ci_wall_time.py`; the shards balance on
-   `tests/support/sharding.py`. Mark a test `slow` only when it is an
-   exhaustive sweep, so PR depth runs one case of it.
+   golden lives beside the test that covers it and compares byte for byte
+   through the shared golden helper. Which golden covers which prompt, and how
+   to update one, is in the `write-agent-prompt` skill's goldens reference.
+   Protocol changes extend the shared conformance corpus, and
+   `pnpm check:conformance` fails when an event or scenario lacks coverage or
+   no runner executes it.
+8. **Stay inside the CI budgets.** The whole-run wall-time thresholds are set
+   in the CI test workflow, and the shards balance on recorded per-file
+   seconds. Mark a test `slow` only when it is an exhaustive sweep, so PR depth
+   runs one case of it.
+   `test_every_test_runs_in_exactly_one_shard_whether_or_not_its_file_is_heavy`
+   fails if sharding drops or duplicates a test; the wall-time thresholds fail
+   the CI job itself.
 
 ## Testing
 
-- Run the narrowest target first (`uv run pytest path -k name`), then the
-  package, then `./scripts/check_ci.sh` before the PR; its groups are in
-  `.repoctl/checks.toml`.
+- Run the narrowest target first (`uv run pytest <test file> -k <name>`), then
+  the package, then `./scripts/check_ci.sh` before the PR.
 - For a change to recovery, the shell, or a contract suite, also run the
-  nightly depth over `libs`, `tests/system` and `tests/vibesys` (command in
-  [references/python.md](references/python.md)).
-  Unenforced: CI runs nightly depth only on schedule
-  (`.github/workflows/nightly.yml`), after the PR has merged.
+  nightly depth over the libraries and the system and product test layers
+  (command in [references/python.md](references/python.md)).
+  Unenforced: CI runs nightly depth only on schedule, after the PR has merged.
 - For a sim test that failed once, replay its printed seed with
-  `--sim-seed=N` and run `--sim-determinism-check`; the vs-sim plugin tests in
-  `libs/vs-sim/tests/` cover both options.
+  `--sim-seed=N` and run `--sim-determinism-check`.
+  Unenforced: the vs-sim plugin's own tests cover both options; a test that
+  needs them has no check beyond running them by hand.
 - Real contract suites and real tiers need opt-in variables
   (`VIBESYS_REAL_CONTRACTS=1` and the ones in testing-map.md); report in the
   PR which ran and which environments were unavailable.
@@ -97,32 +101,33 @@ conformance corpus.
 
 - A test passes alone and fails beside its neighbours because sharding moved
   its file or spread its tests: tests must not depend on file order or on
-  sharing a process with another test (`tests/support/sharding.py`).
+  sharing a process with another test. Unenforced: a hidden ordering
+  dependency shows up only in some shard layouts.
 - A property passes on PR depth and fails nightly because the PR profile is
   derandomized and draws few examples: pin each nightly failure with
   `@example(...)` so PR runs replay it. Unenforced: the nightly result
   arrives after merge.
 - An `async def` test marked `asyncio` silently leaves the virtual clock and
   then waits in real time; drop the marker unless the test needs
-  pytest-asyncio (`tests/quality/test_real_apis_confined.py` catches the real
-  sleeps it then needs).
+  pytest-asyncio.
+  `test_deterministic_tests_use_no_real_time_threads_processes_or_sockets`
+  catches the real sleeps it then needs.
 - The per-layer CPU budgets in testing-map.md read as enforced but nothing
   sums them. Unenforced: no check measures per-layer CPU yet; a test that
   needs a real process or repository says why in a comment.
 - A conformance scenario that validates structurally but that no runner
-  registers has never executed against a transport
-  (`clients/tools/scripts/check_conformance_corpus.mjs` reports it as a
-  setup need).
+  registers has never executed against a transport; `pnpm check:conformance`
+  reports it as a setup need.
 
 ## Sources of truth
 
-- `conftest.py`: the Hypothesis profiles and their example counts.
-- `pyproject.toml` (`[tool.pytest.ini_options]`): markers, `sim_real_tiers`,
-  `sim_smoke_slow`, the per-test timeout.
-- `libs/vs-sim/pytest_plugin/vs_sim_pytest.py`: `--depth`, the `sim`
-  fixture, seeds and the determinism check.
-- `.github/workflows/test.yml`: shards, the CI wall-time thresholds, and which
-  jobs run.
+- The Hypothesis profiles and their example counts, in the root `conftest.py`.
+- The pytest configuration: markers, the real-tier and smoke-slow directory
+  lists, and the per-test timeout.
+- The vs-sim pytest plugin: `--depth`, the `sim` fixture, seeds and the
+  determinism check.
+- The CI test workflow: shards, wall-time thresholds, and which jobs run.
 - [testing-map.md](../../../docs/contributing/testing-map.md): the layers and
   where a new test goes.
-- `tests/conformance/README.md`: the conformance corpus and its readers.
+- The wire-protocol conformance corpus and its readers, described in
+  [wire-protocol.md](../../../docs/contributing/wire-protocol.md).
