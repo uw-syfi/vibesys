@@ -7,24 +7,33 @@ pull requests this way). The tests still pass, because the stale set is self-con
 
 The check compares each file the change touches with the file's history on the base
 branch. A file whose new content is exactly what it was just before a recent base
-commit changed it (a file that commit created counts as absent) undoes that commit. An
-intended revert names the commit it reverts, the way ``git revert`` writes its message
-("This reverts commit <sha>"), and is allowed.
+commit changed it undoes that commit. A deleted file undoes the commit that created it
+when the change also sets another of that commit's files back: that is how #2343 dropped
+the test file #2327 added. A deletion alone is not flagged, since deleting a file a
+recent commit created is an ordinary refactor.
+
+An intended undo declares the commit it undoes, by sha or by pull request number, on a
+line of the change's message that says it reverts, relands or restores it: "This reverts
+commit <sha>" (what ``git revert`` writes), "Reland #2071", "Restores #2163" (a file
+moved back after a rename).
+
+Stdlib only, so CI's ``changes`` job runs it before any environment is installed.
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from vs_project.api import run_git
-
 RECENT_COMMITS = 200
 """How many first-parent base commits back a change is compared against."""
-_REVERTS = re.compile(r"This reverts commit ([0-9a-f]{7,40})")
+_DECLARATION = re.compile(r"\b(?:revert|reland|restore)(?:s|ed|ing)?\b(.*)", re.IGNORECASE)
+_SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
+_PULL_REQUEST = re.compile(r"#(\d+)\b")
 
 
 @dataclass(frozen=True)
@@ -36,8 +45,14 @@ class StaleFile:
     subject: str
 
 
+def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    argv = ["git", *args]
+    # lint-waiver: LW-235001 [S603]; fixed git subcommands over refs and repo-relative paths, no shell; stdlib so CI runs it before installing the environment.
+    return subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)  # noqa: S603
+
+
 def _git(root: Path, *args: str) -> str:
-    result = run_git(list(args), cwd=root, text=True)
+    result = _run_git(root, *args)
     if result.returncode:
         message = f"git {' '.join(args)} failed: {result.stderr.strip()}"
         raise RuntimeError(message)
@@ -47,7 +62,7 @@ def _git(root: Path, *args: str) -> str:
 def _ensure_base(root: Path, base_ref: str) -> None:
     """Fetch the base branch's history when the checkout is shallow or lacks it."""
     shallow = _git(root, "rev-parse", "--is-shallow-repository").strip() == "true"
-    known = run_git(["rev-parse", "--verify", base_ref], cwd=root, text=True).returncode == 0
+    known = _run_git(root, "rev-parse", "--verify", base_ref).returncode == 0
     if base_ref.startswith("origin/") and (shallow or not known):
         branch = base_ref.removeprefix("origin/")
         args = ["fetch", "--no-tags", *(["--unshallow"] if shallow else [])]
@@ -57,13 +72,35 @@ def _ensure_base(root: Path, base_ref: str) -> None:
 _ABSENT = "0" * 40
 
 
+@dataclass(frozen=True)
+class _Declared:
+    """The commits a change's message says it reverts, relands or restores."""
+
+    shas: frozenset[str]
+    pull_requests: frozenset[str]
+
+    @classmethod
+    def from_message(cls, message: str) -> _Declared:
+        shas: set[str] = set()
+        pull_requests: set[str] = set()
+        for match in _DECLARATION.finditer(message):
+            shas.update(_SHA.findall(match.group(1)))
+            pull_requests.update(_PULL_REQUEST.findall(match.group(1)))
+        return cls(frozenset(shas), frozenset(pull_requests))
+
+    def covers(self, commit: str, subject: str) -> bool:
+        return any(commit.startswith(sha) for sha in self.shas) or any(
+            re.search(rf"#{number}\b", subject) for number in self.pull_requests
+        )
+
+
 def stale_files(root: Path, base_ref: str, head: str = "HEAD") -> list[StaleFile]:
     """Every file ``head`` sets back to its content before a recent ``base_ref`` commit."""
     base = _git(root, "merge-base", head, base_ref).strip()
     changed = _git(root, "diff", "--no-renames", "--name-only", base, head).splitlines()
     if not changed:
         return []
-    reverted = _REVERTS.findall(_git(root, "log", "--format=%B", f"{base}..{head}"))
+    declared = _Declared.from_message(_git(root, "log", "--format=%B", f"{base}..{head}"))
     now = dict.fromkeys(changed, _ABSENT)
     for line in _git(root, "ls-tree", "--full-tree", head, "--", *changed).splitlines():
         meta, _, path = line.partition("\t")
@@ -83,15 +120,22 @@ def stale_files(root: Path, base_ref: str, head: str = "HEAD") -> list[StaleFile
         *changed,
     )
     found: dict[str, StaleFile] = {}
+    deleted: dict[str, StaleFile] = {}
     commit = subject = ""
     for line in history.splitlines():
         if line.startswith("@"):
             commit, _, subject = line[1:].partition("\t")
-        elif line.startswith(":") and not any(commit.startswith(sha) for sha in reverted):
-            meta, _, path = line.partition("\t")
-            old = meta.split()[2]
-            if now.get(path, _ABSENT) != _ABSENT and path not in found and old == now[path]:
-                found[path] = StaleFile(path, commit, subject)
+            continue
+        if not line.startswith(":") or declared.covers(commit, subject):
+            continue
+        meta, _, path = line.partition("\t")
+        old = meta.split()[2]
+        if now[path] != _ABSENT and old == now[path] and path not in found:
+            found[path] = StaleFile(path, commit, subject)
+        elif now[path] == _ABSENT and old == _ABSENT and path not in deleted:
+            deleted[path] = StaleFile(path, commit, subject)
+    undone = {stale.undone for stale in found.values()}
+    found.update({path: stale for path, stale in deleted.items() if stale.undone in undone})
     return sorted(found.values(), key=lambda stale: stale.path)
 
 

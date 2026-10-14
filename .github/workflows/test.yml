@@ -73,6 +73,15 @@ jobs:
           ./support/repoctl/repoctl verify-policy --cases tests/repoctl/cases.toml
           ./support/repoctl/repoctl plan --github-event --github-output "$GITHUB_OUTPUT"
 
+      # Stale reverts and tools' leftover files, on every change whatever it touches.
+      # Here rather than in python-checks, which a workflow, TUI or docs change skips.
+      # Stdlib scripts over the history this job already fetched, about a second, and
+      # first: a stale revert stops the run before any other job starts.
+      - name: Check for stale reverts and leftover files
+        run: |
+          python3 scripts/check_stale_revert.py --base-ref origin/main
+          python3 scripts/check_stray_files.py
+
       # Best effort: a missing, evicted or malformed cache entry only means the
       # shards balance on the checked-in record, never that the run fails.
       - name: Restore the latest shard durations recorded on main

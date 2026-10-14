@@ -28,7 +28,6 @@ commands = [
   ["./scripts/check_lint.sh"],
   ["uv", "run", "python", "scripts/check_file_length.py"],
   ["uv", "run", "python", "-m", "scripts.check_purity", "--base-ref", "origin/main"],
-  ["uv", "run", "python", "-m", "scripts.check_stale_revert", "--base-ref", "origin/main"],
   ["uv", "run", "python", "scripts/check_test_isolation.py"],
   ["uv", "run", "python", "-m", "scripts.check_contract_sot", "--base-ref", "origin/main"],
   ["uv", "run", "python", "scripts/check_tach.py"],
