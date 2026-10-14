@@ -32,10 +32,10 @@ from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, Self
 
 from pydantic import (
     BaseModel,
-    ValidationError,
 )
 
 import vs_project._paths as project_paths
+from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._manifests import (
     _IDENTIFIER_PATTERN,
@@ -47,6 +47,7 @@ from vs_project._manifests import (
     RunExecutionRecord,
 )
 from vs_project._state_io import (
+    STATE_DOCUMENT_MAX_BYTES,
     _atomic_write_model,
     _atomic_write_text,
     _load_model,
@@ -741,13 +742,17 @@ class StateSlot[ModelT: BaseModel]:
             return self.transition(None)
         if not isinstance(document, dict):
             raise ProjectStateError.serialized_transition_document_not_object()
-        try:
-            model = self._model_type.model_validate_json(
-                json.dumps(document),
-                strict=True,
+        model = decode_json(
+            json.dumps(document),
+            self._model_type,
+            source="serialized state transition",
+            max_bytes=STATE_DOCUMENT_MAX_BYTES,
+            options=ValidationOptions(strict=True),
+        )
+        if isinstance(model, Unreadable):
+            raise ProjectStateError.serialized_transition_model_mismatch(
+                ValueError(model.details())
             )
-        except ValidationError as exc:
-            raise ProjectStateError.serialized_transition_model_mismatch(exc) from exc
         return self.transition(model)
 
     def validate_transition(self, transition: StateTransition) -> StateTransition:
@@ -759,13 +764,17 @@ class StateSlot[ModelT: BaseModel]:
                 transition._project_relative_path,  # noqa: SLF001  # lint-waiver: LW-008231 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
             )
         if transition._next_document is not None:  # noqa: SLF001  # lint-waiver: LW-008232 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
-            try:
-                self._model_type.model_validate_json(
-                    transition._next_document._contents,  # noqa: SLF001  # lint-waiver: LW-008233 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
-                    strict=True,
+            replacement = decode_json(
+                transition._next_document._contents,  # noqa: SLF001  # lint-waiver: LW-008233 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+                self._model_type,
+                source=str(expected_path),
+                max_bytes=STATE_DOCUMENT_MAX_BYTES,
+                options=ValidationOptions(strict=True),
+            )
+            if isinstance(replacement, Unreadable):
+                raise ProjectStateError.typed_transition_model_mismatch(
+                    expected_path, ValueError(replacement.details())
                 )
-            except ValidationError as exc:
-                raise ProjectStateError.typed_transition_model_mismatch(expected_path, exc) from exc
         return transition
 
     def apply(self, transition: StateTransition) -> None:

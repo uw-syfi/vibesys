@@ -9,9 +9,9 @@ from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter
 
-from vs_decode.api import Unreadable, ValidationOptions, decode_json
+from vs_decode.api import Unreadable, UnreadableKind, ValidationOptions, decode_json, read_json
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project.errors import (
     ProjectStateError,
@@ -232,15 +232,21 @@ def _read_json_object(path: Path) -> dict[str, object]:
 
 def _load_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> ModelT:
     """Load and strictly validate a required metadata model."""
-    try:
-        content = path.read_text(encoding="utf-8")
-        return model_type.model_validate_json(content, strict=True)
-    except FileNotFoundError as exc:
-        raise ProjectStateError.metadata_file_missing(path) from exc
-    except (OSError, UnicodeError) as exc:
-        raise ProjectStateError.metadata_read_failed(path, exc) from exc
-    except ValidationError as exc:
-        raise ProjectStateError.invalid_metadata(path, _validation_message(exc)) from exc
+    decoded = read_json(
+        path,
+        model_type,
+        max_bytes=STATE_DOCUMENT_MAX_BYTES,
+        options=ValidationOptions(strict=True),
+    )
+    if not isinstance(decoded, Unreadable):
+        return decoded
+    match decoded.kind:
+        case UnreadableKind.MISSING:
+            raise ProjectStateError.metadata_file_missing(path)
+        case UnreadableKind.NOT_READABLE:
+            raise ProjectStateError.metadata_read_failed(path, OSError(decoded.details()))
+        case _:
+            raise ProjectStateError.invalid_metadata(path, decoded.details("metadata"))
 
 
 def _load_state_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> ModelT:
@@ -301,16 +307,3 @@ def _declared_version(data: bytes | str, field: str) -> int | None:
         return None
     value = document.get(field)
     return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
-def _validation_message(error: ValidationError) -> str:
-    """Render stable validation details without echoing input values.
-
-    Field locations are reported, including the name of an unknown field (a
-    newer release's key is the diagnostic), but never the offending values.
-    """
-    failures: list[str] = []
-    for detail in error.errors(include_url=False, include_context=False, include_input=False):
-        location = ".".join(str(part) for part in detail["loc"]) or "metadata"
-        failures.append(f"{location}: {detail['msg']}")
-    return "; ".join(failures)

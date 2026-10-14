@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -1414,3 +1415,16 @@ def test_git_paths_validate_candidate_worktrees_without_symlink_traversal(
     (worktrees / "linked").symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError, match="must be below"):
         capability.validate_candidate_worktree(worktrees / "linked" / "candidate")
+
+
+def test_a_manifest_that_is_not_a_regular_file_is_a_read_failure_not_a_hang(
+    tmp_path: Path,
+) -> None:
+    # Reading a FIFO blocks until a writer appears; the loader must refuse it instead.
+    store = _store(tmp_path)
+    manifest = _metadata_dir(store) / "project.json"
+    manifest.unlink()
+    os.mkfifo(manifest)
+
+    with pytest.raises(ProjectStateError, match="Could not read VibeSys metadata"):
+        store.state.load_project()
