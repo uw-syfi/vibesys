@@ -28,7 +28,7 @@ from vs_sandbox.host_command_client import TOKEN_ENV as COMMAND_BROKER_TOKEN_ENV
 from vs_sandbox.job_confinement import HostJobConfinement, JobConfinement
 from vs_sandbox.read_only_links import ReadOnlyPathLinkError, check_read_only_links
 from vs_sandbox.slurm_broker import SlurmProcessBroker, SlurmProcessBrokerError
-from vs_sandbox.slurm_broker_client import run_brokered_process
+from vs_sandbox.slurm_broker_client import BrokerReplyError, run_brokered_process
 from vs_sandbox.slurm_capture_plan import (
     SlurmCapturePlan,
     SlurmCapturePlanError,
@@ -88,6 +88,7 @@ __all__ = [
     "AgentGpuConfig",
     "AgentGpuLauncher",
     "AgentGpuRequestError",
+    "BrokerReplyError",
     "BrokerTransport",
     "GpuCommand",
     "GpuCommands",

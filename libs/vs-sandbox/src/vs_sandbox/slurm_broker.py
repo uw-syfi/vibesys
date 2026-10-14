@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import secrets
 import shlex
@@ -11,38 +10,26 @@ import threading
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from vs_sandbox.process_execution import (
     CapturedProcessRequest,
     CapturedProcessRunner,
     OwnedProcessRunner,
+)
+from vs_sandbox.slurm_broker_protocol import (
+    MAX_FRAME_BYTES,
+    BrokerRan,
+    BrokerRefused,
+    BrokerReply,
+    ProcessCall,
+    ProcessReply,
 )
 from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-_MAX_FRAME_BYTES = 16 * 1024 * 1024
 _SSH_SUFFIX_LENGTH = 3
 _RSYNC_OPERAND_COUNT = 2
-
-
-class _ProcessCall(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    token: str
-    argv: tuple[str, ...] = Field(min_length=1)
-    stdin: str | None
-    timeout: float = Field(gt=0)
-
-
-class _ProcessReply(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    returncode: int
-    stdout: str
-    stderr: str
 
 
 class SlurmProcessBrokerError(PermissionError):
@@ -94,22 +81,21 @@ class _BrokerServer(socketserver.ThreadingUnixStreamServer):
 
 class _BrokerHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
-        frame = self.rfile.readline(_MAX_FRAME_BYTES + 1)
+        frame = self.rfile.readline(MAX_FRAME_BYTES + 1)
         try:
             call = _parse_call(frame)
             server = cast("_BrokerServer", self.server)
-            reply = server.owner.execute(call)
-            payload = {"ok": True, "result": reply.model_dump(mode="json")}
+            payload: BrokerReply = BrokerRan(ok=True, result=server.owner.execute(call))
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-930076 [BLE001]; this process boundary converts arbitrary transport and validation failures into one bounded protocol response, while narrower catches could terminate the broker thread without replying.
-            payload = {"ok": False, "error": str(error)}
-        self.wfile.write(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
+            payload = BrokerRefused(ok=False, error=str(error))
+        self.wfile.write(payload.model_dump_json().encode() + b"\n")
 
 
-def _parse_call(frame: bytes) -> _ProcessCall:
-    if not frame or len(frame) > _MAX_FRAME_BYTES or not frame.endswith(b"\n"):
+def _parse_call(frame: bytes) -> ProcessCall:
+    if not frame or len(frame) > MAX_FRAME_BYTES or not frame.endswith(b"\n"):
         message = "invalid Slurm broker request"
         raise ValueError(message)
-    return _ProcessCall.model_validate_json(frame)
+    return ProcessCall.model_validate_json(frame)
 
 
 class SlurmProcessBroker:
@@ -178,7 +164,7 @@ class SlurmProcessBroker:
         if (stat.st_dev, stat.st_ino) == identity:
             self.socket_path.unlink(missing_ok=True)
 
-    def execute(self, call: _ProcessCall) -> _ProcessReply:
+    def execute(self, call: ProcessCall) -> ProcessReply:
         """Validate one request, then execute it with the host credential environment."""
         if not secrets.compare_digest(call.token, self.token):
             raise SlurmProcessBrokerError.invalid_capability()
@@ -194,7 +180,7 @@ class SlurmProcessBroker:
                 # job id would be lost) or the scancel a stopping gate requests.
             )
         )
-        return _ProcessReply(
+        return ProcessReply(
             returncode=completed.returncode,
             stdout=completed.stdout,
             stderr=completed.stderr,

@@ -112,8 +112,7 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/skypilot_evaluator.py", "rule": "socket", "count": 3}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_broker.py", "rule": "socket_io", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_broker.py", "rule": "threading", "count": 2}
-{"path": "libs/vs-sandbox/src/vs_sandbox/slurm_broker_client.py", "rule": "socket", "count": 3}
-{"path": "libs/vs-sandbox/src/vs_sandbox/slurm_broker_client.py", "rule": "subprocess", "count": 2}
+{"path": "libs/vs-sandbox/src/vs_sandbox/slurm_broker_client.py", "rule": "subprocess", "count": 3}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "asyncio_sleep", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "executor", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "subprocess", "count": 1}
@@ -132,6 +131,7 @@
 {"path": "libs/vs-sandbox/tests/test_skypilot_evaluator_helper.py", "rule": "fs_sync", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_slurm_admission_cancel.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_slurm_broker.py", "rule": "process", "count": 2}
+{"path": "libs/vs-sandbox/tests/test_slurm_broker_client.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/tests/test_slurm_cancel_in_flight.py", "rule": "bare_wait", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_slurm_cancel_in_flight.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/tests/test_slurm_cancel_in_flight.py", "rule": "threading", "count": 2}
