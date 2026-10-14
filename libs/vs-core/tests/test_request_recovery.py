@@ -484,6 +484,32 @@ def test_an_observation_that_resolves_nothing_leaves_a_blocked_recovery_blocked(
     assert later.state.records.recovery.checks[0].resolution == "blocked"
 
 
+def test_a_restart_after_recovery_blocked_on_a_record_stays_blocked_on_it() -> None:
+    """A new host learns nothing by restarting, so the block survives it.
+
+    Before, the restarted recovery rebuilt its checks from the records alone: the next answer
+    that repeated "unknown" about the record core had ended counted as settled, and recovery
+    opened on a record the dead host had judged it could not get past.
+    """
+    original = pending_record()
+    started = step(recovering_state(original), RecoveryStarted(epoch=1, now_at=0.0))
+    blocked = step(
+        reload(started.state),
+        ReconciliationDeadline(request_id=original.request_id, now_at=1000.0),
+    )
+    assert blocked.state.records.recovery.phase == RecoveryPhase.BLOCKED
+    restarted = step(reload(blocked.state), RecoveryStarted(epoch=2, now_at=1001.0))
+    assert restarted.state.records.recovery.phase == RecoveryPhase.BLOCKED
+    record = next(
+        row for row in restarted.state.records.records if row.request_id == original.request_id
+    )
+    later = step(
+        reload(restarted.state),
+        RequestObserved(observation=observed(record, sequence=2)),
+    )
+    assert later.state.records.recovery.phase == RecoveryPhase.BLOCKED
+
+
 @pytest.mark.parametrize("now_at", [100.0, 101.0, 1000.0])
 def test_deadline_blocks_ambiguity_without_fabricating_terminal_ledger_fact(now_at: float) -> None:
     original = pending_record()

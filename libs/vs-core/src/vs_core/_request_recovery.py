@@ -1016,6 +1016,10 @@ def _start(
             and _resolution(record, context) not in ("terminal", "reattached")
             else None
         )
+        if resolution == "pending" and _blocked_before(barrier, record):
+            # The dead host's recovery already blocked on this record; a restart learns
+            # nothing new by itself, so recovery stays blocked until an answer settles it.
+            resolution = "blocked"
         checks.append(
             RecoveryCheck(
                 target=record.request_id,
@@ -1038,6 +1042,14 @@ def _start(
         tuple(requests),
     )
     return change.model_copy(update={"requests": tuple(requests)})
+
+
+def _blocked_before(barrier: RecoveryBarrier, record: RequestRecord) -> bool:
+    """Whether the previous epoch's recovery blocked on ``record`` (see ``_deadline_barrier``)."""
+    return any(
+        check.target == record.request_id and check.resolution == "blocked"
+        for check in barrier.checks
+    )
 
 
 def _merge_child(
