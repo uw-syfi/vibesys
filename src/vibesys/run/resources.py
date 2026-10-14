@@ -680,6 +680,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 skill_source_dirs=tuple(skill_source_paths),
                 host_resources=agent_host_resources,
                 clock=clock,
+                threads=integration.threads,
             )
         )
         project_resources.mark_ready()

@@ -57,6 +57,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.testing import FakeWorkspace
 from vs_runtime.contracts import WorkspaceAccess
+from vs_sim.api import ThreadBlockingRunner
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -289,7 +290,13 @@ class SessionHost:
     def executor(self, store: ReceiptStore) -> RuntimeSessionRequests:
         """A freshly started host over the same journal and provider conversation."""
         resolver: SessionResolver = self.resolver
-        return RuntimeSessionRequests(FakeAgentSessions(self.client, self.journal), resolver, store)
+        return RuntimeSessionRequests(
+            FakeAgentSessions(self.client, self.journal),
+            resolver,
+            store,
+            yields=None,
+            blocking=ThreadBlockingRunner(),
+        )
 
     def sessions(self) -> FakeAgentSessions:
         """A freshly started journal reader, for assertions on durable facts."""

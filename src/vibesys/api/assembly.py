@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment, StopTimer
     from vs_sandbox.api import ComputeBackendImpl, HostResource
-    from vs_sim.api import Threads
+    from vs_sim.api import BlockingRunner, Network
     from vs_slurm.api import SlurmProcess
 
 
@@ -70,6 +70,10 @@ class SessionImplementations:
     agent_providers: tuple[str, ...]
     stop_timer: StopTimer
     timing: RunTiming
+    blocking: BlockingRunner
+    """Runs the run's synchronous effects off the event loop."""
+    network: Network
+    """Serves the run's agent tool sockets."""
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
     git: Git
     """Starts the run's Git commands."""
@@ -81,8 +85,6 @@ class SessionImplementations:
     """The server of each tool that holds no run state, which a core run may offer a role."""
     git_repository: GitRepositoryFactory | None = None
     """Builds the run's ``GitRepository`` implementations; ``None`` opens the configured one."""
-    threads: Threads | None = None
-    """Locks for the session's shared state; ``None`` uses the operating system's."""
     slurm_process: SlurmProcess | None = None
     """Replaces the Slurm transport's process boundary; ``None`` runs the configured programs."""
     state_stores: StateStoreFactory | None = None

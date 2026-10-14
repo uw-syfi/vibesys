@@ -157,7 +157,9 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         detach=True,
         clock=SystemClock(),
     )
-    integration = LocalRunIntegration(clock=SystemClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=SystemClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     integration.events.subscribe(runtime.integration.project_event)
     threads = OsThreads()
     outcome: list[object] = []

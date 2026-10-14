@@ -80,7 +80,7 @@ if TYPE_CHECKING:
         RuntimeWorkspaces,
         TrustedEvaluationPlan,
     )
-    from vs_sim.api import SleepingClock
+    from vs_sim.api import BlockingRunner, Network, SleepingClock, Threads
 
 
 class CoreCompositionError(RuntimeError):
@@ -152,6 +152,12 @@ class CoreResources:
     """The run's clock: it places the deadline and later paces the loop on one timeline."""
     github: GitHubClient
     """Reaches GitHub, for operation owners that keep their records there."""
+    threads: Threads
+    """Locks the run's receipts and serves its agent evaluation calls."""
+    blocking: BlockingRunner
+    """Runs the request executors' synchronous calls off the event loop."""
+    network: Network
+    """Serves the in-turn agent evaluation socket."""
     measurement_observer: MeasurementObserver = field(default_factory=IgnoreMeasurement)
     """Hears each measurement stage start and end, for the host's event stream."""
     commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
@@ -207,7 +213,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     receipts = state_dir.local_namespace(run_id, "receipts")
     publications = state_dir.portable_namespace(run_id, "publications")
     artifacts = ArtifactStore(state_dir.portable_namespace(run_id, "artifacts"))
-    receipt_store = ReceiptStore(receipts)
+    receipt_store = ReceiptStore(receipts, resources.threads)
     try:
         plan = policy.plan(_context(resources, artifacts))
         _validate_plan(plan)
@@ -237,6 +243,8 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         raise CoreCompositionError(".".join(map(str, error.path)), error.detail) from error
     bindings = core_bindings(
         receipts=receipts,
+        threads=resources.threads,
+        blocking=resources.blocking,
         workspaces=resources.workspaces,
         measurement=MeasurementServices(resources.evaluation, resources.measurement_observer),
         sessions=SessionServices(_agent_sessions(resources), resolver, yields=bridge),
@@ -380,6 +388,8 @@ def _agent_bridge(
         ScopeWorkspaces(resources.workspaces, StoreWorkspaceReceipts(receipts)),
         AgentEvaluationRecords(OwedSubmissions(receipts), evidence),
         resources.evaluation_diagnostics,
+        network=resources.network,
+        threads=resources.threads,
     )
 
 

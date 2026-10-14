@@ -26,6 +26,7 @@ from vs_runtime.api.testing import (
     MemoryValidationPasses,
 )
 from vs_sandbox.api import CommandResult
+from vs_sim.api import ThreadBlockingRunner
 from vs_sim.api.testing import GatedBlockingRunner, arrival
 
 if TYPE_CHECKING:
@@ -243,7 +244,7 @@ def _runtime(provider: _Provider, runner: GatedBlockingRunner | None = None) -> 
 
     return create_workspace_runtime(
         workspace_resources=provider,
-        blocking=BlockingOperations(runner),
+        blocking=BlockingOperations(runner or ThreadBlockingRunner()),
         validation_passes=MemoryValidationPasses(),
     )
 

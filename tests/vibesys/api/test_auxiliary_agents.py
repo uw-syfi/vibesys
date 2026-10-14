@@ -38,6 +38,7 @@ from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecor
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.infrastructure import HostEnvironmentFacts, RunEnvironmentPresentation
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -129,6 +130,8 @@ def _resumable_client(**_kwargs: object) -> FakeAgentClient:
 @pytest.fixture(params=[False, True], ids=["built-in", "fake"])
 def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
     return LaunchSettings(
+        blocking=ThreadBlockingRunner(),
+        network=UnixNetwork(),
         timing=real_timing(),
         processes=REAL_PROCESSES,
         agents=FakeSessionAgents() if request.param else None,
@@ -168,7 +171,12 @@ def _session(tmp_path: Path, settings: LaunchSettings | None = None) -> _LocalRu
             sink=cast("EventSink", lambda _event: None),
             registry=registry,
             settings=(
-                LaunchSettings(timing=real_timing(), processes=REAL_PROCESSES)
+                LaunchSettings(
+                    timing=real_timing(),
+                    processes=REAL_PROCESSES,
+                    blocking=ThreadBlockingRunner(),
+                    network=UnixNetwork(),
+                )
                 if settings is None
                 else settings
             ),
@@ -227,6 +235,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
         skill_source_dirs=(),
         host_resources=(),
         clock=ManualClock(),
+        threads=OsThreads(),
     )
 
 
@@ -408,6 +417,8 @@ def test_independent_auxiliary_scope_survives_session_close(
 
     async def execute() -> None:
         settings = LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             timing=real_timing(),
             processes=REAL_PROCESSES,
             registry=registry,

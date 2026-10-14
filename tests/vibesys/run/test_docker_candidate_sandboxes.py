@@ -33,6 +33,7 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine, HostExecutedContainerBackend
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -118,7 +119,9 @@ def _candidate_container_counts(
         made.engine = engine
         return made
 
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
 
     async def exercise() -> tuple[bool, int, int, int]:
         async with open_core_host(

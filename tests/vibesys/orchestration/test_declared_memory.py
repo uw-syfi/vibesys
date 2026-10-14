@@ -28,6 +28,7 @@ from vibesys.api import (
 )
 from vibesys.api.request import load_task
 from vibesys.run.integration import LocalRunIntegration
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
@@ -69,7 +70,9 @@ def _request(project_root: Path) -> RunRequest:
 
 def _run_restore(request: RunRequest, code: str, memory: str) -> None:
     """Exercise declared-memory restore through a real product-composed run."""
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
 
     async def exercise() -> None:
         async with open_core_host(request, integration, plugin=_PLUGIN) as run:

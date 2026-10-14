@@ -72,6 +72,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import CommandResult, CommandRunner, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -225,7 +226,9 @@ def _measure_with_lost_command(
     root = tmp_path / "project"
     _write_project(root)
     sandbox = _LosesStageCommands(lost)
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     request = ProjectRunRequest(
         project_root=root,
         run_id=_RUN_ID,
@@ -282,10 +285,12 @@ def _measure_with_lost_command(
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
+                threads=OsThreads(),
+                blocking=ThreadBlockingRunner(),
             )
             runtime = create_workspace_runtime(
                 workspace_resources=factory,
-                blocking=BlockingOperations(),
+                blocking=BlockingOperations(runner=ThreadBlockingRunner()),
                 validation_passes=MemoryValidationPasses(),
             )
             evaluation = create_evaluation(

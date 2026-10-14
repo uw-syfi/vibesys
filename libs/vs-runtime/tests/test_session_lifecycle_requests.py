@@ -47,6 +47,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.executor_contexts import RevocableLease, context_for
 from vs_runtime.api.observation_contracts import assert_core_accepts
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import examples, wait_until_started
 
 if TYPE_CHECKING:
@@ -71,7 +72,7 @@ class World:
         )
 
     def store(self) -> ReceiptStore:
-        return ReceiptStore(self._project.state.state_store_namespace("run"))
+        return ReceiptStore(self._project.state.state_store_namespace("run"), threads=OsThreads())
 
     async def execute(
         self, request: RequestBase, *, lease: RevocableLease | None = None

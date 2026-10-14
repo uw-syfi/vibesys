@@ -39,6 +39,7 @@ from vs_agent.api.testing import AgentCrashError
 from vs_faults.api import AgentFault, Boundary, ClusterFault, ClusterOperation, FaultPlan, FaultRule
 from vs_runtime.api import RunCleanupError, RuntimeContractError
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import Depth, depth, swept
 
 if TYPE_CHECKING:
@@ -175,7 +176,9 @@ async def test_a_run_nothing_explains_failing_is_a_violation(tmp_path: Path) -> 
 
 def test_a_job_the_run_never_saw_end_or_cancelled_is_a_violation() -> None:
     """The job ledger the shared invariant reads names a job left running."""
-    cluster = FaultyCluster(plan_for(1, faults=0), Ticks(None, RuntimeRunControlChannel(_ignore)))
+    cluster = FaultyCluster(
+        plan_for(1, faults=0), Ticks(None, RuntimeRunControlChannel(_ignore, threads=OsThreads()))
+    )
     cluster.submissions.extend(["seen", "cancelled", "left"])
     cluster.settled.add("seen")
     cluster.cancel_requested.add("cancelled")

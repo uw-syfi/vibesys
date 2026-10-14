@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, StopTimer
     from vs_sandbox.api import ComputeBackendImpl
-    from vs_sim.api import Processes
+    from vs_sim.api import BlockingRunner, Network, Processes
     from vs_slurm.api import SlurmProcess
 
 
@@ -58,6 +58,10 @@ class LaunchSettings:
     """The run's time sources and lease; the entrypoint builds them from real or simulated time."""
     processes: Processes
     """Starts the run's Git and GitHub CLI commands; the entrypoint builds real or fake ones."""
+    blocking: BlockingRunner
+    """Runs the run's blocking calls off the event loop."""
+    network: Network
+    """Opens the run's sockets."""
     registry: OrchestrationRegistry | None = None
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None
     backend_factory: Callable[..., ComputeBackendImpl] | None = None
@@ -114,6 +118,8 @@ def create_session(
             agents=agents,
             stop_timer=timing.clock.sleep if settings.stop_timer is None else settings.stop_timer,
             timing=timing,
+            blocking=settings.blocking,
+            network=settings.network,
             invocation_store_factory=(
                 _durable_invocation_store
                 if settings.invocation_store_factory is None

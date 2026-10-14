@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import threading
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -13,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+    from vs_sim.api import Threads
 
 __all__ = ["SlotLease", "SlotMeter", "SlotMeterError"]
 
@@ -53,7 +54,8 @@ class _Record(BaseModel):
 class SlotMeter:
     """Meter leases in an fsynced JSONL ledger with one exclusive writer.
 
-    ``clock`` supplies monotonic elapsed seconds in the same epoch after reload.
+    ``clock`` supplies monotonic elapsed seconds in the same epoch after reload;
+    ``threads`` makes the lock that serializes this process's writers.
     Every acknowledged mutation is durable. Reads replay the ledger, never the
     current clock, so a crash charges an open lease only to its last heartbeat.
     Callers own lease identities and heartbeat scheduling. Closed leases cannot
@@ -65,10 +67,10 @@ class SlotMeter:
     ``SlotMeterError`` naming the ledger path and record or lease.
     """
 
-    def __init__(self, path: Path, *, clock: Callable[[], float]) -> None:
+    def __init__(self, path: Path, *, clock: Callable[[], float], threads: Threads) -> None:
         self._path = path
         self._clock = clock
-        self._lock = threading.RLock()
+        self._lock = threads.rlock()
         self.leases()
 
     def open(self, lease_id: str) -> SlotLease:

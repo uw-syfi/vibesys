@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from vibesys.events import CoreEvent, CoreEventData, CoreEventType, make_core_event
 from vs_runtime.api.infrastructure import DurableEventJournal, EventCodec
-from vs_sim.api import Clock, utc_datetime
+from vs_sim.api import Clock, Threads, utc_datetime
 
 
 class _CoreEventCodec(EventCodec[CoreEvent]):
@@ -30,9 +30,9 @@ class _CoreEventCodec(EventCodec[CoreEvent]):
 class EventJournal(DurableEventJournal[CoreEvent]):
     """Persist VibeSys core events using runtime-owned journal mechanics."""
 
-    def __init__(self, clock: Clock) -> None:
+    def __init__(self, clock: Clock, threads: Threads) -> None:
         """Create an unattached journal for ``core-events.jsonl`` stamped by epoch ``clock``."""
-        super().__init__(_CoreEventCodec(), filename="core-events.jsonl")
+        super().__init__(_CoreEventCodec(), filename="core-events.jsonl", threads=threads)
         self._clock = clock
 
     def emit(

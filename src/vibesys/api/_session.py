@@ -26,7 +26,6 @@ from vibesys.run.profilers import (
 from vs_core.api import StopMode
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import RunStopped
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -58,7 +57,7 @@ if TYPE_CHECKING:
         StopTimer,
     )
     from vs_sandbox.api import ComputeBackendImpl, HostResource
-    from vs_sim.api import Threads
+    from vs_sim.api import BlockingRunner, Network, Threads
 
 
 def _create_session(
@@ -93,6 +92,8 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None,
     stop_timer: StopTimer,
     timing: RunTiming,
+    blocking: BlockingRunner,
+    network: Network,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore],
 ) -> RunEnd:
     """Compose the private runtime host and run one validated plugin.
@@ -116,6 +117,8 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         options=options,
         stop_timer=stop_timer,
         timing=timing,
+        blocking=blocking,
+        network=network,
         invocation_store_factory=invocation_store_factory,
     ) as core_host:
         return await drive_core_run(core_host, integration)
@@ -159,6 +162,7 @@ class _LocalRunSession:
             clock=implementations.timing.clock,
             git=implementations.git,
             github=implementations.github,
+            threads=implementations.timing.threads,
         )
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -168,7 +172,7 @@ class _LocalRunSession:
         self._ready_listener: Callable[[RunReady], None] | None = None
         self._resources: RunResources | None = None
         self._auxiliary_scope: InProcessAuxiliaryAgents | None = None
-        self._threads = implementations.threads or OsThreads()
+        self._threads = implementations.timing.threads
         self._auxiliary_lock = self._threads.lock()
         self._closed = False
         self._unsubscribe: Callable[[], None] | None = None
@@ -309,6 +313,8 @@ class _LocalRunSession:
                 stateless_tool_servers=self._implementations.stateless_tool_servers,
                 stop_timer=self._implementations.stop_timer,
                 timing=self._implementations.timing,
+                blocking=self._implementations.blocking,
+                network=self._implementations.network,
                 invocation_store_factory=self._implementations.invocation_store_factory,
             )
             succeeded = outcome.status.value == "succeeded"

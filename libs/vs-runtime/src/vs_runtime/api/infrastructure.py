@@ -279,11 +279,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime.api import AgentRole
+    from vs_sim.api import Threads
 
 
-def create_run_control_channel(events: RunControlEventSink) -> RunControlChannel:
-    """Create one thread-safe cooperative run-control channel."""
-    return RuntimeRunControlChannel(events)
+def create_run_control_channel(events: RunControlEventSink, threads: Threads) -> RunControlChannel:
+    """Create one thread-safe cooperative run-control channel, locked by ``threads``."""
+    return RuntimeRunControlChannel(events, threads)
 
 
 type AgentConfigurationResolver = Callable[[AgentRole], AgentExecutionConfiguration]

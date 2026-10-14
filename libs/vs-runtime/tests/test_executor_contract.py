@@ -22,6 +22,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.executor_contexts import RevocableLease
 from vs_runtime.api.executor_contracts import ProcessKilledError
 from vs_runtime.api.observation_contracts import assert_core_accepts
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import swept
 
 if TYPE_CHECKING:
@@ -78,7 +79,9 @@ async def test_a_kind_acts_once_under_its_lease_and_its_identity_and_core_accept
         if not scenario.effectful:
             return  # queries seal nothing, so there is no record or identity to conflict with
         assert request.request_id is not None
-        history = ReceiptStore(world.receipts_namespace()).history(request.request_id.root)
+        history = ReceiptStore(world.receipts_namespace(), threads=OsThreads()).history(
+            request.request_id.root
+        )
         assert not isinstance(history, NeverBegun)
         answer = await inspect_request_of(world, request)
         got = _answer(answer)
@@ -216,7 +219,9 @@ async def test_crash_at_every_durable_boundary_recovers_once_and_core_accepts(
                 assert world.effects() - before == wanted_effects, f"boundary {crash_at}"
             assert_core_accepts([recovered, replayed], expect_retry=False)
             assert_core_accepts([answer, recovered, after], expect_retry=False)
-            history = ReceiptStore(world.receipts_namespace()).history(request_key(request))
+            history = ReceiptStore(world.receipts_namespace(), threads=OsThreads()).history(
+                request_key(request)
+            )
             if isinstance(history, SealedExecution) and history.result_type == result_type_name(
                 ExecutionResult
             ):

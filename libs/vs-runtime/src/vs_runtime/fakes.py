@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypeAlias, TypeVar
@@ -44,7 +43,7 @@ if TYPE_CHECKING:
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
     from vs_runtime._run_control import RunControlChannel, RunControlTransition
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
-    from vs_sim.api import ProcessSpec
+    from vs_sim.api import ProcessSpec, Threads
 
 
 class FakeAgentExecutionEnvironment:
@@ -1058,10 +1057,10 @@ class FakeStopTimer:
     from any thread, so no test waits on the wall clock.
     """
 
-    def __init__(self) -> None:
-        """Start with no recorded or pending waits."""
+    def __init__(self, threads: Threads) -> None:
+        """Start with no recorded or pending waits; ``threads`` makes the lock waits share."""
         self.delays: list[float] = []
-        self._condition = threading.Condition()
+        self._condition = threads.condition()
         self._pending: list[tuple[asyncio.AbstractEventLoop, asyncio.Future[None]]] = []
 
     async def __call__(self, seconds: float) -> None:

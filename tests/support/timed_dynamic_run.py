@@ -65,6 +65,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.testing import FakePublicationDelivery, ScriptedExecutors, request_executors
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import VirtualClock, run_virtual
 from vs_slurm.api import (
     ClusterObservation,
@@ -438,7 +439,7 @@ def _run(
             ),
         ),
     )
-    channel = RuntimeRunControlChannel(_ignore)
+    channel = RuntimeRunControlChannel(_ignore, threads=OsThreads())
     controls = RunControlBridge(channel, _Steers())
     host = CoreRunHost(shell, FakePublicationDelivery(store), clock, controls)
     # Production polls controls every second of run time. A stop does not wait for the

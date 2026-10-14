@@ -76,7 +76,7 @@ if TYPE_CHECKING:
         WorkspaceRuntime,
     )
     from vs_sandbox.api import ComputeBackendImpl, DockerSandbox
-    from vs_sim.api import SleepingClock
+    from vs_sim.api import BlockingRunner, Network, SleepingClock
 
 
 type StatelessToolServer = Callable[[object], ToolServerDescriptor | None]
@@ -128,6 +128,8 @@ class _ProductHostFactory:
     plugin: OrchestrationPlugin
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore] | None
     timing: RunTiming
+    blocking: BlockingRunner
+    network: Network
     resume_policy: (
         Callable[
             [OrchestrationDescriptor, OrchestrationDescriptor],
@@ -170,7 +172,7 @@ class _ProductHostFactory:
         return self._components(resources, ownership)
 
     def _components(self, resources: _PreparedRun, ownership: ExitStack) -> RunHostComponents:
-        blocking = BlockingOperations()
+        blocking = BlockingOperations(self.blocking)
         project = resources.project_resources
         environment = resources.environment_resources
         logger = project.logger
@@ -191,6 +193,8 @@ class _ProductHostFactory:
             skill_selection=platform_skill_selection(resources.backend),
             host_resources=resources.agent_host_resources,
             events=self.integration.workspace_resource_event,
+            threads=self.integration.threads,
+            blocking=self.blocking,
             model_requests=(
                 create_model_request_reconciler() if environment.view.env_kind == "modal" else None
             ),
@@ -413,6 +417,9 @@ class _ProductHostFactory:
                 configuration=configuration,
                 clock=self.timing.clock,
                 github=self.integration.github,
+                threads=self.integration.threads,
+                blocking=self.blocking,
+                network=self.network,
                 agent_lifecycle=self.integration.agent_execution_event,
                 evaluation_diagnostics=self._evaluation_diagnostic,
                 stateless_tool_servers=self._stateless_tool_servers(resources),
@@ -543,6 +550,8 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     profiler_preflight: ProfilerPreflight | None = None,
     stop_timer: StopTimer,
     timing: RunTiming,
+    blocking: BlockingRunner,
+    network: Network,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
     | None = None,
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None,
@@ -569,11 +578,13 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
         plugin=plugin,
         invocation_store_factory=invocation_store_factory,
         timing=timing,
+        blocking=blocking,
+        network=network,
         resume_policy=resume_policy,
         options=options,
         stateless_tool_servers=stateless_tool_servers,
     )
-    async with open_run_host(factory.prepare) as host:
+    async with open_run_host(factory.prepare, runner=blocking) as host:
         try:
             async with bounded_stop(
                 integration.control,

@@ -60,6 +60,7 @@ from vs_runtime.api.testing import (
     MemoryValidationPasses,
 )
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
@@ -158,10 +159,12 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
+                threads=OsThreads(),
+                blocking=ThreadBlockingRunner(),
             )
             workspaces = create_workspace_runtime(
                 workspace_resources=resources,
-                blocking=BlockingOperations(),
+                blocking=BlockingOperations(runner=ThreadBlockingRunner()),
                 validation_passes=MemoryValidationPasses(),
             ).workspaces
         try:

@@ -36,6 +36,7 @@ from vs_agent.api.testing import FakeConfinement, FakeDockerBuildRunner
 from vs_core.api import AssessmentKind
 from vs_project.api import OrchestrationDescriptor
 from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -102,7 +103,9 @@ def _facts(tmp_path: Path, plugin: OrchestrationPlugin) -> RunFacts:
     _write_project(root)
     config = tmp_path / "slurm.toml"
     config.write_text(_SLURM_LOCAL, encoding="utf-8")
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
 
     async def exercise() -> RunFacts:
         async with open_core_host(_request(root, config), integration, plugin=plugin) as host:

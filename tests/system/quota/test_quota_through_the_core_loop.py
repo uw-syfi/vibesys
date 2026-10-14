@@ -47,6 +47,7 @@ from vs_runtime.api.infrastructure import (
     install_capacity_gate,
 )
 from vs_runtime.api.testing import FakeCapacityTimer, ProbedRunClock
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, clock_from
 
 if TYPE_CHECKING:
@@ -100,7 +101,7 @@ async def _play(
         if transition.kind is RunControlTransitionKind.PAUSED and played.timer is None:
             channel.resume()
 
-    channel = RuntimeRunControlChannel(on_transition)
+    channel = RuntimeRunControlChannel(on_transition, threads=OsThreads())
     if policy.action is QuotaAction.WAIT:
         played.timer = FakeCapacityTimer(channel, start=START)
 

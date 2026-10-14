@@ -24,6 +24,7 @@ from vs_runtime.api.infrastructure import (
     open_managed_conversation,
 )
 from vs_sandbox.api import HostResource, ProjectPathPolicy
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -94,6 +95,7 @@ def test_same_object_continues_context_and_close_releases_resources_in_reverse()
             _CloseRecord("environment", close_order),
             _CloseRecord("client", close_order),
         ),
+        threads=OsThreads(),
     )
 
     assert conversation.turn("first", invocation_id="execution-1") == "one"
@@ -118,7 +120,7 @@ def test_same_object_continues_context_and_close_releases_resources_in_reverse()
 def test_replaced_context_reasks_with_full_rules() -> None:
     client = _ReplacingFakeAgentClient(session_reuse=True)
     client.enqueue_text("chat", "established", "unsafe", "safe")
-    conversation = create_managed_conversation(client, _spec(), resources=())
+    conversation = create_managed_conversation(client, _spec(), resources=(), threads=OsThreads())
 
     assert conversation.turn("establish context") == "established"
     assert conversation.turn("inspect") == "safe"
@@ -130,19 +132,23 @@ def test_replaced_context_reasks_with_full_rules() -> None:
 
 
 def test_closed_conversation_rejects_new_turns() -> None:
-    conversation = create_managed_conversation(FakeAgentClient(), _spec(), resources=())
+    conversation = create_managed_conversation(
+        FakeAgentClient(), _spec(), resources=(), threads=OsThreads()
+    )
     conversation.close()
 
     with pytest.raises(RuntimeError, match="closed"):
         conversation.turn("inspect")
     with pytest.raises(ValueError, match="must not be empty"):
-        create_managed_conversation(FakeAgentClient(), _spec(), resources=()).turn("  ")
+        create_managed_conversation(
+            FakeAgentClient(), _spec(), resources=(), threads=OsThreads()
+        ).turn("  ")
 
 
 def test_new_conversation_with_same_member_starts_fresh() -> None:
     client = FakeAgentClient(session_reuse=True)
-    first = create_managed_conversation(client, _spec(), resources=())
-    second = create_managed_conversation(client, _spec(), resources=())
+    first = create_managed_conversation(client, _spec(), resources=(), threads=OsThreads())
+    second = create_managed_conversation(client, _spec(), resources=(), threads=OsThreads())
 
     first.turn("one")
     first.turn("two")
@@ -169,7 +175,9 @@ def test_construction_failure_leaves_resources_with_caller() -> None:
     )
 
     with pytest.raises(ValueError, match="role"):
-        create_managed_conversation(FakeAgentClient(), invalid, resources=(resource,))
+        create_managed_conversation(
+            FakeAgentClient(), invalid, resources=(resource,), threads=OsThreads()
+        )
 
     assert close_order == []
     resource.close()
@@ -197,6 +205,7 @@ def test_open_conversation_builds_client_and_owns_environment(tmp_path: Path) ->
         additional_host_resources=(additional,),
         client_factory=build_client,
         clock=ManualClock(),
+        threads=OsThreads(),
     )
 
     assert conversation.turn("inspect") == "answer"
@@ -226,6 +235,7 @@ def test_open_conversation_preserves_construction_error_when_cleanup_fails(
             agent_events=NULL_AGENT_EVENT_SINK,
             client_factory=fail_client,
             clock=ManualClock(),
+            threads=OsThreads(),
         )
 
     assert environment.close_count == 1

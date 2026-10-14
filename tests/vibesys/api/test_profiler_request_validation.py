@@ -31,6 +31,7 @@ from vibesys.api.request import RunEnvironmentSpec, load_task
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import ThreadBlockingRunner, UnixNetwork
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -181,6 +182,8 @@ def test_profile_workload_requirement_precedes_provisioning(
                     timing=real_timing(),
                     processes=REAL_PROCESSES,
                     backend_factory=host_container_backend,
+                    blocking=ThreadBlockingRunner(),
+                    network=UnixNetwork(),
                 ),
             )
         assert error.value.diagnostic.code == "profile_workload_invalid"
@@ -193,6 +196,8 @@ def test_profile_workload_requirement_precedes_provisioning(
                 timing=real_timing(),
                 processes=REAL_PROCESSES,
                 backend_factory=host_container_backend,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
             ),
         )
         session.close()
@@ -225,6 +230,8 @@ def test_incompatible_profiler_is_a_typed_early_configuration_failure(
                 timing=real_timing(),
                 processes=REAL_PROCESSES,
                 backend_factory=host_container_backend,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
             ),
         )
     assert error.value.diagnostic.code == "profiler_incompatible"
@@ -249,6 +256,8 @@ def test_auto_native_preflight_failure_records_none_without_profiler_support(
         request,
         sink=record,
         settings=LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             timing=real_timing(),
             processes=REAL_PROCESSES,
             registry=_profiler_registry(),
@@ -302,6 +311,8 @@ def test_auto_native_preflight_failure_through_default_launch_wiring(
         request,
         sink=discard,
         settings=LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             timing=real_timing(),
             processes=REAL_PROCESSES,
             registry=_profiler_registry(),
@@ -332,6 +343,8 @@ def test_explicit_native_preflight_failure_precedes_backend_and_project_effects(
         request,
         sink=record,
         settings=LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             timing=real_timing(),
             processes=REAL_PROCESSES,
             registry=_profiler_registry(),

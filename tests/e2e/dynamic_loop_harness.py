@@ -65,7 +65,7 @@ from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_project.api import FakeStateStores, Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_runtime.api.testing import CrashableRunClock, FakeStopTimer
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import run_virtual
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, FakeConnector, recorded_commands
 
@@ -643,9 +643,11 @@ def run_request(  # noqa: PLR0913
         clock.limit = clock.at + budget_s
     runs = launch.default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             agent_client_factory=client_factory or agents.client,
             backend_factory=backend_factory or host_container_backend,
-            stop_timer=stop_timer or FakeStopTimer(),
+            stop_timer=stop_timer or FakeStopTimer(threads=OsThreads()),
             timing=(
                 real_timing()
                 if clock is None

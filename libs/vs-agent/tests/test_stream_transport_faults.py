@@ -35,6 +35,7 @@ from vs_project.api import Project
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.core import ExecutionResult, ReceiptStore
 from vs_runtime.api.observation_contracts import assert_core_accepts
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from vs_core.api import RequestBase
@@ -63,7 +64,7 @@ class _World:
         )
 
     def store(self) -> ReceiptStore:
-        return ReceiptStore(self._project.state.state_store_namespace("run"))
+        return ReceiptStore(self._project.state.state_store_namespace("run"), threads=OsThreads())
 
     async def run(self, request: RequestBase, *, now_at: float | None = None) -> ExecutionResult:
         return await self.stream.host.run(request, self.store(), now_at=now_at)

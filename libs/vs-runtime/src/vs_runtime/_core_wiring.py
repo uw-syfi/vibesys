@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from vs_project.api import StateNamespace
     from vs_runtime._session_requests import SessionResolver, TurnYields
     from vs_runtime._workspaces import RuntimeWorkspaces
+    from vs_sim.api import BlockingRunner, Threads
 
 
 @dataclasses.dataclass(frozen=True)
@@ -130,12 +131,17 @@ def new_core_state(
     )
 
 
-def core_bindings(
+def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run's stores and services plus the two vs_sim roles its executors run on.
+    # > Bundling threads and blocking into one value would be a second ``Platform``, which
+    # > only entrypoints and the server runtime take; folding them into ``SessionServices``
+    # > would hide the workspace executor's runner inside the session bundle.
     *,
     receipts: StateNamespace,
     workspaces: RuntimeWorkspaces,
     measurement: MeasurementServices,
     sessions: SessionServices,
+    threads: Threads,
+    blocking: BlockingRunner,
     operations: OperationCatalog | None = None,
 ) -> CoreRuntimeBindings:
     """Bind every request role over one shared receipt store.
@@ -147,15 +153,19 @@ def core_bindings(
     writer ended (settled, or interrupted and released) before the run is snapshotted.
     ``operations`` defaults to the empty catalog, which serves a strategy that declares
     no registered operations; pass the same catalog to ``new_core_state(offered=)``.
+    ``threads`` locks the receipt store; ``blocking`` runs the executors' synchronous
+    journal, provider and disk calls off the event loop.
     """
-    store = ReceiptStore(receipts)
+    store = ReceiptStore(receipts, threads)
     catalog = operations or empty_catalog()
-    session = session_executors(sessions.agent_sessions, sessions.resolver, store, sessions.yields)
+    session = session_executors(
+        sessions.agent_sessions, sessions.resolver, store, sessions.yields, blocking
+    )
     proof = ReleasedRunInvocations(
         JournalRunInvocations(sessions.agent_sessions, store), sessions.agent_sessions, store
     )
     executors = RequestExecutors(
-        workspaces=RuntimeWorkspaceRequests(workspaces, store, proof),
+        workspaces=RuntimeWorkspaceRequests(workspaces, store, proof, blocking),
         sessions=SessionRequestRouter(session.turns, session.lifecycle),
         evaluation=MeasurementRequests(measurement.executor, store, measurement.observer),
         operations=RegisteredOperationRequests(

@@ -36,7 +36,7 @@ from vs_runtime.api import AgentWorkspaceRouteError
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeDockerEngine
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -75,7 +75,9 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
             ),
         }
     )
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> tuple[bool, list[str]]:
@@ -88,7 +90,9 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
-            stop_timer=FakeStopTimer(),
+            stop_timer=FakeStopTimer(threads=OsThreads()),
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
         ) as host:
             lookup = cast(
                 "Callable[[Path], DockerSandbox | None]", given_to_client["workspace_sandboxes"]
@@ -182,7 +186,9 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
             ),
         }
     )
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     clock = VirtualClock(at=0.0)
     turns = _Turns()
 
@@ -196,7 +202,9 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
-            stop_timer=FakeStopTimer(),
+            stop_timer=FakeStopTimer(threads=OsThreads()),
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
         ) as host:
             turns.root_containers = {c.container_id for c in engine.containers()}
             paths = [

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from vs_sim.api import Threads
 
 
 class EventCodec[EventT](Protocol):
@@ -42,14 +44,14 @@ class _PendingWrite:
 class DurableEventJournal[EventT]:
     """Persist codec-defined events while supporting replay and subscriptions."""
 
-    def __init__(self, codec: EventCodec[EventT], *, filename: str) -> None:
-        """Create an unattached journal for one event codec and file name."""
+    def __init__(self, codec: EventCodec[EventT], *, filename: str, threads: Threads) -> None:
+        """Create an unattached journal for one event codec and file name, locked by ``threads``."""
         if not filename or Path(filename).name != filename:
             message = "journal filename must be one non-empty path component"
             raise ValueError(message)
         self._codec = codec
         self._filename = filename
-        self._condition = threading.Condition(threading.RLock())
+        self._condition = threads.condition(threads.rlock())
         self._path: Path | None = None
         self._stream_id = ""
         self._events: list[EventT] = []

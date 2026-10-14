@@ -66,6 +66,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_runtime.api.testing import ProbedRunClock
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, clock_from
 from vs_slurm.api import ClusterUnknown, Ended, Queued, SlurmJobStatus
 
@@ -540,7 +541,7 @@ async def run_chaos(  # noqa: PLR0913  # LW-150102 [PLR0913]; the options are in
     if stop_at == "seeded":
         stop_at = rng.choice((None, None, rng.randint(1, _MAX_STOP_TICK)))
     assert stop_at is None or isinstance(stop_at, int)
-    channel = RuntimeRunControlChannel(_ignore)
+    channel = RuntimeRunControlChannel(_ignore, threads=OsThreads())
     ticks = Ticks(stop_at, channel)
     cluster = FaultyCluster(plan, ticks)
     strategy = SkeletonStrategy(config=config or shape_for(seed))

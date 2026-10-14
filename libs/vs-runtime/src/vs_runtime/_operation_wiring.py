@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from vs_runtime._operation_catalog import OperationOwner
     from vs_runtime._validation_passes import ValidationPasses
     from vs_runtime.contracts import Commands, RevisionLedger, Workspaces
+    from vs_sim.api import Threads
 
 
 class OperationRole(StrEnum):
@@ -218,16 +219,18 @@ def bind_operations(
     catalog: OperationCatalog,
     receipts: StateNamespace,
     *,
+    threads: Threads,
     base: CoreRuntimeBindings | None = None,
 ) -> CoreRuntimeBindings:
     """Startup gate and shell bindings: reject unowned required operations, then execute the catalog.
 
     Raises ``ContractError`` naming the first required operation that is missing
-    or refused. ``base`` supplies the other executor roles unchanged.
+    or refused. ``base`` supplies the other executor roles unchanged; ``threads``
+    locks the receipt store.
     """
     catalog.require_owned(declaration)
     selected = base or CoreRuntimeBindings()
-    store = ReceiptStore(receipts)
+    store = ReceiptStore(receipts, threads)
     operations = RegisteredOperationRequests(
         catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
     )

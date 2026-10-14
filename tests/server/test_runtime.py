@@ -41,6 +41,7 @@ from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import RunControlChannel
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -263,7 +264,9 @@ def test_runtime_snapshots_namespace_client_state_by_project(tmp_path: Path) -> 
 
 def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: Path) -> None:
     """A stop accepted from ``listening`` survives until session installation."""
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     control = _SessionControlStub(integration.control)
 
     class Observer:

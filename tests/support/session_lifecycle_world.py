@@ -39,6 +39,7 @@ from vs_runtime.api.core import (
     SessionLifecycleRequests,
     SessionRequestRouter,
 )
+from vs_sim.api import ThreadBlockingRunner
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -131,9 +132,10 @@ def lifecycle_executor(
     """
     resolver: SessionResolver = host.resolver
     sessions = sessions or FakeAgentSessions(host.client, host.journal)
-    turns = RuntimeSessionRequests(sessions, resolver, store, blocking=blocking)
+    runner = blocking or ThreadBlockingRunner()
+    turns = RuntimeSessionRequests(sessions, resolver, store, blocking=runner)
     return SessionRequestRouter(
-        turns, SessionLifecycleRequests(sessions, turns, store, turns.settlement, blocking)
+        turns, SessionLifecycleRequests(sessions, turns, store, turns.settlement, runner)
     )
 
 

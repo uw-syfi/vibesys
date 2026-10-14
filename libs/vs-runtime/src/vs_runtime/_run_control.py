@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
@@ -12,6 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_core.api import StopMode
+    from vs_sim.api import Threads
 
 
 class RunControlTransitionKind(StrEnum):
@@ -142,10 +142,10 @@ class RunStopped(BaseException):
 class RuntimeRunControlChannel:
     """Thread-safe mailbox between control callers and a running policy."""
 
-    def __init__(self, events: RunControlEventSink) -> None:
-        """Bind the channel to a synchronous semantic event sink."""
+    def __init__(self, events: RunControlEventSink, threads: Threads) -> None:
+        """Bind the channel to a synchronous semantic event sink; ``threads`` makes its lock."""
         self._events = events
-        self._lock = threading.Condition(threading.Lock())
+        self._lock = threads.condition(threads.lock())
         self._pending_steer: list[str] = []
         self._paused = False
         self._stop_requested = False

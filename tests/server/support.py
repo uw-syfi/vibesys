@@ -236,10 +236,10 @@ def build_server_parts(
             clock=ManualClock(),
         )
     chat.set_fallback_answer(RunInspector(integration).answer)
-    core_events = CoreEventJournal(clock=clock)
+    core_events = CoreEventJournal(clock=clock, threads=OsThreads())
     core_events.subscribe(integration.project_event)
     control = create_run_control_channel(
-        lambda transition: _record_control_transition(core_events, transition)
+        lambda transition: _record_control_transition(core_events, transition), threads=OsThreads()
     )
     control_bridge = _ControlBridge(control)
     controls = RunControlSlot(condition)

@@ -25,6 +25,7 @@ from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import ThreadBlockingRunner, UnixNetwork
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -121,6 +122,8 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
         backend_factory=backend_factory,
         agents=agents,
         git_repository=FakeGitRepositories().repository,
+        blocking=ThreadBlockingRunner(),
+        network=UnixNetwork(),
     )
     validate_descriptor(request.orchestration, registry=registry)
     validate_run_request(request, registry=registry, git=REAL_GIT)
@@ -186,6 +189,8 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool
     request = _request(tmp_path / "project")
     runs = default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             timing=real_timing(),
             processes=REAL_PROCESSES,
             registry=registry,

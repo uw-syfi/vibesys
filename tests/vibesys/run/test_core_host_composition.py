@@ -49,7 +49,7 @@ from vs_runtime.api import (
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -144,7 +144,9 @@ def _open(
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> CoreServices:
@@ -160,7 +162,9 @@ def _open(
                 invocation_store_factory=(
                     (lambda _state, _key: FakeAgentInvocationStore()) if journal else None
                 ),
-                stop_timer=FakeStopTimer(),
+                stop_timer=FakeStopTimer(threads=OsThreads()),
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
             ) as host:
                 return host.services
         finally:
@@ -175,7 +179,9 @@ def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> str:
@@ -190,7 +196,9 @@ def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
                 profiler_preflight=lambda kind: ProfilerPreflightResult(kind=kind, usable=True),
-                stop_timer=FakeStopTimer(),
+                stop_timer=FakeStopTimer(threads=OsThreads()),
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
             ):
                 return "\n".join(repr(event) for event in integration.events.read())
         finally:
@@ -380,7 +388,9 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     clock = VirtualClock(at=0.0)
     request = _request(project_root).model_copy(update={"run_id": "core-run"})
     plugin = replace(
@@ -402,6 +412,8 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
             stop_timer=clock.sleep,
             timing=RunTiming(clock, 60.0, OsThreads()),
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
         )
         return end.status
 

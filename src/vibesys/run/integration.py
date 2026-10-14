@@ -56,7 +56,7 @@ if TYPE_CHECKING:
         RunEnvironmentResources,
     )
     from vs_sandbox.api import HostResource
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Threads
     from vs_slurm.api import SlurmProcess
 
 
@@ -96,6 +96,8 @@ class RunResources:
     host_resources: tuple[HostResource, ...]
     clock: Clock
     """The run's clock, in seconds since the epoch."""
+    threads: Threads
+    """Makes the run's threads and locks."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,6 +326,7 @@ class LocalRunIntegration:
         clock: Clock,
         git: Git,
         github: GitHubCLI,
+        threads: Threads,
     ) -> None:
         """Compose a durable journal with direct invocation control.
 
@@ -332,7 +335,8 @@ class LocalRunIntegration:
         boundary for the run's evaluations; ``None`` runs the configured programs.
         ``state_stores`` opens each run's ``StateStore``; ``None`` is the local
         crash-atomic one. ``clock`` counts seconds since the epoch; it stamps the
-        run's events, names its logs, and times its boot.
+        run's events, names its logs, and times its boot. ``threads`` makes the run's
+        threads and locks.
         """
         self.git = git
         self.github = github
@@ -340,9 +344,10 @@ class LocalRunIntegration:
         self.slurm_process = slurm_process
         self.state_stores = state_stores
         self.clock = clock
-        self.events = EventJournal(clock)
+        self.threads = threads
+        self.events = EventJournal(clock, threads)
         self.agent_events = CoreAgentEventSink(self.events.record, clock)
-        self.control = create_run_control_channel(_CoreRunControlEvents(self.events))
+        self.control = create_run_control_channel(_CoreRunControlEvents(self.events), threads)
         self._closed = False
         self._committed_state_listener: (
             Callable[[str, BaseModel, tuple[str, ...] | None], None] | None

@@ -32,7 +32,7 @@ from vs_mcp.api import StdioServerDescriptor
 from vs_runtime.api import AgentRole, AgentTool, OrchestrationPlugin
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -65,7 +65,9 @@ def _compose(
         options=EmptyOptions,
         core=_policy(templates),
     )
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> None:
@@ -86,7 +88,9 @@ def _compose(
                     if declined
                     else None
                 ),
-                stop_timer=FakeStopTimer(),
+                stop_timer=FakeStopTimer(threads=OsThreads()),
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
             ):
                 return
         finally:

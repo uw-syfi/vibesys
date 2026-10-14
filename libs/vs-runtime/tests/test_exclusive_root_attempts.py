@@ -40,6 +40,7 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
     revision_ref,
 )
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import examples, swept
 
 from .test_session_access import HostDied
@@ -85,7 +86,7 @@ class MortalStore(ReceiptStore):
     """A real store that raises at the n-th durable operation while armed."""
 
     def __init__(self, env: WorkspaceEnv) -> None:
-        super().__init__(env.receipts_namespace())
+        super().__init__(env.receipts_namespace(), OsThreads())
         self.dies_at = _NEVER
         self.operations = 0
 
@@ -153,7 +154,9 @@ class Host:
     epoch: int = 1
 
     def executor(self, store: ReceiptStore) -> RuntimeWorkspaceRequests:
-        return RuntimeWorkspaceRequests(self.env.hosts[-1], store, SettledRunInvocations())
+        return RuntimeWorkspaceRequests(
+            self.env.hosts[-1], store, SettledRunInvocations(), blocking=ThreadBlockingRunner()
+        )
 
     async def run(
         self, request: Request, *, dies_at: int = _NEVER, restore_dies_at: int = _NEVER

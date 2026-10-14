@@ -26,7 +26,7 @@ from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, Fake
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeDockerEngine
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 
@@ -54,7 +54,9 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             ),
         }
     )
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     clock = VirtualClock(at=0.0)
 
     def reaches(run_id: str) -> list[bool]:
@@ -79,7 +81,9 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             ),
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
-            stop_timer=FakeStopTimer(),
+            stop_timer=FakeStopTimer(threads=OsThreads()),
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
         ) as host:
             for _ in range(candidates):
                 await host.workspaces.create_candidate()

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from vs_project.api import Project
 from vs_runtime.api.core import OwedSubmissions, ReceiptStore
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -21,4 +22,4 @@ def owed_namespace(directory: Path) -> StateNamespace:
 
 def owed_in(directory: Path) -> OwedSubmissions:
     """The owed record stored below ``directory``; the same directory gives the same record."""
-    return OwedSubmissions(ReceiptStore(owed_namespace(directory)))
+    return OwedSubmissions(ReceiptStore(owed_namespace(directory), threads=OsThreads()))

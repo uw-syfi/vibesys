@@ -200,12 +200,15 @@ async def scenario(
         bridge = AgentEvaluationBridge(
             tmp_path / "evaluation.sock",
             POLICY,
-            ScopeWorkspaces(workspaces, StoreWorkspaceReceipts(ReceiptStore(receipts))),
+            ScopeWorkspaces(
+                workspaces, StoreWorkspaceReceipts(ReceiptStore(receipts, threads=OsThreads()))
+            ),
             AgentEvaluationRecords(
-                OwedSubmissions(ReceiptStore(receipts)),
-                ReceiptEvidenceLedger(ReceiptStore(receipts)),
+                OwedSubmissions(ReceiptStore(receipts, threads=OsThreads())),
+                ReceiptEvidenceLedger(ReceiptStore(receipts, threads=OsThreads())),
             ),
             network=writers[0].network,
+            threads=OsThreads(),
         )
         resolvers[0].bridge = bridge
         bridges.append(bridge)

@@ -29,6 +29,7 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
+from vs_sim.api import OsThreads, UnixNetwork
 from vs_sim.api.testing import ManualClock, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
@@ -55,9 +56,13 @@ def _bridge(tmp_path: Path, socket: Path | None = None) -> AgentEvaluationBridge
         policy,
         ScopeWorkspaces(
             cast("RuntimeWorkspaces", FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))),
-            StoreWorkspaceReceipts(ReceiptStore(namespace)),
+            StoreWorkspaceReceipts(ReceiptStore(namespace, threads=OsThreads())),
         ),
-        AgentEvaluationRecords(OwedSubmissions(ReceiptStore(namespace)), SynthesizedEvidence()),
+        AgentEvaluationRecords(
+            OwedSubmissions(ReceiptStore(namespace, threads=OsThreads())), SynthesizedEvidence()
+        ),
+        network=UnixNetwork(),
+        threads=OsThreads(),
     )
 
 

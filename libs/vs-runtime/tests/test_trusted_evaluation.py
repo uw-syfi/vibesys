@@ -29,6 +29,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeModelVolumeProvisioner
 from vs_sandbox.api import CommandResult, LocalShellRunner
 from vs_sandbox.api.testing import FakeCommandRunner
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
@@ -67,6 +68,8 @@ def _executor(
         sandbox=sandbox,
         git=cast("GitTracker", git or _Git()),
         model_requests=model_requests,
+        threads=OsThreads(),
+        blocking=ThreadBlockingRunner(),
     )
 
 

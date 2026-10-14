@@ -37,6 +37,7 @@ from vs_evaluation.api.testing import (
     FakeEvaluationExecutor,
     InMemoryEvaluationStore,
 )
+from vs_sim.api import ThreadBlockingRunner
 from vs_sim.api.testing import ManualClock, arrival, examples
 
 if TYPE_CHECKING:
@@ -315,12 +316,12 @@ async def test_availability_is_typed_and_freshness_uses_injected_clock() -> None
 async def test_reconcile_reuses_durable_handle_after_store_reopen(tmp_path: Path) -> None:
     clock = ManualClock()
     first_executor = FakeEvaluationExecutor(clock)
-    first_store = FilesystemEvaluationStore(tmp_path)
+    first_store = FilesystemEvaluationStore(tmp_path, blocking=ThreadBlockingRunner())
     first_service = coordinator(first_executor, first_store)
     first_handle = await first_service.submit(request("resume-key"))
 
     resumed_executor = FakeEvaluationExecutor(clock)
-    resumed_store = FilesystemEvaluationStore(tmp_path)
+    resumed_store = FilesystemEvaluationStore(tmp_path, blocking=ThreadBlockingRunner())
     resumed_service = coordinator(resumed_executor, resumed_store)
     recovered = await resumed_service.reconcile()
 
@@ -336,7 +337,10 @@ async def test_reconcile_reuses_durable_handle_after_store_reopen(tmp_path: Path
 async def test_filesystem_store_claim_is_atomic_across_store_instances(tmp_path: Path) -> None:
     clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
-    stores = [FilesystemEvaluationStore(tmp_path), FilesystemEvaluationStore(tmp_path)]
+    stores = [
+        FilesystemEvaluationStore(tmp_path, blocking=ThreadBlockingRunner()),
+        FilesystemEvaluationStore(tmp_path, blocking=ThreadBlockingRunner()),
+    ]
     services = [coordinator(executor, store) for store in stores]
 
     handles = await asyncio.gather(*(service.submit(request("shared-key")) for service in services))
@@ -672,7 +676,7 @@ async def test_external_submit_observes_durable_dispatch_authorization() -> None
 @pytest.mark.asyncio
 async def test_a_record_that_is_not_a_regular_file_is_corrupt_not_a_hang(tmp_path: Path) -> None:
     # Reading a FIFO blocks until a writer appears; the store must refuse it instead.
-    store = FilesystemEvaluationStore(tmp_path)
+    store = FilesystemEvaluationStore(tmp_path, blocking=ThreadBlockingRunner())
     os.mkfifo(tmp_path / f"eval_{'0' * 64}.json")
 
     with pytest.raises(RuntimeError, match="invalid evaluation record") as raised:

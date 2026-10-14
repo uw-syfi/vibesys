@@ -58,7 +58,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.testing import ProbedRunClock
-from vs_sim.api import yield_now
+from vs_sim.api import OsThreads, yield_now
 from vs_sim.api.testing import clock_from, examples
 
 if TYPE_CHECKING:
@@ -106,7 +106,7 @@ def _ignore(transition: object) -> None:
 
 
 def _channel() -> RuntimeRunControlChannel:
-    return RuntimeRunControlChannel(_ignore)
+    return RuntimeRunControlChannel(_ignore, threads=OsThreads())
 
 
 def _config(

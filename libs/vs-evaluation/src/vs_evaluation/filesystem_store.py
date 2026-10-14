@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import fcntl
 from typing import TYPE_CHECKING, TypeVar
 
@@ -22,6 +21,8 @@ from vs_project.api import atomic_write_bytes
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+    from vs_sim.api import BlockingRunner
 
 T = TypeVar("T")
 _HANDLE_ID_LENGTH = len("eval_") + 64
@@ -47,9 +48,10 @@ class FilesystemEvaluationStore:
     raw keys and credentials never appear in filenames.
     """
 
-    def __init__(self, root: Path) -> None:
-        """Create the storage directory if needed and retain its path."""
+    def __init__(self, root: Path, blocking: BlockingRunner) -> None:
+        """Create the storage directory if needed; file and lock calls run on ``blocking``."""
         self._root = root
+        self._blocking = blocking
         self._root.mkdir(parents=True, exist_ok=True)
         self._lock_path = self._root / ".lock"
 
@@ -128,7 +130,7 @@ class FilesystemEvaluationStore:
 
     async def _run_locked(self, operation: Callable[[], T]) -> T:
         """Run blocking filesystem and flock operations off the event loop."""
-        return await asyncio.to_thread(lambda: self._locked(operation))
+        return await self._blocking.run(lambda: self._locked(operation))
 
     def _locked(self, operation: Callable[[], T]) -> T:
         with self._lock_path.open("a+b") as lock_file:

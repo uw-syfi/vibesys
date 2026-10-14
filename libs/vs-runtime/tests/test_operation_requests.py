@@ -68,6 +68,7 @@ from vs_runtime.api.operation_fixtures import (
 )
 from vs_runtime.api.operation_fixtures import revision as revision_ref
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import Gate, examples
 
 pytestmark = pytest.mark.asyncio
@@ -110,7 +111,7 @@ class CrashingStore(ReceiptStore):
     """A real store that kills the process around the sealing of a result."""
 
     def __init__(self, namespace: StateNamespace, crash_at: str | None) -> None:
-        super().__init__(namespace)
+        super().__init__(namespace, OsThreads())
         self._crash_at = crash_at
 
     def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
@@ -172,7 +173,7 @@ def executor(
     return RegisteredOperationRequests(
         catalog_of(items),
         CrashingReceipts(namespace, crash_at),
-        ObservationFactory(ReceiptStore(namespace)),
+        ObservationFactory(ReceiptStore(namespace, threads=OsThreads())),
     )
 
 
@@ -314,9 +315,11 @@ async def test_unknown_operation_is_rejected_without_receipt_or_effect() -> None
         full = catalog_of(items)
         request = execute_request(full, echo.request, "req-foreign")
         smaller = tuple(item for item in items if item.name != "echo")
-        receipts = NamespaceOperationReceipts(ReceiptStore(namespace))
+        receipts = NamespaceOperationReceipts(ReceiptStore(namespace, threads=OsThreads()))
         result = await RegisteredOperationRequests(
-            catalog_of(smaller), receipts, ObservationFactory(ReceiptStore(namespace))
+            catalog_of(smaller),
+            receipts,
+            ObservationFactory(ReceiptStore(namespace, threads=OsThreads())),
         ).execute(request, context_for(request))
         assert observed(result).observation.status is ObservationStatus.REJECTED
         assert "not in the catalog" in observed(result).observation.diagnostic
@@ -499,7 +502,7 @@ async def test_inspection_seals_an_effect_the_owner_proves_never_happened() -> N
         items = scenarios(root, namespace)
         echo = pick(items, "echo")
         request = execute_request(catalog_of(items), echo.request, "req-never")
-        store = ReceiptStore(namespace)
+        store = ReceiptStore(namespace, threads=OsThreads())
         receipts = NamespaceOperationReceipts(store)
         context = context_for(request)
 
@@ -531,7 +534,9 @@ async def test_inspection_seals_an_effect_the_owner_proves_never_happened() -> N
             perform=crash_after_record,
         )
         runner = RegisteredOperationRequests(
-            catalog_of(items), receipts, ObservationFactory(ReceiptStore(namespace))
+            catalog_of(items),
+            receipts,
+            ObservationFactory(ReceiptStore(namespace, threads=OsThreads())),
         )
         query = await inspect_of(runner, "req-never")
         assert query.target is not None

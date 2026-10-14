@@ -83,6 +83,7 @@ from vs_runtime.api.testing import (
     FakeWorkspaces,
     MemoryValidationPasses,
 )
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import examples
 
 pytestmark = pytest.mark.asyncio
@@ -97,7 +98,9 @@ def _key(source: str, evidence_id: EvidenceId) -> EvidenceKey:
 
 def _store(root: Path) -> ReceiptStore:
     (root / "project").mkdir(exist_ok=True)
-    return ReceiptStore(Project.open(root / "project").state.state_store_namespace("run"))
+    return ReceiptStore(
+        Project.open(root / "project").state.state_store_namespace("run"), threads=OsThreads()
+    )
 
 
 def _evidence(
@@ -585,7 +588,7 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
         base = Path(raw)
         (base / "project").mkdir()
         namespace = Project.open(base / "project").state.state_store_namespace("run")
-        evidence = ReceiptEvidenceLedger(ReceiptStore(namespace))
+        evidence = ReceiptEvidenceLedger(ReceiptStore(namespace, threads=OsThreads()))
         recorded = _evidence(7, value=3.0)
         evidence.record(RequestId(root=SOURCE), recorded, "official")
         workspaces = FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))
@@ -603,7 +606,7 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
         catalog.require_owned(declaration)
         assert {d.kind for d in catalog.offered_operations} == {"test.interpret", "test.retain"}
         validate_startup(declaration, Capabilities(operations=catalog.offered_operations))
-        bindings = bind_operations(declaration, catalog, namespace)
+        bindings = bind_operations(declaration, catalog, namespace, threads=OsThreads())
         request = execute_request(catalog, _Interpret(evidence=(_ref(recorded),)), "interpret")
         result = await bindings.executors.operations.execute(request, _eval_context(request))
         assert isinstance(result, ExecutionResult)

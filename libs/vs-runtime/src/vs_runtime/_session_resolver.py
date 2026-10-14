@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from vs_runtime._workspaces import RuntimeWorkspaces
     from vs_runtime.api.infrastructure import AgentConfigurationResolver
     from vs_runtime.contracts import AgentRole
+    from vs_sim.api import BlockingRunner
 
 type SessionSpecFactory = Callable[[AgentRole, Path], AgentSessionSpec]
 """Provider session configuration for one role in one workspace directory."""
@@ -230,12 +231,16 @@ class SessionExecutors:
     """CancelTurn, CloseSession and ResumeSessionTurn."""
 
 
-def open_session_requests(
+def open_session_requests(  # noqa: PLR0913  # lint-waiver: LW-260142 [PLR0913]; the resolver inputs, the agent client, its journal, the shared store, the blocking runner and the yields.
+    # > Each is owned by a different part of the run; a parameter object would have this
+    # > one user and only rename the arguments, and ``ResolverInputs`` describes what a
+    # > session may do, not where its blocking calls run.
     inputs: ResolverInputs,
     *,
     client: AgentTurnExecutor,
     invocation_slot: AgentInvocationStore,
     store: ReceiptStore,
+    blocking: BlockingRunner,
     yields: TurnYields | None = None,
 ) -> SessionExecutors:
     """The session executors over the run's agent client, journal slot and receipt store.
@@ -252,6 +257,7 @@ def open_session_requests(
         ProductionSessionResolver(inputs),
         store,
         yields,
+        blocking,
     )
 
 
@@ -259,7 +265,8 @@ def session_executors(
     sessions: ClientAgentSessions,
     resolver: SessionResolver,
     store: ReceiptStore,
-    yields: TurnYields | None = None,
+    yields: TurnYields | None,
+    blocking: BlockingRunner,
 ) -> SessionExecutors:
     """Both session executors over one access settlement, for any resolver.
 
@@ -267,9 +274,9 @@ def session_executors(
     that supply their own resolver call this, so the shared settlement and the snapshot
     fence it installs cannot be forgotten.
     """
-    turns = RuntimeSessionRequests(sessions, resolver, store, yields)
+    turns = RuntimeSessionRequests(sessions, resolver, store, yields, blocking=blocking)
     return SessionExecutors(
-        turns, SessionLifecycleRequests(sessions, turns, store, turns.settlement)
+        turns, SessionLifecycleRequests(sessions, turns, store, turns.settlement, blocking)
     )
 
 

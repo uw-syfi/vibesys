@@ -100,6 +100,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
 from vs_runtime.api.slurm_evaluation_stack import (
     SCOPE as EVALUATION_SCOPE,
 )
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
@@ -126,7 +127,7 @@ class _World:
         return FaultingNamespace(self.real_namespace(), crash_at)
 
     def store(self, faulting: FaultingNamespace) -> ReceiptStore:
-        return ReceiptStore(cast("StateNamespace", faulting))
+        return ReceiptStore(cast("StateNamespace", faulting), threads=OsThreads())
 
     def writes(self) -> int:
         return self._writes
@@ -146,7 +147,7 @@ async def inspect_request_of(world: CaseWorld, target: RequestBase) -> Execution
     """
     target_id = cast("RequestId", target.request_id)
     namespace = world.receipts_namespace()
-    store = ReceiptStore(namespace)
+    store = ReceiptStore(namespace, threads=OsThreads())
     inspector = RegisteredOperationRequests(
         catalog_of(scenarios(world.owners_root(), namespace)),
         NamespaceOperationReceipts(store),
@@ -277,7 +278,7 @@ class _SemanticWorld(_World):
 
     def effects(self) -> int:
         real = self.real_namespace()
-        return len(JournalSemanticEvents(ReceiptStore(real), real).read())
+        return len(JournalSemanticEvents(ReceiptStore(real, threads=OsThreads()), real).read())
 
 
 class _SemanticEventsCase:
@@ -473,8 +474,10 @@ class _WorkspacesWorld:
         digest: str | None = None,
     ) -> ExecutionResult:
         faulting = FaultingNamespace(self.env.receipts_namespace(), crash_at)
-        store = ReceiptStore(cast("StateNamespace", faulting))
-        executor = RuntimeWorkspaceRequests(self.env.start_host(), store, SettledRunInvocations())
+        store = ReceiptStore(cast("StateNamespace", faulting), threads=OsThreads())
+        executor = RuntimeWorkspaceRequests(
+            self.env.start_host(), store, SettledRunInvocations(), blocking=ThreadBlockingRunner()
+        )
         context = context_for(request, lease=lease)
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})

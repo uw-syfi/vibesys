@@ -40,6 +40,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -116,7 +117,7 @@ class WorkspaceEnv:
         """
         runtime = create_workspace_runtime(
             workspace_resources=self.factory,
-            blocking=BlockingOperations(runner),
+            blocking=BlockingOperations(runner or ThreadBlockingRunner()),
             validation_passes=MemoryValidationPasses(),
         )
         self.hosts.append(runtime.workspaces)
@@ -223,6 +224,8 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=events or (lambda _event: None),
+                threads=OsThreads(),
+                blocking=ThreadBlockingRunner(),
             )
             env = WorkspaceEnv(project.project, factory, git_disk=disk)
             env.start_host()

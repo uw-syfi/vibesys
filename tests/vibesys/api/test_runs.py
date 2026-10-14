@@ -34,6 +34,7 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, ProjectStateError, validate_run_id
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -74,6 +75,8 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
     registry.register_plugin(failing_plugin("identity-test"))
     runs = default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             timing=real_timing(),
             processes=REAL_PROCESSES,
             registry=registry,
@@ -169,6 +172,8 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     )
     runs = default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             timing=real_timing(),
             processes=REAL_PROCESSES,
             registry=registry,

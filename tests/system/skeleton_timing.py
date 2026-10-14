@@ -53,6 +53,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import VirtualClock, run_virtual
 from vs_slurm.api import SlurmJobStatus
 
@@ -444,7 +445,7 @@ async def _play(path: Path, clock: VirtualClock, strategy: SkeletonStrategy, pla
             observe_interval=plan.observe_s,
             observe_backoff_cap=plan.observe_s,
         )
-        channel = RuntimeRunControlChannel(_ignore)
+        channel = RuntimeRunControlChannel(_ignore, threads=OsThreads())
         process = world.runtime()
         host = CoreRunHost(
             process.shell, process.delivery, clock, RunControlBridge(channel, _Steers())

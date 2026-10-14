@@ -29,6 +29,7 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -81,6 +82,8 @@ def _runs(clients: list[FakeAgentClient] | None = None, *, real_git: bool = Fals
 
     return default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             timing=real_timing(),
             processes=REAL_PROCESSES,
             registry=registry,
@@ -131,6 +134,8 @@ def _rejecting_runs(plan: Callable[[CoreRunContext], CorePlan]) -> Runs:
     registry.register_plugin(replace(plugin, core=replace(plugin.core, plan=plan)))
     return default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             timing=real_timing(),
             processes=REAL_PROCESSES,
             registry=registry,
@@ -200,7 +205,11 @@ def test_launch_rejects_invalid_builtin_options_before_execution(tmp_path: Path)
     async def execute() -> None:
         runs = default_runs(
             LaunchSettings(
-                timing=real_timing(), processes=REAL_PROCESSES, agent_client_factory=_fake_agent
+                timing=real_timing(),
+                processes=REAL_PROCESSES,
+                agent_client_factory=_fake_agent,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
             )
         )
         with pytest.raises(ValueError, match="unknown_launch_option"):

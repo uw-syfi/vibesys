@@ -26,7 +26,7 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import OsThreads, SystemClock
+from vs_sim.api import OsThreads, SystemClock, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -89,7 +89,9 @@ def _request(project_root: Path) -> RunRequest:
 def test_root_workspace_capabilities(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
 
     async def exercise() -> None:
         async with open_core_host(_request(project_root), integration, plugin=_PLUGIN) as ctx:
@@ -116,7 +118,9 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
 def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     backend = _LifecycleBackend()
 
     def backend_factory(*_args: object, **_kwargs: object) -> _LifecycleBackend:
@@ -131,7 +135,9 @@ def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) ->
                 options=EmptyOptions(),
                 timing=RunTiming(SystemClock(), 60.0, OsThreads()),
                 backend_factory=backend_factory,
-                stop_timer=FakeStopTimer(),
+                stop_timer=FakeStopTimer(threads=OsThreads()),
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
             ):
                 pytest.fail("failed product assembly yielded a run")
 

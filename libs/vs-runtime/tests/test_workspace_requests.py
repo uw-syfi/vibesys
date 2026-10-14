@@ -93,6 +93,7 @@ from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import ManualClock, examples, swept, wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
@@ -159,7 +160,7 @@ class _Env:
         """Start another host over the same disk state, as after a process restart."""
         runtime = create_workspace_runtime(
             workspace_resources=self.factory,
-            blocking=BlockingOperations(),
+            blocking=BlockingOperations(runner=ThreadBlockingRunner()),
             validation_passes=MemoryValidationPasses(),
         )
         self.hosts.append(runtime.workspaces)
@@ -168,7 +169,9 @@ class _Env:
 
     def store(self) -> ReceiptStore:
         """A store over the run's durable receipts (a new one models a restart)."""
-        return ReceiptStore(self.project.state.local_namespace(self.run_id, "receipts"))
+        return ReceiptStore(
+            self.project.state.local_namespace(self.run_id, "receipts"), threads=OsThreads()
+        )
 
 
 _ENVS: weakref.WeakKeyDictionary[RuntimeWorkspaces, _Env] = weakref.WeakKeyDictionary()
@@ -242,6 +245,8 @@ def _env(
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
+                threads=OsThreads(),
+                blocking=ThreadBlockingRunner(),
             )
             env = _Env(project.project, "workspace-requests", wrap(factory))
             env.start_host()
@@ -302,7 +307,9 @@ def _executor(
 ) -> tuple[RuntimeWorkspaceRequests, ReceiptStore]:
     """A host's executor over the run's durable receipts (a new one models a restart)."""
     chosen = store or _ENVS[workspaces].store()
-    return RuntimeWorkspaceRequests(workspaces, chosen, SettledRunInvocations()), chosen
+    return RuntimeWorkspaceRequests(
+        workspaces, chosen, SettledRunInvocations(), blocking=ThreadBlockingRunner()
+    ), chosen
 
 
 async def _run(
@@ -437,7 +444,7 @@ class _FailingStore(ReceiptStore):
     """A real store whose chosen writes fail, as when a host dies at that point."""
 
     def __init__(self, namespace: StateNamespace) -> None:
-        super().__init__(namespace)
+        super().__init__(namespace, OsThreads())
         self.fail_done = False
         self.fail_release_mark = False
         self.fail_bind = False
@@ -678,7 +685,9 @@ def test_run_snapshot_binds_invocation_request_and_retention(tmp_path: Path) -> 
 def test_run_snapshot_waits_for_proof_that_the_writer_ended(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         store = _ENVS[workspaces].store()
-        running = RuntimeWorkspaceRequests(workspaces, store, RunningRunInvocations())
+        running = RuntimeWorkspaceRequests(
+            workspaces, store, RunningRunInvocations(), blocking=ThreadBlockingRunner()
+        )
         request = SnapshotAndRetainRun(
             request_id=_rid("run-snap-wait"),
             scope=Scope(owner=RunId(root="run-1"), generation=3),
@@ -697,7 +706,9 @@ def test_run_snapshot_waits_for_proof_that_the_writer_ended(tmp_path: Path) -> N
         assert not observed.terminal
         assert waiting.observation.revision is None
         assert _commits(workspaces) == commits
-        settled = RuntimeWorkspaceRequests(workspaces, store, SettledRunInvocations())
+        settled = RuntimeWorkspaceRequests(
+            workspaces, store, SettledRunInvocations(), blocking=ThreadBlockingRunner()
+        )
         done = await _run(settled, request)
         assert done.observation.observation.status is ObservationStatus.SUCCEEDED
         assert_core_accepts([waiting, done], expect_retry=True)

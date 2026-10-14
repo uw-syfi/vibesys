@@ -89,7 +89,9 @@ def _serve(
 
     def serve() -> None:
         hostname, version = host_facts()
-        integration = LocalRunIntegration(clock=clock, git=REAL_GIT, github=NO_GITHUB)
+        integration = LocalRunIntegration(
+            clock=clock, git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        )
         try:
             with registry.register(instance_id) as hold:
                 publisher = RecordPublisher(

@@ -79,6 +79,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import ManualClock, clock_from, current_virtual_clock
 from vs_slurm.api import (
     SlurmConfig,
@@ -296,6 +297,8 @@ class World:
                 else self.yields(workspaces, self.env.receipts_namespace()),
             ),
             operations=self.operations,
+            threads=OsThreads(),
+            blocking=ThreadBlockingRunner(),
         )
         # The skeleton checks for orphan waits after every commit, so a stall fails where it starts.
         bindings = dataclasses.replace(bindings, check_liveness=True)

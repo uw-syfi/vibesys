@@ -19,6 +19,7 @@ from vibesys.run.contracts import RunRequest
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import WorkspaceRestoreError
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -55,7 +56,9 @@ def _request(project_root: Path) -> RunRequest:
 def test_root_workspace_revision_restore_and_retention_contract(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
 
     async def exercise() -> None:
         async with open_core_host(_request(project_root), integration) as host:

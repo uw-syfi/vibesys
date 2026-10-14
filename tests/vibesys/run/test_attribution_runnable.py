@@ -26,6 +26,7 @@ from tests.support.timing import real_timing
 from launch import LaunchSettings, create_session, validate_run_request
 from vibesys.api import Config, ConfigurationError, OrchestrationDescriptor, RunRequest
 from vibesys.api.request import RunEnvironmentSpec, load_task
+from vs_sim.api import ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -170,6 +171,8 @@ def test_session_construction_refuses_a_host_command_whose_interpreter_is_missin
                 timing=real_timing(),
                 processes=REAL_PROCESSES,
                 backend_factory=host_container_backend,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
             ),
         )
     assert error.value.diagnostic.code == "attribution_command_unavailable"

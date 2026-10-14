@@ -16,7 +16,6 @@ from vs_runtime.contracts import (
     Workspaces,
     member_workspace_id,
 )
-from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -348,11 +347,11 @@ class RuntimeWorkspaces:
         self,
         resources: WorkspaceResourceProvider,
         *,
-        runner: BlockingRunner | None = None,
+        runner: BlockingRunner,
     ) -> None:
-        """Own ``resources``; their synchronous effects run on ``runner`` (a worker thread by default)."""
+        """Own ``resources``; their synchronous effects run on ``runner``."""
         self._resources = resources
-        self._runner = runner or ThreadBlockingRunner()
+        self._runner = runner
         self._root_lock = asyncio.Lock()
         self._lifecycle_lock = asyncio.Lock()
         self._candidate_locks: dict[str, asyncio.Lock] = {}

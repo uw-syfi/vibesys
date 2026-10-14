@@ -36,7 +36,7 @@ from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import AgentRole, CorePlan, CoreRunContext, OrchestrationPlugin, RunStatus
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -91,7 +91,9 @@ def _run(
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
     )
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     # A paused run asks for nothing; it stays open until the deadline stops it.
     if strategy is None:
         integration.control.request_pause()
@@ -108,7 +110,9 @@ def _run(
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
-                stop_timer=FakeStopTimer(),
+                stop_timer=FakeStopTimer(threads=OsThreads()),
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
             ) as host:
                 return await drive_core_run(host, integration)
         finally:

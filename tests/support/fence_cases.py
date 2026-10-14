@@ -89,6 +89,7 @@ from vs_runtime.api.fence_contracts import answered_released
 from vs_runtime.api.operation_fixtures import SCOPE as OPERATION_SCOPE
 from vs_runtime.api.operation_fixtures import EchoOutcome, EchoRequest
 from vs_runtime.api.slurm_evaluation_stack import ADMISSION, SCOPE, plan
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -151,10 +152,10 @@ class _SessionWorld(_ReleasesItself):
         return self._project.state.state_store_namespace("run")
 
     def store(self) -> ReceiptStore:
-        return ReceiptStore(self._namespace())
+        return ReceiptStore(self._namespace(), threads=OsThreads())
 
     def host(self, epoch: int, life: HostLife, blocking: BlockingRunner) -> FenceHost:
-        store = ReceiptStore(life.namespace(self._namespace()))
+        store = ReceiptStore(life.namespace(self._namespace()), threads=OsThreads())
         return _Host(lifecycle_executor(self.session_host, store, blocking=blocking), epoch)
 
     def bound(self) -> bool:
@@ -259,7 +260,7 @@ class _WorkspaceWorld(_ReleasesItself):
         return DiscardWorkspace(**_attempt_fields(f"discard-{identity}"))
 
     def host(self, epoch: int, life: HostLife, blocking: BlockingRunner) -> FenceHost:
-        store = ReceiptStore(life.namespace(self._env.receipts_namespace()))
+        store = ReceiptStore(life.namespace(self._env.receipts_namespace()), threads=OsThreads())
         workspaces = self._env.start_host(blocking)
         executor = RuntimeWorkspaceRequests(workspaces, store, SettledRunInvocations(), blocking)
         return _Host(cast("Any", executor), epoch)
@@ -384,7 +385,9 @@ class _EvaluationWorld(_ReleasesItself):
         )
 
     def host(self, epoch: int, life: HostLife, blocking: BlockingRunner) -> FenceHost:
-        store = ReceiptStore(life.namespace(self._project.state.state_store_namespace("run")))
+        store = ReceiptStore(
+            life.namespace(self._project.state.state_store_namespace("run")), threads=OsThreads()
+        )
         jobs = _HostJobs(self._table, blocking)
         return _Host(MeasurementRequests(cast("Any", jobs), store), epoch)
 
@@ -481,7 +484,7 @@ class _OperationWorld:
         )
 
     def host(self, epoch: int, life: HostLife, blocking: BlockingRunner) -> FenceHost:
-        store = ReceiptStore(life.namespace(self._namespace()))
+        store = ReceiptStore(life.namespace(self._namespace()), threads=OsThreads())
         owner = _EchoOwner(self._effects, blocking)
         catalog = OperationCatalog(_REGISTRY, (OperationEntry.owned(_ECHO, owner),))
         executor = RegisteredOperationRequests(
@@ -505,7 +508,9 @@ class _OperationWorld:
         target = result.observation.target
         if target is None or target.observation.status is not ObservationStatus.REJECTED:
             return False
-        sealed = NamespaceOperationReceipts(ReceiptStore(self._namespace())).result(_OPERATION)
+        sealed = NamespaceOperationReceipts(
+            ReceiptStore(self._namespace(), threads=OsThreads())
+        ).result(_OPERATION)
         return sealed is not None and sealed.status is ObservationStatus.REJECTED
 
     def settled(self, result: ExecutionResult) -> bool:
@@ -518,7 +523,10 @@ class _OperationWorld:
         if target is not None and target.observation.terminal:
             return True
         return (
-            NamespaceOperationReceipts(ReceiptStore(self._namespace())).record(_OPERATION) is None
+            NamespaceOperationReceipts(ReceiptStore(self._namespace(), threads=OsThreads())).record(
+                _OPERATION
+            )
+            is None
         )
 
 

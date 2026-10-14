@@ -99,7 +99,6 @@ from vs_runtime._session_requests import (
     load_session_binding,
     session_binding_key,
 )
-from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from vs_agent.api import AgentInvocationRecord, AgentSessionCheckpoint, AgentSessions
@@ -265,7 +264,7 @@ class SessionLifecycleRequests:
         dispatcher: TurnDispatcher,
         store: ReceiptStore,
         settlement: AccessSettlement,
-        blocking: BlockingRunner | None = None,
+        blocking: BlockingRunner,
     ) -> None:
         """Bind the durable agent sessions, the turn dispatcher, the store and its settlement.
 
@@ -276,7 +275,7 @@ class SessionLifecycleRequests:
         self._dispatcher = dispatcher
         self._store = store
         self._settlement = settlement
-        self._blocking = blocking or ThreadBlockingRunner()
+        self._blocking = blocking
         self._fences = EffectFences(store)
         self._observations = ObservationFactory(store)
 

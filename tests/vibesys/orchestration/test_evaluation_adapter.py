@@ -179,7 +179,9 @@ def _run_project(
     *,
     agent_backend: str | None = None,
 ) -> tuple[_Result, LocalRunIntegration]:
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
 
     async def exercise() -> _Result:
         async with open_core_host(
@@ -391,7 +393,9 @@ def test_the_adapter_evaluates_a_task_and_reports_each_gate_as_events(tmp_path: 
         await _duplicate_objectives(ctx, root, gates)
         await _refused_requests(ctx, root, gates)
 
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
 
     async def exercise() -> None:
         project_root = tmp_path / "project"
@@ -425,7 +429,9 @@ def test_stub_backend_skips_trusted_execution(tmp_path: Path) -> None:
 def test_a_docker_gate_runs_in_a_throwaway_candidate_not_the_live_root(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     backend = FakeComputeBackend()
 
     async def exercise() -> bool:
@@ -451,7 +457,9 @@ def test_gate_starts_before_execution_and_finishes_on_cancellation(
 ) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
-    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+    integration = LocalRunIntegration(
+        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+    )
     sandbox = _BlockingEvaluationSandbox()
     backend = FakeComputeBackend()
     # Docker gates run in a throwaway candidate, so hold every Docker workspace.

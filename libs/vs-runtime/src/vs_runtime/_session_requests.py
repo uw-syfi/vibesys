@@ -107,7 +107,6 @@ from vs_runtime._receipt_store import (
     owner_key,
 )
 from vs_runtime._session_operation import await_session_operation
-from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -424,18 +423,19 @@ class RuntimeSessionRequests:
         resolver: SessionResolver,
         store: ReceiptStore,
         yields: TurnYields | None = None,
-        blocking: BlockingRunner | None = None,
+        *,
+        blocking: BlockingRunner,
     ) -> None:
         """Bind the durable agent sessions and the run's resolver to the shared store.
 
-        *blocking* runs the journal and provider calls (a worker thread each by default).
+        *blocking* runs the journal and provider calls off the event loop.
         """
         self._sessions = sessions
         self._resolver = resolver
         self._store = store
         self._fences = EffectFences(store)
         self._yields = yields
-        self._blocking = blocking or ThreadBlockingRunner()
+        self._blocking = blocking
         self.settlement = AccessSettlement(store, resolver.workspace_for)
         resolver.guard_snapshots(self.settlement.fenced_by)
         """Judges each invocation's writes; the lifecycle executors share it."""
@@ -889,7 +889,9 @@ class RuntimeSessionRequests:
             asyncio.create_task(
                 self._blocking.run(self._start_or_resume, dispatch, established=established)
             ),
-            stop=lambda: self._sessions.cancel(dispatch.key, dispatch.invocation),
+            stop=lambda: self._blocking.run(
+                self._sessions.cancel, dispatch.key, dispatch.invocation
+            ),
         )
 
     async def _established(self, bkey: str, *, excluding: str | None) -> bool:

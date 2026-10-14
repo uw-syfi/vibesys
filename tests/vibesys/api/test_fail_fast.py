@@ -21,6 +21,7 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import load_task
+from vs_sim.api import ThreadBlockingRunner, UnixNetwork
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -90,6 +91,8 @@ def test_incompatible_profiler_is_rejected_at_session_construction(
                 timing=real_timing(),
                 processes=REAL_PROCESSES,
                 backend_factory=host_container_backend,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
             ),
         )
     assert raised.value.diagnostic.code == "profiler_incompatible"
@@ -147,6 +150,8 @@ def test_collection_in_repository_fails_before_session_start(
                 timing=real_timing(),
                 processes=REAL_PROCESSES,
                 backend_factory=host_container_backend,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
             ),
         )
     assert raised.value.diagnostic.code == "invalid_runs_dir"

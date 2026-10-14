@@ -38,6 +38,7 @@ from vs_runtime.api.infrastructure import (
     install_capacity_gate,
 )
 from vs_runtime.api.testing import FakeCapacityTimer, FakeRunControlEventSink
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 ROLE = "worker"
@@ -99,7 +100,7 @@ class _Run:
 
     def play(self, client: FakeAgentClient, prompts: tuple[str, ...]) -> list[str]:
         control = create_run_control_channel(
-            FakeRunControlEventSink(on_transition=self._on_transition)
+            FakeRunControlEventSink(on_transition=self._on_transition), threads=OsThreads()
         )
         self.control = control
         if self.policy.action is QuotaAction.WAIT and not self.production_timer:

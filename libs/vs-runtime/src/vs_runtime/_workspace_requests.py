@@ -90,7 +90,6 @@ from vs_runtime._workspace_receipts import (
     attempt_key,
 )
 from vs_runtime.contracts import RuntimeContractError, WorkspaceRestoreError
-from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from vs_core.api import Request
@@ -213,7 +212,7 @@ class RuntimeWorkspaceRequests:
         workspaces: RuntimeWorkspaces,
         store: ReceiptStore,
         run_invocations: RunInvocationProof,
-        blocking: BlockingRunner | None = None,
+        blocking: BlockingRunner,
     ) -> None:
         """Bind the workspaces to the shared store and to the proof run snapshots require.
 
@@ -221,7 +220,7 @@ class RuntimeWorkspaceRequests:
         invocation's writer ended; a missing proof is Unknown and snapshots nothing.
         *blocking* runs the executor's own disk checks off the event loop.
         """
-        self._blocking = blocking or ThreadBlockingRunner()
+        self._blocking = blocking
         self._workspaces = workspaces
         self._run_invocations = run_invocations
         self._store = store

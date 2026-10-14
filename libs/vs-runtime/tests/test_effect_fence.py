@@ -26,6 +26,7 @@ from vs_runtime.api.core import (
     StillCreatingError,
     Unrecorded,
 )
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import examples
 
 _KEYS = (FenceKey(FenceKind.INVOCATION, "s/i1"), FenceKey(FenceKind.ATTEMPT_WORKSPACE, "a1:0"))
@@ -63,7 +64,11 @@ def test_enter_and_close_answer_as_the_model_does_and_nothing_held_stays_true(
         namespace = Project.open(Path(raw)).state.state_store_namespace("run")
         for operation, index, request, epoch in operations:
             # A new store each time: the answer comes from disk, as on a restarted host.
-            fences, key, model = EffectFences(ReceiptStore(namespace)), _KEYS[index], models[index]
+            fences, key, model = (
+                EffectFences(ReceiptStore(namespace, threads=OsThreads())),
+                _KEYS[index],
+                models[index],
+            )
             by = RequestId(root=request)
             match operation:
                 case "enter":
@@ -115,7 +120,10 @@ def test_a_proof_copied_or_meant_for_another_fence_proves_nothing() -> None:
     """
     with tempfile.TemporaryDirectory() as directory:
         fences = EffectFences(
-            ReceiptStore(Project.open(Path(directory)).state.state_store_namespace("run"))
+            ReceiptStore(
+                Project.open(Path(directory)).state.state_store_namespace("run"),
+                threads=OsThreads(),
+            )
         )
         closed, other = _KEYS
         proof = fences.close(closed, by=RequestId(root="cancel-r"), host=_host(1))
@@ -144,7 +152,10 @@ def test_evidence_clears_only_the_fence_it_is_about() -> None:
     """
     with tempfile.TemporaryDirectory() as directory:
         fences = EffectFences(
-            ReceiptStore(Project.open(Path(directory)).state.state_store_namespace("run"))
+            ReceiptStore(
+                Project.open(Path(directory)).state.state_store_namespace("run"),
+                threads=OsThreads(),
+            )
         )
         closed, other = _KEYS
         fences.enter(closed, by=RequestId(root="dispatch-a"), host=_host(1))

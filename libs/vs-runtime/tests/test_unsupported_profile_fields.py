@@ -21,6 +21,7 @@ from vs_evaluation.api import EvaluationStep, ProfileField, SemanticEvaluationSt
 from vs_project.api import Project
 from vs_runtime.api.core import ExecutionContext, MeasurementRequests, ReceiptStore
 from vs_runtime.api.slurm_evaluation_stack import build_stack, plan, submission
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from vs_evaluation.api import (
@@ -110,7 +111,7 @@ async def test_a_request_the_capture_cannot_satisfy_resolves_as_a_rejection_nami
         stack = await build_stack(base / "stack", profile_command=CAPTURE)
         try:
             project = Project.open(base / "project")
-            store = ReceiptStore(project.state.state_store_namespace("run"))
+            store = ReceiptStore(project.state.state_store_namespace("run"), threads=OsThreads())
             requests = MeasurementRequests(_RequiringFields(stack.executor, fields), store)
             request = submission(
                 "profile",

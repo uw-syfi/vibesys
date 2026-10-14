@@ -47,6 +47,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -268,7 +269,9 @@ _KINDS = (
 
 def _requests_over(base: Path, jobs: PollingEvaluationExecutor) -> MeasurementRequests:
     project = Project.open(base / "project")
-    return MeasurementRequests(jobs, ReceiptStore(project.state.state_store_namespace("run")))
+    return MeasurementRequests(
+        jobs, ReceiptStore(project.state.state_store_namespace("run"), threads=OsThreads())
+    )
 
 
 def _request(

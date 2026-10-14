@@ -75,7 +75,7 @@ from vs_agent.api.testing import (
 )
 from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools
 from vs_project.api import Project, StoredEnvelope
-from vs_sim.api import MonotonicClock, SystemClock, UnixNetwork
+from vs_sim.api import MonotonicClock, SystemClock, ThreadBlockingRunner, UnixNetwork
 from vs_slurm.fake_connector import active_jobs, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
@@ -792,6 +792,8 @@ def test_core_path_runs_the_fake_slurm_search(
     request = with_fake_image_build(request)
     runs = launch.default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             timing=real_timing(),
             processes=REAL_PROCESSES,
             agent_client_factory=_core_agents,

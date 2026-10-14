@@ -107,6 +107,7 @@ class BuiltInSessionAgents:
                 additional_host_resources=readable_resources,
                 client_factory=self.client_factory,
                 clock=resources.clock,
+                threads=resources.threads,
             )
 
 

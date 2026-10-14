@@ -26,6 +26,7 @@ from vibesys.events import CoreEventType, EventStatus
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimNetwork, SimThreads, examples
 
 if TYPE_CHECKING:
@@ -367,7 +368,9 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
             name="subscriber",
             daemon=False,
         )
-        integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
+        integration = LocalRunIntegration(
+            clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        )
         integration.events.subscribe(runtime.integration.project_event)
 
         def run() -> str:
@@ -416,7 +419,7 @@ def test_runtime_does_not_duplicate_core_terminal_event(
             name="subscriber",
             daemon=False,
         )
-        core_events = CoreEventJournal(clock=ManualClock())
+        core_events = CoreEventJournal(clock=ManualClock(), threads=OsThreads())
         core_events.subscribe(runtime.integration.project_event)
 
         runtime.run(

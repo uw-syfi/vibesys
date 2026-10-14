@@ -34,7 +34,7 @@ class _Services:
 
 
 def _factory(services: _Services) -> _ProductHostFactory:
-    factory = _ProductHostFactory(*([None] * 11))  # ty: ignore[invalid-argument-type]
+    factory = _ProductHostFactory(*([None] * 13))  # ty: ignore[invalid-argument-type]
     factory.core_services = cast("object", services)  # ty: ignore[invalid-assignment]
     return factory
 

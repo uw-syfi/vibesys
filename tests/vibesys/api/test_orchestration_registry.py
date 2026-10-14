@@ -55,6 +55,7 @@ from vs_runtime.api import (
     AgentRole,
     OrchestrationResumeDecision,
 )
+from vs_sim.api import ThreadBlockingRunner, UnixNetwork
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -69,6 +70,8 @@ def _resumable_client(**_kwargs: object) -> FakeAgentClient:
 
 
 _SETTINGS = LaunchSettings(
+    blocking=ThreadBlockingRunner(),
+    network=UnixNetwork(),
     timing=real_timing(),
     processes=REAL_PROCESSES,
     backend_factory=host_container_backend,
@@ -199,7 +202,11 @@ def test_builtin_single_agent_refuses_the_stub_backend_before_any_turn(
         request,
         sink=_discard_event,
         settings=LaunchSettings(
-            timing=real_timing(), processes=REAL_PROCESSES, backend_factory=host_container_backend
+            timing=real_timing(),
+            processes=REAL_PROCESSES,
+            backend_factory=host_container_backend,
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
         ),
     )
 

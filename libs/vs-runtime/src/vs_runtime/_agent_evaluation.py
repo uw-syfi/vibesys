@@ -125,7 +125,6 @@ from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._owed_submissions import OwedKey, OwedSubmission, OwedSubmissions
 from vs_runtime._workspace_lookup import find_scope_workspace
 from vs_runtime._workspace_requests import revision_ref
-from vs_sim.api import OsThreads, UnixNetwork
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -403,14 +402,13 @@ class AgentEvaluationBridge:
         records: AgentEvaluationRecords,
         diagnostics: Callable[[str], None] = _ignore_diagnostic,
         *,
-        network: Network | None = None,
-        threads: Threads | None = None,
+        network: Network,
+        threads: Threads,
     ) -> None:
         """Bind the socket path, the plan policy, the workspace lookup, the records and a log sink.
 
         ``diagnostics`` hears one line for each call refused as busy, for the run's journal.
-        ``network`` binds the socket path and ``threads`` reads each connection; both
-        default to the operating system's.
+        ``network`` binds the socket path and ``threads`` reads each connection.
         """
         self._socket_path = socket_path
         self._policy = policy
@@ -425,8 +423,8 @@ class AgentEvaluationBridge:
         self._shell: AdmissionShell | None = None
         self._clock: Clock | None = None
         self._scopes: dict[str, _Scoped] = {}
-        self._network = network or UnixNetwork()
-        self._threads = threads or OsThreads()
+        self._network = network
+        self._threads = threads
         self._listener: Listener | None = None
         self._guard = self._threads.lock()
         self._open: set[Connection] = set()

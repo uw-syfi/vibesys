@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         TrustedEvaluationExecutor,
     )
     from vs_sandbox.api import CommandRunner
+    from vs_sim.api import BlockingRunner, Threads
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +85,8 @@ class WorkspaceResourceFactory:
         skill_selection: SkillSelection,
         host_resources: tuple[HostResource, ...],
         events: WorkspaceResourceEventSink,
+        threads: Threads,
+        blocking: BlockingRunner,
         model_requests: ModelRequestReconciler | None = None,
         root_agent_environment_opener: (
             Callable[[AgentExecutionConfiguration], AgentExecutionEnvironment] | None
@@ -98,6 +101,8 @@ class WorkspaceResourceFactory:
         self._host_resources = host_resources
         self._events = events
         self._model_requests = model_requests
+        self._threads = threads
+        self._blocking = blocking
         self._root_agent_environment_opener = root_agent_environment_opener
 
     @property
@@ -175,6 +180,8 @@ class WorkspaceResourceFactory:
             sandbox=environment.session.sandbox,
             git=git,
             model_requests=self._model_requests,
+            threads=self._threads,
+            blocking=self._blocking,
         )
         host_resources = self._host_resources
         if environment.request.objective is not None:

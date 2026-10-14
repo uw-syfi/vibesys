@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import uuid
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -19,7 +18,7 @@ if TYPE_CHECKING:
     from vs_mcp.api import ToolServerDescriptor
     from vs_runtime._agent_execution import AgentExecutionEnvironment
     from vs_sandbox.api import HostResource
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Threads
 
 
 class _Closeable(Protocol):
@@ -63,6 +62,7 @@ class _RuntimeManagedConversation:
         client: AgentClientProtocol,
         spec: ManagedConversationSpec,
         resources: tuple[_Closeable, ...],
+        threads: Threads,
     ) -> None:
         for name, value in (("role", spec.role), ("member_id", spec.member_id)):
             if not value.strip():
@@ -75,7 +75,7 @@ class _RuntimeManagedConversation:
             SessionScope.MEMBER,
             f"{spec.member_id}:{uuid.uuid4().hex}",
         )
-        self._lock = threading.Lock()
+        self._lock = threads.lock()
         self._closed = False
 
     def turn(self, message: str, *, invocation_id: str | None = None) -> str:
@@ -152,13 +152,15 @@ def create_managed_conversation(
     spec: ManagedConversationSpec,
     *,
     resources: tuple[_Closeable, ...],
+    threads: Threads,
 ) -> ManagedConversation:
     """Transfer *resources* after validating and creating one conversation.
 
     If construction raises, ownership remains with the caller.  After a
     successful return, the conversation closes every resource in reverse order.
+    ``threads`` makes the lock that serializes its turns.
     """
-    return _RuntimeManagedConversation(client, spec, resources)
+    return _RuntimeManagedConversation(client, spec, resources, threads)
 
 
 def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR0913]; this lower composition seam binds independently resolved agent, environment, logging, event, and conversation inputs once.
@@ -172,6 +174,7 @@ def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR09
     client_factory: Callable[..., AgentClientProtocol],
     agent_homes_directory: Path | None = None,
     clock: Clock,
+    threads: Threads,
 ) -> ManagedConversation:
     """Build one auxiliary conversation and own all transferred resources.
 
@@ -179,7 +182,7 @@ def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR09
     failures close every acquired resource and preserve the construction error;
     a successful conversation owns the environment, logger, and client until
     its idempotent ``close``. ``clock`` counts seconds since the epoch; it names the
-    conversation's log file and times and stamps its turns.
+    conversation's log file and times and stamps its turns; ``threads`` serializes them.
     """
     ownership = ExitStack()
     ownership.callback(environment.close)
@@ -207,6 +210,7 @@ def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR09
             client,
             spec,
             resources=(environment, logger, client),
+            threads=threads,
         )
     except BaseException as construction_error:
         try:

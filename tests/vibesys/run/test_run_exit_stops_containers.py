@@ -43,6 +43,7 @@ from vs_core.api.search import Flow, NotOpened, NoWinner, search
 from vs_project.api import OrchestrationDescriptor, Project, ProjectStateError
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeContainer, FakeDockerEngine, HostExecutedContainerBackend
+from vs_sim.api import ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import FakeSignalSource
 
 if TYPE_CHECKING:
@@ -225,6 +226,8 @@ def _execute(
     )
     runs = default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             timing=real_timing(),
             processes=REAL_PROCESSES,
             registry=registry,
