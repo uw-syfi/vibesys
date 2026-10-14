@@ -432,6 +432,7 @@ PURE_BUILTINS = frozenset(
 )
 PURE_MODEL_MEMBERS = frozenset(
     {
+        "__deepcopy__",
         "model_config",
         "model_construct",
         "model_copy",
@@ -567,8 +568,13 @@ class PurityVisitor(ast.NodeVisitor):
 
     def permitted_path(self, path: str) -> bool:
         """Permit reviewed exports only, never module internals or new exports."""
-        if any(part.startswith("__") for part in path.split(".")) and not path.startswith(
-            "__future__."
+        # A model's deep copy builds a value from its own data. `Value` overrides it to return
+        # an immutable value itself, and falls back to pydantic's copy otherwise.
+        model_copy = path.removesuffix(".__deepcopy__") in MODEL_ORIGINS
+        if (
+            any(part.startswith("__") for part in path.split("."))
+            and not path.startswith("__future__.")
+            and not model_copy
         ):
             return False
         for origin in MODEL_ORIGINS:

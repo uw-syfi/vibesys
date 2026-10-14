@@ -161,6 +161,17 @@ def test_effect_path_import_aliases_cannot_evade_allowlist(
     assert scan_source("strategy.py", source)
 
 
+def test_a_model_deep_copy_is_allowed_and_other_model_dunders_fail_closed() -> None:
+    copying = (
+        "from pydantic import BaseModel\n"
+        "class Box(BaseModel):\n"
+        "    def __deepcopy__(self, memo=None):\n"
+        "        return super().__deepcopy__(memo)\n"
+    )
+    assert scan_source("strategy.py", copying) == ()
+    assert scan_source("strategy.py", copying.replace("__deepcopy__(memo)", "__init_subclass__()"))
+
+
 def test_pure_import_paths_and_value_aliases_remain_allowed() -> None:
     source = (
         "from collections.abc import Callable\n"

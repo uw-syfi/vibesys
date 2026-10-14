@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -15,7 +15,7 @@ from pydantic import (
     model_validator,
 )
 
-from vs_core._values import emit_fragment
+from vs_core._values import deeply_immutable, emit_fragment
 
 if TYPE_CHECKING:
     from pydantic import SerializationInfo
@@ -85,6 +85,12 @@ class Value(BaseModel):
             )
             object.__setattr__(self, "_hash", value)
             return value
+
+    def __deepcopy__(self, memo: dict[int, object] | None = None) -> Self:
+        """The value itself when nothing in it can change, as for a tuple of strings."""
+        if deeply_immutable(self):
+            return self
+        return super().__deepcopy__(memo)
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler: SerializerFunctionWrapHandler, info: SerializationInfo) -> object:
