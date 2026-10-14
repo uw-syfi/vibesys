@@ -69,12 +69,12 @@ def test_the_pairs_the_review_reproduced_converge(first: Crossing, second: Cross
     converges_after(first, second)
 
 
-def test_the_known_core_gap_still_halts_the_run() -> None:
+def test_the_known_core_gap_still_stalls_the_run() -> None:
     """A request that began and never sealed reaches its limit while recovery still inspects it.
 
     ``vs_core._waits`` lists RECOVERY_CHECK as HALTS_THE_RUN: the deadline's extra inspection
-    answers "unknown" again and puts the blocked check back to pending, which nothing will answer.
-    The entry of ``CORE_GAPS`` fails the day core fixes this, and must then be removed, so every
+    answers "unknown" again; the check stays blocked (it used to fall back to pending, an orphan
+    wait that halted the shell) and the run sits running with recovery closed. The entry of ``CORE_GAPS`` fails the day core fixes this, and must then be removed, so every
     other crash point is held to convergence.
     """
     assert {"durable_write:receipt_begun#4"} == CORE_GAPS

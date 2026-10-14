@@ -2292,3 +2292,46 @@ def test_a_turns_own_inspection_resolves_its_recovery_check() -> None:
         RequestObserved(observation=answer, target=TargetObservation(observation=end)),
     )
     assert turn_check(result.state) != "pending"
+
+
+@settings(max_examples=examples(pr=6, nightly=60))
+@given(answers=st.integers(min_value=1, max_value=4), restart_between=st.booleans())
+def test_a_blocked_check_never_returns_to_pending(*, answers: int, restart_between: bool) -> None:
+    """The limit blocks the check and asks once more; however often the far side answers unknown.
+
+    An unknown answer cannot undo the block: a pending check of an ended record has no request
+    left in flight, so nothing would ever resolve it and the run would halt on an orphan wait.
+    """
+    original = pending_record(phase=RequestPhase.DISPATCHED)
+    started = step(reload(recovering_state(original)), RecoveryStarted(epoch=1, now_at=11.0))
+    deadline = ReconciliationDeadline(
+        request_id=original.request_id, now_at=original.until.at + 1.0
+    )
+    blocked = step(reload(started.state), deadline)
+    assert [check.resolution for check in blocked.state.records.recovery.checks] == ["blocked"]
+    inspection = next(r for r in blocked.requests if isinstance(r, InspectRequest))
+    assert inspection.request_id is not None
+    state = step(blocked.state, DispatchAuthorized(request_id=inspection.request_id)).state
+    for sequence in range(1, answers + 1):
+        unknown = observed(original, status=ObservationStatus.UNKNOWN)
+        answer = Observation.model_validate(
+            {
+                "event_id": EventId(root=f"deadline-answer-{sequence}"),
+                "request_id": inspection.request_id,
+                "scope": inspection.scope,
+                "sequence": sequence,
+                "observed_at": 200.0 + sequence,
+                "status": ObservationStatus.SUCCEEDED,
+                "accepted": True,
+                "terminal": True,
+                "released": True,
+                "children_complete": True,
+            }
+        )
+        state = step(
+            reload(state) if restart_between else state,
+            RequestObserved(observation=answer, target=TargetObservation(observation=unknown)),
+        ).state
+        barrier = state.records.recovery
+        assert [check.resolution for check in barrier.checks] == ["blocked"]
+        assert barrier.phase == RecoveryPhase.BLOCKED

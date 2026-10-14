@@ -13,7 +13,6 @@ from tests.support.skeleton_faults import COMMIT, RECEIPT_BEGUN, RECEIPT_PREFIX
 from tests.support.skeleton_sim import Simulation, Summary, simulate
 
 from vs_faults.api import Boundary, Crossing, FaultPlan, FaultRule, HostFault
-from vs_runtime._core_loop import OrphanWaitError
 from vs_sim.api.testing import VirtualClock, run_virtual
 
 _RUNS: dict[str, Simulation] = {}
@@ -80,19 +79,19 @@ def after_crash(calls: list[Crossing], crash: Crossing) -> tuple[Crossing, ...]:
 
 # Crash points that hit a known core gap: `vs_core._waits` lists RECOVERY_CHECK as
 # HALTS_THE_RUN. Here a registered operation that began and never sealed reaches its limit while
-# recovery still inspects it; the deadline's extra inspection answers "unknown" again and puts
-# the blocked check back to pending, which nothing will answer. `core_gap` expects exactly that
-# halt, so the entry fails the day core fixes it and must then be removed.
+# recovery still inspects it; the owner cannot tell whether the effect ran, so the check stays
+# blocked and recovery never opens. The run sits running with nothing in flight. `core_gap`
+# expects exactly that stall, so the entry fails the day core fixes it and must then be removed.
 CORE_GAPS = frozenset({"durable_write:receipt_begun#4"})
 
 
 @contextmanager
 def core_gap(first: Crossing) -> Iterator[None]:
-    """Expect the known core halt at ``first`` (and nothing at any other crash point)."""
+    """Expect the known core stall at ``first`` (and nothing at any other crash point)."""
     if name(first) not in CORE_GAPS:
         yield
         return
-    with pytest.raises(OrphanWaitError):
+    with pytest.raises(AssertionError, match="stalled at core revision"):
         yield
 
 

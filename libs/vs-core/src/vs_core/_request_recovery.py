@@ -719,6 +719,18 @@ def _transfer_children(state: RecordsState, context: RecordsContext) -> RecordsS
     return state.model_copy(update={"children": tuple(retained)})
 
 
+def _with_resolution(check: RecoveryCheck, resolution: Resolution) -> RecoveryCheck:
+    """The check after a new observation resolved it, never moving a blocked check to pending.
+
+    The reconciliation deadline blocks a check once it has ended the target and issued one last
+    inspection. That inspection can answer unknown again, which resolves to pending, and nothing
+    would ever answer a pending check whose target already ended. Blocked stays blocked.
+    """
+    if check.resolution == "blocked" and resolution == "pending":
+        return check
+    return check.model_copy(update={"resolution": resolution})
+
+
 def _aggregate_resolution(
     record: RequestRecord, context: RecordsContext, state: RecordsState
 ) -> Resolution:
@@ -1173,7 +1185,7 @@ def _observe(
             if matches and record is not None
             else check.resolution
         )
-        checks.append(check.model_copy(update={"resolution": resolution}))
+        checks.append(_with_resolution(check, resolution))
     change = _finish(updated, barrier.model_copy(update={"checks": tuple(checks)}))
     return change.model_copy(
         update={"signals": (*release_signals, *change.signals), "requests": requests}
