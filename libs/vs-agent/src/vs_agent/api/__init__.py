@@ -129,6 +129,7 @@ from vs_agent.sessions import (
     Unknown,
     inspect_invocation_journal,
 )
+from vs_agent.shim_clock import STOP_POLL_S, ThreadsClock
 from vs_agent.sink import (
     NULL_AGENT_EVENT_SINK,
     AgentEventSink,
@@ -170,6 +171,7 @@ __all__ = [
     "NULL_AGENT_EVENT_SINK",
     "NULL_SKILL_SELECTION",
     "SHIPPED_PROVIDERS",
+    "STOP_POLL_S",
     "AgentBackend",
     "AgentCapabilities",
     "AgentClient",
@@ -240,6 +242,7 @@ __all__ = [
     "SkillSelection",
     "SteerOutcome",
     "SteerableAgentClient",
+    "ThreadsClock",
     "TodoItemData",
     "ToolResultPayload",
     "Unknown",

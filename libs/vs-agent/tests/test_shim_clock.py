@@ -6,7 +6,7 @@ from agentshim import StopSignal
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_agent.shim_clock import STOP_POLL_S, ThreadsClock
+from vs_agent.api import STOP_POLL_S, ThreadsClock
 from vs_sim.api.testing import SimThreads
 
 _SECONDS = st.floats(min_value=0, max_value=3600, allow_nan=False)
